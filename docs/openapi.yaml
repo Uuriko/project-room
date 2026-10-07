@@ -13144,22 +13144,29 @@ paths:
         Whether browser push is configured for this server, and the VAPID
         public key when it is. The default is fixed: mentions and direct
         messages. The response also carries the caller's push-channel
-        preferences (per-kind on/off, default on); no quiet hours.
-        Human members only.
+        preferences: per-kind on/off (default on), preview (lock-screen
+        sender/preview/deep-link, default off), and quietHours
+        ({ start, end, tz } or null, unset by default). Human members only.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
         '401': { description: unauthenticated }
-        '200': { description: "{ roomId, configured, default: mentions_and_dms, preferences: { mention, dm }, publicKey? } plus the viewer ownership envelope" }
+        '200': { description: "{ roomId, configured, default: mentions_and_dms, preferences: { mention, dm, preview, quietHours }, publicKey? } plus the viewer ownership envelope" }
         '403': { description: human_push_humans_only }
     patch:
       x-room-permission: human_member
       summary: Set this member's push-channel preferences
       description: >-
-        Body is `{ preferences: { mention?, dm? } }`, a partial merge over the
-        stored row; each value is true or false. The switches gate delivery:
-        a kind set false is never pushed to this member in this room. Human
-        members only. Preferences store even when push is not configured.
+        Body is `{ preferences: { mention?, dm?, preview?, quietHours? } }`, a
+        partial merge over the stored row. mention/dm/preview are true or
+        false: a kind set false is never pushed to this member in this room,
+        and preview on adds the sender, a lock-screen-safe message preview,
+        and a deep link to the payload (default off — the payload stays
+        counts-only unless the member opts in). quietHours is
+        `{ start: "HH:MM", end: "HH:MM", tz?: "IANA/Zone" }` or null to clear;
+        while the window is active the push channel stays silent for the
+        member. Human members only. Preferences store even when push is not
+        configured.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:

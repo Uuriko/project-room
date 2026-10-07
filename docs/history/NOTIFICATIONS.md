@@ -182,3 +182,21 @@ never change the outcome of a room write.
 GET accepts an exclusive `before` event sequence. Use response `nextBefore` until null; it accounts for both the 500-event scan window and the response item limit. Each page rechecks membership, current preferences, edits/deletions, mute state, private-message scope and the live read cursor. Counts and grouped work changes describe the current page, not all unread history. No unbounded scan or new polling loop is introduced.
 
 The browser offers Older notifications and Newest. Empty truncated windows never claim Nothing new. Mark read is available only on a complete newest page; it cannot acknowledge unseen older pages. Existing Updates/explicit caught-up controls retain their independent semantics. Older page browsing does not move the cursor. New room activity refreshes the selected page rather than silently returning it to the newest page. A durable cross-room attention projection remains future work.
+
+## Rich push payloads (2026-10-07)
+
+The human push channel grew sender/preview/deep-link payloads on top of the
+counts-only v1. `server/push-subscriptions.mjs` builds the v2 payload
+(`richPushPayloadFor`: sender, 140-char lock-screen-safe preview, relative
+deep link `/?room=<id>#pr-record/message/<id>`); `src/human-push-display.js`
+renders it (regenerate `push-sw.js` with `node scripts/build-push-sw.mjs`
+after editing the display module). Content enters a payload only through the
+member's preview switch (`PATCH /api/rooms/{roomId}/human-push`,
+`{ preferences: { preview } }`), which defaults off — the standing "never
+the message" contract holds until the member opts in. Quiet hours joined the
+push channel too (`{ preferences: { quietHours: { start, end, tz } } }`,
+validated by the shared `normalizeQuietHours` from `server/notify-prefs.mjs`);
+while the window is active the push is skipped but the message still lands.
+Two columns (`preview_enabled`, `quiet_hours`) were added to
+`human_push_preferences` with a converge migration in `server/store.mjs`.
+Delivery still needs the VAPID key tap; see `docs/PUSH-VAPID-KEYS.md`.

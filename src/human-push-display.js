@@ -48,6 +48,28 @@ export function needsMeCountFromPush(payload) {
   return Number.isInteger(value) && value >= 0 && value <= 99 ? value : null;
 }
 
+// Rich (v2) rendering: a payload that carries the member's preview
+// preference shows who wrote and the start of what they wrote. Anything
+// else — v1 payloads, or v2 payloads where the member turned preview off —
+// renders the counts, exactly as before. Content only reaches the lock
+// screen when the server put it on the payload, which only happens with
+// preview enabled for that member in that room.
+function richTitle(payload, mention, dm, waiting) {
+  if (payload?.v !== 2) return null;
+  const name = shortLabel(payload?.sender?.name);
+  if (!name || typeof payload?.preview !== "string" || !payload.preview) return null;
+  return name;
+}
+
+function richBody(payload, mention, dm, waiting) {
+  if (payload?.v !== 2) return null;
+  const name = shortLabel(payload?.sender?.name);
+  if (!name || typeof payload?.preview !== "string" || !payload.preview) return null;
+  const text = payload.preview.replace(/[\r\n\x00-\u001f\x7f]/g, " ").trim();
+  if (!text) return null;
+  return text.length > 140 ? text.slice(0, 140) : text;
+}
+
 export function notificationFromPush(payload) {
   const counts = payload && typeof payload === "object" ? payload.counts : null;
   const mention = Number.isInteger(counts?.mention) && counts.mention > 0 ? counts.mention : 0;
@@ -56,10 +78,12 @@ export function notificationFromPush(payload) {
   const roomId = typeof payload?.roomId === "string" && payload.roomId ? payload.roomId : null;
   const url = roomPath(payload?.data?.url) || roomPath(payload?.notification?.navigate_url) || roomPath(payload?.url)
     || (roomId ? `/?room=${encodeURIComponent(roomId)}` : "/");
-  const title = shortLabel(payload?.notification?.title) || shortLabel(payload?.title) || countTitle(mention, dm, waiting);
+  const title = shortLabel(payload?.notification?.title) || shortLabel(payload?.title)
+    || richTitle(payload, mention, dm, waiting) || countTitle(mention, dm, waiting);
+  const body = richBody(payload, mention, dm, waiting) ?? countBody(waiting);
   return {
     title,
-    body: countBody(waiting),
+    body,
     tag: roomId ? `room:${roomId}` : "room",
     data: { roomId, url },
     actions: notificationActions(payload),

@@ -1595,6 +1595,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // schema version bump, intentionally outside the writer fence.
       this.db.exec(humanPushSchema);
       this.db.exec(humanPushPrefsSchema);
+      // Rich push (sender/preview/deep link): converge existing databases.
+      // Old rows read preview as on and quiet hours as unset, preserving
+      // today's delivery exactly until the member touches the switches.
+      {
+        const prefColumns = new Set(this.db.prepare("PRAGMA table_info(human_push_preferences)").all().map(c => c.name));
+        if (!prefColumns.has("preview_enabled")) this.db.exec("ALTER TABLE human_push_preferences ADD COLUMN preview_enabled INTEGER NOT NULL DEFAULT 0");
+        if (!prefColumns.has("quiet_hours")) this.db.exec("ALTER TABLE human_push_preferences ADD COLUMN quiet_hours TEXT");
+      }
       // Gap #2 (PR #562): explicit account_id/source_id columns converge on
       // existing databases via ALTER TABLE; old rows backfill NULL and keep
       // reading as { accountId: null, sourceId: null }.

@@ -3,11 +3,15 @@
 // switch; the per-kind preference switches (human_push_preferences) are the
 // undo, enforced before any send. Thread mutes and member mutes are the other
 // undo. Agents keep their heartbeat push doorbell. A push names the room and
-// a count, never the message.
+// a count; only when the member opts into previews does the payload also
+// carry the sender, a lock-screen-safe preview of the message, and a deep
+// link back to it. Quiet hours suppress the push channel for the window the
+// member sets.
 import { isMutedBy } from "../src/events.js";
 import { notificationFromPush } from "../src/human-push-display.js";
 import { resolveMentionTargetsInText } from "./mention-lifecycle.mjs";
-import { deliverToSubscriptions, normaliseSubscription, pushPayloadFor } from "./push-subscriptions.mjs";
+import { isQuietAt, normalizeQuietHours, NotifyError } from "./notify-prefs.mjs";
+import { deliverToSubscriptions, normaliseSubscription, pushPayloadFor, richPushPayloadFor } from "./push-subscriptions.mjs";
 
 export const HUMAN_PUSH_DEFAULT = "mentions_and_dms";
 // The two event kinds the push channel actually delivers. Preferences switch
@@ -80,12 +84,22 @@ export const humanPushSchema = `
 // room; absent means both kinds on. This is the switch the human controls for
 // the browser push channel. It does not consult the older in-app
 // notificationPreferences levels, which steer the in-app feed only.
+//
+// preview_enabled is the member's lock-screen preview switch: off by default,
+// so a push carries no room content unless the member opts in — the standing
+// privacy contract (a push names the room and a count, never the message).
+// When the member turns preview on, the payload carries sender, preview,
+// and deep link; turning it back off restores the counts-only payload byte
+// for byte. quiet_hours is JSON { start, end, tz } or null; while the window
+// is active the push channel stays silent for that member.
 export const humanPushPrefsSchema = `
   CREATE TABLE IF NOT EXISTS human_push_preferences (
     room_id TEXT NOT NULL,
     member_id TEXT NOT NULL,
     mention_enabled INTEGER NOT NULL DEFAULT 1,
     dm_enabled INTEGER NOT NULL DEFAULT 1,
+    preview_enabled INTEGER NOT NULL DEFAULT 0,
+    quiet_hours TEXT,
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (room_id, member_id)
   );
@@ -173,12 +187,31 @@ export class HumanPush {
   }
 
   // An absent row preserves the default; unreadable preferences fail closed.
+  // quiet_hours is stored as JSON text; a row that predates the column (or a
+  // corrupt value) reads as no quiet hours rather than failing the send.
   _prefsFor(roomId, memberId) {
-    const row = this.db.prepare(
-      "SELECT mention_enabled, dm_enabled FROM human_push_preferences WHERE room_id=? AND member_id=?"
-    ).get(roomId, memberId);
-    return row ? { mention: row.mention_enabled !== 0, dm: row.dm_enabled !== 0 }
-      : { ...HUMAN_PUSH_PREF_DEFAULTS };
+    let row = null;
+    try {
+      row = this.db.prepare(
+        "SELECT mention_enabled, dm_enabled, preview_enabled, quiet_hours FROM human_push_preferences WHERE room_id=? AND member_id=?"
+      ).get(roomId, memberId);
+    } catch {
+      row = null;
+    }
+    if (!row) return { ...HUMAN_PUSH_PREF_DEFAULTS, preview: false, quietHours: null };
+    let quietHours = null;
+    if (typeof row.quiet_hours === "string" && row.quiet_hours) {
+      try {
+        const parsed = JSON.parse(row.quiet_hours);
+        quietHours = parsed && typeof parsed === "object" ? normalizeQuietHours(parsed) : null;
+      } catch { quietHours = null; }
+    }
+    return {
+      mention: row.mention_enabled !== 0,
+      dm: row.dm_enabled !== 0,
+      preview: row.preview_enabled !== 0,
+      quietHours
+    };
   }
 
   preferences(token, roomId, binding = null) {
@@ -192,28 +225,48 @@ export class HumanPush {
   // not configured; delivery stays dark until VAPID keys exist.
   setPreferences(token, roomId, data, binding = null) {
     if (!data || typeof data !== "object" || Array.isArray(data) || !exactKeys(data, ["preferences"]))
-      fail(422, "invalid_human_push_preferences", "Send { preferences: { mention, dm } }");
+      fail(422, "invalid_human_push_preferences", "Send { preferences: { mention, dm, preview, quietHours } }");
     const prefs = data.preferences;
-    if (!prefs || typeof prefs !== "object" || Array.isArray(prefs)) fail(422, "invalid_human_push_preferences", "Send { preferences: { mention, dm } }");
+    if (!prefs || typeof prefs !== "object" || Array.isArray(prefs)) fail(422, "invalid_human_push_preferences", "Send { preferences: { mention, dm, preview, quietHours } }");
     const fields = Object.keys(prefs);
-    if (fields.length === 0 || fields.some(field => !HUMAN_PUSH_PREF_KINDS.includes(field))
-      || fields.some(field => typeof prefs[field] !== "boolean"))
-      fail(422, "invalid_human_push_preferences", "preferences holds mention and/or dm, each true or false");
+    const BOOLEAN_FIELDS = [...HUMAN_PUSH_PREF_KINDS, "preview"];
+    if (fields.length === 0 || fields.some(field => !BOOLEAN_FIELDS.includes(field) && field !== "quietHours")
+      || fields.some(field => BOOLEAN_FIELDS.includes(field) && typeof prefs[field] !== "boolean"))
+      fail(422, "invalid_human_push_preferences", "preferences holds mention, dm, preview (each true or false) and/or quietHours ({ start, end, tz } or null)");
+    let quietHours = null;
+    let quietHoursTouched = false;
+    if (Object.hasOwn(prefs, "quietHours")) {
+      quietHoursTouched = true;
+      const raw = prefs.quietHours;
+      if (raw !== null) {
+        try { quietHours = normalizeQuietHours(raw); }
+        catch (error) {
+          if (error instanceof NotifyError || error?.name === "NotifyError")
+            fail(422, "invalid_human_push_preferences", `quietHours is invalid: ${error.message}`);
+          throw error;
+        }
+      }
+    }
     const auth = this._auth(token, roomId, binding);
     const memberId = this._human(auth);
     const current = this._prefsFor(roomId, memberId);
     const next = {
       mention: fields.includes("mention") ? prefs.mention : current.mention,
-      dm: fields.includes("dm") ? prefs.dm : current.dm
+      dm: fields.includes("dm") ? prefs.dm : current.dm,
+      preview: fields.includes("preview") ? prefs.preview : current.preview,
+      quietHours: quietHoursTouched ? quietHours : current.quietHours
     };
     this.db.prepare(`INSERT INTO human_push_preferences
-      (room_id, member_id, mention_enabled, dm_enabled, updated_at)
-      VALUES (?,?,?,?,?)
+      (room_id, member_id, mention_enabled, dm_enabled, preview_enabled, quiet_hours, updated_at)
+      VALUES (?,?,?,?,?,?,?)
       ON CONFLICT(room_id, member_id) DO UPDATE SET
         mention_enabled=excluded.mention_enabled,
         dm_enabled=excluded.dm_enabled,
+        preview_enabled=excluded.preview_enabled,
+        quiet_hours=excluded.quiet_hours,
         updated_at=excluded.updated_at`
-    ).run(roomId, memberId, next.mention ? 1 : 0, next.dm ? 1 : 0, this.store.now());
+    ).run(roomId, memberId, next.mention ? 1 : 0, next.dm ? 1 : 0, next.preview ? 1 : 0,
+      next.quietHours ? JSON.stringify(next.quietHours) : null, this.store.now());
     return Object.freeze({ roomId, preferences: next, configured: Boolean(this.vapid), ...this._viewer(auth) });
   }
 
@@ -310,13 +363,23 @@ export class HumanPush {
         const prefs = this._prefsFor(roomId, recipient.memberId);
         if (recipient.kind === "mention" && !prefs.mention) continue;
         if (recipient.kind === "dm" && !prefs.dm) continue;
+        // Quiet hours silence the push channel for the member's window. The
+        // message still lands in the room; only the wake is skipped.
+        if (prefs.quietHours && isQuietAt(prefs.quietHours, this.store.now())) continue;
         const subscriptions = this._rows(roomId, recipient.memberId);
         if (subscriptions.length === 0) continue;
-        const payload = declarativePushPayload(pushPayloadFor({
+        const sender = state?.members?.[senderMemberId] ?? null;
+        const payload = declarativePushPayload(richPushPayloadFor({
           roomId,
+          roomName: typeof state?.room?.title === "string" ? state.room.title : null,
           unread: 1,
           sequence,
-          notifications: [{ kind: recipient.kind }]
+          notifications: [{ kind: recipient.kind }],
+          kind: recipient.kind,
+          sender: sender ? { memberId: senderMemberId, name: sender.displayName ?? null } : null,
+          body: typeof body === "string" ? body : null,
+          messageId,
+          preview: prefs.preview === true
         }), { enabled: declarativePushEnabled() });
         // Start only after synchronous transaction completion. A failed outer
         // transaction may remove this event even after command() returned.
