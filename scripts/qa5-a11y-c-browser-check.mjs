@@ -17,6 +17,7 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { signInFixture } from "./auth-signin.mjs";
+import { enableHumanAdvanced } from "./room-chrome.mjs";
 
 async function boot(t, { viewport = { width: 1280, height: 800 }, coarse = false } = {}) {
   const fixture = createAcceptanceFixture();
@@ -38,6 +39,7 @@ async function boot(t, { viewport = { width: 1280, height: 800 }, coarse = false
 
 async function openBoard(page) {
   await page.locator("#main").waitFor({ state: "visible" });
+  await enableHumanAdvanced(page);
   // Below 940px the sidebar (which holds the Board button) sits behind the
   // sidebar toggle by design; open it first when the toggle is the visible one.
   const toggle = page.locator("#sidebar-toggle");
@@ -81,27 +83,91 @@ test("new-item note field is labeled and reaches the created claim", { timeout: 
   const { fixture, origin, page } = await boot(t);
   await page.goto(origin);
   await signInFixture(page, fixture.keys.owner);
-  await openBoard(page);
+  let releaseRead, reachedRead;
+  const heldRead = new Promise(resolve => { releaseRead = resolve; });
+  const readStarted = new Promise(resolve => { reachedRead = resolve; });
+  await page.route("**/work-claims/status", async route => {
+    const response = await route.fetch(); reachedRead(); await heldRead;
+    await route.fulfill({ response });
+  });
+  t.after(() => releaseRead());
+  await openBoard(page); await readStarted;
   const noteInput = page.locator('#board-new-item input[name="note"]');
   assert.equal(await noteInput.count(), 1, "note input exists");
   const label = await page.locator('#board-new-item label:has(input[name="note"])').textContent();
   assert.match(label, /Note/, "note input is label-associated");
   await page.locator('#board-new-item input[name="title"]').fill("Slice C probe claim");
   await noteInput.fill("context for whoever picks this up");
+  assert.equal(await page.locator('#board-new-item input[name="title"]').inputValue(), "Slice C probe claim", "title remains while entering the optional note");
+  await noteInput.press("Home"); await noteInput.press("Shift+ArrowRight");
+  const settledRead = page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/work-claims/status"));
+  releaseRead(); await settledRead;
+  // A fresh board paint must complete before checking the retained values.
+  await page.waitForFunction(() => document.querySelector("#work-board .live-chip")?.textContent === "Deploy status unknown");
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.equal(await noteInput.evaluate(node => node === document.activeElement), true, "refresh keeps the active draft field focused");
+  assert.deepEqual(await noteInput.evaluate(node => [node.selectionStart, node.selectionEnd]), [0, 1], "refresh preserves the selection");
+  assert.equal(await page.locator('#board-new-item input[name="title"]').inputValue(), "Slice C probe claim", "late board data cannot erase the entered title");
+  assert.equal(await noteInput.inputValue(), "context for whoever picks this up", "late board data cannot erase the note");
+  const submitted = page.waitForResponse(response => response.request().method() === "POST"
+    && new URL(response.url()).pathname === "/api/rooms/commons/work-claims");
   await page.locator('#board-new-item button[type="submit"]').click();
-  // Poll the API for the created claim directly: the board's status line is
-  // best-effort UI, the claim record is the S3 contract.
-  let claim = null;
-  for (let i = 0; i < 60 && !claim; i += 1) {
-    const res = await page.request.get(`${origin}/api/rooms/commons/work-claims?limit=50`);
-    const body = await res.json();
-    claim = (body.claims ?? []).find(c => c.title === "Slice C probe claim");
-    if (!claim) await page.waitForTimeout(500);
-  }
-  assert.ok(claim, "claim was created through the form");
+  const response = await submitted;
+  assert.equal(response.status(), 201, "the actual form request creates a claim");
+  const receipt = await response.json();
+  const claim = fixture.store.workClaims.get("commons", receipt.id);
+  assert.equal(claim?.title, "Slice C probe claim", "the submitted claim is durable, not just optimistic UI");
+  await page.locator("article h4", { hasText: "Slice C probe claim" }).waitFor();
   // The create note is stored on the "created" history stamp (server/work-claims.mjs).
   const created = (claim.history ?? []).find(entry => entry.action === "created");
   assert.equal(created?.note, "context for whoever picks this up", "note survived the form wiring");
+  assert.equal(await page.locator('#board-new-item input[name="title"]').inputValue(), "", "a confirmed unchanged submission clears its draft");
+  assert.equal(await noteInput.inputValue(), "");
+
+  for (const next of [
+    { title: "Keep my next idea", note: "Written while confirmation was pending" },
+    { title: "", note: "" }
+  ]) {
+    let releaseReceipt, reachedReceipt;
+    const receiptHeld = new Promise(resolve => { releaseReceipt = resolve; });
+    const receiptStarted = new Promise(resolve => { reachedReceipt = resolve; });
+    t.after(() => releaseReceipt());
+    await page.route("**/work-claims", async route => {
+      if (route.request().method() !== "POST") return route.continue();
+      const response = await route.fetch(); reachedReceipt(); await receiptHeld;
+      await route.fulfill({ response });
+    });
+    const title = next.title ? "Second submitted item" : "Third submitted item";
+    await page.locator('#board-new-item input[name="title"]').fill(title);
+    const second = page.waitForResponse(response => response.request().method() === "POST"
+      && new URL(response.url()).pathname.endsWith("/work-claims"));
+    await page.locator('#board-new-item button[type="submit"]').click(); await receiptStarted;
+    await page.locator('#board-new-item input[name="title"]').fill(next.title);
+    await noteInput.fill(next.note);
+    releaseReceipt(); assert.equal((await second).status(), 201);
+    await page.locator("article h4", { hasText: title }).waitFor();
+    assert.equal(await page.locator('#board-new-item input[name="title"]').inputValue(), next.title, "an older receipt cannot change newer editing");
+    assert.equal(await noteInput.inputValue(), next.note);
+    assert.equal(await noteInput.evaluate(node => node === document.activeElement), true, "confirmation does not steal focus, including after clearing every field");
+    await page.unroute("**/work-claims");
+  }
+  let releaseRefresh, reachedRefresh;
+  const refreshHeld = new Promise(resolve => { releaseRefresh = resolve; });
+  const refreshStarted = new Promise(resolve => { reachedRefresh = resolve; });
+  t.after(() => releaseRefresh());
+  await page.unroute("**/work-claims/status");
+  await page.route("**/work-claims/status", async route => {
+    const response = await route.fetch(); reachedRefresh(); await refreshHeld;
+    await route.fulfill({ response });
+  });
+  await page.locator('#board-new-item input[name="title"]').fill("Fourth submitted item");
+  await page.locator('#board-new-item button[type="submit"]').click(); await refreshStarted;
+  assert.equal(await page.locator('#board-new-item input[name="title"]').inputValue(), "", "acknowledged unchanged draft resets before the follow-up read");
+  await noteInput.fill("Started after the successful receipt");
+  releaseRefresh();
+  await page.locator("article h4", { hasText: "Fourth submitted item" }).waitFor();
+  assert.equal(await noteInput.inputValue(), "Started after the successful receipt");
+  assert.equal(await noteInput.evaluate(node => node === document.activeElement), true, "editing after acknowledgment also keeps focus through refresh");
 });
 
 // D-c: a malformed invite code renders the error screen with the sign-in
@@ -111,10 +177,13 @@ test("malformed invite code shows the error screen with the sign-in fallback", {
   await page.goto(`${origin}/join/!!!`);
   const error = page.locator("#join-error");
   await error.waitFor({ state: "visible" });
-  assert.match(await page.locator("#join-error-title").textContent(), /Invite link problem/);
+  assert.match(await page.locator("#join-error-title").textContent(), /No invite found/);
   const home = page.locator("#join-home-link");
   assert.equal(await home.count(), 1, "back-to-sign-in link is present");
   assert.ok(await home.isVisible(), "back-to-sign-in link is visible");
+  await home.click();
+  await page.locator("#auth-panel").waitFor({ state: "visible" });
+  assert.equal(await page.getByRole("button", { name: "Log in", exact: true }).isVisible(), true, "recovery reaches a usable sign-in");
 });
 
 // 320px: no horizontal overflow on the main page or the board dialog.

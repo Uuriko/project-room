@@ -462,11 +462,17 @@ export function installWorkBoard({ client, getState, getSession }) {
   let pendingFocus = null;
   let pendingStatus = "";
   let stick = null;
+  let confirmedNewItem = null;
 
-  function paint() {
+  function paint({ preserveNewItem = true } = {}) {
     const state = getState();
     const session = getSession();
     const active = document.activeElement;
+    const form = preserveNewItem && loadedContext === context() ? root.querySelector("#board-new-item") : null;
+    const draft = form ? [...form.querySelectorAll("input[name]")].map(input => [input.name, input.value]) : [];
+    const draftFocus = form?.contains(active) && form !== confirmedNewItem ? active.name : null;
+    confirmedNewItem = null;
+    const selection = draftFocus ? [active.selectionStart, active.selectionEnd, active.selectionDirection] : null;
     const restoreFocus = !active || active === document.body || root.contains(active);
     if (pendingFocus) stick = { key: pendingFocus.key ?? null, id: pendingFocus.id ?? null, status: pendingStatus };
     else if (!stick && restoreFocus) {
@@ -479,11 +485,21 @@ export function installWorkBoard({ client, getState, getSession }) {
       older, canWrite: canWriteClaims(state, session), capabilities: advertisedCapabilities(state), cap, workItems: state?.workItems ?? {},
       loading: boardLoading, loadError: boardLoadError
     });
+    const nextForm = root.querySelector("#board-new-item");
+    for (const [name, value] of draft) {
+      const input = nextForm?.elements.namedItem(name);
+      if (input) input.value = value;
+    }
+    if (draftFocus) {
+      const input = nextForm?.elements.namedItem(draftFocus);
+      input?.focus({ preventScroll: true });
+      if (input && selection?.[0] != null) input.setSelectionRange(...selection);
+    }
     if (stick?.status) {
       const line = root.querySelector("#board-status");
       if (line) line.textContent = stick.status;
     }
-    if (!restoreFocus || !stick) return;
+    if (draftFocus || !restoreFocus || !stick) return;
     const same = stick.key ? root.querySelector(`[data-focus-key="${CSS.escape(stick.key)}"]`) : null;
     const heading = !same && stick.id ? root.querySelector(`article[data-claim-id="${CSS.escape(stick.id)}"] h4`) : null;
     (same || heading)?.focus();
@@ -517,7 +533,7 @@ export function installWorkBoard({ client, getState, getSession }) {
     if (!owned) return;
     if (loadedContext !== owned) {
       operation++; mutating = false; readFlight = null; actionFlight = null; loadedRoom = null; seen = null; items = []; status = null;
-      loadedContext = owned; pendingFocus = null; pendingStatus = ""; stick = null; paint();
+      loadedContext = owned; pendingFocus = null; pendingStatus = ""; stick = null; paint({ preserveNewItem: false });
     }
     if ((mutating && !force) || readFlight) return;
     const events = (getState()?.eventLog ?? []).filter(event => event.type === "work_claim.updated");
@@ -657,6 +673,10 @@ export function installWorkBoard({ client, getState, getSession }) {
     });
   }
 
+  root.addEventListener("input", event => {
+    // A next draft can begin after acknowledgment but before refreshed data arrives.
+    if (confirmedNewItem?.contains(event.target)) confirmedNewItem = null;
+  });
   root.addEventListener("submit", event => {
     const linkForm = event.target.closest("[data-claim-link-pr]");
     if (linkForm && root.contains(linkForm)) {
@@ -709,7 +729,16 @@ export function installWorkBoard({ client, getState, getSession }) {
       const body = newItemCreateBody(data);
       if (!body) return;
       const title = body.title;
-      flySubmit(created, () => client.request(client.path("/work-claims"), { method: "POST", data: body }), { id: body.id, status: `Opened '${title}'`, pending: pendingOutcome("create", title) });
+      const owned = context(), fields = ["title", "note", "files"].map(name => [name, data.get(name)]);
+      flySubmit(created, async () => {
+        const receipt = await client.request(client.path("/work-claims"), { method: "POST", data: body });
+        // Clear only the confirmed submitted draft; preserve edits made while waiting.
+        if (context() === owned && root.contains(created)
+          && fields.every(([name, value]) => created.elements.namedItem(name)?.value === value)) {
+          created.reset(); confirmedNewItem = created;
+        }
+        return receipt;
+      }, { id: body.id, status: `Opened '${title}'`, pending: pendingOutcome("create", title) });
       return;
     }
     const form = event.target.closest("[data-claim-reassign]");
@@ -745,6 +774,6 @@ export function installWorkBoard({ client, getState, getSession }) {
       } catch { return false; }
       return context() === owned && loadedContext === owned && loadedRoom === getSession()?.roomId;
     },
-    reset() { operation++; mutating = false; readFlight = null; actionFlight = null; boardLoading = false; boardLoadError = false; loadedContext = null; items = []; status = null; cap = 20; older = false; seen = null; loadedRoom = null; pendingFocus = null; pendingStatus = ""; stick = null; if (root.isConnected) root.replaceChildren(); }
+    reset() { operation++; mutating = false; readFlight = null; actionFlight = null; boardLoading = false; boardLoadError = false; loadedContext = null; confirmedNewItem = null; items = []; status = null; cap = 20; older = false; seen = null; loadedRoom = null; pendingFocus = null; pendingStatus = ""; stick = null; if (root.isConnected) root.replaceChildren(); }
   };
 }
