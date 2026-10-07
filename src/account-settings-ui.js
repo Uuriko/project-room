@@ -510,7 +510,11 @@ export function createAccountSettingsUI({ accountClient, credentials = null, onA
     blocked.replaceChildren();
     form.hidden = true;
     syncDeleteConfirm();
+    const trigger = document.activeElement;
     if (!dialog.open) dialog.showModal();
+    // D3 a11y: a native dialog does not restore focus on close — return it
+    // to the invoking control so keyboard users don't lose their place.
+    dialog.addEventListener("close", () => { if (trigger?.isConnected) trigger.focus({ preventScroll: true }); }, { once: true });
     dialog.querySelector("[data-action='delete-account-cancel']")?.focus();
     try {
       const session = accountClient.currentSession("planning account deletion", { authenticated: true });

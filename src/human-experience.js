@@ -37,7 +37,11 @@ export function installHumanExperience({ getState, getSession, client, notice, o
       return ["<button type=\"button\" class=\"human-project-item\" data-project-work=\"", esc(w.id), "\"><strong>", esc(w.title), "</strong><span>", esc(label), "</span></button>"].join('');
     }).join('')].join('');
     if (!Object.keys(state.workItems ?? {}).length) $('#human-project-content').insertAdjacentHTML('beforeend', uiText("human.copy.006"));
+    const trigger = document.activeElement;
     dialog.showModal();
+    // D3 a11y: a native dialog does not restore focus on close — return it
+    // to the invoking control so keyboard users don't lose their place.
+    dialog.addEventListener("close", () => { if (trigger?.isConnected) trigger.focus({ preventScroll: true }); }, { once: true });
   };
   dialog.addEventListener('click', event => { const button = event.target.closest('[data-project-work]'); if (button) { dialog.close(); openWork(button.dataset.projectWork); } });
   const setup = document.createElement('dialog'); setup.id = 'room-assistant-setup'; setup.setAttribute('aria-labelledby', 'assistant-setup-title');
@@ -49,7 +53,12 @@ export function installHumanExperience({ getState, getSession, client, notice, o
     setup.querySelector('select').innerHTML = uiText("human.copy.008") + Object.values(state.members).filter(m => m.kind === 'agent' && m.active !== false && m.permissions.includes('accept_work')).map(m => ["<option value=\"", esc(m.id), "\">", esc(m.displayName), "</option>"].join('')).join('');
     if (configureOperation) setup.querySelector('select').value = configureOperation.coordinatorMemberId;
     setup.querySelector('select').disabled = Boolean(configureOperation);
-    $('#assistant-setup-error').textContent = ''; setup.showModal();
+    $('#assistant-setup-error').textContent = '';
+    const trigger = document.activeElement;
+    setup.showModal();
+    // D3 a11y: a native dialog does not restore focus on close — return it
+    // to the invoking control so keyboard users don't lose their place.
+    setup.addEventListener("close", () => { if (trigger?.isConnected) trigger.focus({ preventScroll: true }); }, { once: true });
   };
   setup.querySelector('form').onsubmit = async event => {
     event.preventDefault(); const stamp = key(); const button = setup.querySelector('[type=submit]'); button.disabled = true;
@@ -212,7 +221,12 @@ export function installHumanExperience({ getState, getSession, client, notice, o
       }
       const drafts = getState().messages.filter(m => m.workItemId === item.id && !m.deletedAt && !m.toMemberId);
       $('#human-existing-drafts').innerHTML = drafts.map(m => ["<button type=\"button\" class=\"text-button\" data-result-draft=\"", esc(m.id), "\">", esc(m.body.slice(0,100)), "</button>"].join('')).join('') || uiText("human.copy.024");
-      resultDialog.showModal(); return true;
+      const trigger = document.activeElement;
+      resultDialog.showModal();
+      // D3 a11y: a native dialog does not restore focus on close — return it
+      // to the invoking control so keyboard users don't lose their place.
+      resultDialog.addEventListener("close", () => { if (trigger?.isConnected) trigger.focus({ preventScroll: true }); }, { once: true });
+      return true;
     },
     async posted(messageId, wanted) {
       if (!wanted || !human()) return;

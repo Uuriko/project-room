@@ -289,7 +289,13 @@ export function installAgentConnections({ client, getState }) {
     if (!allowed()) return;
     if (!owner) { owner = client.session; generation = client.generation; ownerRevision = member().revision; }
     if (!owns()) { reset(); return; }
-    checkExpiry(); conceal(); describeRoute(); render(); dialog.showModal(); void load();
+    checkExpiry(); conceal(); describeRoute(); render();
+    const trigger = document.activeElement;
+    dialog.showModal();
+    // D3 a11y: a native dialog does not restore focus on close — return it
+    // to the invoking control so keyboard users don't lose their place.
+    dialog.addEventListener("close", () => { if (trigger?.isConnected) trigger.focus({ preventScroll: true }); }, { once: true });
+    void load();
     if (pending) status("Change not confirmed. Retry the original.");
     if (setup) $("#agent-setup-title").focus();
     else if (!pending) (rosterId ? $("#agent-connect-name") : catalogButtons()[0])?.focus();
