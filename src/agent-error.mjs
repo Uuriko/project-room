@@ -540,6 +540,19 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [command("Retry after Retry-After")]
     };
   }
+  // The 409 capacity cap is a known, recurring code — it must never fall
+  // through to the unmapped branch ("Unknown error 'pilot_limit'. Re-check
+  // access..."), which debugs a credential that is fine and invites hammering
+  // a hard cap. 2026-10-07 muse-room incident: every state-changing write
+  // 409'd with exactly this strand. The recovery is back-off + later retry,
+  // or the owner raising/compacting the cap — never re-checking access.
+  if (reasonCode === "pilot_limit") {
+    return {
+      status: "action_required", reason: "pilot_limit",
+      hint: "The room hit its pilot capacity cap — nothing was saved. Back off; retry the same write later, or ask the owner to raise or compact the cap.",
+      next: [command("Back off and retry the same unchanged write later — do not hammer this cap. If it keeps failing, ask the room owner to raise the pilot cap or compact the room.")]
+    };
+  }
   if (reasonCode === "proof_required") {
     // #1547: a paste-only agent dead-ends on this 428 — "See proof" names no
     // tool, no one-liner, and no manual alternative. The 428 body carries the

@@ -84,3 +84,20 @@ test("hint-quality: input_refused points at the fields named in the message", ()
     notContains: [/^Fix the refused fields\. Keep any earlier uncertain requestId\.$/],
   });
 });
+
+// Offender 6 (src/agent-error.mjs, pilot_limit): the 409 capacity cap fell
+// through to the unmapped-code branch — "Unknown error 'pilot_limit'.
+// Re-check access and current work" told agents to debug a credential that
+// was fine and to hammer retries against a hard cap. During the 2026-10-07
+// muse-room projection-cap incident every state-changing write 409'd with
+// exactly this strand. Fixed hint names the cap, forbids hammering, and
+// names the real recovery: back off and retry the same write later, or ask
+// the room owner to raise or compact the cap.
+test("hint-quality: pilot_limit names the cap and the back-off recovery", () => {
+  const ax = agentErrorAx({ httpStatus: 409, code: "pilot_limit", message: "Room projection limit reached; no data was changed" });
+  assertHintContract(ax, {
+    reason: "pilot_limit",
+    contains: [/cap/i, /retry/i, /owner/i],
+    notContains: [/Unknown error/, /Re-check access/],
+  });
+});
