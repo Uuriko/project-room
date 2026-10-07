@@ -259,6 +259,8 @@
   "tests/error-shapes-teach.test.js": 37188,
   "tests/evals-harness.test.js": 7618,
   "tests/evals-heldout.test.js": 4932,
+  "tests/exchange-bounty-lifecycle.test.js": 5000,
+  "tests/exchange-credits-ledger.test.js": 20000,
   "tests/event-audit.test.js": 25404,
   "tests/events-after-sequence.test.js": 21098,
   "tests/events-cursor-paging.test.js": 41107,
