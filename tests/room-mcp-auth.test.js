@@ -42,12 +42,12 @@ async function call(origin, name, args, secret) {
   return { status: response.status, body, value: body.result?.structuredContent };
 }
 
-test("unauthenticated hosted MCP keeps four join documents and adds two public-work reads", async t => {
+test("unauthenticated hosted MCP keeps four join documents, adds two public-work reads and the identity mint", async t => {
   const { origin } = await serve(t);
   const listed = await rpc(origin, "tools/list");
   assert.equal(listed.status, 200);
   const body = await listed.json();
-  assert.deepEqual(body.result.tools.map(tool => tool.name), [...JOIN_TOOLS, "public_work_recommend", "public_work_read_task"]);
+  assert.deepEqual(body.result.tools.map(tool => tool.name), [...JOIN_TOOLS, "public_work_recommend", "public_work_read_task", "room_identity_mint"]);
   const denied = await call(origin, "room_check_access", {});
   assert.equal(denied.status, 401);
   assert.equal(denied.body.error.code, -32001);
@@ -63,7 +63,7 @@ test("unauthenticated hosted MCP keeps four join documents and adds two public-w
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" })
   });
-  assert.deepEqual((await onShortPath.json()).result.tools.map(tool => tool.name), [...JOIN_TOOLS, "public_work_recommend", "public_work_read_task"]);
+  assert.deepEqual((await onShortPath.json()).result.tools.map(tool => tool.name), [...JOIN_TOOLS, "public_work_recommend", "public_work_read_task", "room_identity_mint"]);
 });
 
 test("Bearer pri_ exposes room tools and keeps command receipts", async t => {

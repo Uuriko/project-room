@@ -1,4 +1,5 @@
 import { handlePublicWorkMcp, isPublicWorkMcpTool } from './mcp-public-work.mjs';
+import { handleIdentityMintMcp, isIdentityMintMcpTool } from './mcp-identity-mint.mjs';
 // Authenticated hosted MCP profile for the Room Worker.
 //
 // The public join tools stay on POST /mcp when no Authorization header is
@@ -928,7 +929,13 @@ function resolveMcpIdentity(store, secret, userAgent) {
 
 export function createHostedRoomMcp(store, { agentRooms } = {}) {
   const rooms = agentRooms ?? new AgentRooms(store);
-  return async function hostedRoomMcp(message, { authorization, mcpUrl, searchParams, userAgent } = {}) {
+  return async function hostedRoomMcp(message, { authorization, mcpUrl, searchParams, userAgent, remoteAddress } = {}) {
+    // Anonymous enrollment: mint an identity secret without leaving MCP.
+    // Handled before auth parsing — a presented credential is ignored and a
+    // fresh anonymous identity is minted, mirroring POST /api/agent-identities.
+    if (message?.method === "tools/call" && isIdentityMintMcpTool(message.params?.name)) {
+      return handleIdentityMintMcp(store, message, { remoteAddress });
+    }
     if (message?.method === "tools/call" && isPublicWorkMcpTool(message.params?.name)) {
       const absent = authorization === undefined;
       const parsed = absent ? { secret: null } : identityBearer(authorization);

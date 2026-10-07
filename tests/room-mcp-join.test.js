@@ -46,7 +46,7 @@ test("hosted MCP join URL is host-exact and secret-free", () => {
 test("MCP join RPC serves packets without initialize session state", () => {
   const listed = handleMcpJoinRpc({ jsonrpc: "2.0", id: 1, method: "tools/list" }, { mcpUrl: ROOM_MCP_PUBLIC_URL });
   assert.deepEqual(listed.result.tools.map(tool => tool.name), [
-    "room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet", "public_work_recommend", "public_work_read_task"
+    "room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet", "public_work_recommend", "public_work_read_task", "room_identity_mint"
   ]);
   const init = handleMcpJoinRpc({
     jsonrpc: "2.0", id: 2, method: "initialize",
