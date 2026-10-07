@@ -162,3 +162,27 @@ test("every rooms.projection write goes through the serializer", () => {
   assert.deepEqual(offenders, []);
   assert.ok(BODY_AT_REST_MIN_CHARS >= 256);
 });
+
+test("incident 2026-10-07: muse-room-shaped load (600 x 8KB patch bodies) stays writable, and slimming recovers a capped room", t => {
+  // Reproduces the production incident: muse-room's projection hit the 4 MiB
+  // pilot cap because message bodies accumulate inline. 100 x 45KB bodies is
+  // ~4.5MB of message text, the same shape as the incident (4353 messages,
+  // 24 of them 30-50KB patch dumps).
+  const clock = () => { let at = Date.parse("2026-10-06T00:00:00Z"); return () => (at += 120000); };
+  const fill = room => {
+    for (let i = 0; i < 100; i += 1) room.post(`m${i}`, big(`m${i}`, 45000));
+  };
+  // Without bodies at rest the room must stay writable past the old 4 MiB cap.
+  const fat = open(t, { bodiesAtRest: false, now: clock() });
+  fill(fat);
+  assert.ok(Buffer.byteLength(fat.raw()) > 4 * 1024 * 1024, "fixture exceeds the old cap");
+  assert.ok(Buffer.byteLength(fat.raw()) < PILOT_LIMITS.projectionBytes, "fixture fits the raised cap");
+  // Enabling bodies at rest (production: ROOM_BODIES_AT_REST=1) slims the
+  // stored row below the old cap on the next write — the recovery path.
+  fat.reopen({ bodiesAtRest: true, now: clock() });
+  fat.post("recovery", big("recovery", 45000));
+  assert.ok(Buffer.byteLength(fat.raw()) < 4 * 1024 * 1024,
+    `slimmed row ${Buffer.byteLength(fat.raw())} bytes fits the old 4 MiB cap`);
+  assert.equal(fat.store.room("commons").state.messages.find(m => m.id === "m0").body, big("m0", 45000),
+    "readers still see full bodies after slimming");
+});

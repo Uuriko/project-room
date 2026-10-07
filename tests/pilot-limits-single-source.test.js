@@ -40,9 +40,9 @@ test("no module hard-codes the room projection cap", () => {
     || (/projection(?!\s*\()/i.test(line) && literal.test(line) && !/CACHE|PILOT_LIMITS\s*=|^\s*\/\//.test(line))), []);
 });
 
-test("the raised limits hold: events 1,000,000 and projection 4 MiB (unchanged until the platform row ceiling is validated)", () => {
+test("the raised limits hold: events 1,000,000 and projection 64 MiB (raised 2026-10-07 after muse-room hit the 4 MiB pilot cap at 01:32 PDT per John's order; platform SQLITE_TOOBIG still surfaces as typed 409)", () => {
   assert.equal(PILOT_LIMITS.eventsPerRoom, 1_000_000);
-  assert.equal(PILOT_LIMITS.projectionBytes, 4 * 1024 * 1024);
+  assert.equal(PILOT_LIMITS.projectionBytes, 64 * 1024 * 1024);
 });
 
 test("a platform SQLITE_TOOBIG refusal surfaces as a typed 409, not a 500", () => {

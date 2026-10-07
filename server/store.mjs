@@ -421,7 +421,14 @@ const fail = (status, code, message) => { throw new ServiceError(status, code, m
 // ~0.7 days from refusing writes, with the event cap ~10 days out. Raised per
 // the owner's word relayed at room seq 3425. Every event cap check reads
 // eventsPerRoom from here (tests/pilot-limits-single-source.test.js).
-export const PILOT_LIMITS = Object.freeze({ eventsPerRoom: 1_000_000, membersPerRoom: 100, workItemsPerRoom: 500, projectionBytes: 4 * 1024 * 1024 });
+// 2026-10-07: muse-room hit the 4 MiB projection cap (4,204,247 bytes stored;
+// 97% was state.messages, mostly 30-50KB patch dumps agents paste inline) and
+// every state-changing write began failing 409 pilot_limit. Raised to 64 MiB
+// per John's direct order. 64 MiB matches PROJECTION_CACHE_MAX_BYTES below,
+// and with ROOM_BODIES_AT_REST=1 the slimmed row is ~1.7 MiB for muse-room, so
+// this is years of headroom; the platform SQLITE_TOOBIG ceiling still degrades
+// to a typed 409 instead of a 500.
+export const PILOT_LIMITS = Object.freeze({ eventsPerRoom: 1_000_000, membersPerRoom: 100, workItemsPerRoom: 500, projectionBytes: 64 * 1024 * 1024 });
 // Inactive members retain their history, but do not occupy an admission seat.
 export const activeMemberCount = members => Object.values(members ?? {}).filter(member => member?.active !== false).length;
 const hash = text => createHash("sha256").update(text).digest("hex");
@@ -1108,7 +1115,7 @@ const LOOKUP_INDEXES = `
   CREATE INDEX IF NOT EXISTS guest_selfserve_idem_member ON guest_selfserve_idem(member_id);
 `;
 
-// MSG-0: parsed projection cache. A hit reads sequence only, so a 4 MiB
+// MSG-0: parsed projection cache. A hit reads sequence only, so a 64 MiB
 // room does not JSON.parse again until the sequence changes or a rooms
 // write drops the entry. Commit and rollback of a write transaction drop
 // the whole cache, including a parse of uncommitted bytes. Callers receive
