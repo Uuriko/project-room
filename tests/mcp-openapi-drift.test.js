@@ -230,13 +230,7 @@ const ALLOW = {
 // the drift is fixed this test fails and the entry must be removed, which
 // returns the param to the strict comparison.
 const KNOWN_DRIFT = [
-  {
-    tool: "room_create",
-    param: "starter",
-    issue: "https://github.com/Uuriko/project-room/issues/1566",
-    detail: "POST /api/agent-rooms accepts starter (boolean, default true); the room_create tool neither exposes it nor passes it through (handler allowlists title/purpose/roomId/kind/displayName).",
-  },
-];
+]; // empty: no triaged drift currently open
 
 // ---------------------------------------------------------------------------
 // Comparison
