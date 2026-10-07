@@ -57,8 +57,8 @@
     "src/agent-first-run.js": "sha256:6589f26941f8f2514f531712d58e791f0ef7cc2df7026e3034a88f9ddb940db7",
     "src/agent-invite-ui.js": "sha256:8898768aeb263add076d4db80dfc425e5cf4e50892cd88d1e404f11b9fad05e1",
     "src/agent-signin-ui.js": "sha256:8a60486380a7053085574e043dbbe686914d180c840b9b5aad43f32fffa1dd2e",
-    "src/app.js": "sha256:cfa8dba18e17a7ae59c7c9f5a4b4457d505ee561b8834cd1a6b00a812c9e390d",
-    "src/auth-signin-ui.js": "sha256:d9f166ddfbde924a992c11f969e5d969d8ec75a8dc13d3361a9dc5c9ca8257f0",
+    "src/app.js": "sha256:94d6df0774dc566c56e9ac54cb26778b99a6e8e96f78d9d908de8a930acbb5df",
+    "src/auth-signin-ui.js": "sha256:9f75d4a0c025feca067a9a801b8fa6a0d0a5fe60571930660ee901183380a6e7",
     "src/board-mine.js": "sha256:873e7b34659d9de327c65c8ff7ea861cfb0b14cbb45d60f7c168a44099b97ca7",
     "src/board-ui.js": "sha256:3d50b3636d95da00eafc1c5c4d8a27231548694dad3ba00013f98647178ed339",
     "src/board.css": "sha256:3e7234c2a9399d71c3dba49c62ff3fc286e2b764ce0faad4796b27c9cee7a453",
@@ -141,6 +141,6 @@
   },
   "packages": {
     "package-lock.json": "sha256:4393bfb366eb7228708fe0da7ff99939fc4f89cf28cd97f54db1217aa5d39bac",
-    "package.json": "sha256:0349d2da760798dc710a29e64435cdd1d3b54190d61b0e7cd619c93d5d6db03f"
+    "package.json": "sha256:83710694393161c4c75c1f9e5670d37580da77383e1c789bbeb2bbf165322464"
   }
 }
