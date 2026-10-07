@@ -1,7 +1,7 @@
 // Bounded signed Google provider fixture shared by real HTTP and browser owners.
 import { generateKeyPairSync, sign } from "node:crypto";
 import { GOOGLE_ISSUER, GOOGLE_SCOPES } from "../../server/google-oauth.mjs";
-export const clientId = "1234567890-abcdefghijklmnopqrstuvwxyz.apps.googleusercontent.com";
+export const clientId = "0-fixture.apps.googleusercontent.com";
 export const clientSecret = "GOCSPX-fixture-secret-never-real";
 export const sub = "123456789012345678901";
 const keys = generateKeyPairSync("rsa", { modulusLength: 2048 });
