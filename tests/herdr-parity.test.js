@@ -2,9 +2,8 @@
 //
 // The scripted scenario (claim → session → heartbeat → blocked → done) runs
 // TWICE — once against the legacy session backend, once against the
-// SessionAdapter contract (B2's InMemorySessionAdapter; while B2 has not
-// landed, tests/herdr-parity/stub-inmemory-adapter.mjs stands in — see the
-// README in that directory). The suite asserts IDENTICAL room-observable
+// SessionAdapter contract (B2's real `server/session-adapter.mjs`
+// `InMemorySessionAdapter`). The suite asserts IDENTICAL room-observable
 // outcomes: claim states, journal entries, API response shapes (session
 // card, claim card, heartbeat presence record), and event sequences.
 // Any divergence is a test failure with a diff.
@@ -23,8 +22,8 @@ import {
   VersionMismatchError,
   OccupantChangedError,
   AGENT_STATES,
-  PROTOCOL_VERSION,
-} from "./herdr-parity/stub-inmemory-adapter.mjs";
+  INMEMORY_PROTOCOL_VERSION,
+} from "../server/session-adapter.mjs";
 
 test("parity: claim → session → heartbeat → blocked → done is identical across backends", async () => {
   const legacy = await runScenario(createLegacyDriver);
@@ -90,12 +89,12 @@ test("comparator: detects a claim-state divergence (negative control)", async ()
   assert.ok(diffs.some(d => d.includes("steps[3].claim.state")), `diff should name the field:\n${diffs.join("\n")}`);
 });
 
-test("stub adapter: honors the §2.2 contract surface used by the parity run", async () => {
-  const adapter = await createSessionAdapter({ pinnedProtocolVersion: 22 });
+test("real adapter (B2): honors the §2.2 contract surface used by the parity run", async () => {
+  const adapter = await createSessionAdapter({ pinnedProtocolVersion: INMEMORY_PROTOCOL_VERSION });
   await adapter.connect();
   const ping = await adapter.ping();
   assert.equal(ping.ok, true);
-  assert.equal(ping.protocolVersion, PROTOCOL_VERSION);
+  assert.equal(ping.protocolVersion, INMEMORY_PROTOCOL_VERSION);
 
   const events = [];
   const sub = await adapter.subscribe(["pane.agent_status_changed"], ev => events.push(ev));
@@ -106,19 +105,24 @@ test("stub adapter: honors the §2.2 contract surface used by the parity run", a
     command: "parity-worker",
     metadata: { taskId: "parity-task-1", memberId: "ai_paritylane" },
   });
-  assert.match(handle.agentId, /^agent-2$/); // pane-1 mints first, then agent-2
-  assert.match(handle.paneId, /^pane-1$/);
+  // AgentHandle shape: { id, paneId, occupantId }.
+  assert.match(handle.id, /^agent-/);
+  assert.match(handle.paneId, /^pane-/);
+  assert.match(handle.occupantId, /^occ-/);
 
   await adapter.reportState(handle.paneId, "working", "starting");
   await adapter.reportState(handle.paneId, "blocked", "waiting on review");
   assert.deepEqual(events.map(e => e.state), ["working", "blocked"]);
   assert.ok(events.every(e => e.type === "pane.agent_status_changed"));
 
-  const agent = await adapter.getAgent(handle.agentId);
+  const agent = await adapter.getAgent(handle.id);
   assert.equal(agent.state, "blocked");
+  assert.equal(agent.occupantId, handle.occupantId);
 
   const snap = await adapter.snapshot();
-  assert.equal(snap.agents.length, 1);
+  const panes = snap.workspaces.flatMap(ws => ws.tabs.flatMap(tab => tab.panes));
+  assert.equal(panes.length, 1);
+  assert.equal(panes[0].id, handle.paneId);
 
   assert.equal(adapter.supports("spawnAgent"), true);
   assert.equal(adapter.supports("worktree.create"), false);
@@ -128,32 +132,34 @@ test("stub adapter: honors the §2.2 contract surface used by the parity run", a
   await adapter.disconnect();
 });
 
-test("stub adapter: version mismatch fails closed", async () => {
+test("real adapter (B2): version mismatch fails closed at connect", async () => {
+  const adapter = await createSessionAdapter({ pinnedProtocolVersion: INMEMORY_PROTOCOL_VERSION + 1 });
   await assert.rejects(
-    () => createSessionAdapter({ pinnedProtocolVersion: 21 }),
+    () => adapter.connect(),
     err => err instanceof VersionMismatchError && err.code === "version_mismatch",
   );
 });
 
-test("stub adapter: occupant pinning rejects sends to a changed occupant", async () => {
-  const adapter = await createSessionAdapter({ pinnedProtocolVersion: 22 });
+test("real adapter (B2): occupant pinning rejects sends to a changed occupant", async () => {
+  const adapter = await createSessionAdapter({ pinnedProtocolVersion: INMEMORY_PROTOCOL_VERSION });
   await adapter.connect();
   const handle = await adapter.spawnAgent({ kind: "claude", command: "parity-worker" });
+  // A stale occupant handle is rejected — the send is NOT delivered.
   await assert.rejects(
-    () => adapter.sendText(handle.agentId, "hello", { occupant: "occ-stale" }),
+    () => adapter.sendText({ id: handle.id, occupantId: "occ-stale" }, "hello"),
     err => err instanceof OccupantChangedError && err.code === "occupant_changed",
   );
   // The pinned occupant from the handle works.
-  const res = await adapter.sendText(handle.agentId, "hello", { occupant: handle.occupant });
+  const res = await adapter.sendText(handle, "hello");
   assert.equal(res.ok, true);
   await adapter.disconnect();
 });
 
-test("stub adapter: reportState rejects unknown agent states", async () => {
-  const adapter = await createSessionAdapter({ pinnedProtocolVersion: 22 });
+test("real adapter (B2): reportState rejects unknown agent states", async () => {
+  const adapter = await createSessionAdapter({ pinnedProtocolVersion: INMEMORY_PROTOCOL_VERSION });
   await adapter.connect();
   const handle = await adapter.spawnAgent({ kind: "claude", command: "parity-worker" });
   assert.ok(AGENT_STATES.includes("working") && AGENT_STATES.includes("blocked"));
-  await assert.rejects(() => adapter.reportState(handle.paneId, "napping"), /unknown agent state/);
+  await assert.rejects(() => adapter.reportState(handle.paneId, "napping"), /unknown state/);
   await adapter.disconnect();
 });

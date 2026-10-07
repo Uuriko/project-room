@@ -17,8 +17,7 @@ until this suite is green** (compat-plan §1, REDESIGN.md §4).
 | `../herdr-parity.test.js` | the suite (node:test) |
 | `parity-scenario.mjs` | backend-agnostic scenario: the five ops in order |
 | `legacy-driver.mjs` | legacy backend: real `server/work-claims.mjs`, real `src/work-item-session.js` projection + `sessionCard`, real `server/agent-heartbeats.mjs` over in-memory SQLite |
-| `herdr-driver.mjs` | adapter backend: session events sourced from the SessionAdapter (`spawnAgent`/`reportState`/`closePane`), projected through the same claim machine + session projection |
-| `stub-inmemory-adapter.mjs` | **B9-local stub** of B2's `InMemorySessionAdapter` per REDESIGN.md §2.2 |
+| `herdr-driver.mjs` | adapter backend: session events sourced from B2's real `server/session-adapter.mjs` (`InMemorySessionAdapter`), projected through the same claim machine + session projection |
 | `virtual-clock.mjs` | deterministic clock shared by both runs — timestamps assert exact-equal, never normalized |
 | `room-journal.mjs` | append-only room event journal fixture (fixed vocabulary) |
 | `parity-compare.mjs` | trace comparator with JSON-pointer-ish diffs |
@@ -41,17 +40,16 @@ until this suite is green** (compat-plan §1, REDESIGN.md §4).
 - **Adapter-internal events** (`pane.created`, `pane.agent_status_changed`,
   …) are recorded in the herdr trace for debugging but excluded from the
   parity verdict — they are not room-observable.
-- The stub's method set is fixed and closed; optional-tier methods answer
-  `supports() === false`. Unknown calls throw — no catch-all doubles.
+- The real adapter's method set is fixed and closed; optional-tier methods
+  answer `supports() === false`. Unknown calls throw — no catch-all doubles.
 
-## B2 dependency
+## B2 dependency — landed
 
-`stub-inmemory-adapter.mjs` stands in for B2's `server/session-adapter.mjs`
-(`herdr-b2-adapter`, lane `jill-herdr-b2` — claimed, not yet landed at suite
-authoring time). When B2 lands, `herdr-driver.mjs` swaps its import to the
-real module and this stub is **deleted**. The stub's contract tests in the
-suite (version-mismatch fail-closed, occupant pinning, unknown-state
-rejection) double as the acceptance bar the real implementation must pass.
+`herdr-driver.mjs` drives B2's real `server/session-adapter.mjs`
+(`InMemorySessionAdapter`, merged as PR #1740). The B9-local
+`stub-inmemory-adapter.mjs` was deleted when the swap landed; the adapter
+contract tests in the suite (version-mismatch fail-closed, occupant pinning,
+unknown-state rejection) run against the real implementation.
 
 ## Running
 

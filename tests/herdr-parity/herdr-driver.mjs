@@ -1,11 +1,11 @@
 // Herdr-backend driver for the parity scenario.
 //
 // The session-execution substrate is the SessionAdapter contract
-// (REDESIGN.md §2.2): B2's `InMemorySessionAdapter`, for which
-// stub-inmemory-adapter.mjs stands in until that lane lands. Everything
-// room-observable still flows through the REAL room modules, exactly as the
-// integration will wire them (compat-plan §1: the claim board is
-// UNAFFECTED — herdr never settles claims; REDESIGN §1):
+// (REDESIGN.md §2.2): B2's real `InMemorySessionAdapter` from
+// server/session-adapter.mjs. Everything room-observable still flows
+// through the REAL room modules, exactly as the integration will wire them
+// (compat-plan §1: the claim board is UNAFFECTED — herdr never settles
+// claims; REDESIGN §1):
 //   - claims:      server/work-claims.mjs (same as legacy)
 //   - session run: src/work-item-session.js projection + sessionCard (same)
 // Session events are SOURCED from the adapter (spawn/reportState/closePane)
@@ -21,7 +21,7 @@ import {
   applySessionFields, sessionCard,
   SESSION_EVENT_TYPES, SESSION_STATUSES,
 } from "../../src/work-item-session.js";
-import { createSessionAdapter } from "./stub-inmemory-adapter.mjs";
+import { createSessionAdapter, INMEMORY_PROTOCOL_VERSION } from "../../server/session-adapter.mjs";
 import { createVirtualClock } from "./virtual-clock.mjs";
 import { createRoomJournal } from "./room-journal.mjs";
 
@@ -40,7 +40,7 @@ const sessionEvent = (type, clock, actorId, data = {}) => ({
 export async function createHerdrDriver() {
   const clock = createVirtualClock();
   const journal = createRoomJournal(clock);
-  const adapter = await createSessionAdapter({ pinnedProtocolVersion: 22, now: () => clock.now() });
+  const adapter = await createSessionAdapter({ pinnedProtocolVersion: INMEMORY_PROTOCOL_VERSION });
   await adapter.connect();
 
   // Adapter-internal events are recorded for debuggability only — they are
@@ -115,8 +115,12 @@ export async function createHerdrDriver() {
     async heartbeat(taskId, agentId) {
       tick();
       // The herdr heartbeat IS the self-report: reportState("working").
+      // The real adapter does not expose a last-report timestamp on the
+      // agent record, so lastSeenAt is the driver's own (virtual) clock at
+      // the report — the same instant the stub recorded internally.
+      const lastSeenAt = clock.iso();
       await adapter.reportState(handle.paneId, "working", "heartbeat");
-      const agent = await adapter.getAgent(handle.agentId);
+      const agent = await adapter.getAgent(handle.id);
       applySessionFields(sessionItem, sessionEvent(SESSION_EVENT_TYPES.STATUS_CHANGED, clock, agentId,
         { status: SESSION_STATUSES.ACTIVE }));
       journal.append("heartbeat.recorded", agentId, { hostId: HOST_ID, mode: "pull-only" });
@@ -124,7 +128,7 @@ export async function createHerdrDriver() {
       const heartbeatRecord = {
         agentId, hostId: HOST_ID, mode: "pull-only",
         status: presenceOf(agent.state),
-        lastSeenAt: agent.lastReportAt,
+        lastSeenAt,
         pendingWakes: 0,
       };
       recordStep("heartbeat", { heartbeat: heartbeatRecord });
