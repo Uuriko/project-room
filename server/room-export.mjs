@@ -4,7 +4,7 @@
 // Secret columns and raw token shapes are sha256 hex. Already-hashed columns
 // stay as they are.
 import { createHash, timingSafeEqual } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
 import { RoomStore } from "./store.mjs";
 import { auditRecovery } from "./recovery.mjs";
@@ -69,7 +69,14 @@ function exportTableOrder(db) {
 export function* exportNdjsonLines(db) {
   const rooms = db.prepare("SELECT id, sequence FROM rooms ORDER BY id").all();
   const events = db.prepare("SELECT count(*) AS n FROM events").get().n;
-  yield JSON.stringify({ kind: "watermark", version: 1, backedUpAt: Date.now(), rooms, events }) + "\n";
+  // Per-table row counts: a truncated export that drops whole tables (or the
+  // tail of one) must fail verification loudly instead of restoring silently
+  // partial. The events count alone cannot catch truncation of non-event rows.
+  const tables = {};
+  for (const table of exportTableOrder(db)) {
+    tables[table] = db.prepare(`SELECT count(*) AS n FROM ${quoteIdent(table)}`).get().n;
+  }
+  yield JSON.stringify({ kind: "watermark", version: 1, backedUpAt: Date.now(), rooms, events, tables }) + "\n";
   for (const table of exportTableOrder(db)) {
     const columns = tableColumns(db, table);
     if (!columns.length) continue;
@@ -185,6 +192,7 @@ export function replayNdjson(ndjson, filename) {
   chmodSync(directory, 0o700);
   if (existsSync(filename)) throw new Error("Refusing to replay into an existing store");
   const store = new RoomStore(filename);
+  let verified = false;
   try {
     const existing = new Set(tableNames(store.db));
     const order = insertOrder(new Set(byTable.keys()));
@@ -214,7 +222,24 @@ export function replayNdjson(ndjson, filename) {
     const audit = store.verifyInvitationAudit();
     const events = store.db.prepare("SELECT count(*) AS n FROM events").get().n;
     if (events !== watermark.events) throw new Error("Export watermark does not match the restored event log");
+    // Per-table counts (watermark.tables): exports written before this field
+    // existed skip the check — backward compatible. A truncated export that
+    // drops rows from any table fails here, loudly, instead of restoring
+    // silently partial.
+    if (watermark.tables && typeof watermark.tables === "object") {
+      for (const [table, expected] of Object.entries(watermark.tables)) {
+        const actual = store.db.prepare(`SELECT count(*) AS n FROM ${quoteIdent(table)}`).get().n;
+        if (actual !== expected) throw new Error(`Export watermark does not match the restored table ${table}: expected ${expected} rows, got ${actual}`);
+      }
+    }
     chmodSync(filename, 0o600);
+    verified = true;
     return { verified: true, events, ...audit, recovery };
-  } finally { store.close(); }
+  } finally {
+    store.close();
+    // The destination was created by this run (it did not exist at entry):
+    // a failed replay removes it so no partial store is ever left behind
+    // looking like a successful restore.
+    if (!verified) { try { unlinkSync(filename); } catch { /* best effort */ } }
+  }
 }
