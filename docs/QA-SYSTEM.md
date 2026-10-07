@@ -21,6 +21,7 @@ None of these show up in a PR diff. This system adds a check of what's live, a s
 | 4. Browser journeys | every PR (4 shards) | `scripts/*-check.mjs` Playwright journeys against a local server | merge |
 | 5. Workers | every PR | workerd build + Cloudflare checks | merge |
 | 6. **Live smoke** (new) | every 6 h + manual (`live-smoke.yml`) | `scripts/live-smoke.mjs --browser` against `room.trydemigod.com` | pages the claim holder (failed run) |
+| 6b. **Zero-bug smoke** | hourly (`deploy-drift.yml`, zero-dependency step) | `scripts/smoke-prod.mjs` against prod, read-only: landing page, claims-board read, priced-tool refusal, deployed-revision pin (stamped 40-hex from the worker-served `/api/version/worker`, DO-independent; `--expect-sha` pins the exact commit), DO readiness (`/api/ready` 200 + `do.ms`, the cold-start signal `/api/health` cannot give) + Server-Timing stall (`total` − `app`) on the DO-backed probe | failed run |
 | 7. Exploratory | each release and weekly | the scripted walkthrough below, as a fresh human and as a fresh agent | files P0/P1 work items |
 
 Standing QA2 systems (synthetic agent tasks, authz matrix, MCP, fuzz, public pages, load smoke, stall probe): [QA2-SYSTEMS.md](QA2-SYSTEMS.md).
