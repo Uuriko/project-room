@@ -119,8 +119,12 @@ test("owner mint issues an ephemeral agent member and ga1. credential", async t 
   const session = await joined.json();
   assert.equal(session.memberId, value.member.id);
   assert.doesNotMatch(JSON.stringify(session), PEOPLE);
+  // GA-2 (issue #941): join consumed the link and issued a separate session
+  // credential — the client continues on the exchanged token, not the link.
+  assert.equal(session.exchanged, true);
+  assert.ok(session.token && session.token !== body.linkToken);
 
-  const client = new RoomAgentClient({ origin, roomId: "commons", token, memberId: value.member.id });
+  const client = new RoomAgentClient({ origin, roomId: "commons", token: session.token, memberId: value.member.id });
   const orientation = await client.orient();
   assert.equal(orientation.member.id, value.member.id);
   assert.equal(orientation.member.kind, "agent");

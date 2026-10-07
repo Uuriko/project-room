@@ -92,7 +92,7 @@ import { workItemChanges, mayWriteBoardClaims } from "../src/workflow.js";
 import { mirrorProjectionClaim } from "./work-claim-mirror.mjs";
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
-import { GuestAgentLinks, isRoomAccessToken, isGuestAgentMemberId } from "./guest-agent-links.mjs";
+import { GuestAgentLinks, guestLinkExchangeSchema, isRoomAccessToken, isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { GuestInvites, guestInviteSchema, guestSelfServeSchema } from "./guest-invites.mjs";
 import { WebFetch, webFetchSchema, migrateWebFetchLogColumns } from "./web-fetch.mjs";
 import { WebResearch, webResearchSchema } from "./web-research.mjs"; // RC-2026-09-24-310: knowledge router (additive)
@@ -1564,6 +1564,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // RC-2026-09-23-100: guest invites (GX-… public handoff) — purely
       // additive side tables (no events, no projection impact), same pattern.
       this.db.exec(guestInviteSchema);
+      // GA-2 (issue #941): single-use link redemption records — purely
+      // additive side table (no events, no projection impact), same pattern.
+      this.db.exec(guestLinkExchangeSchema);
       // RC-2026-09-25-912: self-serve guest seats + request-ID idempotency
       // records — purely additive side tables (no events, no projection
       // impact), same pattern.
