@@ -52,12 +52,10 @@ const {
   SessionLifecycleError,
   VersionMismatchError,
   OccupantChangedError,
-  MethodUnsupportedError,
   TransportError,
   TimeoutError,
   ServerError,
   herdrLifecycleSchema,
-  AGENT_STATES,
   SESSION_STATES,
   DEFAULT_TIMEOUTS,
 } = lifecycle;

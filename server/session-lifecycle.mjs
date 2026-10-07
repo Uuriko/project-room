@@ -313,8 +313,6 @@ export function createSessionLifecycle(store, opts = {}) {
     if (!row) fail(404, "session_not_found", `no session "${sessionId}"`);
     return row;
   };
-  const touch = sessionId => db.prepare("UPDATE herdr_sessions SET updated_at = ? WHERE session_id = ?").run(now(), sessionId);
-
   // Dedupe lookup (D2 §4): completed rows only (response_json NOT NULL), TTL'd.
   const dedupeLookup = (key, transition) => {
     const row = db.prepare(`SELECT transition, response_json, created_at FROM herdr_session_journal
