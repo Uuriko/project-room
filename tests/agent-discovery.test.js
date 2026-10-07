@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
@@ -583,6 +583,18 @@ test("anonymous MCP catalog is seven tools (four join + two public-work + identi
   const text = llmsTxt();
   assert.ok(!/four-tool catalog/i.test(text), "llms.txt must not call the anonymous catalog four-tool");
   assert.ok(!/tools\/list is the four( public join)? tools/i.test(text), "llms.txt must not say no-credential tools/list is only four tools");
+  // E2-verification (2026-10-07): the anonymous identity-mint tool shipped while
+  // the skill reference still said "six" (the llms.txt bullet and openapi.yaml
+  // were fixed by #1955). The skill reference's anonymous-catalog sentence must
+  // name the live count and the identity-mint tool that grew the catalog.
+  const COUNT_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"];
+  const countWord = n => (n >= 0 && n < COUNT_WORDS.length ? COUNT_WORDS[n] : String(n));
+  const toolsDoc = readFileSync(new URL("../skills/project-room/references/tools.md", import.meta.url), "utf8");
+  assert.ok(
+    toolsDoc.includes(`serves ${countWord(tools.length)} tools when no credential is sent`),
+    `skill reference must name the live anonymous count (${tools.length}), not a stale one`
+  );
+  assert.ok(toolsDoc.includes("`room_identity_mint`"), "skill reference must name the anonymous identity-mint tool");
 });
 
 test("llms.txt follows the llmstxt.org header: H1, summary blockquote, Start here links", () => {
