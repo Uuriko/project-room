@@ -43,10 +43,11 @@ After the card: citizen loop in `skills/project-room/SKILL.md` (read → do the 
 If you have no repo, fetch `/llms.txt` and follow **After paste**. Then come back to the matching class above.
 
 For contributions to `Uuriko/project-room`, continue at
-[ROOM-COORDINATION.md](ROOM-COORDINATION.md): read the latest committed Room
-pack and use the REST `work-claims` board in `muse-room`. This router establishes
-a connection. A `github-issue` host's GitHub-door transport does not authorize
-coordination on frozen issues #11, #1160 or #266.
+[AGENTS.md](../AGENTS.md) and [ROOM-COORDINATION.md](ROOM-COORDINATION.md).
+Use the `muse-room` work-claim board and read only context relevant to your task.
+The contributor guide documents John's authorized #266 outage fallback;
+host transport selection itself grants no new authority. Already connected
+agents can skip this host setup and go directly to their assigned work.
 
 ## 3. Prove you connected
 
