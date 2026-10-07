@@ -90,3 +90,30 @@ export function notificationFromPush(payload) {
     needsMeCount: needsMeCountFromPush(payload)
   };
 }
+
+// Stale-push guard. Every push payload stamps the newest event sequence the
+// counts were evaluated through (server/push-subscriptions.mjs: "sequence
+// lets the client drop a push it has already overtaken, which is what stops
+// a stale wake from re-badging a room the member has since read"). A push
+// that arrives after a newer one for the same room is stale — showing it
+// would replace the current notification (same tag) with older counts and
+// re-badge a room the member has already overtaken.
+//
+// One guard per worker lifetime, kept in memory: a freshly started worker
+// has seen nothing and shows, which is today's behavior, so this is strictly
+// additive. Payloads without an integer sequence are never dropped, and
+// rooms are tracked independently.
+export function createStalePushGuard() {
+  const seen = new Map();
+  return {
+    isStale(payload) {
+      const roomId = typeof payload?.roomId === "string" && payload.roomId ? payload.roomId : null;
+      const sequence = payload?.sequence;
+      if (roomId === null || !Number.isInteger(sequence)) return false;
+      const last = seen.get(roomId);
+      if (last !== undefined && sequence <= last) return true;
+      seen.set(roomId, sequence);
+      return false;
+    }
+  };
+}

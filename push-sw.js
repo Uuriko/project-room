@@ -95,6 +95,33 @@ function notificationFromPush(payload) {
   };
 }
 
+// Stale-push guard. Every push payload stamps the newest event sequence the
+// counts were evaluated through (server/push-subscriptions.mjs: "sequence
+// lets the client drop a push it has already overtaken, which is what stops
+// a stale wake from re-badging a room the member has since read"). A push
+// that arrives after a newer one for the same room is stale — showing it
+// would replace the current notification (same tag) with older counts and
+// re-badge a room the member has already overtaken.
+//
+// One guard per worker lifetime, kept in memory: a freshly started worker
+// has seen nothing and shows, which is today's behavior, so this is strictly
+// additive. Payloads without an integer sequence are never dropped, and
+// rooms are tracked independently.
+function createStalePushGuard() {
+  const seen = new Map();
+  return {
+    isStale(payload) {
+      const roomId = typeof payload?.roomId === "string" && payload.roomId ? payload.roomId : null;
+      const sequence = payload?.sequence;
+      if (roomId === null || !Number.isInteger(sequence)) return false;
+      const last = seen.get(roomId);
+      if (last !== undefined && sequence <= last) return true;
+      seen.set(roomId, sequence);
+      return false;
+    }
+  };
+}
+
 const CACHE_NAME = "room-pwa-v1";
 const CACHE_ALLOW = [
   "/offline.html",
@@ -136,9 +163,17 @@ self.addEventListener("fetch", event => {
   event.respondWith(fetch(event.request));
 });
 
+// Per-worker stale-push guard (src/human-push-display.js, inlined above).
+// A push overtaken by a newer one for the same room is dropped, so a
+// delayed delivery never re-badges a room the member has already read.
+const stalePushGuard = createStalePushGuard();
+
 self.addEventListener("push", event => {
   let payload = {};
   try { payload = event.data && event.data.json ? event.data.json() : {}; } catch { payload = {}; }
+  // Drop a push the member has already overtaken: same-room tag replacement
+  // would otherwise show older counts and re-badge a room already read.
+  if (stalePushGuard.isStale(payload)) return;
   const note = notificationFromPush(payload);
   const options = { body: note.body, tag: note.tag, renotify: false, data: note.data };
   const actionsSupported = typeof Notification === "function" && "actions" in Notification.prototype;

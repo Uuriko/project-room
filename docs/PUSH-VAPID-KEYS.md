@@ -60,7 +60,23 @@ push service's verdict, never message content.
   Turning preview back off restores the counts-only payload byte for byte.
 - Quiet hours (`{ preferences: { quietHours: { start: "HH:MM", end: "HH:MM",
   tz: "IANA/Zone" } } }`, or `null` to clear) silence the push channel for
-  the member's window; the message still lands in the room.
+  the member's window; the message still lands in the room. The window is
+  checked at post time *and* re-checked just before the push is sent, so a
+  window that starts (or a preference the member enables) between the post
+  and the async send still suppresses it — a push never fires inside quiet
+  hours.
+
+## Delivery guarantees
+
+- **No stale re-badge.** Every payload stamps the newest event sequence the
+  counts were evaluated through. The service worker drops a push whose
+  sequence is not newer than one already shown for that room, so a delayed
+  delivery can never replace the current notification with older counts or
+  re-badge a room the member has already read. Payloads without a sequence
+  are always shown; rooms are tracked independently.
+- **Previews stay opt-in.** Counts-only is the default payload; sender,
+  preview text, and deep link enter a payload only when that member turned
+  preview on for that room.
 
 ## Open product decision (John's call, not a blocker)
 

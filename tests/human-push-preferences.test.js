@@ -205,3 +205,24 @@ test("unreadable push preferences suppress delivery", async t => {
 test("push route metadata keeps every preference and subscription operation room-authenticated", () => {
  assert.deepEqual(HUMAN_PUSH_ROUTES.map(r=>[r.method,r.auth,r.scope]),[["GET","room","room"],["POST","room","room"],["PATCH","room","room"],["DELETE","room","room"]]);
 });
+
+// Quiet hours are enforced at send time, not just at post time. The push
+// path authorizes synchronously inside the message transaction and delivers
+// asynchronously; a quiet-hours window that starts in between must still
+// silence the channel — the member asked for silence, and the send-time
+// re-check (stillVisible) is where the latest preference state is honored.
+test("quiet hours starting between post and delivery suppress the push", async t => {
+  const { store, send, calls, ownerKey, mayaKey } = await boot(t);
+  store.humanPush.save(mayaKey, "commons", browserSub("https://fcm.googleapis.com/fcm/send/maya"));
+  store.humanPush.setPreferences(mayaKey, "commons", {
+    preferences: { quietHours: { start: "22:00", end: "07:00", tz: "UTC" } }
+  });
+  const at = Date.UTC(2026, 9, 7, 21, 59, 0); // 21:59 UTC: outside quiet hours
+  const realNow = store.now.bind(store);
+  store.now = () => at;
+  send(ownerKey, T.MESSAGE_POSTED, { messageId: "m-quiet-race", body: "@Maya hello" });
+  store.now = () => at + 2 * 60 * 1000; // 22:01 UTC: inside quiet hours
+  await store.humanPush.flush();
+  assert.equal(calls.length, 0, "a push must not fire after quiet hours start");
+  store.now = realNow;
+});
