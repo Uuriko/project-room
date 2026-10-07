@@ -426,7 +426,23 @@ export const unfencedAdditiveTables = Object.freeze([
   // Purely additive and intentionally NOT fenced — older writers have no code
   // path to it; the owner-managed roster rules in server/squads.mjs are the
   // integrity gate.
-  "squads"
+  "squads",
+  // herdr_sessions + herdr_session_journal + herdr_lane_optin +
+  // herdr_backend_state (herdr redesign Phase B session durability, lane B5):
+  // purely additive and intentionally NOT fenced — older writers have no code
+  // path to them, and the journal's create/attach/heartbeat/detach/fallback
+  // transitions are the integrity gate.
+  "herdr_sessions",
+  "herdr_session_journal",
+  "herdr_lane_optin",
+  "herdr_backend_state",
+  // private_supervision_cards + private_supervision_card_history (herdr
+  // redesign D4 inbox wiring, v1 triage cards, lane B5): purely additive and
+  // intentionally NOT fenced — older writers have no code path to them, and
+  // the card state machine's transition journal is the integrity gate.
+  // (D4's v2 private_supervision_pending_dispatch is out of scope.)
+  "private_supervision_cards",
+  "private_supervision_card_history"
 ]);
 // Created on first use, not in the constructor. A database that has never
 // issued an OAuth grant or persisted an abuse rate bucket does not have
