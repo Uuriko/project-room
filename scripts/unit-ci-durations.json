@@ -414,6 +414,7 @@
   "tests/join-onboarding-docs.test.js": 4854,
   "tests/join-p2s.test.js": 23796,
   "tests/join-page.test.js": 53057,
+  "tests/join-session-1522.test.js": 11000,
   "tests/join-vocabulary.test.js": 23466,
   "tests/join.test.js": 6284,
   "tests/journey-coverage.test.js": 8107,
