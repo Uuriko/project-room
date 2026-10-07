@@ -786,6 +786,7 @@
   "tests/work-claim-board.test.js": 70563,
   "tests/work-claim-client.test.js": 64110,
   "tests/work-claim-create-note.test.js": 4306,
+  "tests/work-claim-double-settle.test.js": 5000,
   "tests/work-claim-duplicates.test.js": 10314,
   "tests/work-claim-durable-http.test.js": 42485,
   "tests/work-claim-events.test.js": 24567,
