@@ -105,7 +105,7 @@ export function findUnpinnedFiles(expected, manifest) {
 
 // Files the harness READS but never modifies; everything else lives in
 // scripts/, tests/, strings/, docs/ (new files this lane owns).
-const UI_GLOBS = ["src", "index.html", "join.html", "about.html", "offers.html", "operator.html", "offline.html", "404.html"];
+const UI_GLOBS = ["src", "index.html", "join.html", "about.html", "offers.html", "discover.html", "operator.html", "offline.html", "404.html"];
 const EMAIL_FILES = ["server/notify-email.mjs", "server/email-envelope.mjs"];
 const RULES = ["hardcoded-ui-string", "sentence-concatenation", "positional-placeholder"];
 

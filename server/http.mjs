@@ -122,6 +122,7 @@ const assetType = path => path.endsWith(".js") ? "text/javascript" : path.endsWi
 const assets = new Map([
   ["/", ["index.html", "text/html"]],
   ["/offers", ["offers.html", "text/html"]],
+  ["/discover", ["discover.html", "text/html"]],
   ...publicAssetPaths.map(path => [`/${path}`, [path, assetType(path)]]),
   // Public AEO buyer-intent pages: extensionless canonical URLs (the .html
   // forms are served by the allowlist spread above).
@@ -223,7 +224,7 @@ const gr2PublicPath = pathname => {
 };
 // --- end GR2 ---
 const canonicalLink = pathname => {
-  const path = pathname === "/index.html" ? "/" : pathname === "/about.html" ? "/about" : pathname === "/offers.html" ? "/offers" : pathname;
+  const path = pathname === "/index.html" ? "/" : pathname === "/about.html" ? "/about" : pathname === "/offers.html" ? "/offers" : pathname === "/discover.html" ? "/discover" : pathname;
   return `<${ROOM_ORIGIN}${path}>; rel="canonical"`;
 };
 const publicPageLinks = (url, pathname) => `${discoveryLinks(url)}, ${canonicalLink(pathname)}`;
