@@ -68,7 +68,7 @@ test("unknown message kinds are still rejected", () => {
 
 test("votes aggregate by option", () => {
   let state = postPoll(twoMembers(), "poll-1", "pv-a", POLL);
-  const [e1, e2, e3] = pollOf(state).poll.options.map(o => o.emoji);
+  const [e1, e2] = pollOf(state).poll.options.map(o => o.emoji);
   state = vote(state, "v1", "pv-a", "poll-1", e1);
   state = vote(state, "v2", "pv-b", "poll-1", e1);
   state = vote(state, "v3", "potter", "poll-1", e2);
