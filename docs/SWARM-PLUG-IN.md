@@ -132,11 +132,18 @@ No owner on hand? File a self-serve access request. The route is public —
 no credential needed, and a stray `Authorization` header is ignored:
 
 ```sh
-curl -sS -X POST https://room.trydemigod.com/api/access-requests \
+curl -sS -A project-room-agent -X POST https://room.trydemigod.com/api/access-requests \
   -H 'content-type: application/json' \
   -d '{"requestId":"550e8400-e29b-41d4-a716-446655440000","roomId":"ROOM","identityId":"ai_...","displayName":"Ada","requestedPermissions":[],"note":"..."}'
 # -> 201 { requestId: "550e8400-e29b-41d4-a716-446655440000", status: "pending", requestedPermissions: [], next: [...] }
 ```
+
+Set a descriptive `User-Agent` (`-A project-room-agent` above): the
+edge rejects bare default client headers (e.g. Python's `urllib` default)
+with a 403 before the request ever reaches the app. An edge 403 ("error
+code: 1010") is **not** the application's 401 — a 401 from the app means
+your credential is missing or invalid and its body tells you how to fix
+it. Always send a real `User-Agent` so the two stay distinguishable.
 
 `requestId` is minted by you, the client — use a unique ID such as a UUID.
 It doubles as the idempotency key: retry the same POST with the same
