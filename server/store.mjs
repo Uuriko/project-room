@@ -36,6 +36,7 @@ import { enforceSpendAllowance } from "./spend-allowance.mjs";
 import { ensureAutonomyTiersSchema, enforceAutonomyTiers, AUTONOMY_TIERS_SCHEMA } from "./autonomy-tiers.mjs";
 import { ensureOperatorActionsSchema, OPERATOR_ACTIONS_SCHEMA } from "./operator-actions.mjs"; // CP-ADMIN-0: append-only operator audit.
 import { ensureGrantsSchema, GRANTS_SCHEMA } from "./grants.mjs";
+import { createRoomRoles, ensureRoomRolesSchema, ROOM_ROLES_SCHEMA } from "./room-roles.mjs";
 import { ensureSpendGrantsSchema, SPEND_GRANTS_SCHEMA } from "./spend-grants.mjs";
 import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchema, replayInvitationJournal } from "./invitation-journal.mjs";
 import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./invitation-evidence.mjs";
@@ -1026,6 +1027,7 @@ export const ADDITIVE_SCHEMA_ENSURES = [
   [ensureAutonomyTiersSchema, "ensureAutonomyTiersSchema@1"],
   [ensureOperatorActionsSchema, "ensureOperatorActionsSchema@1"],
   [ensureGrantsSchema, "ensureGrantsSchema@1"],
+  [ensureRoomRolesSchema, "ensureRoomRolesSchema@1"],
   [ensureSpendGrantsSchema, "ensureSpendGrantsSchema@1"],
   [ensureAccountProfileSchema, "ensureAccountProfileSchema@1"],
   [ensureVerifiedEmailSchema, "ensureVerifiedEmailSchema@1"],
@@ -1064,7 +1066,7 @@ function roomSchemaStamp() {
     // stamp matches skips the whole schema pass, so any DDL the pass applies
     // must be hashed here or a room stamped by an older deploy never gets it
     // (the priced-tool 500: spend_authorizations missing on muse-room).
-    updatesSchema, GRANTS_SCHEMA, SPEND_GRANTS_SCHEMA, AUTONOMY_TIERS_SCHEMA, identityLinkCodeSchema
+    updatesSchema, GRANTS_SCHEMA, SPEND_GRANTS_SCHEMA, AUTONOMY_TIERS_SCHEMA, identityLinkCodeSchema, ROOM_ROLES_SCHEMA
   ];
   for (const part of parts) hash.update("\0").update(part ?? "");
   for (const [, label] of ADDITIVE_SCHEMA_ENSURES) hash.update("\0").update(label);
@@ -1194,6 +1196,13 @@ export class RoomStore {
     this.workClaims = createDurableWorkClaimRegistry(this.db, {
       transaction: fn => this.transaction(fn),
       onChange: roomId => noteWorkClaimChange(this, roomId),
+    });
+    // Roles with hierarchy (missing-features #6). The service owns only its
+    // additive tables; the member capability bits stay the enforcement
+    // substrate and are written through the command pipeline.
+    this.roomRoles = createRoomRoles(this.db, {
+      now: () => this.now(),
+      ownerIdForRoom: roomId => this.room(roomId).state.room.ownerId,
     });
     this.nextActions = new NextActions(this); // RC-2026-09-25-911: ranked next-actions (private dismissals/suppressions).
     this.readOnly = readOnly;
@@ -1423,6 +1432,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // edges — purely additive table, IF NOT EXISTS is idempotent, no
       // schema version bump.
       ensureGrantsSchema(this.db);
+      // Roles with hierarchy (missing-features #6): role objects, rank,
+      // assignments, channel overwrites — purely additive tables,
+      // IF NOT EXISTS is idempotent, no schema version bump.
+      ensureRoomRolesSchema(this.db);
       // Spend-primitive MVP (qa4-spend-mvp-jill): per-agent spend grant
       // terms + the charge ledger — purely additive tables, IF NOT EXISTS
       // is idempotent, no schema version bump.
@@ -2731,6 +2744,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const insert = this.db.prepare("INSERT INTO events VALUES(?,?,?,?)");
       events.forEach((e, i) => insert.run(state.room.id, i + 1, e.id, JSON.stringify(e)));
       syncRoomPublication(this, { roomId: state.room.id, state: stored, previous: null, auth: null });
+      // Roles with hierarchy (missing-features #6): seed the invite-preset
+      // defaults and map preset members onto them. Backfill never mutates
+      // the stored permission bits.
+      this.roomRoles.ensureRoomRoles(state.room.id);
+      this.roomRoles.backfillRoleAssignments(state.room.id, Object.values(stored.members), state.room.ownerId);
       return state.room.id;
     });
   }
@@ -3427,6 +3445,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
       this.db.prepare("INSERT INTO member_accounts(room_id,member_id,account_id,origin) VALUES(?,?,?,?)")
         .run(row.room_id, row.intended_member_id, row.intended_account_id, `invitation:${row.id}`);
+      // Roles with hierarchy: the invite preset maps onto its default role
+      // object at redemption. Convergent (backfill covers stragglers) and
+      // never blocks joining: a role-row hiccup must not fail redemption.
+      try {
+        const defaultRoleId = this.roomRoles.defaultRoleIdForPreset(row.room_id, row.intended_role);
+        if (defaultRoleId) this.roomRoles.assignRole(row.room_id, defaultRoleId, row.intended_member_id, row.issuer_member_id);
+      } catch {
+        // The permission bits from the invite preset are already authoritative;
+        // the role row converges on the next snapshot/backfill.
+      }
       this.markAccountHadRoom(row.intended_account_id);
       const changed = this.db.prepare(`UPDATE membership_invitations SET revision=1,status='accepted',accepted_at=?,accepted_by_account_id=?,redemption_id=?,joined_event_id=?
         WHERE id=? AND revision=0 AND status='pending'`).run(now, accountSession.account.id, redemptionId, incoming.id, row.id).changes;
@@ -3661,8 +3689,49 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     });
   }
   revoke(token) { this.db.prepare("UPDATE credentials SET revoked=1 WHERE hash=?").run(hash(token)); }
+  // Roles with hierarchy (missing-features #6): assign or unassign a role,
+  // then write the recomputed capability union THROUGH to the member's
+  // permission bits via the existing member.access_changed command. The bits
+  // stay the enforcement substrate; the command pipeline re-checks
+  // manage_members and the agent-admin delegation rules. The HTTP role
+  // routes call this; tests exercise it directly.
+  setMemberRole(token, roomId, { roleId, memberId, assign }, { expectedSessionBinding = null } = {}) {
+    return this.transaction(() => {
+      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      const state = this.room(roomId).state;
+      const actor = state.members[auth.member.id];
+      if (!actor || actor.active === false) fail(403, "access_denied", "Not an active room member");
+      if (auth.member.id !== state.room.ownerId && !actor.permissions.includes("manage_members")) {
+        fail(403, "access_denied", "Role management needs the manage_members capability");
+      }
+      const member = state.members[memberId];
+      if (!member) fail(404, "member_not_found", "Unknown member");
+      if (member.active === false) fail(409, "member_inactive", "Member is not active");
+      const { role, permissions } = assign
+        ? this.roomRoles.assignRole(roomId, roleId, memberId, auth.member.id)
+        : this.roomRoles.unassignRole(roomId, roleId, memberId, auth.member.id);
+      // Re-read: assignRole touches only role tables, so the revision is
+      // current; the command below bumps it exactly once.
+      const current = this.room(roomId).state.members[memberId];
+      const result = this.command(token, roomId, {
+        id: `role-access-${randomUUID()}`,
+        type: T.MEMBER_ACCESS_CHANGED,
+        data: {
+          memberId,
+          expectedMemberRevision: current.revision,
+          permissions,
+          active: current.active !== false,
+        },
+      }, expectedSessionBinding);
+      return { role: role ?? null, memberId, permissions, revision: current.revision + 1, sequence: result.sequence };
+    });
+  }
   snapshot(token, roomId, expectedSessionBinding = null, view = "full", helpContext = false, offerContext = false) {
     // One read transaction keeps sequence, projection, and audit tail at the same commit.
+    // Roles with hierarchy (missing-features #6): the snapshot is a pure
+    // read — role seeding/backfill converge on write paths (initialize,
+    // invitation redemption) and on the explicit GET /roles read, never
+    // here, so read probes stay byte-stable.
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       if (!["full", "work"].includes(view)) fail(422, "invalid_snapshot_view", "Choose a supported snapshot view");
@@ -3675,9 +3744,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           workItems: Object.fromEntries(Object.entries(room.state.workItems).map(([id, item]) => [id, currentWorkRecord(item)])) },
         charter: charterContext(room.state.room), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null,
         viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
+      // Roles with hierarchy (missing-features #6): hierarchy display payload
+      // for the browser UI. The agent work view above keeps its exact
+      // snapshotVersion:1 key contract (client/room-agent.mjs validates it
+      // strictly); agents read roles from GET /api/rooms/{roomId}/roles.
+      const roles = this.roomRoles.rolesForSnapshot(roomId);
       const rows = this.db.prepare("SELECT body FROM events WHERE room_id=? ORDER BY sequence DESC LIMIT 100").all(roomId);
       const cursor = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id)?.sequence ?? 0;
-      return { ...room, roomId, ...(offerContext ? { offerContextVersion: 1 } : {}), charter: charterContext(room.state.room), replyRequestContractVersion: REPLY_POLICY_VERSION, state: { ...room.state, eventLog: rows.reverse().map(r => JSON.parse(r.body)) }, cursor, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
+      return { ...room, roomId, ...(offerContext ? { offerContextVersion: 1 } : {}), charter: charterContext(room.state.room), replyRequestContractVersion: REPLY_POLICY_VERSION, roles, state: { ...room.state, eventLog: rows.reverse().map(r => JSON.parse(r.body)) }, cursor, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
     });
   }
 

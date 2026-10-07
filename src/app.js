@@ -280,6 +280,8 @@ let retentionUI = null;
 let instructionsUI = null;
 let inboxUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
+// Roles with hierarchy (missing-features #6): { version, roles: [{id,name,rank,capabilities,isDefault}], memberRoles: { memberId: [roleIds rank-desc] } }
+let roomRoles = null;
 // JDOT-COH-NAV begin
 let updatesUi = null, resetNavigationBoard = null, navigationBoardReady = null;
 const workNavigationOrigins = new Map();
@@ -343,6 +345,16 @@ const client = new RoomClient({
     const presenceBoundary = firstSnapshot || state.room?.id !== snapshot.state.room?.id || roomGeneration !== client.generation;
     if (presenceBoundary) stopPresencePoll();
     state = snapshot.state; session = identity;
+    roomRoles = snapshot.roles ?? null;
+    if (firstSnapshot) {
+      // Roles with hierarchy: the roles read converges default roles and
+      // preset assignments for rooms created before roles existed; refresh
+      // once afterwards so the member list can render role chips.
+      const generation = client.generation;
+      client.request(client.path("/roles")).then(() => {
+        if (generation === client.generation && state) client.refresh();
+      }).catch(() => {});
+    }
     displayNames = createMemberDisplayNames(state.members);
     void refreshRequestRuns();
     offerContextVersion = snapshot.offerContextVersion === 1 ? 1 : null;
@@ -1965,6 +1977,36 @@ function render() {
     return `<div class="member-actions" data-member-actions="${esc(m.id)}"><button type="button" class="text-button" data-member-pause="${esc(m.id)}" data-pause-action="${paused ? "resume" : "pause"}" title="${paused ? "Let queued wakes start again" : "Queued wakes will not start; a running attempt finishes"}">${paused ? "Resume" : "Pause"}</button><button type="button" class="text-button member-remove${armed ? " armed" : ""}" data-member-remove="${esc(m.id)}" aria-pressed="${armed}">${armed ? "Confirm remove" : "Remove"}</button>${armed ? `<button type="button" class="text-button" data-member-remove-cancel="${esc(m.id)}">Keep</button>` : ""}</div>`;
   };
   const presenceStale = presenceUnrefreshed || presenceObservationAged();
+  // Roles with hierarchy (missing-features #6): the member's roles,
+  // rank-descending, from the snapshot's roles projection. The first entry
+  // is the highest-ranked role shown as the at-a-glance chip.
+  const memberRoleList = m => {
+    const ids = roomRoles?.memberRoles?.[m.id];
+    if (!ids?.length || !Array.isArray(roomRoles.roles)) return [];
+    const byId = new Map(roomRoles.roles.map(role => [role.id, role]));
+    return ids.map(id => byId.get(id)).filter(Boolean);
+  };
+  const memberTopRole = m => memberRoleList(m)[0] ?? null;
+  const roleChipHtml = m => {
+    const top = memberTopRole(m);
+    return top
+      ? `<span class="role-chip" title="Role: ${esc(top.name)} · rank ${top.rank} · ${esc(top.capabilities.join(", "))}">${esc(top.name)}</span>`
+      : "";
+  };
+  // Owner-only role assignment control. Roles list in hierarchy (rank) order;
+  // assigning writes through to the member's capability bits server-side.
+  const roleControl = m => {
+    if (!ownerView || m.id === state.room.ownerId || m.active === false || !roomRoles) return "";
+    const held = memberRoleList(m), heldIds = new Set(held.map(role => role.id));
+    const available = (roomRoles.roles ?? []).filter(role => !heldIds.has(role.id));
+    const heldHtml = held.map(role =>
+      `<span class="role-chip">${esc(role.name)}<button type="button" class="text-button" data-role-unassign="${esc(m.id)}" data-role-id="${esc(role.id)}"${memberActionBusy ? " disabled" : ""} aria-label="Remove ${esc(role.name)} role from ${esc(m.displayName)}" title="Remove ${esc(role.name)}">×</button></span>`
+    ).join("");
+    const assignHtml = available.length
+      ? `<select data-role-select="${esc(m.id)}" aria-label="Role to assign to ${esc(m.displayName)}">${available.map(role => `<option value="${esc(role.id)}">${esc(role.name)} · rank ${role.rank}</option>`).join("")}</select><button type="button" class="text-button" data-role-assign="${esc(m.id)}"${memberActionBusy ? " disabled" : ""}>Assign role</button>`
+      : "";
+    return `<div class="member-role-control"><p class="form-hint">Roles — highest rank first. Assigning a role updates their capabilities.</p><div>${heldHtml || `<span class="form-hint">No roles — capabilities stay as set.</span>`}</div><div>${assignHtml}</div></div>`;
+  };
   const presenceRow = m => {
     // #660: prefer the server-derived presence entry when we have one; it
     // carries the authoritative working state plus owner/scope projection.
@@ -2002,7 +2044,7 @@ function render() {
       ? `<p class="member-observation">Last host report: <time datetime="${esc(new Date(serverPresence.presence.lastSeenAt).toISOString())}">${esc(new Date(serverPresence.presence.lastSeenAt).toLocaleString())}</time></p>` : "";
     const lastReport = agent && presenceStale && serverState
       ? `<p class="member-observation">Last reported availability: ${esc(presenceLabel(serverState))}</p>` : "";
-    return `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-presence="${esc(presence)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}"${m.agentType ? ` data-agent-type="${esc(m.agentType)}"` : ""} ${m.active === false ? "" : `title="${esc(`Address ${m.displayName} in chat`)}"`}><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span><i class="presence-dot presence-${esc(presence)}" title="${esc(availability)}"></i></div><div><div class="member-head"><strong class="member-handle${m.kind === "agent" ? " member-handle-agent" : ""}">${esc(handle)}</strong><span class="sr-only">${esc(availability)}</span>${doneChip}${agentPauses.has(m.id) && m.active !== false ? `<span class="pause-chip" data-paused-member="${esc(m.id)}" title="Queued wakes will not start; a running attempt may finish">Wakes paused</span>` : ""}${friendBondHtml(m)}</div>${agent ? `<span class="member-availability">${esc(availability)}</span>` : ""}${workingOnTitle}${agent ? `<p class="member-status member-assignment">${esc(status)}</p>` : ""}<details class="member-profile"><summary data-focus-key="member-profile:${esc(m.id)}" aria-label="Member options for ${esc(m.displayName)}" title="Member options"><span aria-hidden="true">···</span></summary><div class="member-profile-body"><p class="form-hint">Member ID: <code>${esc(m.id)}</code></p><div class="member-profile-badges">${typeChip}${stateChip}${ownerChip}</div><p class="member-status">${esc(status)}</p>${lastReport}${hostReport}${ownedBy}${agentPauses.has(m.id) && agent ? `<p class="member-pause-explanation">Queued wakes will not start; a running attempt may finish.</p>` : ""}${memberActions(m)}${workControl(m)}<details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p>${adminControl(m)}${muteControl(m)}</details>${dmConsentDetails(m)}${directoryCardDetails(m)}</div></details></div></div>`;
+    return `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-presence="${esc(presence)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}"${m.agentType ? ` data-agent-type="${esc(m.agentType)}"` : ""} ${m.active === false ? "" : `title="${esc(`Address ${m.displayName} in chat`)}"`}><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span><i class="presence-dot presence-${esc(presence)}" title="${esc(availability)}"></i></div><div><div class="member-head"><strong class="member-handle${m.kind === "agent" ? " member-handle-agent" : ""}">${esc(handle)}</strong><span class="sr-only">${esc(availability)}</span>${doneChip}${roleChipHtml(m)}${agentPauses.has(m.id) && m.active !== false ? `<span class="pause-chip" data-paused-member="${esc(m.id)}" title="Queued wakes will not start; a running attempt may finish">Wakes paused</span>` : ""}${friendBondHtml(m)}</div>${agent ? `<span class="member-availability">${esc(availability)}</span>` : ""}${workingOnTitle}${agent ? `<p class="member-status member-assignment">${esc(status)}</p>` : ""}<details class="member-profile"><summary data-focus-key="member-profile:${esc(m.id)}" aria-label="Member options for ${esc(m.displayName)}" title="Member options"><span aria-hidden="true">···</span></summary><div class="member-profile-body"><p class="form-hint">Member ID: <code>${esc(m.id)}</code></p><div class="member-profile-badges">${typeChip}${stateChip}${ownerChip}</div><p class="member-status">${esc(status)}</p>${lastReport}${hostReport}${ownedBy}${agentPauses.has(m.id) && agent ? `<p class="member-pause-explanation">Queued wakes will not start; a running attempt may finish.</p>` : ""}${memberActions(m)}${workControl(m)}<details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary>${memberRoleList(m).length ? `<p class="form-hint">Roles: ${memberRoleList(m).map(role => `${esc(role.name)} (rank ${role.rank})`).join(" · ")}</p>` : ""}<p>${esc(m.permissions.join(", ") || "conversation only")}</p>${roleControl(m)}${adminControl(m)}${muteControl(m)}</details>${dmConsentDetails(m)}${directoryCardDetails(m)}</div></details></div></div>`;
   };
   // E4: mute is the viewer's own preference; the owner (the appeal path) and yourself are never mutable.
   const muteControl = m => m.id === session?.member?.id || m.id === state.room.ownerId ? "" : `<button type="button" class="text-button mute-toggle" data-mute-member="${esc(m.id)}" data-muted="${isMutedBy(state, session?.member?.id, m.id)}" aria-pressed="${isMutedBy(state, session?.member?.id, m.id)}">${isMutedBy(state, session?.member?.id, m.id) ? `Unmute ${esc(m.displayName)}` : `Mute ${esc(m.displayName)} for me`}</button>`;
@@ -4436,6 +4478,45 @@ $("#presence-list").addEventListener("click", async e => {
   }
 });
 $("#presence-list").addEventListener("click", async e => {
+  // Roles with hierarchy (missing-features #6): owner-only assignment
+  // control. The server writes through to the member's capability bits via
+  // member.access_changed, then we refresh for the new snapshot.
+  const assignButton = e.target.closest("[data-role-assign]"), unassignButton = e.target.closest("[data-role-unassign]");
+  if (assignButton || unassignButton) {
+    e.preventDefault();
+    if (!ownsRoomActions(null) || memberActionBusy) return;
+    const memberId = assignButton?.dataset.roleAssign ?? unassignButton.dataset.roleUnassign;
+    const member = state.members[memberId];
+    if (!member || member.active === false || state.room.ownerId !== session.member.id || !can("manage_members")) return;
+    const roleId = unassignButton ? unassignButton.dataset.roleId
+      : document.querySelector(`#presence-list [data-role-select="${CSS.escape(memberId)}"]`)?.value;
+    if (!roleId) return;
+    memberActionBusy = true;
+    const generation = client.generation;
+    try {
+      if (unassignButton) {
+        await client.request(client.path(`/roles/${encodeURIComponent(roleId)}/assignments/${encodeURIComponent(memberId)}`), { method: "DELETE" });
+      } else {
+        await client.request(client.path(`/roles/${encodeURIComponent(roleId)}/assignments`), { method: "POST", data: { memberId } });
+      }
+      if (generation !== client.generation || !state) return;
+      await client.refresh();
+      if (generation !== client.generation || !state) return;
+      const roleName = roomRoles?.roles?.find(role => role.id === roleId)?.name ?? "role";
+      notice(unassignButton
+        ? `${roleName} removed from ${member.displayName}. Their capabilities were recomputed from their remaining roles.`
+        : `${member.displayName} now holds the ${roleName} role. Their capabilities were updated.`);
+    } catch (error) {
+      if (generation === client.generation && state) notice(error.message || "Role change not saved. Try again.", true);
+    } finally {
+      memberActionBusy = false;
+      if (generation === client.generation && state) {
+        render();
+        $(`#presence-list [data-member-record-id="${CSS.escape(memberId)}"]`)?.focus();
+      }
+    }
+    return;
+  }
   const pauseButton = e.target.closest("[data-member-pause]"), removeButton = e.target.closest("[data-member-remove]"), keepButton = e.target.closest("[data-member-remove-cancel]");
   if (!pauseButton && !removeButton && !keepButton) return;
   e.preventDefault();
