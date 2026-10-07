@@ -690,6 +690,7 @@
   "tests/send-journal-export.test.js": 6511,
   "tests/server-json-check.test.js": 2689,
   "tests/service.test.js": 146935,
+  "tests/session-adapter-contract.test.js": 1800,
   "tests/session-expiry.test.js": 4213,
   "tests/session-fixation.test.js": 44613,
   "tests/share-invite-code.test.js": 13187,
