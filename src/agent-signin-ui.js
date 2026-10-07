@@ -15,6 +15,7 @@
 // persisted by the page. From there the agent can create its own room
 // (POST /api/agent-rooms — no human owner needed). Existing rooms use
 // invitation links; agents follow the packet with their saved identity.
+import { uiText } from "./strings.js";
 import { escapeHtml } from "./account-settings-ui.js";
 import { mountAgentFirstRun } from "./agent-first-run.js";
 import { solveIdentityMintProof } from "./client.js";
@@ -44,6 +45,8 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
   }
 
   async function apiError(res, fallback) {
+    // Credential failures need a retry instruction, rather than API header jargon.
+    if (res.status === 401) return new Error(uiText("agentSignIn.credentialMismatch"));
     const err = await res.json().catch(() => ({}));
     const message = err?.error?.message || err?.message || (typeof err?.error === "string" ? err.error : null);
     return new Error(message || `${fallback} (${res.status})`);
