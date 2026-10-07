@@ -254,9 +254,12 @@ within the same millisecond. A renewal can therefore require a fresh read.
 Only the current owner with current Board write permissions can append.
 `manage_claims` is not an ownership override. The claim must be `claimed`,
 `in_progress` or `blocked`, unsuperseded, with an unexpired lease or an
-already-authorized non-expiring lease. Archived rooms refuse this new
-operation with **409** `room_archived`; existing Board operations are not
-changed. The append does not sweep, settle or reacquire any claim.
+already-authorized non-expiring lease. Archived rooms refuse this operation
+with **409** `room_archived` — like every other Board write on an archived
+room (create, claim, update, renew, release, reassign, review, sweep):
+archive closes every write to the room, and the Board is part of the room.
+Reads (list, get, status, provenance, duplicates) stay available, and the
+read-triggered lease sweep does not release on an archived room. The append does not sweep, settle or reacquire any claim.
 
 The input is a URL string of at most 300 characters: canonical HTTPS GitHub
 owner/repository/pull/positive-number, without credentials, non-default
