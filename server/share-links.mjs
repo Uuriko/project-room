@@ -37,11 +37,24 @@ export const shareLinkSchema = `
     session_revision INTEGER NOT NULL, fingerprint TEXT NOT NULL,
     PRIMARY KEY(link_id,slot_hash,redemption_id)
   );
+  -- Redemption idempotency for joins that write no share_link_joins row: the
+  -- membership-reuse path (an existing member re-joining via a link) returns
+  -- duplicate:true without an invitation, so the #770 cross-session replay
+  -- check has nothing to key on. One row per (link, redemptionId) names the
+  -- account that consumed it; a lost-cookie retry from another session is
+  -- rejected as join_session_lost instead of minting a second guest.
+  CREATE TABLE IF NOT EXISTS share_link_join_redemptions (
+    link_id TEXT NOT NULL REFERENCES share_links(id), redemption_id TEXT NOT NULL,
+    account_id TEXT NOT NULL REFERENCES accounts(id), created_at INTEGER NOT NULL,
+    PRIMARY KEY(link_id,redemption_id)
+  );
   CREATE TRIGGER IF NOT EXISTS share_link_scope_immutable BEFORE UPDATE OF id,token_hash,room_id,issuer_account_id,issuer_member_id,issuer_auth_epoch,issuer_member_revision,request_id,fingerprint,created_at,expires_at,max_joins ON share_links BEGIN SELECT RAISE(ABORT,'link scope is immutable'); END;
   CREATE TRIGGER IF NOT EXISTS share_link_revocation_final BEFORE UPDATE ON share_links WHEN OLD.revoked_at IS NOT NULL BEGIN SELECT RAISE(ABORT,'link cancellation is final'); END;
   CREATE TRIGGER IF NOT EXISTS share_links_no_delete BEFORE DELETE ON share_links BEGIN SELECT RAISE(ABORT,'link history is retained'); END;
   CREATE TRIGGER IF NOT EXISTS share_link_joins_no_update BEFORE UPDATE ON share_link_joins BEGIN SELECT RAISE(ABORT,'join history is immutable'); END;
   CREATE TRIGGER IF NOT EXISTS share_link_joins_no_delete BEFORE DELETE ON share_link_joins BEGIN SELECT RAISE(ABORT,'join history is retained'); END;
+  CREATE TRIGGER IF NOT EXISTS share_link_join_redemptions_no_update BEFORE UPDATE ON share_link_join_redemptions BEGIN SELECT RAISE(ABORT,'redemption history is immutable'); END;
+  CREATE TRIGGER IF NOT EXISTS share_link_join_redemptions_no_delete BEFORE DELETE ON share_link_join_redemptions BEGIN SELECT RAISE(ABORT,'redemption history is retained'); END;
 `;
 
 // Retained legacy human invite codes alias existing share_links rows. New
@@ -358,12 +371,34 @@ export class ShareLinks {
       // A retried operation must not become a fresh guest just because its
       // browser cookie disappeared. The request ID is an idempotency key, not
       // a credential: never hand another session the original guest's access.
+      // The membership-reuse path below writes no share_link_joins row, so a
+      // lost-cookie retry of it is invisible to the otherSession check; the
+      // redemption record closes that gap — one (link, redemptionId) admits
+      // one account, however the first join was recorded.
+      const redemption = this.db.prepare("SELECT account_id FROM share_link_join_redemptions WHERE link_id=? AND redemption_id=?").get(row.id, redemptionId);
+      if (redemption && redemption.account_id !== auth?.account.id) {
+        fail(409, "join_session_lost", "Your earlier join used another browser session. Return to that session or sign in with the same account. No additional guest was created. Agents should reuse their saved agent identity.");
+      }
       const otherSession = this.db.prepare("SELECT i.intended_account_id FROM share_link_joins j JOIN membership_invitations i ON i.id=j.invitation_id WHERE j.link_id=? AND j.redemption_id=? AND j.slot_hash<>?")
         .get(row.id, redemptionId, slot.credentialHash);
       if (otherSession && otherSession.intended_account_id !== auth?.account.id) {
         fail(409, "join_session_lost", "Your earlier join used another browser session. Return to that session or sign in with the same account. No additional guest was created. Agents should reuse their saved agent identity.");
       }
       if (auth && this.db.prepare("SELECT 1 FROM member_accounts WHERE room_id=? AND account_id=?").get(row.room_id, auth.account.id)) {
+        // Record the redemption: this path returns duplicate:true without an
+        // invitation or share_link_joins row, so without this record a
+        // lost-cookie retry of the same redemptionId would mint a second
+        // guest. INSERT OR IGNORE keeps concurrent reuses of one
+        // redemptionId from 500ing on the primary key; the loser re-reads
+        // and either reuses (same account) or is rejected (another account).
+        const recorded = this.db.prepare("INSERT OR IGNORE INTO share_link_join_redemptions(link_id,redemption_id,account_id,created_at) VALUES(?,?,?,?)")
+          .run(row.id, redemptionId, auth.account.id, this.store.now()).changes;
+        if (!recorded) {
+          const owner = this.db.prepare("SELECT account_id FROM share_link_join_redemptions WHERE link_id=? AND redemption_id=?").get(row.id, redemptionId);
+          if (owner?.account_id !== auth.account.id) {
+            fail(409, "join_session_lost", "Your earlier join used another browser session. Return to that session or sign in with the same account. No additional guest was created. Agents should reuse their saved agent identity.");
+          }
+        }
         return this.result(slotToken, row.room_id, true); // Existing membership survives a full or expired invitation; removed members still fail authentication.
       }
       if (this.view(row).status !== "active") unavailable();
@@ -494,5 +529,11 @@ export class ShareLinks {
       if (this.count(row) > row.max_joins) fail(503, "link_integrity_error", "Invitation link usage requires operator reconciliation");
     }
     for (const join of this.db.prepare("SELECT * FROM share_link_joins").all()) this.verifyJoin(join);
+    for (const redemption of this.db.prepare("SELECT * FROM share_link_join_redemptions").all()) {
+      if (!this.db.prepare("SELECT 1 FROM share_links WHERE id=?").get(redemption.link_id)
+        || !this.db.prepare("SELECT 1 FROM accounts WHERE id=?").get(redemption.account_id)) {
+        fail(503, "link_integrity_error", "Invitation link usage requires operator reconciliation");
+      }
+    }
   }
 }

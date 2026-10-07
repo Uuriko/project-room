@@ -1524,6 +1524,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // RC-2026-09-24-310: web-research per-request journal — purely additive
       // side table (no events, no projection impact), same pattern.
       this.db.exec(webResearchSchema);
+      // Share-link schemas are additive (IF NOT EXISTS): re-apply on every
+      // eager open so additive table additions inside shareLinkSchema (e.g.
+      // share_link_join_redemptions, the #770 redemption idempotency table)
+      // converge on existing databases without a schema version bump. The
+      // room schema stamp already hashes shareLinkSchema, so deferred wakes
+      // re-run this block too.
+      this.db.exec(shareLinkSchema);
       // #658: mention lifecycle tracking. Purely additive side tables (no
       // events, no projection impact): IF NOT EXISTS is idempotent, no
       // schema version bump, intentionally outside the writer fence.
