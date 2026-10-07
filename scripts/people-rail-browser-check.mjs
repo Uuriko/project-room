@@ -1,3 +1,4 @@
+import { enableHumanAdvanced, ensurePeopleOpen } from "./room-chrome.mjs";
 import { clickChrome } from "./room-chrome.mjs";
 import { openSettings, closeSettings } from "./room-chrome.mjs";
 // People-rail: presence dots, one-line status, loud @agent handles, Done chips.
@@ -81,6 +82,7 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   await page.locator("#auth-panel").waitFor({ state: "visible" });
   await signInFixture(page, owner);
   await page.locator("#main").waitFor({ state: "visible" });
+  await enableHumanAdvanced(page);
   if (!(await page.locator("#people-panel").evaluate(node => node.open))) {
     await page.locator("#people-panel > summary").click();
   }
@@ -253,7 +255,8 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   await page.screenshot({ path: "test-results/people-rail-desktop.png" });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.locator("#sidebar-toggle").click();
-  await page.locator("#people-panel").evaluate(node => { node.open = true; node.scrollIntoView({ block: "start" }); });
+  await ensurePeopleOpen(page);
+  await page.locator("#people-panel").scrollIntoViewIfNeeded();
   await codex.waitFor();
   await page.screenshot({ path: "test-results/people-rail-mobile.png" });
   // Gate: the existing rail owner now distinguishes membership removal from
@@ -330,6 +333,8 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
     window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
   });
   await restoredPresence;
+  await enableHumanAdvanced(page);
+  await ensurePeopleOpen(page);
   await signal.locator('.member-availability').filter({ hasText: /^No live signal$/ }).waitFor();
   const oldRoomResponse = page.waitForResponse(response => presenceRoute.test(response.url()));
   releaseRoom(); await oldRoomResponse;

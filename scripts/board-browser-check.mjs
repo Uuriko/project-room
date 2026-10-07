@@ -12,7 +12,14 @@ import { signInFixture } from "./auth-signin.mjs";
 import { clickChrome, openSearch } from "./room-chrome.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
-const shots = "/opt/cursor/artifacts/screenshots";
+async function openBoard(page) {
+  await page.keyboard.press("Control+k");
+  await page.locator("#room-actions-query").fill("board");
+  await page.locator('[data-room-action="board"]').press("Enter");
+  await page.locator("#board-dialog").waitFor({ state: "visible" });
+}
+
+const shots = process.env.ROOM_TEST_SCREENSHOT_DIR || "test-results/board";
 
 function github() {
   const body = JSON.stringify({ sha: "c".repeat(40) });
@@ -142,7 +149,7 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
   await page.goto(origin);
   await signInFixture(page, fixture.keys.owner);
   await page.locator("#main").waitFor({ state: "visible" });
-  await page.locator("#tasks-board-open").click();
+  await openBoard(page);
   await page.locator("#board-dialog").waitFor({ state: "visible" });
   await page.locator(".board-empty").waitFor();
   assert.equal(await page.locator(".board-empty").innerText(), "Claim work here so people and agents don't collide.");
@@ -183,8 +190,8 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
 
   await page.keyboard.press("Control+k");
   await page.locator("#room-actions-query").waitFor();
-  await page.keyboard.type("board");
-  await page.keyboard.press("Enter");
+  await page.locator("#room-actions-query").fill("board");
+  await page.locator('[data-room-action="board"]').press("Enter");
   await page.locator("#board-dialog").waitFor({ state: "visible" });
   await page.locator("article[data-claim-id='notes']").waitFor();
   const card = (name, id) => page.locator(`[aria-labelledby='board-col-${name}'] > article[data-claim-id='${id}']`);
@@ -288,7 +295,7 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
     await page.setViewportSize(viewport);
     await page.keyboard.press("Control+k");
     await page.locator("#room-actions-query").fill("board");
-    await page.keyboard.press("Enter");
+    await page.locator('[data-room-action="board"]').press("Enter");
     await linked.waitFor({ state: "visible" });
     assert.equal(await linked.getAttribute("href"), canonicalHash);
     assert.equal(await linked.getAttribute("data-open-work"), workId);
@@ -342,7 +349,7 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
   const sameTargetHistoryLength = await page.evaluate(() => history.length);
   await page.keyboard.press("Control+k");
   await page.locator("#room-actions-query").fill("board");
-  await page.keyboard.press("Enter");
+  await page.locator('[data-room-action="board"]').press("Enter");
   await linked.press("Enter");
   await assertWork();
   assert.equal(await page.evaluate(() => history.length), sameTargetHistoryLength);
@@ -387,7 +394,7 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
       if (dismiss === "Close") await page.locator("#board-close").click();
       else await page.keyboard.press("Escape");
       await dialog.waitFor({ state: "hidden" });
-      await page.locator("#tasks-board-open").click();
+      await openBoard(page);
       await dialog.waitFor({ state: "visible" });
       await page.locator("#board-close").focus();
       const reopenedUrl = page.url();
@@ -520,7 +527,7 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
     await page.keyboard.press("Control+k");
     await page.locator("#room-actions-query").waitFor({ state: "visible" });
     await page.locator("#room-actions-query").fill("board");
-    await page.keyboard.press("Enter");
+    await page.locator('[data-room-action="board"]').press("Enter");
     await dialog.waitFor({ state: "visible" });
   };
   const dependent = page.locator("article[data-claim-id='dependent']");
@@ -760,7 +767,7 @@ test("owners link a draft PR, reconcile held responses, and refresh a changed cl
   // the actual command finder remains an explicit way to open it.
   await page.keyboard.press("Control+k");
   await page.locator("#room-actions-query").fill("board");
-  await page.keyboard.press("Enter");
+  await page.locator('[data-room-action="board"]').press("Enter");
   await page.locator("#board-dialog").waitFor({ state: "visible" });
   const card = page.locator("article[data-claim-id='link-draft']");
   const form = card.locator("[data-claim-link-pr]");
@@ -938,11 +945,11 @@ test("held Board reads and mutations retire on room switch and sign-out", { time
       await page.locator("#main").waitFor({ state: "visible" });
       await page.waitForFunction(expected => new URL(location.href).searchParams.get("room") === expected, roomId);
     };
-    const openBoard = async () => {
-      await page.locator("#tasks-board-open").click();
+    const openCurrentBoard = async () => {
+      await openBoard(page);
       await page.locator(`#work-board article[data-claim-id='${id}']`).waitFor({ state: "attached" });
     };
-    await chooseRoom("commons"); await openBoard();
+    await chooseRoom("commons"); await openCurrentBoard();
     const documentOrigin = await page.evaluate(() => performance.timeOrigin);
     const arrived = Promise.withResolvers(), release = Promise.withResolvers();
     const pattern = operation === "read" ? "**/api/rooms/commons/work-claims?*"
@@ -977,12 +984,13 @@ test("held Board reads and mutations retire on room switch and sign-out", { time
       await arrived.promise;
       await page.locator("#board-close").click();
       if (boundary === "room") {
-        await chooseRoom("board-other"); await openBoard();
+        await chooseRoom("board-other"); await openCurrentBoard();
         await page.locator("#board-close").focus();
         assert.match(await page.locator(`article[data-claim-id='${id}'] h4`).innerText(), /^Other room /);
       } else {
         await clickChrome(page, "#signout-button");
         await page.locator("#auth-panel").waitFor({ state: "visible" });
+        if (!await page.locator('#auth-signin-ui [data-signin-form="password"]').isVisible()) await page.getByRole("button", { name: "Log in", exact: true }).click();
         await page.locator('#auth-signin-ui [data-signin-form="password"] [name="email"]').focus();
       }
       assert.equal(await page.evaluate(() => performance.timeOrigin), documentOrigin, "the old callback survives in the same document");
@@ -1046,7 +1054,7 @@ test("first board open requests at most two list pages when most claims are old"
   await page.goto(origin);
   await signInFixture(page, fixture.keys.owner);
   await page.locator("#main").waitFor({ state: "visible" });
-  await page.locator("#tasks-board-open").click();
+  await openBoard(page);
   await page.locator(".board-older").waitFor();
   await page.locator("article[data-claim-id='open-0']").waitFor();
   assert.equal(lists <= 2, true, `list requests: ${lists}`);
@@ -1078,7 +1086,7 @@ test("a read-only member does not see the new item form", { timeout: 60000 }, as
   await page.goto(origin);
   await signInFixture(page, reader);
   await page.locator("#main").waitFor({ state: "visible" });
-  await page.locator("#tasks-board-open").click();
+  await openBoard(page);
   await page.locator("#board-dialog").waitFor({ state: "visible" });
   await page.locator(".live-chip").waitFor();
   assert.equal(await page.locator("#board-new-item").count(), 0);
