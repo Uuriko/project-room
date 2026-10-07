@@ -19,11 +19,11 @@ Deploy only a commit that is on `main` and whose `test` and `schema-gate` push r
    - REST `POST /repos/Uuriko/project-room/actions/workflows/deploy-prod.yml/dispatches` with `{"ref":"main","inputs":{"sha":"<40-hex>"}}`.
 3. The run:
    - refuses unless the commit is on `main` and `test` + `schema-gate` are green on it;
-   - records the live prod and entry version ids (artifact `pre-deploy-<sha>` and the run summary);
+   - records each live Worker version, independently observed `/api/version/worker` source revision, and code schema parsed from that exact Git blob (artifact `pre-deploy-<sha>` and the run summary);
    - pins `ROOM_BODIES_AT_REST=0` for this rollout on both Workers while preserving other variables;
    - deploys `project-room` with `wrangler deploy --env production --keep-vars`, then the public entry `project-room-staging` with `wrangler deploy --keep-vars`;
    - smokes with `scripts/prod-deploy-smoke.mjs`: `/api/version` and `/api/version/worker` equal the sha on room.trydemigod.com and getdasha.com/room, `/api/health` ok, `/api/ready` ready, `/terms`, `/privacy` and `/` return 200, and `/.well-known/agent-card.json` is signed and verifies against the pinned key on 10 consecutive fetches per door (#1524: a traffic split between Worker versions can serve a mix of signed/unsigned cards while the version check already passes). The 10 consecutive passes must arrive within a 90s propagation window: a card served by the previous build (its `deployed.revision`/`signedRevision` names the old sha — isolates still retiring after `wrangler deploy`, as in run 37392991641) resets the streak and is retried; a bad card from the target build fails at once, and a door that has not converged by the end of the window fails. It then runs `scripts/live-smoke.mjs`;
-   - rolls both Workers back to the recorded ids if anything after the first upload fails;
+   - on failure, first checks whether either deployment changed. It restores a prior Worker only when its independently recorded source/schema is known and its code schema is at least the candidate schema. Lower or unknown schemas leave the candidate deployed and report **ROLL FORWARD REQUIRED**. A rollback is reported as verified only after exact version allocation and source-revision readback;
    - posts a receipt to muse-room when the `ROOM_RECEIPT_TOKEN` secret exists.
 4. Post or confirm the receipt in muse-room and release `ROLE-DEPLOYER`.
 
@@ -50,11 +50,11 @@ When the repository variable `ROOM_ONBOARDING_GATE` is `1`, a `probe` job runs b
 PROD DEPLOY <sha8> · prod <new8> (rollback <old8>) · entry <new8> (rollback <old8>) · smoke ok · <run url>
 ```
 
-A failed run posts `PROD DEPLOY <sha8> FAILED · rolled back prod to <old8> · entry to <old8> · <run url>`. A manual rollback posts `PROD ROLLBACK · prod <id8> (was <id8>) · entry <id8> (was <id8>) · smoke ok · <reason> · <run url>`.
+A failed run posts the actual recovery disposition for each Worker: `ROLL FORWARD REQUIRED`, `ROLLBACK NOT VERIFIED`, `ROLLBACK VERIFIED`, or `NO DEPLOYMENT CHANGE OBSERVED`, including the prior and candidate code schemas. The `deploy-recovery-<sha>` artifact preserves the predeployment evidence and recovery report. A manual rollback posts `PROD ROLLBACK · prod <id8> (was <id8>) · entry <id8> (was <id8>) · smoke ok · <reason> · <run url>`.
 
 ## Roll back
 
-Run **rollback-prod** with `prod_version_id`, an optional `entry_version_id` and a `reason`. Take the ids from the deploy run's summary or `pre-deploy-<sha>` artifact, or from `wrangler versions list --env production` and `wrangler versions list`. Schema migrations are forward-only. A code rollback does not undo one. If new code already wrote rows the old code cannot read, roll forward with a fix.
+Run **rollback-prod** with `prod_version_id`, an optional `entry_version_id` and a `reason`. Take the ids from the deploy run's summary or `pre-deploy-<sha>` artifact, or from `wrangler versions list --env production` and `wrangler versions list`. The automatic schema floor is necessary, not sufficient: equal schema numbers do not prove compatibility with new row semantics, fenced tables, or retained runtime. Schema migrations are forward-only. A code rollback does not undo one. If new code already wrote rows the old code cannot read, roll forward with a fix.
 
 ## Taking ROLE-DEPLOYER on the Board
 

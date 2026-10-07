@@ -5,7 +5,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -407,4 +407,131 @@ test("CLI --write refuses missing assets and rejects conflicting flags", async t
   const help = await cli(["--help"]);
   assert.equal(help.status, 0);
   assert.match(help.stdout, /reproducible deploy checks/);
+});
+
+// Actual deployment recovery owner: no live credentials or writes in fixtures.
+import { rollbackDecision, recoverWorkers, recoveryDescription, observeWorker, schemaAt } from "../scripts/deploy-recovery.mjs";
+import { parse as parseYaml } from "yaml";
+const recoveryOld = "11111111-1111-4111-8111-111111111111";
+const recoveryNew = "22222222-2222-4222-8222-222222222222";
+const recoveryRevision = "a".repeat(40);
+const recoveryAllocation = id => ({ versions: [{ version_id: id, percentage: 100 }] });
+const previousWorker = schema => ({ known: true, versionId: recoveryOld, sourceRevision: recoveryRevision, codeSchemaVersion: schema });
+
+test("rollback schema gate rejects lower and unknown schemas without executing old code", async () => {
+  for (const previous of [previousWorker(37), previousWorker(null), { ...previousWorker(38), known: false }, { ...previousWorker(38), sourceRevision: "unstamped" }]) {
+    let calls = 0;
+    const report = await recoverWorkers({ targetSha: "b".repeat(40), candidateCodeSchemaVersion: 38, prod: previous, entry: previous }, { prod: true, entry: true }, {
+      status: async () => recoveryAllocation(recoveryNew), rollback: async () => { calls++; }, readVersion: async () => { throw new Error("must not read back unattempted rollback"); },
+    });
+    assert.equal(calls, 0);
+    assert.equal(report.status, "ROLL FORWARD REQUIRED");
+    assert.equal(report.workers.prod.rollbackAttempted, false);
+    assert.doesNotMatch(recoveryDescription(report), /rolled back|ROLLBACK VERIFIED/);
+  }
+  assert.equal(rollbackDecision(previousWorker(38), 38).eligible, true);
+  assert.match(rollbackDecision(previousWorker(38), 38).reason, /compatibility is not established/);
+});
+
+test("recovery distinguishes no upload, verified rollback and failed/unverified commands", async () => {
+  const snapshot = { targetSha: "b".repeat(40), candidateCodeSchemaVersion: 38, prod: previousWorker(38), entry: previousWorker(37) };
+  let calls = 0;
+  const noChange = await recoverWorkers(snapshot, { prod: true, entry: false }, {
+    status: async () => recoveryAllocation(recoveryOld), rollback: async () => { calls++; }, readVersion: async () => { throw new Error("no upload needs no readback"); },
+  });
+  assert.equal(noChange.status, "NO DEPLOYMENT CHANGE OBSERVED");
+  assert.equal(calls, 0);
+  for (const kind of ["verified", "command-failed", "wrong-source", "wrong-allocation"]) {
+    let rolled = false;
+    const report = await recoverWorkers(snapshot, { prod: true, entry: false }, {
+      status: async () => recoveryAllocation(rolled && kind !== "wrong-allocation" ? recoveryOld : recoveryNew),
+      rollback: async () => { rolled = true; if (kind === "command-failed") throw new Error("rollback failed"); },
+      readVersion: async () => ({ status: "ok", servedBy: "worker", sourceRevision: kind === "wrong-source" ? "c".repeat(40) : recoveryRevision }),
+    });
+    assert.equal(report.status, kind === "verified" ? "ROLLBACK VERIFIED" : "ROLLBACK NOT VERIFIED");
+    assert.equal(report.workers.entry.disposition, "unchanged");
+    if (kind !== "verified") assert.doesNotMatch(recoveryDescription(report), /ROLLBACK VERIFIED|rolled back/);
+  }
+});
+
+test("prior source proof requires one stable exact deployment and parses Git schema without evaluation", async () => {
+  const git = args => args[0] === "show" ? "export const STORE_SCHEMA_VERSION = 37;\nthrow new Error('source must never execute');" : "d".repeat(40);
+  const proof = schemaAt(recoveryRevision, git);
+  assert.equal(proof.version, 37);
+  assert.equal(proof.revision, recoveryRevision);
+  const observed = await observeWorker({ status: async () => recoveryAllocation(recoveryOld), readVersion: async () => ({ status: "ok", servedBy: "worker", sourceRevision: recoveryRevision }), schema: sha => schemaAt(sha, git) });
+  assert.equal(observed.known, true);
+  assert.equal(observed.codeSchemaVersion, 37);
+  for (const bad of ["unstamped", "../wrong", "a".repeat(39)]) assert.equal(schemaAt(bad, git), null);
+  let query = 0;
+  const moved = await observeWorker({ status: async () => recoveryAllocation(query++ ? recoveryNew : recoveryOld), readVersion: async () => ({ status: "ok", servedBy: "worker", sourceRevision: recoveryRevision }), schema: sha => schemaAt(sha, git) });
+  assert.equal(moved.known, false);
+  const split = await observeWorker({ status: async () => ({ versions: [{ version_id: recoveryOld, percentage: 50 }, { version_id: recoveryNew, percentage: 50 }] }), readVersion: async () => ({ status: "ok", servedBy: "worker", sourceRevision: recoveryRevision }), schema: sha => schemaAt(sha, git) });
+  assert.equal(split.known, false);
+});
+
+test("actual production workflow captures schemas before uploads and uses guarded recovery and truthful receipts", () => {
+  const source = readFileSync(new URL("../.github/workflows/deploy-prod.yml", import.meta.url), "utf8");
+  const workflow = parseYaml(source), steps = workflow.jobs.deploy.steps;
+  const snapshot = steps.findIndex(step => step.id === "pre"), prod = steps.findIndex(step => step.id === "prod");
+  assert.ok(snapshot >= 0 && snapshot < prod);
+  assert.match(steps[snapshot].run, /deploy-recovery\.mjs snapshot/);
+  const recovery = steps.find(step => step.id === "rollback");
+  assert.match(recovery.run, /deploy-recovery\.mjs recover/);
+  assert.doesNotMatch(recovery.run, /wrangler rollback/);
+  assert.match(recovery.if, /steps\.pre\.outcome == 'success'/);
+  assert.match(steps.find(step => step.name === "Receipt to muse-room").run, /recoveryDescription/);
+  assert.doesNotMatch(steps.find(step => step.name === "Receipt to muse-room").run, /FAILED · rolled back/);
+  for (const step of steps.filter(step => ["prod", "entry"].includes(step.id))) {
+    assert.match(step.run, /--keep-vars --var ROOM_BODIES_AT_REST:0/);
+    assert.ok(step.env.ROOM_AGENT_CARD_SIGNING_KEY);
+  }
+  assert.equal(workflow.concurrency["cancel-in-progress"], false);
+  assert.match(steps.find(step => step.name === "Summary").run, /Code schemas/);
+});
+
+import { createServer } from "node:http";
+test("actual recovery CLI records independent exact source schemas and refuses a 37-to-38 fallback", async t => {
+  const dir = tempDir(t, "deploy-recovery-cli-");
+  mkdirSync(join(dir, "server")); mkdirSync(join(dir, "cloudflare")); mkdirSync(join(dir, "bin"));
+  const git = args => execFileAsync("git", ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", ...args], { cwd: dir });
+  await git(["init", "--quiet"]);
+  writeFileSync(join(dir, "server/writer-fence.mjs"), "export const STORE_SCHEMA_VERSION = 37;\n");
+  await git(["add", "."]); await git(["commit", "--quiet", "-m", "previous37"]);
+  const oldSha = (await git(["rev-parse", "HEAD"])).stdout.trim();
+  writeFileSync(join(dir, "server/writer-fence.mjs"), "export const STORE_SCHEMA_VERSION = 38;\n");
+  await git(["add", "."]); await git(["commit", "--quiet", "-m", "candidate38"]);
+  const targetSha = (await git(["rev-parse", "HEAD"])).stdout.trim();
+  writeFileSync(join(dir, "bin/pnpm"), `#!/usr/bin/env node
+const fs=require('node:fs'),a=process.argv.slice(2);fs.appendFileSync(process.env.COMMAND_LOG,JSON.stringify(a)+'\\n');if(a.includes('rollback'))throw new Error('unsafe rollback invoked');const prod=a.includes('production');console.log(JSON.stringify({versions:[{version_id:prod&&process.env.STATUS_PHASE!=='new'?'${recoveryOld}':'${recoveryNew}',percentage:100}]}));
+`, { mode: 0o755 });
+  const requests = [];
+  const server = createServer((req, res) => {
+    requests.push(req.url); res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({ status: "ok", servedBy: "worker", sourceRevision: req.url.startsWith("/prod/") ? oldSha : targetSha }));
+  });
+  await new Promise(done => server.listen(0, "127.0.0.1", done));
+  t.after(() => new Promise(done => server.close(done)));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const cli = fileURLToPath(new URL("../scripts/deploy-recovery.mjs", import.meta.url));
+  const pre = join(dir, "pre.json"), recovery = join(dir, "recovery.json"), log = join(dir, "commands.log");
+  const env = { ...process.env, SHA: targetSha, PROD_ORIGIN: `${origin}/prod`, ENTRY_ORIGIN: `${origin}/entry`, PATH: `${join(dir, "bin")}:${process.env.PATH}`, COMMAND_LOG: log };
+  delete env.GITHUB_OUTPUT; delete env.GITHUB_STEP_SUMMARY;
+  await execFileAsync(process.execPath, [cli, "snapshot", pre], { cwd: dir, env });
+  const snapshot = JSON.parse(readFileSync(pre, "utf8"));
+  assert.equal(snapshot.candidateCodeSchemaVersion, 38);
+  assert.equal(snapshot.prod.versionId, recoveryOld);
+  assert.equal(snapshot.prod.sourceRevision, oldSha);
+  assert.equal(snapshot.prod.codeSchemaVersion, 37);
+  assert.equal(snapshot.prod.automaticRollback.eligible, false);
+  assert.equal(snapshot.entry.sourceRevision, targetSha);
+  assert.equal(snapshot.entry.codeSchemaVersion, 38);
+  assert.ok(snapshot.prod.schemaSource.blob);
+  await assert.rejects(execFileAsync(process.execPath, [cli, "recover", pre, recovery], { cwd: dir, env: { ...env, PROD_OUTCOME: "success", ENTRY_OUTCOME: "skipped", STATUS_PHASE: "new" } }), error => error.code === 1);
+  const report = JSON.parse(readFileSync(recovery, "utf8"));
+  assert.equal(report.status, "ROLL FORWARD REQUIRED");
+  assert.equal(report.workers.prod.rollbackAttempted, false);
+  assert.equal(report.workers.entry.disposition, "unchanged");
+  assert.ok(requests.every(path => path.endsWith("/api/version/worker")), "predeployment probes must never instantiate room storage");
+  assert.ok(!readFileSync(log, "utf8").includes('"rollback"'));
 });
