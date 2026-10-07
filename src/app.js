@@ -1019,7 +1019,14 @@ async function loadAccountRooms(more = false) {
       action.textContent = archived ? "Read only" : "Open";
       button.append(heading, meta, action);
       button.setAttribute("aria-label", `${archived ? "Read archived room" : "Open"} ${named ? title : room.id}`);
-      button.addEventListener("click", () => openAccountRoom(room.id)); $("#account-rooms-list").append(button);
+      button.addEventListener("click", () => openAccountRoom(room.id));
+      // D3 a11y: expose list semantics — the container is role="list", so
+      // every room entry needs a listitem wrapper (a flat room list is a
+      // list, not a tree; treeitem would be the wrong role here).
+      const item = document.createElement("div");
+      item.setAttribute("role", "listitem");
+      item.append(button);
+      $("#account-rooms-list").append(item);
     }
     roomListCursor = value.nextCursor; $("#account-rooms-more").hidden = !roomListCursor;
     $("#account-rooms-status").textContent = $("#account-rooms-list").children.length ? "" : roomListCursor ? "No available rooms on this page." : "No rooms yet.";
