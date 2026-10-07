@@ -138,7 +138,7 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     if (busy) return;
     busy = true; onBusyChange?.(true); paintBusySurface(); setStatus("");
     try { await fn(); }
-    catch (error) { setStatus(failureText(error), true); }
+    catch (error) { setStatus(failureText(error), true); return error; }
     finally { busy = false; onBusyChange?.(false); paintBusySurface(); }
   }
 
@@ -257,8 +257,10 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
         setStatus(uiText("signin.copy.024"), true); return;
       }
       if (await beforeSignIn?.() === false) return;
-      await withBusy(async () => {
+      let loginAttempt;
+      const failure = await withBusy(async () => {
         const session = await authedSession();
+        loginAttempt = { generation: accountClient.generation, session };
         if (passwordMode === "signup") {
           const reply = await api(session, "/api/auth/password/signup", { email: passwordEmail, password: fields.password, sessionRevision: session.sessionRevision });
           if (reply?.status !== "check_email" || typeof reply.mailConfigured !== "boolean") throw new Error(uiText("signin.copy.025"));
@@ -277,7 +279,12 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
         }
         const view = await authApi(session, "/api/auth/password/login", { email: passwordEmail, password: fields.password, sessionRevision: session.sessionRevision });
         await finish(view);
-      }); return;
+      });
+      if (failure?.status === 401 && failure.code === "invalid_credentials"
+        && currentView() === "password-login" && accountClient.owns(loginAttempt?.generation, loginAttempt?.session)) {
+        surface()?.querySelector('[name="password"]')?.focus();
+      }
+      return;
     }
     if (form.dataset.signinForm === "magic-code") {
       const code = [...form.querySelectorAll('input[name]')].find(input => input.name === "code")?.value?.trim() ?? "";
