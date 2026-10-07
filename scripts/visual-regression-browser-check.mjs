@@ -19,7 +19,7 @@
 // screenshot and passes on the identical one.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright";
@@ -213,4 +213,13 @@ test("visual diff detector fails on an altered screenshot, passes on an identica
     "altered screenshot must fail the gate",
   );
   assert.ok(existsSync(evidenceActual) && existsSync(evidenceDiff), "failure evidence (actual + diff) should be written");
+  // A resized real screenshot must still fail, and retain the exact capture
+  // even though no same-sized pixel diff can be generated.
+  rmSync(evidenceActual, { force: true }); rmSync(evidenceDiff, { force: true });
+  const shorter = new PNG({ width: png.width, height: png.height - 1 });
+  PNG.bitblt(png, shorter, 0, 0, png.width, shorter.height, 0, 0);
+  const resized = PNG.sync.write(shorter);
+  assert.throws(() => compareScreenshotBuffer(resized, "detector-selftest", { update: false }), /baseline height mismatch/);
+  assert.deepEqual(readFileSync(evidenceActual), resized, "dimension failure must retain the actual screenshot bytes");
+  assert.equal(existsSync(evidenceDiff), false, "dimension failure cannot fabricate a pixel diff");
 });

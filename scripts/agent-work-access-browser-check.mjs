@@ -1,4 +1,4 @@
-import { openMemberProfile, ensurePeopleOpen, openComposerOptions } from "./room-chrome.mjs";
+import { openMemberProfile, ensurePeopleOpen, openComposerOptions, enableHumanAdvanced } from "./room-chrome.mjs";
 // H4: an agent that joins through a room link has no permissions, so it never
 // shows up as an assignee. The owner sees "Let them take work" on that agent in
 // People, the work form says why the agent is missing, and one click makes it
@@ -43,6 +43,7 @@ test("owner lets a link-joined agent take work, then assigns it", { timeout: 900
   await page.locator("#auth-panel").waitFor({ state: "visible" });
   await signInFixture(page, owner);
   await page.locator("#main").waitFor({ state: "visible" });
+  await enableHumanAdvanced(page);
 
   const assignees = async () => page.locator("#assignee-select option").evaluateAll(options => options.map(o => o.value).filter(Boolean));
   await openComposerOptions(page); await page.locator("#new-work-button").click();

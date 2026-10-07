@@ -4,7 +4,7 @@ import { readFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID, createHash } from 'node:crypto';
 import { build } from 'esbuild';
 import { Miniflare, Response } from 'miniflare';
 
@@ -22,8 +22,8 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
       return new Response(await readFile(new URL('..' + pathname, import.meta.url)));
     } }
   });
-  const call = (path, { data, headers = {}, method = data ? 'POST' : 'GET', ip = '192.0.2.1' } = {}) => mf.dispatchFetch(origin + path, {
-    method, headers: { Host: new URL(origin).host, 'CF-Connecting-IP': ip, ...(data ? { Origin: origin, 'Content-Type': 'application/json' } : {}), ...headers },
+  const call = (path, { data, headers = {}, method = data ? 'POST' : 'GET', ip = '192.0.2.1', redirect = 'follow' } = {}) => mf.dispatchFetch(origin + path, {
+    method, redirect, headers: { Host: new URL(origin).host, 'CF-Connecting-IP': ip, ...(data ? { Origin: origin, 'Content-Type': 'application/json' } : {}), ...headers },
     ...(data ? { body: JSON.stringify(data) } : {})
   });
   const json = async (response, status = 200) => {
@@ -32,6 +32,17 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
   };
   try {
     const { ownerKey, accountKey, sourceId } = await json(await call('/__test-provision'));
+    // Worker SQLite JSON extraction supplies ISO event times. A real command
+    // must count as recent human activity after crossing this adapter boundary.
+    await json(await call('/api/rooms/commons/commands', { data: {
+      id: randomUUID(), type: 'message.posted', data: { messageId: 'presence-time-probe', body: 'Timestamp adapter probe' }
+    }, headers: { Authorization: `Bearer ${ownerKey}` } }), 201);
+    const presenceProbe = await json(await call('/api/rooms/commons/presence', {
+      headers: { Authorization: `Bearer ${ownerKey}` }
+    }));
+    const humanPresence = presenceProbe.members.find(member => member.memberId === 'owner');
+    assert.equal(humanPresence.state, 'listening');
+    assert.equal(typeof humanPresence.lastSeenAt, 'string');
     const identity = await json(await call('/api/agent-identities', { data: { displayName: 'Returning agent' } }), 201);
     const identityHeaders = { Authorization: `Bearer ${identity.secret}` };
     await json(await call('/api/agent-rooms', { data: { roomId: 'returning-agent', title: 'Return here', purpose: 'Recovery fixture', kind: 'personal', displayName: 'Returning agent' }, headers: identityHeaders }), 201);
@@ -39,17 +50,32 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.equal(memberships.identityId, identity.identityId);
     assert.deepEqual(memberships.rooms.map(room => room.roomId), ['returning-agent']);
     assert.equal(memberships.nextCursor, null);
-    // Actual Worker SQLite must support bounded current-record projection and
-    // signed continuation paging; Node SQLite cannot prove this adapter path.
+    // Actual Worker SQLite must support certified indexed current records and
+    // signed continuation paging and channel SQL bindings; Node SQLite cannot
+    // prove this adapter path. Public-selection/privacy semantics live in the
+    // HTTP owner tests, rather than being duplicated here.
     for (const id of ['older', 'newer']) await json(await call('/api/rooms/returning-agent/commands', {
       headers: identityHeaders, data: { id: randomUUID(), type: 'message.posted', data: { messageId: id, body: id } }
     }), 201);
-    const conversation = await json(await call('/api/rooms/returning-agent/conversation?limit=1', { headers: identityHeaders }));
+    await json(await call('/__test-conversation-certify'));
+    const conversation = await json(await call('/api/rooms/returning-agent/conversation?limit=1&channelId=general', { headers: identityHeaders }));
+    assert.equal(conversation.channelId, 'general');
     assert.deepEqual(conversation.messages.map(message => message.id), ['newer']);
-    const olderPage = await json(await call('/api/rooms/returning-agent/conversation?limit=1&cursor=' + encodeURIComponent(conversation.nextCursor), { headers: identityHeaders }));
+    const olderPage = await json(await call('/api/rooms/returning-agent/conversation?limit=1&channelId=general&cursor=' + encodeURIComponent(conversation.nextCursor), { headers: identityHeaders }));
     assert.deepEqual(olderPage.messages.map(message => message.id), ['older']);
     assert.equal(olderPage.nextCursor, null);
-    assert.equal((await json(await call('/api/rooms/returning-agent/conversation?limit=1&since=' + encodeURIComponent(conversation.checkpoint), { headers: identityHeaders }))).mode, 'not_modified');
+    assert.equal((await json(await call('/api/rooms/returning-agent/conversation?limit=1&channelId=general&since=' + encodeURIComponent(conversation.checkpoint), { headers: identityHeaders }))).mode, 'not_modified');
+    // Distinct platform risk: a complete equal-time exclusion set exceeds
+    // Worker's SQLite placeholder budget unless encoded as bounded bindings.
+    const history = await json(await call('/__test-conversation-history-provision'));
+    const historyHeaders = { Authorization: `Bearer ${history.readerKey}` };
+    for (const certified of [false, true]) {
+      if (certified) await json(await call('/__test-conversation-certify'));
+      const visible = await json(await call(`/api/rooms/${history.roomId}/conversation?limit=2`, { headers: historyHeaders }));
+      assert.deepEqual(visible.messages.map(message => message.id), ['public-after']);
+      assert.equal(visible.nextCursor, null);
+      await json(await call(`/api/rooms/${history.roomId}/conversation?messageId=private-before`, { headers: historyHeaders }), 404);
+    }
     assert.equal((await call('/api/agent-rooms')).status, 401);
     assert.equal((await call('/api/agent-rooms', { headers: { Authorization: `Bearer ${ownerKey}` } })).status, 401);
 
@@ -68,15 +94,22 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     const page = await call('/');
     assert.equal(page.status, 200, await page.clone().text());
     assert.match(await page.text(), /message-input/);
-    const door = await call('/room', { headers: { Accept: 'text/html' } });
-    assert.equal(door.status, 200, await door.clone().text());
-    assert.match(door.headers.get('content-type'), /text\/html/);
-    assert.match(await door.text(), /A shared place for people and AI agents to build together/);
-    // Edge-door hosts: /room and /room/* rewrite onto the Room origin; the /room*
-    // route's lookalikes (/rooms, /roommates) are plain 404s, not the spoofed-host 403.
-    const edgeDoor = await mf.dispatchFetch('https://www.getdasha.com/room?ref=x', { headers: { Accept: 'text/html', 'CF-Connecting-IP': '192.0.2.1' } });
-    assert.equal(edgeDoor.status, 200, await edgeDoor.clone().text());
-    assert.match(await edgeDoor.text(), /A shared place for people and AI agents to build together/);
+    const door = await call('/room', { redirect: 'manual', headers: { Accept: 'text/html' } });
+    assert.equal(door.status, 302);
+    assert.equal(door.headers.get('location'), origin + '/');
+    assert.equal(await door.text(), '', 'minimal app replaces the public wrapper');
+    // Edge aliases preserve the query and redirect without a fragment so the
+    // browser inherits invitation/room hashes. Never follow this to production.
+    // Lookalikes remain plain 404s, rather than spoofed-host 403s.
+    for (const path of ['/room', '/room/']) {
+      const edgeDoor = await mf.dispatchFetch('https://www.getdasha.com' + path + '?ref=x&next=%2Fabout', {
+        redirect: 'manual', headers: { Accept: 'text/html', 'CF-Connecting-IP': '192.0.2.1' }
+      });
+      assert.equal(edgeDoor.status, 302);
+      assert.equal(edgeDoor.headers.get('location'), new URL('?ref=x&next=%2Fabout', origin + '/').href);
+      assert.equal(edgeDoor.headers.get('cache-control'), 'no-store');
+      assert.equal(await edgeDoor.text(), '');
+    }
     const lookalike = await mf.dispatchFetch('https://www.getdasha.com/rooms', { headers: { 'CF-Connecting-IP': '192.0.2.1' } });
     assert.equal(lookalike.status, 404);
     assert.equal(await lookalike.text(), 'Not found');
@@ -183,6 +216,25 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     // QAS-702 (QA-Auth 2026-09-19): the account-key login rotates the slot —
     // the pre-login cookie is dead; the response cookie carries the session.
     const mailHeaders = { Cookie: mailLoginResponse.headers.get('set-cookie').split(';')[0], 'X-CSRF-Token': mailSession.csrf, 'X-Session-Binding': mailSession.sessionBinding };
+    // Actual Worker SQLite owns native proof consumption and cookie creation.
+    const nativeVerifier = "v".repeat(43), nativeState = "s".repeat(43);
+    const nativeChallenge = createHash("sha256").update(nativeVerifier).digest("base64url");
+    const nativeStart = await call(`/api/auth/desktop/start?state=${nativeState}&challenge=${nativeChallenge}`, { redirect: 'manual' });
+    assert.equal(nativeStart.status, 302);
+    const nativeRequest = new URL(nativeStart.headers.get("location"), origin);
+    const nativeConsent = await call('/oauth/authorize', { headers: mailHeaders, redirect: 'manual',
+      data: { ...Object.fromEntries(nativeRequest.searchParams), decision: 'allow' } });
+    assert.equal(nativeConsent.status, 302);
+    const nativeCallback = new URL(nativeConsent.headers.get('location'));
+    const nativeReturn = await call(nativeCallback.pathname + nativeCallback.search, { redirect: 'manual' });
+    assert.equal(nativeReturn.status, 302);
+    const nativeCode = new URL(nativeReturn.headers.get('location')).searchParams.get('code');
+    const nativeProof = { code: nativeCode, verifier: nativeVerifier };
+    await json(await call('/api/auth/desktop/session', { data: { ...nativeProof, verifier: 'x'.repeat(43) } }), 401);
+    const nativeExchange = await call('/api/auth/desktop/session', { data: nativeProof });
+    assert.deepEqual(await json(nativeExchange, 201), { status: 'signed_in' });
+    assert.match(nativeExchange.headers.get('set-cookie'), /^__Host-account_session=.*HttpOnly.*Secure/);
+    await json(await call('/api/auth/desktop/session', { data: nativeProof }), 401);
     const reviewPath = '/api/inbox/sources/' + sourceId + '/reply-review?view=reply-review-v1';
     const draftReview = await json(await call(reviewPath, { headers: mailHeaders }));
     assert.equal(draftReview.attempt.canReview, true); assert.equal(draftReview.attempt.canSend, false);

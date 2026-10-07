@@ -451,7 +451,7 @@ export class ReferralInvites {
       let state;
       try { state = compactState(applyEventWithGrowth(room.state, added, growthCollector).state); }
       catch (error) { fail(409, "invite_rejected", error.message); }
-      const projection = JSON.stringify(state);
+      const projection = this.store.storedProjection(roomId, state);
       if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
       const sequence = room.sequence + 1;
       this.store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, added.id, JSON.stringify(added));

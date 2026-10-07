@@ -19,6 +19,7 @@ import { BOND_SCOPES } from "./bonds.mjs";
 import { EscrowError } from "./bounty-escrow.mjs";
 import { buildActivationPack } from "./room-activation-pack.mjs";
 import { buildOrient } from "./orient.mjs";
+import { walkProvenance, ClaimError } from "./work-claims.mjs";
 import { randomUUID } from "node:crypto";
 import { validId, ROOM_KINDS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { nextWorkStep } from "../src/workflow.js";
@@ -27,6 +28,7 @@ import { sortWorkByCuriosity, viewerHistory } from "../src/curiosity-rank.mjs";
 import { workHelpContext } from "../src/work-help.js";
 import { HOSTED_ROOM_MCP_TOOLS, HOSTED_MCP_FOLLOW_UPS, ROOM_MCP_SERVER_NAME, ROOM_MCP_SERVER_VERSION, canonicalMcpToolName } from "../src/room-mcp-join.js";
 import { MCP_JOIN_TOOLS, MCP_AUTH_REQUIRED, handleMcpJoinRpc } from "./mcp-http.mjs";
+import { mcpInvalidRequest } from "./mcp-arg-errors.mjs";
 import { AgentRooms } from "./agent-rooms.mjs";
 import { AccessRequests } from "./access-requests.mjs";
 import { collectNeedsMe } from "./needs-me.mjs";
@@ -46,6 +48,7 @@ import { listedMcpTools, MCP_TOOL_FOCUSES } from "./mcp-discovery.mjs";
 import { stampEvents, stampWorkListing } from "./content-trust.mjs";
 import { redactEventPage } from "./redact-read.mjs";
 import { resolveCatalogAgent, catalogCallDenial } from "./capability-visibility.mjs";
+import { listSquads, getSquad, createSquad, updateSquadMembers, disbandSquad } from "./squads.mjs"; // plan-squads: squad roster
 
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -131,6 +134,13 @@ function validRoomArgs(name, args) {
   if (!selected || !allowed(args, Object.keys(selected.inputSchema.properties), selected.inputSchema.required)) return false;
   if (args.roomId !== undefined && !validId(args.roomId)) return false;
   if (name === "room_check_access" || name === "room_activation_pack") return true;
+  if (name === "room_member_card") return validId(args.memberId);
+  if (name === "squads_list") return true;
+  if (name === "squads_get") return typeof args.squadId === "string" && args.squadId.length >= 1 && args.squadId.length <= 128;
+  if (name === "squads_create") return typeof args.name === "string" && args.name.length >= 1 && args.name.length <= 64;
+  if (name === "squads_update_members" || name === "squads_disband") {
+    return typeof args.squadId === "string" && args.squadId.length >= 1 && args.squadId.length <= 128;
+  }
   if (name === "room_needs_me") {
     if (args.since === undefined) return true;
     if (Number.isSafeInteger(args.since) && args.since >= 0) return true;
@@ -156,6 +166,9 @@ function validRoomArgs(name, args) {
   if (name === "room_list_events") {
     return (args.after === undefined || Number.isSafeInteger(args.after) && args.after >= 0)
       && (args.limit === undefined || Number.isSafeInteger(args.limit) && args.limit >= 1 && args.limit <= 100);
+  }
+  if (name === "room_work_claim_provenance") {
+    return typeof args.claimId === "string" && args.claimId.length >= 1 && args.claimId.length <= 128;
   }
   if (name === "room_post_message") {
     const idOk = args.id === undefined || validId(args.id);
@@ -478,6 +491,29 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
     const auth = store.authenticate(secret, roomId);
     return buildActivationPack(store, roomId, auth.member.id);
   }
+  if (name === "room_member_card") {
+    // plan-dir-card: the member chip's card over MCP. Same read as
+    // GET /api/rooms/:roomId/members/:memberId/card.
+    const auth = store.authenticate(secret, roomId);
+    const doc = store.agentPlugin.cardForMember({
+      roomId, memberId: args.memberId, viewerIdentityId: auth.identityId ?? identity.identityId,
+    });
+    if (!doc) throw Object.assign(new Error("No directory card for this member"), { status: 404, code: "unknown_card" });
+    return doc;
+  }
+  if (name === "squads_list") return listSquads(store, secret, roomId);
+  if (name === "squads_get") return getSquad(store, secret, roomId, args.squadId);
+  if (name === "squads_create") {
+    const data = { name: args.name };
+    if (args.goal !== undefined) data.goal = args.goal;
+    if (args.channelMessageId !== undefined) data.channelMessageId = args.channelMessageId;
+    if (args.memberIds !== undefined) data.memberIds = args.memberIds;
+    return createSquad(store, secret, roomId, data);
+  }
+  if (name === "squads_update_members") {
+    return updateSquadMembers(store, secret, roomId, args.squadId, { add: args.add, remove: args.remove });
+  }
+  if (name === "squads_disband") return disbandSquad(store, secret, roomId, args.squadId);
   if (name === "get_room_context") {
     const context = store.roomContext(secret, roomId, {
       sinceVersion: args.since_version === undefined ? null : args.since_version
@@ -489,6 +525,21 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
   if (name === "room_list_events") {
     const auth = store.authenticate(secret, roomId);
     return stampEvents(redactEventPage(store.eventsAfter(secret, roomId, args.after ?? 0, args.limit ?? 50), store.room(roomId).state.messages), auth.member.id);
+  }
+  if (name === "room_work_claim_provenance") {
+    // Provenance walk (orch-provenance-rollback): same graph as GET
+    // /api/rooms/:roomId/work-claims/:claimId/provenance, read over the
+    // room's claim registry. Read-only; any room member may walk.
+    store.authenticate(secret, roomId);
+    const items = store.workClaims.list(roomId);
+    try {
+      return { roomId, claimId: args.claimId, ...walkProvenance(items, args.claimId) };
+    } catch (error) {
+      if (error instanceof ClaimError && error.code === "unknown_claim") {
+        throw new ServiceError(404, "work_claim_not_found", `No work claim "${args.claimId}" in this room`);
+      }
+      throw error;
+    }
   }
   if (name === "room_post_message") {
     const id = args.id ?? randomUUID();
@@ -733,7 +784,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
   const requestId = message?.id;
   if (!object(message) || message.jsonrpc !== "2.0" || typeof message.method !== "string"
     || (hasId && !(typeof requestId === "string" && requestId.length <= 128 || Number.isSafeInteger(requestId)))) {
-    return { jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid request" } };
+    return mcpInvalidRequest();
   }
   if (!hasId) return null;
   if (message.method === "ping") return { jsonrpc: "2.0", id: requestId, result: {} };

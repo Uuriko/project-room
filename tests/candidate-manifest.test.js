@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { manifestDrift } from "../scripts/candidate-manifest.mjs";
@@ -76,4 +76,12 @@ test("drift names the changed file, added file and removed file", t => {
 test("drift refuses malformed manifests without reading sections", () => {
   assert.deepEqual(manifestDrift({}, null), ["manifest is not an object"]);
   assert.ok(manifestDrift({}, { contractVersion: 2, runtime: {}, storeSchemaVersion: 1, assets: {}, deployment: {}, packages: {} }).includes("contractVersion"));
+});
+
+test("frozen deployment manifest pins the recovery helper and production workflow bytes", () => {
+  const manifest = JSON.parse(readFileSync(new URL("../docs/CANDIDATE-MANIFEST.json", import.meta.url), "utf8"));
+  const root = new URL("..", import.meta.url).pathname;
+  const files = ["scripts/deploy-recovery.mjs", ".github/workflows/deploy-prod.yml"];
+  const actual = pinFiles(root, files);
+  for (const file of files) assert.equal(manifest.deployment[file], actual[file], file);
 });

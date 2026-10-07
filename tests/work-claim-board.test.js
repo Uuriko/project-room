@@ -500,3 +500,16 @@ test("board v2 routes answer 410 and point at work claims", async t => {
     assert.equal(store.db.prepare("SELECT name FROM sqlite_master WHERE name=?").get(name).name, name);
   }
 });
+
+test("hard work defaults to a distinct reviewer at create; an explicit policy still wins", async t => {
+  const { call, coordKey } = await fixture(t);
+  const hard = await call(coordKey, "/work-claims", { id: "hard-1", title: "Hard one", tags: ["hard", "H3"] });
+  assert.equal(hard.status, 201);
+  assert.equal(hard.value.reviewPolicy, "distinct_member");
+  const seed = await call(coordKey, "/work-claims", { id: "seed-1", title: "Seed", tags: ["Hard-Problem"] });
+  assert.equal(seed.value.reviewPolicy, "distinct_member");
+  const explicit = await call(coordKey, "/work-claims", { id: "hard-2", title: "Hard, self", tags: ["hard"], reviewPolicy: "self_attested" });
+  assert.equal(explicit.value.reviewPolicy, "self_attested");
+  const plain = await call(coordKey, "/work-claims", { id: "plain-1", title: "Plain", tags: ["wk41"] });
+  assert.equal(plain.value.reviewPolicy, null);
+});

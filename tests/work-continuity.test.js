@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { workStatus } from "../src/work-status.js";
-import { ConversationDrafts, DraftRecovery } from "../src/conversation.js";
+import { ConversationDrafts, channelDraftKey, DraftRecovery } from "../src/conversation.js";
 import { draftCommand } from "../src/client.js";
 
 test("recorded completion stays pending until the current evidence passes its gates", () => {
@@ -90,4 +90,38 @@ test("legacy draft channel comes from the exact validated pending payload", () =
   saved.entries[0][1].pending.contents = JSON.stringify({ type: "message.posted", data: { ...data, body: "Substituted" }, causationId: null });
   f.memory.set(f.recovery.key, JSON.stringify(saved));
   assert.equal(f.recovery.read("scope", f.state).drafts.get("thread").pending, null);
+});
+
+// Storage owner: preserve destination identity and exact retry bytes across
+// reload; reject a channel key substituted by untrusted browser storage.
+test("channel drafts recover independently and legacy root keys migrate without rebinding retries", () => {
+  const f = fixture();
+  f.state.channels = { general: { id: "general" }, design: { id: "design" } };
+  f.drafts = new ConversationDrafts();
+  const general = { body: "General notes", toMemberId: "", replyToId: null, channelId: "general" };
+  const design = { body: "Design notes", toMemberId: "", replyToId: null, channelId: "design" };
+  const key = channelDraftKey("design"), pending = draftCommand(null, "message.posted", { ...design, toMemberId: null });
+  f.drafts.save(null, general);
+  f.drafts.save(key, { ...design, pending });
+  f.recovery.write("scope", f.drafts, null, key);
+  const restored = f.recovery.read("scope", f.state);
+  assert.equal(restored.threadId, null);
+  assert.equal(restored.channelId, "design");
+  assert.equal(restored.drafts.get(null).body, general.body);
+  assert.deepEqual(restored.drafts.get(key).pending, pending);
+  const original = JSON.parse(f.memory.get(f.recovery.key));
+  const tampered = structuredClone(original);
+  tampered.entries[1][0] = channelDraftKey("other");
+  f.memory.set(f.recovery.key, JSON.stringify(tampered));
+  assert.equal(f.recovery.read("scope", f.state).drafts.entries.has(key), false);
+  // Old clients put a selected-channel draft under the shared null root key.
+  const legacy = { ...original, activeKey: null, entries: [[null, original.entries[1][1]]] };
+  f.memory.set(f.recovery.key, JSON.stringify(legacy));
+  const migrated = f.recovery.read("scope", f.state);
+  assert.equal(migrated.activeKey, key);
+  assert.deepEqual(migrated.drafts.get(key).pending, pending);
+  f.state.channels.design.archivedAt = "2026-10-05T00:00:00Z";
+  const archived = f.recovery.read("scope", f.state);
+  assert.equal(archived.activeKey, null, "archived text is not placed in another channel composer");
+  assert.equal(archived.drafts.get(key).body, design.body, "archival retains the unsent text");
 });

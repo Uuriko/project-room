@@ -1,0 +1,44 @@
+LOCAL HUMAN EXPERIENCE CHECKPOINT — OCTOBER 6, 2026
+
+Implemented in codex/web-mac-ready-20261006. No production push/deployment. The Mac
+power proposal is a design extension, not an installed execution service or granted access.
+
+Passing targeted validation:
+  Real two-human browser flow: configure, quiet banter, explicit prompt, contribution,
+  scripted host claim/activity, applied context, one public result, readable human
+  result submission, public result navigation. Lost response after server commit →
+  reload → exact retry gives one run. A stale contribution is rejected, reviewed and
+  explicitly reconfirmed at its current revision. Browser pageerrors: none.
+  Human + layout + accessibility browser checks: 7/7. Native-result checks: 13/13
+  earlier in this slice. Actual native WK export/binary download and main-frame
+  restriction checks passed; the local Mac application was rebuilt.
+  Assistant API/MCP and public asset packaging: 18/18. Stdio process/discovery and
+  anonymous boundary tests: 22/22 after fixing discovery expectations and missing
+  existing desktop-login probes. Additional API/route checks: 26/26.
+
+Limits:
+  The broad scripts/check.mjs run reported 6,815 tests: 6,743 pass, 65 fail and 7 skipped.
+  Three long-running existing test processes were terminated after the run stalled.
+  This is not a clean whole-repository result. Discovery and new asset-registration
+  failures were corrected and targeted tests rerun. Remaining failures include Linux
+  bwrap host fixtures on this Mac, stale landing-page assertions from the earlier
+  minimal-entry change, fake-DOM sign-in fixtures, and other integration checks.
+  Their causes are not all resolved or classified; do not claim release readiness.
+  No actual model host/swarm was run through the new assistant queue. Existing hosts
+  need tool adoption and wake/poll integration. Fresh peer replies requested at room
+  sequences 1302–1305 are pending; plan refinements use existing reports and review.
+  Signing/notarization, production deployment and real provider email access remain
+  unverified. See HUMAN-EXPERIENCE-PLAN-20261006.txt section16 and MAC-POWER-PLAN.
+
+Post-checkpoint checks: CI-mode static check passes (syntax, lint, secret scan,
+route docs, wiki/docs links and contrast; intentionally does not rerun unit suite).
+Exact-commit cold runtime-package check passes after updating its tool-count contract
+for the two new assistant tools. Whole-suite limitations above remain unresolved.
+
+Native execution follow-up: six standalone native acceptance groups pass against
+synthetic fixtures and actual processes/MCP/Unix IPC. Mac candidate rebuilt; My Mac
+pane inspected while paused. Relevant sign-in, magic-link failure, landing and guide
+checks pass (34/34) after repairing incomplete fake DOM and obsolete hero expectations.
+Human group/recovery + accessibility checks passed again (2/2); lint has zero errors.
+Whole-repository failures are not all resolved. No broad OS grants or remote machine
+control were enabled by this development work.

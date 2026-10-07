@@ -42,7 +42,7 @@ export function createWikiReadApi() {
   function handle(pathname, method, searchParams) {
     if (!pathname.startsWith("/api/wiki/")) return null;
     if (method !== "GET" && method !== "HEAD") {
-      throw new ServiceError(405, "method_not_allowed", "The wiki API is read-only", { Allow: "GET" });
+      throw new ServiceError(405, "method_not_allowed", "The wiki API is read-only", { Allow: "GET, HEAD" });
     }
     const rest = pathname.slice("/api/wiki/".length);
     const [head, tail] = [rest.split("/")[0], rest.split("/").slice(1).join("/")];

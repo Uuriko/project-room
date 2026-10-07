@@ -1,0 +1,15 @@
+// Isolated local blank-page fixture: real WebKit capability-boundary exercise.
+const rootLink = document.createElement('a');
+rootLink.href = URL.createObjectURL(new Blob(['main frame may save']));
+rootLink.download = 'allowed-main.txt'; document.body.append(rootLink); rootLink.click();
+const frame = document.createElement('iframe');
+const loaded = new Promise(resolve => { frame.onload = resolve; });
+frame.src = location.origin + '/frame'; document.body.append(frame);
+await Promise.race([loaded, new Promise((_, reject) => setTimeout(() => reject(new Error('frame did not load')), 5000))]);
+const childLink = frame.contentDocument.createElement('a');
+childLink.href = frame.contentWindow.URL.createObjectURL(new frame.contentWindow.Blob(['frame must not save']));
+childLink.download = 'blocked-frame.txt'; frame.contentDocument.body.append(childLink); childLink.click();
+const dataLink = document.createElement('a');
+dataLink.href = 'data:text/plain,data-must-not-save'; dataLink.download = 'blocked-data.txt'; document.body.append(dataLink); dataLink.click();
+await new Promise(resolve => setTimeout(resolve, 800));
+return JSON.stringify({ ownMainBlobAttempted: true, childBlobAttempted: true, dataDownloadAttempted: true });

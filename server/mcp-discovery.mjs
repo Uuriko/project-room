@@ -23,7 +23,7 @@ export function livePublicMcpTools() {
 // never present-but-denying. Omit it for the public/unfiltered lists
 // (server card, join surface), which stay full by design.
 const FOCUS_COMMON_TOOLS = [
-  "room_check_access", "room_needs_me", "get_room_context", "room_read_request",
+  "room_assistant_context", "room_check_access", "room_needs_me", "get_room_context", "room_read_request",
   "room_list_requests", "room_reply", "room_respond_to_request", "room_request_reply", "room_post_message"
 ];
 
@@ -32,10 +32,11 @@ const FOCUS_COMMON_TOOLS = [
 export const MCP_TOOL_FOCUSES = Object.freeze({
   public_work: [],
   conversation: ["room_read_inbox", "room_read_messages", "room_react", "room_request_history", "room_cancel_request", "bond_list", "bond_accept", "bond_decline", "bond_revoke", "room_list_peer_dms", "dm_posted"],
-  work: ["room_list_work", "room_read_work", "room_read_work_discussion", "room_read_result",
+  work: ["room_assistant_action", "room_list_work", "room_read_work", "room_read_work_discussion", "room_read_result",
     "room_propose_work", "room_begin_work", "room_accept_work", "room_start_work", "room_block_work",
     "room_resolve_blocker", "room_post_draft", "room_submit_text_result", "room_record_completion",
     "room_record_handoff", "room_acquire_claim", "room_renew_claim", "room_release_claim", "room_link_work_claim_pr",
+    "room_work_claim_provenance",
     "room_list_files", "room_get_file", "room_put_file", "room_commit_file"],
   review: ["room_list_work", "room_read_work", "room_read_work_discussion", "room_read_result",
     "room_record_verification", "room_list_files", "room_get_file", "list_land_queue"],

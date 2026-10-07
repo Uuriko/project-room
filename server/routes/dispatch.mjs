@@ -99,7 +99,7 @@ export function matchRoute(routes, method, pathname) {
     const upper = String(method || "").toUpperCase();
     const row = found.node.methods.get(upper) ?? null;
     const allow = [...found.node.methods.keys()].sort();
-    return { row, allow, params: found.params };
+    return { row, allow, params: found.params, authRow: found.node.methods.values().next().value };
   }
   const mount = matchMount(mounts, pathname);
   if (!mount) return null;
@@ -175,6 +175,13 @@ export async function dispatchRoute(ctx, routes = ROUTES) {
   const found = matchRoute(routes, ctx.req.method, ctx.url.pathname);
   if (!found) return false;
   if (!found.row) {
+    // Authenticate protected paths before exposing their method surface.
+    if (typeof found.authRow?.authenticate === "function") await found.authRow.authenticate(ctx);
+    if (found.authRow?.auth === "room" && typeof ctx.roomCredentials === "function") {
+      const selected = ctx.roomCredentials(ctx.req, ctx.url);
+      const fence = selected.mode === "account" ? ctx.accountBinding(ctx.req) : ctx.expectedBinding(ctx.req);
+      ctx.roomAuth(selected, found.params.roomId, fence);
+    }
     ctx.res.setHeader("Allow", found.allow.join(", "));
     ctx.reject(405, "method_not_allowed", "Method not allowed");
   }

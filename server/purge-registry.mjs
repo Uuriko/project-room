@@ -21,6 +21,10 @@ function freezeVia(via) {
 }
 
 const ROWS = [
+
+  ...["room_trial_tasks", "room_trial_requests", "room_vetting_keys", "room_vetting_receipts", "demigod_offer_profiles", "demigod_offer_requests", "demigod_contracts", "demigod_contract_requests", "buyer_signoff_loops", "buyer_signoff_requests"].map(table => ({ table, key: "room_id", action: "delete", optional: true, match: {room:["room_id"]} })),
+  { table: "projection_bodies", key: "room_id", action: "delete", match: { room: ["room_id"] } },
+  ...["room_assistant_config", "room_assistant_runs", "room_assistant_ops"].map(table => ({ table, key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } })),
   // Retired schemas remain in upgraded databases but are never created on a
   // fresh store. Their room-owned rows still belong in confirmed room purge.
   ...[
@@ -333,6 +337,16 @@ const ROWS = [
     "match": {
       "room": [
         "room_id"
+      ]
+    }
+  },
+  {
+    "table": "agent_wake_polls",
+    "key": "agent_id",
+    "action": "delete",
+    "match": {
+      "identity": [
+        "agent_id"
       ]
     }
   },
@@ -706,6 +720,12 @@ const ROWS = [
     }
   },
   {
+    "table": "human_push_preferences",
+    "key": "room_id",
+    "action": "delete",
+    "match": { "room": ["room_id"] }
+  },
+  {
     "table": "human_push_subscriptions",
     "key": "room_id",
     "action": "delete",
@@ -913,6 +933,26 @@ const ROWS = [
   },
   {
     "table": "messages",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "room_code_drops",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "room_code_checks",
     "key": "room_id",
     "action": "delete",
     "match": {
@@ -1450,6 +1490,20 @@ const ROWS = [
     }
   },
   {
+    "table": "share_link_access",
+    "key": "link_id",
+    "action": "delete",
+    "match": {},
+    "via": {
+      "room": {
+        "parent": "share_links",
+        "parentKey": "id",
+        "childKey": "link_id",
+        "scope": "room_id"
+      }
+    }
+  },
+  {
     "table": "share_links",
     "key": "room_id",
     "action": "delete",
@@ -1476,6 +1530,23 @@ const ROWS = [
     "match": {
       "account": [
         "account_id"
+      ]
+    }
+  },
+  {
+    // plan-squads: room purge deletes the room's squads; identity purge
+    // deletes squads owned by the identity. Member ids inside members_json
+    // are filtered to active members at fanout time, so a purged member's
+    // id lingering in the JSON never resolves.
+    "table": "squads",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ],
+      "identity": [
+        "owner_id"
       ]
     }
   },

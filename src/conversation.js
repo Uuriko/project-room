@@ -116,6 +116,7 @@ export function presenceLabel(presence) {
   if (presence === "working") return "Working";
   if (presence === "listening") return "Listening";
   if (presence === "idle") return "Idle";
+  if (presence === "unknown") return "No live signal";
   if (presence === "unreachable") return "Unreachable";
   return presence === "online" ? "Online" : presence === "offline" ? "Offline" : "Away";
 }
@@ -127,7 +128,9 @@ export function presenceLabel(presence) {
 export function memberPresence(member, { workItems, messages, now } = {}) {
   if (!member || member.active === false) return "offline";
   if (member.state === "working" || member.state === "listening"
-    || member.state === "idle" || member.state === "unreachable") return member.state;
+    || member.state === "idle" || member.state === "unreachable" || member.state === "unknown") return member.state;
+  // Assignment and old chat are not observations of a reachable agent host.
+  if (member.kind === "agent") return "unknown";
   const clock = Number.isFinite(now) ? now : Date.now();
   const items = workList(workItems);
   if (items.some(item => item.accountableMemberId === member.id
@@ -153,7 +156,7 @@ export function memberOnLine(member, { workItems, now } = {}) {
 export function memberStatus(member, context) {
   if (!member || member.active === false) return "access revoked";
   const line = context ? memberOnLine(member, context) : "";
-  return line || kindLabel(member.kind);
+  return line ? member.kind === "agent" ? `Assigned: ${line}` : line : kindLabel(member.kind);
 }
 
 // Compact Done receipt for an agent who posted completion. Not chat spam.
@@ -197,6 +200,17 @@ export function insertMention(text, caret, start, member) {
 
 const mentionRegExpSpecial = new Set(".*+?^${}()|[]\\");
 const escapeMentionName = value => [...String(value)].map(ch => mentionRegExpSpecial.has(ch) ? `\\${ch}` : ch).join("");
+
+// Presentation only: the original body remains the source for copy, search and
+// message links. Native details keeps expansion usable without another handler.
+export function messageBodyHtml(body, members, esc, messageId) {
+  const text = String(body ?? "");
+  const lines = text.split("\n");
+  const full = mentionHtml(text, members, esc);
+  if (text.length <= 1200 && lines.length <= 12) return full;
+  const preview = renderEmojiShortcodes([...lines.slice(0, 6).join("\n")].slice(0, 600).join(""));
+  return `<details class="message-expansion"><summary data-focus-key="message-expand:${esc(messageId)}"><span class="message-preview" aria-hidden="true">${esc(preview)}…</span><span class="message-show-more">Show more · ${lines.length} ${lines.length === 1 ? "line" : "lines"}</span><span class="message-show-less">Show less</span></summary><div class="message-full">${full}</div></details>`;
+}
 
 export function mentionHtml(body, members, esc) {
   const text = renderEmojiShortcodes(body);
@@ -368,10 +382,19 @@ export function shouldPreserveDrafts({ leavingPage, pendingSignout, endedContext
 // In-memory only: every thread has its own text, recipient, reply target, retry ID,
 // and submission error. Moving between discussions must not leak local composer state.
 // The containing session discards the entire instance on sign-out or revoked access.
+// JSON keys cannot collide with canonical thread message IDs. Retain the
+// historical null key for #general so existing tab drafts remain recoverable.
+export function channelDraftKey(channelId = "general") {
+  return channelId === "general" ? null : JSON.stringify(["channel", channelId]);
+}
+function isChannelDraftKey(key) {
+  try { const value = JSON.parse(key); return Array.isArray(value) && value.length === 2 && value[0] === "channel" && typeof value[1] === "string"; }
+  catch { return false; }
+}
 export class ConversationDrafts {
   constructor() { this.entries = new Map(); }
   get(threadId = null) {
-    if (!this.entries.has(threadId)) this.entries.set(threadId, { body: "", toMemberId: "", replyToId: threadId, pending: null, error: "" });
+    if (!this.entries.has(threadId)) this.entries.set(threadId, { body: "", toMemberId: "", replyToId: isChannelDraftKey(threadId) ? null : threadId, pending: null, error: "" });
     return this.entries.get(threadId);
   }
   save(threadId, values) { Object.assign(this.get(threadId), values); }
@@ -416,7 +439,7 @@ export class DraftRecovery {
       if (raw.length > 500000) throw new Error("size");
       const saved = JSON.parse(raw);
       if (saved.scope !== scope || !Number.isFinite(saved.expires) || saved.expires <= this.now() || saved.expires > this.now() + 12 * 60 * 60 * 1000 || !Array.isArray(saved.entries) || saved.entries.length > 50) throw new Error("scope or expiry");
-      const index = conversationIndex(state.messages), drafts = new ConversationDrafts();
+      const index = conversationIndex(state.messages), drafts = new ConversationDrafts(), restoredKeys = new Map();
       for (const [id, d] of saved.entries) {
         let channelId = typeof d?.channelId === "string" ? d.channelId : undefined;
         // The old writer saved channel only inside the pending command. Recover
@@ -452,10 +475,15 @@ export class DraftRecovery {
             mode: d.mode, threadId: d.threadId, channelId, pending });
           continue;
         }
-        if (id !== null && !index.threads.has(id)) continue;
+        const channelRoot = id === null || isChannelDraftKey(id);
+        const draftId = channelRoot ? channelDraftKey(channelId ?? "general") : id;
+        if (isChannelDraftKey(id) && id !== draftId) continue;
+        if (channelId && channelId !== "general" && !state.channels?.[channelId]) continue;
+        if (!channelRoot && !index.threads.has(id)) continue;
         if (typeof d.body !== "string" || typeof d.toMemberId !== "string") continue;
         if (d.toMemberId && (!state.members[d.toMemberId] || state.members[d.toMemberId].active === false)) continue;
-        if (d.replyToId !== null && (!index.byId.has(d.replyToId) || index.rootById.get(d.replyToId) !== id)) continue;
+        if (d.replyToId !== null && (!index.byId.has(d.replyToId) || !channelRoot && index.rootById.get(d.replyToId) !== id
+          || channelRoot && (index.byId.get(d.replyToId).channelId ?? "general") !== (channelId ?? "general"))) continue;
         // The current client has separate command and message identities. Preserve
         // both, then recompute the entire permitted payload before accepting a retry.
         // Older saved commands without a messageId keep their original payload.
@@ -466,10 +494,16 @@ export class DraftRecovery {
         const contents = JSON.stringify({ type: "message.posted", data, causationId: null });
         const pending = messageIdValid && d.pending?.contents === contents && typeof d.pending.id === "string" && /^[a-zA-Z0-9-]{1,100}$/.test(d.pending.id)
           ? { contents, command: { id: d.pending.id, type: "message.posted", data } } : null;
-        drafts.save(id, { ...data, body: d.body, toMemberId: d.toMemberId, pending });
+        drafts.save(draftId, { ...data, body: d.body, toMemberId: d.toMemberId, pending });
+        restoredKeys.set(id, draftId);
       }
-      const activeKey = drafts.entries.has(saved.activeKey) ? saved.activeKey : drafts.entries.has(saved.threadId) ? saved.threadId : null;
-      return { drafts, activeKey, threadId: drafts.entries.get(activeKey)?.mode ? drafts.entries.get(activeKey).threadId : activeKey };
+      let activeKey = restoredKeys.has(saved.activeKey) ? restoredKeys.get(saved.activeKey)
+        : drafts.entries.has(saved.activeKey) ? saved.activeKey : drafts.entries.has(saved.threadId) ? saved.threadId : null;
+      const active = drafts.entries.get(activeKey);
+      if (active?.channelId && state.channels?.[active.channelId]?.archivedAt) activeKey = null;
+      const selected = drafts.entries.get(activeKey);
+      return { drafts, activeKey, channelId: selected?.channelId ?? "general",
+        threadId: selected?.mode ? selected.threadId : isChannelDraftKey(activeKey) ? null : activeKey };
     } catch { this.clear(); return null; }
   }
 }

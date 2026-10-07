@@ -139,7 +139,9 @@ for (const width of [390, 1280]) test(`a basic member requests by keyboard at ${
   await page.locator("#message-list").getByText(new RegExp(`Approved permission request ${request.requestId}`)).waitFor();
   assert.deepEqual(f.permissions("requester"), ["accept_work", "complete_work"]);
   await ownRow(page).locator("[data-permission-request-status]").filter({ hasText: "You can take work now." }).waitFor();
-  await page.locator("#tasks-board-open").click();
+  await page.keyboard.press("Control+k");
+  await page.locator("#room-actions-query").fill("board");
+  await page.locator('[data-room-action="board"]').press("Enter");
   const card = page.locator('article[data-claim-id="permission-work"]');
   await card.getByRole("button", { name: "Claim", exact: true }).click();
   await page.locator('[aria-labelledby="board-col-claimed"] article[data-claim-id="permission-work"]').waitFor();

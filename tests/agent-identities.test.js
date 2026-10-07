@@ -553,14 +553,7 @@ test("identity create rejects C0 control chars in displayName (RC-2026-09-19-086
 });
 
 
-
-// Quarantined per tests/quarantine.json: the doesNotMatch leak assertion trips
-// when the random operationId (op_<base64url>) happens to contain "lab" as a
-// substring (seen 2026-10-06 on green main, op_TGlaby2u). Harness regex flake,
-// not a product leak — the 401 body was correct. Runs only in the non-blocking
-// lane (`npm run test:quarantined`, QUARANTINE_RUN=1).
-const QUARANTINED_ROOM_DISCOVERY_LEAK_REGEX = process.env.QUARANTINE_RUN !== "1";
-test("room discovery needs only identity, isolates callers and immediately reflects unlink and rotation", { skip: QUARANTINED_ROOM_DISCOVERY_LEAK_REGEX ? "quarantined: tests/quarantine.json (operationId substring trips leak regex; repair by 2026-10-20)" : false }, async t => {
+test("room discovery needs only identity, isolates callers and immediately reflects unlink and rotation", async t => {
   const { store, origin, ownerCommons, ownerLab } = await serve(t);
   const identity = store.identities.create("Returning agent");
   const other = store.identities.create("Other agent");
@@ -579,7 +572,12 @@ test("room discovery needs only identity, isolates callers and immediately refle
   for (const token of ["", ownerCommons, "pri_invalid"]) {
     const denied = await fetch(`${origin}/api/agent-rooms`, { headers: { Authorization: `Bearer ${token}` } });
     assert.equal(denied.status, 401);
-    assert.doesNotMatch(await denied.text(), /Returning agent|commons|lab/);
+    const body = await denied.json();
+    // Random opaque operation ids can coincidentally contain a room slug.
+    // Validate their shape separately; inspect every remaining error field.
+    assert.match(body.operationId, /^op_[A-Za-z0-9_-]+$/);
+    const { operationId: _operationId, ...publicError } = body;
+    assert.doesNotMatch(JSON.stringify(publicError), /Returning agent|commons|lab/);
   }
   await assert.rejects(listAgentRooms(origin, identity.secret, { after: "../wrong" }), { code: "invalid_cursor" });
   store.identities.unlink(ownerCommons, "commons", identity.identityId);

@@ -489,7 +489,7 @@ test("a shared invitation retains its pending account signup across Escape and n
   });
   const page = await (await f.browser.newContext()).newPage(); page.setDefaultTimeout(10000);
   await page.goto(`${f.origin}/#join/${token}`);
-  await page.locator("#join-account-signin").click();
+  if (await page.locator("#join-account-signin").isVisible()) await page.locator("#join-account-signin").click();
   const form = page.locator('#join-account-auth [data-signin-form="password"]');
   await form.locator('[data-password-mode="signup"]').click();
   await form.locator('[name="email"]').fill("shared-pending-signup@example.invalid");

@@ -235,7 +235,7 @@ export class GuestAgentLinks {
       swept += 1;
     }
     if (swept === 0) return;
-    const projection = JSON.stringify(state);
+    const projection = this.store.storedProjection(roomId, state);
     if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached");
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
   }

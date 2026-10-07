@@ -140,11 +140,12 @@ test("agent type catalog renders and click fills the same join path", { timeout:
   assert.equal(await f.page.locator("#agent-connect-advanced").evaluate(node => node.open), false);
   assert.equal(await f.page.locator("#agent-connect-access").isVisible(), true);
   assert.equal(await f.page.locator("#agent-connect-access").inputValue(), "contribute");
-  mkdirSync("/opt/cursor/artifacts/screenshots", { recursive: true });
+  const shots = process.env.ROOM_TEST_SCREENSHOT_DIR || "test-results/agent-connect";
+  mkdirSync(shots, { recursive: true });
   await f.page.setViewportSize({ width: 1280, height: 800 });
-  await f.page.screenshot({ path: "/opt/cursor/artifacts/screenshots/add-agent-1280.png" });
+  await f.page.screenshot({ path: `${shots}/add-agent-1280.png` });
   await f.page.setViewportSize({ width: 390, height: 844 });
-  await f.page.screenshot({ path: "/opt/cursor/artifacts/screenshots/add-agent-390.png" });
+  await f.page.screenshot({ path: `${shots}/add-agent-390.png` });
   await f.page.setViewportSize({ width: 1440, height: 1000 });
   const catalog = f.page.locator("#agent-type-catalog");
   await catalog.waitFor({ state: "visible" });

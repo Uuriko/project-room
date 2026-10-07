@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 import { PassThrough } from "node:stream";
 import { setImmediate as tick } from "node:timers/promises";
 import { serveRoomMcp, MCP_VERSION } from "../client/mcp-stdio.mjs";
-import { RoomClientError } from "../client/room-agent.mjs";
+import { RoomAgentClient, RoomClientError } from "../client/room-agent.mjs";
+import { RoomStore } from "../server/store.mjs";
+import { initialRoom } from "../server/bootstrap.mjs";
+import { createRoomServer } from "../server/http.mjs";
+import { createServer } from "node:http";
 import { createHash } from "node:crypto";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { existsSync, rmSync } from "node:fs";
@@ -81,7 +85,11 @@ test("stdio version negotiation, discovery fallback, tools and notification sile
   await h.ready();
   const tools = (await h.rpc("tools/list")).result.tools;
   assert.deepEqual(tools.filter(tool => tool.name.includes("outside_agent")).map(tool => tool.name), ["room_list_outside_agents", "room_introduce_outside_agent"]);
-  assert.equal(tools.length, 41); assert.ok(tools.every(tool => tool.inputSchema.additionalProperties === false));
+  assert.equal(tools.length, 43);
+  const assistant = tools.filter(tool => tool.name.startsWith("room_assistant_"));
+  assert.deepEqual(assistant.map(tool => tool.name), ["room_assistant_context", "room_assistant_action"]);
+  assert.equal(assistant[0].annotations.readOnlyHint, true);
+  assert.deepEqual(assistant[1].inputSchema.properties.action.enum, ["claim", "report"]); assert.ok(tools.every(tool => tool.inputSchema.additionalProperties === false));
   assert.equal((await h.rpc("tools/call", { name: "room_check_access", arguments: {} }, "typed-id")).result.structuredContent.status, "credential_accepted");
   const count = h.replies.length; h.send({ method: "unknown-notification" }); await tick(); assert.equal(h.replies.length, count);
   assert.equal((await h.rpc("tools/call", { name: "room_read_work", arguments: { workItemId: "work", token: "not-allowed" } })).error.code, -32602);
@@ -284,4 +292,96 @@ test("MCP claim PR refusals preserve specific codes and reconcile unknown writes
     assert.match(result.structuredContent.hint, /never reacquire automatically/);
     assert.equal(JSON.stringify(result).includes("PRIVATE SECRET"), false);
   }
+});
+
+async function boardHttpFixture(t) {
+  const store = new RoomStore(":memory:");
+  store.initialize(initialRoom("commons"));
+  const token = store.issueAccessKey("commons", "owner");
+  const server = createRoomServer({ store }), requests = [];
+  server.on("request", req => requests.push(req.url));
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => {
+    server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve)); store.close();
+  });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  return { origin, token, requests, client: new RoomAgentClient({ origin, roomId: "commons", token }) };
+}
+
+// Stdio owns schema validation and dispatch: SDK tests cannot detect arguments
+// discarded by callTool or JSON-RPC success manufactured after an HTTP refusal.
+test("stdio Board reads forward canonical selections through the real SDK and HTTP route", async t => {
+  const { client, requests } = await boardHttpFixture(t);
+  for (const id of ["a-ready", "b-ready", "held"]) await client.workClaimCreate({ id, title: id });
+  const held = await client.claimWorkItem("held", { leaseHours: 2 });
+  const h = harness(t, client, { memberId: "owner" });
+  await h.ready();
+  const definition = (await h.rpc("tools/list")).result.tools.find(tool => tool.name === "room_read_board");
+  assert.equal(definition.annotations.readOnlyHint, true);
+  assert.equal(definition.inputSchema.properties.limit.default, 50);
+  assert.equal(definition.inputSchema.properties.limit.maximum, 200);
+  const before = requests.length;
+  for (const selection of [{ queue: "all" }, { state: "released" }, { queue: "ready", state: "done" },
+    { limit: 0 }, { limit: 201 }, { limit: 1.5 }, { limit: "1" }, { cursor: "" }, { cursor: null },
+    { cursor: "x".repeat(2049) }, { swept: true }]) {
+    assert.equal((await h.rpc("tools/call", { name: definition.name, arguments: selection })).error.code, -32602);
+  }
+  assert.equal(requests.length, before, "invalid local arguments must not initiate an HTTP read");
+  const read = async selection => (await h.rpc("tools/call", { name: definition.name, arguments: selection })).result;
+  const first = await read({ queue: "ready", limit: 1 });
+  assert.equal(first.isError, undefined);
+  assert.deepEqual(first.structuredContent.claims.map(item => item.id), ["a-ready"]);
+  assert.equal(first.structuredContent.claimsPage.queue, "ready");
+  assert.equal(first.structuredContent.claimsPage.limit, 1);
+  assert.equal(first.structuredContent.claimsPage.hasMore, true);
+  const second = await read({ queue: "ready", limit: 1, cursor: first.structuredContent.claimsPage.nextCursor });
+  assert.deepEqual(second.structuredContent.claims.map(item => item.id), ["b-ready"]);
+  assert.equal(second.structuredContent.claimsPage.hasMore, false);
+  const claimed = await read({ state: "claimed", limit: 200 });
+  const [item] = claimed.structuredContent.claims;
+  assert.equal(claimed.structuredContent.claims.length, 1);
+  assert.deepEqual([item.id, item.state, item.owner, item.leaseExpiresAt], [held.id, held.state, held.owner, held.leaseExpiresAt]);
+  assert.equal(claimed.structuredContent.claimsPage.state, "claimed");
+  assert.equal(claimed.structuredContent.claimsPage.limit, 200);
+  const refused = await read({ state: "claimed", cursor: first.structuredContent.claimsPage.nextCursor });
+  assert.equal(refused.isError, true);
+  assert.equal(refused.structuredContent.code, "invalid_claim_input");
+  assert.equal(Object.hasOwn(refused.structuredContent, "claims"), false);
+  assert.equal(requests.slice(before).some(path => /^\/api\/rooms\/commons\/work-claims(?:\?|$)/.test(path)), false);
+});
+
+// JSON-RPC cancellation must reach the second SDK fetch and suppress its late
+// output. The delayed bytes come from the real canonical route, not a mock client.
+test("stdio Board cancellation closes the canonical HTTP read and emits no late result", async t => {
+  const { origin, token } = await boardHttpFixture(t);
+  let entered, closed, release;
+  const started = new Promise(resolve => { entered = resolve; });
+  const disconnected = new Promise(resolve => { closed = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  const proxy = createServer(async (req, res) => {
+    if (req.method !== "GET" || !["/api/rooms/commons", "/api/rooms/commons/work-claims-read"].includes(req.url)) {
+      res.writeHead(500).end(); return;
+    }
+    const response = await fetch(origin + req.url, { headers: { authorization: req.headers.authorization } });
+    const body = await response.text();
+    if (req.url.endsWith("/work-claims-read")) {
+      res.on("close", closed);
+      entered();
+      await gate;
+    }
+    res.writeHead(response.status, { "content-type": "application/json" }).end(body);
+  });
+  await new Promise(resolve => proxy.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { release(); proxy.closeAllConnections(); await new Promise(resolve => proxy.close(resolve)); });
+  const client = new RoomAgentClient({ origin: `http://127.0.0.1:${proxy.address().port}`, roomId: "commons", token });
+  const h = harness(t, client, { memberId: "owner" });
+  await h.ready();
+  h.send({ id: "cancel-board", method: "tools/call", params: { name: "room_read_board", arguments: {} } });
+  await started;
+  h.send({ method: "notifications/cancelled", params: { requestId: "cancel-board" } });
+  await disconnected;
+  release();
+  assert.deepEqual((await h.rpc("ping")).result, {});
+  assert.equal(h.replies.some(reply => reply.id === "cancel-board"), false);
 });

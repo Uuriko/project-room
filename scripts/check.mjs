@@ -23,6 +23,8 @@ for (const path of ["server.mjs", "push-sw.js", "bin/room.mjs", ...["src", "serv
   const result = spawnSync(process.execPath, ["--check", path], { stdio: "inherit" });
   if (result.status !== 0) process.exit(result.status || 1);
 }
+const uiStrings = spawnSync(process.execPath, ["scripts/build-ui-strings.mjs", "--check"], { stdio: "inherit" });
+if (uiStrings.status !== 0) process.exit(uiStrings.status || 1);
 const coverage = spawnSync(process.execPath, ["scripts/journey-coverage.mjs"], { stdio: "inherit" });
 if (coverage.status !== 0) process.exit(coverage.status || 1);
 const shadows = spawnSync(process.execPath, ["scripts/check-no-shadow-imports.mjs"], { stdio: "inherit" });

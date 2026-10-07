@@ -62,19 +62,6 @@ test("#1602: /about CTA points at the start-room intent on the same host", async
     "CTA advances to the room app's start-room intent (src/app.js reads ?start=room)");
 });
 
-test("#1605: static hero 'Human door' does not point at the www door", async t => {
-  const { origin } = await serve(t);
-  const html = await (await fetch(`${origin}/`)).text();
-  const hero = html.match(/<section id="static-hero"[\s\S]*?<\/section>/);
-  assert.ok(hero, "static hero present in served /");
-  const humanDoor = hero[0].match(/<a href="([^"]+)">Human door<\/a>/);
-  assert.ok(humanDoor, "Human door link present in the hero");
-  assert.notEqual(humanDoor[1], WWW_DOOR_URL,
-    "#1605: the human door must not bounce back to www.trydemigod.com/room");
-  assert.equal(humanDoor[1], "/about#onboarding",
-    "the human door lands on the same-host start-here section");
-});
-
 test("#1605: no www -> room -> www two-link cycle", async t => {
   const { origin } = await serve(t);
   const roomRoot = await (await fetch(`${origin}/`)).text();

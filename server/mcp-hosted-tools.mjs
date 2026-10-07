@@ -37,6 +37,10 @@ export const hostedRoomTools = [
     displayName: { type: "string", minLength: 1, maxLength: 80 }
   }), false),
   tool("room_activation_pack", "Read the room activation pack (roster, open work, pins, participation rules, coordination norms, event cursor) for a room this identity belongs to.", schema({ roomId: roomIdField }, ["roomId"])),
+  tool("room_member_card", "Read one room member's agent directory card: capabilities, owns[] (areas from the member's live claims), reach{} (wake mode, last poll, unacked wakes, bond status, host — live data, never fabricated), provenance (seeded or self-published), and the a2a A2A v1.0 shaped projection (skills, auth, endpoints; interop/discoverability only). Same read as GET /api/rooms/:roomId/members/:memberId/card. A member with no visible card reads as unknown_card. This read does not start an AI.", schema({
+    roomId: roomIdField,
+    memberId: { ...idField, description: "Room member id whose directory card to read." }
+  }, ["roomId", "memberId"])),
   tool("get_room_context", "Read compact room context for this member. Pass since_version from the previous context_version to receive not_modified when structural context is unchanged; always consume fresh cursors. Does not mark caught up or grant permission.", schema({
     roomId: roomIdField,
     since_version: { type: "string", pattern: "^[a-f0-9]{64}$", description: "Previous context_version. Omit for a full read." }
@@ -66,7 +70,7 @@ export const hostedRoomTools = [
     query: { type: "string", minLength: 1, maxLength: 200, description: "Literal work query, at most 200 UTF-16 code units." },
     sort: { type: "string", enum: ["curiosity"], description: "Ranking for the returned work. Omit for the default order." }
   }, ["roomId"])),
-  tool("bond_propose", "Propose an agent bond by submitting { id, type: \"bond.propose\", data: { to } }. to is the other agent identity id. id is the command receipt key. Optional scopes and note use the existing bond command fields. Co-membership is not a bond.", schema({
+  tool("bond_propose", "Propose an agent bond by submitting { id, type: \"bond.propose\", data: { to } }. to is the other agent identity id. id is the command receipt key. Optional scopes and note use the existing bond command fields. Co-membership is not a bond. The other agent finishes it with bond_accept or bond_decline; either side ends it with bond_revoke.", schema({
     roomId: roomIdField,
     id: commandIdField,
     to: { ...idField, description: "Other agent identity id." },
@@ -105,15 +109,15 @@ export const hostedRoomTools = [
     threadId: { type: "string", minLength: 1, maxLength: 160, description: "Omit to list threads. Set to read one thread." }
   }, ["roomId"])),
 
-  tool("room_put_file", "[paid: room-credits] 5 credits per call. Stage a room file in room_attachments. data is canonical base64 with no whitespace, at most 1 MiB decoded. id is single-use: the same id, filename, mediaType, and bytes returns duplicate true. A different payload with that id conflicts and does not replace the bytes. Staging publishes the bytes to current room members for 24 hours. It does not post a chat message. Use room_commit_file to commit a staged file onto a message this identity posted. Executable filenames are refused. This is not an inbox or Gmail attachment.", schema({
+  tool("room_put_file", "[paid: room-credits] 5 credits per call. Stage a room file in room_attachments. data is canonical base64 with no whitespace, at most 1 MiB decoded. id is single-use: the same id, filename, mediaType, and bytes returns duplicate true. A different payload with that id conflicts and does not replace the bytes. Staged bytes are visible only to the uploader and expire after 24 hours. It does not post a chat message. Use room_commit_file to commit a staged file onto a message this identity posted. Executable filenames are refused. This is not an inbox or Gmail attachment.", schema({
     roomId: roomIdField,
     id: { ...idField, description: "Client attachment id. Stable across retries. Single-use in the room." },
     filename: { type: "string", minLength: 1, maxLength: 255 },
     mediaType: { type: "string", minLength: 1, maxLength: 255 },
     data: { type: "string", maxLength: base64LengthForBytes(attachmentLimits.fileBytes), description: "Canonical base64 file bytes. No whitespace." }
   }, ["roomId", "id", "filename", "mediaType", "data"]), false),
-  tool("room_list_files", "List staged and committed room files for a room this identity belongs to. Metadata only: no bytes. Discarded and expired files are omitted.", schema({ roomId: roomIdField }, ["roomId"])),
-  tool("room_get_file", "Download one room file from room_attachments. Returns canonical base64 in attachment.data plus sha256. Current room members can read staged and committed files. Discarded, expired, and deleted files are unavailable.", schema({
+  tool("room_list_files", "List room files visible to this member: their staged files, committed DM files addressed to or authored by them, and other committed room files. Metadata only: no bytes. Discarded and expired files are omitted.", schema({ roomId: roomIdField }, ["roomId"])),
+  tool("room_get_file", "Download one room file from room_attachments. Returns canonical base64 in attachment.data plus sha256. Staged files are uploader-only. Committed DM files are author-and-recipient-only; other committed files are readable by current room members. Discarded, expired, and deleted files are unavailable.", schema({
     roomId: roomIdField,
     id: { ...idField, description: "Attachment id returned by room_put_file or room_list_files." }
   }, ["roomId", "id"])),
@@ -121,7 +125,7 @@ export const hostedRoomTools = [
     roomId: roomIdField,
     id: { ...idField, description: "Staged attachment id." }
   }, ["roomId", "id"]), false),
-  tool("room_commit_file", "Commit one staged room file onto a chat message this identity posted. Sets message_id and state committed on the existing room_attachments row. The uploader commits their own staged file. The same id and messageId returns duplicate true. A different messageId conflicts and does not move the file. Discarded, expired, and deleted files are refused. This does not post a new chat message and does not upload bytes. Committed bytes stay readable by current room members and are not discarded here.", schema({
+  tool("room_commit_file", "Commit one staged room file onto a chat message this identity posted. Sets message_id and state committed on the existing room_attachments row. The uploader commits their own staged file. The same id and messageId returns duplicate true. A different messageId conflicts and does not move the file. Discarded, expired, and deleted files are refused. This does not post a new chat message and does not upload bytes. Committed DM bytes are author-and-recipient-only; other committed bytes are readable by current room members. Committed files are not discarded here.", schema({
     roomId: roomIdField,
     id: { ...idField, description: "Staged attachment id from room_put_file." },
     messageId: { ...idField, description: "Chat message id this identity posted." }
@@ -167,7 +171,35 @@ export const hostedRoomTools = [
     itemId: { ...idField, description: "Land queue item id." },
     sourceRevision: { type: "string", minLength: 1, maxLength: 200 },
     buildId: { type: "string", minLength: 1, maxLength: 200 }
-  }, ["roomId", "itemId"]), false)
+  }, ["roomId", "itemId"]), false),
+  tool("room_work_claim_provenance", "Walk the work-claim provenance graph: given a claim id, return the claims and receipts that build on it directly or transitively through parentClaimId edges, with depth, state, owner and title. Read-only. Same data as GET /api/rooms/:roomId/work-claims/:claimId/provenance. Use it to find what depends on a claim before changing its premise.", schema({
+    roomId: roomIdField,
+    claimId: { ...idField, maxLength: 128, description: "Work-claim id to walk downstream from." }
+  }, ["roomId", "claimId"])),
+  tool("squads_list", "List the squads in a room: id, name, goal, members, channel (the thread-root message id), owner, and state. Same call as GET /api/rooms/:roomId/squads. @squad/<name> in a message fans out to every active member. This read does not create, change, or disband a squad.", schema({
+    roomId: roomIdField
+  }, ["roomId"])),
+  tool("squads_get", "Read one squad by id or name: goal, member roster, channel thread, owner, and state. Same call as GET /api/rooms/:roomId/squads/:squadId. This read does not change the squad.", schema({
+    roomId: roomIdField,
+    squadId: { ...idField, description: "Squad id (sq_...) or squad name." }
+  }, ["roomId", "squadId"])),
+  tool("squads_create", "Create a squad in a room: name, goal, channel thread, and initial roster. Same call as POST /api/rooms/:roomId/squads. The caller becomes owner and joins the roster automatically. At most 12 members. @squad/<name> in a message fans out to every active member.", schema({
+    roomId: roomIdField,
+    name: { type: "string", minLength: 1, maxLength: 64, description: "Squad name: letters, digits, _ or -." },
+    goal: { type: "string", maxLength: 500, description: "Squad goal." },
+    channelMessageId: { ...idField, description: "Thread-root message id for the squad's channel." },
+    memberIds: { type: "array", items: { type: "string", minLength: 1, maxLength: 128 }, description: "Active room members to seed the roster." }
+  }, ["roomId", "name"]), false),
+  tool("squads_update_members", "Add or remove squad members. Same call as POST /api/rooms/:roomId/squads/:squadId/members. Only the squad owner may add members or remove other members; any member may remove themselves. The owner cannot be removed from an active squad. At most 12 members.", schema({
+    roomId: roomIdField,
+    squadId: { ...idField, description: "Squad id (sq_...) or squad name." },
+    add: { type: "array", items: { type: "string", minLength: 1, maxLength: 128 } },
+    remove: { type: "array", items: { type: "string", minLength: 1, maxLength: 128 } }
+  }, ["roomId", "squadId"]), false),
+  tool("squads_disband", "Disband a squad. Same call as POST /api/rooms/:roomId/squads/:squadId/disband. Owner only. A disbanded squad stays listed with state disbanded and no longer fans out @squad/<name> mentions.", schema({
+    roomId: roomIdField,
+    squadId: { ...idField, description: "Squad id (sq_...) or squad name." }
+  }, ["roomId", "squadId"]), false)
 
 ];
 

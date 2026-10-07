@@ -120,7 +120,16 @@ export function compareScreenshotBuffer(shot, name, { maxDiffPixelRatio = MAX_DI
       "Run once with VISUAL_UPDATE_BASELINES=1 to capture it, review the PNG, then commit it.",
     );
   }
-  const { diffPixels, ratio, diffPng } = diffPngBuffers(shot, readFileSync(baselinePath));
+  let comparison;
+  try { comparison = diffPngBuffers(shot, readFileSync(baselinePath)); }
+  catch (error) {
+    // A dimensions mismatch cannot produce a pixel diff; retain the actual
+    // screenshot before rethrowing the unchanged failing gate.
+    mkdirSync(EVIDENCE_DIR, { recursive: true });
+    writeFileSync(join(EVIDENCE_DIR, `${name}.actual.png`), shot);
+    throw error;
+  }
+  const { diffPixels, ratio, diffPng } = comparison;
   if (ratio > maxDiffPixelRatio) {
     mkdirSync(EVIDENCE_DIR, { recursive: true });
     writeFileSync(join(EVIDENCE_DIR, `${name}.actual.png`), shot);

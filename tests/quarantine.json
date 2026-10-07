@@ -3,27 +3,27 @@
     {
       "owner": "jill",
       "quarantined_at": "2026-10-06",
-      "reason": "Never passed in hosted CI in either the original PR #1401 or this rescue (#1582). Harness failure signature: the held-confirmation race (10s client request deadline) loses to slow CI runners; the second-tab guest login needed manual room-session establishment before reload (commits f5068b3b, 567f46ae) and still returned unexplained 401s on CI; focus-event dispatch is browser-dependent in headless multi-page runs. The session-binding fix contract itself is held by the blocking suites (tests/account-client.test.js 15/15, tests/invitation-http.test.js 5/5: match->200, rotated->409, dead->401); only the browser/app-level private-preview retirement flow is quarantined. Repair: stabilize the harness (longer client deadline under test, deterministic confirmation hold, real focus events) or replace with an equivalent deterministic integration test. Reproduced locally 2026-10-06: 3/3 runs fail at the second-tab guest login (POST /api/account-session returns 401, expected 201) while the confirmation hold is active — the harness, not the product, is broken.",
+      "reason": "Never passed in hosted CI in either the original PR #1401 or this rescue (#1582). Harness failure signature: the held-confirmation race (10s client request deadline) loses to slow CI runners; the second-tab guest login needed manual room-session establishment before reload (commits f5068b3b, 567f46ae) and still returned unexplained 401s on CI; focus-event dispatch is browser-dependent in headless multi-page runs. The session-binding fix contract itself is held by the blocking suites (tests/account-client.test.js 15/15, tests/invitation-http.test.js 5/5: match->200, rotated->409, dead->401); only the browser/app-level private-preview retirement flow is quarantined. Repair: stabilize the harness (longer client deadline under test, deterministic confirmation hold, real focus events) or replace with an equivalent deterministic integration test. Reproduced locally 2026-10-06: 3/3 runs fail at the second-tab guest login (POST /api/account-session returns 401, expected 201) while the confirmation hold is active \u2014 the harness, not the product, is broken.",
       "repair_by": "2026-10-20",
       "test": "scripts/inbox-browser-check.mjs > account-only confirmation preserves a newer login and retires a held private preview"
     },
     {
-      "test": "tests/agent-identities.test.js > room discovery needs only identity, isolates callers and immediately reflects unlink and rotation",
-      "reason": "AssertionError doesNotMatch /Returning agent|commons|lab/ on the 401 unauthenticated body: the random operationId (server/http.mjs: op_${randomBytes(6).toString(\"base64url\")}) was op_TGlaby2u, which contains \"lab\" as a substring. Failed unit job 112369321652 on green main run 37492724327 (merge #1582, head 39aac209, 2026-10-06T16:04Z); passed 2x on PR #1582 head 7424b5cf (unit jobs in runs 37489299111 + 37489298741, 2026-10-06T15:39Z) with a byte-identical test file (verified via git diff). Harness regex flake, not a product leak — the 401 was correct. Repair: assert on structured fields (e.g. error.code) instead of a substring regex over the whole body, or mask the operationId before matching.",
+      "owner": "jill",
+      "quarantined_at": "2026-10-05",
+      "reason": "p95 timing assertion (list p95 < 50 ms over 10 samples) fails non-deterministically on loaded/slow VMs; reproduced 2026-10-05 failing 5 of 7 runs on pristine main (e.g. `list p95 58.3 ms`). All functional board assertions stay in the blocking suite; only the timing assertion is quarantined.",
+      "repair_by": "2026-10-19",
+      "test": "tests/work-claim-integrity.test.js > the Board list endpoint p95 stays under the 50 ms budget"
+    },
+    {
+      "test": "scripts/board-browser-check.mjs > owners link a draft PR, reconcile held responses, and refresh a changed claim without resending",
+      "reason": "Fails intermittently on green main with 'Expected values to be strictly equal: false !== true' (boolean assertion, ~2.1s). Failed on main runs 37512753096 (2026-10-06T18:37Z, head 2d808362) and 37504564917 (2026-10-06T17:34Z, head 742a25b50c); passed on main runs 37514808041 (18:53Z), 37509966421, 37508713760, 37504619530 the same day. Non-deterministic on the same green tree => timing/harness flake, not product breakage.",
       "owner": "jill",
       "quarantined_at": "2026-10-06",
       "repair_by": "2026-10-20"
     },
     {
-      "test": "scripts/inbox-browser-check.mjs > real inbox: another tab changing the browser account clears private content and delayed reads",
-      "reason": "locator.waitFor Timeout 30000ms waiting for #main to be visible (63-64x resolved to hidden <main id=\"main\" hidden>). Failed 2x on green main: run 37477149290 (merge #1619, head 0bc86052, 2026-10-06T14:13Z) and run 37482055559 (merge #1653, head f13465f3, 2026-10-06T14:48Z); passed run 37538484029 (merge #1680, head 7d114379, 2026-10-06T22:06Z) in ~2.4s. Boot-timing flake on loaded CI runners, not a product hang — no boot-path changes in the window. Repair: raise the boot wait budget under CI or wait on the session-ready signal instead of #main visibility.",
-      "owner": "jill",
-      "quarantined_at": "2026-10-06",
-      "repair_by": "2026-10-20"
-    },
-    {
-      "test": "scripts/inbox-browser-check.mjs > provider preview cannot repopulate private content after another tab changes account",
-      "reason": "Same signature as the sibling flake: locator.waitFor Timeout 30000ms for #main visible (64x hidden) on the second tab boot. Failed once on green main: run 37433449455 (merge #1585, head bd03a15b, 2026-10-06T08:02Z); passed run 37538484029 (merge #1680, head 7d114379, 2026-10-06T22:06Z) in ~2.3s. Boot-timing flake on loaded CI runners. Repair: same as sibling — raise boot wait budget under CI or wait on session-ready.",
+      "test": "scripts/board-browser-check.mjs > waiting prerequisites stay visible, link by keyboard, and become claimable only when ready",
+      "reason": "Fails intermittently on green main with 'locator.waitFor: Timeout 8000ms exceeded' waiting for #board-dialog to become visible (dialog resolved to hidden 20x). Failed on main run 37506438368 (2026-10-06T17:48Z, head dddbee1a); passed on main runs 37514808041 (18:53Z), 37509966421, 37508713760, 37504619530 the same day. Non-deterministic on the same green tree => browser timing flake, not product breakage.",
       "owner": "jill",
       "quarantined_at": "2026-10-06",
       "repair_by": "2026-10-20"

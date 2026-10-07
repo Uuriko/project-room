@@ -7,7 +7,7 @@ import { createResultsFixture } from './results-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { EVENT_TYPES as T } from '../src/events.js';
 import { signInFixture } from './auth-signin.mjs';
-import { ensureSidebarOpen } from './room-chrome.mjs';
+import { ensureSidebarOpen, ensureSidebarClosed } from './room-chrome.mjs';
 
 for (const mobile of [false, true]) test(`room overview ${mobile ? 'mobile' : 'desktop'}: source-backed orientation preserves writing and updates live`, { timeout: 25000 }, async t => {
   const f = createResultsFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
@@ -44,7 +44,11 @@ for (const mobile of [false, true]) test(`room overview ${mobile ? 'mobile' : 'd
   await dialog.waitFor({ state: 'hidden' });
   await page.waitForFunction(() => document.activeElement?.dataset.messageRecordId === 'planning-note');
   assert.equal(await page.locator('#conversation-title').textContent(), '# planning');
-  assert.equal(await page.locator('#message-input').inputValue(), 'Keep this room draft');
+  assert.equal(await page.locator('#message-input').inputValue(), '', 'opening another channel never carries the general draft into its composer');
+  await ensureSidebarOpen(page);
+  await page.locator('#channel-list [data-channel="general"]').click();
+  await ensureSidebarClosed(page);
+  assert.equal(await page.locator('#message-input').inputValue(), 'Keep this room draft', 'the exact original draft remains in its original channel');
   assert.equal(await page.locator('#main').evaluate(node => node.classList.contains('sidebar-open')), false);
   await open();
   f.reopen('native-result');
@@ -54,9 +58,13 @@ for (const mobile of [false, true]) test(`room overview ${mobile ? 'mobile' : 'd
     return !results?.querySelector('[data-open-work="native-result"]');
   });
   assert.match(await dialog.textContent(), /Launch checklist/);
+  const conversationUrl = page.url();
   await dialog.locator('[data-open-work="approved-result"]').click();
   await page.waitForFunction(() => document.activeElement?.dataset.workRecordId === 'approved-result');
   assert.equal(await page.locator('#message-input').inputValue(), 'Keep this room draft');
+  await page.getByRole('button', { name: 'Back to conversation', exact: true }).click();
+  await page.waitForURL(conversationUrl);
+  assert.equal(await page.locator('#message-input').inputValue(), 'Keep this room draft', 'return navigation preserves the original conversation draft');
   await open(); await page.locator('#room-overview-close').click();
   await page.waitForFunction(() => document.querySelector('#room-overview-open') === document.activeElement);
   assert.equal(await page.locator('#room-overview-open').evaluate(node => node === document.activeElement), true);

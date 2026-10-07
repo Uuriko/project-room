@@ -5,6 +5,7 @@
   --bg:#202127;--panel:#191a20;--panel-raised:#292b33;--panel-hover:#34363f;--line:#393b45;--line-soft:#30323a;--text:#eeedf1;--muted:#aaaab7;--blue:#a9b9ff;--blue-strong:#5555bd;--blue-strong-hover:#6a6ad4;--on-accent:#ffffff;--amber:#ffbf69;--green:#4fd09b;--red:#ff7b7b;--violet:#ad8cff;--card:#191a20;--border:#393b45;--shadow:0 20px 70px rgb(0 0 0 / 32%);--radius-sm:.35rem;--radius-md:.45rem;--radius-lg:.85rem;--radius-xl:1rem;--space-1:.25rem;--space-2:.5rem;--space-3:.75rem;--space-4:1rem;--space-5:1.5rem;--space-6:2rem;--text-xs:.75rem;--text-sm:.875rem;--text-md:1rem;--text-lg:1.25rem;--font-sans:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
   /* Component aliases kept for existing rules. */
   --room-paper: var(--panel-raised);
+  --text-wordmark: clamp(1.75rem, 7vw, 2.4rem);
   --room-ink: var(--text);
   --room-quiet: var(--muted);
   --room-rule: var(--line);
@@ -27,6 +28,22 @@
 :root[data-theme="light"] .message-content > .message-muted,
 :root[data-theme="light"] .message-content > .message-tombstone,
 :root[data-theme="light"] .draft-feedback > .form-hint { color: var(--muted); }
+/* Light theme: components below keep hardcoded dark backgrounds for the dark
+   (default) theme, but their text follows the theme tokens — without these
+   overrides the text is unreadable in light theme (measured 1.01–2.63:1).
+   Dark theme rendering is untouched. */
+:root[data-theme="light"] .thread-bar,
+:root[data-theme="light"] .search-results,
+:root[data-theme="light"] .invitation-details,
+:root[data-theme="light"] .new-work-form,
+:root[data-theme="light"] .handoff-envelopes { background: var(--panel-raised); }
+:root[data-theme="light"] .new-work-form { border-color: var(--line); }
+:root[data-theme="light"] .handoff-envelope { background: var(--panel); }
+:root[data-theme="light"] .new-messages-button { background: var(--panel-raised); color: var(--text); }
+:root[data-theme="light"] .mention-option:hover,
+:root[data-theme="light"] .mention-option.active,
+:root[data-theme="light"] .search-results a:hover,
+:root[data-theme="light"] .rb-event-link:hover { background: var(--panel-hover); }
 
 * { box-sizing: border-box; }
 html { background: var(--bg); scroll-behavior: smooth; }
@@ -142,6 +159,16 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .message-body details.md-spoiler { display: inline-block; margin: 0 .15rem; padding: .1rem .4rem; border: 1px solid var(--line); border-radius: .35rem; background: var(--panel-raised); cursor: pointer; }
 .message-body details.md-spoiler summary { display: inline; color: var(--muted); font-size: var(--text-xs); cursor: pointer; }
 .message-body details.md-spoiler[open] summary { display: none; }
+/* Long-message disclosure uses the same body rhythm in both themes. */
+.message-content > .message-body { margin-bottom: .4rem; color: var(--text); font-size: var(--text-md); line-height: 1.55; overflow-wrap: anywhere; white-space: pre-wrap; }
+.message-expansion > summary { display: block; cursor: pointer; list-style: none; }
+.message-expansion > summary::-webkit-details-marker { display: none; }
+.message-preview { display: block; max-height: 9.3em; overflow: hidden; }
+.message-show-more, .message-show-less { display: block; width: fit-content; min-height: 44px; padding: .6rem 0; color: var(--blue); font-size: var(--text-sm); font-weight: 650; }
+.message-show-less { display: none; }
+.message-expansion[open] > summary .message-preview, .message-expansion[open] > summary .message-show-more { display: none; }
+.message-expansion[open] > summary .message-show-less { display: block; }
+.message-expansion > summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; border-radius: .3rem; }
 .work-link { color: var(--muted); font-size: .72rem; text-decoration: none; }
 .work-link:hover { color: var(--blue); }
 .mention-list { position: absolute; right: 1rem; bottom: calc(100% - .35rem); left: 1rem; z-index: 5; margin: 0; padding: .25rem; border: 1px solid var(--line); border-radius: .5rem; background: var(--panel-raised); box-shadow: var(--shadow); list-style: none; }
@@ -249,6 +276,9 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .channel .channel-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .channel-manage { opacity: 0; flex: none; }
 .channel-row:hover .channel-manage, .channel-row:focus-within .channel-manage { opacity: 1; }
+/* Touch viewports have no hover: keep the owner-only channel settings
+   affordance visible instead of undiscoverable. */
+@media (hover: none), (pointer: coarse) { .channel-manage { opacity: 1; } }
 #people-panel { border: 0; background: transparent; box-shadow: none; padding: 0; }
 #people-panel > summary { list-style: none; }
 #people-panel > summary::-webkit-details-marker { display: none; }
@@ -257,7 +287,7 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .people-actions .button { width: auto; min-height: 36px; padding: .35rem .7rem; font-size: .78rem; }
 .create-room-details { margin: 0 0 .5rem; font-size: .78rem; color: var(--muted); }
 .create-room-details summary { min-height: 36px; cursor: pointer; color: var(--text); font-weight: 600; }
-.room-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.room-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow-x: hidden; overflow-y: auto; }
 .room-main > :not(.timeline) { flex-shrink: 0; }
 .room-topbar { display: flex; align-items: center; gap: .6rem; min-height: 3.5rem; padding: .45rem 1.25rem; border-bottom: 1px solid var(--line-soft); }
 #conversation-title { margin: 0; font-size: 1rem; font-weight: 800; letter-spacing: -.01em; }
@@ -271,7 +301,9 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .search-row input { flex: 1; min-width: 0; }
 .search-row .button { min-height: 36px; padding: .3rem .6rem; font-size: .78rem; }
 .search-results { padding: .5rem 1rem; border-bottom: 1px solid var(--line-soft); max-height: 16rem; overflow-y: auto; }
-.timeline { flex: 1 1 auto; min-height: 0; overflow-y: auto; margin: 0; padding: .75rem 1.5rem 1rem; list-style: none; scrollbar-gutter: stable; }
+/* Keep several lines readable when enlarged controls consume the viewport.
+   The room scrolls to its composer instead of squeezing the timeline away. */
+.timeline { flex: 1 1 auto; min-height: 10rem; overflow-y: auto; margin: 0; padding: .75rem 1.5rem 1rem; list-style: none; scrollbar-gutter: stable; }
 .timeline > .empty-note { color: var(--muted); }
 .tl-work { margin: .6rem 0; }
 .tl-work .work-card { border: 1px solid var(--line); border-radius: .65rem; background: var(--panel-raised); padding: .85rem 1rem; }
@@ -351,6 +383,13 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .member-profile-body summary { min-height: 36px; padding-block: .5rem; cursor: pointer; }
 .member-profile-body p { margin-bottom: .4rem; }
 .member-profile-body .member-status { white-space: normal; font-size: .8rem; }
+/* plan-dir-card: the member chip's directory card section. */
+.member-directory-card { margin-top: .5rem; }
+.member-directory-card > summary { min-height: 36px; padding-block: .5rem; cursor: pointer; }
+.member-card-badges { display: flex; flex-wrap: wrap; gap: .35rem; margin-bottom: .4rem; }
+.card-provenance, .card-visibility { font-size: var(--text-xs); padding: .1rem .45rem; border: 1px solid var(--line); border-radius: 999px; }
+.card-provenance-seeded { border-style: dashed; }
+.member-card-body p { margin-bottom: .4rem; }
 .room-tools > summary { cursor: pointer; min-height: 44px; padding-block: .7rem; }
 @media (pointer: coarse) { .presence-member { min-height: 52px; } .member-profile > summary { width: 44px; height: 44px; } .member-head { padding-right: 2.25rem; } }
 
@@ -1170,11 +1209,6 @@ summary { overflow-wrap: anywhere; }
    the bottom of them. The prompt shows in full - a reader who cannot see what
    they are about to paste into their agent has no reason to trust it, and the
    clipboard fallback needs visible text to select. */
-.join-agent { margin: .25rem 0 0; }
-.join-agent textarea { margin: .5rem 0 .6rem; overflow-wrap: anywhere; }
-.join-agent details { margin-top: .75rem; }
-.join-agent ul { margin: .5rem 0 0; padding-left: 1.1rem; color: var(--muted); font-size: .82rem; }
-.join-agent li { margin: .2rem 0; }
 
 /* Room orientation reuses existing content rather than another work model. */
 .room-overview-open { width: 100%; text-align: left; margin: 0; }
@@ -1408,6 +1442,14 @@ summary { overflow-wrap: anywhere; }
   .composer-add-label { display: inline; white-space: normal; }
   .composer-row #request-reply { margin-left: auto; min-width: 0; max-width: 100%; white-space: normal; }
 }
+/* #1607: the composer send hint is a visible caption under the row, not just
+   a title tooltip. Coarse pointers also get the 44px touch target on the
+   composer "New work" button and the suggestion chips. */
+.composer-hint { margin: .25rem 0 0; padding: 0 .25rem; }
+@media (pointer: coarse) {
+  .composer-add { width: 44px; min-width: 44px; height: 44px; min-height: 44px; padding: .3rem; }
+  .suggestion-chip, .suggestion-dismiss { min-height: 44px; }
+}
 /* 320px at large text cannot fit New work, Request a reply, and Send on one
    line. New work takes the row above; the request wraps beside Send. */
 @media (max-width: 340px) {
@@ -1463,8 +1505,8 @@ summary { overflow-wrap: anywhere; }
   gap: .5rem;
   margin: .5rem 0;
   padding: .6rem .8rem;
-  background: var(--surface-raised, #f5f5f5);
-  border: 1px solid var(--border, #ddd);
+  background: var(--panel-raised);
+  border: 1px solid var(--line);
   border-radius: .5rem;
   font-size: .9rem;
 }
@@ -1474,7 +1516,7 @@ summary { overflow-wrap: anywhere; }
   background: none;
   border: none;
   padding: 0;
-  color: var(--link, #0066cc);
+  color: var(--blue);
   text-decoration: underline;
   cursor: pointer;
   font: inherit;
@@ -1494,7 +1536,7 @@ summary { overflow-wrap: anywhere; }
 .agent-first-run h2 { margin: 0 0 .5rem; font-size: 1.1rem; }
 .agent-first-run-lede { margin: 0 0 .75rem; color: var(--muted); }
 .agent-first-run-steps { margin: 0 0 .75rem; padding-left: 1.25rem; display: grid; gap: .5rem; }
-.agent-first-run-steps button { font: inherit; cursor: pointer; background: none; border: none; padding: 0; color: var(--link, #0066cc); text-decoration: underline; text-align: left; }
+.agent-first-run-steps button { font: inherit; cursor: pointer; background: none; border: none; padding: 0; color: var(--blue); text-decoration: underline; text-align: left; }
 .agent-first-run-steps span { display: block; color: var(--muted); font-size: .85rem; }
 .agent-first-run-foot { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .agent-first-run-hint { font-size: .85rem; color: var(--muted); }
@@ -1519,8 +1561,6 @@ summary { overflow-wrap: anywhere; }
 #email-auth-step #email-auth-panel { margin-top: 0; }
 [data-signin-back] { display: inline-flex; align-items: center; gap: .35rem; min-width: 44px; min-height: 44px; margin: 0 0 .5rem; padding: .6rem 0; box-sizing: border-box; }
 #auth-panel > .invite-help { margin-top: 1.25rem; }
-.join-agent > summary { cursor: pointer; font-size: .9rem; color: var(--muted); min-height: 44px; padding: .7rem 0; }
-.join-agent[open] > summary { margin-bottom: .75rem; }
 
 .auth-panel .auth-email-title { display: flex; align-items: center; min-height: 44px; margin: 0 0 0 3.25rem; font-size: 1.15rem; }
 
@@ -1558,7 +1598,7 @@ summary { overflow-wrap: anywhere; }
 
 /* Visible entry routes, each opening a focused sign-in flow. */
 .signin-entry-routes { display: grid; gap: .5rem; margin-top: 1.25rem; }
-.signin-entry-routes #agent-signin-button { justify-self: start; min-height: 44px; font-size: .9rem; color: var(--text); text-decoration: underline; text-underline-offset: .2em; }
+.signin-entry-routes #agent-signin-button { justify-self: start; min-height: 44px; font-size: var(--text-sm); color: var(--muted); text-decoration: none; }
 #agent-auth-step { margin-top: 1rem; }
 #agent-auth-back { min-height: 44px; }
 
@@ -1613,3 +1653,54 @@ summary { overflow-wrap: anywhere; }
   .updates-actions { width: 100%; }
   .updates-actions button { flex: 1 1 auto; }
 }
+
+/* Revoked memberships remain inspectable separately from active agents. */
+.removed-agents { margin-top: .75rem; color: var(--muted); }
+.removed-agents > summary { min-height: 44px; padding: .65rem 0; font-size: var(--text-sm); cursor: pointer; }
+
+/* Availability is readable without relying on presence-dot colors. */
+.presence-unknown { background: var(--muted); }
+.member-availability { display: block; color: var(--muted); font-size: var(--text-xs); }
+.member-observation, .member-pause-explanation, .presence-check-note { color: var(--muted); font-size: var(--text-sm); overflow-wrap: anywhere; }
+.presence-refresh { margin-bottom: .75rem; }
+.presence-check-note { display: block; }
+.member-owned-by { overflow-wrap: anywhere; }
+
+#room-actions-list section { display: grid; gap: .15rem; }
+#room-actions-list h3 { color: var(--muted); font-size: var(--text-sm); margin: .75rem .75rem .25rem; }
+#room-actions-status:empty { display: none; }
+
+#room-actions-list [data-room-task] { overflow-wrap: anywhere; }
+#room-actions-list [data-room-task] span, #room-actions-list [data-room-task] small { display: block; }
+#room-actions-list [data-room-task] small { color: var(--muted); font-size: var(--text-xs); }
+
+/* Signup guidance belongs to the complete credential row. */
+[data-signin-form="password"] > .form-hint { grid-column: 1 / -1; margin: 0; }
+
+/* The entrance offers two choices; explanation and agent entry live in More. */
+@font-face { font-family: RoomWordmark; src: url("/og/fonts/Inter-Regular.ttf") format("truetype"); font-display: swap; }
+#auth-panel.auth-panel { width: min(100% - 3rem, 25rem); max-width: 25rem; margin: clamp(5rem, 18vh, 12rem) auto 3rem; padding: 0; border: 0; background: transparent; box-shadow: none; }
+.auth-panel #auth-title { font-family: RoomWordmark, var(--font-sans); font-size: var(--text-wordmark); font-weight: 400; letter-spacing: -.07em; line-height: 1.1; text-align: center; margin-bottom: 2.75rem; white-space: normal; }
+.signin-welcome { display: grid; gap: .75rem; }
+.signin-welcome .button { border-radius: .75rem; }
+.signin-more { text-align: center; }
+.signin-more > summary { cursor: pointer; color: var(--muted); font-size: var(--text-sm); min-height: 44px; padding: .8rem; list-style: none; }
+.signin-more > summary::after { content: " +"; }
+.signin-more[open] > summary::after { content: " −"; }
+.signin-more > summary::-webkit-details-marker { display: none; }
+.signin-more > a, .signin-more > button { display: block; margin: .25rem auto; min-height: 44px; padding: .6rem; font-size: var(--text-sm); }
+#signin-entry-routes { margin-top: .6rem; }
+#signin-entry-routes #agent-signin-button { justify-self: center; color: var(--muted); text-decoration: none; font-weight: 400; }
+[data-signin-form="password"] > .signin-more, #signup-password-hint { grid-column: 1 / -1; }
+#terms-notice { order: 3; margin: .5rem 0 0; font-size: var(--text-xs); text-align: center; }
+@media (max-width: 520px) { #auth-panel.auth-panel { margin-top: 22vh; } }
+
+.app-shell:has(#auth-panel:not([hidden])) ~ .site-footer { display: none; }
+body:has(#auth-panel:not([hidden])) .site-footer { display: none; }
+
+.join-agent { margin: 1.25rem 0 0; padding: 1rem 1.1rem; border: 1px solid var(--line); border-radius: .85rem; background: var(--panel-raised); }
+.join-agent h2 { margin: 0 0 .35rem; font-size: var(--text-md); }
+.join-agent textarea { margin: .5rem 0 .6rem; overflow-wrap: anywhere; }
+.join-agent .connect-steps { margin: .5rem 0 0; padding-left: 1.25rem; color: var(--muted); font-size: var(--text-sm); }
+.join-agent .connect-steps li { margin: .35rem 0; }
+.join-agent .connect-steps strong { color: var(--text); }

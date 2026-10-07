@@ -2,7 +2,7 @@
 // (scripts/secret-scan-diff.mjs).
 //
 // What this protects (test-audit authoring gate):
-//  1. Behavior: the diff gate flags secret-shaped ADDED lines (11 seeded
+//  1. Behavior: the diff gate flags secret-shaped ADDED lines (12 seeded
 //     rules, generated at runtime) and stays silent on the current main
 //     tree — the zero-false-positive acceptance for the CI gate.
 //  2. Credible regressions: parseDiff scanning removed lines or misreporting
@@ -69,6 +69,15 @@ const fakeBotToken = () => {
     .slice(0, 35);
   return `bot_token = "${botId}:${secret}"`;
 };
+// 12-word mnemonic assembled at runtime from a word list: no literal
+// secret-shaped string is committed (same push-protection rationale as the
+// other generators). Deterministic pick — no Math.random flake.
+const fakeWalletSeed = () => {
+  const words = ["abandon","ability","able","about","above","absent","absorb","abstract","absurd","abuse","access","accident","achieve","acid","acoustic","acquire","across","act","action","actor","adapt","add"];
+  const picked = [];
+  for (let i = 0; i < 12; i++) picked.push(words[(i * 7 + 3) % words.length]);
+  return `mnemonic = "${picked.join(" ")}"`;
+};
 // Deterministic PRNG for the high-entropy seed (same rationale as
 // tests/secret-scan.test.js: a true random draw can dip below the entropy
 // threshold and flake CI).
@@ -95,6 +104,7 @@ const SEEDS = [
   ["slack-token", fakeSlack],
   ["stripe-key", fakeStripe],
   ["telegram-bot-token", fakeBotToken],
+  ["wallet-seed", fakeWalletSeed],
   ["high-entropy", fakeHighEntropy],
 ];
 
@@ -182,7 +192,7 @@ function runGate(args, cwd) {
   });
 }
 
-test("CLI flags all 11 seeded rules on added lines (exit 1)", () => {
+test("CLI flags all 12 seeded rules on added lines (exit 1)", () => {
   const { dir, sha } = initTempRepo();
   const values = SEEDS.map(([, gen]) => gen());
   // Each seed is already a full line (or a bare value); write them

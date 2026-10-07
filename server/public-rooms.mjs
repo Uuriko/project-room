@@ -1,8 +1,9 @@
-// Public acquisition pages: template gallery, opt-in room pages, agent directory.
-// Script-free HTML. Member-authored text is escaped on the page and marked
-// untrusted on the JSON agents read. The pages read public_rooms,
-// public_receipts, and public_directory_entries. They do not read
-// rooms.projection, and a GET does not mint a share link.
+// Public acquisition pages: template gallery, opt-in room pages, agent directory,
+// and the demo room. Script-free HTML. Member-authored text is escaped on the
+// page and marked untrusted on the JSON agents read. The pages read
+// public_rooms, public_receipts, and public_directory_entries. They do not read
+// rooms.projection, and a GET does not mint a share link. The demo room is the
+// exception: it reads nothing at all — curated static content only.
 import { escapeHtml, RECEIPTS_PAGE_CSP } from "./receipts-page.mjs";
 import { CONTENT_TRUST } from "./content-trust.mjs";
 import { ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
@@ -113,6 +114,75 @@ ${taskLine}
 ${receiptLine}
 <p><a href="${escapeHtml(join.href)}">Join</a></p>
 <p><a href="${escapeHtml(reportHref("room", slug))}">Report</a></p>
+</main>
+<footer><a href="/?start=room">Made in Project Room — start your own room</a><p>${LEGAL_FOOTER_LINKS}</p></footer>
+</body></html>`;
+  return { html, document };
+}
+
+// Demo room (wave-2 human-UX #1599): one illustrative sanitized conversation
+// for unauthenticated visitors — "what the product IS" before sign-in. The
+// content is frozen and fictional; the view takes no store argument, so no
+// live room data, member PII, or opt-in state can ever reach the page. It is
+// labeled a demo snapshot throughout and must stay that way.
+const DEMO_ROOM = Object.freeze({
+  title: "The Demo Room",
+  purpose: "Friends working together with one assistant in a shared conversation.",
+  members: Object.freeze([
+    Object.freeze({ name: "Mara", kind: "person" }),
+    Object.freeze({ name: "Leo", kind: "person" }),
+    Object.freeze({ name: "Room", kind: "assistant" }),
+  ]),
+  messages: Object.freeze([
+    Object.freeze({ from: "Mara", body: "@Room, help us triage the support threads before Friday." }),
+    Object.freeze({ from: "Leo", body: "Please prioritize the mobile issues. We have a release coming up." }),
+    Object.freeze({ from: "Room", body: "I am grouping the reports and checking which ones affect mobile. I have included Leo's priority." }),
+    Object.freeze({ from: "Room", body: "Here is the triage summary: three bugs, five questions and four requests. Two mobile bugs should come first." }),
+    Object.freeze({ from: "Mara", body: "Looks good. Let's take those two first." }),
+  ]),
+  tasks: Object.freeze(["Fix the two mobile bugs", "Draft the weekly changelog"]),
+  receipts: Object.freeze(["Support triage summary", "Changelog draft"]),
+});
+
+export function demoRoomView({ ref = "" } = {}) {
+  const room = DEMO_ROOM;
+  const clean = publicRef(ref);
+  const start = withRef("/?start=room", clean);
+  const description = `${room.title}: ${room.purpose} Demo snapshot with illustrative content.`;
+  const memberLine = room.members.map(item => `<li>${escapeHtml(item.name)} · ${escapeHtml(item.kind)}</li>`).join("");
+  const messageLine = room.messages.map(item =>
+    `<article class="card"><p class="meta">${escapeHtml(item.from)}</p><p>${escapeHtml(item.body)}</p></article>`
+  ).join("\n");
+  const taskLine = `<ul>${room.tasks.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
+  const receiptLine = `<ul>${room.receipts.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
+  const document = {
+    schema: "project-room-demo-room/1",
+    contentTrust: CONTENT_TRUST,
+    untrusted: true,
+    demo: true,
+    title: room.title,
+    purpose: room.purpose,
+    members: room.members.map(item => ({ name: item.name, kind: item.kind })),
+    messages: room.messages.map(item => ({ from: item.from, body: item.body })),
+    tasks: [...room.tasks],
+    receipts: [...room.receipts],
+  };
+  const html = `${head({ title: `${room.title} · Project Room demo`, description, path: "/demo" })}
+${shell(`<a href="/templates">Templates</a>`)}
+<main>
+<p class="meta">Demo snapshot — everything on this page is illustrative content, not a live room.</p>
+<h1>${escapeHtml(room.title)}</h1>
+<p>${escapeHtml(room.purpose)}</p>
+<p class="meta">${room.members.filter(item => item.kind === "person").length} people · one assistant</p>
+<h2>Who is here</h2>
+<ul>${memberLine}</ul>
+<h2>The conversation</h2>
+${messageLine}
+<h2>Open tasks</h2>
+${taskLine}
+<h2>Shared results</h2>
+${receiptLine}
+<p><a href="${escapeHtml(start)}">Start your own room</a> — sign in to join a real room.</p>
 </main>
 <footer><a href="/?start=room">Made in Project Room — start your own room</a><p>${LEGAL_FOOTER_LINKS}</p></footer>
 </body></html>`;

@@ -12,6 +12,8 @@ function fakeContainer() {
     addEventListener(name, fn) { (listeners[name] ??= []).push(fn); },
     removeEventListener(name, fn) { listeners[name] = (listeners[name] ?? []).filter(f => f !== fn); },
     querySelector(selector) { return selector === "[data-signin-status]" ? status : null; },
+    setAttribute() {},
+    querySelectorAll() { return []; },
     contains() { return true; },
     fire(name, event) { for (const fn of listeners[name] ?? []) fn(event); }
   };

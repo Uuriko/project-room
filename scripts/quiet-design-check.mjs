@@ -29,7 +29,7 @@ for (const touch of [false, true]) {
     await page.goto(`http://127.0.0.1:${server.address().port}`);
     await signInFixture(page, fixture.keys.owner);
     await page.locator("#main").waitFor({ state: "visible" });
-    assert.equal(await page.locator("#people-panel").evaluate(e => e.open), true, "people-panel starts open in the sidebar");
+    assert.equal(await page.locator("#people-panel").evaluate(e => e.open), false, "people-panel starts collapsed in the human sidebar");
     assert.equal(await page.locator("#composer-options").evaluate(node => node.open), false, "secondary composer options start closed");
     assert.equal(await page.locator("#work-options").evaluate(e => e.open), false, "work-options starts quiet");
     assert.equal(await page.locator(".work-details").first().evaluate(e => e.open), false);
@@ -120,15 +120,24 @@ for (const touch of [false, true]) {
       await reveal.evaluate(e => e.blur());
     }
     await page.evaluate(() => document.documentElement.style.fontSize = "200%");
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true, "doubled text reflows");
-    assert.ok((await page.locator('#message-list').boundingBox()).height >= 160, 'large text retains a readable conversation region');
+    const largeTextViewports = touch ? [{ width: 390, height: 844 }] : [{ width: 1440, height: 1000 }, { width: 1280, height: 800 }];
+    for (const viewport of largeTextViewports) {
+      await page.setViewportSize(viewport);
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true, "doubled text reflows");
+      const timelineBox = await page.locator('#message-list').boundingBox();
+      assert.ok(timelineBox.height >= 160, `large text retains a readable conversation region (${viewport.width}x${viewport.height}: ${timelineBox.height}px)`);
+      await input.scrollIntoViewIfNeeded();
+      const composerBox = await input.boundingBox();
+      assert.ok(composerBox.y >= 0 && composerBox.y + composerBox.height <= viewport.height + 1, "large text composer stays reachable by scrolling");
+    }
+    await page.setViewportSize(touch ? { width: 390, height: 844 } : { width: 1440, height: 1000 });
     await input.scrollIntoViewIfNeeded();
     await page.screenshot({ path: `test-results/quiet-${label}-large-text-viewport.png` });
     await page.screenshot({ path: `test-results/quiet-${label}-large-text.png`, fullPage: true });
     if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await clickChrome(page, "#signout-button");
     await page.locator("#auth-panel").waitFor({ state: "visible" });
     assert.equal(await page.locator("#work-dialog").evaluate(e => e.open), false);
-    assert.equal(await page.locator("#people-panel").evaluate(e => e.open), true);
+    assert.equal(await page.locator("#people-panel").evaluate(e => e.open), false, "sign-out restores the quiet human disclosure state");
     assert.equal(await page.locator("#composer-options").evaluate(node => node.open), false, "secondary composer options start closed");
     assert.equal(await page.locator("#work-options").evaluate(e => e.open), false);
     assert.deepEqual(errors, []);

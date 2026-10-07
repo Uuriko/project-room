@@ -35,6 +35,17 @@ export function mcpTransportError(code, message, { reason, hint, next, category,
   };
 }
 
+// JSON-RPC -32600: the envelope itself is wrong. Carries the same hint and
+// next[] as every other error (ERROR-TAXONOMY.md, #1550).
+export function mcpInvalidRequest() {
+  return mcpTransportError(-32600, "Invalid request", {
+    reason: "invalid_request",
+    category: "input",
+    hint: "Send one JSON-RPC 2.0 object: {\"jsonrpc\":\"2.0\",\"id\":<string up to 128 chars or integer>,\"method\":\"<name>\",\"params\":{...}}. Omit id for a notification; notifications receive no JSON-RPC response. Batches are not accepted.",
+    next: [Object.freeze({ command: "initialize" }), Object.freeze({ command: "tools/list" })],
+  });
+}
+
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
 
 export const MCP_AUTH_HINT = "Use your saved connection and identity secret. If none exists, read /llms.txt for initial setup.";
@@ -186,10 +197,9 @@ export function mcpCallError(id, { reason, tool, suggestion = null, missing = []
             hint: suggestion
               ? `Did you mean "${suggestion}"? Re-list tools with tools/list and use the exact snake_case name.`
               : "No tool has a name close to that. Re-list tools with tools/list and use an exact snake_case name.",
-            next: [
-              Object.freeze({ command: "tools/list" }),
-              Object.freeze({ tool: "room_check_access" }),
-            ],
+            // Re-list tools rather than directing an unknown-tool caller to
+            // a hosted access check that may require authentication (#1551).
+            next: [Object.freeze({ command: "tools/list" })],
           }),
         },
       }

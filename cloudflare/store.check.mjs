@@ -114,3 +114,17 @@ test('bounty draft receipts match durable event sequences and replay after Worke
     assert.deepEqual(await resumed.json(), receipt);
   } finally { await mf.dispose(); }
 });
+
+// Distinct platform risk: native nested rollback, writer permit and cache ownership.
+test('explicit isolated RoomStore writes roll back independently on real Workers', async () => {
+  const bundled = await build({ entryPoints: [fileURLToPath(new URL('./store-worker.test-fixture.mjs', import.meta.url))],
+    bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*'] });
+  const mf = new Miniflare({ modules: true, script: bundled.outputFiles[0].text,
+    compatibilityDate: '2026-07-30', compatibilityFlags: ['nodejs_compat'],
+    durableObjects: { ROOM: { className: 'StoreTestRoom', useSQLite: true } } });
+  try {
+    const response = await mf.dispatchFetch('http://localhost/isolated-transactions');
+    assert.equal(response.status, 200, await response.clone().text());
+    assert.deepEqual(await response.json(), { innerRolledBack: true, parentPreserved: true, outerRollback: true, cacheRestored: true, defaultsPreserved: true, readOnlyProtected: true, synchronous: true });
+  } finally { await mf.dispose(); }
+});

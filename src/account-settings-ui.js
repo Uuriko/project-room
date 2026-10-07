@@ -317,7 +317,7 @@ export function settingsHtml({ methods = [], providers = null, emailVerification
     + emailVerificationHtml(emailVerification, providers)
     + profileSectionHtml(methods)
     + section("settings-notifications-title", "Notifications",
-      `<p class="settings-empty">Nothing to configure here yet. Room notifications stay in Catch up.</p>`)
+      `<p class="form-hint">Browser push preferences live per room in Catch up → Notifications — choose mentions, direct messages, or both. Push delivery turns on from there once the room's push keys are provisioned; until then nothing leaves this tab.</p>`)
     + section("settings-agents-title", "Agents &amp; connections", oauthSectionHtml(providers) + mailSectionHtml(providers))
     + section("settings-billing-title", "Billing / plan",
       `<p class="settings-empty">No plan is billed from account settings. A room\u2019s spend allowance is under Settings, in Billing / plan.</p>`)

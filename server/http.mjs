@@ -56,7 +56,7 @@ import { createHostedRoomMcp } from "./mcp-room-profile.mjs";
 import { diagnoseArguments } from "./mcp-arg-errors.mjs";
 import { collectNeedsMe } from "./needs-me.mjs";
 import { isIdentitySecret } from "./agent-identities.mjs";
-import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomDoorHtml, PUBLIC_DOOR_CSP } from "../deploy/room-entry.mjs";
+import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomAppUrl } from "../deploy/room-entry.mjs";
 import { guestAgentLinkContract, GUEST_AGENT_TOKEN_PREFIX, isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { isWebFetchGuest, WebFetchError } from "./web-fetch.mjs";
 // Board v2 is retired. Its routes answer 410 board_v2_retired. The
@@ -79,6 +79,7 @@ import { readSpendAllowance, setSpendAllowance } from "./spend-allowance.mjs";
 import { getAgentAutonomyTier, setAgentAutonomyTier } from "./autonomy-tiers.mjs";
 import { listAgentGrants, getAgentCapabilities, issueAgentGrant, revokeAgentGrant } from "./grants.mjs";
 import { listPins, setPin } from "./pins.mjs";
+// (squad roster handlers moved to server/routes/squads.mjs, batch RT)
 import { currentTypists, typingBeats, typingKey } from "./typing.mjs";
 import { renderReceiptsHtml, renderReceiptDetailHtml, receiptsListJson, receiptJson, RECEIPTS_PAGE_CSP } from "./receipts-page.mjs";
 import { queryPublicReceipts, publicReceiptById, listPublicReceiptSitemap, PUBLIC_RECEIPT_ID } from "./receipts-live.mjs";
@@ -906,7 +907,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     res.setHeader("Strict-Transport-Security", "max-age=31536000");
     // Cloudflare Web Analytics injects its beacon at the edge. The app does not
     // add that script; this document policy is what lets the beacon run.
-    res.setHeader("Content-Security-Policy", "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
+    res.setHeader("Content-Security-Policy", "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
     // SEC-1: lock unused powerful features and cross-origin window access.
     res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()");
     res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
@@ -1040,7 +1041,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         roomAuth, roomCredentials, expectedBinding, accountBinding,
         checkOrigin, protectWrite, exact, pathId, expectedOrigin,
         accountCookieName, roomCookieName, tokenPattern, accountView: sessionAccountView,
-        signInSlotToken, magicMailer, magicEmailLimit, passkeys,
+        signInSlotToken, magicMailer, magicEmailLimit, passkeys, oauthProvider,
         magicRequestEmailLimiter, magicConsumeEmailLimiter,
         resetRequestEmailLimiter, resetConsumeEmailLimiter, signupEmailLimiter,
         gmail, channelWebhooks, telegram, telegramStatus,
@@ -1411,9 +1412,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           "work:write": "Accept and complete work",
         };
         const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-        const scopeItems = validated.scopes.map(s => `<li>${esc(scopeLabels[s] || s)}</li>`).join("");
-        const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect ${esc(validated.client.name)}</title><style>body{font-family:system-ui,sans-serif;max-width:28rem;margin:4rem auto;padding:0 1rem;color:#1a1a1a}h1{font-size:1.25rem}ul{padding-left:1.25rem}.actions{margin-top:1.5rem;display:flex;gap:.75rem}button{padding:.6rem 1.25rem;border-radius:.5rem;border:1px solid #ccc;font-size:1rem;cursor:pointer}.primary{background:#0066cc;color:#fff;border-color:#0066cc}</style></head><body><h1>Connect ${esc(validated.client.name)} to Project Room?</h1><p><strong>${esc(validated.client.name)}</strong> is requesting access to your Project Room account. It will be able to:</p><ul>${scopeItems}</ul><p>You can revoke access at any time — list and kill your sessions with the <code>/api/oauth/sessions</code> endpoints, or revoke a single token at <code>POST /oauth/revoke</code>.</p><form method="post" action="/oauth/authorize"><input type="hidden" name="client_id" value="${esc(url.searchParams.get("client_id"))}"><input type="hidden" name="redirect_uri" value="${esc(url.searchParams.get("redirect_uri"))}"><input type="hidden" name="scope" value="${esc(url.searchParams.get("scope") || "")}"><input type="hidden" name="state" value="${esc(url.searchParams.get("state") || "")}"><input type="hidden" name="code_challenge" value="${esc(url.searchParams.get("code_challenge"))}"><input type="hidden" name="code_challenge_method" value="S256"><input type="hidden" name="csrf_token" value="${esc(auth.csrf)}"><div class="actions"><button type="submit" name="decision" value="allow" class="primary">Allow</button><button type="submit" name="decision" value="deny">Deny</button></div></form></body></html>`;
+        const scopeItems = validated.client.clientId === "project-room-macos"
+          ? "<li>Sign in to the Mac app with this account, including its room and account controls. The Mac session is separate from this browser.</li>"
+          : validated.scopes.map(s => `<li>${esc(scopeLabels[s] || s)}</li>`).join("");
+        const revocationHelp = validated.client.clientId === "project-room-macos"
+          ? "Sign out from Account in the Mac app to end its session. Signing out of this browser leaves the Mac app signed in."
+          : "Revoke access with the /api/oauth/sessions endpoints or POST /oauth/revoke.";
+        const nativeConsentWarning = validated.client.clientId === "project-room-macos"
+          ? "<p>Only allow this if you just chose Sign in in the Project Room Mac app.</p>" : "";
+        const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect ${esc(validated.client.name)}</title><style>body{font-family:system-ui,sans-serif;max-width:28rem;margin:4rem auto;padding:0 1rem;color:#1a1a1a}h1{font-size:1.25rem}ul{padding-left:1.25rem}.actions{margin-top:1.5rem;display:flex;gap:.75rem}button{padding:.6rem 1.25rem;border-radius:.5rem;border:1px solid #ccc;font-size:1rem;cursor:pointer}.primary{background:#0066cc;color:#fff;border-color:#0066cc}</style></head><body><h1>Connect ${esc(validated.client.name)} to Project Room?</h1><p><strong>${esc(validated.client.name)}</strong> is requesting access to your Project Room account. It will be able to:</p><ul>${scopeItems}</ul><p>${esc(revocationHelp)}</p>${nativeConsentWarning}<form method="post" action="/oauth/authorize"><input type="hidden" name="client_id" value="${esc(url.searchParams.get("client_id"))}"><input type="hidden" name="redirect_uri" value="${esc(url.searchParams.get("redirect_uri"))}"><input type="hidden" name="scope" value="${esc(url.searchParams.get("scope") || "")}"><input type="hidden" name="state" value="${esc(url.searchParams.get("state") || "")}"><input type="hidden" name="code_challenge" value="${esc(url.searchParams.get("code_challenge"))}"><input type="hidden" name="code_challenge_method" value="S256"><input type="hidden" name="csrf_token" value="${esc(auth.csrf)}"><div class="actions"><button type="submit" name="decision" value="allow" class="primary">Allow</button><button type="submit" name="decision" value="deny">Deny</button></div></form></body></html>`;
         const bytes = Buffer.from(html, "utf8");
+        res.setHeader("Referrer-Policy", "same-origin");
         res.setHeader("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; style-src 'unsafe-inline'");
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": bytes.length });
         return res.end(bytes);
@@ -1614,18 +1623,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (wikiReply) return json(res, wikiReply.status, wikiReply.body, req.method === "HEAD");
       }
       // Public Hosts (www / lobby / apex) reverse-proxy /room here. Browsers
-      // get the getdasha HTML door. / stays the workspace app. Packets stay
+      // go directly to the canonical workspace app. Packets stay
       // at /llms.txt, /room/llms.txt, /skill.md, /room/skill, agent.json,
       // and the kits catalog at /kits.txt / /room/kits.
       if (isPublicRoomDoorPath(url.pathname)) {
         if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed");
         if (wantsPublicDoorHtml(req.headers.accept)) {
-          const bytes = Buffer.from(publicRoomDoorHtml());
-          res.setHeader("Content-Security-Policy", PUBLIC_DOOR_CSP);
-          // GR1: the getdasha /room door canonicalizes onto this host.
-          res.setHeader("Link", `${discoveryLinks(url)}, <${ROOM_ORIGIN}/room>; rel="canonical"`);
-          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": bytes.length });
-          return res.end(req.method === "HEAD" ? undefined : bytes);
+          res.setHeader("Cache-Control", "no-store");
+          res.setHeader("Link", `${discoveryLinks(url)}, <${expectedOrigin()}/>; rel="canonical"`);
+          res.writeHead(302, { Location: publicRoomAppUrl(url.href, expectedOrigin()) });
+          return res.end();
         }
         const packet = discoveryDoc("/llms.txt");
         res.setHeader("X-Robots-Tag", "all");
@@ -3358,6 +3365,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // member.access_changed with active:false via the event-sourced path;
       // the identity link is kept (identity is not deleted).
       const memberDeactivateMatch = /^\/api\/rooms\/([^/]{1,384})\/members\/([^/]{1,64})$/.exec(url.pathname);
+      // plan-dir-card: a member's directory card (owns[] + reach{}) for
+      // the member chip, and the owner-only directory seed.
+      const memberCardMatch = /^\/api\/rooms\/([^/]{1,384})\/members\/([^/]{1,64})\/card$/.exec(url.pathname);
+      const dirSeedMatch = /^\/api\/rooms\/([^/]{1,384})\/directory\/seed$/.exec(url.pathname);
       // Public-face controls (owner only): status/toggle at the funnel root, rotate below.
       const publicFaceRotateMatch = /^\/api\/rooms\/([^/]{1,384})\/public-face\/rotate$/.exec(url.pathname);
       // Lane C inbox collaboration (task RC-2026-09-18-011): every collab
@@ -3418,8 +3429,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const workClaimReassignMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/reassign$/.exec(url.pathname);
       const workClaimReceiptsMatch = /^\/api\/rooms\/([^/]{1,384})\/receipts$/.exec(url.pathname);
       const workClaimRenewMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/renew$/.exec(url.pathname);
+      // Provenance walk + premise-invalid rollback (orch-provenance-rollback).
+      // Literal segments are matched before the {id} template so they are
+      // never mistaken for a claim id.
       const workClaimMatch = workClaimsMatch ?? workClaimsStatusMatch ?? workClaimsSweepMatch ?? workClaimsDuplicatesMatch ?? workClaimsConfigMatch ?? workClaimClaimMatch
-        ?? workClaimUpdateMatch ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch ?? workClaimItemMatch
+        ?? workClaimUpdateMatch ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch
+        ?? workClaimItemMatch
         ?? workClaimReceiptsMatch;
       // Agent /feedback endpoint (structured bug/feature reports): every
       // route template below is documented in docs/openapi.yaml — the
@@ -3509,6 +3524,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         && !dmConsentDecideMatch && !dmConsentBlockMatch && !dmConsentRevokeMatch && !dmConsentUnblockMatch && !publicFaceRotateMatch
         && !peerDmThreadMatch && !operatorAgentMatch
         && !mentionAckMatch && !mentionSettingsMatch && !savedDeleteMatch && !memberDeactivateMatch
+        && !memberCardMatch && !dirSeedMatch
         && !agentGrantsMatch && !agentGrantDeleteMatch && !agentCapabilitiesMatch
         && !matchmakingMatch) reject(404, "not_found", "Not found");
       const roomId = pathId((publicWorkRoomReviewMatch ?? projectOfferActionMatch ?? match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? delegationGrantMatch ?? delegationRevokeMatch ?? delegationListMatch ?? ownerDelegateGrantMatch ?? ownerDelegateRevokeMatch ?? ownerDelegateListMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch
@@ -3516,6 +3532,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         ?? dmConsentDecideMatch ?? dmConsentBlockMatch ?? dmConsentRevokeMatch ?? dmConsentUnblockMatch ?? publicFaceRotateMatch
         ?? peerDmThreadMatch ?? operatorAgentMatch
         ?? mentionAckMatch ?? mentionSettingsMatch ?? savedDeleteMatch ?? memberDeactivateMatch
+        ?? memberCardMatch ?? dirSeedMatch
         ?? agentGrantsMatch ?? agentGrantDeleteMatch ?? agentCapabilitiesMatch ?? matchmakingMatch)[1]);
       // NOTE: matchmakingMatch must stay in the roomId chain above — it was
       // added to the 404 guard but forgotten here, so every matchmaking
@@ -3528,6 +3545,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const mentionEventId = mentionAckMatch ? pathId(mentionAckMatch[2]) : null;
       const savedDeleteMessageId = savedDeleteMatch ? pathId(savedDeleteMatch[2]) : null;
       const deactivateMemberId = memberDeactivateMatch ? pathId(memberDeactivateMatch[2]) : null;
+      const cardMemberId = memberCardMatch ? pathId(memberCardMatch[2]) : null;
       const route = publicWorkRoomReviewMatch ? "public-work-review" : projectOfferActionMatch ? "project-offers" : match ? (match[2] ?? "") : revokeMatch ? "invitation-revoke" : threadMatch ? "thread" : accessDecideMatch ? "access-decide" : delegationGrantMatch ? "delegation-grant" : delegationRevokeMatch ? "delegation-revoke" : delegationListMatch ? "delegation-list" : ownerDelegateGrantMatch ? "owner-delegate-grant" : ownerDelegateRevokeMatch ? "owner-delegate-revoke" : ownerDelegateListMatch ? "owner-delegate-list"
         : dmConsentDecideMatch ? "dm-consent-decide" : dmConsentBlockMatch ? "dm-consent-block" : dmConsentRevokeMatch ? "dm-consent-revoke"
         : dmConsentUnblockMatch ? "dm-consent-unblock" : publicFaceRotateMatch ? "public-face-rotate"
@@ -3536,6 +3554,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         : agentCapabilitiesMatch ? "agent-capabilities"
         : mentionAckMatch ? "mention-ack" : mentionSettingsMatch ? "mention-settings" : savedDeleteMatch ? "saved-delete"
         : memberDeactivateMatch ? "member-deactivate"
+        : memberCardMatch ? "member-card" : dirSeedMatch ? "directory-seed"
         : "ownership-transfer";      const selected = roomCredentials(req, url);
       const fence = selected.mode === "account" ? accountBinding(req, route === "stream" ? url : null) : expectedBinding(req);
       const auth = roomAuth(selected, roomId, fence);
@@ -3696,9 +3715,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           : workClaimUpdateMatch ? "update"
           : workClaimReviewMatch ? "review"
           : workClaimReleaseMatch ? "release"
-          : workClaimRenewMatch ? "renew" : "reassign";
+          : workClaimRenewMatch ? "renew"
+          : "reassign";
         const workClaimIdMatch = workClaimItemMatch ?? workClaimClaimMatch ?? workClaimUpdateMatch
-          ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch;
+          ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch
+         ;
         return await handleWorkClaims({ req, res, url, store, roomId, auth, workClaimRoute,
           workClaimId: workClaimIdMatch ? pathId(workClaimIdMatch[2]) : null, registry: store.workClaims,
           ...(fetchPullRequest ? { fetchPullRequest } : {}),
@@ -3833,11 +3854,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "conversation" && req.method === "GET") {
         const params = url.searchParams;
-        if ([...params.keys()].some(key => !["limit", "cursor", "since", "messageId", "auth"].includes(key) || params.getAll(key).length !== 1)
+        if ([...params.keys()].some(key => !["limit", "cursor", "since", "messageId", "channelId", "auth"].includes(key) || params.getAll(key).length !== 1)
           || params.has("limit") && !/^[1-9]\d*$/.test(params.get("limit"))) reject(422, "invalid_conversation_selection", "Choose a bounded conversation page or one message");
         return json(res, 200, readConversation(store, selected.token, roomId, {
           ...(params.has("limit") ? { limit: Number(params.get("limit")) } : {}),
-          cursor: params.get("cursor"), since: params.get("since"), messageId: params.get("messageId"), expectedSessionBinding: fence
+          cursor: params.get("cursor"), since: params.get("since"), messageId: params.get("messageId"), channelId: params.get("channelId"), expectedSessionBinding: fence
         }));
       }
       if (route === "thread" && req.method === "GET") {
@@ -4356,6 +4377,28 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!exact(data, ["timeoutMs"])) reject(422, "invalid_request", "timeoutMs is the accepted field");
         return json(res, 200, store.setMentionTimeout(selected.token, roomId, data.timeoutMs, fence));
       }
+      if (route === "member-card" && req.method === "GET") {
+        // plan-dir-card: a room member's directory card for the member
+        // chip (owns[] + reach{}). Any room member may read it; visibility
+        // is enforced in the store (private cards only to the owning
+        // identity). 404 when the member has no card or the viewer may not
+        // see it — never an existence oracle.
+        const doc = store.agentPlugin.cardForMember({
+          roomId, memberId: cardMemberId, viewerIdentityId: auth.identityId ?? null,
+          // A2A v1.0 projection (interop/discoverability only); interfaces
+          // omitted when the origin is not a public https URL.
+          serviceOrigin: typeof origin === "string" && /^https:\/\/\S+$/.test(origin) ? origin : null,
+        });
+        if (!doc) reject(404, "unknown_card", "No directory card for this member");
+        return json(res, 200, doc);
+      }
+      if (route === "directory-seed" && req.method === "POST") {
+        // plan-dir-card: owner-only seeding of placeholder directory cards
+        // for agent members that have none. Seeded cards are visibility
+        // "room", provenance "seeded", unsigned; the agent replaces its seed
+        // by publishing a signed card.
+        return json(res, 200, store.agentPlugin.seedRoomDirectoryCards({ roomId, ownerMemberId: auth.member.id }));
+      }
       if (route === "member-deactivate" && req.method === "DELETE") {
         // RC-2026-09-23: self-deactivation. The caller names its own member
         // id; naming anyone else is 403. Emits member.access_changed with
@@ -4398,20 +4441,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const data = await body(req);
         if (!exact(data, ["threadId", "muted"])) reject(422, "invalid_thread_mute", "threadId and muted are the accepted fields");
         return json(res, 200, store.threadMutes.set(selected.token, roomId, data, fence));
-      }
-      // Human browser push. One fixed default (mentions and DMs). GET returns
-      // the VAPID public key when delivery is configured. POST stores the
-      // browser subscription. There is no preference body.
-      if (route === "human-push" && req.method === "GET") {
-        const params = url.searchParams;
-        if ([...params.keys()].some(key => key !== "auth" || params.getAll(key).length !== 1)) reject(422, "invalid_human_push", "No selection on this route");
-        return json(res, 200, store.humanPush.status(selected.token, roomId, fence));
-      }
-      if (route === "human-push" && req.method === "POST") {
-        return json(res, 200, store.humanPush.save(selected.token, roomId, await body(req), fence));
-      }
-      if (route === "human-push" && req.method === "DELETE") {
-        return json(res, 200, store.humanPush.remove(selected.token, roomId, await body(req), fence));
       }
       if (route === "agent-pause" && req.method === "GET") {
         // C6: wake-pause state for the caller, or (signed-in owner) one named
@@ -4599,7 +4628,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route === "share-links" && req.method === "GET") return json(res, 200, store.shareLinks.list(selected.token, roomId, fence));
       if (route === "share-links" && req.method === "POST") {
         const data = await body(req);
-        if (!exact(data, ["requestId", "linkToken", "expiresAt", "maxJoins", "expectedMemberRevision"])) reject(422, "invalid_link", "Supply the exact invitation link settings");
+        const linkFields = ["requestId", "linkToken", "expiresAt", "maxJoins", "expectedMemberRevision"];
+        if (!exact(data, linkFields) && !exact(data, [...linkFields, "access"])) reject(422, "invalid_link", "Supply the exact invitation link settings");
         const result = store.shareLinks.create(selected.token, roomId, data, fence);
         return json(res, result.duplicate ? 200 : 201, result);
       }

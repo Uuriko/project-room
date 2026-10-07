@@ -27,6 +27,10 @@ const claim={taskId:'mcp:task',requestId:'claim',expectedTermsVersion:1};
 
 test('actual MCP anonymous recommendations and task reads discover auth without writing or room enrollment',async t=>{
  const f=await fixture(t),before=state(f.store);
+ const unknown=await f.call('qa2_no_such_tool');
+ assert.equal(unknown.body.error.code,-32602);assert.equal(unknown.body.error.data.reason,'unknown_tool');
+ assert.deepEqual(unknown.body.error.data.next,[{command:'tools/list'}]);
+ assert.match(unknown.body.error.data.hint,/tools\/list/);
  const listed=await f.rpc({jsonrpc:'2.0',id:1,method:'tools/list'});
  assert.deepEqual(listed.body.result.tools.map(tool=>tool.name),['room_join_packet','room_join_kits','room_join_prompt','room_mcp_snippet','public_work_recommend','public_work_read_task']);
  const recommendation=value(await f.call('public_work_recommend',{skills:['JavaScript']}));assert.equal(recommendation.claim,null);assert.equal(recommendation.recommendations[0].task.taskId,'mcp:task');
@@ -71,8 +75,45 @@ test('strict MCP schemas reject excessive arguments and notifications never muta
   const reply=await f.call(name,args,f.first.secret);assert.equal(reply.body.error.code,-32602,JSON.stringify(reply));
  }
  const notification=await f.rpc({jsonrpc:'2.0',method:'tools/call',params:{name:'public_work_claim',arguments:claim}},f.first.secret);assert.equal(notification.status,202);
- const malformed=await f.rpc({jsonrpc:'1.0',id:3,method:'tools/call',params:{name:'public_work_claim',arguments:claim}},f.first.secret);assert.equal(malformed.body.error.code,-32600);
  assert.equal(state(f.store),before);
+ // Three real dispatch profiles: anonymous join, outside public-work, room member.
+ const created=await fetch(f.origin+'/api/agent-rooms',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+f.second.secret},body:JSON.stringify({roomId:'qa2-member-room',title:'Synthetic member room',purpose:'Envelope error boundary',kind:'personal'})});
+ assert.equal(created.status,201);
+ const memberBefore=JSON.stringify(f.store.room('qa2-member-room'));
+ const afterSetup=state(f.store);
+ for(const [profile,secret,method,params] of [
+  ['anonymous',undefined,'ping',{}],
+  ['outside-public-work',f.first.secret,'tools/call',{name:'public_work_claim',arguments:claim}],
+  ['room-member',f.second.secret,'ping',{}]
+ ]) {
+  for(const message of [null,[],{jsonrpc:'1.0',id:3,method,params},{jsonrpc:'2.0',id:3},{jsonrpc:'2.0',id:null,method,params}]) {
+   const malformed=await f.rpc(message,secret),error=malformed.body.error;
+   assert.equal(malformed.status,200,profile);assert.equal(malformed.body.id,null,profile);
+   assert.equal(error.code,-32600,profile);assert.equal(error.data?.reason,'invalid_request',profile);
+   assert.equal(error.data.category,'input',profile);assert.equal(error.data.status,'action_required',profile);
+   assert.match(error.data.hint,/JSON-RPC|jsonrpc/,profile);
+   assert.match(error.data.hint,/notification/i,profile);
+   assert.match(error.data.hint,/batch/i,profile);
+   assert.ok(error.data.next.length>0,profile);
+   assert.ok(error.data.next.every(step=>typeof step.command==='string' || typeof step.tool==='string'),profile);
+   assert.match(error.data.operationId,/^op_[A-Za-z0-9_-]+$/,profile);
+   assert.equal(state(f.store),afterSetup,profile);assert.equal(JSON.stringify(f.store.room('qa2-member-room')),memberBefore,profile);
+  }
+ }
+ // Room creation is fixture setup; refusals and the retained notification have no effects.
+ assert.equal(f.store.publicWorkClaims.read('mcp:task').claim.state,'unclaimed');
+});
+
+test('HTTP public claim lease type and range refusals leave registry and journals unchanged',async t=>{
+ const f=await fixture(t),before=state(f.store);
+ for(const leaseHours of ['6h',null,0,25]) {
+  const response=await fetch(f.origin+'/api/public-work/tasks/mcp%3Atask/claim',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+f.first.secret},body:JSON.stringify({requestId:'qa2-lease-'+String(leaseHours),expectedTermsVersion:1,leaseHours})});
+  const body=await response.json();assert.equal(response.status,422,JSON.stringify(body));
+  assert.equal(body.error.code,'invalid_public_work');
+  if(typeof leaseHours!=='number') assert.match(body.error.message,/JSON number/i);
+  else assert.match(body.error.message,/greater than zero.*24/);
+  assert.equal(state(f.store),before);assert.equal(f.store.publicWorkClaims.read('mcp:task').claim.state,'unclaimed');
+ }
 });
 
 test('credential revoked while MCP body uploads cannot claim even with a saved prior connection',async t=>{

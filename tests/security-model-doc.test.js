@@ -18,5 +18,7 @@ test("SECURITY-MODEL.md makes no false redaction claims", () => {
   const path = join(root, "docs", "SECURITY-MODEL.md");
   const content = readFileSync(path, "utf8");
   assert.ok(!content.includes("PR #188"), "Doc must not cite unmerged PR #188 as available");
-  assert.ok(content.includes("src/data-export.mjs"), "Doc should reference the actual redaction implementation");
+  for (const implementation of ["server/message-redaction.mjs", "server/redact-read.mjs"]) {
+    assert.ok(content.includes(implementation), `Doc should reference the actual redaction implementation ${implementation}`);
+  }
 });

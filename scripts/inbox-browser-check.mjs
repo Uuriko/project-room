@@ -416,12 +416,7 @@ test("unavailable and HTML provider drafts never show an acknowledgment action",
     await p.locator("#inbox-reply-close").click();
   }
 });
-// Quarantined per tests/quarantine.json: fresh/second-tab #main stays hidden
-// past the 30s waitFor on loaded CI runners (failed 2026-10-06 on green main,
-// run 37433449455; passes in ~2.3s in green runs). Boot-timing flake, not a
-// product hang — runs only in the non-blocking lane (QUARANTINE_RUN=1).
-const QUARANTINED_PROVIDER_PREVIEW_RETAB = process.env.QUARANTINE_RUN !== "1";
-test("provider preview cannot repopulate private content after another tab changes account", { timeout: 35000, skip: QUARANTINED_PROVIDER_PREVIEW_RETAB ? "quarantined: tests/quarantine.json (#main-visible timeout on slow CI; repair by 2026-10-20)" : false }, async t => {
+test("provider preview cannot repopulate private content after another tab changes account", { timeout: 35000 }, async t => {
   const f = await reviewFixture(t), p = f.page;
   let release, reached; const held = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { reached = resolve; });
   t.after(() => release());
@@ -521,7 +516,7 @@ test("account-only confirmation preserves a newer login and retires a held priva
   // Establish the guest's room session (as signInFixture does) so the
   // reloaded tab can enter the room; the account login alone is not enough.
   const roomSession = await other.context().request.post(f.origin + "/api/session", {
-    headers: { Origin: f.origin }, data: { accessKey: guestAccessKey }
+    headers: { Origin: f.origin }, data: { accessKey: f.store.issueAccessKey("commons", "guest") }
   });
   assert.equal(roomSession.status(), 201);
   phase = "confirmation response";
@@ -1096,12 +1091,7 @@ test("real inbox: a saved reply based on an old source requires review after rel
   await p.getByText("Saved · only you", { exact: true }).waitFor(); assert.equal(f.saved().draft.sourceRevision, 2);
 });
 
-// Quarantined per tests/quarantine.json: #main stays hidden past the 30s
-// waitFor on loaded CI runners (failed 2x 2026-10-06 on green main, runs
-// 37477149290 + 37482055559; passes in ~2.4s in green runs). Boot-timing flake,
-// not a product hang — runs only in the non-blocking lane (QUARANTINE_RUN=1).
-const QUARANTINED_REAL_INBOX_RETAB = process.env.QUARANTINE_RUN !== "1";
-test("real inbox: another tab changing the browser account clears private content and delayed reads", { timeout: 35000, skip: QUARANTINED_REAL_INBOX_RETAB ? "quarantined: tests/quarantine.json (#main-visible timeout on slow CI; repair by 2026-10-20)" : false }, async t => {
+test("real inbox: another tab changing the browser account clears private content and delayed reads", { timeout: 35000 }, async t => {
   const f = await setup(t), p = f.page; await f.inbox(); await f.pick("note");
   await p.locator("#inbox-draft").fill("Only the original account");
   // A never-opened source guarantees a real held read, regardless of the initial

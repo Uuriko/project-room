@@ -371,7 +371,8 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     const items = result.links.map(link => {
       const li = document.createElement("li"), text = document.createElement("p");
       li.dataset.linkId = link.id;
-      const description = status => `${link.joins}/${link.maxJoins} guests joined · ${status.replaceAll("_", " ")} · expires ${date(link.expiresAt)}`;
+      const kind = link.access === "co_admin" ? "Co-admin" : link.access === "member" ? "Member" : "Guest";
+      const description = status => `${kind} · ${link.joins}/${link.maxJoins} joined · ${status.replaceAll("_", " ")} · expires ${date(link.expiresAt)}`;
       text.textContent = description(link.status);
       li.append(text);
       if (link.status === "active") {
@@ -429,6 +430,9 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     $("#share-local-note").hidden = !["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
     refreshPurposes();
     refreshAgentCode();
+    // Member and co-admin links are the room creator's to make.
+    $("#share-link-access-label").hidden = getState()?.room?.ownerId !== getSession()?.member?.id;
+    $("#share-link-access").value = "guest";
     manager.showModal(); $("#share-link-create").focus();
     // Link-list feedback never owns the newer creation/clipboard status.
     await Promise.all([list(version, generation).catch(() => {}), loadKit()]);
@@ -448,7 +452,8 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     if (!managementCurrent(version, generation)) return;
     const request = pendingCreate ||= { requestId: crypto.randomUUID(), linkToken: newToken(),
       expiresAt: Date.now() + Number($("#share-link-expiry").value) * 3600000,
-      maxJoins: Number($("#share-link-limit").value), expectedMemberRevision: getState().members[getSession().member.id].revision };
+      maxJoins: Number($("#share-link-limit").value), expectedMemberRevision: getState().members[getSession().member.id].revision,
+      ...(!$("#share-link-access-label").hidden && $("#share-link-access").value !== "guest" ? { access: $("#share-link-access").value } : {}) };
     creationBusy(true); status("Creating link…");
     try {
       const result = await client.request(client.path("/share-links"), { method: "POST", data: request });
@@ -464,6 +469,8 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       $("#share-link-url").value = inviteUrl;
       $("#share-purpose-note").hidden = !purposeItem;
       if (purposeItem) $("#share-purpose-note").textContent = `Opens "${purposeItem.title}" after they join. Guests can read the room and its history, post messages, and react.`;
+      if (result.link.access === "co_admin") { $("#share-purpose-note").hidden = false; $("#share-purpose-note").textContent = "Anyone who joins with this link gets full permissions. Share it only with people and agents you trust."; }
+      else if (result.link.access === "member") { $("#share-purpose-note").hidden = false; $("#share-purpose-note").textContent = "People and agents who join can take, complete and verify work."; }
       $("#share-link-url").dataset.linkId = result.link.id;
       $("#share-link-result").hidden = false;
       $("#share-link-form").hidden = true;
@@ -563,15 +570,29 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       const returning = preview.link.status !== "active";
       $("#join-link-scope").textContent = returning ? "You already belong to this room. Open it without using another invitation place." : "Read history and join the conversation. Everyone in the room can read your messages.";
       $("#join-link-permissions").textContent = preview.access;
-      $("#join-link-expiry").textContent = `Invitation expires ${date(preview.link.expiresAt)} · ${preview.link.remainingJoins} guest places left.`;
+      $("#join-link-expiry").textContent = `Invitation expires ${date(preview.link.expiresAt)} · ${preview.link.remainingJoins} places left.`;
       const sharedUrl = publicJoinInviteHref(joinSecret);
       $("#shared-agent-details").hidden = !sharedUrl;
       $("#shared-agent-instructions").value = sharedUrl ? `Join ${preview.room.title}: ${sharedUrl}\nDownload and verify the agent runtime from https://github.com/Uuriko/project-room/releases/latest (Node 24.19+). From its folder run:\nnode scripts/agent-inbox.mjs join ${JSON.stringify(sharedUrl)} ./room-connection --name "My agent"\nReview the destination and read/chat access, then repeat with --accept when authorized. Reuse room-connection to resume. Import the returned host configuration into your MCP client. A running host is required to answer requests.` : "";
       updateSwitchWarning();
       $("#join-account-choices").hidden = Boolean(account.authenticated) || Boolean(resume);
       $("#join-guest-note").hidden = Boolean(account.authenticated);
-      $("#join-link-submit").textContent = returning ? "Open room" : account.authenticated ? "Join room" : "Continue as guest";
+      const elevatedLink = preview.link.access && preview.link.access !== "guest";
+      $("#join-link-submit").textContent = returning ? "Open room" : account.authenticated || elevatedLink ? "Join room" : "Continue as guest";
+      const accessSummary = $("#join-access-details").querySelector?.("summary");
+      if (accessSummary) accessSummary.textContent = elevatedLink ? (preview.link.access === "co_admin" ? "Co-admin access" : "Member access") : "Guest access";
       $("#join-link-form").hidden = false; $("#join-link-name").focus();
+      // Signed out: sign-in comes first, with "Continue as guest" below it.
+      // Member and co-admin links need an account, so they offer no guest path.
+      const elevated = preview.link.access && preview.link.access !== "guest";
+      $("#join-account-back").hidden = elevated;
+      if (!account.authenticated && !resume && !fragment.reviewSession && !returning) {
+        $("#join-account-choices").hidden = true; $("#join-account-back").hidden = true;
+        $("#join-account-auth").hidden = false; onAccountSignin("magic");
+        $("#join-link-form").hidden = elevated;
+        if (elevated) $("#join-link-scope").textContent = "Sign in or create an account to join. This invitation gives you room permissions.";
+        $("#join-account-google").focus();
+      }
       if (fragment.reviewSession) {
         reviewedSession = account;
         const identity = account.account?.id;
@@ -632,7 +653,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   $("#join-account-back").addEventListener("click", () => {
     if (joining || !canLeaveAccountSignin()) return;
     onAccountSignin(null); $("#join-account-auth").hidden = true;
-    $("#join-account-choices").hidden = false; $("#join-link-form").hidden = false;
+    $("#join-account-choices").hidden = true; $("#join-link-form").hidden = false;
     $("#join-link-name").focus();
   });
   $("#shared-agent-copy").addEventListener("click", async () => {

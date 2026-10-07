@@ -1,6 +1,7 @@
 // Reach recovery through the visible password-first entry, including invitation hosts.
 export async function openMagicSignin(page) {
   const controller = page.locator("#auth-signin-ui");
+  if (await controller.locator('[data-password-mode="login"]').isVisible()) await controller.locator('[data-password-mode="login"]').click();
   await controller.locator("[data-forgot-password]").click();
   await controller.locator('[data-recovery-option="magic"]').click();
   const form = controller.locator('[data-signin-form="magic-request"]');

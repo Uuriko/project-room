@@ -23,8 +23,8 @@ name: deploy-prod
 #
 # Steps: record the live prod and entry version ids (artifact), deploy the
 # canonical Worker (`wrangler deploy --env production --keep-vars`), then the
-# public entry (`wrangler deploy --keep-vars`), smoke, and roll both back to
-# the recorded ids when anything after the first upload fails. A receipt goes
+# public entry (`wrangler deploy --keep-vars`), smoke, and recover only to
+# prior code meeting a known schema floor. Lower/unknown schemas require roll-forward. A receipt goes
 # to muse-room when the ROOM_RECEIPT_TOKEN secret exists.
 #
 # Actions secrets (names only, never values in git):
@@ -201,6 +201,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ needs.gate.outputs.sha }}
+          fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
@@ -209,21 +210,9 @@ jobs:
           version: 10
       - run: PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci --no-audit --no-fund
       - run: pnpm --dir cloudflare install --frozen-lockfile --ignore-scripts
-      - name: Record the live version ids (rollback targets)
+      - name: Record exact live versions and code schemas before upload
         id: pre
-        working-directory: cloudflare
-        run: |
-          set -euo pipefail
-          pick() { node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s.slice(s.indexOf("{")));const v=[...(j.versions??[])].sort((a,b)=>b.percentage-a.percentage)[0];if(!v)process.exit(1);console.log(v.version_id)})'; }
-          PROD_PRE="$(pnpm exec wrangler deployments status --env production --json | pick)"
-          ENTRY_PRE="$(pnpm exec wrangler deployments status --json | pick)"
-          LIVE="$(curl -fsS -A 'Mozilla/5.0 project-room-deploy' "$PROD_ORIGIN/api/version" | jq -r '.sourceRevision // empty' || true)"
-          jq -n --arg sha "$SHA" --arg live "$LIVE" --arg prod "$PROD_PRE" --arg entry "$ENTRY_PRE" \
-            --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg run "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-            '{targetSha:$sha, liveSourceRevisionBefore:$live, prodRollbackVersionId:$prod, entryRollbackVersionId:$entry, recordedAt:$at, run:$run}' > "$RUNNER_TEMP/pre-deploy.json"
-          cat "$RUNNER_TEMP/pre-deploy.json"
-          echo "prod=$PROD_PRE" >> "$GITHUB_OUTPUT"
-          echo "entry=$ENTRY_PRE" >> "$GITHUB_OUTPUT"
+        run: node scripts/deploy-recovery.mjs snapshot "$RUNNER_TEMP/pre-deploy.json"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: pre-deploy-${{ needs.gate.outputs.sha }}
@@ -236,7 +225,7 @@ jobs:
           ROOM_AGENT_CARD_SIGNING_KEY: ${{ secrets.ROOM_AGENT_CARD_SIGNING_KEY }}
         run: |
           set -euo pipefail
-          pnpm exec wrangler deploy --env production --keep-vars | tee "$RUNNER_TEMP/deploy-prod.txt"
+          pnpm exec wrangler deploy --env production --keep-vars --var ROOM_BODIES_AT_REST:0 | tee "$RUNNER_TEMP/deploy-prod.txt"
           VERSION="$(grep -oE 'Current Version ID: [0-9a-f-]{36}' "$RUNNER_TEMP/deploy-prod.txt" | awk '{print $4}' | tail -1)"
           [ -n "$VERSION" ] || { echo "::error::could not read the new prod version id"; exit 1; }
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -247,7 +236,7 @@ jobs:
           ROOM_AGENT_CARD_SIGNING_KEY: ${{ secrets.ROOM_AGENT_CARD_SIGNING_KEY }}
         run: |
           set -euo pipefail
-          pnpm exec wrangler deploy --keep-vars | tee "$RUNNER_TEMP/deploy-entry.txt"
+          pnpm exec wrangler deploy --keep-vars --var ROOM_BODIES_AT_REST:0 | tee "$RUNNER_TEMP/deploy-entry.txt"
           VERSION="$(grep -oE 'Current Version ID: [0-9a-f-]{36}' "$RUNNER_TEMP/deploy-entry.txt" | awk '{print $4}' | tail -1)"
           [ -n "$VERSION" ] || { echo "::error::could not read the new entry version id"; exit 1; }
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -260,23 +249,21 @@ jobs:
           ROOM_SMOKE_ORIGIN: ${{ env.PROD_ORIGIN }}
           GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/live-smoke.mjs | tee "$RUNNER_TEMP/live-smoke.json"
-      - name: Roll back both Workers
+      - name: Recover only when prior code meets the schema floor
         id: rollback
         if: failure() && steps.pre.outcome == 'success' && steps.prod.outcome != 'skipped'
-        working-directory: cloudflare
         env:
-          PROD_PRE: ${{ steps.pre.outputs.prod }}
-          ENTRY_PRE: ${{ steps.pre.outputs.entry }}
+          PROD_OUTCOME: ${{ steps.prod.outcome }}
           ENTRY_OUTCOME: ${{ steps.entry.outcome }}
-        run: |
-          set -uo pipefail
-          status=0
-          pnpm exec wrangler rollback "$PROD_PRE" --env production --message "deploy-prod run $GITHUB_RUN_ID failed for $SHA" --yes || status=1
-          if [ "$ENTRY_OUTCOME" != "skipped" ]; then
-            pnpm exec wrangler rollback "$ENTRY_PRE" --message "deploy-prod run $GITHUB_RUN_ID failed for $SHA" --yes || status=1
-          fi
-          echo "::error title=deploy-prod rolled back::prod -> $PROD_PRE, entry -> $ENTRY_PRE (status $status)"
-          exit "$status"
+        run: node scripts/deploy-recovery.mjs recover "$RUNNER_TEMP/pre-deploy.json" "$RUNNER_TEMP/deploy-recovery.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always() && steps.pre.outcome == 'success'
+        with:
+          name: deploy-recovery-${{ needs.gate.outputs.sha }}
+          path: |
+            ${{ runner.temp }}/pre-deploy.json
+            ${{ runner.temp }}/deploy-recovery.json
+          retention-days: 90
       - name: Receipt to muse-room
         if: always() && steps.pre.outcome == 'success'
         continue-on-error: true
@@ -294,9 +281,13 @@ jobs:
         run: |
           if [ -z "$ROOM_RECEIPT_TOKEN" ]; then echo "ROOM_RECEIPT_TOKEN not set; no receipt posted."; exit 0; fi
           node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            import { recoveryDescription } from "./scripts/deploy-recovery.mjs";
             const e = process.env, s = v => (v || "?").slice(0, 8);
-            const body = e.ROLLBACK_OUTCOME && e.ROLLBACK_OUTCOME !== "skipped"
-              ? `PROD DEPLOY ${s(e.SHA)} FAILED · rolled back prod to ${s(e.PROD_PRE)} · entry to ${s(e.ENTRY_PRE)} (rollback ${e.ROLLBACK_OUTCOME}) · ${e.RUN_URL}`
+            let recovery = null;
+            try { recovery = JSON.parse(readFileSync(`${e.RUNNER_TEMP}/deploy-recovery.json`, "utf8")); } catch {}
+            const body = recovery
+              ? `PROD DEPLOY ${s(e.SHA)} FAILED · ${recoveryDescription(recovery)} · ${e.RUN_URL}`
               : `PROD DEPLOY ${s(e.SHA)} · prod ${s(e.PROD_NEW)} (rollback ${s(e.PROD_PRE)}) · entry ${s(e.ENTRY_NEW)} (rollback ${s(e.ENTRY_PRE)}) · smoke ${e.OUTCOME === "success" ? "ok" : e.OUTCOME} · ${e.RUN_URL}${e.REASON ? " · " + e.REASON.slice(0, 200) : ""}${e.PROBE_OVERRIDE ? " · onboarding probe overridden: " + e.PROBE_OVERRIDE.slice(0, 200) : ""}`;
             const command = { id: crypto.randomUUID(), type: "message.posted", data: { messageId: crypto.randomUUID(), body } };
             const res = await fetch(`${e.PROD_ORIGIN}/api/rooms/${e.RECEIPT_ROOM}/commands`, {
@@ -327,6 +318,16 @@ jobs:
             echo "| project-room (prod) | ${PROD_NEW:-not deployed} | ${PROD_PRE:-unknown} |"
             echo "| project-room-staging (entry) | ${ENTRY_NEW:-not deployed} | ${ENTRY_PRE:-unknown} |"
             echo ""
-            echo "Rollback step: ${ROLLBACK_OUTCOME:-not run}"
+            node --input-type=module -e '
+              import { readFileSync } from "node:fs";
+              import { recoveryDescription } from "./scripts/deploy-recovery.mjs";
+              let pre = null, report = null;
+              try { pre = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/pre-deploy.json`, "utf8")); } catch {}
+              try { report = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/deploy-recovery.json`, "utf8")); } catch {}
+              console.log(`Code schemas: candidate ${pre?.candidateCodeSchemaVersion ?? "unknown"}; prod previous ${pre?.prod?.codeSchemaVersion ?? "unknown"}; entry previous ${pre?.entry?.codeSchemaVersion ?? "unknown"}`);
+              console.log(recoveryDescription(report));
+              console.log("Schema floor is necessary, not proof of same-schema row/runtime compatibility. Schema migrations are not reversed.");
+            '
+            echo "Recovery step: ${ROLLBACK_OUTCOME:-not run}"
             echo "Onboarding probe gate: ${PROBE_VERDICT:-off}${PROBE_OVERRIDE:+ (override: $PROBE_OVERRIDE)}"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -1,3 +1,4 @@
+import { sessionWatermark } from "./read-cursor.mjs";
 // Cross-room "what needs me" for one identity.
 //
 // One read replaces listing rooms and then opening each inbox. Items are
@@ -17,7 +18,8 @@ import { ServiceError } from "./store.mjs";
 import { nextWorkStep } from "../src/workflow.js";
 import { retiredNeedsMeKeys } from "./updates.mjs";
 import { mayWriteWorkClaims } from "./work-claim-routes.mjs";
-import { claimUpdatedAt } from "./work-claims.mjs";
+import { claimUpdatedAt, isHardWork, resolveNamedReviewers, hasCurrentReview } from "./work-claims.mjs";
+import { claimIdle } from "./agent-fleet.mjs";
 
 const MAX_ROOMS = 40;
 const MAX_PER_KIND = 8;
@@ -29,6 +31,9 @@ const MAX_ITEMS = 100;
 // items, never moves the cursor, and shows even when nothing else is new.
 const OPEN_WORK_SHOWN = 3;
 const OPEN_WORK_TITLE = 80;
+const MY_WORK_SHOWN = 5;
+const MY_ACTIVE_STATES = new Set(["claimed", "in_progress"]);
+export const LEASE_SOON_MS = 3_600_000;
 const MENTION_WINDOW = 100;
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
@@ -303,10 +308,12 @@ export function openWorkOf(store, roomId, memberId, authority, nowMs = Date.now(
   // Board order (updatedAt desc, then id) within each group, as the Board shows.
   const ready = list.filter(item => item?.state === "unclaimed" && (item.kind ?? "work") === "work"
     && (item.dependsOn ?? []).every(dep => done.has(dep)))
-    .map(item => ({ item, at: updatedMs(item), released: (item.history ?? []).some(entry => entry?.action === "claimed") }))
-    // Work posted for pickup (never claimed) first; released or lease-expired
-    // items can be finished work handed back without "done", so they follow.
-    .sort((a, b) => Number(a.released) - Number(b.released)
+    .map(item => ({ item, at: updatedMs(item), released: (item.history ?? []).some(entry => entry?.action === "claimed"),
+      hard: isHardWork(item) }))
+    // Hard items (tag hard / hard-problem) first: they are the ones that stall
+    // unpicked. Then work posted for pickup (never claimed); released or
+    // lease-expired items can be finished work handed back without "done".
+    .sort((a, b) => Number(b.hard) - Number(a.hard) || Number(a.released) - Number(b.released)
       || (b.at ?? -Infinity) - (a.at ?? -Infinity) || String(a.item.id).localeCompare(String(b.item.id)))
     .map(row => ({ ...row, idleMinutes: minutesSince(row.at) }));
   if (!ready.length) return null;
@@ -315,9 +322,11 @@ export function openWorkOf(store, roomId, memberId, authority, nowMs = Date.now(
     roomId,
     count: ready.length,
     neverClaimed: ready.filter(row => !row.released).length,
+    ...(ready.some(row => row.hard) ? { hard: ready.filter(row => row.hard).length } : {}),
     ...(idles.length ? { oldestIdleMinutes: Math.max(...idles) } : {}),
-    top: ready.slice(0, OPEN_WORK_SHOWN).map(({ item, idleMinutes, released }) => ({
+    top: ready.slice(0, OPEN_WORK_SHOWN).map(({ item, idleMinutes, released, hard }) => ({
       id: item.id,
+      ...(hard ? { hard: true, reviewPolicy: item.reviewPolicy ?? "self_attested" } : {}),
       title: String(item.title ?? "").slice(0, OPEN_WORK_TITLE),
       ...(idleMinutes !== null ? { idleMinutes } : {}),
       ...(released ? { released: true } : {}),
@@ -325,6 +334,63 @@ export function openWorkOf(store, roomId, memberId, authority, nowMs = Date.now(
     })),
     next: `POST /api/rooms/${encodeURIComponent(roomId)}/work-claims/{id}/claim`
   };
+}
+
+// Review asks (hw-h2-needs-me-review-asks): open items that name this member
+// as reviewer (tag rev-<memberId>) and are ready to review (in_progress or a
+// linked PR). Standing state like openWork: it never moves the cursor, it
+// retires when the member records a review on the current basis, and it
+// returns when the head moves.
+export function reviewAsksOf(store, roomId, memberId, authority) {
+  let list;
+  try { list = store.workClaims?.list(roomId) ?? []; } catch { return null; }
+  const asks = list.filter(item => item && item.state !== "done" && !item.supersededBy && item.owner && item.owner !== memberId
+      && resolveNamedReviewers(item, authority?.members).includes(memberId)
+      && (item.state === "in_progress" || item.pullRequest || (item.pullRequests ?? []).length)
+      && !hasCurrentReview(item, memberId))
+    .sort((a, b) => String(claimUpdatedAt(b) ?? "").localeCompare(String(claimUpdatedAt(a) ?? "")) || String(a.id).localeCompare(String(b.id)));
+  if (!asks.length) return null;
+  return {
+    roomId,
+    count: asks.length,
+    top: asks.slice(0, OPEN_WORK_SHOWN).map(item => ({
+      id: item.id,
+      title: String(item.title ?? "").slice(0, OPEN_WORK_TITLE),
+      owner: item.owner,
+      ...(item.pullRequest?.url ? { pullRequest: item.pullRequest.url } : {}),
+      ...(item.ci?.headSha ? { headSha: item.ci.headSha } : {}),
+      ...(item.revision ? { revision: item.revision } : {})
+    })),
+    next: `POST /api/rooms/${encodeURIComponent(roomId)}/work-claims/{id}/review`
+  };
+}
+
+// The caller's own held claims that need attention, so the one inbox carries
+// them: a lease that lapses within the hour, or a claim idle for 2h
+// (agent-fleet claimIdle). Reviews owed are reviewAsks (rev-<memberId>,
+// hw-h2-needs-me-review-asks), not repeated here. Standing state like
+// openWork: never moves the cursor.
+export function myWorkOf(store, roomId, memberId, nowMs = Date.now()) {
+  let list;
+  try { list = store.workClaims?.list(roomId) ?? []; } catch { return null; }
+  const title = item => String(item.title ?? item.id).slice(0, OPEN_WORK_TITLE);
+  const rows = [];
+  for (const item of list) {
+    if (!item || !MY_ACTIVE_STATES.has(item.state)) continue;
+    if (item.owner === memberId) {
+      const left = item.leaseExpiresAt ? Date.parse(item.leaseExpiresAt) - nowMs : NaN;
+      if (left > 0 && left <= LEASE_SOON_MS) {
+        rows.push({ id: item.id, title: title(item), why: "lease_expiring", minutesLeft: Math.ceil(left / 60000) });
+      } else if (claimIdle(item, nowMs)) {
+        const idleMinutes = Math.round((nowMs - Date.parse(claimUpdatedAt(item) || item.claimedAt)) / 60000);
+        rows.push({ id: item.id, title: title(item), why: "claim_idle", ...(Number.isFinite(idleMinutes) ? { idleMinutes } : {}) });
+      }
+    }
+  }
+  if (!rows.length) return null;
+  const rank = { lease_expiring: 0, claim_idle: 1 };
+  rows.sort((a, b) => rank[a.why] - rank[b.why] || String(a.id).localeCompare(String(b.id)));
+  return { roomId, count: rows.length, top: rows.slice(0, MY_WORK_SHOWN) };
 }
 
 export function collectNeedsMe(store, secret, { since } = {}) {
@@ -355,6 +421,8 @@ export function collectNeedsMe(store, secret, { since } = {}) {
   const landIds = { ...parsed.landIds };
   const pendingBonds = store.bonds.pendingProposalsFor(identity.identityId);
   const openWork = [];
+  const reviewAsks = [];
+  const myWork = [];
   let roomAfter = parsed.roomAfter ?? "";
   let hasMore = links.length > MAX_ROOMS;
   for (const link of links.slice(0, MAX_ROOMS)) {
@@ -367,9 +435,13 @@ export function collectNeedsMe(store, secret, { since } = {}) {
     // One summary per room this page walks (at most MAX_ROOMS), none dropped.
     const open = openWorkOf(store, link.roomId, link.memberId, authority);
     if (open) openWork.push(open);
+    const asks = reviewAsksOf(store, link.roomId, link.memberId, authority);
+    if (asks) reviewAsks.push(asks);
+    const mine = myWorkOf(store, link.roomId, link.memberId);
+    if (mine) myWork.push(mine);
     const after = roomWatermark(parsed, link.roomId);
     const landAfter = landWatermark(parsed, link.roomId);
-    let through = mentionHorizon(store, link.roomId, link.memberId, after, Math.max(after, authority.sequence));
+    let through = mentionHorizon(store, link.roomId, link.memberId, after, sessionWatermark(after, authority.sequence));
     let candidates = [];
     if (authority.sequence > after) {
       const state = store.room(link.roomId).state;
@@ -413,5 +485,5 @@ export function collectNeedsMe(store, secret, { since } = {}) {
   // Retain the old rooms/land shape and extend it only for continuation/ties.
   const cursor = { rooms, land, landIds, ...(parsed.number !== null ? { floor: parsed.number } : {}), ...(hasMore ? { roomAfter } : {}) };
   items.sort((a, b) => a.roomId.localeCompare(b.roomId) || b.seq - a.seq);
-  return { identityId: identity.identityId, items, ...(openWork.length ? { openWork } : {}), cursor, hasMore, untrusted: true };
+  return { identityId: identity.identityId, items, ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), ...(myWork.length ? { myWork } : {}), cursor, hasMore, untrusted: true };
 }

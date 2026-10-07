@@ -63,7 +63,7 @@ test("section summaries share one anatomy: chevron, label, flex row, 44px target
     hasClass: node.classList.contains("section-summary"),
     label: (node.querySelector(".section-label strong")?.textContent || node.textContent || "").trim() }));
   assert.equal(work.hasClass, true);
-  assert.match(work.label, /Review \+ approval|Options|read only/);
+  assert.equal(work.label, "Advanced options", "human work setup keeps technical choices behind Advanced");
 });
 
 test("chevron direction reflects open state identically across sections", { timeout: 30000 }, async t => {

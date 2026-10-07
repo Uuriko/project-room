@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { roomEntry, publicRoomDoorHtml } from "../deploy/room-entry.mjs";
+import { roomEntry } from "../deploy/room-entry.mjs";
 import {
   agentCard, llmsTxt, llmsFullTxt, kitsTxt, agentCardJson, agentsJson, discoveryDoc, DISCOVERY_PATHS,
   AFTER_PASTE_SECTION, joinPrompt, JOIN_HOSTS, JOIN_PROMPT_PATH, SHORT_PACKET_FILES, SHORT_PACKET_SYNONYMS, AGENT_CARD_SYNONYMS, HEALTH_ALIAS_PATHS,
@@ -435,14 +435,9 @@ test("/room/health aliases return the same JSON as /api/health; bare /health sta
 });
 
 test("door serves the same discovery bytes and points at origin", async () => {
-  const html = await roomEntry(new Request("https://www.trydemigod.com/room")).text();
-  assert.match(html, /Connect an agent/);
-  // Door copy is plain language now (see tests/room-entry.test.js for the full set).
-  assert.match(html, /Invite teammates and AI agents to work on the same items together/);
-  assert.match(html, /Rooms are private by default\. Adding an agent never lists the room publicly/);
-  assert.match(html, /choose “Use my AI” and paste the agent packet/);
-  assert.match(html, /href="\/room\/llms.txt"/);
-  assert.match(html, /href="\/room\/\.well-known\/agent\.json"/);
+  const entry = roomEntry(new Request("https://www.trydemigod.com/room"));
+  assert.equal(entry.status, 302);
+  assert.equal(entry.headers.get("Location"), "https://room.trydemigod.com/");
   for (const doorPath of [
     "/room/llms.txt", "/room/join.txt", "/room/llms-full.txt", "/room/.well-known/agent.json",
     "/room/skill.md", "/room/agents.md", "/room/AGENTS.md", "/room/CLAUDE.md",
@@ -462,20 +457,19 @@ test("door serves the same discovery bytes and points at origin", async () => {
   }
 });
 
-test("advertised door root serves the HTML door; packets stay at /room/llms.txt", async (t) => {
+test("advertised door root redirects to the app; packets stay at /room/llms.txt", async (t) => {
   assert.equal(discoveryDoc("/room"), null);
   assert.equal(discoveryDoc("/room/"), null);
   assert.equal(discoveryDoc("/room/llms.txt").body, llmsTxt());
   assert.match(discoveryDoc("/room/llms.txt").type, /text\/plain/);
   const base = await serve(t);
-  const door = publicRoomDoorHtml();
   for (const path of ["/room", "/room/"]) {
-    const res = await fetch(`${base}${path}`);
-    assert.equal(res.status, 200, path);
-    assert.match(res.headers.get("content-type"), /text\/html/);
-    assert.equal(await res.text(), door);
-    const head = await fetch(`${base}${path}`, { method: "HEAD" });
-    assert.equal(head.status, 200, path);
+    const res = await fetch(`${base}${path}`, {redirect:"manual"});
+    assert.equal(res.status, 302, path);
+    assert.equal(res.headers.get("Location"), `${base}/`);
+    assert.equal(await res.text(), "");
+    const head = await fetch(`${base}${path}`, { method: "HEAD", redirect:"manual" });
+    assert.equal(head.status, 302, path);
     assert.equal(await head.text(), "");
     assert.equal((await fetch(`${base}${path}`, { method: "POST" })).status, 405, path);
     const plain = await fetch(`${base}${path}`, { headers: { Accept: "text/plain" } });

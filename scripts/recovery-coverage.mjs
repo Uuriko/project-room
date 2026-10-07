@@ -1,3 +1,4 @@
+import {seedRecordRails} from "./record-rails-fixture.mjs";
 // The rows the recovery audit requires. Shared with the cold-start budget so
 // a wake is measured against a store that has every application table, not
 // only the event log. Disposable synthetic data only.
@@ -7,9 +8,24 @@ import { flagMessage } from "../server/inbox-spam.mjs";
 import { createNotifyPrefs } from "../server/notify-prefs.mjs";
 import { issueGrant } from "../server/grants.mjs";
 import { appendOperatorAction } from "../server/operator-actions.mjs";
+import { RoomAssistant } from "../server/room-assistant.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
 export async function seedRecoveryCoverage(f) {
+  // Exercise assistant authority, public scope and durable attempt records so
+  // recovery/cold-open coverage includes substantive rows in all three tables.
+  const agent = f.store.room("commons").state.members.agent;
+  f.store.command(f.keys.owner, "commons", { id: "recovery-assistant-permission", type: T.MEMBER_ACCESS_CHANGED,
+    data: { memberId: agent.id, expectedMemberRevision: agent.revision, permissions: [...new Set([...agent.permissions, "accept_work"])], active: true } });
+  const source = f.store.room("commons").state.messages.find(message => message.authorId === "owner" && !message.toMemberId && message.body != null && !message.deletedAt);
+  if (!source) throw new Error("Recovery fixture requires an authored public assistant source");
+  const assistant = new RoomAssistant(f.store);
+  const ownerAuth = () => f.store.authenticate(f.keys.owner, "commons");
+  assistant.apply("commons", { action: "configure", requestId: "recovery-assistant-config", expectedRevision: 0, name: "Room", coordinatorMemberId: agent.id }, ownerAuth);
+  assistant.apply("commons", { action: "invoke", requestId: "recovery-assistant-invoke", runId: "recovery-shared-run", sourceMessageId: source.id }, ownerAuth);
+  assistant.apply("commons", { action: "claim", requestId: "recovery-assistant-claim", runId: "recovery-shared-run", attemptId: "recovery-host-attempt", expectedRevision: 0 }, () => f.store.authenticate(f.keys.agent, "commons"));
+  seedRecordRails(f.store,f.keys.owner,"agent",f.projectOffers[0].offerId);
+
   // One append-only operator audit row. The cold-start budget and the
   // recovery audit both require every application table to hold a row,
   // except the cron tables.
@@ -383,6 +399,7 @@ export async function seedRecoveryCoverage(f) {
     (endpoint, room_id, member_id, p256dh, auth, expiration_time, created_at)
     VALUES ('https://push.example.test/recovery', 'commons', 'owner', 'recovery-p256dh', 'recovery-auth', NULL, ?)`)
     .run(f.now());
+  f.store.db.prepare("INSERT INTO human_push_preferences(room_id,member_id,mention_enabled,dm_enabled,updated_at) VALUES('commons','owner',0,1,?)").run(f.now());
   // Seed one live grant edge so the capture covers agent_capability_grants
   // (per-agent capability grant edges, UFO-steal slice 1 RC-2026-09-27-2728).
   // issueGrant is the product writer; the audit's "every table has
@@ -442,6 +459,12 @@ export async function seedRecoveryCoverage(f) {
     .run(createHash("sha256").update("project-room-public-report:recovery").digest("hex"), f.now());
   f.store.db.prepare("INSERT INTO public_unpublish (kind, target, at, by_account) VALUES ('room', 'recovery-public-room', ?, ?)")
     .run(f.now(), termsAccount.id);
+  // plan-squads: one squad row so the recovery audit and cold-start budget
+  // see the squads table with substantive fixture data.
+  f.store.db.prepare(`INSERT INTO squads
+    (room_id, squad_id, name, goal, members_json, channel_message_id, owner_id, state, created_at, updated_at)
+    VALUES ('commons', 'sq_recovery0001', 'recovery-crew', 'recover the room', '["owner"]', NULL, 'owner', 'active', ?, ?)`)
+    .run(f.now(), f.now());
 
   return {
     runRequest, runInput, offerRecords: f.store.projectOffers.ownerList("commons", "owner"),

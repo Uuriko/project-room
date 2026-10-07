@@ -2,7 +2,9 @@
 // table in one transaction. Read-time masking stays; this is the write that
 // makes the old text unreadable in storage.
 
+import { storedProjection } from "./projection-at-rest.mjs"; // Phase 1a
 import { applyEvent, event, EVENT_TYPES, isRoomArchived } from "../src/events.js";
+import { syncMessageRows } from "./messages-store.mjs";
 
 const compact = state => ({ ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} });
 
@@ -38,7 +40,7 @@ function receiptCites(state, messageId) {
 // Already-redacted messages are left as they are. Returns the compact state
 // the rooms row now stores. `sequence` on the command that triggered this
 // stays the delete event; the room sequence advances past the new events.
-export function commitMessageRedaction(db, { roomId, state, actorId, at, messageId }) {
+export function commitMessageRedaction(db, { roomId, state, actorId, at, messageId, bodiesAtRest = false }) {
   if (typeof roomId !== "string" || typeof messageId !== "string" || !messageId) {
     return { state, sequence: null, rewritten: 0 };
   }
@@ -98,12 +100,20 @@ export function commitMessageRedaction(db, { roomId, state, actorId, at, message
       next = applyEvent(next, incoming);
       sequence += 1;
       insert.run(roomId, sequence, incoming.id, JSON.stringify(incoming));
+      syncMessageRows(db, { roomId, sequence, event: incoming, state: next });
     }
   }
 
   const ids = messageId.endsWith(":channel") ? [messageId] : [messageId, `${messageId}:channel`];
   try {
     db.prepare(`UPDATE messages SET body=NULL, deleted_at=COALESCE(deleted_at, ?) WHERE room_id=? AND message_id IN (${ids.map(() => "?").join(",")})`).run(at, roomId, ...ids);
+    if (isRoomArchived(state)) {
+      db.prepare(`UPDATE messages SET record_json=NULL WHERE room_id=? AND message_id IN (${ids.map(() => "?").join(",")})`).run(roomId, ...ids);
+    }
+    // A replay snapshot may retain old edit text and attachment metadata.
+    // Clear it in the same deletion transaction; the next backfill reconstructs
+    // its prefix from the already-redacted log instead of resurrecting text.
+    db.prepare("UPDATE messages_backfill_cursor SET state_json=NULL, state_seq=0, parity_at_seq=NULL WHERE room_id=?").run(roomId);
   } catch (error) {
     if (!/no such table/i.test(error?.message ?? "")) throw error;
   }
@@ -114,6 +124,15 @@ export function commitMessageRedaction(db, { roomId, state, actorId, at, message
   } catch (error) {
     if (!/no such (table|column)/i.test(error?.message ?? "")) throw error;
   }
+  // A code drop's card is its message: deleting the card removes the drop's
+  // metadata (title, commit subjects, paths) and its checks with the bytes.
+  try {
+    const drops = db.prepare("SELECT id FROM room_code_drops WHERE room_id=? AND message_id=?").all(roomId, messageId);
+    for (const { id } of drops) db.prepare("DELETE FROM room_code_checks WHERE room_id=? AND drop_id=?").run(roomId, id);
+    db.prepare("DELETE FROM room_code_drops WHERE room_id=? AND message_id=?").run(roomId, messageId);
+  } catch (error) {
+    if (!/no such table/i.test(error?.message ?? "")) throw error;
+  }
   try { db.prepare("DELETE FROM projection_checkpoints WHERE room_id=?").run(roomId); }
   catch (error) {
     if (!/no such table/i.test(error?.message ?? "")) throw error;
@@ -121,7 +140,7 @@ export function commitMessageRedaction(db, { roomId, state, actorId, at, message
 
   const stored = compact(next);
   if (!isRoomArchived(state)) {
-    db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, JSON.stringify(stored), roomId);
+    db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, storedProjection(db, roomId, stored, { enabled: bodiesAtRest }), roomId);
   }
   return { state: stored, sequence, rewritten };
 }

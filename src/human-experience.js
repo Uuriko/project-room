@@ -1,0 +1,220 @@
+import { uiText } from './strings.js';
+import { currentResult } from './work-selectors.js';
+// Human presentation and explicitly PUBLIC assistant invocation. No private request reuse.
+export function installHumanExperience({ getState, getSession, client, notice, openWork, openMessage, selectResult, refreshTranscript }) {
+  const $ = selector => document.querySelector(selector);
+  const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  const human = () => getSession()?.member?.kind === 'human';
+  let boundary = '', projection = null, reading = false, selected = false, contribution = null, operation = null, rejectedOperation = null, configureOperation = null, error = '', lastRead = 0;
+  const key = () => ["", client.generation, ":", getState()?.room.id, ":", getSession()?.member.id, ""].join('');
+  const pendingKey = () => ["room-assistant-pending:", getState()?.room.id, ":", getSession()?.member.id, ""].join('');
+  function persistOperation() { try { if (operation) sessionStorage.setItem(pendingKey(), JSON.stringify(operation)); else sessionStorage.removeItem(pendingKey()); } catch { /* the current tab still has the exact retry */ } }
+  const path = () => `/api/rooms/${encodeURIComponent(getState().room.id)}/assistant`;
+  const section = document.createElement('section'); section.id = 'room-assistant'; section.hidden = true;
+  section.setAttribute('aria-label', 'Room assistant');
+  section.innerHTML = uiText("human.copy.001");
+  $('#typing-indicator').before(section);
+  const ask = document.createElement('button'); ask.type = 'button'; ask.id = 'ask-room'; ask.className = 'button ghost';
+  ask.textContent = 'Ask Room'; ask.setAttribute('aria-pressed', 'false'); ask.title = uiText("human.copy.002");
+  const composerActions = document.createElement('div'); composerActions.className = 'human-composer-actions';
+  composerActions.append($('#composer-options'), ask); $('.composer-row').append(composerActions);
+  ask.addEventListener('click', () => { selected = !selected; if (!selected) { contribution = null; ask.textContent = 'Ask Room'; } ask.setAttribute('aria-pressed', String(selected)); $('#message-input').focus(); });
+  const advanced = document.createElement('label'); advanced.className = 'check';
+  advanced.innerHTML = uiText("human.copy.003");
+  $('#settings-dialog').append(advanced);
+  $('#human-advanced').addEventListener('change', () => {
+    document.body.classList.toggle('human-advanced', $('#human-advanced').checked);
+    refreshTranscript();
+    try { sessionStorage.setItem(`room-human-advanced:${boundary}`, String($('#human-advanced').checked)); } catch { /* session only */ }
+  });
+  const dialog = document.createElement('dialog'); dialog.id = 'human-project-dialog'; dialog.setAttribute('aria-labelledby', 'human-project-title');
+  dialog.innerHTML = '<div class="dialog-head"><h2 id="human-project-title">Project</h2><button type="button" class="button ghost" data-close-project>Close</button></div><div id="human-project-content"></div>';
+  document.body.append(dialog); dialog.querySelector('[data-close-project]').onclick = () => dialog.close();
+  $('#human-project-open').onclick = () => {
+    const state = getState();
+    $('#human-project-content').innerHTML = [`<p>${esc(state.room.purpose || uiText("human.copy.004"))}</p>`, Object.values(state.workItems ?? {}).filter(w => !w.supersededBy).map(w => {
+      const label = w.state === 'completed' ? (currentResult(w) ? 'Done' : 'Needs review') : w.state === 'working' ? uiText("human.copy.005") : w.state === 'blocked' ? 'Needs input' : 'Planned';
+      return ["<button type=\"button\" class=\"human-project-item\" data-project-work=\"", esc(w.id), "\"><strong>", esc(w.title), "</strong><span>", esc(label), "</span></button>"].join('');
+    }).join('')].join('');
+    if (!Object.keys(state.workItems ?? {}).length) $('#human-project-content').insertAdjacentHTML('beforeend', uiText("human.copy.006"));
+    dialog.showModal();
+  };
+  dialog.addEventListener('click', event => { const button = event.target.closest('[data-project-work]'); if (button) { dialog.close(); openWork(button.dataset.projectWork); } });
+  const setup = document.createElement('dialog'); setup.id = 'room-assistant-setup'; setup.setAttribute('aria-labelledby', 'assistant-setup-title');
+  setup.innerHTML = uiText("human.copy.007");
+  document.body.append(setup); setup.querySelector('[data-close-setup]').onclick = () => setup.close();
+  setup.querySelector('#assistant-enroll').onclick = () => { setup.close(); $('#connect-agent-button').click(); };
+  $('#assistant-setup').onclick = () => {
+    const state = getState();
+    setup.querySelector('select').innerHTML = uiText("human.copy.008") + Object.values(state.members).filter(m => m.kind === 'agent' && m.active !== false && m.permissions.includes('accept_work')).map(m => ["<option value=\"", esc(m.id), "\">", esc(m.displayName), "</option>"].join('')).join('');
+    if (configureOperation) setup.querySelector('select').value = configureOperation.coordinatorMemberId;
+    setup.querySelector('select').disabled = Boolean(configureOperation);
+    $('#assistant-setup-error').textContent = ''; setup.showModal();
+  };
+  setup.querySelector('form').onsubmit = async event => {
+    event.preventDefault(); const stamp = key(); const button = setup.querySelector('[type=submit]'); button.disabled = true;
+    try {
+      configureOperation ??= { action: 'configure', requestId: crypto.randomUUID(), expectedRevision: projection?.assistant.revision ?? 0, name: 'Room', coordinatorMemberId: setup.querySelector('select').value };
+      await client.request(path(), { method: 'POST', data: configureOperation });
+      if (stamp !== key()) return; configureOperation = null; setup.close(); lastRead = 0; await refresh();
+    } catch (failure) { if (stamp === key()) { $('#assistant-setup-error').textContent = failure.message; if (failure.status >= 400 && failure.status < 500) { configureOperation = null; lastRead = 0; await refresh(); } else setup.querySelector('select').disabled = true; } }
+    finally { button.disabled = false; }
+  };
+  function paint() {
+    if (!human() || !projection) return;
+    const assistant = projection.assistant;
+    section.querySelector('strong').textContent = assistant.name || 'Room';
+    $('#room-assistant-status').textContent = assistant.availability === 'connected' ? 'Connected' : assistant.availability === 'awaiting_host' ? uiText("human.copy.009") : 'Not connected';
+    $('#assistant-setup').hidden = getState().room.ownerId !== getSession().member.id;
+    const runs = Object.values(projection.runs ?? {});
+    $('#assistant-activity').hidden = !runs.length;
+    const runsHtml = runs.map(run => {
+      const source = getState().messages.find(m => m.id === run.sourceMessageId);
+      const controls = getState().room.ownerId === getSession().member.id || run.initiatorId === getSession().member.id;
+      const inputs = run.inputs.slice(1).map(input => {
+        const message = getState().messages.find(m => m.id === input.sourceMessageId);
+        return ["<p>", esc(getState().members[input.memberId]?.displayName || 'Participant'), ": ", esc(message?.body?.slice(0,100) || 'Context'), " · ", input.status === 'applied' ? 'Applied' : 'Pending', "</p>"].join('');
+      }).join('');
+      const editable = !['done','failed','cancelled'].includes(run.status);
+      return ["<article class=\"assistant-run\" data-assistant-run=\"", esc(run.id), "\"><strong>", esc(source?.body?.slice(0,160) || 'Shared request'), "</strong><p>", esc(({ queued: uiText("human.copy.010"), working: 'Working', unknown: 'Connection interrupted', paused: 'Paused', resume_requested: uiText("human.copy.011"), pause_requested: uiText("human.copy.012"), cancel_requested: uiText("human.copy.013"), done: 'Result ready', failed: "Couldn't finish", needs_input: 'Needs input', cancelled: 'Cancelled' })[run.status] || run.status), "</p><button type=\"button\" class=\"text-button\" data-assistant-message=\"", esc(run.sourceMessageId), "\">Original prompt</button>", run.resultMessageId ? `<button type="button" class="text-button" data-assistant-message="${esc(run.resultMessageId)}">Open result</button>` : '', "", (run.activity ?? []).slice(-5).map(a => `<p>${esc(a.summary)}</p>`).join(''), "", inputs, "", editable ? ["<button type=\"button\" class=\"text-button\" data-contribute-run=\"", esc(run.id), "\" data-revision=\"", run.revision, "\">Add context</button>"].join('') : '', "", editable && run.status !== 'needs_input' ? ["<button type=\"button\" class=\"text-button\" data-contribute-run=\"", esc(run.id), "\" data-conflict=\"true\" data-revision=\"", run.revision, "\">Change direction</button>"].join('') : '', "", controls && run.status === 'needs_input' ? ["<button type=\"button\" class=\"text-button\" data-contribute-run=\"", esc(run.id), "\" data-resolve=\"true\" data-revision=\"", run.revision, "\">Resolve direction</button>"].join('') : '', "", controls && ['queued', 'working', 'unknown'].includes(run.status) ? ["<button type=\"button\" class=\"text-button\" data-pause-run=\"", esc(run.id), "\" data-revision=\"", run.revision, "\">Pause</button>"].join('') : controls && run.status === 'paused' ? ["<button type=\"button\" class=\"text-button\" data-pause-run=\"", esc(run.id), "\" data-resume=\"true\" data-revision=\"", run.revision, "\">Resume</button>"].join('') : '', "</article>"].join('');
+    }).join('');
+    if ($('#assistant-runs')._html !== runsHtml) {
+      const panel = $('#assistant-runs'), focused = panel.contains(document.activeElement) ? document.activeElement : null;
+      const runId = focused?.closest('[data-assistant-run]')?.dataset.assistantRun, label = focused?.textContent, scroll = panel.scrollTop;
+      panel.innerHTML = runsHtml; panel._html = runsHtml; panel.scrollTop = scroll;
+      if (focused) { const replacement = [...panel.querySelectorAll('button')].find(b => b.closest('[data-assistant-run]').dataset.assistantRun === runId && b.textContent === label); (replacement || $('#assistant-activity summary')).focus({preventScroll:true}); }
+    }
+    $('#assistant-error').textContent = error; $('#assistant-retry').hidden = !operation; $('#assistant-review').hidden = !rejectedOperation; $('#assistant-discard').hidden = !operation && !rejectedOperation; ask.disabled = Boolean(operation);
+  }
+  async function refresh() {
+    if (!human() || !getState() || reading || document.hidden || Date.now() - lastRead < 1500) return;
+    const stamp = key(); reading = true; lastRead = Date.now();
+    try { const next = await client.request(path()); if (stamp !== key()) return; const changed = projection?.assistant.coordinatorMemberId !== next.assistant.coordinatorMemberId || projection?.assistant.name !== next.assistant.name; projection = next; paint(); if (changed) refreshTranscript(); }
+    catch (failure) { if (stamp === key()) { error = failure.status === 404 ? uiText("human.copy.014") : failure.message; $('#assistant-error').textContent = error; } }
+    finally { reading = false; }
+  }
+  async function invoke() {
+    if (!operation || !getState()) return;
+    const owned = operation, stamp = key();
+    try { await client.request(path(), { method: 'POST', data: owned }); if (stamp !== key() || operation !== owned) return; operation = null; persistOperation(); contribution = null; selected = false; ask.textContent = 'Ask Room'; ask.setAttribute('aria-pressed', 'false'); error = ''; lastRead = 0; await refresh(); }
+    catch (failure) { if (stamp === key()) {
+      const rejected = failure.status >= 400 && failure.status < 500;
+      error = ["", owned.sourceMessageId && ['invoke','contribute','resolve'].includes(owned.action) ? 'Message sent. ' : '', "Assistant request ", rejected ? 'was rejected' : 'not confirmed', ": ", failure.message, ""].join('');
+      if (rejected) { rejectedOperation = owned; operation = null; persistOperation(); }
+      paint();
+    } }
+  }
+  $('#assistant-retry').onclick = invoke;
+  $('#assistant-discard').onclick = () => { operation = null; rejectedOperation = null; persistOperation(); error = ''; contribution = null; selected = false; ask.textContent = 'Ask Room'; ask.setAttribute('aria-pressed','false'); paint(); };
+  $('#assistant-review').onclick = async () => {
+    const original = rejectedOperation, stamp = key(); if (!original) return;
+    try {
+      const latest = await client.request(path()); if (stamp !== key() || original !== rejectedOperation) return;
+      const run = latest.runs.find(r => r.id === original.runId);
+      if (original.action !== 'invoke' && (!run || ['done','failed','cancelled'].includes(run.status))) { error = uiText("human.copy.015"); paint(); return; }
+      operation = { ...original, requestId: crypto.randomUUID(), ...(original.action !== 'invoke' ? { expectedRevision: run.revision } : {}) }; rejectedOperation = null; projection = latest; persistOperation();
+      error = uiText("human.copy.016"); paint();
+    } catch (failure) { if (stamp === key()) { error = failure.message; paint(); } }
+  };
+  $('#assistant-runs').onclick = async event => {
+    const message = event.target.closest('[data-assistant-message]'); if (message) { openMessage(message.dataset.assistantMessage); return; }
+    const context = event.target.closest('[data-contribute-run]');
+    if (context) {
+      contribution = { action: context.dataset.resolve ? 'resolve' : 'contribute', runId: context.dataset.contributeRun, expectedRevision: Number(context.dataset.revision), ...(context.dataset.resolve ? {} : { conflict: context.dataset.conflict === 'true' }) };
+      selected = true; ask.textContent = context.dataset.resolve ? 'Resolve direction' : context.dataset.conflict ? 'Change direction' : 'Add context'; ask.setAttribute('aria-pressed', 'true'); $('#message-input').focus(); return;
+    }
+    const button = event.target.closest('[data-pause-run]'); if (!button) return;
+    if (operation) return;
+    operation = { action: button.dataset.resume ? 'resume' : 'pause', requestId: crypto.randomUUID(), runId: button.dataset.pauseRun, expectedRevision: Number(button.dataset.revision) };
+    // Save the exact operation before dispatch; a lost response cannot create a second stop/resume.
+    persistOperation(); button.disabled = true; await invoke();
+
+  };
+  const resultDialog = document.createElement('dialog'); resultDialog.id = 'human-share-result'; resultDialog.setAttribute('aria-labelledby', 'human-share-title');
+  resultDialog.innerHTML = uiText("human.copy.017");
+  document.body.append(resultDialog); let resultEntry = null;
+  resultDialog.querySelector('[data-close-share]').onclick = () => { if (resultEntry?.rejected) resultEntry = null; resultDialog.close(); };
+  $('#human-share-refresh').onclick = async () => {
+    const entry = resultEntry, stamp = key(); if (!entry?.rejected || entry.boundary !== stamp) return;
+    const review = $('#human-share-refresh'); review.disabled = true;
+    try {
+      await client.refresh(); if (stamp !== key() || resultEntry !== entry) return;
+      const item = getState().workItems[entry.workId];
+      if (!item || item.supersededBy) { $('#human-share-error').textContent = uiText("human.copy.018"); return; }
+      entry.revision = item.revision; entry.command = null; entry.rejected = false;
+      resultDialog.querySelector('textarea').disabled = false;
+      const submit = resultDialog.querySelector('[type=submit]'); submit.disabled = false; submit.textContent = 'Review result'; review.hidden = true;
+      $('#human-share-error').textContent = uiText("human.copy.019", { fragmentA: item.title });
+      resultDialog.querySelector('textarea').focus();
+    } catch (failure) { if (stamp === key() && resultEntry === entry) $('#human-share-error').textContent = failure.message; }
+    finally { review.disabled = false; }
+  };
+  resultDialog.querySelector('form').onsubmit = async event => {
+    event.preventDefault(); const entry = resultEntry, stamp = key(), body = resultDialog.querySelector('textarea').value;
+    if (!entry || entry.boundary !== stamp || entry.rejected) return;
+    const button = resultDialog.querySelector('[type=submit]'); button.disabled = true;
+    entry.command ??= { id: crypto.randomUUID(), type: 'message.posted', data: { messageId: crypto.randomUUID(), workItemId: entry.workId,
+      packetId: crypto.randomUUID(), basisRevision: entry.revision, body } };
+    try {
+      await client.send(entry.command); if (stamp !== key() || resultEntry !== entry) return;
+      const messageId = entry.command.data.messageId; resultEntry = null; resultDialog.close(); selectResult(entry.workId, messageId);
+    } catch (failure) {
+      if (stamp !== key()) return;
+      entry.rejected = failure.status >= 400 && failure.status < 500;
+      $('#human-share-error').textContent = entry.rejected
+        ? uiText("human.copy.020", { fragmentA: failure.message })
+        : uiText("human.copy.021", { fragmentA: failure.message });
+      resultDialog.querySelector('textarea').disabled = true;
+      $('#human-share-refresh').hidden = !entry.rejected;
+      button.textContent = entry.rejected ? 'Review result' : uiText("human.copy.022");
+    } finally { button.disabled = Boolean(resultEntry === entry && entry.rejected); }
+  };
+  $('#human-existing-drafts').onclick = event => {
+    const button = event.target.closest('[data-result-draft]'); if (!button || resultEntry?.boundary !== key()) return;
+    resultDialog.close(); selectResult(resultEntry.workId, button.dataset.resultDraft);
+  };
+  setInterval(() => { void refresh(); }, 3000);
+  return {
+    assistantName(id) { return human() && !document.body.classList.contains('human-advanced') && projection?.assistant.coordinatorMemberId === id ? projection.assistant.name : null; },
+    sync() {
+      const active = human() && Boolean(getState()); document.body.classList.toggle('human-experience', active);
+      document.body.classList.toggle('human-single-conversation', active && Object.values(getState()?.channels ?? {}).filter(c => !c.archivedAt).length <= 1);
+      section.hidden = !active; ask.hidden = !active; advanced.hidden = !active;
+      if (active) {
+        for (const button of document.querySelectorAll('[data-action="complete"]')) { button.textContent = 'Share result'; const parent = button.closest('.work-actions'); if (parent && button.parentNode !== parent) parent.insertBefore(button, parent.querySelector('.work-more')); }
+        $('#work-options-summary').textContent = 'Advanced options';
+      }
+      if (!active) { projection = null; operation = null; rejectedOperation = null; configureOperation = null; boundary = ''; selected = false; section.querySelector('#assistant-runs').replaceChildren(); delete $('#assistant-runs')._html; if (setup.open) setup.close(); if (dialog.open) dialog.close(); if (resultDialog.open) resultDialog.close(); resultEntry = null; document.body.classList.remove('human-advanced'); return; }
+      if (boundary !== key()) {
+        for (const modal of [setup, dialog, resultDialog]) if (modal.open) modal.close();
+        resultEntry = null; resultDialog.querySelector('form').reset(); setup.querySelector('form').reset(); $('#human-project-content').replaceChildren(); $('#assistant-runs').replaceChildren(); delete $('#assistant-runs')._html;
+        boundary = key(); projection = null; operation = null; rejectedOperation = null; configureOperation = null; contribution = null; error = ''; lastRead = 0; selected = false; ask.textContent = 'Ask Room'; ask.setAttribute('aria-pressed', 'false');
+        try {
+          const pending = JSON.parse(sessionStorage.getItem(pendingKey()) || 'null');
+          if (pending && ['invoke','contribute','resolve','pause','resume'].includes(pending.action) && typeof pending.requestId === 'string' && typeof pending.runId === 'string'
+            && (['pause','resume'].includes(pending.action) || getState().messages.some(m => m.id === pending.sourceMessageId && m.authorId === getSession().member.id && !m.toMemberId))) { operation = pending; error = uiText("human.copy.023"); }
+        } catch { /* corrupt/unavailable saved state is not executed */ }
+        let enabled = false; try { enabled = sessionStorage.getItem(`room-human-advanced:${boundary}`) === 'true'; } catch { /* defaults */ }
+        $('#human-advanced').checked = enabled; document.body.classList.toggle('human-advanced', enabled);
+        $('#people-panel').open = false;
+      }
+      void refresh();
+    },
+    intent(content) { const solo = Object.values(getState()?.members ?? {}).filter(m => m.active !== false && m.kind === 'human').length === 1 && projection?.assistant.coordinatorMemberId; return !operation && human() && !content.toMemberId && (selected || /^@Room\b/i.test(content.body) || solo) ? { ...(contribution || { action: 'invoke' }) } : null; },
+    shareResult(item) {
+      if (!human() || document.body.classList.contains('human-advanced')) return false;
+      if (!resultEntry?.command || resultEntry.workId !== item.id || resultEntry.boundary !== key()) {
+        resultEntry = { workId: item.id, revision: item.revision, boundary: key(), command: null };
+        resultDialog.querySelector('form').reset(); resultDialog.querySelector('textarea').disabled = false;
+        resultDialog.querySelector('[type=submit]').textContent = 'Review result'; resultDialog.querySelector('[type=submit]').disabled = false; $('#human-share-refresh').hidden = true; $('#human-share-error').textContent = '';
+      }
+      const drafts = getState().messages.filter(m => m.workItemId === item.id && !m.deletedAt && !m.toMemberId);
+      $('#human-existing-drafts').innerHTML = drafts.map(m => ["<button type=\"button\" class=\"text-button\" data-result-draft=\"", esc(m.id), "\">", esc(m.body.slice(0,100)), "</button>"].join('')).join('') || uiText("human.copy.024");
+      resultDialog.showModal(); return true;
+    },
+    async posted(messageId, wanted) {
+      if (!wanted || !human()) return;
+      operation = { ...wanted, requestId: `ask-${messageId}`, ...(wanted.action === 'invoke' ? { runId: `run-${messageId}` } : {}), sourceMessageId: messageId }; persistOperation(); await invoke();
+    }
+  };
+}

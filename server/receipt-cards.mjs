@@ -7,6 +7,7 @@
 // postReceiptCard instead.
 import { createHash } from "node:crypto";
 import { applyEvent, event, isRoomArchived } from "../src/events.js";
+import { syncMessageRows } from "./messages-store.mjs";
 
 export const ROOM_GUIDE_ID = "room-guide";
 
@@ -17,30 +18,33 @@ export function stableEventId(prefix, material) {
 
 export function appendRoomEvent(store, roomId, { id, type, actorId, data, atMs }) {
   if (!store?.db || typeof store.room !== "function") return null;
-  const room = store.room(roomId);
-  if (isRoomArchived(room.state)) return null;
-  if (store.db.prepare("SELECT 1 FROM events WHERE id=?").get(id)) return null;
-  const member = room.state.members?.[actorId];
-  const incoming = event({
-    id,
-    idempotencyKey: id,
-    type,
-    actorId,
-    roomId,
-    at: new Date(Number.isFinite(atMs) ? atMs : (typeof store.now === "function" ? store.now() : Date.now())).toISOString(),
-    data: member?.system === true ? { ...data, actorKind: "system" } : data
-  });
-  const state = applyEvent(room.state, incoming);
-  const sequence = room.sequence + 1;
-  store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
-  const compact = { ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
-  store.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, JSON.stringify(compact), roomId);
-  try {
-    if (store.agentPlugin) store.agentPlugin.fanoutRoomEvent({ roomId, event: incoming });
-  } catch (error) {
-    console.error("room event fan-out failed:", error?.message ?? error);
-  }
-  return { sequence, event: incoming };
+  return store.transaction(() => {
+    const room = store.room(roomId);
+    if (isRoomArchived(room.state)) return null;
+    if (store.db.prepare("SELECT 1 FROM events WHERE id=?").get(id)) return null;
+    const member = room.state.members?.[actorId];
+    const incoming = event({
+      id,
+      idempotencyKey: id,
+      type,
+      actorId,
+      roomId,
+      at: new Date(Number.isFinite(atMs) ? atMs : (typeof store.now === "function" ? store.now() : Date.now())).toISOString(),
+      data: member?.system === true ? { ...data, actorKind: "system" } : data
+    });
+    const state = applyEvent(room.state, incoming);
+    const sequence = room.sequence + 1;
+    store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
+    const compact = { ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
+    store.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, store.storedProjection(roomId, compact), roomId);
+    syncMessageRows(store.db, { roomId, sequence, event: incoming, state });
+    try {
+      if (store.agentPlugin) store.agentPlugin.fanoutRoomEvent({ roomId, event: incoming });
+    } catch (error) {
+      console.error("room event fan-out failed:", error?.message ?? error);
+    }
+    return { sequence, event: incoming };
+  }, { isolated: true });
 }
 
 const evidenceOf = item => {

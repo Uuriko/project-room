@@ -1,0 +1,28 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { RoomStore } from '../server/store.mjs';
+import { initialRoom } from '../server/bootstrap.mjs';
+import { createRoomServer } from '../server/http.mjs';
+test('real PR receiver is mounted, disabled by default and rejects unauthenticated deliveries', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'room-pr-receiver-'));
+  const store = new RoomStore(join(directory, 'room.sqlite')); store.initialize(initialRoom());
+  const server = createRoomServer({ store }); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const oldFlag = process.env.ROOM_PR_WEBHOOK, oldSecret = process.env.GITHUB_PR_WEBHOOK_SECRET;
+  t.after(() => { server.closeStreams(); server.closeAllConnections(); server.close(); store.close(); rmSync(directory, {recursive:true,force:true});
+    if(oldFlag===undefined) delete process.env.ROOM_PR_WEBHOOK; else process.env.ROOM_PR_WEBHOOK=oldFlag;
+    if(oldSecret===undefined) delete process.env.GITHUB_PR_WEBHOOK_SECRET; else process.env.GITHUB_PR_WEBHOOK_SECRET=oldSecret;
+  });
+  const url = `http://127.0.0.1:${server.address().port}/api/github/pr-webhook`;
+  const body = JSON.stringify({zen:'receipt test'});
+  const send = signature => fetch(url,{method:'POST',headers:{'content-type':'application/json','x-github-event':'ping',...(signature?{'x-hub-signature-256':signature}:{})},body});
+  delete process.env.ROOM_PR_WEBHOOK; delete process.env.GITHUB_PR_WEBHOOK_SECRET;
+  assert.equal((await send()).status,404);
+  process.env.ROOM_PR_WEBHOOK='1'; assert.equal((await send()).status,503);
+  process.env.GITHUB_PR_WEBHOOK_SECRET='isolated-http-fixture'; assert.equal((await send('sha256='+'0'.repeat(64))).status,401);
+  const signature = 'sha256='+createHmac('sha256','isolated-http-fixture').update(body).digest('hex');
+  const response=await send(signature); assert.equal(response.status,200); assert.deepEqual(await response.json(),{ok:true,ignored:true});
+});

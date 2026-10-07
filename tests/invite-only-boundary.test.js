@@ -48,6 +48,13 @@ assert.ok(SERVED_CANDIDATES.length >= 60 && SERVED_CANDIDATES.includes("/api/hea
 // Keyed like routeKey(): parameters reduced to {}.
 const token = () => randomBytes(32).toString("base64url");
 const PROBES = {
+  "GET /demo": [undefined, 200],
+  "HEAD /demo": [undefined, 200],
+  // Native login starts/callbacks require PKCE query shape. The exchange is
+  // publicly reachable but an invented one-time code cannot establish a session.
+  "GET /api/auth/desktop/start": [undefined, 422],
+  "GET /api/auth/desktop/callback": [undefined, 422],
+  "POST /api/auth/desktop/session": [{ code: `oac_${"A".repeat(32)}`, verifier: "A".repeat(43) }, 401],
   "HEAD /api/health": [undefined, 200],
   "HEAD /api/version": [undefined, 200],
   "HEAD /api/ready": [undefined, 200],
@@ -255,6 +262,9 @@ test("Node unauthenticated endpoint inventory equals its openapi security: [] se
   // Everything room-scoped requires a credential (shape-valid bodies reach the
   // auth check; malformed ones may fail input validation first, which leaks nothing).
   const guardedRoutes = [
+    ["GET", "/api/rooms/commons/assistant"],
+    ["HEAD", "/api/rooms/commons/assistant"],
+    ["POST", "/api/rooms/commons/assistant", { action: "invoke", requestId: "anonymous", runId: "anonymous", sourceMessageId: "test-welcome" }],
     ["GET", "/api/rooms/commons/commands"],
     ["GET", "/api/rooms/commons/events"],
     ["GET", "/api/rooms/commons/export"],

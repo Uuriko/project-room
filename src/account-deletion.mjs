@@ -47,6 +47,10 @@ export const KNOWN_CATEGORIES = Object.freeze({
   // QA2 finding P2-11: owned-room disposition runs before memberships drop,
   // so a personal room is archived before the account leaves it.
   owned_rooms: { priority: 45, dependsOn: [] },
+  // SEC-04 (2026-10-05): agent invites and referral invites minted by the
+  // account's room members must be revoked before memberships drop, because
+  // member_accounts is the only link from the account to those member ids.
+  member_issued_invites: { priority: 47, dependsOn: [] },
   media: { priority: 50, dependsOn: ["messages"] },
   activity: { priority: 60, dependsOn: [] },
   integrations: { priority: 70, dependsOn: [] },
@@ -57,6 +61,11 @@ export const KNOWN_CATEGORIES = Object.freeze({
   // connected email data, derived stitch rows, account-issued access grants,
   // and sponsored agent connections behind. Purge/revoke them before the
   // profile tombstone lands; inbox command receipts stay as audit.
+  // SEC-04 (2026-10-05): account-keyed inbox and channel rows outside the
+  // private_inbox tables (handoff packets, SLA alerts, channel journal).
+  // Runs before private_email: pending_channel_updates has a foreign key to
+  // private_email_connections, so the journal must go first.
+  derived_inbox: { priority: 69, dependsOn: [] },
   private_inbox: { priority: 71, dependsOn: [] },
   private_email: { priority: 72, dependsOn: [] },
   stitch: { priority: 73, dependsOn: ["private_inbox"] },

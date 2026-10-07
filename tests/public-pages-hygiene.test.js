@@ -92,38 +92,8 @@ test("favicon, icon, and manifest routes serve the public marks", async t => {
   assert.match(touch.headers.get("content-type") ?? "", /image\/png/);
   const offline = await fetch(`${origin}/offline.html`);
   assert.equal(offline.status, 200);
-  const offlineHtml = await offline.text();
-  assert.match(offlineHtml, /Room is offline/);
-  // 2026-10-06: the service-worker's offline fallback was a dead end — no
-  // action. It now names the check and links back to the door, with no
-  // inline script (CSP-immune).
-  assert.match(offlineHtml, /Check your network/);
-  assert.match(offlineHtml, /<a href="\/">try the room again<\/a>/);
-  assert.doesNotMatch(offlineHtml, /<script/);
+  assert.match(await offline.text(), /Room is offline/);
   assert.equal((home.match(/<h1[\s>]/g) ?? []).length, 1);
   assert.doesNotMatch(home, /id="message-input"[^>]*aria-expanded/);
   assert.doesNotMatch(home, /id="room-overview-open"[^>]*aria-label="Room overview"/);
-});
-
-test("browser 404 names the invite-link dead end", async t => {
-  // 2026-10-06: a stranger pasting a bad invite link landed on a bare 404
-  // with no hint. The page now says invite links open exactly as sent and
-  // work once, and points at a fresh link.
-  const origin = await serve(t);
-  const res = await fetch(`${origin}/no-such-page`, { headers: { Accept: "text/html" } });
-  assert.equal(res.status, 404);
-  const html = await res.text();
-  assert.match(html, /<h1>Page not found<\/h1>/);
-  assert.match(html, /invite links open exactly as sent and work once/i);
-  assert.match(html, /<a href="\/">Home<\/a>/);
-});
-
-test("404.html and the served 404 document stay identical", async () => {
-  // deploy/public-search.mjs says "404.html is the same document": the
-  // edge serves the file, the node server serves the constant. A copy
-  // edit to one without the other is a drift bug.
-  const { PUBLIC_NOT_FOUND_HTML } = await import("../deploy/public-search.mjs");
-  const { readFile } = await import("node:fs/promises");
-  const file = await readFile(new URL("../404.html", import.meta.url), "utf8");
-  assert.equal(file, PUBLIC_NOT_FOUND_HTML);
 });

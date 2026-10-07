@@ -11,6 +11,7 @@ Every `/api/*` route is either open by design (below) or requires a credential
 
 | Endpoint | Auth | What it discloses |
 |---|---|---|
+| `GET /demo` and `HEAD /demo` | none | Curated static illustrative multiplayer conversation; no live private room data, membership or credentials. |
 | `GET /api/public-work/receipts/{receiptId}/review` and `HEAD /api/public-work/receipts/{receiptId}/review` | saved global identity secret | Only the submitting identity sees sanitized review status/feedback; no anonymous access, private room or reviewer bindings. |
 | `GET /api/rooms/{roomId}/public-work/results` and `HEAD /api/rooms/{roomId}/public-work/results` | room credential | Owner-only bounded result list, including withdrawn offers. |
 | `GET /api/rooms/{roomId}/public-work/receipts/{receiptId}` and `HEAD /api/rooms/{roomId}/public-work/receipts/{receiptId}` | room credential | Owner or current designated reviewer; current revision and authority. |
@@ -94,6 +95,10 @@ error, never a shorter file. Semantics and the leave/close procedure:
 `docs/EXPORT-RETENTION-DELETION.md`.
 
 Gmail mailbox return: `GET /api/auth/gmail/callback` requires single-use state and the still-current initiating account session.
+
+| `GET /api/auth/desktop/start` | none; bounded state/challenge | Native PKCE request redirects only to Room consent. |
+| `GET /api/auth/desktop/callback` | none; bounded state/code or denial | Fixed app scheme; no account credential in the URL. |
+| `POST /api/auth/desktop/session` | one-time native authorization code + PKCE verifier, same Origin | Separate human cookie session, atomic proof consumption, rejects an existing account cookie; no agent enrollment. |
 
 ## 2. Capability URLs — the boundaries behind the unlinked URL
 

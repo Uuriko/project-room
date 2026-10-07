@@ -1,3 +1,4 @@
+import { uiText } from "./strings.js";
 import { installOwnerProjectOffers } from "./owner-project-offers-ui.js";
 import { createMemberDisplayNames } from "./member-display-names.js";
 import { installRoomLayout, syncSidebarSections } from "./room-layout.js";
@@ -5,7 +6,7 @@ import { EVENT_TYPES as T, MAX_MESSAGE_BODY_CHARS, WORK_STATES as S, roomPolicy,
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
-import { conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, mentionHtml, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
+import { conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, messageBodyHtml, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
 import { canonicalReaction, clipGraphemes, emojiCatalog, emojiMatches, emojiName, emojiQuery, foldedReactionMap, frequentEmoji, insertEmoji, renderEmojiShortcodes } from "./emoji.js";
 import { nextWorkStep, workStatus, workActions, renderWorkActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, diffResultLines, diffResultSummary, workRecipeOptions } from "./workflow.js";
 import { coordinationLoops } from "./work-loops.js";
@@ -40,6 +41,33 @@ import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui
 import { installHumanPush } from "./human-push.js";
 import { chatSuggestions, ASK_AGENT_AFTER_MS } from "./chat-suggestions.js";
 import { paintClaimChat } from "./board-ui.js";
+import { installHumanExperience } from "./human-experience.js";
+
+// Keep a connector/native consent journey through password or provider login.
+// Only our exact consent path is a return target; never follow arbitrary URLs.
+const oauthReturnKey = "project-room:oauth-return:v1";
+function validatedOAuthReturn(value) {
+  if (typeof value !== "string" || !value.startsWith("/oauth/authorize?") || value.length > 4096) return null;
+  try {
+    const target = new URL(value, location.origin);
+    return target.origin === location.origin && target.pathname === "/oauth/authorize" && !target.hash
+      && !target.username && !target.password ? target.pathname + target.search : null;
+  } catch { return null; }
+}
+try {
+  const params = new URLSearchParams(location.search);
+  const target = params.get("oauth") === "login" ? validatedOAuthReturn(params.get("return")) : null;
+  if (target) sessionStorage.setItem(oauthReturnKey, target);
+} catch { /* A blocked storage leaves ordinary sign-in available. */ }
+function resumeOAuthConsent() {
+  if (!accountClient.session?.authenticated || accountClient.session.terms?.required) return false;
+  try {
+    const target = validatedOAuthReturn(sessionStorage.getItem(oauthReturnKey));
+    sessionStorage.removeItem(oauthReturnKey);
+    if (target) { location.assign(target); return true; }
+  } catch { /* No arbitrary redirect fallback. */ }
+  return false;
+}
 
 const $ = selector => document.querySelector(selector);
 applyStoredTheme();
@@ -247,7 +275,8 @@ let offerContextVersion = null;
 let currentThreadId = null, conversation = null, drafts = new ConversationDrafts();
 let requestRuns = {}, requestRunsReading = false, requestRunsReadKey = "";
 let requestMode = null, requestReading = false, requestEpoch = 0;
-const composerKey = () => replyDraftKey(requestMode, currentThreadId);
+const composerKey = () => requestMode ? replyDraftKey(requestMode, currentThreadId) : currentThreadId ?? channelDraftKey(activeChannelId);
+const conversationViewKey = () => currentThreadId ? `thread:${currentThreadId}` : `room:${activeChannelId}`;
 const viewPositions = new Map(), pendingReactions = new Map(), pendingPins = new Set(), locallyOwnedMessageIds = new Set();
 let newVisibleMessages = 0, unreadAnchorId = null, mentionIndex = 0, emojiIndex = 0;
 let mutedThreads = new Set(), threadMuteBusy = false;
@@ -284,12 +313,14 @@ let recovery;
 let leavingPage = false;
 let composerFiles = [];
 let roomFilesByMessage = new Map();
-try { recovery = new DraftRecovery(window.sessionStorage); } catch { recovery = new DraftRecovery(null); }
+try { recovery = new DraftRecovery(navigator.userAgent.includes("ProjectRoomMac/") ? window.localStorage : window.sessionStorage); } catch { recovery = new DraftRecovery(null); }
 const draftScope = draftRecoveryScope;
 const client = new RoomClient({
   accountClient,
   onSnapshot(snapshot, identity) {
     const firstSnapshot = !state;
+    const presenceBoundary = firstSnapshot || state.room?.id !== snapshot.state.room?.id || roomGeneration !== client.generation;
+    if (presenceBoundary) stopPresencePoll();
     state = snapshot.state; session = identity;
     displayNames = createMemberDisplayNames(state.members);
     void refreshRequestRuns();
@@ -324,6 +355,7 @@ const client = new RoomClient({
     agentInvitesUI?.sync();
     referralBoardUI?.sync();
     landQueueUI?.sync();
+    if (presenceBoundary) startPresencePoll();
     if (firstSnapshot) {
       rememberLastRoom(roomId, undefined, state.room?.title);
       const accountId = accountClient.session?.account?.id ?? session?.account?.id;
@@ -335,7 +367,6 @@ const client = new RoomClient({
       void refreshSavedIds();
       void applyHorizonAnchor();
       void refreshMutedThreads();
-      startPresencePoll();
     }
     instructionsUI?.sync();
     resultCopyUI?.sync();
@@ -348,6 +379,8 @@ const client = new RoomClient({
       const saved = recovery.read(draftScope(identity), state);
       if (saved) {
         drafts = saved.drafts; currentThreadId = saved.threadId;
+        if (state.channels?.[saved.channelId] && !state.channels[saved.channelId].archivedAt) activeChannelId = saved.channelId;
+        syncChannelChrome();
         const draft = drafts.get(saved.activeKey);
         requestMode = draft.mode ?? null;
         restoreComposer(draft);
@@ -433,6 +466,7 @@ const client = new RoomClient({
     $("#signout-button").disabled = pendingSignout;
     workFormOpener = null; clearNotice();
     $("#main").hidden = true; $("#auth-panel").hidden = false; $("#signout-button").hidden = true;
+    humanExperience?.sync();
     $("#account-settings-button").hidden = true;
     syncSessionMenu();
     $("#auth-panel").setAttribute("aria-busy", pendingSignout ? "true" : "false");
@@ -461,14 +495,9 @@ const client = new RoomClient({
     $("#room-overview-content").replaceChildren();
     delete $("#room-overview-content")._content;
     if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
-    // Every disclosure goes back to how index.html authored it. Two are
-    // authored open - People, and About since it moved into the Settings
-    // dialog - and closing those is not a reset. It left the next person to
-    // sign in on this browser with a collapsed rail and, for About, with the
-    // room purpose, Room instructions, Archive and Leave hidden behind a
-    // closed summary for the rest of the session.
-    for (const id of ["work-options", "connection-details", "rb-history-section", "rb-involving-section", "decision-section", "usage-panel"]) $(`#${id}`).open = false;
-    for (const id of ["people-panel", "room-about"]) $(`#${id}`).open = true;
+    // Restore the authored human defaults: People stays quiet until disclosed.
+    for (const id of ["work-options", "connection-details", "rb-history-section", "rb-involving-section", "decision-section", "usage-panel", "people-panel"]) $(`#${id}`).open = false;
+    $("#room-about").open = true;
     agentPauses = new Map(); armedRemoval = null;
     setFormStatus($("#new-work-status"), ""); setFormStatus($("#action-error"), ""); setFormStatus($("#composer-status"), ""); setFormStatus($("#room-about-status"), ""); briefReconcileNote = "";
     $("#action-dialog").close(); $("#new-work-form").hidden = true; $("#reply-bar").hidden = true;
@@ -607,6 +636,7 @@ let accountCheckFlight = null, roomListVersion = 0, roomListCursor = null;
 // (RC-2026-09-19-066): the redeem failed before any network call and the
 // user was left on the welcome screen.
 let accountRestoreFlight = null;
+let firstRoomNamePending = false;
 let humanAuthBusy = false;
 let signinView = "password-login", signinHistoryReplay = false, resetJourneyPending = false;
 let resumeResetJourney = false;
@@ -721,6 +751,7 @@ const signinUI = createAuthSigninUI({
 });
 const initialAuthLink = classifyAuthLink(new URLSearchParams(location.search));
 const initialPasswordReset = initialAuthLink.kind === "reset";
+if (initialAuthLink.kind === "none" && !initialGoogleFailed) signinUI.showWelcome();
 const initialSignin = signinUI.mount($("#auth-signin-ui"));
 
 // Agent sign-in (RC-2026-09-23): agents choose their own account (identity
@@ -808,18 +839,22 @@ async function openPersonalRoomAfterSignup() {
     if (startRoomFlight) await startRoomFlight;
     return;
   }
+  firstRoomNamePending = true;
+  showAccountWorkspace();
   try { await inboxUI.askSetupName?.(); } catch { /* a name is optional; the room still opens */ }
+  finally { firstRoomNamePending = false; }
   if (accountClient.session !== owned || state) return;
   const body = await ensureDefaultRoom();
   if (accountClient.session !== owned || state) return;
   const roomId = body?.room?.id;
   if (!roomId) { showAccountWorkspace(); return; }
   history.replaceState(null, "", roomHandoffLocation(roomId));
-  try { await client.restore(roomId); inboxUI.refreshSetup?.(); }
+  try { await client.restore(roomId); inboxUI.showRooms(); inboxUI.refreshSetup?.(); }
   catch { if (accountClient.session === owned && !state) showAccountWorkspace(); }
 }
 // --- end Q3-C ---
 async function landAfterSignIn() {
+  if (resumeOAuthConsent()) return;
   const target = signInRoomTarget({
     nextRoom: roomIdFromNext(new URLSearchParams(location.search).get("next")),
     deepLinkRoom: roomFromLocation({ search: location.search, hash: location.hash }),
@@ -854,6 +889,7 @@ async function landAfterSignIn() {
 let startRoomFlight = null;
 function showAccountWorkspace() {
   if (!accountClient.session?.authenticated) return;
+  if (resumeOAuthConsent()) return;
   if (accountClient.session.terms?.required) {
     $("#main").hidden = true;
     $("#auth-panel").hidden = false;
@@ -898,7 +934,7 @@ async function openStartedRoom() {
   const roomId = body?.room?.id;
   if (!roomId) { inboxUI.open(); return; }
   history.replaceState(null, "", roomHandoffLocation(roomId));
-  try { await client.restore(roomId); inboxUI.refreshSetup?.(); }
+  try { await client.restore(roomId); inboxUI.showRooms(); inboxUI.refreshSetup?.(); }
   catch { if (accountClient.session === owned && !state) { inboxUI.showRoomList(); $("#account-rooms-status").textContent = "Couldn’t open your room. Choose it below."; } }
 }
 async function confirmAccount() {
@@ -952,7 +988,8 @@ async function loadAccountRooms(more = false) {
     // RC-2026-09-19-088: first sign-in must never land in an empty void. A
     // fresh account with no rooms and no pending invitation gets its default
     // room created and opened.
-    if (!more && !$("#account-rooms-list").children.length && !roomListCursor) ensureDefaultRoom();
+    if (!more && !$("#account-rooms-list").children.length && !roomListCursor
+      && !firstRoomNamePending && !startRoomIntent && !startRoomFlight) ensureDefaultRoom();
   } catch (error) {
     if (version !== roomListVersion || (accountClient.session && accountClient.session !== owned)) return;
     if ([401, 403].includes(error.status) || !accountClient.session) endAccountAccess();
@@ -1093,12 +1130,36 @@ window.addEventListener("focus", () => confirmAccount());
 document.addEventListener("visibilitychange", () => { if (!document.hidden) confirmAccount(); });
 setInterval(() => { if (!document.hidden) confirmAccount(); }, 5000);
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+// plan-dir-card: render a directory card inside the member chip's profile.
+// owns[] and reach{} are host-supplied from live data (never fabricated);
+// provenance tells a seeded placeholder from a self-published card.
+function renderDirectoryCard(card) {
+  if (!card || typeof card !== "object") return uiText("directory.card.copy.001");
+  const reach = card.reach && typeof card.reach === "object" ? card.reach : null;
+  const reachLine = reach
+    ? `Wake ${reach.wakeMode ?? "unknown"}`
+      + `${reach.lastPollAt ? ` · last poll ${new Date(reach.lastPollAt).toLocaleString()}` : ""}`
+      + ` · ${reach.pendingUnacked ?? 0} unacked`
+      + ` · bonds ${reach.bondStatus ?? "unknown"}`
+      + `${reach.host ? ` · host ${reach.host}` : ""}`
+    : uiText("directory.card.copy.002");
+  const owns = Array.isArray(card.owns) && card.owns.length ? card.owns.join(", ") : "—";
+  const provenance = card.provenance === "seeded"
+    ? `<span class="card-provenance card-provenance-seeded" title="Seeded by the room owner from live room data; the agent has not published a card yet">Seeded</span>`
+    : `<span class="card-provenance card-provenance-self">Self-published</span>`;
+  return ["<div class=\"member-card-badges\">", provenance, "<span class=\"card-visibility\">", esc(card.visibility), "</span></div>"].join('')
+    + `<p><strong>${esc(card.name)}</strong></p>`
+    + (card.description ? `<p class="form-hint">${esc(card.description)}</p>` : "")
+    + `<p>Capabilities: ${esc((card.capabilities ?? []).join(", ") || "—")}</p>`
+    + `<p>Owns: ${esc(owns)}</p>`
+    + `<p class="form-hint">${esc(reachLine)}</p>`;
+}
 const humanize = value => String(value).replaceAll("_", " ").replaceAll(".", " ");
-const memberLabel = id => id == null ? "Unassigned" : state.members[id] ? `${state.members[id].displayName} (${id})` : `Unknown member (${id})`;
+const memberLabel = id => id == null ? "Unassigned" : state.members[id] ? ["", state.members[id].displayName, " (", id, ")"].join('') : `Unknown member (${id})`;
 // Keep ordinary conversation readable; exact IDs remain in details and decision
 // controls. Duplicate names retain the full ID so attribution stays unambiguous.
 let displayNames = createMemberDisplayNames({});
-const displayName = id => displayNames(id);
+const displayName = id => humanExperience?.assistantName(id) || displayNames(id);
 const name = displayName; // Ordinary summaries use the same duplicate-aware attribution as authors.
 const can = capability => state?.members[session?.member.id]?.permissions.includes(capability);
 const sameSession = (generation, roomId, memberId) => generation === client.generation && state
@@ -1863,12 +1924,15 @@ function render() {
     const paused = agentPauses.has(m.id), armed = armedRemoval === m.id;
     return `<div class="member-actions" data-member-actions="${esc(m.id)}"><button type="button" class="text-button" data-member-pause="${esc(m.id)}" data-pause-action="${paused ? "resume" : "pause"}" title="${paused ? "Let queued wakes start again" : "Queued wakes will not start; a running attempt finishes"}">${paused ? "Resume" : "Pause"}</button><button type="button" class="text-button member-remove${armed ? " armed" : ""}" data-member-remove="${esc(m.id)}" aria-pressed="${armed}">${armed ? "Confirm remove" : "Remove"}</button>${armed ? `<button type="button" class="text-button" data-member-remove-cancel="${esc(m.id)}">Keep</button>` : ""}</div>`;
   };
+  const presenceStale = presenceUnrefreshed || presenceObservationAged();
   const presenceRow = m => {
     // #660: prefer the server-derived presence entry when we have one; it
     // carries the authoritative working state plus owner/scope projection.
-    const serverPresence = presenceStates.get(m.id);
+    const serverPresence = m.active === false ? null : presenceStates.get(m.id);
     const merged = serverPresence ? { ...m, ...serverPresence } : m;
-    const presence = memberPresence(merged, railCtx);
+    const agent = m.kind === "agent" && m.active !== false;
+    const presence = agent && presenceStale ? "unknown" : memberPresence(merged, railCtx);
+    const availability = agent && presenceStale ? (presenceUnrefreshed ? "Availability not refreshed" : "Availability needs refresh") : presenceLabel(presence);
     // Keep names readable; duplicate names retain their IDs and every exact
     // identity remains available in the member disclosure and action choices.
     const handle = m.kind === "agent" ? memberHandle(m, displayName(m.id)) : displayName(m.id);
@@ -1882,19 +1946,23 @@ function render() {
       : "";
     // #660: state chip, owner chip, "working on {title}", "owned by".
     const serverState = serverPresence?.state;
-    const stateChip = serverState
-      ? `<span class="member-state-chip" data-state="${esc(serverState)}">${esc(presenceLabel(serverState))}</span>`
+    const stateChip = agent || serverState
+      ? `<span class="member-state-chip" data-state="${esc(presence)}">${esc(availability)}</span>`
       : "";
     const ownerChip = m.id === state.room.ownerId
       ? `<span class="owner-chip" title="Room owner">Owner</span>`
       : m.active !== false && m.permissions.includes("manage_members") ? `<span class="owner-chip" title="Can invite and manage members">Admin</span>` : "";
-    const workingOnTitle = serverState === "working" && serverPresence?.workingOn?.[0]?.title
-      ? `<span class="member-working-on">working on ${esc(String(serverPresence.workingOn[0].title))}…</span>`
+    const workingOnTitle = !presenceUnrefreshed && serverState === "working" && serverPresence?.workingOn?.[0]?.title
+      ? `<span class="member-working-on">${presenceStale ? "Last reported working on" : "working on"} ${esc(String(serverPresence.workingOn[0].title))}…</span>`
       : "";
     const ownedBy = serverPresence?.ownerIdentityId
-      ? `<span class="member-owned-by">owned by @${esc(String(serverPresence.ownerIdentityId).slice(0, 12))}</span>`
+      ? `<span class="member-owned-by">Agent identity: <code>${esc(serverPresence.ownerIdentityId)}</code></span>`
       : "";
-    return `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-presence="${esc(presence)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}"${m.agentType ? ` data-agent-type="${esc(m.agentType)}"` : ""} ${m.active === false ? "" : `title="${esc(`Address ${m.displayName} in chat`)}"`}><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span><i class="presence-dot presence-${esc(presence)}" title="${esc(presenceLabel(presence))}"></i></div><div><div class="member-head"><strong class="member-handle${m.kind === "agent" ? " member-handle-agent" : ""}">${esc(handle)}</strong><span class="sr-only">${esc(presenceLabel(presence))}</span>${doneChip}${agentPauses.has(m.id) && m.active !== false ? `<span class="pause-chip" data-paused-member="${esc(m.id)}" title="Queued wakes will not start">Paused</span>` : ""}${friendBondHtml(m)}</div>${workingOnTitle}<details class="member-profile"><summary data-focus-key="member-profile:${esc(m.id)}" aria-label="Member options for ${esc(m.displayName)}" title="Member options"><span aria-hidden="true">···</span></summary><div class="member-profile-body"><p class="form-hint">Member ID: <code>${esc(m.id)}</code></p><div class="member-profile-badges">${typeChip}${stateChip}${ownerChip}</div><p class="member-status">${esc(status)}</p>${ownedBy}${memberActions(m)}${workControl(m)}<details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p>${adminControl(m)}${muteControl(m)}</details>${dmConsentDetails(m)}</div></details></div></div>`;
+    const hostReport = Number.isFinite(serverPresence?.presence?.lastSeenAt)
+      ? `<p class="member-observation">Last host report: <time datetime="${esc(new Date(serverPresence.presence.lastSeenAt).toISOString())}">${esc(new Date(serverPresence.presence.lastSeenAt).toLocaleString())}</time></p>` : "";
+    const lastReport = agent && presenceStale && serverState
+      ? `<p class="member-observation">Last reported availability: ${esc(presenceLabel(serverState))}</p>` : "";
+    return `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-presence="${esc(presence)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}"${m.agentType ? ` data-agent-type="${esc(m.agentType)}"` : ""} ${m.active === false ? "" : `title="${esc(`Address ${m.displayName} in chat`)}"`}><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span><i class="presence-dot presence-${esc(presence)}" title="${esc(availability)}"></i></div><div><div class="member-head"><strong class="member-handle${m.kind === "agent" ? " member-handle-agent" : ""}">${esc(handle)}</strong><span class="sr-only">${esc(availability)}</span>${doneChip}${agentPauses.has(m.id) && m.active !== false ? `<span class="pause-chip" data-paused-member="${esc(m.id)}" title="Queued wakes will not start; a running attempt may finish">Wakes paused</span>` : ""}${friendBondHtml(m)}</div>${agent ? `<span class="member-availability">${esc(availability)}</span>` : ""}${workingOnTitle}${agent ? `<p class="member-status member-assignment">${esc(status)}</p>` : ""}<details class="member-profile"><summary data-focus-key="member-profile:${esc(m.id)}" aria-label="Member options for ${esc(m.displayName)}" title="Member options"><span aria-hidden="true">···</span></summary><div class="member-profile-body"><p class="form-hint">Member ID: <code>${esc(m.id)}</code></p><div class="member-profile-badges">${typeChip}${stateChip}${ownerChip}</div><p class="member-status">${esc(status)}</p>${lastReport}${hostReport}${ownedBy}${agentPauses.has(m.id) && agent ? `<p class="member-pause-explanation">Queued wakes will not start; a running attempt may finish.</p>` : ""}${memberActions(m)}${workControl(m)}<details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p>${adminControl(m)}${muteControl(m)}</details>${dmConsentDetails(m)}${directoryCardDetails(m)}</div></details></div></div>`;
   };
   // E4: mute is the viewer's own preference; the owner (the appeal path) and yourself are never mutable.
   const muteControl = m => m.id === session?.member?.id || m.id === state.room.ownerId ? "" : `<button type="button" class="text-button mute-toggle" data-mute-member="${esc(m.id)}" data-muted="${isMutedBy(state, session?.member?.id, m.id)}" aria-pressed="${isMutedBy(state, session?.member?.id, m.id)}">${isMutedBy(state, session?.member?.id, m.id) ? `Unmute ${esc(m.displayName)}` : `Mute ${esc(m.displayName)} for me`}</button>`;
@@ -1933,6 +2001,14 @@ function render() {
       : `<button type="button" class="text-button" data-dm-consent-action="${a.action}" data-dm-consent-peer="${esc(m.id)}">${esc(a.label)}</button>`).join("");
     return `<details class="dm-consent"><summary data-focus-key="member-dm:${esc(m.id)}">Direct messages</summary><div class="dm-consent-body">${lines}<div class="dm-consent-actions">${actions}</div></div></details>`;
   };
+  // plan-dir-card: the member chip's directory card section. The card is
+  // lazy-loaded on first expand from the member-card endpoint so the
+  // presence roster stays light; cardAgentId on the member says whether a
+  // visible card exists.
+  const directoryCardDetails = m => {
+    if (!m || m.kind !== "agent" || !m.cardAgentId || m.active === false) return "";
+    return `<details class="member-directory-card" data-directory-card="${esc(m.id)}"><summary data-focus-key="member-card:${esc(m.id)}">Directory card</summary><div class="member-card-body" data-member-card-body="${esc(m.id)}"><p class="form-hint">Loading…</p></div></details>`;
+  };
   // Incoming DM requests surface at the top of the People panel so they are
   // visible without opening any one member's details.
   const dmRequestInbox = () => {
@@ -1947,8 +2023,16 @@ function render() {
   };
   const byPresence = (a, b) => (a.active === false) - (b.active === false) || a.displayName.localeCompare(b.displayName);
   const people = members.filter(m => m.kind !== "agent").sort(byPresence);
-  const agents = members.filter(m => m.kind === "agent").sort(byPresence);
-  renderContent("#presence-list", `${dmRequestInbox()}${people.length ? `<p class="presence-heading">People</p>${people.map(presenceRow).join("")}` : ""}${agents.length ? `<p class="presence-heading">Agents</p>${agents.map(presenceRow).join("")}` : ""}`);
+  const agents = members.filter(m => m.kind === "agent" && m.active !== false).sort(byPresence);
+  const removedAgents = members.filter(m => m.kind === "agent" && m.active === false).sort(byPresence);
+  // Membership revocation is different from idle presence. Keep active agents
+  // visible and historical identities inspectable without crowding the rail.
+  const removedAgentsHtml = removedAgents.length
+    ? `<details class="removed-agents"><summary data-focus-key="removed-agents">Removed agents (${removedAgents.length})</summary>${removedAgents.map(presenceRow).join("")}</details>` : "";
+  const presenceNote = presenceUnrefreshed ? "Availability could not refresh. Try again." : presenceStale ? "Availability needs refresh. Reports older than 60 seconds need another check." : "";
+  const checked = presenceCheckedAt ? `${presenceStale ? "Last successful check" : "Last checked"}: ${time(new Date(presenceCheckedAt).toISOString())}` : "";
+  const presenceRefresh = `<div class="presence-refresh"><button type="button" class="text-button" data-refresh-presence data-focus-key="refresh-presence">Refresh availability</button><span class="presence-check-note">${esc([presenceNote, checked].filter(Boolean).join(" "))}</span></div>`;
+  renderContent("#presence-list", `${presenceRefresh}${dmRequestInbox()}${people.length ? `<p class="presence-heading">People</p>${people.map(presenceRow).join("")}` : ""}${agents.length ? `<p class="presence-heading">Agents</p>${agents.map(presenceRow).join("")}` : ""}${removedAgentsHtml}`);
   // JDOT-MEMBER-PERMS-UI begin
   memberPermissionsUI.sync();
   ownerAttentionCard.sync();
@@ -1973,6 +2057,8 @@ function render() {
   renderReturnBrief({ timelineRendered: true });
   setText("#decision-count", state.eventLog.filter(e => e.type === T.DECISION_RECORDED).length || "");
   renderRecordPanel();
+  humanExperience?.sync();
+  revealAgentSigninLink();
 }
 function renderRecordPanel() {
   if (!state || !$("#settings-dialog").open || $("#settings-dialog").classList.contains("results-only") || !$("#record-panel").open) return;
@@ -1999,19 +2085,27 @@ function restoreActiveChannel() {
 }
 function activeChannel() { return state?.channels?.[activeChannelId] ?? null; }
 function setActiveChannel(id) {
-  if (!state) return;
+  if (!state || busy || requestReading || composerFiles.some(file => file.status === "uploading")) return;
   const next = state.channels[id] && !state.channels[id].archivedAt ? id : DEFAULT_CHANNEL_ID;
+  if (next === activeChannelId && !currentThreadId && !requestMode) return;
+  saveComposer();
+  viewPositions.set(conversationViewKey(), $("#message-list").scrollTop);
+  requestEpoch++; requestReading = false; requestMode = null;
+  currentThreadId = null;
   activeChannelId = next;
   try { localStorage.setItem(channelStorageKey(), activeChannelId); } catch { /* private mode */ }
-  syncChannelChrome();
-  renderMessages();
-  $("#message-list")?.scrollTo({ top: 0 });
+  restoreComposer(drafts.get(composerKey()));
+  $("#also-send-to-channel").checked = false;
+  syncChannelChrome(); updateReply(); syncRequestComposer(); renderComposerError();
+  renderMessages(); persistDrafts();
 }
+
 function syncChannelChrome() {
   // If the active channel was archived elsewhere, fall back to the main channel.
-  if (state && activeChannelId !== DEFAULT_CHANNEL_ID && state.channels[activeChannelId]?.archivedAt) {
-    activeChannelId = DEFAULT_CHANNEL_ID;
-    try { localStorage.setItem(channelStorageKey(), activeChannelId); } catch { /* private mode */ }
+  if (state && activeChannelId !== DEFAULT_CHANNEL_ID && state.channels[activeChannelId]?.archivedAt
+    && !busy && !requestReading && !composerFiles.some(file => file.status === "uploading")) {
+    setActiveChannel(DEFAULT_CHANNEL_ID);
+    return;
   }
   const name = activeChannel()?.name ?? DEFAULT_CHANNEL_ID;
   setText("#conversation-title", `# ${name}`);
@@ -2191,6 +2285,13 @@ function renderMessages() {
           if (!before) { node.insertBefore(after, node.firstChild); continue; }
           if (!after) { before.remove(); continue; }
           if (before.className !== after.className) before.className = after.className;
+          if (selector === ".message-body") {
+            // Expansion is local reading state, independent of reactions and
+            // edits. Copy it before comparing so unchanged text stays selected.
+            const expanded = before.querySelector("details.message-expansion");
+            const nextExpanded = after.querySelector("details.message-expansion");
+            if (expanded?.open && nextExpanded) nextExpanded.open = true;
+          }
           if (before.innerHTML !== after.innerHTML) {
             if (selector === ".draft-feedback") {
               // Feedback changes without replacing the selected text or its controls.
@@ -2433,7 +2534,7 @@ function messageContent(m, cluster = {}, unreadStart = false) {
   const groupedTime = cluster.grouped
     ? `<time class="grouped-time" datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time>`
     : "";
-  return `${divider}${groupedTime}<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong>${isPinned(state, m.id) ? `<span class="pinned-chip">Pinned</span>` : ""}<a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · private</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${parent.deletedAt ? "Message deleted" : esc(clipGraphemes(renderEmojiShortcodes(parent.body ?? ""), 90))}</a>` : ""}</div>${muted ? `<p class="message-body message-muted">Hidden: you muted ${esc(authorLabel)}.</p>` : m.deletedAt ? `<p class="message-body message-tombstone">Message deleted</p>` : `<p class="message-body">${mentionHtml(m.body, Object.values(state.members), esc)}</p>${messageFileChips(m.id)}`}<div class="draft-feedback">${muted ? "" : draftFeedbackHTML(m)}</div><div class="reactions" role="group" aria-label="Reactions to message by ${esc(authorLabel)}">${muted || m.deletedAt ? "" : reactionButtons}</div>${messageLinksHTML(m, { linked, moderation, count, muted, canReact: !muted && !m.deletedAt })}</div>`;
+  return `${divider}${groupedTime}<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong>${isPinned(state, m.id) ? `<span class="pinned-chip">Pinned</span>` : ""}<a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · private</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${parent.deletedAt ? "Message deleted" : esc(clipGraphemes(renderEmojiShortcodes(parent.body ?? ""), 90))}</a>` : ""}</div>${muted ? `<p class="message-body message-muted">Hidden: you muted ${esc(authorLabel)}.</p>` : m.deletedAt ? `<p class="message-body message-tombstone">Message deleted</p>` : `<div class="message-body">${messageBodyHtml(m.body, Object.values(state.members), esc, m.id)}</div>${messageFileChips(m.id)}`}<div class="draft-feedback">${muted ? "" : draftFeedbackHTML(m)}</div><div class="reactions" role="group" aria-label="Reactions to message by ${esc(authorLabel)}">${muted || m.deletedAt ? "" : reactionButtons}</div>${messageLinksHTML(m, { linked, moderation, count, muted, canReact: !muted && !m.deletedAt })}</div>`;
 }
 function mentionsFilterOn() {
   return $("#search-mentions")?.getAttribute("aria-pressed") === "true";
@@ -2464,11 +2565,12 @@ function renderSearch(now = Date.now()) {
   if (focused) ([...list.querySelectorAll("[data-search-key]")].find(e => e.dataset.searchKey === focused) || $("#message-search")).focus({ preventScroll: true });
 }
 function saveComposer() {
-  drafts.save(composerKey(), { body: $("#message-input").value, toMemberId: $("#message-to-select").value, replyToId, channelId: pendingMessage ? pendingMessage.command.data.channelId : activeChannelId, pending: pendingMessage,
+  drafts.save(composerKey(), { body: $("#message-input").value, toMemberId: $("#message-to-select").value, replyToId, channelId: pendingMessage ? pendingMessage.command.data.channelId : activeChannelId, pending: pendingMessage, files: composerFiles,
     ...(requestMode ? { mode: requestMode, threadId: currentThreadId } : {}) });
   persistDrafts();
 }
 function restoreComposer(draft) {
+  composerFiles = draft.files ?? []; renderComposerFiles();
   $("#message-input").value = draft.body;
   const select = $("#message-to-select");
   if (draft.toMemberId && ![...select.options].some(option => option.value === draft.toMemberId)) {
@@ -2672,20 +2774,13 @@ function persistDrafts() {
   recovery.write(draftScope(session), drafts, currentThreadId, composerKey());
 }
 function switchThread(threadId, focusComposer = false) {
-  if (!state || busy || (threadId && !conversation.threads.has(threadId))) return;
+  if (!state || busy || composerFiles.some(file => file.status === "uploading") || (threadId && !conversation.threads.has(threadId))) return;
   const leavingResultQuestion = Boolean(requestMode?.resultEventId);
   requestEpoch++; requestReading = false;
   if (threadId !== currentThreadId || requestMode) {
-    saveComposer(); viewPositions.set(currentThreadId ? `thread:${currentThreadId}` : "room", $("#message-list").scrollTop);
+    saveComposer(); viewPositions.set(conversationViewKey(), $("#message-list").scrollTop);
     currentThreadId = threadId; requestMode = null;
-    const draft = drafts.get(threadId);
-    $("#message-input").value = draft.body;
-    const select = $("#message-to-select");
-    if (draft.toMemberId && ![...select.options].some(o => o.value === draft.toMemberId)) {
-      select.add(new Option("Previous recipient unavailable — choose again", draft.toMemberId));
-      select.options[select.options.length - 1].disabled = true;
-    }
-    select.value = draft.toMemberId; replyToId = draft.replyToId; pendingMessage = draft.pending;
+    restoreComposer(drafts.get(composerKey()));
     // "Also send to channel" is per-send, off by default in every thread.
     $("#also-send-to-channel").checked = false;
   }
@@ -3472,17 +3567,17 @@ function mainSigninHost() {
   return $("#auth-panel").contains($("#auth-signin-ui"));
 }
 function focusSignin() {
-  ($("#auth-signin-ui [name=email]") || $("#google-signin"))?.focus({ preventScroll: true });
+  signinUI.focus();
 }
 function syncSigninView(view) {
   const previous = signinView;
   signinView = view;
   if (!mainSigninHost()) return;
-  const auxiliary = !view.startsWith("password-");
-  if (!signinHistoryReplay && auxiliary && previous !== view) {
+  const auxiliary = view !== "welcome" && !view.startsWith("password-");
+  if (!signinHistoryReplay && (auxiliary || previous === "welcome" && view.startsWith("password-")) && previous !== view) {
     if (previous.startsWith("password-")) {
       const base = { ...history.state };
-      delete base.roomSigninView; delete base.roomSigninStep;
+      base.roomSigninView = previous; delete base.roomSigninStep;
       history.replaceState(base, "", location.href);
     }
     const sameFlow = previous.startsWith("magic-") && view.startsWith("magic-")
@@ -3494,13 +3589,15 @@ function syncSigninView(view) {
   $("#email-auth-step").hidden = !auxiliary;
   $("#signin-methods").hidden = auxiliary;
   $("#signin-entry-routes").hidden = auxiliary;
+  $("#google-signin").hidden = view === "welcome";
+  $("#terms-notice").hidden = view === "welcome";
 }
 function showSigninMethods() {
   $("#agent-auth-step").hidden = true;
   $("#agent-signin-button").setAttribute("aria-expanded", "false");
   $("#signin-controller").prepend($("#auth-signin-ui"));
-  signinUI.showPassword();
-  syncSigninView("password-login");
+  signinUI.showWelcome();
+  syncSigninView("welcome");
 }
 function openEmailAuth(mode, { recordHistory = true } = {}) {
   if (!agentSigninUI.canLeave() || !signinUI.canLeave()) return;
@@ -3534,19 +3631,21 @@ window.addEventListener("popstate", event => {
   if ($("#auth-panel").hidden || !mainSigninHost()) return;
   if (!signinUI.canLeave()) { history.forward(); return; }
   signinHistoryReplay = true;
-  try { signinUI.showView(event.state?.roomSigninView || "password-login"); }
+  try { signinUI.showView(event.state?.roomSigninView || "welcome"); }
   finally { signinHistoryReplay = false; }
   focusSignin();
 });
-// Keep the agent path discoverable without asking everyone to read setup
-// instructions. Existing links open the disclosure directly.
+// Preserve guide deep links through sign-in, then open the Advanced guide.
+$("#connect-guide-copy").innerHTML = uiText("guide.instructions");
+let pendingAgentGuide = location.hash === "#join-agent";
 function revealAgentSigninLink() {
-  if (location.hash !== "#join-agent") return;
-  if (!signinUI.closeEmail()) return;
-  openAgentSignin();
-  const details = $("#join-agent");
-  if (details) details.open = true;
+  if (!pendingAgentGuide || !state || session?.member?.kind !== "human") return;
+  pendingAgentGuide = false;
+  $("#connect-guide-dialog").showModal();
 }
+$("#connect-guide-open").addEventListener("click", () => $("#connect-guide-dialog").showModal());
+$("#connect-guide-close").addEventListener("click", () => $("#connect-guide-dialog").close());
+$("#signout-button").addEventListener("click", () => $("#connect-guide-dialog").close(), true);
 revealAgentSigninLink();
 // Agent instructions always name the host currently serving this page.
 const joinAgentPrompt = () => `Read ${location.origin}/llms.txt and join using the original shared invitation I gave you.`;
@@ -3581,6 +3680,8 @@ $("#join-agent-copy")?.addEventListener("click", async () => {
 });
 // C1: mobile session menu (short header) - toggle, Escape, outside click.
 installRoomLayout();
+const humanExperience = installHumanExperience({ getState: () => state, getSession: () => session, client, notice,
+  openWork: id => revealWork(id), openMessage: id => revealMessage(id), selectResult: (id, messageId) => openWorkAction(state.workItems[id], "complete", messageId), refreshTranscript: () => { if (state) renderMessages(); } });
 const sessionMenu = $("#session-menu");
 const sessionMenuButton = $("#session-menu-button");
 const setSessionMenuOpen = open => {
@@ -3717,6 +3818,7 @@ $("#message-form").addEventListener("submit", e => {
   if (composerOverLimit()) { renderComposerLength(); return; }
   if (requestMode) { submitRequest(e.currentTarget); return; }
   const content = { body: $("#message-input").value.trim(), toMemberId: $("#message-to-select").value || null, replyToId, channelId: activeChannelId };
+  const askRoom = humanExperience.intent(content);
   if (!content.body) return;
   if (composerFiles.some(file => file.status === "uploading")) { setComposerError("Wait for the file to finish attaching."); return; }
   // "Also send to channel": a public thread reply also lands as a top-level
@@ -3731,7 +3833,7 @@ $("#message-form").addEventListener("submit", e => {
   const data = unchanged ? previous : { messageId: crypto.randomUUID(), ...content };
   pendingMessage = draftCommand(pendingMessage, T.MESSAGE_POSTED, data);
   saveComposer();
-  const generation = client.generation, threadId = currentThreadId;
+  const generation = client.generation, draftKey = composerKey();
   submit(e.currentTarget, async () => {
     // Ownership must outlive pendingMessage: the command can commit while its immediate
     // snapshot fails, then first appear on a later refresh after the draft was cleared.
@@ -3745,10 +3847,11 @@ $("#message-form").addEventListener("submit", e => {
     if (generation !== client.generation || !state) return;
     await commitComposerFiles(data.messageId);
     if (generation !== client.generation || !state) return;
-    drafts.clear(threadId);
+    drafts.clear(draftKey);
     $("#message-input").value = ""; pendingMessage = null; clearReply();
     $("#also-send-to-channel").checked = false;
     persistDrafts();
+    await humanExperience.posted(data.messageId, askRoom);
     maybeShowGuestUpgradeHint();
   }, { failureHint: "Draft kept. Send again to retry." });
 });
@@ -3876,7 +3979,7 @@ function submitRequest(form) {
       if (!await confirmsReplyCommand(receipt, command, identity.roomId, identity.member.id)) throw new Error("Save not confirmed");
       if (generation !== client.generation || session !== identity || !state) return;
       drafts.clear(key); requestMode = null; requestEpoch++;
-      restoreComposer(drafts.get(currentThreadId)); updateReply(); persistDrafts();
+      restoreComposer(drafts.get(composerKey())); updateReply(); persistDrafts();
       if (mode.resultEventId) renderReturnBrief();
       notice(mode.kind === "request" ? "Request saved." : mode.kind === "cancelled" ? "Request cancelled." : "Reply saved.");
     } catch (error) {
@@ -4111,6 +4214,8 @@ function syncComposerHint() {
   const input = $("#message-input");
   input.title = hint;
   input.setAttribute("aria-description", hint);
+  const caption = $("#composer-hint");
+  if (caption) caption.textContent = hint;
   input.enterKeyHint = touchKeyboard.matches ? "enter" : "send";
 }
 touchKeyboard.addEventListener("change", syncComposerHint);
@@ -4169,6 +4274,26 @@ async function refreshAgentPauses() {
   } catch { /* the roster stays as last read; the next action re-reads it */ }
 }
 $("#people-panel").addEventListener("toggle", () => { if ($("#people-panel").open) { refreshAgentPauses(); void refreshDmConsents(); void refreshFriendBonds(); void refreshPresenceStates(); } });
+// plan-dir-card: lazy-load a member's directory card the first time its
+// chip section expands. The endpoint 404s when the member has no visible
+// card; the section only renders when the roster advertised a cardAgentId,
+// so a 404 here is just a quiet "not available".
+document.addEventListener("toggle", event => {
+  const details = event.target?.closest?.("[data-directory-card]");
+  if (!details || details.dataset.loaded || !details.open) return;
+  details.dataset.loaded = "1";
+  const memberId = details.dataset.directoryCard;
+  const body = details.querySelector("[data-member-card-body]");
+  if (!body) return;
+  void (async () => {
+    try {
+      const card = await client.request(client.path(`/members/${encodeURIComponent(memberId)}/card`));
+      if (body.isConnected) body.innerHTML = renderDirectoryCard(card);
+    } catch {
+      if (body.isConnected) body.innerHTML = `<p class="form-hint">No directory card available.</p>`;
+    }
+  })();
+}, true);
 $("#presence-list").addEventListener("click", async e => {
   const button = e.target.closest("[data-member-work]");
   if (!button || !ownsRoomActions(null) || memberActionBusy || state.room.ownerId !== session.member.id) return;
@@ -4399,21 +4524,119 @@ function roomActionEntries() {
 function closeRoomActions(restore = true) {
   const context = roomActionsContext; roomActionsContext = null;
   $("#room-actions-dialog").close(); $("#room-actions-list").replaceChildren(); $("#room-actions-query").value = "";
-  $("#room-actions-empty").hidden = true;
+  $("#room-actions-empty").hidden = true; $("#room-actions-count").textContent = ""; $("#room-actions-status").textContent = "";
   if (restore && context && ownsRoomActions(context) && context.opener?.isConnected && context.opener.getClientRects().length) {
     context.opener.focus({ preventScroll: true });
     if (context.selection && context.opener.value === context.value) context.opener.setSelectionRange(...context.selection);
   }
 }
+const ROOM_CHANNEL_RESULT_LIMIT = 20, ROOM_TASK_RESULT_LIMIT = 20;
+// Match the timeline's newest loaded proposal without rendering work cards.
+function roomTaskEntries() {
+  const sources = new Map();
+  for (let index = state.messages.length - 1; index >= 0; index--) {
+    const message = state.messages[index];
+    if (message.workItemId && message.proposal && !sources.has(message.workItemId)) sources.set(message.workItemId, messageChannelId(message));
+  }
+  return Object.values(state.workItems).map(item => ({ item, channelId: sources.get(item.id) ?? DEFAULT_CHANNEL_ID }))
+    .filter(({ item, channelId }) => state.workItems[item.id] === item && state.channels?.[channelId] && !state.channels[channelId].archivedAt);
+}
+function roomDestinationBlockedReason() {
+  return busy ? "Wait for the current send to finish, then try again."
+    : composerFiles.some(file => file.status === "uploading") ? "Wait for the file upload to finish, then try again."
+    : requestReading ? "Wait for the request to finish loading, then try again." : "";
+}
+function refuseRoomDestination(message) {
+  $("#room-actions-status").textContent = message; $("#room-actions-status").scrollIntoView({ block: "nearest" });
+}
 function renderRoomActions() {
   if (!roomActionsContext || !ownsRoomActions()) { closeRoomActions(false); return; }
-  const terms = $("#room-actions-query").value.toLowerCase().trim().split(/\s+/).filter(Boolean);
-  const entries = roomActionEntries().filter(entry => terms.every(term => `${entry.label} ${entry.words}`.toLowerCase().includes(term)));
-  $("#room-actions-list").replaceChildren(...entries.map(entry => {
+  const raw = $("#room-actions-query").value.toLowerCase().trim();
+  const channelsOnly = raw.startsWith("#"), tasksOnly = raw.startsWith(">");
+  const query = (channelsOnly || tasksOnly ? raw.slice(1) : raw).trim();
+  const terms = query.split(/\s+/).filter(Boolean);
+  const channels = tasksOnly ? [] : channelList(state).filter(channel => !channel.archivedAt && terms.every(term => channel.name.toLowerCase().includes(term)));
+  const rank = channel => !query ? channel.id === activeChannelId ? -1 : 0
+    : channel.name.toLowerCase() === query ? 0 : channel.name.toLowerCase().startsWith(query) ? 1 : 2;
+  channels.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name, "en") || a.id.localeCompare(b.id, "en"));
+  const shown = channels.slice(0, ROOM_CHANNEL_RESULT_LIMIT);
+  const tasks = channelsOnly ? [] : roomTaskEntries().filter(({ item }) => terms.every(term => item.title.toLowerCase().includes(term)));
+  const taskRank = ({ item }) => item.title.toLowerCase() === query ? 0 : item.title.toLowerCase().startsWith(query) ? 1 : 2;
+  tasks.sort((a, b) => taskRank(a) - taskRank(b) || a.item.title.localeCompare(b.item.title, "en") || a.item.id.localeCompare(b.item.id, "en"));
+  const shownTasks = tasks.slice(0, ROOM_TASK_RESULT_LIMIT);
+  const entries = channelsOnly || tasksOnly ? [] : roomActionEntries().filter(entry => terms.every(term => `${entry.label} ${entry.words}`.toLowerCase().includes(term)));
+  const group = (name, buttons) => {
+    const section = document.createElement("section"), heading = document.createElement("h3");
+    heading.id = `room-finder-${name.toLowerCase()}`; heading.textContent = name;
+    section.setAttribute("aria-labelledby", heading.id); section.append(heading, ...buttons); return section;
+  };
+  const groups = [];
+  if (shown.length) groups.push(group("Channels", shown.map(channel => {
+    const button = document.createElement("button"); button.type = "button"; button.dataset.roomChannel = channel.id;
+    button.textContent = `# ${channel.name}${channel.id === activeChannelId ? " · Current" : ""}`; return button;
+  })));
+  if (shownTasks.length) groups.push(group("Tasks", shownTasks.map(({ item, channelId }) => {
+    const button = document.createElement("button"), title = document.createElement("span"), context = document.createElement("small");
+    button.type = "button"; button.dataset.roomTask = item.id;
+    title.textContent = item.title;
+    context.textContent = `${workStatus(item, Date.now()).label} · #${state.channels[channelId].name} · ${item.id}`;
+    button.append(title, context); return button;
+  })));
+  if (entries.length) groups.push(group("Actions", entries.map(entry => {
     const button = document.createElement("button"); button.type = "button"; button.dataset.roomAction = entry.id;
     button.textContent = entry.label; return button;
-  }));
-  $("#room-actions-empty").hidden = entries.length > 0;
+  })));
+  $("#room-actions-list").replaceChildren(...groups);
+  const counts = [!tasksOnly ? `${shown.length} of ${channels.length} channels` : "", !channelsOnly ? `${shownTasks.length} of ${tasks.length} tasks` : ""].filter(Boolean);
+  $("#room-actions-count").textContent = `Showing ${counts.join("; ")}. Loaded in this room.${channels.length > shown.length || tasks.length > shownTasks.length ? " Type more to refine the list." : ""}`;
+  $("#room-actions-empty").hidden = shown.length + shownTasks.length + entries.length > 0;
+  $("#room-actions-status").textContent = "";
+}
+function chooseRoomChannel(id) {
+  if (!roomActionsContext || !ownsRoomActions()) { closeRoomActions(false); return; }
+  const channel = state.channels?.[id];
+  if (!channel || channel.archivedAt) {
+    renderRoomActions(); $("#room-actions-status").textContent = "That channel is unavailable. Choose another channel.";
+    $("#room-actions-query").focus(); return;
+  }
+  const blocked = roomDestinationBlockedReason();
+  if (blocked) { refuseRoomDestination(blocked); return; }
+  setActiveChannel(id); closeRoomActions(false);
+  $("#main").classList.remove("sidebar-open"); $("#sidebar-toggle").setAttribute("aria-expanded", "false");
+  $("#conversation-title").focus({ preventScroll: true });
+}
+function chooseRoomTask(id) {
+  if (!roomActionsContext || !ownsRoomActions()) { closeRoomActions(false); return; }
+  const destination = roomTaskEntries().find(({ item }) => item.id === id);
+  if (!destination) {
+    renderRoomActions(); refuseRoomDestination("That task is unavailable in the loaded conversation. Choose another destination.");
+    $("#room-actions-query").focus(); return;
+  }
+  const blocked = roomDestinationBlockedReason();
+  if (blocked) { refuseRoomDestination(blocked); return; }
+  const origin = currentWorkOrigin(), target = recordHref("work", id);
+  const repeatInspection = roomActionsContext.opener?.closest?.("[data-work-record-id]")?.dataset.workRecordId === id
+    && activeWorkNavigationId === id && origin?.target === target && location.hash === target
+    && history.state?.roomWorkTarget === activeWorkNavigation;
+  const focusKey = roomActionsContext.opener?.dataset?.focusKey;
+  closeRoomActions(true);
+  const usable = node => node?.isConnected && node !== document.body && !node.closest("[hidden], #room-actions-dialog") && node.getClientRects().length > 0;
+  if (!usable(document.activeElement)) {
+    const keyed = focusKey ? [...document.querySelectorAll("[data-focus-key]")].find(node => node.dataset.focusKey === focusKey && usable(node)) : null;
+    (keyed ?? $("#conversation-title")).focus({ preventScroll: true });
+  }
+  if (repeatInspection) {
+    // The inspected card is the same destination, not a new return surface.
+    workNavigationOrigins.set(activeWorkNavigation, { ...origin, presentation: "details" });
+    workHistoryReplayKey = null; showWorkDestination("work", id);
+  } else if (!navigateWorkRecord("work", id)) { notice("That task could not open. Try again from the finder.", true); return; }
+  $("#main").classList.remove("sidebar-open"); $("#sidebar-toggle").setAttribute("aria-expanded", "false");
+}
+function chooseRoomChoice(button) {
+  if (!roomActionsContext || !ownsRoomActions()) { closeRoomActions(false); return; }
+  if (button?.dataset.roomChannel) chooseRoomChannel(button.dataset.roomChannel);
+  else if (button?.dataset.roomTask) chooseRoomTask(button.dataset.roomTask);
+  else if (button?.dataset.roomAction) chooseRoomAction(button.dataset.roomAction);
 }
 function openRoomActions() {
   if (!ownsRoomActions(null) || document.querySelector("dialog[open]")) return;
@@ -4474,10 +4697,11 @@ $("#room-actions-open").addEventListener("click", openRoomActions);
 $("#room-actions-close").addEventListener("click", () => closeRoomActions());
 $("#room-actions-dialog").addEventListener("cancel", event => { event.preventDefault(); closeRoomActions(); });
 $("#room-actions-query").addEventListener("input", renderRoomActions);
-$("#room-actions-list").addEventListener("click", event => { const id = event.target.closest("[data-room-action]")?.dataset.roomAction; if (id) chooseRoomAction(id); });
+$("#room-actions-list").addEventListener("click", event => chooseRoomChoice(event.target.closest("[data-room-channel], [data-room-task], [data-room-action]")));
 $("#room-actions-dialog").addEventListener("keydown", event => {
   if (event.isComposing || event.keyCode === 229) { if (event.key === "Enter") event.preventDefault(); return; }
   if (event.altKey || event.ctrlKey || event.metaKey) return;
+  if (event.key === "Escape") { event.preventDefault(); closeRoomActions(); return; }
   if (event.key === "Enter" && event.repeat) { event.preventDefault(); return; }
   const buttons = [...$("#room-actions-list").querySelectorAll("button")], index = buttons.indexOf(document.activeElement);
   if (["ArrowDown", "ArrowUp"].includes(event.key)) {
@@ -4485,7 +4709,7 @@ $("#room-actions-dialog").addEventListener("keydown", event => {
     const next = event.key === "ArrowDown" ? index + 1 : index < 0 ? buttons.length - 1 : index - 1;
     (buttons[next] || $("#room-actions-query")).focus();
   } else if (event.key === "Enter" && document.activeElement === $("#room-actions-query")) {
-    event.preventDefault(); if (!event.repeat && buttons[0]) chooseRoomAction(buttons[0].dataset.roomAction);
+    event.preventDefault(); if (!event.repeat && buttons[0]) chooseRoomChoice(buttons[0]);
   }
 });
 document.addEventListener("keydown", event => {
@@ -5653,6 +5877,7 @@ $("#room-results-list").addEventListener("click", e => {
 function openWorkAction(item, action, draftMessageId = null, offerId = null) {
   if (pendingAction?.uncertain) { resumeAction(); return; }
   if (!item || !Object.hasOwn(actionSpecs, action)) return;
+  if (action === "complete" && !draftMessageId && humanExperience.shareResult(item)) return;
   const [type, , fields] = actionSpecs[action];
   actionEpoch++;
   pendingAction = { type, action, workId: item.id, revision: item.revision, draftMessageId, receipt: item.receipt ? { completionEventId: item.receipt.eventId, evidenceVersion: item.receipt.evidenceVersion } : null, retry: null, uncertain: false, error: "" };
@@ -6007,8 +6232,20 @@ let friendBonds = [], friendBusy = false, friendSeq = 0, friendDmPeerId = null;
 // entry). Refreshed on room open and on an interval while visible; the rail
 // prefers these over the local derivation. Never loaded for the public
 // read-only face.
-let presenceStates = new Map(), presenceBusy = false, presenceSeq = 0, presenceTimer = null;
+let presenceStates = new Map(), presenceRequest = null, presenceSeq = 0, presenceTimer = null, presenceAgeTimer = null;
+let presenceUnrefreshed = false, presenceCheckedAt = null;
 const PRESENCE_REFRESH_MS = 30000;
+// Client display freshness only; this does not determine host reachability.
+const PRESENCE_OBSERVATION_MAX_AGE_MS = 60000;
+function presenceObservationAged() {
+  if (presenceCheckedAt === null) return false;
+  const age = Date.now() - presenceCheckedAt;
+  return age < 0 || age >= PRESENCE_OBSERVATION_MAX_AGE_MS;
+}
+function ownsPresenceRequest(request) {
+  return request === presenceRequest && request.seq === presenceSeq
+    && request.generation === client.generation && request.room === state;
+}
 // New room events are coalesced: the feed refetches at most once per window while the tab is visible.
 const NOTIFICATION_COALESCE_MS = 1500;
 const NOTIFICATION_LABELS = { mention: "mentioned you", reply: "replied to you", assignment: "named you on work", work_update: "updated work you are on", access_request: "requested access" };
@@ -6068,6 +6305,11 @@ humanPushUi = installHumanPush({
   client,
   button: $("#human-push-button"),
   note: $("#human-push-note"),
+  prefs: {
+    box: $("#human-push-prefs"),
+    mention: $("#human-push-pref-mention"),
+    dm: $("#human-push-pref-dm")
+  },
   eligible: () => Boolean(state) && ownsNotifications(notificationOwner) && client.session?.member?.kind !== "agent"
 });
 // Tag acknowledgment (2026-09-23): one tap on a pending mention sends the
@@ -6451,29 +6693,47 @@ document.addEventListener("visibilitychange", () => {
 });
 // ---- Presence states ----------------------------------------------------------
 // #660: server-derived per-member working states (working/listening/idle/
-// unreachable) plus owner/scope projection. Load failures stay silent; the
-// rail falls back to its local derivation.
+// unreachable/unknown) observations. Failed refreshes retain context while
+// clearly qualifying cached availability as unrefreshed.
 async function refreshPresenceStates() {
-  if (!state || !session || $("#main").hidden || presenceBusy) return;
-  const seq = ++presenceSeq, generation = client.generation, room = state;
-  presenceBusy = true;
+  if (!state || !session || $("#main").hidden) return;
+  // Qualify synchronously, including while the owned request is still pending.
+  if (presenceObservationAged()) render();
+  if (presenceRequest && ownsPresenceRequest(presenceRequest)) return;
+  const request = { seq: ++presenceSeq, generation: client.generation, room: state };
+  presenceRequest = request;
   try {
     const result = await client.request(client.path("/presence"));
-    if (seq !== presenceSeq || generation !== client.generation || state !== room) return;
+    if (!ownsPresenceRequest(request)) return;
     const next = new Map();
     for (const entry of result?.members ?? []) {
       if (entry && entry.memberId) next.set(entry.memberId, entry);
     }
-    presenceStates = next;
+    presenceStates = next; presenceUnrefreshed = false; presenceCheckedAt = Date.now();
+    if (presenceAgeTimer) clearTimeout(presenceAgeTimer);
+    const checkedAt = presenceCheckedAt;
+    presenceAgeTimer = setTimeout(() => {
+      if (request.generation === client.generation
+        && request.room.room.id === state?.room?.id && checkedAt === presenceCheckedAt) render();
+    }, PRESENCE_OBSERVATION_MAX_AGE_MS);
   } catch {
-    if (seq !== presenceSeq || generation !== client.generation || state !== room) return;
-    // Keep the last known states on failure; wiping them would flash the
-    // whole People panel back to the local derivation.
+    if (!ownsPresenceRequest(request)) return;
+    // Keep useful context, but never present a cached report as current.
+    presenceUnrefreshed = true;
   } finally {
-    presenceBusy = false;
-    if (seq === presenceSeq && generation === client.generation && state === room) render();
+    if (ownsPresenceRequest(request)) { presenceRequest = null; render(); }
   }
 }
+// Returning from a hidden or restored page checks the report immediately.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") void refreshPresenceStates();
+});
+window.addEventListener("pageshow", event => {
+  if (event.persisted && document.visibilityState === "visible") void refreshPresenceStates();
+});
+$("#presence-list").addEventListener("click", event => {
+  if (event.target.closest("[data-refresh-presence]")) void refreshPresenceStates();
+});
 function startPresencePoll() {
   stopPresencePoll();
   void refreshPresenceStates();
@@ -6484,7 +6744,8 @@ function startPresencePoll() {
 function stopPresencePoll() {
   presenceSeq++;
   if (presenceTimer) { clearInterval(presenceTimer); presenceTimer = null; }
-  presenceStates = new Map();
+  if (presenceAgeTimer) { clearTimeout(presenceAgeTimer); presenceAgeTimer = null; }
+  presenceStates = new Map(); presenceUnrefreshed = false; presenceCheckedAt = null; presenceRequest = null;
 }
 // ---- DM consent ---------------------------------------------------------------
 // The signed-in member's consent pairs drive the People panel's Direct
@@ -7135,7 +7396,7 @@ if (initialInvitationFragment && !initialPasswordReset) openInvitation(initialIn
     return;
   }
   const requestedRoom = selectedRoomFromLocation();
-  if (requestedRoom || accountHomeFromLocation()) {
+  if (requestedRoom || accountHomeFromLocation() || new URLSearchParams(location.search).get("oauth") === "login") {
     // Join-flow sessions are room-cookie sessions with no account behind
     // them — the /join page's "Open room" link lands here with a valid
     // __Host-room_session cookie but no account session. Try the room
@@ -7272,5 +7533,22 @@ if (initialInvitationFragment && !initialPasswordReset) openInvitation(initialIn
   render = () => { if (!state) { board.reset(); return; } priorRender(); board.sync(); };
   const priorMessages = renderMessages;
   renderMessages = () => { priorMessages(); paintChat(); };
+}
+// --- plan-squads: Squads panel. Read-only roster UI, lazy-loaded. ---
+{
+  const squadsPanel = lazyDisclosure({ panel: $("#squads-dialog"),
+    load: () => import("./squads-ui.js"),
+    install: module => module.installSquadsPanel({ client, getState: () => state, getSession: () => session }),
+    onError: () => notice("Could not load squads. Close and reopen to retry.", true) });
+  const openSquads = () => {
+    const dialog = $("#squads-dialog");
+    if (!dialog.open) dialog.showModal();
+    squadsPanel.sync();
+  };
+  $("#squads-open").addEventListener("click", openSquads);
+  $("#squads-close").addEventListener("click", () => { $("#squads-dialog").close(); });
+  $("#signout-button").addEventListener("click", () => { $("#squads-dialog").close(); squadsPanel.reset(); }, true);
+  const priorSquadsRender = render;
+  render = () => { if (!state) { squadsPanel.reset(); return; } priorSquadsRender(); squadsPanel.sync(); };
 }
 // --- end W board ---

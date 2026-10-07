@@ -114,3 +114,48 @@ test("presence next[] counts a heartbeating pull-only agent as around", async t 
   assert.deepEqual(json.next.map(n => n.action), ["dm-member"],
     "heartbeating agent counts as online even with no stream watcher");
 });
+
+test("presence HTTP separates genuine observations from enrollment and ordinary commands", async t => {
+  const fixture = createAcceptanceFixture();
+  const origin = await startServer(t, fixture);
+  let now = Date.now();
+  fixture.store.now = () => now;
+  fixture.store.agentHeartbeats.now = () => now;
+  const identity = fixture.store.identities.create("observed-agent");
+  fixture.store.identities.link(fixture.keys.owner, "commons", {
+    identityId: identity.identityId, memberId: "observed", displayName: "Observed", permissions: ["accept_work"],
+  });
+  const presence = async () => {
+    const res = await get(origin, "/api/rooms/commons/presence", fixture.keys.owner);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    return { ...body, agent: body.members.find(m => m.memberId === "observed") };
+  };
+  let result = await presence();
+  assert.equal(result.agent.presence, null);
+  const command = async (secret, text) => {
+    const res = await post(origin, "/api/rooms/commons/commands", {
+      id: crypto.randomUUID(), type: "message.posted", data: { messageId: crypto.randomUUID(), body: text },
+    }, secret);
+    assert.equal(res.status, 201);
+  };
+  await command(fixture.keys.owner, "Human observation");
+  result = await presence();
+  assert.equal(result.members.find(m => m.memberId === "owner").state, "listening", "real ISO command timestamp is normalized");
+  await post(origin, "/api/agent-heartbeats", { hostId: "slow", mode: "pull-only", cadenceSeconds: 1200 }, identity.secret);
+  await command(identity.secret, "Ordinary chat is not execution");
+  result = await presence();
+  assert.equal(result.agent.state, "listening");
+  now += 6 * 60_000;
+  await post(origin, "/api/agent-heartbeats", { hostId: "fast", mode: "pull-only" }, identity.secret);
+  now += 6 * 60_000;
+  result = await presence();
+  assert.equal(result.agent.presence.status, "online", "older slow host is still inside its declared cadence despite latest fast host expiring");
+  assert.equal(result.agent.state, "listening");
+  assert.ok(result.next.some(n => n.description.includes("observed")));
+  now += 21 * 60_000;
+  result = await presence();
+  assert.equal(result.agent.presence.status, "offline");
+  assert.equal(result.agent.state, "unreachable");
+  assert.ok(!result.next.some(n => n.description.includes("observed")));
+});

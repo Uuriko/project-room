@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { DatabaseSync } from "node:sqlite";
+import { fenceDefinitions } from "../server/writer-fence.mjs";
 import { EVENT_TYPES as T, event } from "../src/events.js";
 
 // initialize and importEvents do not write message rows. The backfill is the
@@ -118,6 +120,64 @@ test("backfill replays initialize and importEvents, and a second pass does not a
   assert.equal(quiet.done, true);
   assert.equal(quiet.events, 0);
   assert.deepEqual(rows(store, roomId), afterImport);
+  // Counts and order alone miss a corrupted current record. The storage
+  // parity owner must reject both record content and indexed visibility drift.
+  for (const change of ["body='wrong text'", "author_id='wrong-author'", "channel_id='wrong-channel'"]) {
+    store.db.prepare(`UPDATE messages SET ${change} WHERE message_id='imported'`).run();
+    assert.throws(() => store.checkMessagesParity(), /messages parity failed.*record/);
+    assert.equal(store.db.prepare("SELECT parity_at_seq FROM messages_backfill_cursor WHERE room_id=?").get(roomId).parity_at_seq, null);
+    store.db.prepare("DELETE FROM messages_backfill_cursor WHERE room_id=?").run(roomId);
+    finish(store);
+  }
+  store.db.prepare("UPDATE messages SET record_json=json_set(record_json,'$.revision',999) WHERE message_id='imported'").run();
+  assert.throws(() => store.checkMessagesParity(), /messages parity failed.*record/);
+  store.db.prepare("DELETE FROM messages_backfill_cursor WHERE room_id=?").run(roomId);
+  finish(store);
+  store.checkMessagesParity();
+  // Replacement can keep the same head id/sequence while changing earlier
+  // content. An old replay snapshot/certification must never survive import.
+  const replacement = store.db.prepare("SELECT sequence,body FROM events WHERE room_id=? ORDER BY sequence").all(roomId)
+    .map(row => ({ sequence: row.sequence, event: JSON.parse(row.body) }));
+  replacement.at(-1).event.data.body = 'replacement with unchanged event id';
+  store.importEvents(owner, roomId, replacement);
+  assert.equal(store.checkMessagesParity().checked, 0);
+  finish(store);
+  assert.equal(store.checkMessagesParity().checked, 1);
+  assert.equal(JSON.parse(rows(store, roomId)[0].record_json).body, 'replacement with unchanged event id');
+});
+
+// Authoring gate: real v37 storage upgrade, previously opened writer and
+// persisted replay cursor. Existing old-version tests lack this column and
+// populated message backfill. Synthetic downgrade only; no production seam.
+test('v37 message records migrate lazily, replay populated cursors, and fence old writers', t => {
+  const directory = mkdtempSync(join(tmpdir(), 'project-room-message-v38-'));
+  const filename = join(directory, 'room.sqlite');
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const seed = new RoomStore(filename);
+  seed.initialize([...initialRoom('commons'), messageEvent('commons', 'ev-legacy', T.MESSAGE_POSTED, {messageId:'legacy', body:'retained legacy text'}, 2)]);
+  finish(seed);
+  for (const row of seed.db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v38_*'").all()) seed.db.exec(`DROP TRIGGER ${row.name}`);
+  if (seed.db.prepare("SELECT 1 FROM pragma_table_info('messages') WHERE name='record_json'").get()) seed.db.exec('ALTER TABLE messages DROP COLUMN record_json');
+  for (const {name,sql} of fenceDefinitions(37)) if (!seed.db.prepare("SELECT 1 FROM sqlite_master WHERE name=?").get(name)) seed.db.exec(sql);
+  seed.db.exec('PRAGMA user_version=37');
+  seed.close();
+  const old = new DatabaseSync(filename);
+  old.function('project_room_writer_v37',()=>37);
+  const oldWrite = old.prepare("UPDATE messages SET body=body WHERE message_id='legacy'");
+  oldWrite.run();
+  const current = new RoomStore(filename);
+  try {
+    assert.equal(current.db.prepare('PRAGMA user_version').get().user_version,38);
+    assert.equal(current.db.prepare("SELECT record_json FROM messages WHERE message_id='legacy'").get().record_json,null);
+    assert.throws(()=>oldWrite.run(),/project_room_writer_v38|unsupported database writer/);
+    assert.equal(current.checkMessagesParity().checked,0,'uncertified legacy rows are not ready');
+    finish(current);
+    assert.equal(JSON.parse(current.db.prepare("SELECT record_json FROM messages WHERE message_id='legacy'").get().record_json).body,'retained legacy text');
+    assert.equal(current.checkMessagesParity().checked,1);
+  } finally { current.close(); old.close(); }
+  const reopened = new RoomStore(filename);
+  try { assert.equal(JSON.parse(reopened.db.prepare("SELECT record_json FROM messages WHERE message_id='legacy'").get().record_json).body,'retained legacy text'); }
+  finally {reopened.close();}
 });
 
 test("a command row stays one row when the backfill replays that event", t => {

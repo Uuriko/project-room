@@ -92,9 +92,9 @@ test("Demigod door GET /room/mcp is the pasteable join surface", async () => {
   const response = roomEntry(new Request("https://www.trydemigod.com/room/mcp"));
   assert.equal(response.status, 200);
   assert.match(await response.text(), /https:\/\/www\.getdasha\.com\/room\/mcp/);
-  const html = await roomEntry(new Request("https://www.trydemigod.com/room")).text();
-  assert.match(html, /Add Room as MCP/);
-  assert.match(html, /claude mcp add --transport http/);
+  const entry = roomEntry(new Request("https://www.trydemigod.com/room"));
+  assert.equal(entry.status, 302, "MCP instructions remain on the explicit MCP path");
+  assert.equal(await entry.text(), "");
 });
 
 test("public join tool descriptions say read-only and disclaim the join", () => {

@@ -132,7 +132,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await page.locator(`#reaction-sheet [data-reaction="${HEART}"]`).first().click();
     await page.locator('#reaction-sheet').waitFor({ state: "hidden" });
     await page.waitForFunction(glyph => document.querySelector(`[data-message-record-id="book-club"] [data-reaction="${glyph}"]`).getAttribute("aria-pressed") === "true", HEART);
-    const selectedBody = await page.locator('[data-message-record-id="book-club"] .message-content p').evaluate(e => {
+    const selectedBody = await page.locator('[data-message-record-id="book-club"] .message-content .message-body').evaluate(e => {
       const range = document.createRange(); range.selectNodeContents(e);
       const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
       return selection.toString();
@@ -194,7 +194,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     // Literal markup is text, and long text still reflows at this viewport.
     send(human, T.MESSAGE_POSTED, { body: "<strong>Literal text</strong> " + "longword".repeat(35), replyToId: "book-club" });
     await page.getByText(/<strong>Literal text<\/strong>/).waitFor();
-    assert.equal(await page.locator(".message-content p strong").count(), 0);
+    assert.equal(await page.locator(".message-content .message-body strong").count(), 0);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
     await capture("");
 

@@ -22,6 +22,7 @@ async function setup(t) {
   const page = await browser.newPage(); page.setDefaultTimeout(10000);
   const errors = []; page.on('pageerror', e => errors.push(e.message)); t.after(() => assert.deepEqual(errors, []));
   await page.goto(origin);
+  await page.locator('[data-password-mode="login"]').click();
   return { ...f, origin, browser, page, delivered };
 }
 async function requestReset(f) {
@@ -73,7 +74,8 @@ test('delivered reset URL renders without consuming; matching passwords reset th
 test('reset mailed from a shared invitation preserves review and blocks Back during a committed reset', { timeout: 45000 }, async t => {
   const f = await setup(t);
   await f.page.goto(`${f.origin}/#join/${f.links.valid}`);
-  await f.page.locator('#join-account-signin').click();
+  if (await f.page.locator('#join-account-signin').isVisible()) await f.page.locator('#join-account-signin').click();
+  await f.page.locator('#join-account-auth').waitFor({ state: 'visible' });
   await f.page.locator('#join-account-auth [name="email"]').fill(email);
   await f.page.locator('#join-account-auth [data-forgot-password]').click();
   await f.page.locator('#join-account-auth [data-reset-password]').click();
@@ -95,7 +97,8 @@ test('reset mailed from a shared invitation preserves review and blocks Back dur
   await page.keyboard.press('Escape'); assert.equal(await form.isVisible(), true);
   release(); await page.locator('#join-link-dialog').waitFor();
   assert.equal(await page.locator('#main').isVisible(), false, 'password reset never grants room access');
-  await page.locator('#join-account-signin').click();
+  if (await page.locator('#join-account-signin').isVisible()) await page.locator('#join-account-signin').click();
+  await page.locator('#join-account-auth').waitFor({ state: 'visible' });
   const login = page.locator('#join-account-auth [data-signin-form="password"]');
   await login.locator('[name="email"]').fill(email); await login.locator('[name="password"]').fill(newPassword);
   const signed = page.waitForResponse(r => new URL(r.url()).pathname === '/api/auth/password/login');
@@ -109,6 +112,7 @@ test('foreign-account reset requires confirmed logout and fresh password entry w
   f.store.createAccount('foreign-reset-account'); f.store.completeOnboarding('foreign-reset-account');
   f.store.accountLogins.linkPasswordMethod('foreign-reset-account', { email: foreignEmail, verifier: hashPassword(oldPassword) });
   const page = await f.browser.newPage(); page.setDefaultTimeout(10000); await page.goto(f.origin);
+  await page.locator('[data-password-mode="login"]').click();
   const login = page.locator('[data-signin-form="password"]'); await login.locator('[name="email"]').fill(foreignEmail); await login.locator('[name="password"]').fill(oldPassword);
   const signed = page.waitForResponse(r => new URL(r.url()).pathname === '/api/auth/password/login');
   await login.locator('button[type="submit"]').click(); await signed; await page.locator('#auth-panel').waitFor({ state: 'hidden' });
@@ -210,7 +214,8 @@ test('failed reset email request announces the network error and permits a real 
 
 test('unconfigured Google from shared invitation restores preview with visible failure and no join', { timeout: 25000 }, async t => {
   const f = await setup(t), joinsBefore = f.store.db.prepare('SELECT count(*) AS n FROM share_link_joins').get().n;
-  await f.page.goto(`${f.origin}/#join/${f.links.valid}`); await f.page.locator('#join-account-signin').click();
+  await f.page.goto(`${f.origin}/#join/${f.links.valid}`); if (await f.page.locator('#join-account-signin').isVisible()) await f.page.locator('#join-account-signin').click();
+  await f.page.locator('#join-account-auth').waitFor({ state: 'visible' });
   await f.page.locator('#join-account-google').click();
   await f.page.locator('#join-link-dialog').waitFor();
   await f.page.locator('#join-link-status').filter({ hasText: 'Google sign-in isn’t available' }).waitFor();

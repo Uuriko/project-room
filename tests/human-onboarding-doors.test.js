@@ -35,21 +35,16 @@ async function serve(t) {
   return `http://127.0.0.1:${server.address().port}`;
 }
 
-const authHeroNav = html => {
-  const section = html.match(/<section id="auth-hero"[\s\S]*?<\/section>/);
-  assert.ok(section, "auth-hero section present in served /");
-  const nav = section[0].match(/<nav class="auth-hero-links"[\s\S]*?<\/nav>/);
-  assert.ok(nav, "auth-hero nav present");
-  return nav[0];
-};
-
-test("GET / auth-hero nav links 'New here? Start here' at /about#onboarding", async t => {
+test("GET / keeps product education out of the minimal sign-in entry", async t => {
   const origin = await serve(t);
   const response = await fetch(`${origin}/`);
-  assert.equal(response.status, 200);
-  const nav = authHeroNav(await response.text());
-  assert.match(nav, /<a href="\/about#onboarding">New here\? Start here<\/a>/,
-    "strangers see the onboarding door in the logged-out hero");
+  assert.equal(response.status,200);
+  const html = await response.text();
+  assert.match(html,/<h1 id="auth-title"[^>]*>PROJECT ROOM<\/h1>/);
+  assert.ok(!html.includes('id="auth-hero"'));
+  const auth = html.match(/<section id="auth-panel"[\s\S]*?<\/section>/)[0];
+  assert.equal((auth.match(/id="agent-signin-button"/g) ?? []).length, 1);
+  assert.ok(!/href="(?:\/about|\/agents\.json|[^"]*#join-agent)/.test(auth), "education stays outside sign-in");
 });
 
 test("GET /about carries the onboarding section and links the full human guide", async t => {

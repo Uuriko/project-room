@@ -15,7 +15,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
-import { ensurePeopleOpen } from "./room-chrome.mjs";
+import { ensurePeopleOpen, openSettings, closeSettings } from "./room-chrome.mjs";
 
 const command = (type, data, id = crypto.randomUUID()) => ({ id, type, data });
 
@@ -47,6 +47,10 @@ test("People panel: owner pauses, resumes and removes an agent with a two-click 
   await page.locator("#auth-panel").waitFor({ state: "visible" });
   await signInFixture(page, owner);
   await page.locator("#main").waitFor({ state: "visible" });
+  await page.waitForFunction(() => document.body.classList.contains("human-experience"));
+  assert.equal(await page.locator('#presence-list .presence-member[data-member-record-id="codex"]').isVisible(), false, "agent controls are hidden for humans by default");
+  await openSettings(page); await page.locator('#advanced-room-tools > summary').click();
+  await page.locator('#human-advanced').check(); await closeSettings(page);
   await ensurePeopleOpen(page);
   const row = page.locator('#presence-list .presence-member[data-member-record-id="codex"]');
   const guestRow = page.locator('#presence-list .presence-member[data-member-record-id="guest"]');
@@ -88,6 +92,8 @@ test("People panel: owner pauses, resumes and removes an agent with a two-click 
   // Pause: the row shows Paused, the button flips, and the queued wake is not leasable.
   await pause.click();
   await row.locator(".pause-chip").waitFor();
+  assert.equal(await row.locator(".pause-chip").textContent(), "Wakes paused");
+  assert.match(await row.locator(".member-pause-explanation").textContent(), /Queued wakes will not start; a running attempt may finish/);
   assert.equal(await pause.textContent(), "Resume");
   assert.match(await page.locator("#status").textContent(), /paused: queued wakes will not start/);
   assert.ok(store.wakeQueue.pauseStatus("commons", "codex"), "pause row written through the route");

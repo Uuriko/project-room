@@ -1,9 +1,11 @@
+import { hydrateProjection } from "./projection-at-rest.mjs";
 // MSG-1: the messages table, double-written with the room event log.
 // Read paths still use the projection. The command path writes rows in the
 // same transaction as the event insert. MSG-2 replays events that landed
 // before the table, and events from importEvents and initialize, which still
 // do not double-write. The integrity cron runs that replay.
 import { applyEvent, emptyRoomState } from "../src/events.js";
+import { isDeepStrictEqual } from "node:util";
 
 export const MESSAGE_ROW_TYPES = Object.freeze([
   "message.posted",
@@ -11,7 +13,8 @@ export const MESSAGE_ROW_TYPES = Object.freeze([
   "message.deleted",
   "message.reaction_set",
   "message.pinned",
-  "message.unpinned"
+  "message.unpinned",
+  "message.redacted"
 ]);
 
 const MESSAGE_ROW_TYPE_SET = new Set(MESSAGE_ROW_TYPES);
@@ -33,6 +36,7 @@ CREATE TABLE IF NOT EXISTS messages (
   deleted_at TEXT,
   reactions_json TEXT,
   pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)),
+  record_json TEXT,
   PRIMARY KEY (room_id, message_id)
 );
 CREATE INDEX IF NOT EXISTS messages_room_seq ON messages(room_id, seq);
@@ -73,7 +77,7 @@ export function messageVisibleTo(row, viewerId) {
 
 export function threadRootId(messages, message) {
   if (!message?.replyToId) return null;
-  const byId = new Map((messages ?? []).map(entry => [entry.id, entry]));
+  const byId = messages instanceof Map ? messages : new Map((messages ?? []).map(entry => [entry.id, entry]));
   let current = message;
   const seen = new Set();
   while (current?.replyToId && !seen.has(current.id)) {
@@ -87,6 +91,9 @@ export function threadRootId(messages, message) {
 
 function affectedMessageIds(event) {
   const data = event?.data ?? {};
+  if (event?.type === "message.redacted" && typeof data.messageId === "string") {
+    return data.messageId.endsWith(":channel") ? [data.messageId] : [data.messageId, `${data.messageId}:channel`];
+  }
   if (event?.type === "message.posted") {
     const id = typeof data.messageId === "string" && data.messageId ? data.messageId : event.id;
     const ids = [id];
@@ -103,8 +110,8 @@ function statementFor(db) {
   if (hit) return hit;
   hit = db.prepare(`INSERT INTO messages (
       room_id, message_id, seq, channel_id, thread_root_id, reply_to_id, to_member_id, work_item_id,
-      author_id, body, created_at, edited_at, deleted_at, reactions_json, pinned
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      author_id, body, created_at, edited_at, deleted_at, reactions_json, pinned, record_json
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(room_id, message_id) DO UPDATE SET
       seq = MIN(messages.seq, excluded.seq),
       channel_id = excluded.channel_id,
@@ -118,7 +125,8 @@ function statementFor(db) {
       edited_at = excluded.edited_at,
       deleted_at = excluded.deleted_at,
       reactions_json = excluded.reactions_json,
-      pinned = excluded.pinned`);
+      pinned = excluded.pinned,
+      record_json = excluded.record_json`);
   statements.set(db, hit);
   return hit;
 }
@@ -133,6 +141,13 @@ function textOrNull(value) {
 function storedBody(message) {
   if (!message || message.deletedAt || message.body == null) return null;
   return typeof message.body === "string" ? message.body : null;
+}
+
+// Complete API record, never prior edit wording. The projection remains the
+// authority during migration; null legacy records wait for budgeted replay.
+function currentRecord(message) {
+  const { editHistory: _history, ...record } = message;
+  return { ...record, body: storedBody(message) };
 }
 
 // Upsert one row per message the event touched. seq stays at the earliest
@@ -153,7 +168,7 @@ export function syncMessageRows(db, { roomId, sequence, event, state }) {
     upsert.run(
       roomId, message.id, sequence,
       textOrNull(message.channelId),
-      threadRootId(messages, message),
+      threadRootId(byId, message),
       textOrNull(message.replyToId),
       textOrNull(message.toMemberId),
       textOrNull(message.workItemId),
@@ -163,7 +178,8 @@ export function syncMessageRows(db, { roomId, sequence, event, state }) {
       textOrNull(message.editedAt),
       textOrNull(message.deletedAt),
       reactions,
-      pinned.has(message.id) ? 1 : 0
+      pinned.has(message.id) ? 1 : 0,
+      JSON.stringify(currentRecord(message))
     );
     written += 1;
   }
@@ -370,19 +386,65 @@ function rememberSweep(store, roomId) {
   });
 }
 
-// One caught-up room per call. Count is the projection message array.
-// Last seq is the highest message.posted sequence, which is the seq stored
-// on the newest row (edits keep the earlier seq). A room still being
-// replayed is left for a later call. A mismatch throws.
+// One caught-up room per call. Compare complete current records, query-index
+// fields and original posting sequences as well as aggregate count/order.
+// A room still being replayed is left for a later call. Certification is
+// recorded only after all comparisons pass; a mismatch clears it and throws.
 export function checkMessagesParity(store) {
   if (store?.readOnly) throw new Error("Read-only stores do not check message parity");
+  // Hold the writer lock across the comparison and certification. Commit a
+  // detected mismatch's invalidation before reporting the failure to callers.
+  const result = store.transaction(() => {
+    try { return { value: certifyMessagesParity(store) }; }
+    catch (error) {
+      if (!error.message.startsWith("messages parity failed for ")) throw error;
+      return { error };
+    }
+  });
+  if (result.error) throw result.error;
+  return result.value;
+}
+
+function certifyMessagesParity(store) {
   const sweepAfter = store.db.prepare("SELECT sweep_after FROM messages_backfill_cursor WHERE room_id=?").get(SWEEP_ID)?.sweep_after ?? "";
   const roomId = nextParityRoom(store.db, sweepAfter);
   if (!roomId) return { ok: true, checked: 0 };
+  // A failed recheck must not leave an earlier certification usable.
+  store.transaction(() => store.db.prepare("UPDATE messages_backfill_cursor SET parity_at_seq=NULL WHERE room_id=?").run(roomId));
   const numbers = parityNumbers(store.db, roomId);
   if (numbers.projectionCount !== numbers.tableCount || numbers.projectionLastSeq !== numbers.tableLastSeq) {
     throw new Error(`messages parity failed for ${roomId}: projection count ${numbers.projectionCount}, table count ${numbers.tableCount}, projection last seq ${numbers.projectionLastSeq}, table last seq ${numbers.tableLastSeq}`);
   }
+  const hydration = hydrateProjection(store.db, roomId, JSON.parse(store.db.prepare("SELECT projection FROM rooms WHERE id=?").get(roomId).projection));
+  if (hydration.missing.length) throw new Error(`messages parity failed for ${roomId}: stored message body missing`);
+  const state = hydration.state;
+  const messages = new Map((state.messages ?? []).map(message => [message.id, message]));
+  const pinned = new Set((state.pins ?? []).map(pin => pin.messageId));
+  const sequences = new Map();
+  for (const row of store.db.prepare("SELECT sequence,body FROM events WHERE room_id=? AND json_extract(body,'$.type')=? ORDER BY sequence").all(roomId, POSTED)) {
+    for (const id of affectedMessageIds(JSON.parse(row.body))) if (!sequences.has(id)) sequences.set(id, row.sequence);
+  }
+  for (const row of store.db.prepare("SELECT * FROM messages WHERE room_id=?").all(roomId)) {
+    const message = messages.get(row.message_id);
+    let record, reactions;
+    try { record = JSON.parse(row.record_json); reactions = row.reactions_json === null ? {} : JSON.parse(row.reactions_json); }
+    catch { /* invalid records fail parity */ }
+    if (!message || !isDeepStrictEqual(record, currentRecord(message))
+      || row.seq !== sequences.get(message.id)
+      || row.author_id !== message.authorId || row.body !== storedBody(message)
+      || row.channel_id !== textOrNull(message.channelId)
+      || row.thread_root_id !== threadRootId(messages, message)
+      || row.reply_to_id !== textOrNull(message.replyToId)
+      || row.to_member_id !== textOrNull(message.toMemberId)
+      || row.work_item_id !== textOrNull(message.workItemId)
+      || row.created_at !== message.createdAt || row.edited_at !== textOrNull(message.editedAt)
+      || row.deleted_at !== textOrNull(message.deletedAt)
+      || row.pinned !== (pinned.has(message.id) ? 1 : 0)
+      || !isDeepStrictEqual(reactions, message.reactions ?? {})) {
+      throw new Error(`messages parity failed for ${roomId}: current record ${row.message_id} differs`);
+    }
+  }
+  store.transaction(() => store.db.prepare("UPDATE messages_backfill_cursor SET parity_at_seq=applied_seq WHERE room_id=?").run(roomId));
   rememberSweep(store, roomId);
   return { ok: true, checked: 1, roomId, ...numbers };
 }

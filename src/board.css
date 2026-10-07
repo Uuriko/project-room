@@ -35,3 +35,16 @@
 @media (min-width: 900px) {
   .board-columns { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 }
+
+/* Board "What needs me": at most three urgent rows, one action each; the rest behind More. */
+.needs-me { margin: 0 0 var(--space-3); padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel-raised); }
+.needs-me h3 { margin: 0 0 var(--space-2); font-size: var(--text-md); font-weight: 650; }
+.needs-me-list, .needs-me-more ul { display: grid; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
+.needs-me-row { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.needs-me-open { display: flex; flex: 1; flex-direction: column; gap: .1rem; min-width: 0; min-height: 44px; justify-content: center; padding: .3rem .4rem; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+.needs-me-open:hover { background: var(--panel-hover); }
+.needs-me-title { display: -webkit-box; overflow: hidden; font-size: var(--text-sm); overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.needs-me-note { color: var(--muted); font-size: var(--text-xs); }
+.needs-me-act { flex: none; min-height: 44px; }
+.needs-me-more { margin-top: var(--space-1); }
+.needs-me-more summary { min-height: 32px; color: var(--muted); font-size: var(--text-sm); cursor: pointer; }

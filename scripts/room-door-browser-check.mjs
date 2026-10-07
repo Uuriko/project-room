@@ -6,10 +6,9 @@ import { join } from "node:path";
 import { chromium } from "playwright";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { ROOM_ORIGIN, COMPUTE_DOOR } from "../deploy/agent-discovery.mjs";
 
 for (const touch of [false, true]) {
-  test(`public /room door ${touch ? "mobile" : "desktop"}: Join + Connect, not the llms packet`, { timeout: 60000 }, async t => {
+  test(`public /room door ${touch ? "mobile" : "desktop"}: canonical minimal auth, preserved deep links, separate agent packets`, { timeout: 60000 }, async t => {
     const directory = mkdtempSync(join(tmpdir(), "room-door-"));
     const store = new RoomStore(join(directory, "room.sqlite"));
     const server = createRoomServer({ store });
@@ -28,121 +27,41 @@ for (const touch of [false, true]) {
     });
     const page = await context.newPage();
     page.setDefaultTimeout(15000);
-    await page.goto(`${origin}/room`);
-    assert.equal(await page.title(), "Project Room");
-    assert.match(await page.locator("h1").innerText(), /Project Room/);
-    assert.match(await page.locator(".lead").innerText(), /A shared place for people and AI agents to build together/);
-    assert.match(await page.locator(".spine").innerText(), /Conversations, shared work, and a private Inbox\./);
-    const open = page.getByRole("link", { name: "Open Room", exact: true });
-    const joinLink = page.getByRole("link", { name: "Join", exact: true });
-    const paste = page.getByRole("link", { name: "Paste a prompt", exact: true });
-    const people = page.getByRole("link", { name: "People and agents", exact: true });
-    assert.equal(await open.getAttribute("href"), ROOM_ORIGIN);
-    assert.equal(await joinLink.count(), 0);
-    assert.doesNotMatch(await page.content(), /project-room-staging\.getdasha\.workers\.dev/);
-    assert.equal(await page.locator("#join-code-form").count(), 0);
-    assert.equal(await page.locator("#join-empty").getAttribute("hidden"), "");
-    assert.equal(await paste.getAttribute("href"), "#join-agent");
-    assert.equal(await people.getAttribute("href"), "#people");
-    assert.equal(await page.locator(".actions a").count(), 2, "first paint is Start a room + Open");
-    assert.equal(await page.getByRole("link", { name: "Start a room", exact: true }).getAttribute("href"), `${ROOM_ORIGIN}/?start=room`);
-    assert.equal(await page.locator(".actions .open").count(), 1);
-    assert.equal(await page.locator(".whispers .whisper").count(), 1, "one people-and-agents link");
-    assert.equal(await page.getByRole("heading", { name: "Connect", exact: true }).count(), 1);
-    assert.equal(await page.getByRole("link", { name: "Connect an agent", exact: true }).count(), 0);
-    const mcp = page.getByRole("link", { name: "Add Room as MCP", exact: true });
-    assert.equal(await mcp.getAttribute("href"), "https://www.getdasha.com/room/mcp");
-    assert.equal(await page.locator("#mcp-join-url").inputValue(), "https://www.getdasha.com/room/mcp");
-    assert.equal(await page.locator('a[href="/room/mcp"]').count(), 1, "#667 same-bytes link lives under the spine");
-    assert.equal(await page.getByRole("link", { name: "Join with code", exact: true }).count(), 0);
-    await page.goto(`${origin}/room#room/grok-muse-potter-20260918`);
-    assert.equal(await page.getByRole("link", { name: "Open Room", exact: true }).getAttribute("href"), `${ROOM_ORIGIN}/?room=grok-muse-potter-20260918#room/grok-muse-potter-20260918`);
-    assert.equal(await page.getByRole("link", { name: "People and agents", exact: true }).getAttribute("href"), `${ROOM_ORIGIN}/?room=grok-muse-potter-20260918#room/grok-muse-potter-20260918`);
-    await paste.click();
-    await page.locator("#join-agent").waitFor();
-    const joinText = await page.locator("#join-agent").innerText();
-    assert.match(joinText, /Join from your favorite agent app/i); // CSS text-transform:uppercase on h2
-    assert.match(joinText, /Just paste a prompt/);
-    assert.match(joinText, /Cursor · Grok Bot · ChatGPT · Codex · Claude · MCP/);
-    assert.match(await page.locator("#join-prompt").inputValue(), /Join Uuriko Project Room as an agent/);
-    assert.match(await page.locator("#join-prompt").inputValue(), /No Room key in this chat/);
-    assert.ok((await page.getByRole("link", { name: "join.txt", exact: true }).count()) >= 1);
-    assert.equal(await page.getByRole("link", { name: "join.txt", exact: true }).first().getAttribute("href"), "/room/join.txt");
-    const mcpJoin = page.locator("#mcp-join");
-    await mcpJoin.waitFor();
-    // Door h2s use text-transform:uppercase; match source text like join-agent.
-    assert.match(await page.locator("#mcp-join-title").textContent(), /Add Room as MCP/);
-    assert.equal(await page.locator("#mcp-join-url").inputValue(), "https://www.getdasha.com/room/mcp");
-    assert.match(await mcpJoin.innerText(), /claude mcp add --transport http/i);
-    await page.locator("#connect").waitFor();
-    // Plain-language copy replaced the shorthand ("Agent handles stay loud", "Member+kit", ...).
-    const connectText = await page.locator("#connect").innerText();
-    assert.doesNotMatch(connectText, /Share https:\/\/www\.getdasha\.com\/room#room/);
-    assert.match(connectText, /Start with a prompt/);
-    assert.match(connectText, /Automatic replies depend on its host and connection/);
-    assert.match(connectText, /Add Room as MCP/);
-    assert.match(connectText, /Rooms are private by default\. Adding an agent never lists the room publicly/);
-    assert.match(connectText, /Types for this Room only/);
-    assert.match(connectText, /Not a public agent store/);
-    assert.match(connectText, /Claude Code/);
-    assert.match(connectText, /Hermes/);
-    const claude = page.locator('#agent-type-catalog [data-agent-type="claude-code"]');
-    assert.equal(await claude.getAttribute("href"), "#mcp-join");
-    assert.equal(await page.locator('#agent-type-catalog [data-agent-type="cursor"]').getAttribute("href"), "#join-agent");
-    assert.equal(await page.locator('#agent-type-catalog [data-agent-type="pi"]').getAttribute("href"), "#join-agent");
-    await claude.click();
-    await page.locator("#mcp-join").waitFor();
-    assert.doesNotMatch(connectText, /marketplace|Agent handles stay loud|Member\+kit|frontier member|Genie/i);
-    // One packet link; the other links point at genuinely different documents.
-    assert.equal(await page.getByRole("link", { name: "Read the agent packet (llms.txt)" }).getAttribute("href"), "/room/llms.txt");
-    assert.equal(await page.locator('#connect a[href="/room/llms.txt"]').count(), 1);
-    assert.equal(await page.getByRole("link", { name: "Full packet" }).getAttribute("href"), "/room/llms-full.txt");
-    assert.equal(await page.getByRole("link", { name: "Machine card (agent.json)" }).getAttribute("href"), "/room/.well-known/agent.json");
-    assert.equal(await page.getByRole("link", { name: "Kits catalog" }).getAttribute("href"), "/room/kits");
-    assert.match(await page.locator(".works-with").innerText(), /Works with Claude Code, Codex, OpenCode, Cursor/);
-    assert.equal(await page.locator(".works-with a").count(), 0);
-    assert.equal(await page.locator(".compute a").first().getAttribute("href"), COMPUTE_DOOR);
-    assert.equal(await page.getByRole("link", { name: "github.com/Uuriko/project-room" }).getAttribute("href"), "https://github.com/Uuriko/project-room");
-    assert.equal(await page.locator("script").count(), 1);
-    assert.doesNotMatch(await page.content(), /# Project Room|Bearer |ROOM_AGENT_TOKEN|Genie/i);
-    mkdirSync("test-results", { recursive: true });
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "door fits viewport");
-    await page.screenshot({ path: touch ? "test-results/room-door-connect-people-mobile.png" : "test-results/room-door-connect-people-desktop.png", fullPage: true });
+    const errors = []; page.on('pageerror', error => errors.push(error.message));
+    for (const path of ['/room', '/room/']) {
+      await page.goto(`${origin}${path}?entry=browser&next=%2Fabout`);
+      await page.locator('#auth-panel').waitFor({ state: 'visible' });
+      assert.equal(page.url(), `${origin}/?entry=browser&next=%2Fabout`);
+      assert.equal(await page.locator('#auth-title').innerText(), 'PROJECT ROOM');
+      for (const name of ['Create account', 'Log in', 'Agent sign in']) {
+        const button = page.getByRole('button', { name, exact: true });
+        assert.equal(await button.count(), 1); assert.equal(await button.isVisible(), true);
+      }
+      assert.doesNotMatch(await page.locator('body').innerText(), /A shared place|Conversations, shared work|Have an invite\?|Paste a prompt|Connect an agent/);
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    }
+    // Capture the actual first navigation before the app handles each hash.
+    for (const hash of ['#join/' + 'J'.repeat(43), '#code/abc-def-ghj', '#room/commons', '#join/']) {
+      let arrived;
+      const listener = frame => { if (frame === page.mainFrame() && frame.url().startsWith(origin + '/')) arrived ??= frame.url(); };
+      page.on('framenavigated', listener);
+      await page.goto(`${origin}/room?ref=invite${hash}`);
+      page.off('framenavigated', listener);
+      assert.equal(arrived, `${origin}/?ref=invite${hash}`);
+    }
+    await page.goto(`${origin}/room`); await page.locator('#auth-panel').waitFor({ state: 'visible' });
+    mkdirSync('test-results', { recursive: true });
+    await page.screenshot({ path: `test-results/room-door-minimal-${touch ? 'mobile' : 'desktop'}.png`, fullPage: true });
     const workspace = await page.request.get(`${origin}/`);
-    assert.match(workspace.headers()["content-type"], /text\/html/);
-    assert.match(await workspace.text(), /message-input/);
-    const packet = await page.request.get(`${origin}/room/llms.txt`);
-    assert.match(packet.headers()["content-type"], /text\/plain/);
-    assert.match(await packet.text(), /# (Uuriko )?Project Room/);
-    const joinPacket = await page.request.get(`${origin}/room/join.txt`);
-    assert.match(joinPacket.headers()["content-type"], /text\/plain/);
-    assert.match(await joinPacket.text(), /Join Uuriko Project Room as an agent/);
-    assert.match(await joinPacket.text(), /After paste/);
-    const joinToken = "J".repeat(43);
-    await page.route(url => {
-      try { return new URL(url).origin === new URL(ROOM_ORIGIN).origin; } catch { return false; }
-    }, async route => {
-      await route.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html><title>Room app</title><p>app</p>" });
-    });
-    await page.goto(`${origin}/room#join/${joinToken}`);
-    await page.waitForURL(url => url.hash === `#join/${joinToken}` && url.origin === new URL(ROOM_ORIGIN).origin);
-    assert.equal(page.url(), `${ROOM_ORIGIN}/#join/${joinToken}`);
-    await page.goto(`${origin}/room#code/abc-def-ghj`);
-    await page.waitForURL(url => url.hash === "#code/abc-def-ghj" && url.origin === new URL(ROOM_ORIGIN).origin);
-    await page.goto(`${origin}/room#join/`);
-    await page.locator("#join-empty").waitFor();
-    assert.equal(await page.locator("#join-empty").getAttribute("hidden"), null);
-    assert.match(await page.locator("#join-empty").innerText(), /incomplete/i);
-    assert.equal(await page.locator("#join-empty-recover a[href='#join-code']").count(), 0);
-    assert.equal(await page.locator("#join-empty-recover a[href='#join-agent']").count(), 1);
-    assert.equal(await page.locator("#join-empty-recover a[href='#mcp-join']").count(), 1);
-    assert.match(await page.locator("#join-empty-recover").innerText(), /Open room door/);
-    assert.equal(new URL(page.url()).origin, origin, "incomplete #join/ stays on the door");
-    const mcpDoc = await page.request.get(`${origin}/room/mcp`);
-    assert.match(mcpDoc.headers()["content-type"], /text\/plain/);
-    const mcpText = await mcpDoc.text();
-    assert.match(mcpText, /claude mcp add --transport http/);
-    // Local Room Worker is host-exact; edge/Demigod advertise the public URL.
-    assert.ok(mcpText.includes(`${origin}/mcp`));
+    assert.match(workspace.headers()['content-type'], /text\/html/); assert.match(await workspace.text(), /message-input/);
+    for (const path of ['/room/llms.txt', '/room/join.txt', '/room/mcp']) {
+      const packet = await page.request.get(origin + path);
+      assert.equal(packet.status(), 200); assert.match(packet.headers()['content-type'], /text\/plain/);
+      assert.match(await packet.text(), /Project Room/);
+    }
+    const plain = await page.request.get(`${origin}/room`, { headers: { Accept: 'text/plain' } });
+    assert.equal(plain.status(), 200); assert.match(plain.headers()['content-type'], /text\/plain/);
+    assert.match(await plain.text(), /Project Room/);
+    assert.deepEqual(errors, []);
   });
 }

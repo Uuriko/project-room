@@ -8,7 +8,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import { claimWork, createWork, recordReview, updateWork } from "../server/work-claims.mjs";
-import { fleetFor, fleetRows, primaryState, FLEET_STATES } from "../server/agent-fleet.mjs";
+import { fleetFor, fleetRows, primaryState, FLEET_STATES, claimIdle, CLAIM_IDLE_MS } from "../server/agent-fleet.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
 async function setup(t) {
@@ -149,4 +149,26 @@ test("a 50-agent room reads in under 50 ms with one projection parse", async t =
   assert.ok(elapsed < 50, `overview took ${elapsed.toFixed(1)} ms`);
   assert.equal(overview.agents.filter(row => row.state === "working").length, 25);
   assert.equal(fleetRows(f.store, "commons", f.store.room("commons"), { memberIds: ["bulk-00"] })[0].currentClaim.claimId, "bulk-claim-0");
+});
+
+test("a held claim with no sign of life for 2h is badged claim_idle; a renewal, an update or blocked clears it", async t => {
+  const f = await setup(t);
+  f.send("owner", T.MEMBER_ADDED, { memberId: "agent-quiet", displayName: "Quiet bot", kind: "agent", permissions: ["accept_work"] });
+  const now = f.store.now();
+  const at = offset => new Date(now - offset);
+  let quiet = createWork({ id: "fleet-quiet", title: "Slim the projection" }, { now: at(4 * 3_600_000), agentId: "owner" });
+  quiet = claimWork(quiet, "agent-quiet", { now: at(3 * 3_600_000), leaseHours: 6 });
+  f.store.workClaims.set("commons", quiet);
+  const row = async () => (await f.get("owner", "/api/rooms/commons/agents/overview")).body.agents.find(r => r.memberId === "agent-quiet");
+  const idle = await row();
+  assert.equal(idle.state, "working", "a claim still reads as working");
+  assert.ok(idle.badges.includes("claim_idle"), JSON.stringify(idle.badges));
+  assert.ok(!idle.badges.includes("lease_expired"));
+  // Pure rule, shared with needs-me myWork: only the claim's own stamps
+  // count (room chatter does not); a fresh renew/update or blocked clears it.
+  const nowMs = now;
+  assert.equal(claimIdle(quiet, nowMs), true);
+  assert.equal(claimIdle({ ...quiet, updatedAt: at(CLAIM_IDLE_MS - 60_000).toISOString() }, nowMs), false);
+  assert.equal(claimIdle({ ...quiet, state: "blocked" }, nowMs), false);
+  assert.equal(claimIdle(null, nowMs), false);
 });

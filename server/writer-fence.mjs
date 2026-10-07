@@ -4,9 +4,9 @@ import { OAUTH_PROVIDER_TABLES } from "./oauth-provider-store.mjs";
 // Upgrade compatibility fence, not authentication against a database administrator.
 // Older service connections do not register this function, so ordinary writes fail
 // after the schema transaction commits, even if the connection predates migration.
-export const STORE_SCHEMA_VERSION = 37;
+export const STORE_SCHEMA_VERSION = 38;
 export const WRITER_FUNCTION = `project_room_writer_v${STORE_SCHEMA_VERSION}`;
-export const writerVersions = Object.freeze([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37]);
+export const writerVersions = Object.freeze([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38]);
 const v6Tables = ["rooms", "events", "commands", "accounts", "member_accounts", "account_access_events",
   "credentials", "cursors", "projection_checkpoints", "account_credentials", "account_session_slots",
   "membership_invitations", "membership_invitation_events", "membership_invitation_journal"];
@@ -33,6 +33,8 @@ export const unfencedAdditiveTables = Object.freeze([
   "public_work_reviews", "public_work_review_requests", // Private review projections/journals never alter existing claims, receipts or awards.
   "public_work_successors", "public_work_successor_requests", // Additive follow-up lineage and replay journal; older writers never mutate these tables.
   "project_offers", "project_offer_requests", // Owner-authored public terms, additive; older writers have no routes.
+  "room_assistant_config", "room_assistant_runs", "room_assistant_ops",
+  "room_trial_tasks", "room_trial_requests", "room_vetting_keys", "room_vetting_receipts", "demigod_offer_profiles", "demigod_offer_requests", "demigod_contracts", "demigod_contract_requests", "buyer_signoff_loops", "buyer_signoff_requests", // Additive private record-only rails; older writers have no routes.
   "request_runs", // Permanent host reservations; older writers have no execution route.
   "private_inbox_reads",
   "access_requests",
@@ -163,6 +165,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // as agent_hosts — purely additive, per-identity rows, self-verified
   // schema on open; rows never drive bans, slashes, or balances.
   "agent_push_configs",
+  // plan-wake-live: agent_wake_polls (per-agent last-polled-at). Purely
+  // additive: one row per agent identity, written only on poll/heartbeat
+  // activity, read by the wakeable / not-wakeable lists; older writers have
+  // no code path to it and AgentHeartbeats.verifySchema() is read-only-safe.
+  "agent_wake_polls",
   "collab_assignments",
   "collab_notes",
   "collab_draft_locks",
@@ -348,6 +355,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // — older writers have no code path to it. Rows are a delivery address,
   // never room content and never a grant.
   "human_push_subscriptions",
+  // human_push_preferences (wave-2 #1601: per-member push-channel switches,
+  // one row per member in a room). Same rationale as subscriptions: purely
+  // additive, older writers have no code path to it, and the row only gates
+  // delivery — it never grants anything.
+  "human_push_preferences",
   // board_vtwo_* (BOARD-v2 SQLite persistence, PR #1144): board_vtwo_claims,
   // board_vtwo_events, board_vtwo_mirror, board_vtwo_idempotency. Purely additive
   // and intentionally NOT fenced — older writers have no code path to them,
@@ -387,6 +399,15 @@ export const unfencedAdditiveTables = Object.freeze([
   // its last wake time. Older writers have no path to it. A missing row means
   // off, so a rollback only stops the ready_work wakes.
   "agent_wants_work",
+  // room_code_drops / room_code_checks: code drop metadata and review checks.
+  // The bytes live in room_attachments. Older writers have no path to them.
+  "room_code_drops",
+  "room_code_checks",
+  // share_link_access: member / co-admin link options. A missing row is a guest link.
+  "share_link_access",
+  // projection_bodies: Phase 1a message bodies at rest. Older writers have no
+  // path to it; rooms.projection rows they write carry full bodies.
+  "projection_bodies",
   // LEGAL: terms acceptance, public abuse reports, and operator unpublish.
   // Additive and unfenced. Older writers have no code path to them.
   "account_terms",
@@ -395,7 +416,12 @@ export const unfencedAdditiveTables = Object.freeze([
   // operator_actions (CP-ADMIN-0): append-only operator audit. Purely additive
   // and intentionally NOT fenced — older writers have no path to it. The
   // append-only triggers are the integrity gate.
-  "operator_actions"
+  "operator_actions",
+  // squads (plan-squads): named groups with goal, roster, and thread channel.
+  // Purely additive and intentionally NOT fenced — older writers have no code
+  // path to it; the owner-managed roster rules in server/squads.mjs are the
+  // integrity gate.
+  "squads"
 ]);
 // Created on first use, not in the constructor. A database that has never
 // issued an OAuth grant or persisted an abuse rate bucket does not have
@@ -493,7 +519,7 @@ export function registerWriter(db) {
   db.function("project_room_writer_v25", () => 25);
   db.function("project_room_writer_v26", () => 26);
   db.function("project_room_writer_v27", () => 27);
-  for (const version of [28, 29, 30, 31, 32, 33, 34, 35, 36]) db.function(`project_room_writer_v${version}`, () => version);
+  for (const version of [28, 29, 30, 31, 32, 33, 34, 35, 36, 37]) db.function(`project_room_writer_v${version}`, () => version);
   db.function(WRITER_FUNCTION, () => STORE_SCHEMA_VERSION);
 }
 

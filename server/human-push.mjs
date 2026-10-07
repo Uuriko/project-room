@@ -1,14 +1,20 @@
-// Human browser push. One fixed default: mentions and direct messages.
-// The browser permission prompt is the only switch. Notification preference
-// levels and quiet hours are not inputs here; thread mutes and member mutes
-// are the undo. Agents keep their heartbeat push doorbell. A push names the
-// room and a count, never the message.
+// Human browser push. Default: mentions and direct messages, both on until
+// the member opts out per kind. The browser permission prompt is the subscribe
+// switch; the per-kind preference switches (human_push_preferences) are the
+// undo, enforced before any send. Thread mutes and member mutes are the other
+// undo. Agents keep their heartbeat push doorbell. A push names the room and
+// a count, never the message.
 import { isMutedBy } from "../src/events.js";
 import { notificationFromPush } from "../src/human-push-display.js";
 import { resolveMentionTargetsInText } from "./mention-lifecycle.mjs";
 import { deliverToSubscriptions, normaliseSubscription, pushPayloadFor } from "./push-subscriptions.mjs";
 
 export const HUMAN_PUSH_DEFAULT = "mentions_and_dms";
+// The two event kinds the push channel actually delivers. Preferences switch
+// each kind on or off for one member in one room; both are on by default, so
+// a member who never touches them gets exactly today's behavior.
+export const HUMAN_PUSH_PREF_KINDS = Object.freeze(["mention", "dm"]);
+export const HUMAN_PUSH_PREF_DEFAULTS = Object.freeze({ mention: true, dm: true });
 const MAX_DEVICES = 8;
 const DECLARATIVE_LIMIT = 4096;
 
@@ -42,6 +48,7 @@ class ServiceError extends Error {
   constructor(status, code, message) { super(message); this.name = "ServiceError"; this.status = status; this.code = code; }
 }
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
+const exactKeys = (value, fields) => Object.keys(value).length === fields.length && fields.every(field => Object.hasOwn(value, field));
 
 // Browser-issued delivery services only. A subscriber must never turn a
 // mention into an arbitrary HTTPS request from the server's network.
@@ -67,6 +74,21 @@ export const humanPushSchema = `
     PRIMARY KEY (endpoint, room_id, member_id)
   );
   CREATE INDEX IF NOT EXISTS human_push_member ON human_push_subscriptions(room_id, member_id);
+`;
+
+// Per-member push-channel preferences (wave-2 #1601). One row per member per
+// room; absent means both kinds on. This is the switch the human controls for
+// the browser push channel. It does not consult the older in-app
+// notificationPreferences levels, which steer the in-app feed only.
+export const humanPushPrefsSchema = `
+  CREATE TABLE IF NOT EXISTS human_push_preferences (
+    room_id TEXT NOT NULL,
+    member_id TEXT NOT NULL,
+    mention_enabled INTEGER NOT NULL DEFAULT 1,
+    dm_enabled INTEGER NOT NULL DEFAULT 1,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (room_id, member_id)
+  );
 `;
 
 // Humans a message.posted should wake in the browser. A DM stays with its
@@ -138,15 +160,61 @@ export class HumanPush {
 
   status(token, roomId, binding = null) {
     const auth = this._auth(token, roomId, binding);
-    this._human(auth);
+    const memberId = this._human(auth);
     const body = {
       roomId,
       configured: Boolean(this.vapid),
       default: HUMAN_PUSH_DEFAULT,
+      preferences: this._prefsFor(roomId, memberId),
       ...this._viewer(auth)
     };
     if (this.vapid) body.publicKey = this.vapid.publicKey;
     return Object.freeze(body);
+  }
+
+  // An absent row preserves the default; unreadable preferences fail closed.
+  _prefsFor(roomId, memberId) {
+    const row = this.db.prepare(
+      "SELECT mention_enabled, dm_enabled FROM human_push_preferences WHERE room_id=? AND member_id=?"
+    ).get(roomId, memberId);
+    return row ? { mention: row.mention_enabled !== 0, dm: row.dm_enabled !== 0 }
+      : { ...HUMAN_PUSH_PREF_DEFAULTS };
+  }
+
+  preferences(token, roomId, binding = null) {
+    const auth = this._auth(token, roomId, binding);
+    const memberId = this._human(auth);
+    return Object.freeze({ roomId, preferences: this._prefsFor(roomId, memberId), ...this._viewer(auth) });
+  }
+
+  // Partial merge over the stored row: send only the kinds to change.
+  // Preferences are intent, not delivery, so they store even when push is
+  // not configured; delivery stays dark until VAPID keys exist.
+  setPreferences(token, roomId, data, binding = null) {
+    if (!data || typeof data !== "object" || Array.isArray(data) || !exactKeys(data, ["preferences"]))
+      fail(422, "invalid_human_push_preferences", "Send { preferences: { mention, dm } }");
+    const prefs = data.preferences;
+    if (!prefs || typeof prefs !== "object" || Array.isArray(prefs)) fail(422, "invalid_human_push_preferences", "Send { preferences: { mention, dm } }");
+    const fields = Object.keys(prefs);
+    if (fields.length === 0 || fields.some(field => !HUMAN_PUSH_PREF_KINDS.includes(field))
+      || fields.some(field => typeof prefs[field] !== "boolean"))
+      fail(422, "invalid_human_push_preferences", "preferences holds mention and/or dm, each true or false");
+    const auth = this._auth(token, roomId, binding);
+    const memberId = this._human(auth);
+    const current = this._prefsFor(roomId, memberId);
+    const next = {
+      mention: fields.includes("mention") ? prefs.mention : current.mention,
+      dm: fields.includes("dm") ? prefs.dm : current.dm
+    };
+    this.db.prepare(`INSERT INTO human_push_preferences
+      (room_id, member_id, mention_enabled, dm_enabled, updated_at)
+      VALUES (?,?,?,?,?)
+      ON CONFLICT(room_id, member_id) DO UPDATE SET
+        mention_enabled=excluded.mention_enabled,
+        dm_enabled=excluded.dm_enabled,
+        updated_at=excluded.updated_at`
+    ).run(roomId, memberId, next.mention ? 1 : 0, next.dm ? 1 : 0, this.store.now());
+    return Object.freeze({ roomId, preferences: next, configured: Boolean(this.vapid), ...this._viewer(auth) });
   }
 
   save(token, roomId, data, binding = null) {
@@ -237,6 +305,11 @@ export class HumanPush {
       if (!this.vapid) return;
       for (const recipient of humanPushRecipients({ members: state?.members, senderMemberId, body, toMemberId })) {
         if (this._suppressed(roomId, state, recipient.memberId, senderMemberId, messageId)) continue;
+        // The member's own push switch. Default on: never touching
+        // preferences keeps today's mentions-and-DMs behavior exactly.
+        const prefs = this._prefsFor(roomId, recipient.memberId);
+        if (recipient.kind === "mention" && !prefs.mention) continue;
+        if (recipient.kind === "dm" && !prefs.dm) continue;
         const subscriptions = this._rows(roomId, recipient.memberId);
         if (subscriptions.length === 0) continue;
         const payload = declarativePushPayload(pushPayloadFor({
@@ -253,7 +326,9 @@ export class HumanPush {
           const current = this.store.room(roomId).state;
           const member = current.members?.[recipient.memberId];
           const message = current.messages?.find(row => row.id === messageId);
-          return member?.kind === "human" && member.active !== false
+          const prefs = this._prefsFor(roomId, recipient.memberId);
+          const kindOn = recipient.kind === "mention" ? prefs.mention : prefs.dm;
+          return kindOn && member?.kind === "human" && member.active !== false
             && message && !message.deletedAt
             && (!message.toMemberId || message.toMemberId === recipient.memberId)
             && !this._suppressed(roomId, current, recipient.memberId, senderMemberId, messageId)

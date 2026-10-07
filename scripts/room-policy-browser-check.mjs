@@ -53,7 +53,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     for (const box of [f.review, f.decision]) { assert.equal(await box.isChecked(), true); assert.equal(await box.isDisabled(), true); }
     await f.note.waitFor({ state: "visible" });
     assert.match(await f.note.textContent(), /^Room policy: independent review and owner approval are required for every new outcome in this room\. Only the room owner can change this\.$/);
-    assert.equal(await page.locator("#work-options-summary").textContent(), "Review + approval · read only");
+    assert.equal(await page.locator("#work-options-summary").textContent(), "Advanced options");
     assert.equal(await page.locator("#verifier-field").isVisible(), true, "a reviewer must be named when review is mandatory");
     assert.match(await page.locator("#reviewer-unavailable-text").textContent(), /Room policy requires review/);
     assert.equal(await page.locator("#review-settings-button").isHidden(), true, "no shortcut to a setting the proposer cannot change");

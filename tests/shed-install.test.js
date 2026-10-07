@@ -134,12 +134,14 @@ test("shed installer re-run keeps an existing shed.env and re-enables the servic
   const sentinel = "SHED_AGENT_CMD=sentinel-do-not-clobber\nSHED_POLL_SECS=60\nSHED_EXEC_TIMEOUT_SECS=600\n";
   writeFileSync(envFile, sentinel, { mode: 0o600 });
 
-  // Stub the OS-facing commands: node (validation passes), git, systemctl.
+  // This owner exercises Linux systemd service re-enablement on every host.
+  // Stub uname alongside node, git and systemctl so Darwin never starts launchd.
   const binDir = join(dir, "bin");
   mkdirSync(binDir, { recursive: true });
   const ctlLog = join(dir, "systemctl.log");
   writeFileSync(join(binDir, "node"), "#!/usr/bin/env bash\nexit 0\n", { mode: 0o755 });
   writeFileSync(join(binDir, "git"), "#!/usr/bin/env bash\nexit 0\n", { mode: 0o755 });
+  writeFileSync(join(binDir, "uname"), "#!/usr/bin/env bash\nprintf 'Linux\\n'\n", { mode: 0o755 });
   writeFileSync(join(binDir, "systemctl"), `#!/usr/bin/env bash\necho "$*" >> ${JSON.stringify(ctlLog)}\nexit 0\n`, { mode: 0o755 });
 
   const result = runInstaller({ home, shedDir, connDir, pathExtra: binDir });

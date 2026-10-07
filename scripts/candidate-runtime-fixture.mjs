@@ -52,13 +52,18 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/spend-grants.mjs'); // spend-primitive MVP: per-agent spend grants + charge-then-forward (imported by server/routes/spend-grants.mjs, server/mcp-room-profile.mjs, server/mcp-full-profile.mjs)
   paths.add('server/routes/spend-grants.mjs'); // spend-primitive MVP: spend-grant RT routes (imported by server/routes/table.mjs)
   paths.add('server/routes/typing.mjs'); // human UX: typing heartbeat RT route (imported by server/routes/table.mjs)
+  paths.add('server/routes/wake-status.mjs'); // plan-wake-live: wakeable / not-wakeable list RT route (imported by server/routes/table.mjs)
+  paths.add('server/claim-autolink.mjs'); // plan-pr-autolink: claim-id parsing, PR auto-link, webhook core, poll fallback, deploy linking (imported by server/jobs.mjs)
+  paths.add('server/routes/demo.mjs'); paths.add('server/routes/human-push.mjs');
+  paths.add('server/routes/squads.mjs'); // plan-squads: squad roster RT routes (imported by server/routes/table.mjs)
   paths.add('server/spend-pricing.mjs'); // spend-pricing kill switch: owner-only priced-tool gate lever (imported by server/spend-grants.mjs)
   paths.add('server/routes/spend-pricing.mjs'); // spend-pricing kill switch RT routes (imported by server/routes/table.mjs)
+  paths.add('server/read-cursor.mjs'); // safe scalar foundation
   paths.add('server/needs-me.mjs'); // cross-room room_needs_me (imported by server/mcp-room-profile.mjs and server/http.mjs)
   paths.add('server/land-queue.mjs'); // per-room pull-request land queue (imported by server/store.mjs)
   paths.add('server/work-wakes.mjs'); // Opt-in pointer-only work delivery on heartbeat reads (imported by server/store.mjs)
   paths.add('src/land-queue-board.js'); // Land-queue board card (imported by src/app.js)
-  paths.add('src/board-ui.js'); paths.add('src/board.css'); // Tasks › Board (imported by src/app.js)
+  paths.add('src/board-ui.js'); paths.add('src/board-mine.js'); paths.add('src/board.css'); // Tasks › Board (imported by src/app.js; board-mine.js by board-ui.js)
   paths.add('server/mcp-full-profile.mjs'); // stdio-equivalent hosted MCP tools (imported by server/mcp-room-profile.mjs)
   paths.add('deploy/agent-discovery.mjs');
   paths.add('deploy/capabilities.mjs'); // #601: build-time route-family inventory (imported by deploy/agent-discovery.mjs)
@@ -117,6 +122,8 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/room-guide.mjs'); // ACT-1a: Room Guide (imported by cloudflare/room.mjs and server/starter-room.mjs)
   paths.add('server/starter-room.mjs'); // ACT-1a: starter seed (imported by server/room-lifecycle.mjs)
   paths.add('server/pins.mjs');
+  paths.add('server/squads.mjs'); // plan-squads: squad roster + thread channel (imported by server/http.mjs, server/store.mjs, server/mcp-room-profile.mjs, server/work-claim-routes.mjs)
+  paths.add('src/squads-ui.js'); // plan-squads: read-only squad roster panel (lazy-loaded by src/app.js)
   paths.add('server/typing.mjs'); // ephemeral typing heartbeats (imported by server/http.mjs)
   paths.add('server/required-reading.mjs'); // W012: per-lane required reading (imported by server/work-claim-routes.mjs)
   paths.add('server/account-login-methods.mjs'); // Multi-method login model (imported by server/store.mjs)

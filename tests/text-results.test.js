@@ -51,7 +51,7 @@ test("native text preserves exact stored UTF-8 and old post/proposal provenance 
   const reopened = new RoomStore(join(f.directory, "room.sqlite"));
   try {
     assert.equal(reopened.workResult(f.keys.producer, "commons", f.workItemId).result.text.body, body);
-    assert.equal(reopened.command(f.keys.producer, "commons", command).duplicate, true); assert.equal(auditRecovery(reopened).schemaVersion, 37);
+    assert.equal(reopened.command(f.keys.producer, "commons", command).duplicate, true); assert.equal(auditRecovery(reopened).schemaVersion, 38);
   } finally { reopened.close(); }
   assert.equal((await f.client.snapshot()).cursor, 0);
 });

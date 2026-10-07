@@ -15,6 +15,8 @@ function fakeContainer() {
     listeners,
     addEventListener(name, fn) { (listeners[name] ??= []).push(fn); },
     querySelector() { return null; },
+    querySelectorAll() { return []; },
+    setAttribute(name,value) { this[name] = value; },
     contains() { return true; }
   };
 }

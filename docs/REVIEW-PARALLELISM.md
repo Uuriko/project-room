@@ -14,21 +14,16 @@ APPROVE on the exact head, never with an open CHANGES REQUESTED.
 ## 1. The mechanical pass
 
 `review-mechanical` runs on `pull_request` (opened, synchronize, reopened,
-edited). One check run does two stages, both written to the same job summary:
+edited). Its **fast** report contains diff size and claim-scope match, with
+lint and tests explicitly pending. It uses `gh` and `node`, with no npm
+install or polling, and returns immediately after writing the report.
 
-- **fast** (immediately): diff size + claim-scope match. `gh` + `node`
-  only, no `npm install`, so the reviewer sees signal in ~1 minute.
-- **full** (same run, after a bounded ~40 min wait): the job polls for the
-  `test` workflow run on the PR head and appends the lint and test-suite
-  conclusions. If the wait times out, the report says `timed-out` honestly
-  instead of guessing.
-
-A second trigger, `workflow_run` on the `test` workflow, re-emits the full
-report event-driven with no polling — it activates once this workflow file
-is merged to the default branch. It binds the report to
-`workflow_run.head_sha` (the tested commit): if the PR head moved since the
-test run, it skips instead of pairing a stale conclusion with a new head —
-the `pull_request` job owns the current head. It reports:
+The `workflow_run` trigger on completed `test` workflows provides the
+**full** report with actual lint and test-suite conclusions. It binds the
+report to `workflow_run.head_sha` (the tested commit): if the PR head moved
+since the test run, it skips instead of pairing a stale conclusion with a
+new head. A later completed test event supplies the current head's final
+report. It reports:
 
 | signal | source |
 |---|---|
@@ -117,7 +112,39 @@ Baseline (recent merged PRs, measured 2026-10-05):
 Honesty rule: one paired PR is one sample. Report the numbers, do not
 generalize. The experiment earns a second crew only if the numbers move.
 
-## 5. What this does not change
+## 6. Review-state surface + single-lane routing
+
+Two lanes must never review the same PR, and no lane may trust a verdict
+posted on a head that has since moved. The machine-readable surface is
+`scripts/review-state.mjs` (unit-tested in `tests/review-state.test.js`):
+run it against open PRs to get, per PR, the assigned reviewer, every
+verdict's head SHA, and staleness flags.
+
+Routing rules:
+
+1. **One lane per PR.** Every non-draft PR that needs review routes to
+   exactly one reviewer lane. No qualifying PR sits unreviewed.
+2. **Assignment sticks across head moves.** When the author rebases or
+   pushes a fix, the assigned lane re-reviews — a new lane is not assigned.
+   This ends the re-review treadmill where each head move triggered a fresh,
+   duplicated judgment pass.
+3. **Author never reviews their own PR.** The deterministic slot skips the
+   author's lane.
+4. **A verdict covers one head.** Verdict provenance is
+   `{ reviewer, verdict, headSha, at }` — who judged what on which exact
+   commit, when. A verdict on a moved head is **stale** and does not gate a
+   merge, consistent with the provenance model in #1614 (evidence frozen onto
+   the version it describes; here the version is the PR head).
+5. **No silent drops.** A PR with no eligible lane lands in `unrouted` in
+   the state output; the coordinator re-routes from `unrouted` before merge.
+
+Routing is deterministic (PR number → lane slot), so independent
+coordinators compute the same assignment without negotiating. Persist the
+assignment file (`--assign-file`) between runs to keep stickiness. Drafts are
+never routed. The state surface reads GitHub PR reviews only; it changes no
+merge gate.
+
+## 7. What this does not change
 
 - `npm run check` / `npm run lint` / the `test` workflow remain the quality
   gates. The mechanical pass aggregates and adds scope; it duplicates no
@@ -126,3 +153,5 @@ generalize. The experiment earns a second crew only if the numbers move.
   untouched. This workflow is informational, never required.
 - Money-adjacent code paths (bounties, $DASHA, payouts) keep their existing
   review bar regardless of what the mechanical pass says.
+
+The shared `Uuriko` publisher login does not identify the authoring lane. Supply a trusted local `--author-lanes file.json` map of PR number to lane (from the coordination record) before routing those PRs; missing attribution leaves them explicitly unrouted. This report grants no approval or merge authority. A reviewer’s outstanding changes request remains blocking until that same reviewer replaces it, even if another reviewer approves.

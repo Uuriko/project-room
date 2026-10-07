@@ -9,6 +9,7 @@
 // Pure helpers are exported for unit tests; the DOM boot below runs only
 // in a browser.
 
+import { uiText } from "./strings.js";
 import { formatSessionExpiry } from "./session-expiry.js";
 
 export const JOIN_CODE_PATTERN = /^RM-[A-Z0-9]+$/;
@@ -78,21 +79,6 @@ export function formatInviteExpiry(expiresAt, nowMs = Date.now()) {
   return `in ${days} day${days === 1 ? "" : "s"}`;
 }
 
-// Error codes that end the join flow: the full error card (with its
-// Back to sign-in exit) beats inline status text — there is nothing left
-// to do on the consent screen.
-export const JOIN_END_CODES = new Set([
-  "invite_unavailable",
-  "invite_revoked",
-  "invite_expired",
-  "invite_already_used",
-  "invite_authority_changed",
-  // 2026-10-06: an already-joined member re-clicking their invite used to
-  // get bare inline text with no way back; the card's Back to sign-in
-  // link is the exit the message names.
-  "identity_already_linked",
-]);
-
 // Maps a failed preview/join call to a message with a next step.
 // Every branch names what happened and what to do — no dead ends.
 export function joinErrorMessage({ status, code, action = "join" } = {}) {
@@ -110,7 +96,7 @@ export function joinErrorMessage({ status, code, action = "join" } = {}) {
     case "invite_authority_changed":
       return { title: "Invite no longer valid", message: "The inviter's permissions changed, so this link stopped working. Ask them for a new invite.", retry: false };
     case "identity_already_linked":
-      return { title: "Already joined", message: "This browser is already a member of this room. Go back to sign-in and open the room — there is nothing more to join.", retry: false };
+      return { title: "Already joined", message: uiText("join.alreadyJoined"), retry: false };
     case "pilot_limit":
       return { title: "Room is full", message: "The room reached its member limit. Ask the room owner for help.", retry: false };
     case "invalid_invite_name":
@@ -255,7 +241,7 @@ async function boot() {
       if (button) button.disabled = false;
       // A dead code stays dead: surface the reason instead of a retry loop.
       const mapped = joinErrorMessage({ status: joined.status, code: joined.error?.code, action: "join" });
-      if (JOIN_END_CODES.has(joined.error?.code)) fail(mapped);
+      if (["invite_unavailable", "invite_revoked", "invite_expired", "invite_already_used", "invite_authority_changed"].includes(joined.error?.code)) fail(mapped);
       else if (statusEl) statusEl.textContent = mapped.message;
       return;
     }
