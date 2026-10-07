@@ -329,6 +329,7 @@
   "tests/help-offer-service.test.js": 221259,
   "tests/help-offers.test.js": 20749,
   "tests/helper-agent-exercise.test.js": 22240,
+  "tests/herdr-bridge-adapter.test.js": 6100,
   "tests/history-visibility.test.js": 27985,
   "tests/host-context-policy.test.js": 3289,
   "tests/host-policy-boundary.test.js": 5085,

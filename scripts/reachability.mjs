@@ -78,6 +78,9 @@ export const KEEP = [
   "server/work-claim-routes.mjs",
   "server/work-claim-sqlite.mjs",
   "server/work-claims.mjs",
+  // herdr redesign: wired by the integration step (mount in http.mjs +
+  // runtime-package registration). Not orphans; remove from KEEP when wired.
+  "server/session-adapter/herdr-bridge-adapter.mjs",
 ];
 
 const KEEP_SET = new Set(KEEP);
