@@ -1920,11 +1920,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // --- end LEGAL ---
       if (url.pathname === "/sitemap.xml" && ["GET", "HEAD"].includes(req.method)) {
         // Confirm bytes exist before advertising an asset-backed canonical URL.
-        const available = [];
-        for (const [path, file] of publicSearchAssets(publicAssetPaths)) {
-          if (!reviewedPublicSearchPaths.includes(path)) continue;
-          try { await loadAsset(file); available.push(path); } catch { /* Unavailable pages are not advertised. */ }
-        }
+        const candidates = [...publicSearchAssets(publicAssetPaths)]
+          .filter(([path]) => reviewedPublicSearchPaths.includes(path));
+        // Independent immutable assets need no serial I/O round trips. Keep
+        // catalog order and re-check availability on every request; a failed
+        // read still excludes the page rather than poisoning the whole map.
+        const availability = await Promise.allSettled(candidates.map(async ([, file]) => loadAsset(file)));
+        const available = candidates.filter((_, i) => availability[i].status === "fulfilled")
+          .map(([path]) => path);
         const receiptEntries = listPublicReceiptSitemap(store).map(item => ({
           path: item.path,
           lastmod: item.lastmod || PUBLIC_PAGE_LASTMOD,

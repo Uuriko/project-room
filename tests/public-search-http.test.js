@@ -167,3 +167,35 @@ test("compare routes exist only for registered reviewed pages", () => {
   assert.equal(reviewedPublicSearchPaths.includes("/compare/project-room-vs-slack"), true);
   assert.equal(reviewedPublicSearchPaths.includes("/compare/not-a-page"), false);
 });
+
+test("sitemap probes independent assets concurrently and excludes a failed asset without caching it", async t => {
+  const candidates = [...publicSearchAssets(publicAssetPaths)].filter(([path]) => reviewedPublicSearchPaths.includes(path));
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  let first;
+  const firstProbe = new Promise(resolve => { first = resolve; });
+  let missing = 'about.html';
+  const probes = [];
+  const origin = await serve(t, { loadAsset: async file => {
+    probes.push(file); first();
+    await gate;
+    if (file === missing) throw new Error('synthetic missing asset');
+    return Buffer.from('available');
+  } });
+  const response = fetch(origin + '/sitemap.xml');
+  await firstProbe;
+  // The handler starts every independent probe before waiting for any result.
+  // A held promise exposes serialization without a wall-clock assertion.
+  await new Promise(setImmediate);
+  const started = probes.length;
+  release();
+  const xml = await (await response).text();
+  assert.equal(started, candidates.length, 'one pending asset must not serialize all other probes');
+  assert.deepEqual(probes, candidates.map(([, file]) => file), 'each reviewed asset is probed once in catalog order');
+  assert.doesNotMatch(xml, /<loc>https:\/\/room\.trydemigod\.com\/about<\/loc>/);
+  assert.match(xml, /<loc>https:\/\/room\.trydemigod\.com\/offers<\/loc>/);
+  missing = 'offers.html';
+  const changed = await (await fetch(origin + '/sitemap.xml')).text();
+  assert.match(changed, /<loc>https:\/\/room\.trydemigod\.com\/about<\/loc>/);
+  assert.doesNotMatch(changed, /<loc>https:\/\/room\.trydemigod\.com\/offers<\/loc>/);
+});

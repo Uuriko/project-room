@@ -300,7 +300,9 @@ export async function pull({ env = process.env, fetchImpl = fetch, execute = fal
   for (const roomId of rooms) {
     try {
       const listed = await listWorkClaims({ env, fetchImpl, roomId });
-      swarm.push(swarmBriefFromClaims(roomId, listed.claims));
+      swarm.push(listed.truncated
+        ? { roomId, open: null, collisions: null, truncated: true, unavailable: true }
+        : swarmBriefFromClaims(roomId, listed.claims));
     } catch {
       swarm.push({ roomId, open: null, collisions: [], truncated: false, unavailable: true });
     }
@@ -525,8 +527,8 @@ function safeClaimResult(parsed, token, workItemId, room) {
   };
 }
 
-export function replyMessageId(roomId, replyToId, body) {
-  const digest = createHash("sha256").update(`${roomId}\0${replyToId}\0${body}`).digest("hex").slice(0, 30);
+export function replyMessageId(roomId, replyToId, body, toMemberId = "") {
+  const digest = createHash("sha256").update(`${roomId}\0${replyToId}\0${toMemberId}\0${body}`).digest("hex").slice(0, 30);
   return `gr${digest}`;
 }
 
@@ -543,21 +545,28 @@ export async function listTags({ env = process.env, fetchImpl = fetch, roomId } 
     sequence: Number.isSafeInteger(row.sequence) ? row.sequence : null,
     at: typeof row.at === "string" ? row.at : null,
     excerpt: typeof row.body === "string" ? row.body.replace(/\s+/g, " ").slice(0, 180) : "",
+    private: row.private === true,
+    replyToMemberId: typeof row.replyToMemberId === "string" ? row.replyToMemberId : null,
   })).filter(row => row.messageId);
   if (JSON.stringify(tags).includes(connection.token)) fail("secret_in_plan");
   return { roomId: room, tags };
 }
 
-export async function postRoomReply({ env = process.env, fetchImpl = fetch, roomId, replyToId, body } = {}) {
+export async function postRoomReply({ env = process.env, fetchImpl = fetch, roomId, replyToId, body, toMemberId } = {}) {
   const connection = connectionFromEnv(env);
   const room = claimRoom(connection, roomId);
   if (typeof replyToId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(replyToId)) fail("invalid_text_plug");
   if (typeof body !== "string" || body.length < 1 || body.length > 900) fail("invalid_text_plug");
+  if (toMemberId !== undefined && (typeof toMemberId !== "string" || !/^[A-Za-z0-9_.:-]{1,128}$/.test(toMemberId))) fail("invalid_text_plug");
   if (body.includes(connection.token) || /pri_[A-Za-z0-9_-]{8,}/i.test(body)) fail("secret_in_plan");
-  const messageId = replyMessageId(room, replyToId, body);
+  const messageId = replyMessageId(room, replyToId, body, toMemberId ?? "");
   const parsed = await jsonRequest(connection, `/api/rooms/${encodeURIComponent(room)}/commands`, {
     fetchImpl, method: "POST",
-    body: { id: messageId, type: "message.posted", data: { messageId, body, replyToId } },
+    body: {
+      id: messageId,
+      type: "message.posted",
+      data: { messageId, body, replyToId, ...(toMemberId ? { toMemberId } : {}) },
+    },
   });
   const blob = JSON.stringify(parsed);
   if (blob.includes(connection.token)) fail("secret_in_plan");
@@ -584,10 +593,15 @@ export async function listWorkClaims({ env = process.env, fetchImpl = fetch, roo
     claims.push(...parsed.claims);
     if (!parsed.hasMore || typeof parsed.nextCursor !== "string" || !parsed.nextCursor) break;
     cursor = parsed.nextCursor;
+    if (page === 3) {
+      const blob = JSON.stringify(claims);
+      if (blob.includes(connection.token)) fail("secret_in_plan");
+      return { roomId: room, claims, truncated: true };
+    }
   }
   const blob = JSON.stringify(claims);
   if (blob.includes(connection.token)) fail("secret_in_plan");
-  return { roomId: room, claims };
+  return { roomId: room, claims, truncated: false };
 }
 
 export async function updateClaim({ env = process.env, fetchImpl = fetch, workItemId, state, note, roomId } = {}) {
@@ -673,13 +687,19 @@ export async function handleTextCommand({ env = process.env, fetchImpl = fetch, 
     return { ok: true, verb: "tags", roomId: listed.roomId, tags: listed.tags };
   }
   if (parsed.verb === "reply") {
+    const listed = await listTags({ env, fetchImpl, roomId: parsed.roomId });
+    const tag = listed.tags.find(row => row.messageId === parsed.workItemId);
+    if (!tag) fail("invalid_text_plug", "reply target is not in the waiting inbox");
+    if (tag.private && !tag.replyToMemberId) fail("invalid_text_plug", "private tag has no reply member");
     const posted = await postRoomReply({
       env, fetchImpl, roomId: parsed.roomId, replyToId: parsed.workItemId, body: parsed.note,
+      ...(tag.private ? { toMemberId: tag.replyToMemberId } : {}),
     });
-    return { ok: true, verb: "reply", roomId: posted.roomId, replyToId: posted.replyToId, messageId: posted.messageId, sequence: posted.sequence };
+    return { ok: true, verb: "reply", roomId: posted.roomId, replyToId: posted.replyToId, messageId: posted.messageId, sequence: posted.sequence, private: tag.private };
   }
   if (parsed.verb === "holders" || parsed.verb === "collisions") {
     const listed = await listWorkClaims({ env, fetchImpl, roomId: parsed.roomId });
+    if (listed.truncated) fail("claim_scan_truncated", "claim list is longer than the scanned pages; refusing a partial read");
     if (parsed.verb === "holders") {
       return { ok: true, verb: "holders", roomId: listed.roomId, path: parsed.path, holders: holdersForPath(listed.claims, parsed.path) };
     }
