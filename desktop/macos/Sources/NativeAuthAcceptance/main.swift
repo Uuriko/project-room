@@ -124,7 +124,7 @@ import ProjectRoomKit
                 guard !room.webView.isHidden else { fatalError("GitHub cancellation did not restore app") }
                 print("NATIVE_AUTH_PROVIDER_INTENT passed; Google/GitHub preserved; generic menu omits provider")
                 completeWithRealBrowser = true
-                _ = try await room.webView.evaluateJavaScript("document.querySelector('#google-signin').click(); true")
+                _ = try await room.webView.evaluateJavaScript("history.replaceState(null, '', '/?native_return=preserved'); document.querySelector('#google-signin').click(); true")
                 var nativeSession: [String: Any]?
                 for _ in 0..<200 {
                     try await Task.sleep(nanoseconds: 50_000_000)
@@ -140,6 +140,18 @@ import ProjectRoomKit
                 guard let cookie = cookies.first(where: { $0.name == "account_session" || $0.name == "__Host-account_session" }), cookie.isHTTPOnly else { fatalError("Native account cookie must remain HttpOnly") }
                 let scriptCookie = try await room.webView.evaluateJavaScript("document.cookie") as? String ?? ""
                 guard !scriptCookie.contains("account_session") else { fatalError("JavaScript gained access to the account cookie") }
+                var visibleAccount = false
+                for _ in 0..<100 {
+                    let visible = try? await room.webView.evaluateJavaScript("document.querySelector('#auth-panel')?.hidden === true && document.querySelector('#account-settings-button')?.hidden === false && ['#main', '#inbox-panel'].some(selector => { const element = document.querySelector(selector); return element && !element.hidden && element.getClientRects().length > 0; })")
+                    if visible as? Bool == true { visibleAccount = true; break }
+                    try await Task.sleep(nanoseconds: 50_000_000)
+                }
+                let uiState = try await room.webView.evaluateJavaScript("JSON.stringify({href:location.href,accountSignedIn:document.body.dataset.accountSignedIn,authHidden:document.querySelector('#auth-panel')?.hidden,mainHidden:document.querySelector('#main')?.hidden,inboxHidden:document.querySelector('#inbox-panel')?.hidden,inboxHeight:document.querySelector('#inbox-panel')?.getBoundingClientRect().height})")
+                print("NATIVE_AUTH_VISIBLE_STATE \(uiState)")
+                guard visibleAccount else { fputs("NATIVE_AUTH_VISIBLE_WORKSPACE_FAILED: authenticated cookie did not restore visible signed-in workspace\n", stderr); exit(1) }
+                let returnPreserved = try await room.webView.evaluateJavaScript("new URL(location.href).searchParams.get('native_return') === 'preserved'")
+                guard returnPreserved as? Bool == true else { fatalError("Native sign-in lost the original destination parameters") }
+                print("NATIVE_AUTH_VISIBLE_WORKSPACE passed; account signed in and welcome hidden; return parameters retained")
                 print("NATIVE_AUTH_REAL_GOOGLE_CALLBACK passed; actual PKCE201 and WK HttpOnly account readback")
                 exit(0)
             } catch { fputs("NATIVE_AUTH_FAILED \(error)\n", stderr); exit(1) }

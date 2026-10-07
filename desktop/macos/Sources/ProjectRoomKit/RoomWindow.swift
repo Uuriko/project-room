@@ -215,7 +215,15 @@ public typealias RoomAuthenticationFactory = @MainActor (URL, String, @escaping 
             await webView.configuration.websiteDataStore.httpCookieStore.setCookie(cookie)
             status.stringValue = "Signed in"
             webView.isHidden = false
-            open(pendingDestination ?? origin)
+            // A new WK store has no browser account hint. Explicitly restore
+            // the freshly installed session while retaining the original room,
+            // invitation fragment and other destination parameters.
+            var destination = URLComponents(url: pendingDestination ?? origin, resolvingAgainstBaseURL: false)
+            var query = destination?.queryItems ?? []
+            query.removeAll { $0.name == "oauth" }
+            query.append(URLQueryItem(name: "oauth", value: "login"))
+            destination?.queryItems = query
+            open(destination?.url ?? origin)
             pendingDestination = nil
         } catch {
             guard currentAuthentication(attempt) else { return }
