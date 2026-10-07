@@ -913,6 +913,7 @@
   "tests/contribution-public.test.js": 103,
   "tests/cursor-guards.test.js": 96,
   "tests/emoji-catalog.test.js": 94,
+  "tests/emoji-catalog-weight.test.js": 1246,
   "tests/gmail-ui.test.js": 84,
   "tests/land-card-model.test.js": 82,
   "tests/operator-ui.test.js": 79,
