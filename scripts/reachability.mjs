@@ -83,6 +83,9 @@ export const KEEP = [
   // runtime-package registration). Not orphans; remove from KEEP when wired.
   "server/session-adapter.mjs",
   "server/session-adapter/herdr-bridge-adapter.mjs",
+  // herdr redesign: wired by the #pr-view/triage view (B7). Not an orphan;
+  // remove from KEEP when the view lands.
+  "src/supervision-client.js",
 ];
 
 const KEEP_SET = new Set(KEEP);
