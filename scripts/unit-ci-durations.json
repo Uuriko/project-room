@@ -227,6 +227,7 @@
   "tests/diagnostics.test.js": 32723,
   "tests/directory-card-withdrawal.test.js": 36249,
   "tests/disconnected-agent-roundtrip.test.js": 21729,
+  "tests/discover-page.test.js": 22883,
   "tests/discoverability.test.js": 89949,
   "tests/discovery-profile.test.js": 61708,
   "tests/disk-door.test.js": 23663,

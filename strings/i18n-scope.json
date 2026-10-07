@@ -1,6 +1,7 @@
 [
   "404.html",
   "about.html",
+  "discover.html",
   "index.html",
   "join.html",
   "offers.html",
@@ -30,6 +31,7 @@
   "src/conversation.js",
   "src/curiosity-rank.mjs",
   "src/design-tokens.js",
+  "src/discover-ui.js",
   "src/display-name-guard.js",
   "src/dm-consents.js",
   "src/emoji-catalog.js",

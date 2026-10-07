@@ -13,7 +13,7 @@ const agentDocRoutes = Object.freeze([
   ["/docs/agents", "docs/agents/index.html"],
   ...connectSnippets.map(tool => [tool.docsPath, tool.htmlFile]),
 ]);
-export const reviewedPublicSearchPaths = Object.freeze(["/", "/offers", "/about", ...comparePaths, "/receipts", ...agentDocRoutes.map(([path]) => path)]);
+export const reviewedPublicSearchPaths = Object.freeze(["/", "/offers", "/discover", "/about", ...comparePaths, "/receipts", ...agentDocRoutes.map(([path]) => path)]);
 export const PUBLIC_PAGE_LASTMOD = "2026-10-02";
 // About and compare documents ship no first-party scripts. Cloudflare injects
 // its Web Analytics beacon at the edge, so script-src and connect-src name
@@ -79,7 +79,7 @@ export function publicHtmlNotFoundPath(pathname) {
   if (path === "/.well-known" || path.startsWith("/.well-known/")) return false;
   return true;
 }
-const staticPages = Object.freeze([["/", "index.html"], ["/offers", "offers.html"], ["/about", "about.html"]]);
+const staticPages = Object.freeze([["/", "index.html"], ["/offers", "offers.html"], ["/discover", "discover.html"], ["/about", "about.html"]]);
 export function publicSearchAssets(registered) {
   const paths = new Set(registered);
   return new Map([...staticPages, ...comparisonSlugs.map(slug => [`/compare/${slug}`, `compare/${slug}.html`]), ...agentDocRoutes]
