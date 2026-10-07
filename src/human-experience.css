@@ -4,7 +4,11 @@
 .human-experience:not(.human-advanced) .receipt-label,
 .human-experience:not(.human-advanced) .work-begin-limit,
 .human-experience:not(.human-advanced) .member-avatar.agent ~ div .member-status,
-.human-experience:not(.human-advanced) #invite-agents-button { display: none; }
+.human-experience:not(.human-advanced) #invite-agents-button,
+.human-experience:not(.human-advanced) #invite-people-button,
+.human-experience:not(.human-advanced) #connect-agent-button,
+.human-experience:not(.human-advanced) #growth-agent-code,
+.human-experience:not(.human-advanced) #growth-reward { display: none; }
 .human-experience:not(.human-advanced) .presence-member:has(.member-avatar.agent) { display: none; }
 .human-single-conversation:not(.human-advanced) #room-sidebar nav[aria-label="Channels"] { display: none; }
 .human-composer-actions { display: contents; }
