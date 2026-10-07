@@ -43,7 +43,7 @@ test('two humans share one durable run, host claims and publishes a real public 
   assert.equal((await api('owner')).runs[0].status, 'working');
   await api('producer', {action:'report', runId:'shared', attemptId:'host-a', expectedRevision:2, state:'done', summary:'Ready'},422);
   message('producer', 'public-answer', 'Here is the combined result.');
-  await api('producer', {action:'report', runId:'shared', attemptId:'host-a', expectedRevision:2, state:'done', summary:'Combined both inputs; result ready.', resultMessageId:'public-answer'});
+  await api('producer', {action:'report', runId:'shared', attemptId:'host-a', expectedRevision:2, state:'done', summary:'Combined both inputs; result ready.', resultMessageId:'public-answer', appliedInputMessageIds:['question','constraint']});
   const owner = await api('owner'), friend = await api('guest');
   assert.deepEqual(owner.runs, friend.runs);
   assert.equal(friend.runs[0].resultMessageId, 'public-answer');
@@ -53,6 +53,35 @@ test('two humans share one durable run, host claims and publishes a real public 
   f.store = new RoomStore(join(f.directory, 'room.sqlite'));
   const reopened = new RoomAssistant(f.store).list('commons', () => f.store.authenticate(f.keys.guest, 'commons'));
   assert.equal(reopened.runs[0].status, 'done');
+});
+
+test('completion accounts for late group contributions and refuses partial completion atomically', async t => {
+  const { api, message } = await setup(t);
+  await api('owner', {action:'configure',expectedRevision:0,name:'Room',coordinatorMemberId:'producer'});
+  message('owner','initial-goal');
+  await api('owner',{action:'invoke',runId:'late-input',sourceMessageId:'initial-goal'});
+  await api('producer',{action:'claim',runId:'late-input',attemptId:'host',expectedRevision:0});
+  await api('producer',{action:'report',runId:'late-input',attemptId:'host',expectedRevision:1,state:'working',summary:'Read the initial request.',appliedInputMessageIds:['initial-goal']});
+  message('guest','late-constraint','Also preserve the draft.');
+  await api('guest',{action:'contribute',runId:'late-input',sourceMessageId:'late-constraint',expectedRevision:2});
+  message('producer','late-answer','Result incorporating the shared request.');
+  const completion={action:'report',requestId:'finish-late-input',runId:'late-input',attemptId:'host',expectedRevision:3,state:'done',summary:'Ready.',resultMessageId:'late-answer'};
+  const rejected=await api('producer',completion,409);
+  assert.equal(rejected.error.code,'assistant_inputs_pending');
+  const unchanged=(await api('owner')).runs[0];
+  assert.equal(unchanged.revision,3);
+  assert.equal(unchanged.status,'working');
+  assert.equal(unchanged.resultMessageId,undefined);
+  assert.equal(unchanged.activity.length,1);
+  assert.deepEqual(unchanged.inputs.map(i=>i.status),['applied','pending']);
+  // A refused write has no successful retry receipt. Correcting the same request
+  // accounts for the new contribution without losing the earlier acknowledgment.
+  const corrected={...completion,appliedInputMessageIds:['late-constraint']};
+  const done=await api('producer',corrected);
+  assert.equal(done.result.status,'done');
+  assert.deepEqual(done.result.inputs.map(i=>i.status),['applied','applied']);
+  assert.deepEqual(await api('producer',corrected),done);
+  assert.equal((await api('guest')).runs[0].activity.length,2);
 });
 
 test('conflict is explicit, decision is authorized, and cancellation awaits host confirmation', async t => {

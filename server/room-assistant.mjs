@@ -160,6 +160,11 @@ export class RoomAssistant {
                   fail('invalid_assistant_report', 'Applied inputs must name existing shared contributions', 422);
                 for (const entry of run.inputs) if (input.appliedInputMessageIds.includes(entry.sourceMessageId)) entry.status = 'applied';
               }
+              // A current revision alone does not establish that the host handled
+              // every human contribution. Preserve earlier acknowledgments and
+              // include this report's acknowledgments before closing the run.
+              if (input.state === 'done' && run.inputs.some(entry => entry.status !== 'applied'))
+                fail('assistant_inputs_pending', 'Read and account for every shared contribution before reporting done');
               run.hostReportedAt = this.store.now();
               run.status = input.state;
               run.activity.push({ at: this.store.now(), memberId: actor.id, kind: 'reported', summary: input.summary.trim(), state: input.state });
