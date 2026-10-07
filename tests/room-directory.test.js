@@ -103,7 +103,7 @@ test("public listing shows only discoverable, non-archived rooms, sanitized", ()
   assert.equal(nextCursor, null);
   assert.equal(rooms.length, 1);
   const [entry] = rooms;
-  assert.deepEqual(Object.keys(entry).sort(), ["kind", "listedAt", "memberCount", "purpose", "roomId", "title"]);
+  assert.deepEqual(Object.keys(entry).sort(), ["join", "kind", "listedAt", "memberCount", "purpose", "roomId", "title"]);
   assert.equal(entry.roomId, "r1");
   assert.equal(entry.title, "Build week");
   assert.equal(entry.purpose, "Ship the thing");
@@ -113,6 +113,31 @@ test("public listing shows only discoverable, non-archived rooms, sanitized", ()
   const serialized = JSON.stringify(rooms);
   assert.ok(!serialized.includes("alice@example.com"), "no emails leak");
   assert.ok(!serialized.includes("idt_1"), "no identity ids leak");
+  assert.ok(!serialized.includes("Olivia Owner"), "no member handles leak");
+});
+
+// A stranger that finds a room in the public directory must learn what to do
+// next from the listing itself: which endpoint to call and what shape to send.
+test("public listing carries a machine-readable join hint per room", () => {
+  const store = makeStore({ r1: stateFor("r1") });
+  const dir = new RoomDirectory(store);
+  dir.set("r1", "owner", true);
+  const { rooms } = dir.list();
+  assert.equal(rooms.length, 1);
+  const join = rooms[0].join;
+  assert.equal(join.method, "access-request");
+  assert.equal(join.endpoint, "POST /api/access-requests");
+  assert.deepEqual(join.example, {
+    roomId: "r1",
+    identityId: "<your-identity-id>",
+    displayName: "<your-agent-name>",
+    requestedPermissions: [],
+  });
+  assert.match(join.note, /POST \/api\/agent-identities/);
+  assert.match(join.note, /owner/);
+  // The join hint is public guidance: it carries the room id only, nothing private.
+  const serialized = JSON.stringify(join);
+  assert.ok(!serialized.includes("alice@example.com"), "no emails leak");
   assert.ok(!serialized.includes("Olivia Owner"), "no member handles leak");
 });
 
@@ -202,6 +227,11 @@ test("HTTP: owner toggles directory; public listing serves it; unauthenticated t
   assert.equal(entry.roomId, "commons");
   assert.equal(entry.title, "Project Room Commons");
   assert.ok(!("members" in entry) && !("ownerId" in entry), "no member/owner data leaks");
+  // The public listing teaches the next step: request access for this room.
+  assert.equal(entry.join.method, "access-request");
+  assert.equal(entry.join.endpoint, "POST /api/access-requests");
+  assert.equal(entry.join.example.roomId, "commons");
+  assert.deepEqual(entry.join.example.requestedPermissions, []);
   // Bad shapes rejected; unauthenticated refused; wrong method refused.
   const bad = await call("POST", "/api/rooms/commons/directory", { token: ownerToken, data: { discoverable: "yes" } });
   assert.equal(bad.status, 422);

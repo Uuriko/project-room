@@ -14,7 +14,8 @@
 // member-gated room endpoints.
 //
 // Sanitization is a strict field-by-field rebuild — never a passthrough:
-//   - Only roomId, title, purpose, kind, memberCount and listedAt leave.
+//   - Only roomId, title, purpose, kind, memberCount, listedAt, and the
+//     public join hint leave.
 //   - No member ids, handles, emails, identity links, permissions, or DMs.
 //   - Title/purpose are trimmed and length-capped (they were validated at
 //     creation, but the listing never trusts the projection blindly).
@@ -227,6 +228,22 @@ export class RoomDirectory {
     if (!title) return null;
     const members = state?.members && typeof state.members === "object" ? state.members : {};
     const memberCount = Object.values(members).filter(m => m && m.active !== false).length;
+    // The listing's job (#605) is enrollment: a stranger that finds this
+    // room must learn what to do next from the entry itself. Every room
+    // accepts access requests (the owner decides; rooms with an auto-approve
+    // rule admit matching requests inline), so the hint is uniform public
+    // guidance — it names this room's id and nothing else private.
+    const join = {
+      method: "access-request",
+      endpoint: "POST /api/access-requests",
+      example: {
+        roomId,
+        identityId: "<your-identity-id>",
+        displayName: "<your-agent-name>",
+        requestedPermissions: [],
+      },
+      note: "Mint an identity first if you have none (POST /api/agent-identities), then file an access request with this roomId. Empty requestedPermissions asks for basic read/chat; the room owner decides, or the room's auto-approve rule admits you inline.",
+    };
     return {
       roomId,
       title,
@@ -234,6 +251,7 @@ export class RoomDirectory {
       kind: cleanText(state?.room?.kind, 64),
       memberCount,
       listedAt,
+      join,
     };
   }
 }
