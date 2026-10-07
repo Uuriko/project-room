@@ -42,7 +42,7 @@ const DISPUTE_BOND_RATIO = 0.25; // tier-0: exactly 25% of the escrow amount
 const APPEAL_BOND_RATIO = 0.5;   // tier-1: exactly 50% (2x the tier-0 bond)
 const PANEL_SIZE = 3;
 const OUTCOMES = Object.freeze(["release", "refund"]);
-const DISPUTEABLE = new Set(["funded", "in_evaluation"]); // the machine's set
+const DISPUTEABLE = new Set(["in_evaluation", "slashed"]); // disputable machine states
 const STATES = Object.freeze(["disputed", "ruled", "appealed", "final"]);
 const TERMINAL = new Set(["final"]);
 
@@ -73,7 +73,7 @@ export function createEscrowDisputes({
 } = {}) {
   check(escrows && typeof escrows.get === "function"
     && typeof escrows.dispute === "function" && typeof escrows.resolveDispute === "function",
-    "invalid_dispute", "escrows must expose get/dispute/resolveDispute (lane-9 machine)");
+    "invalid_dispute", "escrows must expose get/dispute/resolveDispute (a dispute-capable escrow view)");
   check(store === undefined || store instanceof Map, "invalid_dispute", "store must be a Map if given");
   for (const [hook, name] of [[onDisputeOpened, "onDisputeOpened"], [onDisputeFinalized, "onDisputeFinalized"]])
     check(hook === undefined || typeof hook === "function", "invalid_dispute", `${name} must be a function if given`);
@@ -314,9 +314,10 @@ export function createEscrowDisputes({
 
   // Liveness backstop: no ruling (or no panel ruling) within the timeout.
   // Conservative default: refund -- funds return to the payer, matching the
-  // machine's own sweep bias (funded past deadline -> refunded). Bonds are
-  // forfeited as abandoned. NOTE the lane-9 gap: the machine stays
-  // `disputed`; the settlement layer must honor this directive.
+  // machine's own sweep bias (expiry -> refunded). Bonds are forfeited as
+  // abandoned. The machine has no stall transition out of a frozen dispute,
+  // so it still reads its raw state — the settlement layer must honor this
+  // directive, not the raw machine state.
   const resolveStalled = (escrowId, { at } = {}) => {
     const record = get(escrowId);
     if (TERMINAL.has(record.state)) fail("already_final", `dispute for "${escrowId}" is already final`);

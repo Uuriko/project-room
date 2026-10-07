@@ -1,13 +1,20 @@
 // Lane 12 (acp-build-disputes): escrow dispute + appeals tests.
 //
-// Lane 9's escrow machine (server/escrow.mjs, PR #1785) settles disputes on
-// a SINGLE arbiter's signature: disputed --resolveDispute--> resolved is
-// terminal, and dispute() itself is free (no stake). That reproduces ACP's
-// two dispute holes: the dispute path is a gratis griefing API, and one
-// signature is final with no appeal. This module owns what the machine
-// leaves out: dispute bonds (the disputer stakes too), appeals (a second
-// independent panel, majority rules, exactly one escalation), and finality
-// (the settlement directive, including panel overturns of the arbiter).
+// Lane 7's claim escrow machine (server/claim-escrow.mjs, PR #1787) is a
+// single-party bond machine with no dispute transitions: the seated
+// evaluator signs the verdict, approve -> released, reject -> slashed. That
+// reproduces ACP's dispute hole in room form: one signature is final with
+// no appeal, and nothing prices a challenge. This module owns what the
+// machine leaves out: dispute bonds (the disputer stakes too), appeals (a
+// second independent panel, majority rules, exactly one escalation), and
+// finality (the settlement directive, including panel overturns of the
+// arbiter). The machine is driven through
+// server/claim-escrow-dispute-adapter.mjs, which exposes the dispute-capable
+// escrow view (get/dispute/resolveDispute) over the real lane-7 machine:
+// "disputed"/"resolved" are overlay states reported by the adapter while
+// the machine keeps its raw state, and the adapter drives approve/reject
+// only when the ruler is the seated evaluator in in_evaluation — every
+// other ruling is a settlement-layer directive.
 //
 // Authoring-gate answers (test-audit SKILL.md):
 // 1. Contracts: exact 25% dispute bond / 50% appeal bond as preconditions;
@@ -24,19 +31,20 @@
 //    second escalation; appeal after a frivolous ruling; settlement
 //    honoring the machine's raw `resolved` over a panel overturn;
 //    disputes stalling forever when the arbiter never rules.
-// 3. Existing coverage gap: server/escrow.mjs owns the machine's own
-//    transitions (its PR #1785 tests cover them); bounty-disputes owns the
+// 3. Existing coverage gap: server/claim-escrow.mjs owns the machine's own
+//    transitions (its PR #1787 tests cover them); bounty-disputes owns the
 //    bounty-keyed ladder; dispute-arbiters owns decider seating. Nothing
 //    owns the bond precondition, the appeal tier, or the finality
 //    directive for escrow disputes. This module is the contract owner.
-//    Tests use the REAL lane-9 machine (no behavioral mocks: a fake would
-//    implement the asserted behavior).
+//    Tests use the REAL lane-7 machine through the dispute adapter (no
+//    behavioral mocks: a fake would implement the asserted behavior).
 // 4. No test-only production seams: the hooks (onDisputeOpened /
 //    onDisputeFinalized) and the injectable clock are the production
 //    integration surface (keeper wiring, lane-10 registry adapter).
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createEscrow } from "../server/escrow.mjs";
+import { createClaimEscrows } from "../server/claim-escrow.mjs";
+import { createClaimEscrowDisputeAdapter } from "../server/claim-escrow-dispute-adapter.mjs";
 import { createEscrowDisputes, EscrowDisputeError } from "../server/escrow-disputes.mjs";
 
 const throwsCode = (fn, code) =>
@@ -52,28 +60,35 @@ const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 
 // amount 100 -> dispute bond exactly 25, appeal bond exactly 50.
-function setup() {
+// The lane-7 machine is single-party (claimant posts the bond); the adapter
+// projects the payer|payee pair the dispute layer needs, defaulting to a
+// distinct arbiter seat per test.
+function setup({ arbiterOf } = {}) {
   let now = T0;
   const opened = [];
   const finalized = [];
-  const escrows = createEscrow({ now: () => now });
+  const machine = createClaimEscrows();
+  const escrows = createClaimEscrowDisputeAdapter({ machine,
+    partiesOf: () => ({ payer: PAYER, payee: PAYEE }),
+    arbiterOf: arbiterOf ?? (() => ARBITER) });
   const ed = createEscrowDisputes({ escrows, nowMs: () => now,
     appealWindowMs: HOUR, disputeTimeoutMs: 14 * DAY,
     onDisputeOpened: event => opened.push(event),
     onDisputeFinalized: event => finalized.push(event) });
-  return { ed, escrows, opened, finalized,
+  return { ed, escrows, machine, opened, finalized,
     advance: ms => { now += ms; } };
 }
 
 function funded(api, id = "esc1") {
-  api.escrows.create({ id, payer: PAYER, payee: PAYEE,
-    evaluator: EVALUATOR, arbiter: ARBITER, amount: 100 });
-  api.escrows.fund(id, { by: PAYER });
+  api.machine.create({ escrowId: id, claimId: `claim-${id}`, claimant: PAYER,
+    bondUnits: 100, denomination: "credit", leaseExpiresAt: null });
+  api.machine.lockBond(id, { by: PAYER });
   return id;
 }
 function inEvaluation(api, id = "esc1") {
   funded(api, id);
-  api.escrows.beginEvaluation(id, { by: EVALUATOR });
+  api.machine.submitWork(id, { by: PAYER });
+  api.machine.seatEvaluator(id, { evaluator: EVALUATOR });
   return id;
 }
 // Payee disputes an in-evaluation escrow; returns the dispute record.
@@ -100,10 +115,10 @@ test("openDispute: payee stakes the exact 25% bond, escrow freezes, registry hoo
   assert.ok(Object.isFrozen(rec));
 });
 
-test("openDispute: payer may dispute from funded (pre-evaluation)", () => {
+test("openDispute: payer may dispute from in_evaluation", () => {
   const api = setup();
-  funded(api);
-  const rec = api.ed.openDispute("esc1", { by: PAYER, bond: 25, reason: "cold feet" });
+  inEvaluation(api);
+  const rec = api.ed.openDispute("esc1", { by: PAYER, bond: 25, reason: "evaluator captured" });
   assert.equal(rec.state, "disputed");
   assert.equal(api.escrows.get("esc1").state, "disputed");
 });
@@ -138,8 +153,8 @@ test("openDispute: a stranger with no seat cannot dispute", () => {
 
 test("openDispute: non-disputable escrow states throw, no record created", () => {
   const api = setup();
-  api.escrows.create({ id: "esc1", payer: PAYER, payee: PAYEE,
-    evaluator: EVALUATOR, arbiter: ARBITER, amount: 100 });
+  api.machine.create({ escrowId: "esc1", claimId: "claim-esc1", claimant: PAYER,
+    bondUnits: 100, denomination: "credit", leaseExpiresAt: null });
   throwsCode(() => api.ed.openDispute("esc1", { by: PAYER, bond: 25, reason: "x" }), "invalid_transition");
   assert.equal(api.ed.size(), 0);
 });
@@ -389,9 +404,9 @@ test("resolveStalled: arbiter never rules past the timeout -> conservative defau
   ]);
   assert.equal(api.finalized.length, 1);
   assert.equal(api.finalized[0].tier, 0);
-  // Documented lane-9 gap: the machine has no stall transition out of
-  // `disputed`, so it still reads disputed — the settlement layer must
-  // honor the directive, not the raw machine state.
+  // The adapter never mutates the machine on a stall: it still reads its raw
+  // state, so the settlement layer must honor the directive, not the raw
+  // machine state.
   assert.equal(api.escrows.get("esc1").state, "disputed");
 });
 
@@ -426,4 +441,36 @@ test("finalized directive carries the full settlement packet", () => {
   assert.equal(packet.raisedBy, PAYEE);
   assert.ok(Array.isArray(packet.bondMovements));
   assert.ok(typeof packet.finalizedAt === "string");
+});
+
+test("adapter: when the ruler is the seated evaluator, the ruling drives the machine", () => {
+  const api = setup({ arbiterOf: record => record.evaluator });
+  inEvaluation(api);
+  api.ed.openDispute("esc1", { by: PAYER, bond: 25, reason: "verdict too harsh" });
+  const rec = api.ed.ruleDispute("esc1", { arbiter: EVALUATOR, outcome: "refund",
+    reasonCodes: ["evidence-insufficient"], note: "re-review" });
+  assert.equal(rec.state, "ruled");
+  // The adapter drove machine.reject: the raw machine state is slashed,
+  // while the dispute view reports the ruling.
+  assert.equal(api.machine.get("esc1").state, "slashed");
+  assert.equal(api.escrows.get("esc1").state, "resolved");
+  assert.equal(api.escrows.get("esc1").disputeOutcome, "refund");
+});
+
+test("adapter: a panel overturn never rewrites the machine — the directive rules", () => {
+  const api = setup({ arbiterOf: record => record.evaluator });
+  inEvaluation(api);
+  api.ed.openDispute("esc1", { by: PAYER, bond: 25, reason: "verdict too harsh" });
+  api.ed.ruleDispute("esc1", { arbiter: EVALUATOR, outcome: "refund",
+    reasonCodes: ["evidence-insufficient"], note: "re-review" });
+  api.ed.appealDispute("esc1", { by: PAYEE, bond: 50, panel: PANEL });
+  const fin = api.ed.ruleAppeal("esc1", {
+    votes: PANEL.map(lane => ({ lane, outcome: "release" })),
+    reasonCodes: ["criterion-unmet"],
+  });
+  assert.equal(fin.finalOutcome, "release");
+  assert.equal(fin.overturned, true);
+  // Machine still reads slashed; the settlement layer honors finalOutcome.
+  assert.equal(api.machine.get("esc1").state, "slashed");
+  assert.equal(api.escrows.get("esc1").disputeOutcome, "refund");
 });
