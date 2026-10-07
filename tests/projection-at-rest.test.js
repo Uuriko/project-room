@@ -81,7 +81,16 @@ test("edits and deletes release the old text at rest", t => {
 });
 
 test("the room size cap counts the stored row, so long patches stop filling it", t => {
-  const count = Math.ceil(PILOT_LIMITS.projectionBytes / 60000) + 2;
+  // A moving clock keeps the per-member message rate limit out of the way.
+  const clock = () => { let at = Date.parse("2026-10-06T00:00:00Z"); return () => (at += 120000); };
+  // Measure the real stored bytes per message once, then size the fill from the
+  // cap. The old hard-coded 60,000 bytes/message estimate overstated the true
+  // ~59,000-byte cost, so the fill never reached PILOT_LIMITS.projectionBytes.
+  const probe = open(t, { bodiesAtRest: false, now: clock() });
+  const before = Buffer.byteLength(probe.raw());
+  probe.post("probe", big("probe", 59000));
+  const perMessage = Buffer.byteLength(probe.raw()) - before;
+  const count = Math.ceil(PILOT_LIMITS.projectionBytes / perMessage) + 2;
   const fill = room => {
     for (let i = 0; i < count; i += 1) {
       try { room.post(`p${i}`, big(`p${i}`, 59000)); }
@@ -89,8 +98,6 @@ test("the room size cap counts the stored row, so long patches stop filling it",
     }
     return { stoppedAt: null };
   };
-  // A moving clock keeps the per-member message rate limit out of the way.
-  const clock = () => { let at = Date.parse("2026-10-06T00:00:00Z"); return () => (at += 120000); };
   assert.equal(fill(open(t, { bodiesAtRest: false, now: clock() })).code, "pilot_limit", "without bodies at rest the room fills up");
   const slim = open(t, { bodiesAtRest: true, now: clock() });
   assert.equal(fill(slim).stoppedAt, null);
@@ -163,26 +170,29 @@ test("every rooms.projection write goes through the serializer", () => {
   assert.ok(BODY_AT_REST_MIN_CHARS >= 256);
 });
 
-test("incident 2026-10-07: muse-room-shaped load (600 x 8KB patch bodies) stays writable, and slimming recovers a capped room", t => {
+test("incident 2026-10-07: muse-room-shaped load (100 x 45KB patch bodies) trips the 4 MiB cap, and slimming recovers the room", t => {
   // Reproduces the production incident: muse-room's projection hit the 4 MiB
   // pilot cap because message bodies accumulate inline. 100 x 45KB bodies is
   // ~4.5MB of message text, the same shape as the incident (4353 messages,
-  // 24 of them 30-50KB patch dumps).
+  // 24 of them 30-50KB patch dumps). The cap stays at 4 MiB (the 64 MiB raise
+  // was reverted: the platform row ceiling sits below it); ROOM_BODIES_AT_REST=1
+  // is the recovery path.
   const clock = () => { let at = Date.parse("2026-10-06T00:00:00Z"); return () => (at += 120000); };
-  const fill = room => {
-    for (let i = 0; i < 100; i += 1) room.post(`m${i}`, big(`m${i}`, 45000));
-  };
-  // Without bodies at rest the room must stay writable past the old 4 MiB cap.
   const fat = open(t, { bodiesAtRest: false, now: clock() });
-  fill(fat);
-  assert.ok(Buffer.byteLength(fat.raw()) > 4 * 1024 * 1024, "fixture exceeds the old cap");
-  assert.ok(Buffer.byteLength(fat.raw()) < PILOT_LIMITS.projectionBytes, "fixture fits the raised cap");
+  let trip = null;
+  for (let i = 0; i < 100; i += 1) {
+    try { fat.post(`m${i}`, big(`m${i}`, 45000)); }
+    catch (error) { trip = { at: i, code: error.code }; break; }
+  }
+  assert.ok(trip !== null, "the fat room trips the cap");
+  assert.equal(trip.code, "pilot_limit", "the trip is the projection cap, not another limit");
+  assert.ok(Buffer.byteLength(fat.raw()) > 3.5 * 1024 * 1024, "the fixture filled the room to the cap");
   // Enabling bodies at rest (production: ROOM_BODIES_AT_REST=1) slims the
-  // stored row below the old cap on the next write — the recovery path.
+  // stored row below the cap on the next write — the recovery path.
   fat.reopen({ bodiesAtRest: true, now: clock() });
   fat.post("recovery", big("recovery", 45000));
   assert.ok(Buffer.byteLength(fat.raw()) < 4 * 1024 * 1024,
-    `slimmed row ${Buffer.byteLength(fat.raw())} bytes fits the old 4 MiB cap`);
+    `slimmed row ${Buffer.byteLength(fat.raw())} bytes fits the 4 MiB cap`);
   assert.equal(fat.store.room("commons").state.messages.find(m => m.id === "m0").body, big("m0", 45000),
     "readers still see full bodies after slimming");
 });

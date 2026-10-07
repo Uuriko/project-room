@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { RoomStore } from "../server/store.mjs";
+import { RoomStore, PILOT_LIMITS } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T, PERMISSIONS } from "../src/events.js";
 
@@ -126,7 +126,7 @@ test("a pending invitation grants its account no Room read authority", t => {
 test("invitation acceptance at the projection cap fails cleanly without creating membership", t => {
   const f = fixture(t), issued = invitation(f), room = f.store.room.bind(f.store);
   // Isolate the capacity policy without constructing thousands of unrelated events.
-  f.store.room = id => { const result = room(id); return { sequence: result.sequence, state: { ...result.state, capacityFixture: "x".repeat(4 * 1024 * 1024) } }; };
+  f.store.room = id => { const result = room(id); return { sequence: result.sequence, state: { ...result.state, capacityFixture: "x".repeat(PILOT_LIMITS.projectionBytes) } }; };
   assert.throws(() => f.store.acceptInvitation(f.target.token, issued.rawToken, {
     redemptionId: redemption(), expectedRevision: 0, expectedSessionBinding: f.target.session.sessionBinding
   }), { code: "pilot_limit", status: 409 });
