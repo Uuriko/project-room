@@ -48,10 +48,16 @@ Room recovers.
 
 ## Land and deploy
 
-Run relevant checks, then verify the final head's hosted CI and review. Merge
-one PR at a time on the merge-slot only with fully green required hosted CI,
-exact-head reviewer APPROVE (or verified identical-patch approval carry), and
-no open CHANGES REQUESTED. Never push directly to `main`.
+Run relevant checks, then verify the final head's required hosted CI. Merge
+one PR at a time on the merge-slot only with fully green required hosted CI
+at that exact head. Never push directly to `main`.
+
+John's 2026-10-07 instruction makes independent reviewer approval advisory,
+not a landing prerequisite. Assess review findings and fix actual correctness,
+security or data-loss blockers. A missing approval or CHANGES REQUESTED status
+alone does not block authorized work. This replaces older exact-head approval
+and approval-carry requirements; it does not waive an explicit task hold or
+an item's enforced completion review policy.
 
 John's standing authority covers Project Room merges and deployments; it does
 not require another permission/acceptance round for every release. Deploy via
