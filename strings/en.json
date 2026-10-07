@@ -126,5 +126,8 @@
   "file.download.pending": "Downloading…",
   "file.download.started": "Download started",
   "file.download.unavailable": "File unavailable",
-  "file.download.retry": "Couldn’t download. Try again."
+  "file.download.retry": "Couldn’t download. Try again.",
+  "human.decisionRationaleNotice": "<p class=\"form-hint\">Your reason will be posted to the room.</p>",
+  "human.decisionReceiptUnknown": "Save receipt could not be confirmed",
+  "human.decisionRationaleChanged": "Your reason was posted. Review the changed result before deciding."
 }

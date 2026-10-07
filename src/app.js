@@ -5965,13 +5965,18 @@ function openWorkAction(item, action, draftMessageId = null, offerId = null) {
   if (action === "complete" && !draftMessageId && humanExperience.shareResult(item)) return;
   const [type, , fields] = actionSpecs[action];
   actionEpoch++;
-  pendingAction = { type, action, workId: item.id, revision: item.revision, draftMessageId, receipt: item.receipt ? { completionEventId: item.receipt.eventId, evidenceVersion: item.receipt.evidenceVersion } : null, retry: null, uncertain: false, error: "" };
+  const publishRationale = action === "decide" && document.body.classList.contains("human-experience") && !document.body.classList.contains("human-advanced");
+  pendingAction = { type, action, workId: item.id, revision: item.revision, draftMessageId, publishRationale, receipt: item.receipt ? { completionEventId: item.receipt.eventId, evidenceVersion: item.receipt.evidenceVersion } : null, retry: null, uncertain: false, error: "" };
   if (isHelpAction(action)) {
     pendingAction.helpRevision = item.helpWanted?.revision ?? 0;
     pendingAction.accountableRevision = state.members[item.accountableMemberId]?.revision;
   }
   if (isOfferAction(action)) pinOffer(pendingAction, item, offerId);
   $("#action-fields").innerHTML = action === "complete" ? producerField() + (draftMessageId ? area("summary", "Summary") + area("nextAction", "Next step") : fields) : fields;
+  if (pendingAction.publishRationale) {
+    $("#action-fields [name=sourceMessageId]").closest("label").remove();
+    $("#action-fields").insertAdjacentHTML("beforeend", uiText("human.decisionRationaleNotice"));
+  }
   if (action === "help") {
     const keep = item.helpWanted?.status === "open" && Date.parse(item.helpWanted.expiresAt) > Date.now();
     $("#action-fields").innerHTML = '<label>What would help?<textarea name="scope" required rows="3" maxlength="600"></textarea></label><label>Available for<select name="duration" required>'
@@ -6162,6 +6167,8 @@ $("#refresh-action").addEventListener("click", () => {
         entry.helpExpiresAt = null;
       }
     }
+    entry.decisionDispatched = false;
+    if (changedResult) entry.rationale = null;
     if (changedResult) for (const field of $("#action-fields").querySelectorAll("select[name='result'],select[name='decision']")) field.value = "";
     renderActionContext(item, entry.action);
   }).then(() => {
@@ -6236,11 +6243,31 @@ $("#action-form").addEventListener("submit", e => {
       evidenceMessageEventId: entry.text.messageEventId, evidenceVersion: entry.text.evidenceVersion, previousCompletionEventId: entry.receipt?.completionEventId ?? null });
     if (entry.action === "claim") data.paths = fields.paths.split("\n").map(p => p.trim()).filter(Boolean);
     if (["verify", "decide"].includes(entry.action)) Object.assign(data, entry.receipt);
-    entry.retry = draftCommand(entry.retry, entry.type, data);
+    if (entry.publishRationale) {
+      data.reason = fields.reason.trim();
+      entry.rationale = draftCommand(entry.rationale, T.MESSAGE_POSTED, { messageId: entry.rationale?.command.data.body === data.reason ? entry.rationale.command.data.messageId : crypto.randomUUID(), body: data.reason });
+      data.sourceMessageId = entry.rationale.command.data.messageId;
+    }
+    const retry = draftCommand(entry.retry, entry.type, data);
+    if (retry !== entry.retry) entry.decisionDispatched = false;
+    entry.retry = retry;
   }
   submit(e.currentTarget, async current => {
     const owns = () => current() && pendingAction === entry && actionEpoch === epoch && sameSession(generation, roomId, memberId);
     try {
+      if (entry.rationale && !entry.rationale.confirmed) {
+        const receipt = await client.send(entry.rationale.command);
+        if (!owns()) return;
+        if (!await confirmsWorkAction(receipt, entry.rationale.command, roomId, memberId)) throw new Error(uiText("human.decisionReceiptUnknown"));
+        if (!owns()) return;
+        entry.rationale.confirmed = true;
+      }
+      // A rationale can settle after the result changed. Never silently rebase
+      // its verdict; uncertain decision retries still reconcile the original.
+      if (entry.publishRationale && !entry.decisionDispatched && actionChanged(entry)) {
+        entry.uncertain = false; entry.needsReview = true; entry.error = uiText("human.decisionRationaleChanged"); return;
+      }
+      entry.decisionDispatched = true;
       const receipt = await client.send(entry.retry.command);
       if (!owns()) return;
       if (!await confirmsWorkAction(receipt, entry.retry.command, roomId, memberId)) throw new Error("Save receipt could not be confirmed");

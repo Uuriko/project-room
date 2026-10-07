@@ -69,7 +69,7 @@ export function workCollaboration(item, member, participants) {
 // must match before a browser may discard a retained retry or announce success.
 export async function confirmsWorkAction(receipt, command, roomId, memberId) {
   const entry = receipt?.event;
-  const actions = [T.WORK_ACCEPTED, T.WORK_STARTED, T.WORK_BLOCKED, T.WORK_BLOCKER_RESOLVED,
+  const actions = [T.MESSAGE_POSTED, T.WORK_ACCEPTED, T.WORK_STARTED, T.WORK_BLOCKED, T.WORK_BLOCKER_RESOLVED,
     T.WORK_COMPLETED, T.CLAIM_ACQUIRED, T.CLAIM_RELEASED, T.CLAIM_RENEWED, T.VERIFICATION_RECORDED, T.OWNER_DECISION_RECORDED, T.WORK_HELP_UPDATED,
     T.HELP_OFFER_OPENED, T.HELP_OFFER_UPDATED];
   const same = (a, b) => a === b || (a && b && typeof a === "object" && typeof b === "object"
