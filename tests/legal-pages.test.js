@@ -110,11 +110,20 @@ test("legal pages are cacheable, indexed, and listed in the sitemap", async t =>
     if (previousContact === undefined) delete process.env.ROOM_SECURITY_CONTACT;
     else process.env.ROOM_SECURITY_CONTACT = previousContact;
   });
-  const security = await raw(origin, "/.well-known/security.txt");
-  assert.equal(security.status, 200);
-  assert.match(security.text, /Contact: mailto:potter@trydemigod\.com/);
-  assert.equal(security.headers.get("content-type"), "text/plain; charset=utf-8");
-  assert.equal((await raw(origin, "/security.txt")).text, security.text);
+  // Each response generates its expiry from Date.now(). Compare aliases at
+  // the same instant rather than depending on two HTTP reads sharing a second.
+  // Only Date is mocked: network deadlines and server timers remain real.
+  t.mock.timers.enable({ apis: ["Date"], now: Date.UTC(2026, 9, 6, 12, 0, 0) });
+  try {
+    const security = await raw(origin, "/.well-known/security.txt");
+    assert.equal(security.status, 200);
+    assert.match(security.text, /Contact: mailto:potter@trydemigod\.com/);
+    assert.match(security.text, /Expires: 2027-10-06T12:00:00Z\n/);
+    assert.equal(security.headers.get("content-type"), "text/plain; charset=utf-8");
+    assert.equal((await raw(origin, "/security.txt")).text, security.text);
+  } finally {
+    t.mock.timers.reset();
+  }
   const sitemap = await raw(origin, "/sitemap.xml");
   assert.equal(sitemap.status, 200);
   for (const path of ["/terms", "/privacy", "/subprocessors", "/acceptable-use", "/legal"]) {
