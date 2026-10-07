@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { llmsTxt } from "../deploy/agent-discovery.mjs";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const read = (p) => readFileSync(join(ROOT, p), "utf8");
@@ -66,5 +67,48 @@ test("proof-of-work numbers in the cold docs match server/agent-identities.mjs",
   assert.ok(
     start.includes("{bucket}:{trimmedDisplayName}:{nonce}"),
     "AGENT-START-HERE.md must spell the PoW input format",
+  );
+});
+
+test("anonymous MCP catalog is seven tools in the packet, API reference, and cold doc", () => {
+  // Regression history: lane1/funnel added room_identity_mint to the anonymous
+  // catalog (now 7 tools: four join + two public-work + identity mint).
+  // PR #1492 fixed the count in seven copy spots but missed the generated
+  // /llms.txt packet, docs/openapi.yaml, and COLD-AGENT-WALKTHROUGH.md —
+  // all three still said "six" on 2026-10-07 (live tools/list probe).
+  const packet = llmsTxt();
+  assert.ok(!packet.includes("six public tools"), "packet must not say 'six public tools'");
+  assert.ok(!packet.includes("six-tool"), "packet must not say 'six-tool'");
+  assert.ok(packet.includes("seven"), "packet must state the seven-tool count");
+  const apiRef = read("docs/openapi.yaml");
+  assert.ok(
+    !apiRef.includes("six public tools"),
+    "docs/openapi.yaml must not say 'six public tools'",
+  );
+  const cold = read("docs/COLD-AGENT-WALKTHROUGH.md");
+  assert.ok(
+    /seven public tools/i.test(cold),
+    "COLD-AGENT-WALKTHROUGH.md stranger table must say seven public tools",
+  );
+});
+
+test("deployed revision is documented at /api/version, not /api/health", () => {
+  // Live evidence 2026-10-07: GET /api/health answers
+  // {status, mode, deployment} with no revision; GET /api/version answers
+  // {status, mode, sourceRevision, buildId, deployment}. The cold doc's
+  // stranger table must not point revision-seekers at /api/health.
+  const cold = read("docs/COLD-AGENT-WALKTHROUGH.md");
+  assert.ok(
+    !/GET \/api\/health[^\n]*deployed revision/i.test(cold),
+    "COLD-AGENT-WALKTHROUGH.md must not claim /api/health carries the deployed revision",
+  );
+  assert.ok(
+    /\/api\/version/.test(cold),
+    "COLD-AGENT-WALKTHROUGH.md must point deployed-revision seekers at /api/version",
+  );
+  const httpSrc = read("server/http.mjs");
+  assert.ok(
+    /sourceRevision: SOURCE_REVISION/.test(httpSrc),
+    "server must serve sourceRevision on /api/version",
   );
 });
