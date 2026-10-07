@@ -22,9 +22,18 @@ export function presenceState({
   }
   const validHostObservation = Number.isFinite(hostLastSeenAt)
     && Number.isFinite(now) && hostLastSeenAt <= now;
+  // grok-presence-iso-ms: a command inside the live window is stronger live
+  // evidence than a stale host observation — an agent that demonstrably ran
+  // seconds ago reads "idle", never "unreachable". Older activity does not
+  // mask a dead host: the deliberate "ordinary commands don't imply
+  // availability" contract (an agent silent for 33 min with a stale host
+  // stays unreachable) is preserved.
+  const liveEvidence = within(lastCommandAt, now, PRESENCE_LIVE_WINDOW_MS)
+    || within(lastSeenAt, now, PRESENCE_LIVE_WINDOW_MS);
+  const recentActivity = within(lastCommandAt, now, PRESENCE_IDLE_WINDOW_MS)
+    || within(lastSeenAt, now, PRESENCE_IDLE_WINDOW_MS);
   if (validHostObservation && hostStatus === "online") return "listening";
-  if (validHostObservation && hostStatus === "offline") return "unreachable";
-  if (within(lastCommandAt, now, PRESENCE_IDLE_WINDOW_MS)
-    || within(lastSeenAt, now, PRESENCE_IDLE_WINDOW_MS)) return "idle";
+  if (validHostObservation && hostStatus === "offline" && !liveEvidence) return "unreachable";
+  if (recentActivity) return "idle";
   return "unknown";
 }

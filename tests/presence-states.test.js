@@ -58,6 +58,22 @@ test("presenceState: offline host timestamp does not imply listening", () => {
   }), "unreachable");
 });
 
+test("presenceState: offline host with recent agent command -> idle, not unreachable", () => {
+  // grok-presence-iso-ms: a registered-but-stale host must not mask stronger
+  // live evidence. Documented contract: "idle for recent agent activity
+  // without a live connection; unreachable for a registered offline host
+  // without stronger live evidence". The live window (5 min) bounds the
+  // override: a command 6 min ago no longer contradicts the dead host.
+  assert.equal(presenceState({
+    kind: "agent", hostStatus: "offline", hostLastSeenAt: NOW - 10 * min,
+    lastCommandAt: NOW - min, lastSeenAt: NOW - min, now: NOW,
+  }), "idle");
+  assert.equal(presenceState({
+    kind: "agent", hostStatus: "offline", hostLastSeenAt: NOW - 10 * min,
+    lastCommandAt: NOW - 6 * min, lastSeenAt: NOW - 6 * min, now: NOW,
+  }), "unreachable");
+});
+
 test("presenceState: human command within live window -> listening", () => {
   assert.equal(presenceState({
     kind: "human", lastCommandAt: NOW - 3 * min, now: NOW,
@@ -272,4 +288,40 @@ test("presence: human never shows unreachable", () => {
   for (const m of members) {
     if (m.kind === "human") assert.notEqual(m.state, "unreachable");
   }
+});
+
+test("presence: agent with stale registered host that just posted reads idle, not unreachable", () => {
+  // grok-presence-iso-ms end to end: the roster state must reflect the fresh
+  // post — "idle for recent agent activity without a live connection" — and
+  // never "unreachable". The roster's lastSeenAt keeps the documented
+  // ISO-string shape; the derivation normalizes to ms epoch internally.
+  const { store, ownerKey } = serve(test);
+  store.command(ownerKey, "commons", {
+    id: randomUUID(), type: T.MEMBER_ADDED,
+    data: { memberId: "agent", displayName: "Test agent", kind: "agent", permissions: ["accept_work"] },
+  });
+  // Simulate an identity + link (normally created via the agent-identities API).
+  store.db.prepare(
+    "INSERT INTO agent_identities(identity_id, secret_hash, display_name, created_at) VALUES(?,?,?,?)"
+  ).run("identity-iso-1", "hash-placeholder", "ISO Agent", Date.now());
+  store.db.prepare(
+    "INSERT INTO identity_links(room_id, identity_id, member_id, linked_at) VALUES(?,?,?,?)"
+  ).run("commons", "identity-iso-1", "agent", Date.now());
+  let at = Date.now();
+  store.now = () => at;
+  store.agentHeartbeats.heartbeat({ agentId: "identity-iso-1", hostId: "host-1", mode: "wakeable" });
+  // The host goes stale (past the 180s window and the 5-min live window),
+  // then the agent posts a message right now.
+  at += 400_000;
+  const agentKey = store.issueAccessKey("commons", "agent");
+  store.command(agentKey, "commons", {
+    id: randomUUID(), type: T.MESSAGE_POSTED,
+    data: { messageId: randomUUID(), body: "still here" },
+  });
+  const { members } = store.presence(ownerKey, "commons", []);
+  const agent = byId(members, "agent");
+  assert.equal(agent.presence.status, "offline");
+  assert.equal(typeof agent.lastSeenAt, "string");
+  assert.ok(Number.isFinite(Date.parse(agent.lastSeenAt)));
+  assert.equal(agent.state, "idle");
 });
