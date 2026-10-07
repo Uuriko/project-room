@@ -76,6 +76,11 @@ function failureValue(error) {
     return {
       status: error.status, code: error.code, message: error.message,
       ...(error.item ? { item: error.item } : {}),
+      // #1554: errors that carry recovery guidance (e.g. bond peer_not_found)
+      // surface hint/next in the tool-error envelope so MCP callers can
+      // recover without reading source.
+      ...(error.hint ? { hint: error.hint } : {}),
+      ...(error.next ? { next: error.next } : {}),
       // Spend-grant refusals carry machine-readable detail (price, reason,
       // remaining cap) alongside the human text — the x402 PaymentRequired
       // shape: structuredContent AND content[0].text both name the price.

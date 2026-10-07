@@ -140,6 +140,17 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [path(bondsPath), command(hints[reasonCode])]
     };
   }
+  if (reasonCode === "peer_not_found") {
+    // #1554: bond_propose to an existing-but-unlinked identity. The 404 is
+    // deliberately uniform (no existence oracle); the hint teaches recovery
+    // without distinguishing the cases.
+    return {
+      status: "action_required",
+      reason: reasonCode,
+      hint: "The target must be a room-linked peer; ask them to join the room first.",
+      next: [tool("get_room_context")]
+    };
+  }
   if (reasonCode === "trust_off") {
     return {
       status: "action_required",
