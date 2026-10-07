@@ -83,6 +83,13 @@ export const KEEP = [
   // runtime-package registration). Not orphans; remove from KEEP when wired.
   "server/session-adapter.mjs",
   "server/session-adapter/herdr-bridge-adapter.mjs",
+  // #1601 (IS-UX-1): human digest pipeline + in-app notification center.
+  // The client mount (index.html / src/app.js) is owned by jill-lane7 and
+  // the digest hook is called by a future digest runner. Not orphans;
+  // remove from KEEP when wired.
+  "server/human-digest-content.mjs",
+  "server/human-digest-hook.mjs",
+  "src/notification-center.js",
 ];
 
 const KEEP_SET = new Set(KEEP);

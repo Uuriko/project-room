@@ -66,6 +66,7 @@
   "src/mcp-server-card.mjs",
   "src/member-display-names.js",
   "src/needs-attention.js",
+  "src/notification-center.js",
   "src/open-questions-ui.js",
   "src/operator-ui.js",
   "src/outside-agents.mjs",
