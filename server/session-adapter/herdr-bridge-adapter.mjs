@@ -489,8 +489,8 @@ export class HerdrBridgeAdapter {
   /** Close all subscriptions, then the bridge session. Idempotent. */
   async disconnect() {
     if (!this._connected && this._subscriptions.size === 0) return;
-    for (const sub of this._subscriptions.values()) {
-      try { await sub.close(); } catch { /* best effort */ }
+    for (const record of this._subscriptions.values()) {
+      try { await record.sub.close(); } catch { /* best effort */ }
     }
     this._subscriptions.clear();
     this._connected = false;
@@ -1123,7 +1123,10 @@ export class HerdrBridgeAdapter {
         checkHeartbeat();
         const remaining = this._heartbeatTimeoutMs - (this._now() - lastFrameAt);
         const readP = reader.read();
-        const timeoutP = sleep(Math.max(0, remaining)).then(() => { throw new Error('stream_dead: no heartbeat within the watchdog window'); });
+        let watchdog;
+        const timeoutP = new Promise((_, reject) => {
+          watchdog = setTimeout(() => reject(new Error('stream_dead: no heartbeat within the watchdog window')), Math.max(0, remaining));
+        });
         let chunk;
         try {
           const r = await Promise.race([readP, timeoutP]);
@@ -1131,6 +1134,8 @@ export class HerdrBridgeAdapter {
         } catch (e) {
           try { reader.cancel().catch(() => {}); } catch { /* ignore */ }
           throw e;
+        } finally {
+          clearTimeout(watchdog);
         }
         if (chunk.done) {
           // Server closed the stream: treat as a death to recover from (unless we closed it).

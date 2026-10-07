@@ -757,3 +757,122 @@ test('J1: adapter module stays Worker-safe (no node: imports, no require, no pro
     assert.ok(i.startsWith('.') || i === '../session-adapter.mjs', `unexpected import: ${i}`);
   }
 });
+
+// K. Public wait and error contracts: real HTTP/SSE transport, no adapter internals.
+test('K1: output wait preserves regex flags, repeats unmatched rounds with one key, and returns the matching line', async t => {
+  let rounds = 0;
+  const mock = await startMockBridge({ handlers: { '/v1/wait': ({ send }) => send(200,
+    ++rounds === 1 ? { matched: false } : { matched: true, matchedLine: 'READY 42' }) } });
+  try {
+    const { adapter } = await connectedAdapter(t, mock);
+    assert.deepEqual(await adapter.waitForOutput('pane-1', /ready \d+/i, { timeoutMs: 1000 }),
+      { paneId: 'pane-1', matched: 'READY 42' });
+    const requests = mock.state.requests.filter(r => r.route === '/v1/wait');
+    assert.equal(requests.length, 2);
+    for (const r of requests) {
+      assert.equal(r.body.mode, 'output'); assert.equal(r.body.paneId, 'pane-1');
+      assert.equal(r.body.pattern, 'ready \\d+'); assert.equal(r.body.flags, 'i');
+      assert.ok(r.body.timeoutMs > 0 && r.body.timeoutMs <= 1000);
+    }
+    assert.ok(requests[0].headers['x-idempotency-key']);
+    assert.equal(requests[0].headers['x-idempotency-key'], requests[1].headers['x-idempotency-key']);
+    assert.deepEqual(await adapter.waitForOutput('pane-1', 'READY', { timeoutMs: 1000 }),
+      { paneId: 'pane-1', matched: 'READY 42' });
+    assert.equal(mock.state.requests.at(-1).body.flags, '');
+  } finally { await mock.close(); }
+});
+
+test('K2: invalid waits, exhausted deadlines and already aborted calls make no bridge writes', async t => {
+  const mock = await startMockBridge();
+  try {
+    const { adapter } = await connectedAdapter(t, mock);
+    const before = mock.state.requests.length;
+    for (const [call, pattern] of [
+      [() => adapter.waitForOutput('', /x/, { timeoutMs: 100 }), /paneId is required/],
+      [() => adapter.waitForOutput('p', /x/), /timeoutMs/],
+      [() => adapter.waitForOutput('p', /x/, { timeoutMs: 0 }), /timed out/],
+      [() => adapter.waitForState('a', [], { timeoutMs: 100 }), /non-empty array/],
+      [() => adapter.waitForState('a', ['done']), /timeoutMs/],
+      [() => adapter.waitForState('a', ['done'], { timeoutMs: 0 }), /timed out/],
+      [() => adapter.waitForState('a', ['done'], { timeoutMs: 100, signal: AbortSignal.abort() }), /aborted/],
+      [() => adapter.waitForEvent({ type: 'done' }), /timeoutMs/],
+    ]) await assert.rejects(call(), pattern);
+    assert.equal(mock.state.requests.length, before);
+  } finally { await mock.close(); }
+});
+
+function heldEventFrames(frames) {
+  return ({ req, res }) => new Promise(resolve => {
+    res.write(sseFrames(...frames.map(data => ({ data }))));
+    req.on('close', resolve);
+  });
+}
+
+test('K3: event wait filters type, agent and pane, closes its dedicated subscription, and tolerates a throwing predicate', async t => {
+  const frames = [
+    { seq: 1, type: 'other', agentId: 'a', paneId: 'p' },
+    { seq: 2, type: 'done', agentId: 'other', paneId: 'p' },
+    { seq: 3, type: 'done', agentId: 'a', paneId: 'other' },
+    { seq: 4, type: 'done', agentId: 'a', paneId: 'p' },
+  ];
+  const events = [];
+  const mock = await startMockBridge({ onEvents: heldEventFrames(frames) });
+  try {
+    const { adapter } = await connectedAdapter(t, mock, { connectOpts: { onEvent: e => events.push(e) } });
+    const result = await adapter.waitForEvent({ type: 'done', agentId: 'a', paneId: 'p' }, { timeoutMs: 1000 });
+    assert.equal(result.seq, 4);
+    assert.ok(events.some(e => e.type === 'subscription_closed'));
+    assert.equal((await adapter.waitForEvent(e => {
+      if (e.seq === 1) throw new Error('predicate failure');
+      return e.seq === 2;
+    }, { timeoutMs: 1000 })).seq, 2);
+  } finally { await mock.close(); }
+});
+
+test('K4: event timeout and forbidden event route reject and leave no live subscription', async t => {
+  const mock = await startMockBridge({ onEvents: heldEventFrames([{ seq: 1, type: 'other' }]) });
+  try {
+    const { adapter } = await connectedAdapter(t, mock);
+    await assert.rejects(adapter.waitForEvent({ type: 'missing' }, { timeoutMs: 30 }), /timed out/);
+    const limited = await connectedAdapter(t, mock, { envOpts: { methods: ['ping'] } });
+    const before = mock.state.requests.length;
+    await assert.rejects(limited.adapter.waitForEvent({ type: 'done' }, { timeoutMs: 100 }), /method/i);
+    assert.equal(mock.state.requests.length, before);
+  } finally { await mock.close(); }
+});
+
+test('K5: snapshot is authenticated and disconnect closes an active subscription', async t => {
+  const mock = await startMockBridge({ onEvents: heldEventFrames([{ seq: 1, type: 'ping' }]) });
+  try {
+    const { adapter } = await connectedAdapter(t, mock);
+    assert.equal(adapter.tenantId, 'tenant-a'); assert.equal(adapter.bridgeId, 'host-1');
+    assert.deepEqual(await adapter.snapshot(), { version: 1, workspaces: [] });
+    const sub = await adapter.subscribe(['*'], () => {});
+    assert.equal(sub.active, true);
+    await adapter.disconnect();
+    assert.equal(sub.active, false);
+    await assert.rejects(adapter.snapshot(), /not connected/);
+  } finally { await mock.close(); }
+});
+
+test('K6: wire errors retain taxonomy and never replay a rejected write', async t => {
+  const mock = await startMockBridge();
+  try {
+    const { adapter } = await connectedAdapter(t, mock);
+    for (const [status, body, code] of [
+      [200, 'not json', 'invalid_response'], [401, '', 'auth_denied'],
+      [403, '', 'auth_denied'], [404, '', 'method_unsupported'],
+      [429, '', 'bridge_rate_limited'], [500, '', 'bridge_server_error'],
+      [400, '', 'invalid_request'],
+      [200, JSON.stringify({ error: { code: 'version_mismatch', message: 'wrong version' } }), 'version_mismatch'],
+      [200, JSON.stringify({ error: { code: 'method_unsupported', message: 'missing method' } }), 'method_unsupported'],
+    ]) {
+      mock.state.handlers['/v1/send'] = ({ res }) => { res.writeHead(status); res.end(body); };
+      const before = mock.state.requests.length;
+      await assert.rejects(adapter.sendText('a', 'hello'), e => e.code === code);
+      const attempts = mock.state.requests.slice(before);
+      assert.equal(attempts.length, status === 500 ? 2 : 1, `bounded attempts for ${status}/${code}`);
+      if (status === 500) assert.equal(attempts[0].headers['x-idempotency-key'], attempts[1].headers['x-idempotency-key']);
+    }
+  } finally { await mock.close(); }
+});
