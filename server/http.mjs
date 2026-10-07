@@ -21,6 +21,7 @@ import { SyntheticInboxTransport, FixtureChannelSender } from "./inbox-transport
 import { createSendBudgetRegistry } from "./channel-send-budgets.mjs";
 import { handleInboxCollab } from "./inbox-collab-routes.mjs"; // Lane C inbox collaboration (task RC-2026-09-18-011).
 import { buildActivationPack } from "./room-activation-pack.mjs"; // Room activation pack (quill lane, RC-2026-09-18-040).
+import { buildPermissionMoment } from "./permission-moment.mjs"; // Permission moment (lane6 plug-in crew): "here's what you can do here".
 import { buildOrient } from "./orient.mjs"; // Orient endpoint (jill lane, RC-2026-09-28 — the URL outside agents guess; ryska's 404).
 import { listRoomUpdates, listIdentityUpdates, listAccountUpdates, markUpdate, readEventTail } from "./updates.mjs"; // Updates projection (U batch).
 import { handleWorkClaims } from "./work-claim-routes.mjs"; // Work-claim leases/delivery/review (task RC-2026-09-18-041).
@@ -77,7 +78,7 @@ import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { createAgentPluginRoutes } from "./agent-plugin-routes.mjs";
 import { createNextActionsRoutes } from "./next-actions-routes.mjs"; // RC-2026-09-25-911: ranked per-agent next actions.
 import { readSpendAllowance, setSpendAllowance } from "./spend-allowance.mjs";
-import { getAgentAutonomyTier, setAgentAutonomyTier } from "./autonomy-tiers.mjs";
+import { getAgentAutonomyTier, setAgentAutonomyTier, getTier, DEFAULT_AUTONOMY_TIER } from "./autonomy-tiers.mjs";
 import { listAgentGrants, getAgentCapabilities, issueAgentGrant, revokeAgentGrant } from "./grants.mjs";
 import { listPins, setPin } from "./pins.mjs";
 // (squad roster handlers moved to server/routes/squads.mjs, batch RT)
@@ -3354,7 +3355,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const projectOfferWithdrawMatch = /^\/api\/rooms\/([^/]{1,384})\/project-offers\/([^/]{1,128})\/withdraw$/.exec(url.pathname);
       const projectOfferClaimsMatch = /^\/api\/rooms\/([^/]{1,384})\/project-offers\/([^/]{1,128})\/claims$/.exec(url.pathname);
       const projectOfferActionMatch = projectOfferPublishMatch ?? projectOfferWithdrawMatch ?? projectOfferClaimsMatch;
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|conversation|stream|cursor|project-offers|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|outside-agents|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|orient|verification-policy|dm-consents|bonds|peer-dms|directory|opportunities|public-face|needs-attention|jev-shadow|mentions|open-questions|human-push|thread-mutes|referrals|referral-invites|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|conversation|stream|cursor|project-offers|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|outside-agents|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|orient|my-permissions|verification-policy|dm-consents|bonds|peer-dms|directory|opportunities|public-face|needs-attention|jev-shadow|mentions|open-questions|human-push|thread-mutes|referrals|referral-invites|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -4011,6 +4012,22 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // rooms answer 404 room_not_found from the store.
       if (route === "activation-pack" && req.method === "GET") {
         return json(res, 200, buildActivationPack(store, roomId, viewerId));
+      }
+      // MY-PERMISSIONS — lane6 plug-in crew: the "here's what you can do
+      // here" moment. The caller's own permission set rendered in plain
+      // language, each capability paired with a concrete executable next
+      // action. Read-only; rides the standard room credential funnel. The
+      // autonomy tier is read fresh (fail-closed, like the command hook) so
+      // a demotion shows up here before the agent discovers it via a 403.
+      if (route === "my-permissions" && req.method === "GET") {
+        const tier = getTier(store.db, roomId, auth.member.id)?.autonomyTier ?? DEFAULT_AUTONOMY_TIER;
+        return json(res, 200, buildPermissionMoment({
+          member: { id: auth.member.id, displayName: auth.member.displayName, kind: auth.member.kind,
+            permissions: [...auth.member.permissions] },
+          roomId,
+          autonomyTier: tier,
+          isOwner: auth.member.id === store.room(roomId).state.room.ownerId,
+        }));
       }
       // ORIENT — jill lane RC-2026-09-28 (ryska's 404): the URL outside
       // agents guess by analogy with /activation-pack. Read-only,

@@ -12,7 +12,8 @@ import { MCP_DISCOVERY_BLOCK } from "./discoverability.mjs";
 import { ServiceError } from "./store.mjs";
 import { isIdentitySecret } from "./agent-identities.mjs";
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
-import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
+import { enforceAutonomyTierForAction, getTier, DEFAULT_AUTONOMY_TIER } from "./autonomy-tiers.mjs";
+import { buildPermissionMoment } from "./permission-moment.mjs";
 import { HeartbeatError } from "./agent-heartbeats.mjs";
 import { AgentPluginError } from "./agent-plugin-store.mjs";
 import { EVENT_CATALOG, WebhookSubscriptionError } from "./agent-webhook-subscriptions.mjs";
@@ -481,10 +482,21 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
   const roomId = args.roomId;
   if (name === "room_check_access") {
     const auth = store.authenticate(secret, roomId);
+    // lane6 plug-in crew: the "here's what you can do here" moment rides on
+    // the call every MCP agent makes at session start. Additive field — the
+    // raw permission tokens stay for machine readers; permissionMoment is
+    // the same set in plain language with executable next actions.
+    const tier = getTier(store.db, roomId, auth.member.id)?.autonomyTier ?? DEFAULT_AUTONOMY_TIER;
     return {
       contractVersion: 1, type: "agent_connection_check", status: "credential_accepted",
       roomId, memberId: auth.member.id, identityId: auth.identityId ?? identity.identityId,
       kind: auth.member.kind, permissions: [...auth.member.permissions],
+      permissionMoment: buildPermissionMoment({
+        member: { id: auth.member.id, displayName: auth.member.displayName, kind: auth.member.kind,
+          permissions: [...auth.member.permissions] },
+        roomId, autonomyTier: tier,
+        isOwner: auth.member.id === store.room(roomId).state.room.ownerId,
+      }),
       checkedAt: new Date().toISOString(), expiresAt: null, scope: "room", externalExecution: false
     };
   }
