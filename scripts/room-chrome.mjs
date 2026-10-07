@@ -160,3 +160,11 @@ export async function openComposerOptions(page) {
   const details = page.locator("#composer-options");
   if (!(await details.evaluate(node => node.open))) await details.locator(":scope > summary").click();
 }
+
+// Protocol owners deliberately enter the human's opt-in technical workspace.
+// The first screen stays simple; use the same controls as a human requesting it.
+export async function enableHumanAdvanced(page) {
+  await openSettings(page, "advanced-room-tools");
+  await page.locator("#human-advanced").check();
+  await closeSettings(page);
+}
