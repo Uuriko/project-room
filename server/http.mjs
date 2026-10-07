@@ -3024,27 +3024,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/api/referral-invites/preview" && req.method !== "POST") {
         reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
       }
-      // Agent invite preview: read-only consent data for the pre-redemption
-      // review screen. Unauthenticated (the code is the bearer credential);
-      // consumes nothing, reveals no member or identity data.
-      // Agent invite preview: read-only consent data for the pre-redemption
-      // review screen. Unauthenticated (the code is the Bearer <redacted>);
-      // consumes nothing, reveals no member or identity data. POST carries
-      // the code in the body so it never lands in a query string or access
-      // log (the referral-invites/preview rule); GET stays for older clients.
-      if (url.pathname === "/api/agent-invites/preview" && (req.method === "GET" || req.method === "POST")) {
-        rate(`invite-preview:${remoteAddress}`, 20);
-        let code;
-        if (req.method === "POST") {
-          const postData = await body(req);
-          if (!exact(postData, ["code"]) || typeof postData.code !== "string") reject(422, "invalid_invite", "Invite code is required");
-          code = postData.code;
-        } else {
-          code = url.searchParams.get("code");
-        }
-        if (typeof code !== "string" || !code) reject(422, "invalid_invite", "Invite code is required");
-        return json(res, 200, store.invites.preview(code));
-      }
       // Self-serve access requests: an identity without membership asks to
       // join. Unauthenticated (the identity is not a member yet); the
       // module rate-limits per identity and never reveals more than 404.
