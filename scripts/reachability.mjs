@@ -62,9 +62,11 @@ export const KEEP = [
   // diff posted in room). Not an orphan; remove when the mount lands.
   "server/merge-queue.mjs",
   // Lane B18 (herdr redesign, D6 router shadow): server/routing.mjs +
-  // server/routing-routes.mjs are intentionally unmounted — the http.mjs
-  // mount and runtime-package registration are deferred to the redesign
-  // integration step (REDESIGN.md §7). Not orphans; remove when the mount lands.
+  // server/routing-routes.mjs are intentionally unmounted from http.mjs —
+  // the http mount is deferred to the redesign integration step (REDESIGN.md
+  // §7). They ARE registered in scripts/runtime-package.mjs (store.mjs
+  // imports ROUTING_RECORDS_SCHEMA for the init-time DDL). Not orphans;
+  // remove when the mount lands.
   "server/routing.mjs",
   "server/routing-routes.mjs",
   "server/growth-loop.mjs",

@@ -98,6 +98,7 @@ import { WebFetch, webFetchSchema, migrateWebFetchLogColumns } from "./web-fetch
 import { WebResearch, webResearchSchema } from "./web-research.mjs"; // RC-2026-09-24-310: knowledge router (additive)
 import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensureIdentityCapacitySchema, ensureIdentityLinkCodeSchema, identityLinkCodeSchema, isIdentitySecret } from "./agent-identities.mjs";
 import { AgentKeyRegistry, agentKeyRegistrySchema } from "./agent-key-registry.mjs"; // Integration map slice 9: agent public-key registry.
+import { ROUTING_RECORDS_SCHEMA } from "./routing-routes.mjs"; // Lane B18 (herdr redesign, D6 router shadow): affinity router journal table.
 // Board v2 is retired. These tables stay so existing databases and the
 // recovery audit still see them. Nothing drops board_vtwo_*.
 const RETIRED_BOARD_V2_SCHEMA = `
@@ -1055,7 +1056,7 @@ function roomSchemaStamp() {
     publicWorkClaimFenceSchema, publicWorkReviewsSchema, publicWorkSuccessorsSchema,
     accessRequestSchema, membershipDelegationSchema, membershipDelegationJournalSchema,
     ownerDelegateSchema, agentRoomSchema, oauthPendingSchema, gmailSchema, requestRunSchema, roomAssistantSchema,
-    directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA,
+    directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA, ROUTING_RECORDS_SCHEMA,
     agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA, OPERATOR_ACTIONS_SCHEMA,
     INTEGRITY_JOB_CURSOR_SCHEMA, INTEGRITY_ROOM_STATE_SCHEMA, INTEGRITY_SWEEP_COLUMN,
     ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES, MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, WANTS_WORK_SCHEMA, CODE_DROPS_SCHEMA, PROJECTION_BODIES_SCHEMA,
@@ -1442,6 +1443,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Applied here (not only where the registry is instantiated) so upgrades,
       // store-only fixtures, and the recovery audit see the tables.
       this.db.exec(RETIRED_BOARD_V2_SCHEMA);
+      // Lane B18 (herdr redesign, D6 router shadow): affinity router journal
+      // (routing_records) is purely additive — IF NOT EXISTS is idempotent, no
+      // schema version bump, intentionally outside the writer fence (see
+      // unfencedAdditiveTables). Applied here (not only on journal first use)
+      // so upgrades, store-only fixtures, and the recovery audit see the table.
+      this.db.exec(ROUTING_RECORDS_SCHEMA);
       // RC-2026-09-23-106: agent browser sessions record the identity secret
       // hash at creation time. If the secret is rotated or revoked, sessions
       // minted with the old secret are rejected at authenticate() time.

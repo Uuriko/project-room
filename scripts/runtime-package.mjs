@@ -198,6 +198,7 @@ optional.push("server/work-claim-mirror.mjs"); // projection claims mirrored ont
 optional.push("server/receipt-cards.mjs"); // ACT-1a: in-room receipt cards (imported by server/work-claim-events.mjs and server/room-guide.mjs)
 optional.push("server/room-guide.mjs"); // ACT-1a: Room Guide demo agent (imported by cloudflare/room.mjs and server/starter-room.mjs)
 optional.push("server/starter-room.mjs"); // ACT-1a: starter seed (imported by server/room-lifecycle.mjs)
+optional.push("server/routing.mjs", "server/routing-routes.mjs"); // Lane B18 (herdr redesign, D6): affinity router shadow scorer + journal (ROUTING_RECORDS_SCHEMA imported by server/store.mjs; routing.mjs is pure, no imports)
 optional.push("server/claim-coordination.mjs"); // exclusive file leases, ready queue, pull-request outcomes (imported by server/work-claims.mjs and server/work-claim-routes.mjs)
 optional.push("server/claim-pr-sync.mjs"); // poll linked pull requests onto claims (imported by server/work-claim-routes.mjs and cloudflare/room.mjs)
 optional.push("server/claim-autolink.mjs"); // plan-pr-autolink: claim-id parsing, PR auto-link, webhook core, poll fallback, deploy linking (imported by server/jobs.mjs and server/routes/pr-webhook.mjs)
