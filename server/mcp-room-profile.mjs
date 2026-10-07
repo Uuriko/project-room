@@ -436,6 +436,7 @@ async function callLandTool(store, secret, name, args) {
 // failure; an idempotent duplicate retry is voided (the original call
 // already paid).
 function callRoomTool(store, secret, identity, name, args, agentRooms) {
+  enforceMcpApiKeyRoomScope(store, secret, name);
   enforceMcpCallVisibility(store, identity, name);
   const spend = chargeSpendBeforeCall(store, secret, name, args);
   if (!spend) return dispatchRoomToolCall(store, secret, identity, name, args, agentRooms);
@@ -902,6 +903,40 @@ function mcpKeyGrantsScope(store, secret, requiredScope) {
   if (!record) return false;
   return (record.scopes ?? []).some(scope =>
     scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
+}
+
+// RC-2026-09-18-012 parity: the HTTP room routes confine api-key callers
+// to their stored scopes (reads need rooms:read, writes need rooms:write —
+// the room-route gate in server/http.mjs). The hosted MCP core-profile
+// room tools call the same store methods but never applied that gate, so
+// a scoped key with no room scopes could read and write any linked room
+// over MCP — including membership-admin tools — while HTTP 403'd it.
+// This gate runs in callRoomTool, the single funnel for core-profile room
+// tools. Identity-wide inbox attachment tools take mcp:inbox, mirroring
+// the hosted inbox tools' gate above.
+const MCP_ROOM_WRITE_TOOLS = new Set([
+  "room_create", "room_join",
+  "squads_create", "squads_update_members", "squads_disband",
+  "room_post_message", "room_react",
+  "add_land_item", "remove_land_item", "report_tip",
+  "room_put_file", "room_discard_file", "room_commit_file",
+  "room_decide_access_request", "room_create_agent_invite", "room_revoke_agent_invite",
+  "bond_propose", "bond_accept", "bond_decline", "bond_revoke",
+  "dm_posted",
+]);
+const MCP_INBOX_ATTACHMENT_TOOLS = new Set([
+  "inbox_put_attachment", "inbox_list_attachments", "inbox_get_attachment", "inbox_discard_attachment",
+]);
+function enforceMcpApiKeyRoomScope(store, secret, name) {
+  if (typeof secret !== "string" || !secret.startsWith(API_KEY_PREFIX)) return;
+  if (MCP_INBOX_ATTACHMENT_TOOLS.has(name)) {
+    if (!mcpKeyGrantsScope(store, secret, MCP_INBOX_SCOPE))
+      throw new ServiceError(403, "insufficient_scope", `API key lacks the ${MCP_INBOX_SCOPE} scope`);
+    return;
+  }
+  const required = MCP_ROOM_WRITE_TOOLS.has(name) ? "rooms:write" : "rooms:read";
+  if (!mcpKeyGrantsScope(store, secret, required))
+    throw new ServiceError(403, "insufficient_scope", `API key lacks the ${required} scope`);
 }
 
 function mcpRoomAllowlist(store, secret) {  if (typeof secret !== "string" || !secret.startsWith(API_KEY_PREFIX)) return null;
