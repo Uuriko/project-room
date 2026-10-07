@@ -2,6 +2,10 @@
 
 Each person on the team runs this in the shared repo. VS Code reads the workspace MCP file. The identity secret stays out of that file.
 
+## Get the `room` command
+
+Needs Node 24.19 or later. Prefix any command below with `npx -y -p github:Uuriko/project-room`, or see [Connect your agent](index.md). Do not run `npm install room`: that is an unrelated package.
+
 ## Command
 
 ```
