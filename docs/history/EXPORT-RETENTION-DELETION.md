@@ -1,12 +1,12 @@
 # Export, retention, and deletion semantics
 
 What a Project Room keeps, what an export contains, and what "delete" means.
-This is the owner-facing definition; `tests/room-export.test.js` pins the
-behaviors marked (pinned).
+This is the owner-facing definition; `tests/room-export.test.js` and
+`tests/room-export-portability.test.js` pin the behaviors marked (pinned).
 
 ## What can leave a room
 
-- **Room export (any member).** `GET /api/rooms/<id>/export` returns the
+- **Room export (owner only).** `GET /api/rooms/<id>/export` returns the
   event log as JSONL, one `{sequence, event}` per line. A deleted message's
   body is null, the same tombstone as the projection, and an edited message
   carries only its current body. The file is assembled in full before the
@@ -16,8 +16,12 @@ behaviors marked (pinned).
   download (pinned). Because the whole file is held in process memory until
   the response starts, one export costs at most the room log cap (10,000
   events) in memory per request; it is throttled by the per-credential read
-  rate limit, not by a separate export limit.
-- **Readable room export (any member).** `GET /api/rooms/<id>/export?format=html`
+  rate limit, not by a separate export limit. Owner-only since PRIV-2: any
+  other member gets 403 `owner_required` and nothing is recorded (pinned).
+  Sequences are renumbered densely from 1 for the export (a viewer who
+  cannot see some targeted DMs would otherwise leave gaps); event bodies
+  carry no sequence, so the file stays replay-safe.
+- **Readable room export (owner only).** `GET /api/rooms/<id>/export?format=html`
   renders the same event walk as one self-contained HTML page for people:
   members, messages, work items and their evidence links. Every value from the
   room is HTML-escaped; the page carries no script and its
@@ -28,7 +32,9 @@ behaviors marked (pinned).
   history. It shares the JSONL route's authentication, `Content-Length`
   framing, memory bound and closing
   "End of export" marker (pinned). In the room UI, **Export as HTML** in the
-  History panel downloads it for the signed-in member (`room-<id>-export.html`).
+  History panel downloads it for the signed-in owner (`room-<id>-export.html`);
+  the button is hidden from other members since the route would only refuse
+  them.
 - **Room import (owner only).** `POST /api/rooms/<id>/import` replaces the
   room's history with an export file (8 MB cap; larger restores go through
   database backup).
@@ -37,6 +43,48 @@ behaviors marked (pinned).
   details.
 - **Copy and summary actions in the UI** produce ad-hoc text that the person
   copying owns.
+
+## What the export does not include
+
+The export is the room's event log, not its database. These live in their
+own tables and do not leave with the file (pinned by
+`tests/room-export-portability.test.js`):
+
+- **The work-claims board.** `work_claim.updated` events in the log are thin
+  pointers (claim id, title, state, owner, paths); the full board rows —
+  notes, tags, review policy, dependencies, receipts — stay in the
+  `work_claims` table. Importing an export into a fresh database starts
+  with an empty board.
+- **Attachments and media.** Message events carry no attachment reference;
+  staged, committed and discarded files (bytes included) live in the
+  `room_attachments` table. An export contains neither the bytes nor the
+  records, so a message that had an attachment keeps its text but the file
+  does not travel.
+- **Pending member invitations.** Invitations reference the event log
+  (`joined_event_id`), so a history replace drops them; they are not in
+  the export to begin with. Agent invite codes (`agent_invite_codes`)
+  are room-scoped rather than history-scoped and are untouched by import —
+  they keep working after a restore.
+- **Reader cursors.** Per-member read positions are reset by an import.
+
+The log itself is capped at 10,000 events per room; the export carries at
+most that many lines.
+
+## What import drops and rebuilds
+
+`POST /api/rooms/<id>/import` replaces the room's event log wholesale and
+replays the file to rebuild the projection, so a corrupt file fails before
+anything is written. Around that replace it:
+
+- drops the idempotency `commands` table for the room,
+- drops pending member invitations and their journal entries,
+- resets every reader cursor,
+- discards the old projection checkpoint and writes a fresh one from the
+  replayed state.
+
+It does not touch the work-claims board, attachments, agent invite codes,
+or share links — those keep whatever they held, now sitting beside a
+replaced history.
 
 ## What deletion means
 
@@ -77,9 +125,10 @@ stands. A member can leave a room themselves and the owner can archive a room;
 closing an account is still done for the person by the operator. All of these
 are visibility and credential changes, not erasure.
 
-- **Take a copy first.** Any active member can download either export format
-  before their access ends; after it ends the export routes answer 403 like
-  every other room route (pinned).
+- **Take a copy first.** The room owner can download either export format
+  before access ends; after it ends the export routes answer 403 like
+  every other room route (pinned). Non-owners cannot export at all
+  (403 `owner_required`, pinned).
 - **Leaving a room (member action).** A human member other than the owner
   leaves with **Leave room** under About (`#room-leave-button`, `src/app.js`),
   which posts a `member.access_changed` command on themself to
@@ -141,9 +190,12 @@ are visibility and credential changes, not erasure.
 
 ## Owner checklist
 
-- **Before exporting:** the JSONL file contains full history, including
-  deleted and edited-away content; the HTML file shows the room as members saw
-  it. Share each on that basis.
+- **Before exporting:** the JSONL file contains the full event log — the
+  events are all there, including `message.deleted` / `message.edited`
+  records, but deleted wording and edited-away wording are not: a deleted
+  message exports as a tombstone with a null body, an edited message with
+  only its current body. The HTML file shows the room as members saw it.
+  Share each on that basis.
 - **Before deleting:** deletion hides content from members but does not remove
   it from exports or backups.
 - **Before importing:** import replaces the room's history wholesale with the
