@@ -193,14 +193,24 @@ export function parseHerdrSessionsFlag(raw) {
 // is honest surfacing data, never a claim signal (herdr done != claim done).
 const HERDR_TERMINAL_SESSION_STATES = new Set(["destroyed"]);
 const herdrText = value => typeof value === "string" && value.length > 0 ? value : null;
-const herdrMs = value => { const ms = Date.parse(value); return Number.isFinite(ms) ? ms : 0; };
+// B16: tolerate ISO strings and numeric epoch-ms alike — a herdr writer may
+// store either (SQLite is dynamically typed and B5 owns the DDL).
+const herdrMs = value => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : 0;
+};
 // Normalize one herdr_sessions row. B5 owns the DDL; tolerate snake_case and
 // camelCase column names so the surfacing does not hard-fail on a rename.
-// Returns null for rows with no usable state (including terminal "destroyed").
+// Returns null for rows with no usable state. Terminal states ("destroyed")
+// are preserved in the info: the latest-row comparison must see them, so a
+// destroyed row newer than an active row suppresses the badge instead of
+// letting the stale active row resurface. Terminal filtering happens when
+// the public maps are built (herdrSessionsForRoom).
 function herdrSessionRowInfo(row) {
   if (!row || typeof row !== "object") return null;
   const state = herdrText(row.state ?? row.session_state ?? row.sessionState);
-  if (!state || HERDR_TERMINAL_SESSION_STATES.has(state)) return null;
+  if (!state) return null;
   return {
     state,
     sessionId: herdrText(row.session_id ?? row.sessionId ?? row.id) ?? "",
@@ -1215,12 +1225,6 @@ export class RoomStore {
     this.storageFailureThreshold = storageFailureThreshold;
     this.storageFailures = 0;
     this.now = now;
-    // B16: ROOM_HERDR_SESSIONS — parsed once at boot (fail-closed default
-    // off). The Node entry point passes process.env.ROOM_HERDR_SESSIONS and
-    // the Cloudflare entry passes env.ROOM_HERDR_SESSIONS; when neither is
-    // supplied the surfacing stays inert.
-    this.herdrSessionsScope = parseHerdrSessionsFlag(
-      herdrSessions ?? (typeof process !== "undefined" ? process.env?.ROOM_HERDR_SESSIONS : undefined));
     this.roomFlood = createRoomFloodGuard({ now: () => this.now() });
     this.db = database ?? new DatabaseSync(filename, { readOnly });
     this.storagePlatform = storagePlatform;
@@ -3986,7 +3990,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         keep(byClaimRaw, info.claimId,
           { state: info.state, sessionId: info.sessionId, laneMemberId: info.laneMemberId });
       }
-      const strip = raw => new Map([...raw].map(([key, entry]) => [key, entry.value]));
+      // Terminal latest rows suppress the badge: filter them when building the
+      // public maps, after the latest-row comparison has already run — a
+      // destroyed row newer than an active row must win, then disappear.
+      const strip = raw => new Map([...raw]
+        .filter(([, entry]) => !HERDR_TERMINAL_SESSION_STATES.has(entry.value.state))
+        .map(([key, entry]) => [key, entry.value]));
       return { byMember: strip(byMemberRaw), byClaim: strip(byClaimRaw) };
     } catch {
       return null;

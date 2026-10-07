@@ -187,6 +187,68 @@ test("herdrSessionsForRoom: latest session row wins per member", t => {
   assert.equal(found.byMember.get("agent1")?.state, "detached");
 });
 
+test("herdrSessionsForRoom: a newer destroyed row suppresses an older active row", t => {
+  // Regression: the destroyed row must participate in the latest-row
+  // comparison (not be discarded first), so the badge disappears instead of
+  // the stale active row resurfacing.
+  const store = serve(t, "on");
+  seedB5(store, {
+    optins: [{ memberId: "agent1" }],
+    sessions: [
+      { sessionId: "ses-old", memberId: "agent1", claimId: "c1", state: "active", updatedAt: "2026-10-01T00:00:00.000Z" },
+      { sessionId: "ses-gone", memberId: "agent1", claimId: "c1", state: "destroyed", updatedAt: "2026-10-06T00:00:00.000Z" },
+    ],
+  });
+  const found = store.herdrSessionsForRoom("commons");
+  assert.ok(found);
+  assert.equal(found.byMember.get("agent1"), undefined);
+  assert.equal(found.byClaim.get("c1"), undefined);
+});
+
+test("herdrSessionsForRoom: an older destroyed row does not hide a newer active row", t => {
+  const store = serve(t, "on");
+  seedB5(store, {
+    optins: [{ memberId: "agent1" }],
+    sessions: [
+      { sessionId: "ses-gone", memberId: "agent1", claimId: "c0", state: "destroyed", updatedAt: "2026-10-01T00:00:00.000Z" },
+      { sessionId: "ses-new", memberId: "agent1", claimId: "c1", state: "active", updatedAt: "2026-10-06T00:00:00.000Z" },
+    ],
+  });
+  const found = store.herdrSessionsForRoom("commons");
+  assert.equal(found.byMember.get("agent1")?.sessionId, "ses-new");
+});
+
+test("herdrSessionsForRoom: numeric epoch-ms updated_at orders rows", t => {
+  // Regression: a herdr writer may store epoch-ms as a number; Date.parse
+  // alone turns those into NaN and breaks latest-row ordering. updated_at is
+  // declared without affinity here so INTEGER survives the round-trip.
+  const store = serve(t, "on");
+  store.db.exec(`
+    CREATE TABLE herdr_lane_optin (
+      room_id TEXT NOT NULL, lane_member_id TEXT NOT NULL,
+      session_backend TEXT NOT NULL, set_by TEXT, set_at TEXT
+    );
+    CREATE TABLE herdr_sessions (
+      session_id TEXT NOT NULL, room_id TEXT NOT NULL, claim_id TEXT,
+      lane_member_id TEXT NOT NULL, state TEXT NOT NULL, backend TEXT NOT NULL,
+      pane_id TEXT, updated_at, created_at
+    );
+  `);
+  store.db.prepare(
+    "INSERT INTO herdr_lane_optin (room_id, lane_member_id, session_backend, set_by, set_at) VALUES (?,?,?,?,?)"
+  ).run("commons", "agent1", "herdr", "owner", new Date(0).toISOString());
+  const insert = store.db.prepare(
+    "INSERT INTO herdr_sessions (session_id, room_id, claim_id, lane_member_id, state, backend, pane_id, updated_at, created_at) VALUES (?,?,?,?,?,?,?,?,?)");
+  insert.run("ses-new", "commons", "c1", "agent1", "detached", "herdr", null,
+    Date.parse("2026-10-06T00:00:00.000Z"), Date.parse("2026-10-06T00:00:00.000Z"));
+  insert.run("ses-old", "commons", "c0", "agent1", "active", "herdr", null,
+    Date.parse("2026-10-01T00:00:00.000Z"), Date.parse("2026-10-01T00:00:00.000Z"));
+  const found = store.herdrSessionsForRoom("commons");
+  assert.ok(found);
+  assert.equal(found.byMember.get("agent1")?.sessionId, "ses-new");
+  assert.equal(found.byMember.get("agent1")?.state, "detached");
+});
+
 // ---------------------------------------------------------------------------
 // 3. presence(): additive, omitted-when-null
 // ---------------------------------------------------------------------------
