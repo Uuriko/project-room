@@ -31,19 +31,13 @@ A failed replay prints one line and leaves the destination unpromoted. The scrip
 
 The production cron writes one object a day when the owning script has an R2 binding named `ROOM_BACKUPS`. The key is `room-backups/YYYY-MM-DD.ndjson` in UTC. If that object is already there, the tick does nothing. If the binding is absent, the tick skips. A failed write is logged as `[room-backup]` and does not fail the rest of the cron.
 
-The binding is not in the checked-in config. Adding it only in the dashboard does not stick: the next deploy drops bindings the config does not list.
+The binding is declared in the checked-in config (`env.production.r2_buckets` in `cloudflare/wrangler.jsonc`), pinned by `tests/room-backup-binding.test.js` — a dashboard-only binding would not survive the next deploy. The R2 bucket itself is created once, outside the repo:
 
-To turn it on:
+1. Create an R2 bucket named `project-room-backups` (dashboard, or `wrangler r2 bucket create project-room-backups`). The bucket must exist before the deploy that carries the binding, or the deploy fails.
+2. Deploy through the shared deploy lane (`deploy-prod` per `docs/DEPLOY-LANE.md`); the binding attaches on deploy and the next cron tick writes the first object.
+3. Set `ROOM_BACKUP_TOKEN` on that same script if operators will also pull the export over HTTP. The daily job calls the Durable Object directly and does not need the token.
 
-1. Create an R2 bucket named `project-room-backups`.
-2. Add this binding under `env.production` in `cloudflare/wrangler.jsonc` (the script that owns the Durable Object and the cron):
-
-```json
-"r2_buckets": [{ "binding": "ROOM_BACKUPS", "bucket_name": "project-room-backups" }]
-```
-
-3. Deploy that script with `npx wrangler deploy --env production --keep-vars` from `cloudflare/`.
-4. Set `ROOM_BACKUP_TOKEN` on that same script if operators will also pull the export over HTTP. The daily job calls the Durable Object directly and does not need the token.
+Verify after the first cron tick: the bucket holds `room-backups/<today-UTC>.ndjson`, and `node scripts/replay-room-export.mjs` loads it into a scratch file.
 
 Isolated staging has no cron, so it does not write this daily object. Its own export route works once `ROOM_BACKUP_TOKEN` is set on `project-room-stage`.
 
