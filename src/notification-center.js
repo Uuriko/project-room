@@ -2,7 +2,9 @@
 // that renders the per-member notification feed (the shape
 // GET /api/rooms/{id}/notifications returns: {unread, notifications:[...]})
 // grouped by kind, with an unread count and an empty state. Pure render
-// helpers are DOM-free; mount() takes a container element.
+// helpers are DOM-free; mount() takes a container element. User-facing copy
+// lives in the strings catalog (strings/en.json, nc.*) via uiText(); HTML
+// parameters are escaped by callers before insertion, per src/strings.js.
 //
 // MOUNT POINT (wiring owned by jill-lane7 — index.html / src/app.js):
 //   import { mountNotificationCenter } from "./notification-center.js";
@@ -11,20 +13,22 @@
 //     onAck: item => client.ackMention(item)
 //   });
 //   await center.refresh();
-const KIND_LABELS = {
-  mention: "Mentions",
-  reply: "Replies",
-  assignment: "Assignments",
-  work_update: "Work updates",
-  access_request: "Access requests",
-  access_decision: "Access decisions"
+import { uiText } from "./strings.js";
+
+const KIND_KEYS = {
+  mention: "nc.kind.mention",
+  reply: "nc.kind.reply",
+  assignment: "nc.kind.assignment",
+  work_update: "nc.kind.work_update",
+  access_request: "nc.kind.access_request",
+  access_decision: "nc.kind.access_decision"
 };
 export const CENTER_KIND_ORDER = Object.freeze([
   "mention", "reply", "assignment", "work_update", "access_request", "access_decision"
 ]);
 
 export function kindLabel(kind) {
-  return KIND_LABELS[kind] ?? "Updates";
+  return uiText(KIND_KEYS[kind] ?? "nc.kind.other");
 }
 
 export function unreadCount(feed) {
@@ -40,35 +44,38 @@ export function groupForCenter(notifications) {
 }
 
 const escapeHtml = value => String(value ?? "")
-  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  .split("'").join("&#39;").split('"').join("&quot;");
 
-const itemTitle = item => {
-  const actor = escapeHtml(item?.actorId ?? "someone");
-  switch (item?.kind) {
-    case "mention": return `${actor} mentioned you`;
-    case "reply": return `${actor} replied to you`;
-    case "assignment": return `${actor} assigned you work`;
-    case "work_update": return `${actor} updated your work`;
-    case "access_request": return `${actor} requested access`;
-    case "access_decision": return `${actor} decided an access request`;
-    default: return `${actor} has an update for you`;
-  }
+const ITEM_KEYS = {
+  mention: "nc.item.mention",
+  reply: "nc.item.reply",
+  assignment: "nc.item.assignment",
+  work_update: "nc.item.work_update",
+  access_request: "nc.item.access_request",
+  access_decision: "nc.item.access_decision"
 };
 
-const itemTarget = item =>
-  item?.messageId ? `message ${escapeHtml(item.messageId)}`
-  : item?.workItemId ? `work ${escapeHtml(item.workItemId)}`
-  : "the room";
+const itemTitle = item => uiText(ITEM_KEYS[item?.kind] ?? "nc.item.other", {
+  actor: escapeHtml(item?.actorId ?? "someone")
+});
+
+const itemTarget = item => {
+  if (item?.messageId) return uiText("nc.target.message", { id: escapeHtml(item.messageId) });
+  if (item?.workItemId) return uiText("nc.target.work", { id: escapeHtml(item.workItemId) });
+  return uiText("nc.target.room");
+};
 
 export function renderCenterHtml({ notifications = [], roomName = "Room", unread = null } = {}) {
   const groups = groupForCenter(notifications);
   // Prefer the feed's own unread count: the server may report more unread
   // items than the fetched page carries.
   const count = typeof unread === "number" ? unread : notifications.length;
-  const head = `<div class="notification-center" data-unread="${count}" role="region" aria-label="Notifications">` +
-    `<h2>Notifications${count > 0 ? ` <span class="count-chip">${count}</span>` : ""}</h2>`;
+  const title = uiText("nc.title");
+  const head = `<div class="notification-center" data-unread="${count}" role="region" aria-label="${title}">` +
+    `<h2>${title}${count > 0 ? ` <span class="count-chip">${count}</span>` : ""}</h2>`;
   if (groups.length === 0) {
-    return `${head}<p class="notification-empty">You're caught up — nothing needs you in ${escapeHtml(roomName)} right now.</p></div>`;
+    return `${head}<p class="notification-empty">${uiText("nc.empty", { room: escapeHtml(roomName) })}</p></div>`;
   }
   const body = groups.map(group =>
     `<section class="notification-group" data-kind="${group.kind}">` +
@@ -76,9 +83,9 @@ export function renderCenterHtml({ notifications = [], roomName = "Room", unread
     group.items.map(item =>
       `<li class="notification-item" data-kind="${escapeHtml(item.kind)}">` +
       `<span class="notification-title">${itemTitle(item)}</span> ` +
-      `<span class="notification-target">in ${itemTarget(item)}</span>` +
+      `<span class="notification-target">${uiText("nc.inTarget", { target: itemTarget(item) })}</span>` +
       (item.kind === "mention"
-        ? ` <button type="button" class="button ghost" data-ack-mention="${escapeHtml(item.messageId ?? "")}">Acknowledge</button>`
+        ? ` <button type="button" class="button ghost" data-ack-mention="${escapeHtml(item.messageId ?? "")}">${uiText("nc.ack")}</button>`
         : "") +
       `</li>`).join("") +
     `</ul></section>`).join("");
