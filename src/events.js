@@ -486,8 +486,75 @@ export function replay(events) {
   return events.reduce((state, next) => applyEvent(state, next), emptyRoomState());
 }
 
+const OBJECT_PROTO = Object.getPrototypeOf({});
+
+// Deep clone of a room state that shares immutable primitives by reference
+// instead of copying their bytes. Room states are JSON-shaped (they round
+// trip through rooms.projection every write), so the bulk — message bodies,
+// ids, timestamps — is strings; structuredClone re-allocates and memcpys
+// every one of them, which costs ~100ms per event on a few-MB room. Strings
+// (and numbers/booleans) are immutable, so sharing them between the frozen
+// input and the mutable output is safe; every object/array on the path is
+// still an independent copy the reducer may mutate. Anything exotic
+// (Date/Map/class instance — never present in a real state) falls back to
+// structuredClone for that subtree so semantics stay identical.
+export function cloneRoomState(root) {
+  if (root === null || typeof root !== "object") return root;
+  const out = Array.isArray(root) ? new Array(root.length) : {};
+  const stack = [[root, out]];
+  while (stack.length > 0) {
+    const [src, dst] = stack.pop();
+    if (Array.isArray(src)) {
+      for (let i = 0; i < src.length; i++) {
+        const value = src[i];
+        if (value !== null && typeof value === "object") {
+          if (Array.isArray(value)) {
+            const copy = new Array(value.length);
+            dst[i] = copy;
+            stack.push([value, copy]);
+            continue;
+          }
+          const proto = Object.getPrototypeOf(value);
+          if (proto === OBJECT_PROTO || proto === null) {
+            const copy = {};
+            dst[i] = copy;
+            stack.push([value, copy]);
+          } else {
+            dst[i] = structuredClone(value);
+          }
+        } else {
+          dst[i] = value;
+        }
+      }
+    } else {
+      for (const key of Object.keys(src)) {
+        const value = src[key];
+        if (value !== null && typeof value === "object") {
+          if (Array.isArray(value)) {
+            const copy = new Array(value.length);
+            dst[key] = copy;
+            stack.push([value, copy]);
+            continue;
+          }
+          const proto = Object.getPrototypeOf(value);
+          if (proto === OBJECT_PROTO || proto === null) {
+            const copy = {};
+            dst[key] = copy;
+            stack.push([value, copy]);
+          } else {
+            dst[key] = structuredClone(value);
+          }
+        } else {
+          dst[key] = value;
+        }
+      }
+    }
+  }
+  return out;
+}
+
 export function applyEvent(current, incoming) {
-  const state = structuredClone(current);
+  const state = cloneRoomState(current);
   validateEnvelope(incoming);
   // H-11: fingerprint via eventFingerprint (handler-stamped markers excluded)
   // so the stored fingerprint agrees with the logged (post-handler) event.
