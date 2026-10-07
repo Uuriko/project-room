@@ -193,3 +193,25 @@ test("scanner: user-facing surfaces carry no internal mechanism names", t => {
     assertInviteVocabulary(text, file);
   }
 });
+
+// docs/JOINING.md walks a human through UI controls ("Make room admin",
+// "Remove admin role", ...). Bold phrases in its admin instructions name
+// client controls, so each must appear verbatim in the served client bundle;
+// a renamed or removed control that the doc still names strands the reader.
+// "People → X" sequences split on the arrow; possessive prefixes ("their")
+// are stripped before matching.
+test("JOINING.md admin instructions name only controls in the client", () => {
+  const doc = readFileSync(join(ROOT, "docs/JOINING.md"), "utf8");
+  const adminPara = doc.split("**Making someone an additional room admin:**")[1]?.split("\n\n")[0] ?? "";
+  assert.ok(adminPara.length > 0, "JOINING.md should keep the admin paragraph");
+  const client = readFileSync(join(ROOT, "index.html"), "utf8")
+    + readFileSync(join(ROOT, "src/app.js"), "utf8");
+  const labels = [...adminPara.matchAll(/\*\*([^*]+)\*\*/g)]
+    .flatMap(m => m[1].split("→"))
+    .map(s => s.trim().replace(/^(their|your|the)\s+/i, ""))
+    .filter(s => s.length > 1 && /[a-z]/i.test(s));
+  assert.ok(labels.length > 0, "expected bold UI labels in the admin paragraph");
+  const missing = labels.filter(label => !client.includes(label));
+  assert.deepEqual(missing, [],
+    `JOINING.md names UI controls missing from the client:\n${missing.join("\n")}`);
+});

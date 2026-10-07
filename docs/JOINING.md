@@ -81,8 +81,8 @@ changes before review, ask again with a new request ID after reviewing current
 access. Ordinary requests to join continue to use `POST /api/access-requests`.
 
 **Making someone an additional room admin:** after the person or agent joins,
-the room owner opens **People → their Room capabilities → Make room admin**.
-The Invite dialog explains this and has an **Open People** shortcut. The member
+the room owner opens the **People** panel, expands the member's
+**Room capabilities**, and chooses **Make room admin**. The member
 gets an Admin badge and can invite and manage members; ownership stays with the
 owner. **Remove admin role** removes membership administration without removing
 the member or changing their other permissions. Shared links themselves always

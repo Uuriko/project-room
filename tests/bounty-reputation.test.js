@@ -466,3 +466,46 @@ test("routingVisibility mirrors claimEligibility across bands and amounts (no dr
   const std = routingVisibility(escrow, ROOM, JILL, { nowMs });
   assert.equal(std.maxClaimMillis, null, "non-probation bands carry no cap");
 });
+
+test("rejected submission: bond forfeited flows a penalty signal for the claimant", () => {
+  const { escrow } = makeEscrow();
+  const bounty = post(escrow);
+  escrow.fundBounty(ROOM, bounty.bountyId, { funder: JILL });
+  escrow.claimBounty(ROOM, bounty.bountyId, { claimant: GROK });
+  escrow.submitWork(ROOM, bounty.bountyId, { claimant: GROK,
+    evidence: { evidenceUrl: "https://example.com/pr/r1", summary: "shoddy" } });
+  const rejected = escrow.rejectWork(ROOM, bounty.bountyId, { rejector: JILL, reason: "shoddy work" });
+  assert.equal(rejected.settlement.kind, "failed");
+  // The rejection names the claimant so the projector can attribute it;
+  // work judged bad + bond slashed to the pool is the bond_forfeited penalty.
+  const events = escrow.listEvents(ROOM).filter(e => e.type === "bounty.rejected");
+  assert.equal(events.length, 1);
+  assert.equal(events[0].data.claimant, GROK, "rejection event must name the claimant");
+  assert.deepEqual(signalsForEvent(events[0]), [{ agent: GROK, type: "bond_forfeited" }]);
+  assert.equal(scoreOf(escrow, GROK), BOUNTY_SIGNAL_WEIGHTS.bond_forfeited);
+  // Legacy events without a claimant are skipped, never guessed at.
+  assert.deepEqual(signalsForEvent({ type: "bounty.rejected", data: { reason: "x", rejectedBy: JILL } }), []);
+  expectConserved(escrow);
+});
+
+test("non-verdict lifecycle events flow no reputation signals", () => {
+  const { escrow } = makeEscrow();
+  runToPaid(escrow, { amount: 0.5, worker: GROK });
+  const seen = new Set();
+  const flowed = [];
+  for (const e of escrow.listEvents(ROOM)) {
+    seen.add(e.type);
+    for (const s of signalsForEvent(e)) flowed.push({ eventType: e.type, ...s });
+  }
+  // The full lifecycle emitted proposed/funded/claimed/submitted/accepted/
+  // approved/paid — only the two verdict outcomes may carry signals.
+  assert.ok(seen.has("bounty.approved"), "fixture must include the auto-approve step");
+  assert.ok(!flowed.some(f => f.eventType === "bounty.approved"), "auto-approve flows no signal");
+  assert.deepEqual([...new Set(flowed.map(f => f.eventType))].sort(),
+    ["bounty.accepted", "bounty.paid"],
+    "only acceptance and payout emit signals on a clean run");
+  assert.deepEqual(flowed, [
+    { eventType: "bounty.accepted", agent: GROK, type: "submission_accepted" },
+    { eventType: "bounty.paid", agent: GROK, type: "payout_released" },
+  ]);
+});

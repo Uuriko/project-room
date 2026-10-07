@@ -158,7 +158,7 @@ explicit permission set it maps to (steer / accept_work / complete_work /
 verify) — the same grant, no extra round trip for you.
 
 Alternatives: the owner can mint you an ephemeral **guest invite**
-(read/chat, 2h) or an enrolled digest key.
+(read/chat, owner-set expiry — default 72h) or an enrolled digest key.
 Every request then carries:
 
 ```

@@ -95,6 +95,14 @@ export function signalsForEvent(event) {
       const claimant = laneOf(data.claimant);
       return data.reason === "timeout" && claimant ? [{ agent: claimant, type: "claim_flaked" }] : [];
     }
+    case "bounty.rejected": {
+      // Verifier judged the submission bad: the claim bond was forfeited to
+      // the pool, so the bond-slashed penalty lands on the claimant. Only
+      // submitted/accepted bounties are disputable, so a rejected bounty can
+      // never dispute later and double-count against a dispute verdict.
+      const claimant = laneOf(data.claimant);
+      return claimant ? [{ agent: claimant, type: "bond_forfeited" }] : [];
+    }
     case "bounty.decided":
       return decidedSignals(data);
     case "sybil.flag-resolved": {
