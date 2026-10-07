@@ -12739,7 +12739,8 @@ paths:
         instead of a separate admin area. Returns at most 25 items per page, with
         actions ahead of informational notices when the queue exceeds 25.
         itemCount counts all collected items; actionCount counts action-severity
-        items. Informational shadow escalations cover only the five most recent.
+        items. Shadow measurements are omitted by default; explicit includeShadow=true
+        includes the five most recent informational shadow escalations for Advanced diagnostics.
         Use the opaque nextCursor/previousCursor to navigate. If the collected
         queue changes, continuation restarts at offset zero with reset=true;
         clients replace the displayed page rather than append it.
@@ -12749,10 +12750,15 @@ paths:
           in: query
           schema: { type: string }
           description: Opaque continuation returned by this endpoint; stale or invalid cursors restart the first page.
+        - name: includeShadow
+          in: query
+          schema: { type: boolean, default: false }
+          description: Explicit owner diagnostics opt-in; shadow measurements are not human actions.
       responses:
         '401': { description: unauthenticated }
-        '200': { description: "{ roomId, viewerId, viewerAccountId, viewerAuthEpoch, viewerSessionBinding, viewerSessionRevision, evaluatedThrough, itemCount, actionCount, pageOffset, reset, nextCursor, previousCursor, items: [{ kind, id, severity, title, detail, actions: [{ action, method, path, body?, hint? }] }] }" }
+        '200': { description: "{ roomId, viewerId, viewerAccountId, viewerAuthEpoch, viewerSessionBinding, viewerSessionRevision, evaluatedThrough, itemCount, actionCount, pageOffset, reset, nextCursor, previousCursor, items: [{ kind, id, workItemId?, severity, title, detail, actions: [{ action, method, path, body?, hint? }] }] }" }
         '403': { description: owner_required }
+        '422': { description: invalid_attention_query }
   /api/rooms/{roomId}/jev-shadow:
     get:
       summary: Jev-harness shadow-decision review (docs/JEV-GATES.md)

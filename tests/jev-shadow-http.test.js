@@ -99,7 +99,7 @@ test("work-claim done journals a shadow receipt and the work stays done", async 
   assert.equal(entry.escalate, true); // thin bare receipt: escalated, still accepted
 });
 
-test("escalated receipts surface read-only in needs-attention", async t => {
+test("shadow receipts require explicit diagnostics opt-in in needs-attention", async t => {
   const { origin, ownerKey } = await serve(t);
   await post(origin, "/api/rooms/commons/work-claims", { id: "w-jev-na", title: "Needs attention" }, ownerKey);
   await post(origin, "/api/rooms/commons/work-claims/w-jev-na/claim", {}, ownerKey);
@@ -108,10 +108,19 @@ test("escalated receipts surface read-only in needs-attention", async t => {
   assert.equal(done.status, 200);
   const res = await get(origin, "/api/rooms/commons/needs-attention", ownerKey);
   assert.equal(res.status, 200);
-  const json = await res.json();
+  const ordinary = await res.json();
+  assert.equal(ordinary.items.some(i => i.kind === "jev_escalation"), false, "shadow measurements are not an owner action");
+  const diagnostic = await get(origin, "/api/rooms/commons/needs-attention?includeShadow=true", ownerKey);
+  assert.equal(diagnostic.status, 200);
+  const json = await diagnostic.json();
   const item = json.items.find(i => i.kind === "jev_escalation" && i.title.includes("w-jev-na"));
   assert.ok(item, JSON.stringify(json.items.map(i => i.kind)));
   assert.equal(item.severity, "info");
+  assert.equal(item.workItemId, undefined, "standalone claim journal is not a timeline work record");
+  for (const query of ["includeShadow=bogus", "includeShadow=true&includeShadow=false"]) {
+    const invalid = await get(origin, `/api/rooms/commons/needs-attention?${query}`, ownerKey);
+    assert.equal(invalid.status, 422, "ambiguous diagnostics intent is refused");
+  }
 });
 
 test("jev-shadow is owner-only and validates its query", async t => {
@@ -123,6 +132,8 @@ test("jev-shadow is owner-only and validates its query", async t => {
 
   const forbidden = await get(origin, "/api/rooms/commons/jev-shadow", memberSecret);
   assert.equal(forbidden.status, 403, JSON.stringify(await forbidden.json()));
+  const forbiddenDiagnostics = await get(origin, "/api/rooms/commons/needs-attention?includeShadow=true", memberSecret);
+  assert.equal(forbiddenDiagnostics.status, 403, "diagnostics opt-in never grants owner authority");
 
   const badGate = await get(origin, "/api/rooms/commons/jev-shadow?gate=bogus", ownerKey);
   assert.equal(badGate.status, 422, JSON.stringify(await badGate.json()));
