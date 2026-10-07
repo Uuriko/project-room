@@ -680,6 +680,7 @@
   "tests/route-hardening.test.js": 110971,
   "tests/route-table-parity.test.js": 83266,
   "tests/routing-address-properties.test.js": 15456,
+  "tests/routing-shadow.test.js": 2200,
   "tests/runtime-package.test.js": 300000,
   "tests/schema-migration-v33-v35.test.js": 61817,
   "tests/schema-stamp-coverage.test.js": 18916,
