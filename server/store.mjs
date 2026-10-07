@@ -2241,6 +2241,21 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         PRIMARY KEY(link_id,slot_hash,redemption_id)
       )`);
       db.exec("INSERT INTO share_link_joins SELECT * FROM share_link_joins_legacy_v34");
+      // The additive redemption journal also references share_links. SQLite
+      // retargets that foreign key during the parent rename, so preserve its
+      // rows and rebuild it before dropping the legacy parent.
+      if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='share_link_join_redemptions'").get()) {
+        db.exec("DROP TRIGGER IF EXISTS share_link_join_redemptions_no_update");
+        db.exec("DROP TRIGGER IF EXISTS share_link_join_redemptions_no_delete");
+        db.exec("ALTER TABLE share_link_join_redemptions RENAME TO share_link_join_redemptions_legacy_v34");
+        db.exec(`CREATE TABLE share_link_join_redemptions (
+          link_id TEXT NOT NULL REFERENCES share_links(id), redemption_id TEXT NOT NULL,
+          account_id TEXT NOT NULL REFERENCES accounts(id), created_at INTEGER NOT NULL,
+          PRIMARY KEY(link_id,redemption_id)
+        )`);
+        db.exec("INSERT INTO share_link_join_redemptions SELECT * FROM share_link_join_redemptions_legacy_v34");
+        db.exec("DROP TABLE share_link_join_redemptions_legacy_v34");
+      }
       // Children first, then the parents nothing references anymore.
       db.exec("DROP TABLE share_link_joins_legacy_v34");
       db.exec("DROP TABLE membership_invitation_events_legacy_v34");

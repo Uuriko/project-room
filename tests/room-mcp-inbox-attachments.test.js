@@ -52,7 +52,7 @@ test("inbox attachment tools stay behind a live identity secret", async t => {
     roomId: "inbox-den", title: "Inbox den", purpose: "Inbox bytes", kind: "personal", displayName: "Inbox owner"
   });
   const listed = await rpc(origin, "tools/list");
-  assert.deepEqual((await listed.json()).result.tools.map(tool => tool.name), [...JOIN_TOOLS, "public_work_recommend", "public_work_read_task"]);
+  assert.deepEqual((await listed.json()).result.tools.map(tool => tool.name), [...JOIN_TOOLS, "public_work_recommend", "public_work_read_task", "room_identity_mint"]);
   const denied = await call(origin, "inbox_get_attachment", { id: "note" });
   assert.equal(denied.status, 401);
   assert.equal(denied.body.error.code, -32001);
