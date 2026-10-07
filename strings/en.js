@@ -130,5 +130,7 @@ export default {
   "file.download.retry": "Couldn’t download. Try again.",
   "human.decisionRationaleNotice": "<p class=\"form-hint\">Your reason will be posted to the room.</p>",
   "human.decisionReceiptUnknown": "Save receipt could not be confirmed",
-  "human.decisionRationaleChanged": "Your reason was posted. Review the changed result before deciding."
+  "human.decisionRationaleChanged": "Your reason was posted. Review the changed result before deciding.",
+  "human.cancelDeleted": "<button type=\"button\" class=\"text-button\" data-pause-run=\"{runId}\" data-cancel=\"true\" data-revision=\"{revision}\">Cancel</button>",
+  "human.deletedRequest": "Deleted request"
 };
