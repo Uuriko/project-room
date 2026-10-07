@@ -10,6 +10,7 @@ import {
   formatInviteExpiry,
   joinErrorMessage,
   validateJoinName,
+  JOIN_END_CODES,
 } from "../src/join.js";
 
 test("parse join code from the path, rejecting lookalikes", () => {
@@ -84,6 +85,27 @@ test("join errors name the problem and the next step", () => {
   const preview = joinErrorMessage({ status: 404, code: "invite_unavailable", action: "preview" });
   assert.equal(preview.retry, false);
   assert.match(joinErrorMessage({ status: 500 }).message, /hiccup|try again/i);
+  // 2026-10-06: re-clicking an invite link after joining must speak browser,
+  // not "saved connection" agent jargon — and must name the visible exit.
+  const relink = joinErrorMessage({ status: 409, code: "identity_already_linked", action: "join" });
+  assert.equal(relink.title, "Already joined");
+  assert.equal(relink.retry, false);
+  assert.match(relink.message, /This browser is already a member/);
+  assert.match(relink.message, /Back to sign-in|back to sign-in/i);
+  assert.doesNotMatch(relink.message, /saved connection/i);
+});
+
+test("spent join errors take the full error card, not inline status text", () => {
+  // 2026-10-06: an already-joined member re-clicking their invite saw bare
+  // inline text with no way back. The full error card carries the Back to
+  // sign-in exit the message names, so identity_already_linked joins the
+  // spent-invite codes on the card path. boot() reads this same set.
+  for (const code of ["invite_unavailable", "invite_revoked", "invite_expired", "invite_already_used", "invite_authority_changed", "identity_already_linked"]) {
+    assert.ok(JOIN_END_CODES.has(code), `${code} shows the full error card`);
+  }
+  for (const code of ["rate_limited", "network_error", "invalid_join"]) {
+    assert.ok(!JOIN_END_CODES.has(code), `${code} stays inline with a retry`);
+  }
 });
 
 test("join names are 1–80 characters", () => {
