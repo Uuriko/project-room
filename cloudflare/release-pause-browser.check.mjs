@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { build } from 'esbuild';
 import { Miniflare, Response } from 'miniflare';
 import { chromium } from 'playwright';
+import { publicAssetPaths } from '../deploy/public-assets.mjs';
 import { signInFixture } from '../scripts/auth-signin.mjs';
 
 for (const touch of [false, true]) test(`release pause/resume preserves exact sends and privacy: ${touch ? 'touch' : 'desktop'}`, { timeout: 90000 }, async () => {
@@ -27,7 +28,9 @@ for (const touch of [false, true]) test(`release pause/resume preserves exact se
     durableObjects: { ROOM: { className: 'HttpTestRoom', useSQLite: true } }, durableObjectsPersist: persistence,
     serviceBindings: { ASSETS: async request => {
       const pathname = new URL(request.url).pathname;
-      if (!/^\/(index\.html|src\/[a-z-]+\.(js|css))$/.test(pathname)) return new Response(null, { status: 404 });
+      // Serve the real release inventory: catalog modules and accessibility
+      // assets are app dependencies too, not only src/*.js/css.
+      if (!publicAssetPaths.includes(pathname.slice(1))) return new Response(null, { status: 404 });
       return new Response(await readFile(new URL('..' + pathname, import.meta.url)));
     } } };
   let mf, browser;

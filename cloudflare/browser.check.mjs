@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { build } from 'esbuild';
 import { Miniflare, Response } from 'miniflare';
 import { chromium } from 'playwright';
+import { publicAssetPaths } from '../deploy/public-assets.mjs';
 import { signInFixture } from "../scripts/auth-signin.mjs";
 
 test('two real browsers use the shared UI on local Workers, including SSE and restart', { timeout: 90000 }, async () => {
@@ -26,7 +27,9 @@ test('two real browsers use the shared UI on local Workers, including SSE and re
     durableObjects: { ROOM: { className: 'HttpTestRoom', useSQLite: true } }, durableObjectsPersist: persistence,
     bindings: { ROOM_ORIGIN: origin }, serviceBindings: { ASSETS: async request => {
       const pathname = new URL(request.url).pathname;
-      if (!/^\/(index\.html|src\/[a-z-]+\.(js|css))$/.test(pathname)) return new Response(null, { status: 404 });
+      // Serve the real release inventory: catalog modules and accessibility
+      // assets are app dependencies too, not only src/*.js/css.
+      if (!publicAssetPaths.includes(pathname.slice(1))) return new Response(null, { status: 404 });
       return new Response(await readFile(new URL('..' + pathname, import.meta.url)));
     } }
   };
