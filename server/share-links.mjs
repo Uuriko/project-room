@@ -225,6 +225,12 @@ export class ShareLinks {
     }
     return this.store.transaction(() => {
       const auth = this.administrator(token, roomId, binding), tokenHash = hash(linkToken);
+      // Invitation issuance carries the f520ca69 email-verification gate:
+      // sibling issuance paths (agent-invites.create, membership invitation
+      // issue) refuse unverified accounts, and share links are invitations
+      // too. Accountless issuers (owner on an identity bearer, delegated
+      // admin agents) have no account to verify and are unaffected.
+      if (auth.account) this.store.accountLogins.assertEmailVerified(auth.account.id);
       // Creating share links is a membership write: the read-only autonomy
       // tier applies even for delegated-admin agents (issue #996).
       enforceAutonomyTierForAction({ db: this.store.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "share_link_create", fail });
