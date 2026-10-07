@@ -289,46 +289,36 @@ jobs:
   # job in the graph was skipped, so an intentional browser-shard skip would
   # skip this required check. Evaluate the direct results instead.
   coverage:
-    # Per-module coverage ratchet (backlog Q015): runs the root unit suite
-    # with V8 coverage and fails when any module in coverage-thresholds.json
-    # drops below its threshold. Zero dependencies; the script points TMPDIR
-    # at a worktree-local .tmp/ and writes coverage data to ./coverage/
-    # (both gitignored) by itself.
+    # Per-module coverage ratchet (backlog Q015), measured from the unit
+    # shards: each unit shard collects V8 coverage from its own test processes
+    # and writes a compact covered-line summary into the shard evidence
+    # artifact (scripts/unit-ci.mjs; raw payloads stay worktree-local). This
+    # job unions the three summaries and enforces the thresholds in
+    # coverage-thresholds.json -- the old duplicate ~14-minute full-suite run
+    # is gone. Zero dependencies: no npm ci, no bubblewrap, no browser.
+    # needs: [unit] -- coverage is only meaningful on a green suite (the old
+    # script likewise refused to evaluate when its own suite run failed); the
+    # `unit` gate already verified the exact-run shard receipts, so the
+    # summaries below are complete and current by construction.
+    needs: [unit]
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          fetch-depth: 0 # secret-scan-diff and room-lifecycle tests read the origin/main tree.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
-          cache: npm
-      - run: npm ci
-      - name: Install Linux host isolation for automatic-run unit tests
-        run: sudo apt-get update -qq && sudo apt-get install -y bubblewrap
-      - name: Permit the sandbox launcher to create its isolated namespaces
-        # Same setup as the unit job (Ubuntu 24.04 denies capabilities inside
-        # unprivileged user namespaces without an application profile).
-        run: |
-          if [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || true)" = "1" ]; then
-            if [ -f /etc/apparmor.d/bwrap ]; then
-              sudo apparmor_parser -r /etc/apparmor.d/bwrap
-            else
-              cat > "$RUNNER_TEMP/project-room-bwrap.apparmor" <<'PROFILE'
-          abi <abi/4.0>,
-          include <tunables/global>
-          /usr/bin/bwrap flags=(unconfined) {
-            userns,
-          }
-          PROFILE
-              sudo apparmor_parser -r "$RUNNER_TEMP/project-room-bwrap.apparmor"
-            fi
-          fi
-      - name: Verify automatic host namespace support without operator input
-        run: node scripts/host-isolation-preflight.mjs
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          # All attempts in this run, merged: the summaries are per-shard
+          # files (coverage-shard-<i>.json), so attempts never collide.
+          pattern: unit-shard-evidence-*
+          path: unit-evidence
+          merge-multiple: true
       - name: Enforce per-module coverage thresholds
-        run: node scripts/coverage-thresholds.mjs
+        # Every --summary path must exist: a missing shard summary fails
+        # closed here instead of scoring partial data as complete.
+        run: node scripts/coverage-thresholds.mjs --summary unit-evidence/test-results/coverage-shard-1.json --summary unit-evidence/test-results/coverage-shard-2.json --summary unit-evidence/test-results/coverage-shard-3.json
   test:
     needs: [contract, lint, unit, browser, cloudflare, visual-refresh-guard, coverage]
     if: always() && !cancelled()
