@@ -1,6 +1,7 @@
 {
  "milliseconds": {
   "tests/a2a-card-truth.test.js": 14409,
+  "tests/a2a-enrollment-conformance.test.js": 8000,
   "tests/a2a-jsonrpc.test.js": 12569,
   "tests/abuse-rate-buckets.test.js": 17436,
   "tests/acceptance-fixture.test.js": 16147,
@@ -399,6 +400,7 @@
   "tests/invitation-owner-admin.test.js": 40761,
   "tests/invitation-stats.test.js": 21252,
   "tests/invitations.test.js": 98838,
+  "tests/invite-flow-abuse.test.js": 26500,
   "tests/invite-oauth-context.test.js": 4357,
   "tests/invite-only-boundary.test.js": 134327,
   "tests/jev-admission.test.js": 5635,
