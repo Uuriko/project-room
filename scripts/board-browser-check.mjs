@@ -516,6 +516,9 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
     await page.keyboard.press("Control+k");
     await page.locator("#room-actions-query").waitFor({ state: "visible" });
     await page.locator("#room-actions-query").fill("board");
+    // Ensure the filter applied and Board is the actionable item before Enter;
+    // otherwise Enter can fire with a stale list and never open the dialog.
+    await page.locator('#room-actions-list button[data-room-action="board"]').waitFor({ state: "visible" });
     await page.keyboard.press("Enter");
     await dialog.waitFor({ state: "visible" });
   };
@@ -849,6 +852,9 @@ test("owners link a draft PR, reconcile held responses, and refresh a changed cl
     await input.press("Enter");
     assert.equal((await rejected).status(), 409);
     await page.waitForFunction(() => document.querySelector("#board-status")?.textContent.startsWith("Claim changed. The board is refreshed"));
+    // Focus restoration after the refresh is async; wait for it rather than
+    // asserting synchronously (flaky under CI timing).
+    await page.waitForFunction(() => document.activeElement?.dataset?.focusKey === "link-pr:link-draft", { timeout: 5000 });
     assert.equal(await input.evaluate(node => node === document.activeElement), true);
     await page.locator("#board-close").focus();
     const delivered = page.waitForResponse(response => response.request() === heldRefresh);
