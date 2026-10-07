@@ -1,6 +1,8 @@
 // Compact land-queue board card. The list is the room's land queue read
 // (GET list_land_queue). Each card shows the pull request number, title,
 // short head SHA, a checks dot, a behind badge, and a tip badge.
+// Room-only items (land claims with no PR) render as "room item" with a
+// "no PR" marker and no checks dot — their mergeable/checks never resolve.
 
 export function shortSha(sha) {
   return typeof sha === "string" && sha.length >= 7 ? sha.slice(0, 7) : "";
@@ -31,6 +33,13 @@ export function landCardHtml(item) {
   const behind = card.behind ? `<span class="land-badge">behind</span>` : "";
   const merged = card.merged ? `<span class="land-badge">merged</span>` : "";
   const tip = card.tip ? `<span class="land-badge">tip</span>` : "";
+  if (item?.roomOnly === true) {
+    // REL-07: room-only land items have no PR to link or check against —
+    // render "room item" + "no PR" with no checks dot. PR cards below are
+    // unchanged.
+    const roomTitle = typeof item?.title === "string" && item.title ? item.title : "room item";
+    return `<article class="land-card land-room-only"><span class="land-room">room item</span> <span class="land-title">${escapeHtml(roomTitle)}</span> <span class="land-nopr">no PR</span>${behind}${merged}${tip}</article>`;
+  }
   const sha = card.head ? `<span class="land-sha">${escapeHtml(card.head)}</span>` : "";
   const title = escapeHtml(card.title);
   const label = `#${escapeHtml(card.prNumber)}`;

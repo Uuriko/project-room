@@ -186,7 +186,7 @@ test("buildWakePing carries the ack hint additively", () => {
   assert.equal(payload.event, WAKE_PING_EVENT);
   assert.deepEqual(payload.signal, signal);
   assert.equal(payload.ackHint, WAKE_ACK_HINT);
-  assert.equal(payload.ackHint, "react 👍 to acknowledge");
+  assert.equal(payload.ackHint, "react 👍 marks the mention responded; a reaction alone does not clear the wake signal — POST /api/agent-heartbeats/ack {signalIds} (or MCP heartbeat_ack) to clear it");
 });
 
 test("journaled pending-wake signals carry the ack hint", () => {

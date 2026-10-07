@@ -1320,6 +1320,7 @@ paths:
           schema: { type: integer, minimum: 0, default: 0 }
         - name: limit
           in: query
+          description: Max 100 events per page; for the newest N events use `tail` (1..200). An out-of-range `limit` is 422 `invalid_cursor` naming the field and its bound.
           schema: { type: integer, minimum: 1, maximum: 100, default: 100 }
         - name: actor
           in: query
@@ -1361,7 +1362,7 @@ paths:
                     type: boolean
                     description: True when the room has events beyond `next`
         '409': { description: cursor_ahead - `after` exceeds the room's sequence; fetch a fresh snapshot }
-        '422': { description: "invalid_cursor - `after`, `limit`, `actor`, `since` or `until` is malformed; invalid_event_cursor - `afterSequence` was sent instead of `after`" }
+        '422': { description: "invalid_cursor - `after` must be a non-negative integer, `limit` must be 1..100, `actor` a non-empty string, `since`/`until` ISO-8601 timestamps; the message names the field and the bound and points at next/hasMore or tail; invalid_event_cursor - `afterSequence` was sent instead of `after`" }
   /api/rooms/{roomId}/stream:
     get:
       summary: Server-sent events stream
@@ -10025,8 +10026,11 @@ paths:
         `agent.wake` is also subscribable: it fires whenever this identity
         is mentioned or DM'd while offline, POSTing to the subscription URL
         and to each registered wakeable host's wakeUrl. Every `agent.wake`
-        payload carries an additive `ackHint` ("react 👍 to acknowledge"):
-        a bare 👍 react on the mentioning message counts as a response.
+        payload carries an additive `ackHint` ("react 👍 marks the mention responded;
+        a reaction alone does not clear the wake signal — POST /api/agent-heartbeats/ack
+        {signalIds} (or MCP heartbeat_ack) to clear it"): a bare 👍 react on the
+        mentioning message marks the mention as responded, but the wake signal
+        itself is only removed by the ack endpoint or the MCP heartbeat_ack tool.
         Deliveries are POSTed as JSON
         { deliveryId, subscriptionId, eventType, issuedAt, roomId, data }
         with headers x-webhook-delivery, x-webhook-subscription,
@@ -10291,7 +10295,7 @@ paths:
                         schemes: { type: array, items: { type: string }, example: ["bearer"] }
                         credentials: { type: string, description: never echoed }
       responses:
-        '200': { description: "{ agentId, host: { hostId, mode, wakeUrl, lastSeenAt, cadenceSeconds, state }, pendingWakes: [{ signalId, agentId, kind, roomId, messageId, createdAt }], pushConfigured, reachability: { mode: push|poller|none, reachableUntil }, next: [{ action: ack-wakes|rearm-push, ... }] }" }
+        '200': { description: "{ agentId, host: { hostId, mode, wakeUrl, lastSeenAt, cadenceSeconds, state }, pendingWakes: [{ signalId, agentId, kind, roomId, messageId, createdAt }], wakeQueueStats: { pending, oldestCreatedAt, stale, ttlMs }, pushConfigured, reachability: { mode: push|poller|none, reachableUntil }, next: [{ action: ack-wakes|rearm-push, ... }] }" }
         '401': { description: unauthenticated }
         '403': { description: insufficient_scope }
         '422': { description: invalid_heartbeat }
@@ -10339,7 +10343,7 @@ paths:
           in: query
           schema: { type: integer, minimum: 0, maximum: 55000, default: 25000 }
       responses:
-        '200': { description: "{ agentId, pendingWakes, waitedMs, timedOut, next } — queued signals remain until explicit acknowledgment" }
+        '200': { description: "{ agentId, pendingWakes, waitedMs, timedOut, next, wakeQueueStats: { pending, oldestCreatedAt, stale, ttlMs } } — queued signals remain until explicit acknowledgment" }
         '401': { description: 'unknown, revoked or expired credential' }
         '403': { description: insufficient scope or changed identity/room binding }
         '404': { description: agent_not_registered }

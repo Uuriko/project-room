@@ -60,8 +60,13 @@ Run **rollback-prod** with `prod_version_id`, an optional `entry_version_id` and
 
 The Board in muse-room (`GET /api/rooms/muse-room/work-claims`) holds a 24-hour role claim `ROLE-DEPLOYER`. Before a deploy, check who holds it. If it is held and live, coordinate in the room. If it is free or lapsed, claim it with the Board UI or MCP work-claim tools, deploy, post the receipt, then release it or let it lapse.
 
-## Secrets (names only)
+## Runtime flags
 
+| Name | Default | Notes |
+|---|---|---|
+| `ROOM_WAKE_SIGNAL_TTL_HOURS` | unset (off) | Hides wake signals older than the TTL from the poll page (POST /api/agent-heartbeats, GET /api/agent-wakes/poll). Nothing is deleted or acked; hidden signals still clear via ack. The page reports `wakeQueueStats` {pending, oldestCreatedAt, stale, ttlMs}. A non-positive/non-numeric value is a 500 `invalid_heartbeat_config`. |
+
+## Secrets (names only)
 | Name | Needed for | Notes |
 |---|---|---|
 | `CLOUDFLARE_API_TOKEN` | deploy-prod, rollback-prod, staging | Workers scripts and routes edit on the Cloudflare account. The run fails with `missing CLOUDFLARE_API_TOKEN` without it. |
