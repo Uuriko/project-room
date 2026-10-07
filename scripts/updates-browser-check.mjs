@@ -384,6 +384,8 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
     // the pending response, as in the existing session-boundary journey.
     await page.evaluate(() => history.replaceState(null, "", "?room=commons"));
     const form = page.locator('#auth-signin-ui [data-signin-form="password"]');
+    if (!await form.isVisible()) await page.getByRole("button", { name: "Log in", exact: true }).click();
+    await form.waitFor({ state: "visible" });
     await form.locator('[name="email"]').fill(`${accountId}@example.invalid`);
     await form.locator('[name="password"]').fill(fixturePassword);
     const accepted = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/password/login" && response.request().method() === "POST");
