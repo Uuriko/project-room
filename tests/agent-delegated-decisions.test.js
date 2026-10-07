@@ -85,3 +85,38 @@ test('a delegated agent may not approve work whose evidence names it as producer
     completionEventId: item.receipt.eventId, evidenceVersion: 'v1', reason: 'Self approval' }), /accountable for or produced/);
   assert.equal(f.state().workItems.w4.decision, null);
 });
+
+test('demoting an already designated agent decision-maker removes its power on that work', t => {
+  const f = fixture(t);
+  f.send('owner', T.WORK_PROPOSED, { workItemId: 'w5', title: 'Outcome', definitionOfDone: 'Exact result recorded', accountableMemberId: 'producer', mode: 'read',
+    ownerDecisionRequired: true, humanDecisionMakerId: 'admin-agent' });
+  f.send('producer', T.WORK_ACCEPTED, { workItemId: 'w5', expectedRevision: 0 });
+  f.send('producer', T.WORK_COMPLETED, { workItemId: 'w5', expectedRevision: 1, summary: 'Done', evidenceUrl: 'https://example.invalid/result', evidenceVersion: 'v1',
+    nextAction: 'Review', producerId: 'producer', signedEvidence: f.signEvidence() });
+  const rev = f.state().members['admin-agent'].revision;
+  f.send('owner', T.MEMBER_ACCESS_CHANGED, { memberId: 'admin-agent', expectedMemberRevision: rev, permissions: ['accept_work', 'complete_work'], active: true });
+  assert.notEqual(f.state().members['admin-agent'].delegatedAdmin, true);
+  const item = f.state().workItems.w5;
+  assert.ok(!workActions(item, f.state().members['admin-agent']).some(([a]) => a === 'decide'), 'no decide action after demotion');
+  f.send('admin-agent', T.MESSAGE_POSTED, { messageId: 'why-5', body: 'Rationale after demotion.' });
+  assert.throws(() => f.send('admin-agent', T.OWNER_DECISION_RECORDED, { workItemId: 'w5', sourceMessageId: 'why-5', expectedRevision: item.revision, decision: 'approved',
+    completionEventId: item.receipt.eventId, evidenceVersion: 'v1', reason: 'Should be refused' }), /lacks decide|designated human decision-maker/);
+  assert.equal(f.state().workItems.w5.decision, null);
+});
+
+test('the HTTP command route enforces the same rule for agent bearers', async t => {
+  const { createRoomServer } = await import('../server/http.mjs');
+  const f = fixture(t);
+  const server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { server.closeStreams?.(); server.closeAllConnections?.(); await new Promise(r => server.close(r)); });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const post = (key, type, data) => fetch(`${origin}/api/rooms/commons/commands`, { method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: origin, Authorization: `Bearer ${key}` },
+    body: JSON.stringify({ id: crypto.randomUUID(), type, data }) }).then(async r => ({ status: r.status, json: await r.json().catch(() => null) }));
+  f.send('owner', T.MESSAGE_POSTED, { messageId: 'm-http', body: 'Ship on Tuesdays.' });
+  const plain = await post(f.keys['plain-agent'], T.DECISION_RECORDED, { sourceMessageId: 'm-http', statement: 'Plain agent sets policy.' });
+  assert.ok(plain.status >= 400 && plain.status < 500, JSON.stringify(plain));
+  const delegated = await post(f.keys['admin-agent'], T.DECISION_RECORDED, { sourceMessageId: 'm-http', statement: 'Ship on Tuesdays.' });
+  assert.ok(delegated.status >= 200 && delegated.status < 300, JSON.stringify(delegated));
+});
