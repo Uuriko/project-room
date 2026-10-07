@@ -294,7 +294,7 @@ test("journal is append-only and immutable: record/get/listByTask, duplicates re
 test("journal exposes no update/delete surface and writes no UPDATE/DELETE SQL", () => {
   const proto = Object.getOwnPropertyNames(RoutingJournal.prototype);
   assert.ok(!proto.some(n => /update|delete|remove|mutate/i.test(n)), `journal must be append-only, saw: ${proto}`);
-  const { db, j } = openJournal();
+  const { db } = openJournal();
   const stmts = [];
   const spy = { exec: s => db.exec(s), prepare: s => { stmts.push(s); return db.prepare(s); } };
   new RoutingJournal({ db: spy }).record({ routingId: "r1", roomId: "room-1", recordJson: "{}", createdAt: NOW });
