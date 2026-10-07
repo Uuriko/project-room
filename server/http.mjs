@@ -104,6 +104,7 @@ import { createRateLimiter } from "./identity-ratelimit.mjs";
 import { emailLookupHash, normalizeEmail } from "./account-login-methods.mjs";
 import { createPasskeyAuth, resolvePasskeyParams } from "./account-passkeys.mjs";
 import { createDeletionSecret, executeAccountDeletion, issueDeletionToken, planAccountDeletion, verifyDeletionToken, RETENTION_POLICY } from "./account-deletion.mjs"; // RC-2026-09-19-078: account-management surface
+import { exportAccountData } from "./account-export.mjs"; // H3 privacy audit: self-serve user data export
 import { createOperatorRoutes } from "./operator-routes.mjs"; // CP-ADMIN-0: operator purge, status, and audit. Paths stay in that module.
 import { hashPassword, checkPasswordPolicy } from "../src/password-auth.mjs";
 import { buildGitHubAuthUrl, codeChallengeFor, createPendingStore, exchangeCodeForToken, fetchGitHubUser,
@@ -2376,6 +2377,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
         requireAccountSession();
         return json(res, 200, { policy: RETENTION_POLICY });
+      }
+      if (url.pathname === "/api/account/export") {
+        // H3 privacy audit: self-serve user data export. Returns every
+        // account-keyed row the service holds for the caller, with
+        // secret-bearing columns redacted. Same table list as account
+        // deletion, so export and deletion scope cannot disagree.
+        if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
+        const session = requireAccountSession();
+        rate(`account-export:${remoteAddress}`, 10);
+        return json(res, 200, exportAccountData(store, session.account.id));
       }
       if (url.pathname === "/api/account/deletion/plan") {
         if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");

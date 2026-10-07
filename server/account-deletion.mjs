@@ -58,7 +58,7 @@ export const RETENTION_POLICY = Object.freeze({
     Object.freeze({ category: "private_inbox", description: "Private inbox content is permanently deleted: imported message versions (private_inbox_versions), drafts (private_inbox_drafts), sources (private_inbox_sources), and read state (private_inbox_reads)." }),
     Object.freeze({ category: "private_email", description: "Connected email data is permanently deleted: connections (private_email_connections) and folders (private_email_folders)." }),
     Object.freeze({ category: "stitch", description: "Derived cross-channel stitch data (stitch_identities, stitch_links, stitch_suggestions, stitch_receipts, stitch_revocations) is permanently deleted." }),
-    Object.freeze({ category: "derived_inbox", description: "Account-keyed inbox and channel rows are permanently deleted: handoff packets (inbox_handoffs), SLA breach alerts (sla_breach_alerts), the channel update journal (pending_channel_updates), and channel live status (telegram_live_status)." }),
+    Object.freeze({ category: "derived_inbox", description: "Account-keyed inbox and channel rows are permanently deleted: handoff packets (inbox_handoffs), SLA breach alerts (sla_breach_alerts), the channel update journal (pending_channel_updates), channel live status (telegram_live_status), direct channel sends (direct_channel_sends), quarantine thread splits (quarantine_thread_splits), and spam quarantine rows (spam_quarantine)." }),
     Object.freeze({ category: "member_issued_invites", description: "Unredeemed agent invites (agent_invite_codes) and referral invites (referral_invites) minted by the account's room members are revoked before the account leaves its rooms; their history stays for audit." }),
     Object.freeze({ category: "issued_access", description: "Access granted by the account is revoked: active guest invites (guest_invites), share links (share_links), and pending membership invitations it issued or that were issued to it." }),
     Object.freeze({ category: "sponsored_agents", description: "Agent connections sponsored by the account are disconnected: their room credentials are revoked (agentConnections.revokeAccount), the same revocation a deactivation performs." }),
@@ -87,7 +87,10 @@ const tableExists = (db, name) =>
   Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));
 
 // SEC-04: account-keyed inbox/channel tables outside the private_inbox set.
-const DERIVED_INBOX_TABLES = Object.freeze(["inbox_handoffs", "sla_breach_alerts", "pending_channel_updates", "telegram_live_status"]);
+const DERIVED_INBOX_TABLES = Object.freeze(["inbox_handoffs", "sla_breach_alerts", "pending_channel_updates", "telegram_live_status",
+  // H3 (2026-10-07): the purge registry marks these `delete` for the account
+  // scope too; SEC-04 missed them and they survived account deletion.
+  "direct_channel_sends", "quarantine_thread_splits", "spam_quarantine"]);
 
 const countDerivedInbox = (store, accountId) => DERIVED_INBOX_TABLES
   .filter(table => tableExists(store.db, table))

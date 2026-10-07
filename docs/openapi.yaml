@@ -10967,6 +10967,24 @@ paths:
       responses:
         '200': { description: "{ policy: { version, summary, purged, retained } }" }
         '401': { description: account_session_required or invalid_session }
+  /api/account/export:
+    get:
+      summary: User data export
+      description: |
+        H3 privacy audit (2026-10-07). Browser account-session route. Returns
+        every account-keyed row the service holds for the caller — the same
+        table list account deletion purges (server/purge-registry.mjs), so
+        export scope and deletion scope cannot disagree. Secret-bearing
+        columns (credential hashes, verifiers, encrypted blobs, provider
+        token payloads) are redacted as "[redacted]" and listed in
+        redactedColumns. Fails 413 past the row cap instead of truncating.
+      security:
+        - accountSession: []
+      responses:
+        '200': { description: "{ accountId, exportedAt, profile, retention, redactedColumns, counts, tables }" }
+        '401': { description: account_session_required or invalid_session }
+        '405': { description: method_not_allowed }
+        '413': { description: export_too_large }
   /api/account/deletion/plan:
     get:
       summary: Plan account deletion (confirmation step)
