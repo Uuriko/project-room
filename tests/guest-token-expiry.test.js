@@ -68,7 +68,7 @@ const joinLink = (request, linkToken) =>
 
 test("guest token dies exactly at its expiry instant: no grace, no skew", async t => {
   const { store, request, ownerKey, advance, now } = await serve(t);
-  const mintedRes = await mint(request, ownerKey, { linkToken: guestToken() });
+  const mintedRes = await mint(request, ownerKey);
   assert.equal(mintedRes.status, 201);
   const minted = await mintedRes.json();
   const token = minted.token;
@@ -126,7 +126,7 @@ test("a bearer in active use over HTTP is cut off at expiry with 401", async t =
 test("an expired token is never revived: re-mint on the same requestId is rejected, the old bearer stays dead", async t => {
   const { store, request, ownerKey, advance } = await serve(t);
   const requestId = randomUUID();
-  const first = await mint(request, ownerKey, { requestId, linkToken: guestToken() });
+  const first = await mint(request, ownerKey, { requestId });
   assert.equal(first.status, 201);
   const minted = await first.json();
   const token = minted.token;

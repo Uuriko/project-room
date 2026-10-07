@@ -108,9 +108,11 @@ test("owner bearer mints guest-agent links with no Origin header", async t => {
   const { request, ownerKey } = await serve(t);
   const minted = await request("/api/guest-agent-links", {
     method: "POST", token: ownerKey,
-    data: { roomId: "commons", requestId: randomUUID(), linkToken: GUEST_AGENT_TOKEN_PREFIX + randomBytes(32).toString("base64url"), expectedOwnerRevision: 0 },
+    // GA-1 (issue #941): the token is always server-issued.
+    data: { roomId: "commons", requestId: randomUUID(), expectedOwnerRevision: 0 },
   });
   assert.equal(minted.status, 201);
+  assert.match((await minted.json()).token, /^ga1\.[A-Za-z0-9_-]{43}$/);
 });
 
 test("www Origin on a JSON API is 403 origin_denied with an Origin hint", async t => {

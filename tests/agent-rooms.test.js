@@ -649,8 +649,7 @@ test("HTTP: agent owner administers by ID; non-owner agent is denied", async t =
   assert.equal(cancelled.status, 200);
   // Guest-agent mint: the owner gate passes, but minting stays account-bound.
   const guestMint = await post(`${room}/guest-agent-links`, { token: ownerSecret, data: {
-    requestId: randomUUID(), linkToken: `ga1.${randomBytes(32).toString("base64url")}`,
-    expectedOwnerRevision: 0, displayName: "Guest"
+    requestId: randomUUID(), expectedOwnerRevision: 0, displayName: "Guest"
   } });
   assert.equal(guestMint.status, 403);
   assert.equal(guestMint.body?.error?.code, "account_session_required");
@@ -664,8 +663,7 @@ test("HTTP: agent owner administers by ID; non-owner agent is denied", async t =
     assert.equal(res.status, 403, `${path}: ${res.status}`);
   }
   const otherMint = await post(`${room}/guest-agent-links`, { token: other.body.secret, data: {
-    requestId: randomUUID(), linkToken: `ga1.${randomBytes(32).toString("base64url")}`,
-    expectedOwnerRevision: 0, displayName: "Guest"
+    requestId: randomUUID(), expectedOwnerRevision: 0, displayName: "Guest"
   } });
   assert.equal(otherMint.status, 403);
   assert.notEqual(otherMint.body?.error?.code, "account_session_required");
