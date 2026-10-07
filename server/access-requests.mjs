@@ -33,6 +33,7 @@ import { PILOT_LIMITS } from "./store.mjs";
 import { randomUUID, createHash } from "node:crypto";
 import { MemberPermissionRequests, permissionRequestContents } from "./member-permission-requests.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
+import { permissionDenial } from "./permission-denials.mjs";
 // RC-2026-09-19-071 (QAJ-006): a new access request appends an
 // access.requested room event so the request is timeline-visible and drives
 // an owner notification. These imports follow the agent-invites.mjs
@@ -370,7 +371,7 @@ export class AccessRequests {
     let allowed = false;
     try { allowed = memberCan(authority, auth.member.id, "manage_members"); }
     catch { allowed = false; }
-    if (!allowed) fail(403, "access_denied", "manage_members required");
+    if (!allowed) throw permissionDenial(403, "access_denied", "manage_members required", "manage_members");
     return { auth, authority };
   }
 
@@ -602,7 +603,7 @@ export class AccessRequests {
     const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
     const authority = this.store.roomAuthority(roomId);
     if (!this.store.delegation.canAdministerMembership(authority, auth, roomId)) {
-      fail(403, "access_denied", "Membership administration grant required");
+      throw permissionDenial(403, "access_denied", "Membership administration grant required", "manage_members");
     }
     return { auth, authority };
   }

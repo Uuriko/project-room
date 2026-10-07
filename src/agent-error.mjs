@@ -1,5 +1,6 @@
 // AX next-step for agents. Existing { error.code, error.message } stays.
 import { createHash, randomBytes } from "node:crypto";
+import { PERMISSIONS } from "./events.js";
 export const AGENT_ERRORS = "code/message + status/reason/hint/next";
 
 const tool = (name, args) => args ? { tool: name, arguments: args } : { tool: name };
@@ -11,6 +12,25 @@ const command = value => ({ command: value });
 // so the envelope (code/message/hint/next) is unchanged — the AX layer only
 // reads it to enumerate the expected data shape for bond/dm commands.
 export const ERROR_COMMAND_TYPE = Symbol("project-room.error.commandType");
+
+// E3 (permissions legibility): the missing permission token, stamped by the
+// denying call site on the thrown error via annotatePermissionDenial.
+// Symbol keys never serialize onto the wire — the AX layer only reads it to
+// name the missing permission and point at the real recovery
+// (POST …/access-requests) instead of the generic access_denied branch.
+export const ERROR_MISSING_PERMISSION = Symbol("project-room.error.missingPermission");
+
+export function isPermissionToken(value) {
+  return typeof value === "string" && PERMISSIONS.includes(value);
+}
+
+// Stamp the denied permission token onto a thrown error. Fail-closed:
+// unknown, empty, or non-string tokens leave the error unannotated so the
+// AX layer falls back to the legacy generic denial. Returns the error.
+export function annotatePermissionDenial(error, permission) {
+  if (error && isPermissionToken(permission)) error[ERROR_MISSING_PERMISSION] = permission;
+  return error;
+}
 
 // G7 (#940): expected data shapes for the bond/dm command family, mirroring
 // the validateCommand shapes in server/store.mjs. "?" marks optional fields.
@@ -41,7 +61,7 @@ function publicHint(value, fallback) {
   return typeof value === "string" && value.trim() && value.length < 160 ? value : fallback;
 }
 
-export function agentErrorAx({ httpStatus = 0, code = "request_failed", message = "", roomId, workItemId, commandType } = {}) {
+export function agentErrorAx({ httpStatus = 0, code = "request_failed", message = "", roomId, workItemId, commandType, missingPermission } = {}) {
   const reasonCode = publicCode(code);
   const listPath = roomId ? `/api/rooms/${roomId}?view=work` : "/api/session";
   const workPath = roomId ? `/api/rooms/${roomId}/work-context` : "/api/session";
@@ -216,6 +236,21 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [tool("room_check_access"), command(cap
         ? "Ask the room owner to set the per-member claim cap."
         : "Ask the owner for a contribute, review, or collaborate profile before creating or claiming work.")]
+    };
+  }
+  // E3 (permissions legibility): an annotated denial names the missing
+  // permission token and points at the real recovery — requesting it via
+  // the room's access-requests route, which the owner reviews — instead of
+  // the legacy "ask the owner to mint a guest invite" dead end.
+  if (isPermissionToken(missingPermission)
+    && (httpStatus === 403 || ["access_denied", "owner_required"].includes(reasonCode))) {
+    const requestPath = roomId ? `/api/rooms/${roomId}/access-requests` : "/api/access-requests";
+    return {
+      status: "action_required",
+      reason: reasonCode === "owner_required" ? "owner_required" : "access_denied",
+      hint: `Missing permission: ${missingPermission}. Request it: POST this room's /access-requests {"permissions":["${missingPermission}"]} — the room owner decides.`,
+      next: [tool("room_check_access"), path(requestPath),
+        command(`Request the ${missingPermission} permission: POST ${requestPath} {"permissions":["${missingPermission}"]}. The room owner reviews the request.`)]
     };
   }
   if (httpStatus === 403 || ["access_denied", "owner_required", "host_denied", "proxy_denied", "csrf_denied"].includes(reasonCode)) {
@@ -641,8 +676,8 @@ export function errorTrace({ httpStatus = 0, code = "request_failed", message = 
   return { errorId: `eid_${randomBytes(9).toString("base64url")}`, fingerprint };
 }
 
-export function agentErrorBody({ httpStatus, code, message, roomId, workItemId, commandType } = {}) {
-  const ax = agentErrorAx({ httpStatus, code, message, roomId, workItemId, commandType });
+export function agentErrorBody({ httpStatus, code, message, roomId, workItemId, commandType, missingPermission } = {}) {
+  const ax = agentErrorAx({ httpStatus, code, message, roomId, workItemId, commandType, missingPermission });
   const body = { error: { code, message }, status: ax.status, reason: ax.reason, hint: ax.hint, next: ax.next };
   const trace = errorTrace({ httpStatus, code, message, roomId, workItemId });
   if (trace) {

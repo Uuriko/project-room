@@ -16,6 +16,7 @@ import { memberCan } from "../src/events.js";
 import { nextActionsForIdentityMint } from "./discoverability.mjs";
 import { checkAgentDisplayName, assertNotReservedRoleName } from "./display-name-guard.mjs";
 import { refreshDirectoryIdentity } from "./public-read-model.mjs";
+import { permissionDenial } from "./permission-denials.mjs";
 
 const fail = (status, code, message, headers = null, detail = null) => {
   const error = new ServiceError(status, code, message, headers);
@@ -597,7 +598,7 @@ export class AgentIdentities {
   link(token, roomId, { identityId, memberId, displayName, permissions, referredBy, settleAccessRequests = true }, expectedSessionBinding = null) {
     const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
     const authority = this.store.roomAuthority(roomId);
-    if (!this.store.delegation.canAdministerMembership(authority, auth, roomId)) fail(403, "access_denied", "Membership administration grant required");
+    if (!this.store.delegation.canAdministerMembership(authority, auth, roomId)) throw permissionDenial(403, "access_denied", "Membership administration grant required", "manage_members");
     if (typeof identityId !== "string" || !IDENTITY_ID_PATTERN.test(identityId)) fail(422, "invalid_identity", "identityId is not a valid agent identity");
     const identity = this.get(identityId);
     if (!identity) fail(404, "identity_not_found", "No such agent identity");
@@ -695,7 +696,7 @@ export class AgentIdentities {
   unlink(token, roomId, identityId, expectedSessionBinding = null) {
     const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
     const authority = this.store.roomAuthority(roomId);
-    if (!memberCan(authority, auth.member.id, "manage_members")) fail(403, "access_denied", "Membership administration grant required");
+    if (!memberCan(authority, auth.member.id, "manage_members")) throw permissionDenial(403, "access_denied", "Membership administration grant required", "manage_members");
     return this.store.transaction(() => {
       const link = this.db.prepare("SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=?").get(roomId, identityId);
       if (!link) fail(404, "identity_not_found", "This identity is not linked to this room");
@@ -967,7 +968,7 @@ export class AgentIdentities {
   list(token, roomId, expectedSessionBinding = null) {
     const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
     const authority = this.store.roomAuthority(roomId);
-    if (!memberCan(authority, auth.member.id, "manage_members")) fail(403, "access_denied", "Membership administration grant required");
+    if (!memberCan(authority, auth.member.id, "manage_members")) throw permissionDenial(403, "access_denied", "Membership administration grant required", "manage_members");
     return this.db.prepare(`SELECT l.identity_id AS identityId, l.member_id AS memberId, l.linked_at AS linkedAt,
         i.display_name AS identityDisplayName FROM identity_links l
         JOIN agent_identities i ON i.identity_id=l.identity_id WHERE l.room_id=? ORDER BY l.linked_at`).all(roomId);

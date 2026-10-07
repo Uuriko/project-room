@@ -33,7 +33,7 @@ import { buildOpportunitiesFeed } from "./opportunities.mjs"; // Public opportun
 import { telegramConfig, TelegramLiveStatus } from "./channel-adapters/telegram-config.mjs";
 import { TelegramTransport } from "./channel-adapters/telegram-transport.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
-import { agentErrorBody, errorCategory, mergeErrorDetail, ERROR_COMMAND_TYPE } from "../src/agent-error.mjs";
+import { agentErrorBody, errorCategory, mergeErrorDetail, ERROR_COMMAND_TYPE, ERROR_MISSING_PERMISSION } from "../src/agent-error.mjs";
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { redactEventPage, redactEventRows, redactMessageTree, redactSnapshotState } from "./redact-read.mjs";
@@ -4962,7 +4962,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       } catch { /* base envelope keeps its shape on parse failure */ }
       const errorBody = mergeErrorDetail(errorOverride
         ? { error: { code, message }, ...errorOverride, operationId, category }
-        : { ...agentErrorBody({ httpStatus, code, message, roomId, workItemId, commandType: error[ERROR_COMMAND_TYPE] }), operationId, category },
+        : { ...agentErrorBody({ httpStatus, code, message, roomId, workItemId, commandType: error[ERROR_COMMAND_TYPE], missingPermission: error[ERROR_MISSING_PERMISSION] }), operationId, category },
       error.detail);
       json(res, httpStatus, errorBody);
     }

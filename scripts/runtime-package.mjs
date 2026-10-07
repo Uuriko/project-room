@@ -131,6 +131,7 @@ optional.push("server/agent-identities.mjs");
 optional.push("server/owner-delegates.mjs"); // Owner-delegate authority (imported by server/store.mjs; delegate flag consumed by server/guest-agent-links.mjs, server/guest-invites.mjs, server/agent-invites.mjs, server/access-review.mjs, server/agent-connections.mjs)
 optional.push("server/display-name-guard.mjs"); // Identity mint/link guard is part of the runtime import closure.
 optional.push("server/agent-invites.mjs");
+optional.push("server/permission-denials.mjs"); // Permission-denial annotation helper (imported by server/access-requests.mjs, server/agent-identities.mjs, server/agent-invites.mjs, server/agent-connections.mjs)
 optional.push("server/routes/agent-connect.mjs"); // GET /a/<code> agent invite page (imported by server/http.mjs and server/agent-invites.mjs)
 optional.push("server/referrals.mjs"); // Referral attribution: joins via invite/access-request (imported by server/store.mjs)
 optional.push("server/growth-loop.mjs"); // Referral growth: activation, room credits, payout guard (imported by server/referrals.mjs and server/agent-rooms.mjs)

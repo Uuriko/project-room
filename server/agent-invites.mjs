@@ -21,6 +21,7 @@ import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { event, EVENT_TYPES as T, memberCan, canInviteMembers, MEMBERSHIP_AUTHORITY_POLICY_VERSION, PERMISSIONS, AGENT_INVITE_SAFE_PERMISSIONS } from "../src/events.js";
 import { nextActionsForInviteRedeem } from "./discoverability.mjs";
+import { permissionDenial } from "./permission-denials.mjs";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { agentAccessProfiles } from "./agent-connections.mjs";
 import { assertAdmissibleMemberName } from "./display-name-guard.mjs";
@@ -156,7 +157,7 @@ export class AgentInvites {
     const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
     if (auth.account) this.store.accountLogins.assertEmailVerified(auth.account.id);
     const authority = this.store.roomAuthority(roomId);
-    if (!auth.delegate && !canInviteMembers(authority, auth.member.id)) fail(403, "access_denied", "Invite grant required");
+    if (!auth.delegate && !canInviteMembers(authority, auth.member.id)) throw permissionDenial(403, "access_denied", "Invite grant required", "invite_member");
     // Minting invites is a membership write: the read-only autonomy tier
     // applies even when the agent holds an invite grant (issue #996).
     enforceAutonomyTierForAction({ db: this.store.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "agent_invite_create", fail });
@@ -376,7 +377,7 @@ export class AgentInvites {
   revoke(token, roomId, id, expectedSessionBinding = null) {
     const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
     const authority = this.store.roomAuthority(roomId);
-    if (!memberCan(authority, auth.member.id, "manage_members")) fail(403, "access_denied", "Membership administration grant required");
+    if (!memberCan(authority, auth.member.id, "manage_members")) throw permissionDenial(403, "access_denied", "Membership administration grant required", "manage_members");
     // Revoking invites is a membership write: the read-only autonomy tier
     // applies even when the agent holds a manage_members grant (issue #996).
     enforceAutonomyTierForAction({ db: this.store.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "agent_invite_revoke", fail });
@@ -396,7 +397,7 @@ export class AgentInvites {
   list(token, roomId, expectedSessionBinding = null) {
     const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
     const authority = this.store.roomAuthority(roomId);
-    if (!memberCan(authority, auth.member.id, "manage_members")) fail(403, "access_denied", "Membership administration grant required");
+    if (!memberCan(authority, auth.member.id, "manage_members")) throw permissionDenial(403, "access_denied", "Membership administration grant required", "manage_members");
     const now = this.store.now();
     return this.db.prepare("SELECT * FROM agent_invite_codes WHERE room_id=? ORDER BY created_at DESC").all(roomId)
       .map(row => view(row, now));

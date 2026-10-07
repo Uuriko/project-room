@@ -20,7 +20,7 @@ The coarse categories (`errorCategory` in `src/agent-error.mjs`):
 
 | Category | HTTP | Meaning | What to do |
 |---|---|---|---|
-| `access` | 401, 403 | Bad/missing credential, or this credential may not do that | `room_check_access`; ask the owner for the right credential |
+| `access` | 401, 403 | Bad/missing credential, or this credential may not do that | `room_check_access`; a 403 names the missing permission and how to request it (see below) |
 | `not_found` | 404 | Room, work item, invitation, or cursor does not exist (or you may not see it) | List work / rooms again; do not guess IDs |
 | `conflict` | 409 | The world moved: stale revision, claimed session, duplicate requestId with different input | See below — never silently retry the same input |
 | `input` | 422 | Fields refused: bad shape, bad enum, over limits | Fix the refused fields; keep any earlier uncertain `requestId` |
@@ -73,6 +73,16 @@ id; re-read the work-claims board for the current ids, never guess. A
 `403 work_claims_not_permitted` names the profile gate (contribute, review,
 or collaborate) — ask the owner to grant it; the owner-only per-member claim
 cap variant says so.
+
+**Permission denials name what is missing.** A 403 `access_denied` /
+`owner_required` whose `hint` starts with `Missing permission: <token>`
+tells you exactly which room permission the action needed (`steer`,
+`decide`, `manage_members`, `manage_claims`, `accept_work`,
+`complete_work`, `verify`, `write_external`, `invite_member`) and its
+`next` steps carry the recovery: run `room_check_access` to see what this
+identity holds, then `POST /api/rooms/:roomId/access-requests`
+`{"permissions":["<token>"]}` — the room owner reviews the request.
+Denials without the named token keep the legacy generic wording.
 
 **`idempotency_conflict`** — this `requestId` was already used with
 *different* input. Recover the original input; never invent a replacement
