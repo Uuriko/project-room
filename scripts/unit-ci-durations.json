@@ -741,6 +741,8 @@
   "tests/telegram-token-leak.test.js": 13658,
   "tests/telegram-webhook-rotation.test.js": 41662,
   "tests/test-factories.test.js": 5011,
+  "tests/test-failures.test.js": 1902,
+  "tests/unit-ci-runner.test.js": 6490,
   "tests/text-results.test.js": 98912,
   "tests/thread-options.test.js": 45951,
   "tests/token-bucket.test.js": 4258,
