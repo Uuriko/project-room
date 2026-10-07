@@ -6,6 +6,9 @@
 # Usage: scripts/qa2/fuzz.sh [out-dir]   (needs node 24 and uv or pipx)
 set -euo pipefail
 OUT="${1:-qa2-fuzz-out}"; mkdir -p "$OUT"
+# Absolute: the schemathesis passes run in a subshell after `cd "$DIR"`, so a
+# relative OUT made every nightly run fail with "gate.log: No such file".
+OUT="$(cd "$OUT" && pwd)"
 DIR="$(mktemp -d)"; PORT="${QA2_FUZZ_PORT:-4311}"; ORIGIN="http://127.0.0.1:$PORT"
 PORT=$PORT ROOM_DB="$DIR/room.sqlite" ROOM_INSTANCE_LOCK_PATH="$DIR/lock" node server.mjs > "$OUT/server.log" 2>&1 &
 SERVER=$!; trap 'kill $SERVER 2>/dev/null || true; sleep 1; rm -rf "$DIR"' EXIT
