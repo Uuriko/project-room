@@ -1757,7 +1757,8 @@ function syncWorkForm() {
   $("#verifier-select").disabled = !reviewing;
   $("#verifier-select").required = reviewing;
   const checks = [reviewing && "Review", $("#require-decision").checked && "approval"].filter(Boolean);
-  $("#work-options-summary").textContent = `${checks.join(" + ") || "Evidence only"} · ${writing ? "external write" : "read only"}`;
+  $("#work-options-summary").textContent = !reviewing && active.length === 1 && active[0].kind === "human" && active[0].id === session.member.id
+    ? uiText("human.workNoReview") : `${checks.join(" + ") || "Evidence only"} · ${writing ? "external write" : "read only"}`;
   for (const id of ["assignee-select", "verifier-select"]) {
     const select = $(`#${id}`);
     select.setCustomValidity(!select.disabled && select.selectedOptions[0]?.disabled ? "This member is no longer eligible. Choose another member." : "");
@@ -5562,6 +5563,16 @@ function openWork(sourceId = null, reuseId = null) {
   $("#source-context").textContent = sourceId ? `Source: ${state.messages.find(m => m.id === sourceId)?.body || ""}` : "";
   $("#source-context").hidden = !sourceId; $("#work-title-input").focus();
   syncWorkForm();
+  // Only initial creation in a genuinely solo room has one valid assignee.
+  // Reused definitions and subsequent live edits retain their existing choices.
+  const active = Object.values(state.members).filter(member => member.active !== false);
+  const sole = active.length === 1 && active[0];
+  if (!definition && sole?.kind === "human" && sole.id === session.member.id
+    && WORK_PERMISSIONS.every(permission => sole.permissions.includes(permission))) {
+    $("#assignee-select").value = sole.id;
+    if (!roomPolicy(state).requireIndependentReview) $("#require-verification").checked = false;
+    syncWorkForm();
+  }
 }
 function closeWorkForm({ returnFocus = true } = {}) {
   const unconfirmed = workRetryLocked;

@@ -12,8 +12,12 @@ import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
 import { closeSettings, openSettings } from "./room-chrome.mjs";
 
-async function setup(t, viewport = { width: 1440, height: 1000 }) {
+async function setup(t, viewport = { width: 1440, height: 1000 }, { solo = false, mandatory = false } = {}) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
+  if (solo) for (const member of Object.values(f.store.room('commons').state.members)) {
+    if (member.id !== 'owner' && member.active !== false) f.store.command(f.keys.owner,'commons',{id:crypto.randomUUID(),type:T.MEMBER_ACCESS_CHANGED,data:{memberId:member.id,expectedMemberRevision:member.revision??0,permissions:member.permissions,active:false}});
+  }
+  if (mandatory) f.store.command(f.keys.owner,'commons',{id:crypto.randomUUID(),type:T.ROOM_POLICY_SET,data:{requireIndependentReview:true,requireOwnerDecision:true}});
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
   t.after(async () => {
@@ -144,3 +148,55 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await guest.close();
   });
 }
+
+// Initial solo defaults remove choices with only one valid answer; the real
+// form still submits the same permission-checked proposal and never accepts it.
+for(const scenario of [
+  {name:'solo desktop',solo:true,viewport:{width:1440,height:1000}},
+  {name:'solo mobile',solo:true,viewport:{width:390,height:844}},
+  {name:'mandatory solo',solo:true,mandatory:true,viewport:{width:1440,height:1000}},
+  {name:'multiplayer',solo:false,viewport:{width:1440,height:1000}}
+]) test(`initial work defaults ${scenario.name}: eligibility and review stay honest`,{timeout:60000},async t=>{
+  const f=await setup(t,scenario.viewport,scenario),{page}=f;
+  const row=page.locator('[data-message-record-id="test-welcome"]');
+  await row.locator('.message-more > summary').click();
+  await row.getByRole('button',{name:'Make this work',exact:true}).click();
+  await page.locator('#work-dialog').waitFor({state:'visible'});
+  assert.equal(await page.locator('#assignee-select').inputValue(),scenario.solo?'owner':'');
+  assert.equal(await f.review.isChecked(),!scenario.solo || scenario.mandatory===true);
+  assert.equal(await f.review.isDisabled(),scenario.mandatory===true);
+  if(scenario.solo&&!scenario.mandatory) {
+    await page.locator('#work-options-summary').getByText('No review · Advanced options',{exact:true}).waitFor();
+    assert.equal(await page.locator('#verifier-field').isVisible(),false);
+    assert.equal(await page.locator('#work-options').evaluate(n=>n.open),false,'no settings interstitial is required');
+    await page.locator('#work-title-input').fill(`Solo outcome ${scenario.name}`);
+    await page.locator('#work-done-input').fill('A clear note is saved.');
+    await page.locator('#create-work-button').click();
+    await page.locator('#work-dialog').waitFor({state:'hidden'});
+    const saved=Object.values(f.items()).find(i=>i.title===`Solo outcome ${scenario.name}`);
+    assert.ok(saved);assert.equal(saved.accountableMemberId,'owner');assert.equal(saved.independentVerificationRequired,false);
+    assert.equal(saved.ownerDecisionRequired,true);assert.equal(saved.state,'proposed','creating your own work does not accept it');
+    await row.locator('.message-more > summary').click();await row.getByRole('button',{name:'Make this work',exact:true}).click();
+    await page.locator('#work-options-summary').click();await f.review.check();
+    assert.equal(await page.locator('#verifier-field').isVisible(),true,'optional review remains available');
+    assert.equal(await page.locator('#reviewer-unavailable').isVisible(),true,'opting in explains the missing independent reviewer');
+    // Background changes cannot reset an explicit choice or silently retarget it.
+    f.send(T.MESSAGE_POSTED,{messageId:crypto.randomUUID(),body:'A background update.'});
+    await page.getByText('A background update.',{exact:true}).waitFor();
+    assert.equal(await f.review.isChecked(),true);assert.equal(await page.locator('#assignee-select').inputValue(),'owner');
+    await page.locator('#cancel-work-button').click();
+    const card=page.locator(`[data-work-record-id="${saved.id}"]`);
+    await card.locator('.work-details > summary').click();await card.locator('[data-reuse-work]').click();
+    await page.locator('#work-dialog').waitFor({state:'visible'});
+    assert.equal(await page.locator('#work-title-input').inputValue(),saved.title);
+    assert.equal(await page.locator('#assignee-select').inputValue(),'','reuse remains definition-only even in a solo room');
+    assert.equal(await f.review.isChecked(),true,'reuse does not inherit the original optional-review choice');
+  } else if(scenario.mandatory) {
+    assert.equal(await page.locator('#reviewer-unavailable').isVisible(),true);
+    assert.match(await f.note.textContent(),/independent review/);
+    assert.equal(await page.locator('#review-settings-button').isHidden(),true);
+  } else {
+    assert.equal(await page.locator('#verifier-field').isVisible(),true);
+    assert.match(await page.locator('#work-options-summary').textContent(),/^(Advanced options|Review \+ approval · read only)$/);
+  }
+});
