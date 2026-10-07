@@ -123,6 +123,11 @@ Then deploy the canonical Worker with `--keep-vars`. A binding that exists only 
 
 The on-disk Node server still uses `scripts/backup-room.mjs`, which copies a sqlite file. That path is not the hosted Durable Object.
 
+Disaster recovery for the hosted object — the `POST /api/operator/restore`
+endpoint that replays an NDJSON export into an empty Durable Object, the
+honest RPO/RTO, and what a restore does and does not recover — is
+[BACKUP-DR.md](BACKUP-DR.md).
+
 ## Operator
 
 Purge, status, and the operator audit answer 404 until `ROOM_OPERATOR_TOKEN_SHA256` is set on the script that owns the Durable Object. The value is the hex SHA-256 of the operator token, not the token. `ROOM_OPERATOR_PROTECTED_ROOMS` is an optional comma-separated list of room ids that purge refuses, in addition to `invite-only-pilot`. Set them with `pnpm exec wrangler secret put NAME --env production`. Add the same names on `--env staging` only when a rehearsal needs them. A secret on the entry Worker alone does not reach the object. `--keep-vars` and rollback leave both in place. Find, plan, and execute are in [OPERATOR.md](OPERATOR.md).

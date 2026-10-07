@@ -14,6 +14,8 @@ import { emailContractFixture } from '../scripts/email-contract-fixture.mjs';
 import { RecordedGraphMailbox, prepareGraphFixturePage, graphFixtureStart } from '../server/graph-fixture-sync.mjs';
 import { prepareGraphReplyDraft, currentGraphReplyDraft, observeGraphReplyCreation, prepareGraphReplyUpdate } from '../server/graph-reply-draft.mjs';
 import { generateVapidKeys } from '../server/web-push.mjs';
+import { exportNdjsonText } from '../server/room-export.mjs';
+import { replayNdjsonInto } from '../server/restore-ndjson.mjs';
 
 function checkNarrowAuthentication(store, credentials) {
   const { state, sequence } = store.room('commons'), before = auditRecovery(store).dataSha256;
@@ -453,6 +455,26 @@ export class StoreTestRoom {
       assert.deepEqual(auditRecovery(store), before);
       return Response.json({ latestUnavailable: true, preservedLocal: true });
     }
+    // H2 backup/DR drill: export the seeded room as NDJSON, then replay it.
+    // The /restore-drill/replay route runs against whichever Durable Object
+    // the worker routes to — the drill check addresses a pristine DO so the
+    // replay meets an empty store, exactly like post-loss recovery.
+    if (path === '/restore-drill/seed') {
+      store.initialize(initialRoom('restore-worker'));
+      const owner = store.issueAccessKey('restore-worker', 'owner');
+      store.command(owner, 'restore-worker', { id: randomUUID(), type: T.MESSAGE_POSTED,
+        data: { messageId: randomUUID(), body: 'drill history must survive the replay' } });
+      return Response.json({ ndjson: exportNdjsonText(store.db) });
+    }
+    if (path === '/restore-drill/replay') {
+      const ndjson = await request.text();
+      try {
+        const summary = replayNdjsonInto(ndjson, store);
+        return Response.json({ ok: true, verified: summary.verified, events: summary.events, tables: summary.tables });
+      } catch (error) {
+        return Response.json({ ok: false, error: error?.message ?? String(error) }, { status: 500 });
+      }
+    }
     if (path === '/newer-version') {
       store.transaction(() => durableStorage.setVersion(this.db, STORE_SCHEMA_VERSION + 1));
       assert.throws(() => new RoomStore(null, { database: this.db, storagePlatform: durableStorage }), /newer than this service/);
@@ -462,4 +484,17 @@ export class StoreTestRoom {
     return new Response('Not found', { status: 404 });
   }
 }
-export default { fetch(request, env) { return env.ROOM.getByName('shared-store-proof').fetch(request); } };
+export default { fetch(request, env) {
+  const url = new URL(request.url);
+  if (url.pathname === '/restore-drill-fresh') {
+    // Disaster-recovery drill: address a pristine Durable Object so the
+    // replay runs against an empty store, exactly like post-loss recovery.
+    // Only this exact path is rerouted; every other request keeps the
+    // original pass-through untouched.
+    return env.ROOM.getByName('restore-fresh-target').fetch(
+      new Request('http://localhost/restore-drill/replay', {
+        method: 'POST', headers: { 'content-type': 'application/x-ndjson' }, body: request.body, duplex: 'half',
+      }));
+  }
+  return env.ROOM.getByName('shared-store-proof').fetch(request);
+} };

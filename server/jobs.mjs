@@ -291,7 +291,7 @@ export const JOBS = Object.freeze([
     runtimes: Object.freeze(["worker"]),
     singleRuntimeReason: "Daily backup writes the ROOM_BACKUPS R2 bucket. A Node process has no R2 binding.",
     enabled: env => backupConfigured(env),
-    disabledReason: () => "ROOM_BACKUPS is not configured",
+    disabledReason: () => "ROOM_BACKUPS is not configured — no backups are being taken; see docs/BACKUP-DR.md",
     async run(_store, ctx) {
       if (!ctx.room) return { skipped: 1 };
       try { return await writeDailyBackup(ctx.env, ctx.room); }
