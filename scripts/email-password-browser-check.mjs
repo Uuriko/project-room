@@ -18,7 +18,9 @@ async function setup(t) {
   const page = await browser.newPage(); page.setDefaultTimeout(10000);
   const errors = []; page.on("pageerror", error => errors.push(error.message)); t.after(() => assert.deepEqual(errors, []));
   await page.goto(origin);
-  await page.locator('[data-password-mode="login"]').click();
+  await page.locator('#auth-signin-ui [data-password-mode="signup"]').waitFor({ state: "visible" });
+  await page.getByRole("button", { name: "Log in", exact: true }).click();
+  assert.equal(await page.locator('#auth-signin-ui [name="email"]').evaluate(node => node === document.activeElement), true, "explicit Log in focuses the visible email field");
   return { ...f, page, origin };
 }
 
@@ -27,6 +29,7 @@ test("contextual email creation signs in using the actual password signup API", 
   const form = page.locator('#auth-signin-ui [data-signin-form="password"]');
   assert.equal(await form.locator('[name="password"]').getAttribute("autocomplete"), "current-password");
   await form.locator('[data-password-mode="signup"]').click();
+  assert.equal(await form.locator('[name="email"]').evaluate(node => node === document.activeElement), true, "explicit account creation preserves email focus");
   await form.locator('[name="email"]').fill(email); await form.locator('[name="password"]').fill(password);
   const reply = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/password/signup");
   await form.locator('button[type="submit"]').click();
@@ -46,6 +49,7 @@ test("password signup lands in the personal room", { timeout: 40000 }, async t =
   const email = "room-landing@example.invalid";
   const form = page.locator('#auth-signin-ui [data-signin-form="password"]');
   await form.locator('[data-password-mode="signup"]').click();
+  assert.equal(await form.locator('[name="email"]').evaluate(node => node === document.activeElement), true, "explicit account creation preserves email focus");
   await form.locator('[name="email"]').fill(email);
   await form.locator('[name="password"]').fill(password);
   await form.locator('button[type="submit"]').click();

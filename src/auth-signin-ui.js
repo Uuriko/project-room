@@ -83,7 +83,8 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
   }
   function focusView() {
     const node = surface();
-    const candidates = node ? [...node.querySelectorAll('[name="email"], [name="newPassword"], [data-reset-password], button:not([data-signin-back]):not(:disabled)')] : [];
+    const selectors = ['[name="email"]', '[name="newPassword"]', '[data-reset-password]', 'button:not([data-signin-back]):not(:disabled)'];
+    const candidates = node ? selectors.flatMap(selector => [...node.querySelectorAll(selector)]) : [];
     const target = candidates.find(element => !element.closest("[hidden]") && element.getClientRects().length > 0);
     target?.focus();
   }
