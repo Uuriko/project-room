@@ -781,3 +781,34 @@ test("omitting ROOM_IDENTITY_HASH_KEY does not lock out fallback or previously k
   assert.equal(omitted.identities.resolveGlobalIdentitySecret(second.secret).identityId, second.identityId);
   omitted.close();
 });
+
+test("#1004: link with an inherited Object.prototype member id fails 422, not 409", async t => {
+  const { store, origin, ownerCommons } = await serve(t);
+  const created = await fetch(`${origin}/api/agent-identities`, {
+    method: "POST", headers: { "Content-Type": "application/json", Origin: origin },
+    body: JSON.stringify({ displayName: "Prototype Probe" })
+  });
+  assert.equal(created.status, 201);
+  const { identityId } = await created.json();
+  for (const reserved of ["constructor", "toString", "valueOf", "hasOwnProperty"]) {
+    const res = await fetch(`${origin}/api/rooms/commons/identity-links`, {
+      method: "POST", headers: { "Content-Type": "application/json", Origin: origin, Authorization: `Bearer ${ownerCommons}` },
+      body: JSON.stringify({ identityId, memberId: reserved, permissions: [] })
+    });
+    assert.equal(res.status, 422, `memberId ${reserved}: expected 422, got ${res.status}`);
+    assert.equal((await res.json()).error.code, "invalid_identity");
+  }
+  // Nothing was linked and no member record was created.
+  assert.equal(store.db.prepare("SELECT 1 FROM identity_links WHERE room_id=? AND identity_id=?").get("commons", identityId), undefined);
+  assert.equal(Object.hasOwn(store.room("commons").state.members, "constructor"), false);
+});
+
+test("#1004: memberOf resolves own members only", async t => {
+  const { memberOf } = await import("../server/agent-identities.mjs");
+  const members = { alice: { id: "alice" } };
+  assert.equal(memberOf(members, "alice"), members.alice);
+  assert.equal(memberOf(members, "constructor"), undefined);
+  assert.equal(memberOf(members, "toString"), undefined);
+  assert.equal(memberOf(null, "alice"), undefined);
+  assert.equal(memberOf(undefined, "alice"), undefined);
+});

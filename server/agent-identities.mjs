@@ -110,6 +110,19 @@ export const IDENTITY_SECRET_PREFIX = "pri_";
 const IDENTITY_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const MEMBER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
+// #1004: member projections are plain objects from JSON.parse, so a direct
+// members[id] lookup resolves inherited Object.prototype names
+// ("constructor", "toString", "valueOf", "hasOwnProperty", ...) that pass
+// MEMBER_ID_PATTERN. Every lookup of a member record by a caller-supplied
+// id must go through this helper so only own members resolve.
+export const memberOf = (members, id) => (members && Object.hasOwn(members, id) ? members[id] : undefined);
+
+// Inherited Object.prototype property names pass MEMBER_ID_PATTERN but can
+// never name a real member. link() rejects them with the same 422 as the
+// shape check instead of the misleading 409 identity_conflict the plain
+// lookup used to produce.
+const RESERVED_MEMBER_IDS = new Set(Object.getOwnPropertyNames(Object.prototype));
+
 export function isIdentitySecret(token) {
   return typeof token === "string" && token.startsWith(IDENTITY_SECRET_PREFIX)
     && /^[A-Za-z0-9_-]{43,128}$/.test(token.slice(IDENTITY_SECRET_PREFIX.length));
@@ -610,6 +623,8 @@ export class AgentIdentities {
     }
     const resolvedMemberId = memberId ?? identityId;
     if (!MEMBER_ID_PATTERN.test(resolvedMemberId)) fail(422, "invalid_identity", "memberId must match [A-Za-z0-9][A-Za-z0-9_-]{0,63}");
+    // #1004: reserved names pass the pattern but are never real members.
+    if (RESERVED_MEMBER_IDS.has(resolvedMemberId)) fail(422, "invalid_identity", "memberId is a reserved name");
     if (!Array.isArray(permissions)) fail(422, "invalid_identity", "permissions must be an array; an empty array links the identity with read/chat access only");
     // RC-2026-09-18-038: a delegate acting on an owner grant may link members
     // but may never confer manage_members — that would make the grant
@@ -630,7 +645,9 @@ export class AgentIdentities {
     return this.store.transaction(() => {
       const existing = this.db.prepare("SELECT 1 FROM identity_links WHERE room_id=? AND identity_id=?").get(roomId, identityId);
       if (existing) fail(409, "identity_already_linked", "This identity is already linked to this room");
-      const roomMember = this.store.roomAuthority(roomId).members[resolvedMemberId];
+      // #1004: own-property lookup — an inherited Object.prototype name
+      // must never resolve to a "member" here.
+      const roomMember = memberOf(this.store.roomAuthority(roomId).members, resolvedMemberId);
       if (roomMember) {
         // Re-linking after an unlink: the member record (bound to this
         // identity) is reused and reactivated. A foreign member holding the
