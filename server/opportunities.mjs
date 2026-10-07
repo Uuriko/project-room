@@ -6,10 +6,12 @@
 // invite/join flow (single-use agent invites, share links, access requests).
 // No invite codes, member lists, identity data, or admission URLs ever leave.
 //
-// Two explicit "help wanted" signals feed it:
+// Three explicit "help wanted" signals feed it:
 //   1. work items carrying an open helpWanted invitation (WORK_HELP_UPDATED
 //      with status "open" and a live expiry) on non-terminal work;
-//   2. bounties in proposed/funded state with a live deadline.
+//   2. bounties in proposed/funded state with a live deadline;
+//   3. unclaimed volunteer public-work tasks (#1609) — the opt-in pool is
+//      public by design, so its tasks are discoverable without admission.
 //
 // Room-level discovery requires directory discoverability and an independent
 // owner-controlled opportunity-feed flag. Existing listed rooms default to
@@ -163,6 +165,69 @@ function bountyOpportunity(row, roomTitle) {
   };
 }
 
+// Unclaimed volunteer public-work tasks are opt-in "help wanted" for
+// strangers (#1609): the pool is public by design and its tasks already carry
+// public packets (title, acceptance criteria, repository URL). Claimed and
+// submitted tasks stay out; their owner/receipt material never reaches the
+// feed. The room_id comes from the task row, not the packet, so the feed
+// keeps its owner opt-in contract by restricting to the same listed,
+// feed-enabled rooms as the other two signals.
+function publicWorkOpportunity(task, roomId, roomTitle, openedAtMs) {
+  const title = cleanText(task.title, 200);
+  const repositoryUrl = cleanText(task.repositoryUrl, 300);
+  if (!title || !repositoryUrl) return null;
+  const acceptanceCriteria = Array.isArray(task.acceptanceCriteria)
+    ? task.acceptanceCriteria.map(criterion => cleanText(criterion)).filter(Boolean)
+    : [];
+  return {
+    kind: "public-work",
+    taskId: task.taskId,
+    roomId,
+    roomTitle,
+    roomPath: roomPath(roomId),
+    title,
+    acceptanceCriteria,
+    repositoryUrl,
+    claimState: "unclaimed",
+    openedAt: new Date(openedAtMs).toISOString(),
+  };
+}
+
+// Pages the public-work pool and returns the feed items for unclaimed tasks
+// in the given listed rooms. Read-only: SELECTs plus the service's own list()
+// cursor; no new tables, no migrations.
+function publicWorkOpportunities(store, listedRoomIds, titles) {
+  const service = store?.publicWorkClaims;
+  if (!service || typeof service.list !== "function") return [];
+  const tasks = [];
+  let after = "";
+  for (;;) {
+    const page = service.list({ limit: 100, after });
+    tasks.push(...page.tasks);
+    if (!page.nextCursor) break;
+    after = page.nextCursor;
+  }
+  if (!tasks.length) return [];
+  const ids = tasks.map(task => task.taskId);
+  const meta = new Map(store.db.prepare(
+    `SELECT offer_id, room_id, created_at FROM public_work_tasks WHERE offer_id IN (${ids.map(() => "?").join(",")})`
+  ).all(...ids).map(row => [row.offer_id, row]));
+  const listed = new Set(listedRoomIds);
+  const items = [];
+  for (const task of tasks) {
+    if (task?.claim?.state !== "unclaimed") continue;
+    const row = meta.get(task.taskId);
+    if (!row || !listed.has(row.room_id)) continue;
+    const roomTitle = titles.get(row.room_id);
+    if (!roomTitle) continue;
+    const opp = publicWorkOpportunity(task, row.room_id, roomTitle, row.created_at);
+    if (opp) items.push(opp);
+  }
+  return items;
+}
+
+const itemTs = opp => Date.parse(opp.kind === "bounty" ? opp.createdAt : opp.openedAt) || 0;
+
 export function buildOpportunitiesFeed(store, { now = Date.now(), roomId = null, limit = null, since = null } = {}) {
   const db = store?.db;
   if (!db) fail(500, "opportunities_store_missing", "Opportunity feed requires a store with a db handle");
@@ -206,24 +271,22 @@ export function buildOpportunitiesFeed(store, { now = Date.now(), roomId = null,
       const opp = bountyOpportunity(row, roomTitle);
       if (opp) opportunities.push(opp);
     }
+    // Third signal: unclaimed volunteer public-work tasks (#1609).
+    opportunities.push(...publicWorkOpportunities(store, roomIds, titles));
   }
 
-  opportunities.sort((a, b) => {
-    const at = Date.parse(a.kind === "bounty" ? a.createdAt : a.openedAt) || 0;
-    const bt = Date.parse(b.kind === "bounty" ? b.createdAt : b.openedAt) || 0;
-    return bt - at;
-  });
+  opportunities.sort((a, b) => itemTs(b) - itemTs(a));
 
   // Cheap resume: with ?since=, return only items opened/created after the
   // cursor. Items with no parseable timestamp are treated as ancient — they
   // cannot prove they are new, so a delta poll must not surface them.
-  const visible = sinceMs == null ? opportunities : opportunities.filter(opp => {
-    const ts = Date.parse(opp.kind === "bounty" ? opp.createdAt : opp.openedAt) || 0;
-    return ts > sinceMs;
-  });
+  const visible = sinceMs == null ? opportunities : opportunities.filter(opp => itemTs(opp) > sinceMs);
 
   return {
     generatedAt: new Date(now).toISOString(),
+    // Stable signpost so strangers always learn the volunteer pool's door,
+    // even when every signal is dry (#1609).
+    seeAlso: { publicWork: "/api/public-work/tasks" },
     opportunities: visible.slice(0, pageSize),
   };
 }

@@ -2661,7 +2661,10 @@ paths:
       description: >-
         Read-only discovery of open work across owner opt-in directory-listed,
         feed-enabled rooms (no login): open help-wanted invitations on non-terminal work
-        items, and proposed/funded bounties with live deadlines. Decoupled
+        items, proposed/funded bounties with live deadlines, and unclaimed
+        volunteer public-work tasks. A `seeAlso.publicWork` pointer to
+        `/api/public-work/tasks` is always present so the feed never degrades
+        into a dead end when every signal is dry. Decoupled
         from admission — reading the feed grants nothing; acting on an
         opportunity uses the normal invite/join flow. Rebuilt field-by-field
         in the module; member ids, identity data, invite codes, and admission
@@ -2695,14 +2698,20 @@ paths:
                 type: object
                 properties:
                   generatedAt: { type: string, format: date-time }
+                  seeAlso:
+                    type: object
+                    description: Stable pointers so the feed never degrades into a dead end when every signal is dry
+                    properties:
+                      publicWork: { type: string, description: 'Public volunteer task pool, e.g. /api/public-work/tasks' }
                   opportunities:
                     type: array
                     items:
                       type: object
                       properties:
-                        kind: { type: string, enum: [help-wanted, bounty] }
+                        kind: { type: string, enum: [help-wanted, bounty, public-work] }
                         workItemId: { type: [string, 'null'] }
                         bountyId: { type: [string, 'null'] }
+                        taskId: { type: [string, 'null'], description: 'public-work task id (kind=public-work only)' }
                         roomId: { type: string }
                         roomTitle: { type: string }
                         roomPath: { type: string }
@@ -2720,6 +2729,9 @@ paths:
                         deadlineMs: { type: [integer, 'null'] }
                         label: { type: [string, 'null'] }
                         createdAt: { type: [string, 'null'] }
+                        acceptanceCriteria: { type: [array, 'null'], items: { type: string }, description: 'public-work only' }
+                        repositoryUrl: { type: [string, 'null'], description: 'public-work only' }
+                        claimState: { type: [string, 'null'], description: 'public-work only; always unclaimed in the feed' }
         '422':
           $ref: '#/components/responses/InvalidInput'
         '429':
