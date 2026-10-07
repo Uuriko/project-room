@@ -12,11 +12,17 @@ async function handleDesktopAuth(ctx) {
           || url.searchParams.getAll("state").length !== 1 || url.searchParams.getAll("challenge").length !== 1) {
           reject(422, "invalid_desktop_auth", "A current native authentication request is required");
         }
+        const providers = url.searchParams.getAll("provider"), provider = providers[0];
+        if (providers.length > 1 || (providers.length === 1 && !["google", "github"].includes(provider))) {
+          reject(400, "invalid_desktop_provider", "Choose a supported sign-in provider");
+        }
         rate(`desktop-start:${remoteAddress}`, 20);
         oauthProvider.registerClient({ clientId: desktopClientId, name: "Project Room for Mac", redirectUris: [desktopRedirect] });
         const query = new URLSearchParams({ client_id: desktopClientId, redirect_uri: desktopRedirect,
           scope: OAUTH_SCOPES.join(" "), state, code_challenge: challenge, code_challenge_method: "S256" });
-        res.writeHead(302, { Location: "/oauth/authorize?" + query }); return res.end();
+        const consent = "/oauth/authorize?" + query;
+        const entrance = provider ? "/?" + new URLSearchParams({ oauth: "login", return: consent, provider }) : consent;
+        res.writeHead(302, { Location: entrance }); return res.end();
       }
       if (url.pathname === "/api/auth/desktop/callback" && req.method === "GET") {
         const state = url.searchParams.get("state"), code = url.searchParams.get("code"), error = url.searchParams.get("error");
