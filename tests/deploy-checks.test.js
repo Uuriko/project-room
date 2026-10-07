@@ -494,6 +494,8 @@ import { createServer } from "node:http";
 test("actual recovery CLI records independent exact source schemas and refuses a 37-to-38 fallback", async t => {
   const dir = tempDir(t, "deploy-recovery-cli-");
   mkdirSync(join(dir, "server")); mkdirSync(join(dir, "cloudflare")); mkdirSync(join(dir, "bin"));
+  // The extensionless fake pnpm is CommonJS even under repository-local TMPDIR.
+  writeFileSync(join(dir, "package.json"), JSON.stringify({ type: "commonjs" }));
   const git = args => execFileAsync("git", ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", ...args], { cwd: dir });
   await git(["init", "--quiet"]);
   writeFileSync(join(dir, "server/writer-fence.mjs"), "export const STORE_SCHEMA_VERSION = 37;\n");
