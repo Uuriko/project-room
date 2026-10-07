@@ -120,8 +120,17 @@ for (const touch of [false, true]) {
       await reveal.evaluate(e => e.blur());
     }
     await page.evaluate(() => document.documentElement.style.fontSize = "200%");
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true, "doubled text reflows");
-    assert.ok((await page.locator('#message-list').boundingBox()).height >= 160, 'large text retains a readable conversation region');
+    const largeTextViewports = touch ? [{ width: 390, height: 844 }] : [{ width: 1440, height: 1000 }, { width: 1280, height: 800 }];
+    for (const viewport of largeTextViewports) {
+      await page.setViewportSize(viewport);
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true, "doubled text reflows");
+      const timelineBox = await page.locator('#message-list').boundingBox();
+      assert.ok(timelineBox.height >= 160, `large text retains a readable conversation region (${viewport.width}x${viewport.height}: ${timelineBox.height}px)`);
+      await input.scrollIntoViewIfNeeded();
+      const composerBox = await input.boundingBox();
+      assert.ok(composerBox.y >= 0 && composerBox.y + composerBox.height <= viewport.height + 1, "large text composer stays reachable by scrolling");
+    }
+    await page.setViewportSize(touch ? { width: 390, height: 844 } : { width: 1440, height: 1000 });
     await input.scrollIntoViewIfNeeded();
     await page.screenshot({ path: `test-results/quiet-${label}-large-text-viewport.png` });
     await page.screenshot({ path: `test-results/quiet-${label}-large-text.png`, fullPage: true });
