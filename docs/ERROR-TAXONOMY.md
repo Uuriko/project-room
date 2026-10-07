@@ -47,6 +47,33 @@ declare a smaller `budget.maxSpendCents`, or ask the owner. A related
 `422 spend_allowance_budget_required` means the room has an allowance and
 the start declared no `maxSpendCents` to reserve.
 
+**Availability 503s** — server-side, not your credential. The hint/next carry
+the recovery; never "check access" for these:
+
+| Code | What it means | Hint/next |
+|---|---|---|
+| `storage_unavailable` | The store refused the write (disk full, read-only, I/O) and rolled it back | Wait for `Retry-After` (30s), retry the exact request, reconcile afterward; no success is claimed |
+| `mail_not_configured` | Email delivery is not configured on this server | Nothing was sent and retrying will not help — contact the room operator to configure it |
+
+**The `already_*` 409 family** — the action already happened; do not retry it.
+Re-read the current state to confirm instead of sending the same request again:
+
+| Code | Meaning |
+|---|---|
+| `already_member` | The identity is already a member — act with the saved credential, don't create another membership |
+| `already_decided` | The access request was already decided — the decision stands |
+| `already_owner` | That identity already holds full authority as room owner |
+| `already_administers` | Membership administration is already held |
+| `already_inactive` | The membership is already inactive — the desired state already holds |
+| `already_claimed` | The bounty is already claimed — pick another or wait |
+| `already_appealed` | One appeal per filing — already appealed, no further appeal possible |
+
+**Board claim-id errors** — `work_claim_not_found` (404) quotes the unknown
+id; re-read the work-claims board for the current ids, never guess. A
+`403 work_claims_not_permitted` names the profile gate (contribute, review,
+or collaborate) — ask the owner to grant it; the owner-only per-member claim
+cap variant says so.
+
 **`idempotency_conflict`** — this `requestId` was already used with
 *different* input. Recover the original input; never invent a replacement
 ID. (Same ID + same input = safe duplicate, returns the original receipt.)

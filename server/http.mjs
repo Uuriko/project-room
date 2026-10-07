@@ -33,7 +33,7 @@ import { buildOpportunitiesFeed } from "./opportunities.mjs"; // Public opportun
 import { telegramConfig, TelegramLiveStatus } from "./channel-adapters/telegram-config.mjs";
 import { TelegramTransport } from "./channel-adapters/telegram-transport.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
-import { agentErrorBody, errorCategory, ERROR_COMMAND_TYPE } from "../src/agent-error.mjs";
+import { agentErrorBody, errorCategory, mergeErrorDetail, ERROR_COMMAND_TYPE } from "../src/agent-error.mjs";
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { redactEventPage, redactEventRows, redactMessageTree, redactSnapshotState } from "./redact-read.mjs";
@@ -4938,14 +4938,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       try {
         errorOverride = discoverabilityErrorOverride({ pathname: requestPathname(req.url), httpStatus, code });
       } catch { /* base envelope keeps its shape on parse failure */ }
-      const errorBody = errorOverride
+      const errorBody = mergeErrorDetail(errorOverride
         ? { error: { code, message }, ...errorOverride, operationId, category }
-        : { ...agentErrorBody({ httpStatus, code, message, roomId, workItemId, commandType: error[ERROR_COMMAND_TYPE] }), operationId, category };
-      if (error.detail && typeof error.detail === "object" && !Array.isArray(error.detail)) {
-        for (const [key, value] of Object.entries(error.detail)) {
-          if (!["error", "status", "reason", "hint", "next", "operationId", "category"].includes(key)) errorBody[key] = value;
-        }
-      }
+        : { ...agentErrorBody({ httpStatus, code, message, roomId, workItemId, commandType: error[ERROR_COMMAND_TYPE] }), operationId, category },
+      error.detail);
       json(res, httpStatus, errorBody);
     }
   });

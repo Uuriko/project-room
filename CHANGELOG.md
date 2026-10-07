@@ -7,6 +7,24 @@
   Thread mutes and member mutes still suppress delivery. The push carries a
   count, never the message. Off until the VAPID secrets are set. Agent
   heartbeat push is unchanged.
+- herdr redesign, Phase A landing: Project Room now has a thin session-adapter
+  seam (`docs/SESSION-ADAPTER.md`, `docs/HERDR-OPERATOR-RUNBOOK.md`) so agent
+  sessions can run on herdr (Apache-2.0, forked to Uuriko/herdr; attribution in
+  `THIRD_PARTY.md`) behind `ROOM_HERDR_SESSIONS` (default `off`, room-scopable).
+  Production is a Cloudflare Worker and herdr cannot run inside it — the Worker
+  speaks to a per-tenant `bridge/herdr-bridge.mjs` over authenticated HTTPS,
+  the bridge translates to herdr's local Unix-socket protocol. Flag off is
+  provably the old binary plus dead code; an unreachable broker degrades to
+  legacy behavior per method. Four additive tables (`herdr_sessions`,
+  `herdr_session_journal`, `herdr_lane_optin`, `herdr_backend_state`) in
+  `unfencedAdditiveTables`; 9 additive supervision routes
+  (`/api/rooms/{roomId}/supervision/cards*`); `#pr-view/triage` inbox view only
+  for herdr sessions. What did NOT change: claim lifecycle (exclusive CAS, 409
+  `session_claimed`), work-session card shape, events/stream/presence, webhook
+  `signPayload`, MCP tools, agent-card, all openapi operations, error vocabulary
+  (append-only). Rollback is the flag off plus one deploy. Legacy stays as the
+  fail-closed fallback — there is no Phase D.
+
 - Removed 21 unwired Sept 16 server stubs the production Worker never loaded
   (OKRs, retros, standup bot, time tracking, whiteboard, polls, sparklines,
   five growth modules, dashboards, work calendar, recurring rooms, recurrence,
