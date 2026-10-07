@@ -83,3 +83,83 @@ test('EVALUATION_CHECKLIST.md requires held-out validation run + trajectory revi
   assert.match(md, /trajectory/i, 'must require trajectory review');
   assert.match(md, /leniency/i, 'must reference the judge-leniency gate');
 });
+
+// --- Crew C6: runEval edge-case hardening ---------------------------------
+// Each test guards one documented runEval contract. The solver-throw and
+// duplicate-id tests are regression tests: they fail on the pre-fix harness,
+// which propagated bare solver errors and silently accepted duplicate ids.
+// The other three pin existing behavior as the documented contract.
+
+test('runEval: solver throwing mid-run aborts with an error naming the task id', async () => {
+  const { runEval } = await import('../evals/index.mjs');
+  let t2Ran = false;
+  let err;
+  try {
+    await runEval({
+      tasks: [{ id: 't-bad' }, { id: 't-ok' }],
+      solver: (task) => {
+        if (task.id === 't-bad') throw new Error('boom');
+        t2Ran = true;
+        return {};
+      },
+      scorers: {},
+    });
+  } catch (e) { err = e; }
+  assert.ok(err, 'runEval must reject when the solver throws');
+  assert.match(err.message, /solver failed for task "t-bad"/,
+    'error must name the failing task id, not surface a bare stack');
+  assert.match(err.message, /boom/, 'original solver reason must survive');
+  assert.equal(t2Ran, false, 'runEval must abort, not continue to the next task');
+});
+
+test('runEval: fractional scorer scores are recorded exactly; pass needs every scorer exactly 1', async () => {
+  const { runEval } = await import('../evals/index.mjs');
+  const report = await runEval({
+    tasks: [{ id: 't1' }, { id: 't2' }],
+    solver: () => ({}),
+    scorers: { s: (task) => (task.id === 't2' ? 0.5 : 1) },
+  });
+  const [r1, r2] = report.results;
+  assert.equal(r1.scores.s, 1);
+  assert.equal(r1.passed, true);
+  assert.equal(r2.scores.s, 0.5, 'fractional score must be recorded exactly');
+  assert.equal(r2.passed, false, 'deterministic-first: 0.5 is not a pass');
+  assert.deepEqual(report.summary, { total: 2, passed: 1, failed: 1 });
+});
+
+test('runEval: outcome missing trajectory defaults to []', async () => {
+  const { runEval } = await import('../evals/index.mjs');
+  const report = await runEval({
+    tasks: [{ id: 't1' }, { id: 't2' }],
+    solver: (task) => (task.id === 't1' ? { finalAnswer: 'x' } : { trajectory: ['step'] }),
+    scorers: {},
+  });
+  assert.deepEqual(report.results[0].trajectory, []);
+  assert.deepEqual(report.results[1].trajectory, ['step'], 'present trajectory must survive');
+});
+
+test('runEval: duplicate task ids throw a clear error before running anything', async () => {
+  const { runEval } = await import('../evals/index.mjs');
+  let ran = false;
+  await assert.rejects(
+    runEval({
+      tasks: [{ id: 'dup' }, { id: 'dup' }],
+      solver: () => { ran = true; return {}; },
+      scorers: {},
+    }),
+    /duplicate task id "dup"/,
+    'error must name the duplicated id'
+  );
+  assert.equal(ran, false, 'no task may run before the duplicate check');
+});
+
+test('runEval: empty scorers object means every task passes (vacuous pass, documented)', async () => {
+  const { runEval } = await import('../evals/index.mjs');
+  const report = await runEval({
+    tasks: [{ id: 't1' }, { id: 't2' }],
+    solver: () => ({}),
+    scorers: {},
+  });
+  assert.ok(report.results.every((r) => r.passed === true));
+  assert.deepEqual(report.summary, { total: 2, passed: 2, failed: 0 });
+});

@@ -284,3 +284,55 @@ test("loginAccountSessionWithMethod rejects stale revisions and bad method descr
   })).code, "stale_session_revision");
   assert.equal(capture(() => store.loginAccountSessionWithMethod(token, "acct-slot-2", slot.sessionRevision, {})).code, "invalid_login_method");
 });
+
+test("emailStatus counts disabled email methods: disabling an unverified method does not launder verification", () => {
+  const { store, logins } = makeStore();
+  store.createAccount("acct-1", "password-signup");
+  const pw = logins.linkPasswordMethod("acct-1", { email: "unverified@example.com", verifier: "scrypt$v1" });
+  assert.equal(logins.emailStatus("acct-1"), "unverified");
+  // Add a second factor so the password method may be disabled.
+  logins.generateRecoveryCodes("acct-1", { count: 2 });
+  logins.setMethodDisabled("acct-1", pw.id, true);
+  // The account still holds an unverified email: the f520ca69 gates must hold.
+  assert.equal(logins.emailStatus("acct-1"), "unverified");
+  assert.equal(logins.emailVerification("acct-1").verified, false);
+  assert.throws(() => logins.assertEmailVerified("acct-1"), error => error.code === "email_unverified");
+});
+
+test("emailStatus stays verified when a verified email method is disabled", () => {
+  const { store, logins } = makeStore();
+  store.createAccount("acct-2", "password-signup");
+  logins.linkPasswordMethod("acct-2", { email: "ada@example.com", verifier: "scrypt$v1" });
+  const issued = logins.issueEmailVerifyCode({ accountId: "acct-2", email: "ada@example.com" });
+  logins.consumeEmailVerifyCode({ accountId: "acct-2", code: issued.code });
+  const magic = logins.listMethods("acct-2").find(m => m.type === "magic");
+  assert.equal(logins.emailStatus("acct-2"), "verified");
+  logins.generateRecoveryCodes("acct-2", { count: 2 });
+  logins.setMethodDisabled("acct-2", magic.id, true);
+  // Past verification is not revoked by disabling the method: no regression.
+  assert.equal(logins.emailStatus("acct-2"), "verified");
+  logins.assertEmailVerified("acct-2");
+});
+
+test("removeMethod refuses to remove the last email method while the account is unverified", () => {
+  const { store, logins } = makeStore();
+  store.createAccount("acct-3", "password-signup");
+  const pw = logins.linkPasswordMethod("acct-3", { email: "unverified@example.com", verifier: "scrypt$v1" });
+  logins.generateRecoveryCodes("acct-3", { count: 2 });
+  // Removing the only email-bearing method would erase the unverified
+  // signal and flip emailStatus to "none" (assertEmailVerified passes).
+  assert.throws(() => logins.removeMethod("acct-3", pw.id),
+    error => error.status === 409 && error.code === "last_unverified_email");
+  assert.equal(logins.emailStatus("acct-3"), "unverified");
+});
+
+test("removeMethod allows removing an email method once the account is verified", () => {
+  const { store, logins } = makeStore();
+  store.createAccount("acct-4", "password-signup");
+  const pw = logins.linkPasswordMethod("acct-4", { email: "ada@example.com", verifier: "scrypt$v1" });
+  const issued = logins.issueEmailVerifyCode({ accountId: "acct-4", email: "ada@example.com" });
+  logins.consumeEmailVerifyCode({ accountId: "acct-4", code: issued.code });
+  logins.generateRecoveryCodes("acct-4", { count: 2 });
+  const removed = logins.removeMethod("acct-4", pw.id);
+  assert.equal(removed.removed, true);
+});

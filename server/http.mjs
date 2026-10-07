@@ -2892,7 +2892,22 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/api/agent-invites/redeem" && req.method === "POST") {
         rate(`invite-redeem:${remoteAddress}`, 20);
         const data = await body(req);
-        if (!exact(data, ["code", "displayName"]) || typeof data.code !== "string" || typeof data.displayName !== "string") reject(422, "invalid_invite", "Invite code and displayName are required");
+        // Colony round-2 (musespark-explorer, 2026-10-06): the static 422 here
+        // blamed the caller for sending *less* when the body carried an *extra*
+        // field — a recovery trap for a cold client. Port the access-request
+        // diagnoseArguments pattern so the 422 names the offending field.
+        const diagnosis = diagnoseArguments({
+          required: ["code", "displayName"],
+          properties: { code: { type: "string" }, displayName: { type: "string" } },
+          additionalProperties: false,
+        }, data);
+        if (diagnosis) {
+          const parts = [];
+          if (diagnosis.missing.length) parts.push(`missing required field${diagnosis.missing.length > 1 ? "s" : ""}: ${diagnosis.missing.join(", ")}`);
+          if (diagnosis.unexpected.length) parts.push(`unexpected field${diagnosis.unexpected.length > 1 ? "s" : ""}: ${diagnosis.unexpected.join(", ")}`);
+          for (const [field, reason] of Object.entries(diagnosis.invalid)) parts.push(`${field}: ${reason}`);
+          reject(422, "invalid_invite", `Invalid invite redeem (${parts.join("; ")}). Send exactly {code, displayName}.`);
+        }
         const redeemedInvite = store.invites.redeem(data.code, { displayName: data.displayName, identitySecret: bearer(req) });
         // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md):
         // score the join, journal the would-be decision, admit anyway.

@@ -15,7 +15,7 @@ import { validId } from "../src/events.js";
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 const ACTIONABLE = new Set(["unread", "read"]);
 export const UPDATE_KINDS = Object.freeze([
-  "request", "mention", "dm", "review_requested",
+  "request", "mention", "dm", "review_requested", "handoff",
   "claim_lease_expiring", "claim_ci_failed", "claim_changes_requested",
   "invite_pending", "access_request"
 ]);
@@ -172,7 +172,10 @@ function projectRoom(store, roomId, memberId, identityId) {
 
   for (const request of Object.values(requests)) {
     if (!request || request.recipientId !== memberId) continue;
-    const context = byId.get(request.contextMessageId) ?? byId.get(request.id);
+    const latest = byId.get(request.contextMessageId) ?? byId.get(request.id);
+    // Same rule as reply-context (server/reply-requests.mjs): a private message is
+    // visible only to its author and recipient, so never echo it as the title.
+    const context = latest?.toMemberId && latest.authorId !== memberId && latest.toMemberId !== memberId ? null : latest;
     const updatedAt = iso(context?.createdAt ?? request.closedAt ?? request.createdAt);
     const terminal = request.status === "answered" || request.status === "declined" ? "answered"
       : request.status === "cancelled" ? "cleared" : null;
@@ -253,6 +256,21 @@ function projectRoom(store, roomId, memberId, identityId) {
     if (!item?.id) continue;
     const next = nextWorkStep(item, now, ownerId);
     if (next.memberId !== memberId || !next.needsAttention) continue;
+    // An open handoff triaged to this member is a reply owed: someone handed
+    // work over and is waiting on this member's response. It stays owed until
+    // the handoff closes or the member marks it read/done/clear.
+    if (next.action === "triaged_handoff" && item.handoff?.open) {
+      const handoffAt = iso(item.handoff.at ?? item.updatedAt ?? item.createdAt ?? now);
+      items.push(draft({
+        kind: "handoff", roomId, key: `handoff|${item.id}`,
+        title: clip(item.handoff.nextAction || item.title || item.id), actor: item.handoff.actorId ?? null,
+        createdAt: iso(item.handoff.at ?? item.createdAt ?? handoffAt), updatedAt: handoffAt,
+        basis: `${item.revision}|handoff|${item.handoff.eventId ?? ""}`,
+        sourceRef: { workItemId: item.id },
+        next: { method: "GET", path: `/api/rooms/${encodeURIComponent(roomId)}/work-context?workItemId=${encodeURIComponent(item.id)}` }
+      }));
+      continue;
+    }
     if (!["verify", "decide"].includes(next.action)) continue;
     const at = iso(item.updatedAt ?? item.createdAt ?? now);
     items.push(draft({
@@ -452,6 +470,92 @@ export function listAccountUpdates(store, token, binding, query = {}) {
   });
 }
 
+// Owed-replies inbox: the return trigger. One poll answers "what replies are
+// owed to ME right now" across every room this identity is linked to.
+// Owed kinds: direct questions (request), mentions awaiting reply, DMs,
+// review requests naming the viewer, and open handoffs addressed to the
+// viewer. Only unread/read items are owed; answered, handled, and cleared
+// items leave the list. Ordered by waiting time, oldest first, so the most
+// overdue reply surfaces first. Each entry carries who asked (actor), what
+// they asked (title excerpt), where (roomId plus the sourceRef ids, echoed
+// in `where`), how long it has been waiting (waitingMs), and the suggested
+// next read or reply (next). Reading never acknowledges or resolves items;
+// use the updates mark endpoints for that.
+const OWED_KINDS = Object.freeze(["request", "mention", "dm", "review_requested", "handoff"]);
+
+function parseOwedQuery({ limit = DEFAULT_LIMIT, cursor = null } = {}) {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_LIMIT) fail(422, "invalid_owed_query", "limit must be an integer from 1 to 100");
+  let decoded = null;
+  if (cursor != null && cursor !== "") {
+    try {
+      decoded = JSON.parse(Buffer.from(String(cursor), "base64url").toString("utf8"));
+    } catch { fail(422, "invalid_cursor", "Invalid owed-replies cursor"); }
+    if (!decoded || decoded.v !== 2 || typeof decoded.viewer !== "string"
+      || typeof decoded.createdAt !== "string" || typeof decoded.id !== "string") {
+      fail(422, "invalid_cursor", "Invalid owed-replies cursor");
+    }
+  }
+  return { limit, cursor: decoded };
+}
+
+function owedWhere(item) {
+  const ref = item.sourceRef ?? {};
+  const where = { roomId: item.roomId };
+  if (typeof ref.messageId === "string") where.messageId = ref.messageId;
+  if (typeof ref.requestId === "string") where.requestId = ref.requestId;
+  if (typeof ref.workItemId === "string") where.workItemId = ref.workItemId;
+  return where;
+}
+
+export function listOwedReplies(store, secret, query = {}) {
+  const identity = store.identities.resolveGlobalIdentitySecret(secret);
+  if (!identity) fail(401, "unauthenticated", "Unknown or revoked identity secret");
+  const parsed = parseOwedQuery(query);
+  return store.readTransaction(() => {
+    const viewer = `identity:${identity.identityId}`;
+    const now = store.now();
+    const items = [];
+    for (const room of identityRooms(store, identity.identityId)) {
+      let projected;
+      try {
+        projected = projectRoom(store, room.roomId, room.memberId, identity.identityId);
+      } catch {
+        continue;
+      }
+      if (projected.skipped) continue;
+      for (const item of projected.items) {
+        if (!OWED_KINDS.includes(item.kind) || !ACTIONABLE.has(item.state)) continue;
+        items.push(item);
+      }
+    }
+    items.sort((a, b) => a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+    let start = 0;
+    if (parsed.cursor) {
+      if (parsed.cursor.viewer !== viewer) fail(422, "invalid_cursor", "That cursor belongs to a different reader");
+      const index = items.findIndex(item => item.id === parsed.cursor.id && item.createdAt === parsed.cursor.createdAt);
+      if (index < 0) fail(409, "cursor_stale", "The list changed; start again without a cursor");
+      start = index + 1;
+    }
+    const slice = items.slice(start, start + parsed.limit);
+    const last = slice.at(-1);
+    const hasMore = start + parsed.limit < items.length;
+    return {
+      untrusted: true,
+      items: slice.map(item => {
+        const waited = now - Date.parse(item.createdAt);
+        return {
+          ...publish(item),
+          where: owedWhere(item),
+          waitingMs: Number.isFinite(waited) ? Math.max(0, waited) : 0
+        };
+      }),
+      hasMore,
+      limit: parsed.limit,
+      cursor: hasMore ? encode({ v: 2, viewer, createdAt: last.createdAt, id: last.id }) : null
+    };
+  });
+}
+
 export function markUpdate(store, token, roomId, itemId, action, requestId, binding = null, expectedBasis = undefined) {
   if (!["read", "done", "clear"].includes(action)) fail(422, "invalid_update", "Choose read, done, or clear");
   if (!validId(requestId) || !validId(itemId)) fail(422, "invalid_update", "Supply the item id and a request id");
@@ -505,6 +609,7 @@ export function retiredNeedsMeKeys(store, roomId, memberId) {
       if (item.kind === "request" && ref.requestId) keys.add(`direct_ask:${ref.requestId}`);
       if (item.kind === "mention" && ref.messageId) keys.add(`mention:${ref.messageId}`);
       if (item.kind === "dm" && ref.messageId) keys.add(`dm:${ref.messageId}`);
+      if (item.kind === "handoff" && ref.workItemId) keys.add(`handoff:${ref.workItemId}`);
     }
     return keys;
   } catch {

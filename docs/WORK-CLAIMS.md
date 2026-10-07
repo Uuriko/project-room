@@ -110,10 +110,10 @@ Missing or invalid stored values use the defaults.
 
 ## Leases
 
-Default **24h**. `leaseHours` must be greater than 0 and at most **168**.
-A larger value is **422** `invalid_claim_input` and the message names that
-range. `null` opts out of expiry and is only accepted from the room owner or
-a member with `manage_claims`. Other callers get **422**.
+Default **24h**. `leaseHours` must be a number from **0.25** to **168**.
+A value outside that range is **422** `invalid_claim_input` and the message
+names the range. `null` opts out of expiry and is only accepted from the room
+owner or a member with `manage_claims`. Other callers get **422**.
 
 Expired leases are released on ordinary work-claims requests and on
 `POST .../sweep`. The append-PR update alternative instead refuses a lapsed
