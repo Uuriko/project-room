@@ -426,7 +426,18 @@ export const unfencedAdditiveTables = Object.freeze([
   // Purely additive and intentionally NOT fenced — older writers have no code
   // path to it; the owner-managed roster rules in server/squads.mjs are the
   // integrity gate.
-  "squads"
+  "squads",
+  // eval_seats / eval_assignments / eval_commits / eval_reveals / eval_bonds /
+  // eval_challenges (independent evaluator seat, lane 6, server/evaluator-seat.mjs):
+  // purely additive and intentionally NOT fenced — older writers have no code
+  // path to them, and the module's commit→reveal→finalize transitions plus the
+  // forfeit-vs-slash rules are the integrity gate.
+  "eval_seats",
+  "eval_assignments",
+  "eval_commits",
+  "eval_reveals",
+  "eval_bonds",
+  "eval_challenges"
 ]);
 // Created on first use, not in the constructor. A database that has never
 // issued an OAuth grant or persisted an abuse rate bucket does not have
