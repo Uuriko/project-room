@@ -40,9 +40,12 @@ export function handlePublicWorkMcp(store, message, secret, mcpUrl = ROOM_MCP_PU
  if (!hasId) return null; // Notifications never initiate a claim mutation.
  const name = message.params?.name, args = message.params?.arguments === undefined ? {} : message.params.arguments;
  const selected = publicWorkMcpDefinitions.find(tool => tool.name === name);
+ // #1528(b): auth before argument validation on gated tools. An anonymous
+ // caller with malformed args must get the auth rejection, not a
+ // schema-describing invalid_arguments oracle.
+ if (!secret && !anonymousPublicWorkMcpTools.includes(selected)) return mcpCallError(requestId, { reason: 'auth_required', tool: name });
  const problems = diagnoseArguments(selected.inputSchema, args);
  if (problems) return mcpCallError(requestId, { reason: 'invalid_arguments', tool: name, ...problems });
- if (!secret && !anonymousPublicWorkMcpTools.includes(selected)) return mcpCallError(requestId, { reason: 'auth_required', tool: name });
  try {
   let value;
   if (name === 'public_work_recommend') value = store.publicWorkClaims.match(secret, { ...args, autoClaim: false });

@@ -46,6 +46,9 @@ test("MCP tools/call names unknown_tool, auth_required, and invalid_arguments", 
   assert.match(auth.error.message, /saved identity secret/);
   assert.match(auth.error.data.hint, /saved connection/);
   assert.match(auth.error.data.hint, /\/llms\.txt/, "new agents still have a setup path");
+  // #1551: the auth_required next[] must not name hosted tools to an
+  // anonymous caller; it points back at the visible catalog instead.
+  assert.deepEqual(auth.error.data.next, [{ command: "tools/list" }]);
 
   const extra = handleMcpJoinRpc(rpc("tools/call", { name: "room_join_packet", arguments: { token: "nope" } }));
   assert.equal(extra.error.message, "invalid_arguments");
