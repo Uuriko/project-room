@@ -97,12 +97,14 @@ test("contextual email login reports a rejected password then signs into the exi
   const form = page.locator('#auth-signin-ui [data-signin-form="password"]');
   await form.locator('[name="email"]').fill(email); await form.locator('[name="password"]').fill("wrong-synthetic-password");
   const rejected = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/password/login");
-  await form.locator('button[type="submit"]').click(); assert.equal((await rejected).status(), 401);
+  await form.locator('[name="password"]').press("Enter"); assert.equal((await rejected).status(), 401);
   await page.locator('#auth-signin-ui [data-signin-status].error').waitFor();
   assert.equal(await form.locator('[name="password"]').inputValue(), "", "failed password is never repainted");
-  await form.locator('[name="password"]').fill(password);
+  assert.equal(await form.locator('[name="email"]').inputValue(), email, "the email remains available for retry");
+  assert.equal(await form.locator('[name="password"]').evaluate(node => node === document.activeElement), true, "a rejected password returns focus to the cleared password field");
+  await page.keyboard.type(password);
   const accepted = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/password/login");
-  await form.locator('button[type="submit"]').click(); assert.equal((await accepted).status(), 200);
+  await form.locator('[name="password"]').press("Enter"); assert.equal((await accepted).status(), 200);
   await page.locator("#auth-panel").waitFor({ state: "hidden" });
   const actual = await (await page.context().request.get(`${origin}/api/account-session`)).json();
   assert.equal(actual.authenticated, true); assert.equal(actual.account.id, "existing-password-account");
