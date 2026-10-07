@@ -469,6 +469,7 @@
   "tests/mention-receipts.test.js": 24697,
   "tests/mention-span.test.js": 5573,
   "tests/merge-hold.test.js": 9479,
+  "tests/mergehold-gate.test.js": 5000,
   "tests/message-edit-delete.test.js": 14793,
   "tests/message-markdown.test.js": 5299,
   "tests/message-posted-body.test.js": 24912,
