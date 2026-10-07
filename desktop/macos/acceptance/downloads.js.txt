@@ -53,18 +53,24 @@ await wait(() => document.querySelector('#main')?.hidden === false && document.q
 check(new URL(location.href).searchParams.get('room') === firstRoom, 'later personalization keeps original personal room');
 // Existing room membership names are independent from the account profile.
 check(document.querySelector('#identity-label').textContent === 'Owner', 'profile editing preserves existing room membership identity');
+// Use the actual composer stage/commit path and actual message download button.
+const bytes = Uint8Array.from([0, 1, 127, 128, 255, 10]);
+const transfer = new DataTransfer();
+transfer.items.add(new File([bytes], 'native-attachment.bin', { type: 'application/octet-stream' }));
+const fileInput = document.querySelector('#composer-file');
+fileInput.files = transfer.files; fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+await wait(() => document.querySelector('#composer-attachments')?.textContent.includes('native-attachment.bin') && !document.querySelector('#composer-attachments')?.textContent.includes('Uploading'), 'real native upload staged');
+fill('#message-input', 'Actual committed native attachment.');
+document.querySelector('#message-form').requestSubmit();
+await wait(() => document.querySelector('[data-download-file]')?.getClientRects().length, 'committed attachment Download button');
+document.querySelector('[data-download-file]').click();
+await wait(() => document.querySelector('.message-files [role=status]')?.textContent === 'Download started', 'actual committed attachment download');
 fill('#message-input', 'Keep this native draft when I close the window.');
 await wait(() => localStorage.getItem('project-room:drafts:v3')?.includes('Keep this native draft'), 'durable scoped text draft');
 check(!sessionStorage.getItem('project-room:drafts:v3'), 'Mac uses durable draft storage');
 check(document.documentElement.scrollWidth <= innerWidth + 1, 'no horizontal overflow');
 
-// Exercise the real room-export handler, then attachment-shaped binary Blob delivery.
+// Exercise the real room-export handler as the other authorized Blob owner.
 document.querySelector('#record-export-html').click();
 await wait(() => document.querySelector('#record-export-status').textContent.includes('Download started:'), 'room export prepared');
-const bytes = Uint8Array.from([0, 1, 127, 128, 255, 10]);
-const objectURL = URL.createObjectURL(new Blob([bytes], {type: 'application/octet-stream'}));
-const attachment = document.createElement('a');
-attachment.href = objectURL; attachment.download = 'native-attachment.bin';
-document.body.append(attachment); attachment.click(); attachment.remove();
-setTimeout(() => URL.revokeObjectURL(objectURL), 10000);
-return JSON.stringify({ roomExport: true, attachmentBlob: true, realGmailAccount: false });
+return JSON.stringify({ roomExport: true, committedAttachmentDownload: true, realGmailAccount: false });

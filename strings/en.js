@@ -122,5 +122,10 @@ export default {
   "profile.failed": "Could not load the profile.",
   "profile.save_failed": "Could not save the profile.",
   "profile.close": "Close",
-  "profile.editing": "editing your profile"
+  "profile.editing": "editing your profile",
+  "file.download.action": "Download {filename}",
+  "file.download.pending": "Downloading…",
+  "file.download.started": "Download started",
+  "file.download.unavailable": "File unavailable",
+  "file.download.retry": "Couldn’t download. Try again."
 };

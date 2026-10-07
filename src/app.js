@@ -330,6 +330,7 @@ let recovery;
 let leavingPage = false;
 let composerFiles = [];
 let roomFilesByMessage = new Map();
+const messageFileDownloads = new Map();
 try { recovery = new DraftRecovery(navigator.userAgent.includes("ProjectRoomMac/") ? window.localStorage : window.sessionStorage); } catch { recovery = new DraftRecovery(null); }
 const draftScope = draftRecoveryScope;
 const client = new RoomClient({
@@ -504,6 +505,7 @@ const client = new RoomClient({
     clearStoredPasswords();
     composerFiles = [];
     roomFilesByMessage = new Map();
+    messageFileDownloads.clear();
     renderComposerFiles();
     $("#work-dialog").close();
     $("#room-overview-dialog").close();
@@ -2454,7 +2456,45 @@ function reactionButtonsFor(m) {
 function messageFileChips(messageId) {
   const files = roomFilesByMessage.get(messageId) ?? [];
   if (!files.length) return "";
-  return `<div class="message-files">${files.map(file => `<span class="file-chip">${esc(fileChipLabel(file.filename))}</span>`).join("")}</div>`;
+  return `<div class="message-files">${files.map(file => {
+    const download = messageFileDownloads.get(file.id);
+    return `<span class="file-chip"><button type="button" data-download-file="${esc(file.id)}" data-file-message="${esc(messageId)}" data-focus-key="file-download:${esc(file.id)}" aria-label="${esc(uiText("file.download.action", { filename: fileChipLabel(file.filename) }))}"${download?.busy ? ' aria-disabled="true" aria-busy="true"' : ""}>${esc(fileChipLabel(file.filename))}</button>${download?.status ? `<span role="status">${esc(download.status)}</span>` : ""}</span>`;
+  }).join("")}</div>`;
+}
+async function downloadMessageFile(id, messageId) {
+  const file = roomFilesByMessage.get(messageId)?.find(entry => entry.id === id);
+  const authSession = client.session, generation = client.generation, roomId = state?.room?.id;
+  const owns = () => Boolean(state && session === authSession && client.session === authSession
+    && client.generation === generation && state.room?.id === roomId && client.ownsAccountSession()
+    && conversation.byId.get(messageId) && !conversation.byId.get(messageId).deletedAt);
+  if (!file || file.state !== "committed" || !owns() || messageFileDownloads.get(id)?.busy) return;
+  const pending = { busy: true, status: uiText("file.download.pending") };
+  messageFileDownloads.set(id, pending); renderMessages();
+  try {
+    const result = await client.request(client.path(`/files/${encodeURIComponent(id)}`));
+    if (!owns() || messageFileDownloads.get(id) !== pending) return;
+    const attachment = result?.attachment;
+    if (result.roomId !== roomId || attachment?.id !== id || attachment.messageId !== messageId
+      || attachment.state !== "committed" || attachment.encoding !== "base64" || typeof attachment.data !== "string"
+      || attachment.sha256 !== file.sha256 || attachment.byteLength !== file.byteLength) throw new Error("attachment_unconfirmed");
+    const bytes = Uint8Array.from(atob(attachment.data), char => char.charCodeAt(0));
+    if (bytes.length !== file.byteLength || bytes.length > COMPOSER_FILE_BYTES) throw new Error("attachment_unconfirmed");
+    const digest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map(value => value.toString(16).padStart(2, "0")).join("");
+    if (digest !== file.sha256) throw new Error("attachment_unconfirmed");
+    if (!owns() || messageFileDownloads.get(id) !== pending) return;
+    const url = URL.createObjectURL(new Blob([bytes], { type: "application/octet-stream" }));
+    const link = document.createElement("a");
+    link.href = url; link.download = file.filename; link.hidden = true;
+    document.body.append(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    pending.status = uiText("file.download.started");
+  } catch (error) {
+    if (!owns() || messageFileDownloads.get(id) !== pending) return;
+    if ([401, 403].includes(error.status) || error.code === "session_binding_changed") { client.handleFailure(error); return; }
+    pending.status = [404, 410].includes(error.status) ? uiText("file.download.unavailable") : uiText("file.download.retry");
+  } finally {
+    if (owns() && messageFileDownloads.get(id) === pending) { pending.busy = false; renderMessages(); }
+  }
 }
 function renderComposerFiles() {
   const host = $("#composer-attachments");
@@ -4033,6 +4073,8 @@ function submitRequest(form) {
 // The menu lifting click listener is no longer needed (content-visibility
 // removed from .message). The menu positions correctly without it.
 $("#message-list").addEventListener("click", e => {
+  const file = e.target.closest("[data-download-file]");
+  if (file) { void downloadMessageFile(file.dataset.downloadFile, file.dataset.fileMessage); return; }
   if (e.target.closest("[data-empty-write]")) { $("#message-input").focus(); return; }
   if (e.target.closest("[data-empty-invite]")) { $("#invite-people-button")?.click(); return; }
   const chip = e.target.closest("[data-mention-id]");
