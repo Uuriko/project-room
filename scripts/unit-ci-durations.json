@@ -124,6 +124,7 @@
   "tests/board-waiting.test.js": 5584,
   "tests/board-wake-ready-work.test.js": 26661,
   "tests/board-wake.test.js": 27645,
+  "tests/bonds-1554-hint.test.js": 17000,
   "tests/bonds-m3.test.js": 51729,
   "tests/bonds.test.js": 81163,
   "tests/boot-config.test.js": 8121,
