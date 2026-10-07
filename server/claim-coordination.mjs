@@ -100,6 +100,13 @@ const stamp = (atMs, agentId, action, note) => Object.freeze({
 // Returns null when the claim is not live or already settled.
 export function settlePullRequest(item, outcome, nowMs) {
   if (!LIVE_CLAIM_STATES.has(item.state)) return null;
+  // #1526 B2: a lapsed lease is never settled. The HTTP board path
+  // auto-releases expired claims before any settlement read; the cron must
+  // match it, so a merged PR on a dead round is not credited as done (the
+  // lease_expired event and its flake signal stand instead).
+  if (typeof item.leaseExpiresAt === "string"
+    && Number.isFinite(Date.parse(item.leaseExpiresAt))
+    && Date.parse(item.leaseExpiresAt) <= nowMs) return null;
   if (!pullsReadyToSettle(item)) return null;
   if (outcome !== "merged" && outcome !== "closed") return null;
   const at = new Date(nowMs).toISOString();

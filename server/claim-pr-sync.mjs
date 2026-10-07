@@ -16,7 +16,7 @@
 // The token (GITHUB_TOKEN or GH_TOKEN) is never logged or stored. Public
 // repositories still answer when it is absent.
 import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
-import { closeWhenLive, notePullMerged, recordCi } from "./work-claims.mjs";
+import { ACTIVE_CLAIM_STATES, closeWhenLive, notePullMerged, recordCi, releaseExpired } from "./work-claims.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
 import {
   PULL_CANDIDATE_CAP, PULL_MISSING_BACKOFF_MS, holdForRateLimit, nextPullBackoff,
@@ -426,6 +426,11 @@ function loadDueClaims(store, nowMs) {
 export async function syncClaimPullRequests(store, { env = null, fetchImpl = fetch, nowMs = Date.now(), token = undefined, deadline = Infinity, yieldBetween = null } = {}) {
   if (!store?.db || !store.workClaims) return { checked: 0, updated: 0 };
   closeDeployedClaims(store, nowMs);
+  // #1526 B2: sweep lapsed leases before polling, exactly like the HTTP board
+  // path (sweepRoom in server/work-claim-routes.mjs). A claim whose lease
+  // lapsed is auto-released (lease_expired event, flake signal) so the tick
+  // can never settle a dead round as done — the cron and HTTP paths agree.
+  sweepExpiredClaimLeases(store, nowMs);
   const access = token === undefined ? githubToken(env ?? process.env) : token;
   if (Date.now() > deadline) return { checked: 0, updated: 0, budgetExceeded: 1 };
   if (readClaimPullBudget(store) > nowMs) return { checked: 0, updated: 0, rateLimited: true };
@@ -484,6 +489,50 @@ function closeDeployedClaims(store, nowMs) {
       });
     }
   }
+}
+
+// #1526 B2: the HTTP board path sweeps lapsed leases at the top of every
+// request (sweepRoom in server/work-claim-routes.mjs); the per-minute cron
+// never did, so a lapsed round could be settled pr_merged by the tick while
+// the same facts on the HTTP path released it first (claim_flaked). Sweep
+// here with the same semantics — auto-release, lease_expired event, one
+// wake per expiry — so both settlement paths read the same world.
+function sweepExpiredClaimLeases(store, nowMs) {
+  let roomIds = [];
+  try {
+    roomIds = store.db.prepare("SELECT DISTINCT room_id AS roomId FROM work_claims").all().map(row => row.roomId);
+  } catch (error) {
+    if (/no such table/i.test(error?.message ?? "")) return 0;
+    throw error;
+  }
+  let released = 0;
+  for (const roomId of roomIds) {
+    const expired = store.workClaims.list(roomId).filter(item =>
+      ACTIVE_CLAIM_STATES.includes(item.state)
+      && typeof item.leaseExpiresAt === "string"
+      && Number.isFinite(Date.parse(item.leaseExpiresAt))
+      && Date.parse(item.leaseExpiresAt) <= nowMs);
+    if (expired.length === 0) continue;
+    store.workClaims.transaction(() => {
+      for (const before of expired) {
+        const [item] = releaseExpired([before], nowMs);
+        if (!item || item.state !== "unclaimed" || before.state === "unclaimed") continue;
+        store.workClaims.set(roomId, item);
+        const receipt = emitWorkClaimEvent(store, roomId, {
+          actorId: before.owner, item, action: "lease_expired", previousOwnerId: before.owner,
+          atMs: nowMs, paths: before.files ?? []
+        });
+        // One wake per expiry. The message id includes the lapsed lease time,
+        // so a later claim that expires again wakes again, and a repeat sweep
+        // of this lapse coalesces.
+        enqueueClaimWake(store, roomId, before.owner,
+          `work-claim:${item.id}:lease_expired:${before.leaseExpiresAt ?? receipt?.sequence ?? nowMs}`,
+          { reason: "lease_expired", actorId: before.owner });
+        released += 1;
+      }
+    });
+  }
+  return released;
 }
 
 // Settle every live claim linked to a closing pull_request webhook payload.
