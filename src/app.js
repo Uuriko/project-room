@@ -853,6 +853,16 @@ async function openRememberedRoomOrInbox() {
     return false;
   }
 }
+// First-room creation owns this handoff; ordinary room restores keep their focus.
+function focusFirstRoomComposer(body, owned, restored) {
+  const input = $("#message-input");
+  if (body?.created !== true || accountClient.session !== owned || !restored || session !== restored
+    || state?.room?.id !== body.room?.id || state.room.kind !== "personal"
+    || leavingPage || signoutLoading || busy || currentThreadId || replyToId
+    || pendingMessage || pendingAction || drafts.hasText() || document.querySelector("dialog[open]")
+    || input.value || input.disabled || input.readOnly || input.closest("[hidden]") || !input.getClientRects().length) return;
+  input.focus();
+}
 // --- Q3-C: signup with no chosen room opens that account's room. ---
 async function openPersonalRoomAfterSignup() {
   const owned = accountClient.session;
@@ -870,7 +880,11 @@ async function openPersonalRoomAfterSignup() {
   const roomId = body?.room?.id;
   if (!roomId) { showAccountWorkspace(); return; }
   history.replaceState(null, "", roomHandoffLocation(roomId));
-  try { await client.restore(roomId); inboxUI.showRooms(); inboxUI.refreshSetup?.(); }
+  try {
+    const restored = await client.restore(roomId);
+    inboxUI.showRooms(); inboxUI.refreshSetup?.();
+    focusFirstRoomComposer(body, owned, restored);
+  }
   catch { if (accountClient.session === owned && !state) showAccountWorkspace(); }
 }
 // --- end Q3-C ---
@@ -955,7 +969,11 @@ async function openStartedRoom() {
   const roomId = body?.room?.id;
   if (!roomId) { inboxUI.open(); return; }
   history.replaceState(null, "", roomHandoffLocation(roomId));
-  try { await client.restore(roomId); inboxUI.showRooms(); inboxUI.refreshSetup?.(); }
+  try {
+    const restored = await client.restore(roomId);
+    inboxUI.showRooms(); inboxUI.refreshSetup?.();
+    focusFirstRoomComposer(body, owned, restored);
+  }
   catch { if (accountClient.session === owned && !state) { inboxUI.showRoomList(); $("#account-rooms-status").textContent = "Couldn’t open your room. Choose it below."; } }
 }
 async function confirmAccount() {
