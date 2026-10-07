@@ -12,6 +12,10 @@
 //   node scripts/coverage-thresholds.mjs --coverage-dir <dir>   # evaluate existing data
 //   node scripts/coverage-thresholds.mjs --baseline             # collect + print measured JSON
 //   node scripts/coverage-thresholds.mjs --config <path>        # alternate config
+//   node scripts/coverage-thresholds.mjs --summary <file> [--summary <file>...]
+//                                                   # evaluate per-shard summaries (CI)
+//   node scripts/coverage-thresholds.mjs --summarize --coverage-dir <dir> --out <file>
+//                                                   # write one shard's compact summary
 //
 // Exit codes: 0 = all thresholds met; 1 = threshold breach or suite failure;
 // 2 = usage/config error.
@@ -43,6 +47,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  writeFileSync,
 } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -336,24 +341,21 @@ export function listModuleFiles(root, dir, extraExclude = []) {
 }
 
 /**
- * Evaluate every configured module against per-payload coverage.
+ * Union of covered 0-based line indices per module file, from raw V8 payloads.
+ * Returns { [moduleName]: { files: Map<rel, Set<lineIdx>>, zeroCoverageFiles: string[] } }.
  * A line counts as covered when ANY payload (test process) covers it —
  * coverage is monotonic in the test set. Files with no coverage data count
  * as 0 covered lines (decay-catching).
  */
-export function evaluateModules(root, config, grouped) {
+export function unionCoveredLines(root, config, grouped) {
   const rootPrefix = pathToFileURL(root + sep).href;
-  const results = {};
+  const out = {};
   for (const [name, mod] of Object.entries(config.modules)) {
     const files = listModuleFiles(root, mod.dir, mod.exclude || []);
-    let covered = 0;
-    let coverable = 0;
-    const fileRows = [];
+    const fileSets = new Map();
     const zeroCoverageFiles = [];
     for (const rel of files) {
       const text = readFileSync(join(root, rel), "utf8");
-      const coverableArr = coverableLines(text);
-      const coverableCount = coverableArr.filter(Boolean).length;
       const payloads = grouped.get(rootPrefix + rel);
       const union = new Set();
       if (payloads) {
@@ -363,28 +365,158 @@ export function evaluateModules(root, config, grouped) {
       } else {
         zeroCoverageFiles.push(rel);
       }
-      const pct = coverableCount === 0 ? 100 : (100 * union.size) / coverableCount;
-      covered += union.size;
+      fileSets.set(rel, union);
+    }
+    out[name] = { files: fileSets, zeroCoverageFiles };
+  }
+  return out;
+}
+
+/** Compact per-shard coverage summary format version. */
+export const COVERAGE_SUMMARY_VERSION = 1;
+
+/**
+ * Compact per-shard coverage summary: covered 0-based line indices per module
+ * file. Small enough to ride the unit-shard evidence artifact; the coverage
+ * job unions summaries across shards instead of re-running the suite.
+ */
+export function summarizeCoverage(root, config, grouped) {
+  const unions = unionCoveredLines(root, config, grouped);
+  const modules = {};
+  for (const [name, u] of Object.entries(unions)) {
+    const files = {};
+    for (const [rel, set] of u.files) {
+      if (set.size > 0) files[rel] = [...set].sort((a, b) => a - b);
+    }
+    modules[name] = { files };
+  }
+  return { version: COVERAGE_SUMMARY_VERSION, modules };
+}
+
+function assertSummaryShape(summary, label) {
+  if (!summary || typeof summary !== "object") throw new Error(`${label}: summary must be an object`);
+  if (summary.version !== COVERAGE_SUMMARY_VERSION)
+    throw new Error(`${label}: unsupported summary version ${JSON.stringify(summary.version)}`);
+  if (!summary.modules || typeof summary.modules !== "object")
+    throw new Error(`${label}: summary must have a modules object`);
+  for (const [name, mod] of Object.entries(summary.modules)) {
+    if (!mod || typeof mod !== "object" || !mod.files || typeof mod.files !== "object")
+      throw new Error(`${label}: module ${JSON.stringify(name)} must have a files object`);
+    for (const [rel, lines] of Object.entries(mod.files)) {
+      if (!Array.isArray(lines) || lines.some((n) => !Number.isInteger(n) || n < 0))
+        throw new Error(`${label}: module ${JSON.stringify(name)} file ${JSON.stringify(rel)} must list covered lines as non-negative integers`);
+    }
+  }
+}
+
+/**
+ * Evaluate per-module coverage from per-shard summaries (union of covered
+ * lines across shards). Returns the same results shape as evaluateModules, so
+ * checkThresholds/formatReport work unchanged. A summary line that is not
+ * coverable in the current source (stale line number, comment line) never
+ * inflates coverage.
+ */
+export function evaluateSummaries(root, config, summaries) {
+  if (!Array.isArray(summaries) || summaries.length === 0)
+    throw new Error("evaluateSummaries: need at least one summary");
+  summaries.forEach((s, i) => assertSummaryShape(s, `summary[${i}]`));
+  const unions = {};
+  for (const [name, mod] of Object.entries(config.modules)) {
+    const files = listModuleFiles(root, mod.dir, mod.exclude || []);
+    const fileSets = new Map();
+    const zeroCoverageFiles = [];
+    for (const rel of files) {
+      const union = new Set();
+      let seen = false;
+      for (const s of summaries) {
+        const lines = s.modules[name]?.files[rel];
+        if (Array.isArray(lines)) {
+          seen = true;
+          for (const n of lines) union.add(n);
+        }
+      }
+      if (!seen) zeroCoverageFiles.push(rel);
+      fileSets.set(rel, union);
+    }
+    unions[name] = { files: fileSets, zeroCoverageFiles };
+  }
+  return reportFromUnions(root, config, unions);
+}
+
+/**
+ * Shared reporting from per-module file unions: percentages, uncovered-line
+ * lists, lowest files. Covered lines are intersected with the current
+ * source's coverable lines, so a stale summary can never inflate coverage.
+ */
+function reportFromUnions(root, config, unions) {
+  const results = {};
+  for (const [name, mod] of Object.entries(config.modules)) {
+    const u = unions[name];
+    let covered = 0;
+    let coverable = 0;
+    const fileRows = [];
+    for (const [rel, union] of u.files) {
+      const text = readFileSync(join(root, rel), "utf8");
+      const coverableArr = coverableLines(text);
+      const coverableCount = coverableArr.filter(Boolean).length;
+      let coveredCount = 0;
+      for (const i of union) if (coverableArr[i]) coveredCount++;
+      const pct = coverableCount === 0 ? 100 : (100 * coveredCount) / coverableCount;
+      covered += coveredCount;
       coverable += coverableCount;
       const uncoveredLines = [];
       for (let i = 0; i < coverableArr.length && uncoveredLines.length < 25; i++) {
         if (coverableArr[i] && !union.has(i)) uncoveredLines.push(i + 1);
       }
-      fileRows.push({ file: rel, covered: union.size, coverable: coverableCount, pct, uncoveredLines });
+      fileRows.push({ file: rel, covered: coveredCount, coverable: coverableCount, pct, uncoveredLines });
     }
     fileRows.sort((a, b) => a.pct - b.pct);
     results[name] = {
       dir: mod.dir,
       threshold: mod.threshold,
-      files: files.length,
+      files: u.files.size,
       covered,
       coverable,
       pct: coverable === 0 ? 100 : (100 * covered) / coverable,
-      zeroCoverageFiles,
+      zeroCoverageFiles: u.zeroCoverageFiles,
       lowestFiles: fileRows.slice(0, 10).map(r => ({ file: r.file, pct: r.pct })),
     };
   }
   return results;
+}
+
+/**
+ * Evaluate every configured module against per-payload coverage.
+ * A line counts as covered when ANY payload (test process) covers it —
+ * coverage is monotonic in the test set. Files with no coverage data count
+ * as 0 covered lines (decay-catching).
+ */
+export function evaluateModules(root, config, grouped) {
+  return reportFromUnions(root, config, unionCoveredLines(root, config, grouped));
+}
+
+/**
+ * Group every V8 coverage payload in a directory by script URL, keeping each
+ * payload's function list separate (no cross-process range merging).
+ * Returns { grouped, payloadCount }.
+ */
+export function groupCoverageDir(coverageDir, root = ROOT) {
+  const payloads = readCoveragePayloads(coverageDir);
+  const grouped = new Map();
+  let payloadCount = 0;
+  for (const payload of payloads) {
+    payloadCount++;
+    const one = groupFunctionsByUrl([payload], root);
+    for (const [url, list] of one) {
+      let target = grouped.get(url);
+      if (!target) {
+        target = [];
+        grouped.set(url, target);
+      }
+      target.push(...list);
+    }
+  }
+  return { grouped, payloadCount };
 }
 
 /** Compare module percentages against thresholds. */
@@ -441,6 +573,9 @@ function parseArgs(argv) {
     coverageDir: null,
     collectOnly: false,
     baseline: false,
+    summaries: [],
+    summarize: false,
+    out: null,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -448,8 +583,11 @@ function parseArgs(argv) {
     else if (a === "--coverage-dir") opts.coverageDir = resolve(argv[++i] || "");
     else if (a === "--collect-only") opts.collectOnly = true;
     else if (a === "--baseline") opts.baseline = true;
+    else if (a === "--summary") opts.summaries.push(resolve(argv[++i] || ""));
+    else if (a === "--summarize") opts.summarize = true;
+    else if (a === "--out") opts.out = resolve(argv[++i] || "");
     else if (a === "--help" || a === "-h") {
-      console.log("usage: node scripts/coverage-thresholds.mjs [--config <path>] [--coverage-dir <dir>] [--collect-only] [--baseline]");
+      console.log("usage: node scripts/coverage-thresholds.mjs [--config <path>] [--coverage-dir <dir>] [--collect-only] [--baseline] [--summary <file> ...] [--summarize --coverage-dir <dir> --out <file>]");
       process.exit(0);
     } else {
       console.error(`unknown argument: ${a}`);
@@ -463,6 +601,22 @@ function parseArgs(argv) {
   return opts;
 }
 
+function readSummaryFile(path) {
+  let raw;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch (err) {
+    console.error(`coverage gate: cannot read summary ${path}: ${err.message}`);
+    process.exit(2);
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    console.error(`coverage gate: summary ${path} is not valid JSON`);
+    process.exit(2);
+  }
+}
+
 const isMain = !!process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
 if (isMain) {
   const opts = parseArgs(process.argv.slice(2));
@@ -472,6 +626,40 @@ if (isMain) {
   } catch (err) {
     console.error(`coverage gate: ${err.message}`);
     process.exit(2);
+  }
+
+  // Sharded evaluation: union per-shard summaries (written by unit-ci.mjs into
+  // the shard evidence) instead of re-running the suite. Every --summary path
+  // must exist and parse — a missing shard summary fails closed here rather
+  // than scoring partial data as complete.
+  if (opts.summaries.length > 0) {
+    const summaries = opts.summaries.map(readSummaryFile);
+    let results;
+    try {
+      results = evaluateSummaries(ROOT, config, summaries);
+    } catch (err) {
+      console.error(`coverage gate: ${err.message}`);
+      process.exit(2);
+    }
+    const check = checkThresholds(config, results);
+    console.log(formatReport(results, check));
+    process.exit(check.ok ? 0 : 1);
+  }
+
+  // Summarization for one shard's raw payloads (unit-ci.mjs collection step).
+  if (opts.summarize) {
+    if (!opts.coverageDir || !opts.out) {
+      console.error("--summarize requires --coverage-dir and --out");
+      process.exit(2);
+    }
+    const { grouped, payloadCount } = groupCoverageDir(opts.coverageDir, ROOT);
+    if (payloadCount === 0) {
+      console.error(`coverage gate: no coverage data in ${opts.coverageDir}`);
+      process.exit(2);
+    }
+    writeFileSync(opts.out, JSON.stringify(summarizeCoverage(ROOT, config, grouped)));
+    console.log(`coverage summary written to ${opts.out} from ${payloadCount} payloads`);
+    process.exit(0);
   }
 
   let coverageDir = opts.coverageDir;
@@ -488,21 +676,7 @@ if (isMain) {
     }
   }
 
-  const payloads = readCoveragePayloads(coverageDir);
-  const grouped = new Map();
-  let payloadCount = 0;
-  for (const payload of payloads) {
-    payloadCount++;
-    const one = groupFunctionsByUrl([payload], ROOT);
-    for (const [url, list] of one) {
-      let target = grouped.get(url);
-      if (!target) {
-        target = [];
-        grouped.set(url, target);
-      }
-      target.push(...list);
-    }
-  }
+  const { grouped, payloadCount } = groupCoverageDir(coverageDir, ROOT);
   if (payloadCount === 0) {
     console.error(`coverage gate: no coverage data in ${coverageDir}`);
     process.exit(2);
