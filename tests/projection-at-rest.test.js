@@ -11,6 +11,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { RoomStore, PILOT_LIMITS } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
@@ -232,4 +233,24 @@ test("the projection-cap rejection names the recovery (ask the owner, or retry l
   assert.match(failure.message, /no data was changed/, "keeps the no-write guarantee");
   assert.match(failure.message, /room owner/i, "names asking the room owner as the recovery");
   assert.match(failure.message, /try again later/i, "names retrying later as the recovery");
+});
+
+test("every PILOT_LIMITS.projectionBytes 409 names a recovery (no dead-end cap message)", () => {
+  // 2026-10-07 muse-room incident follow-up: PR #1810 fixed the 6
+  // "Room projection limit reached" sites but left 7 sibling
+  // PILOT_LIMITS.projectionBytes checks (guest-invites.mjs, guest-agent-links.mjs,
+  // share-links.mjs) rejecting with "Room storage limit reached" and no recovery.
+  // Every projection-cap rejection must tell the user what to do, so a new site
+  // added without recovery text fails this test.
+  const serverDir = fileURLToPath(new URL("../server/", import.meta.url));
+  const offenders = [];
+  for (const name of readdirSync(serverDir).filter(file => file.endsWith(".mjs"))) {
+    const source = readFileSync(join(serverDir, name), "utf8");
+    source.split("\n").forEach((line, index) => {
+      if (!line.includes("PILOT_LIMITS.projectionBytes") || !line.includes('fail(409, "pilot_limit"')) return;
+      if (!/room owner|ask its owner|try again later/i.test(line)) offenders.push(`${name}:${index + 1}`);
+    });
+  }
+  assert.deepEqual(offenders, [],
+    `projection-cap 409 without a named recovery: ${offenders.join(", ")}`);
 });
