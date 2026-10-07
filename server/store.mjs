@@ -4770,12 +4770,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, command.data.memberId);
         this.reminders.retireMember(roomId, command.data.memberId);
       }
-      // RC-2026-09-18-051: wake-on-mention. An @-mention or DM addressed to
-      // an offline wakeable agent enqueues a wake signal (delivered on the
-      // agent's next heartbeat) and journals an agent.wake webhook delivery
-      // for any subscription the agent registered. Runs in the same
-      // transaction as the message event, so a wake is never recorded
-      // without its triggering message.
+      // RC-2026-10-07: reaction-as-ack. The agent.wake payload's one-tap ack
+      // copy (WAKE_ACK_HINT) says "react 👍 to acknowledge", so an active
+      // reaction by a member marks THEIR OWN pending wake signals for that
+      // message delivered. Without this the same signal re-appears on every
+      // heartbeat poll after the member reacted (the phantom re-wake loop).
+      // Runs in the same transaction as the reaction event; never throws —
+      // an ack is best-effort and must not fail the reaction.
+      if (command.type === T.MESSAGE_REACTION_SET && command.data?.active === true
+        && typeof command.data.messageId === "string") {
+        try { this.ackWakesOnReaction(roomId, auth.member.id, command.data.messageId); } catch {}
+      }
       if (command.type === T.MESSAGE_POSTED) {
         this.maybeWakeOnMention(roomId, state, auth.member.id, command.data, incoming.id);
         state = this.resumeRoundLimitPauses(roomId, state, auth.member.id, incoming, sequence);
@@ -4953,6 +4958,26 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // to agent members, then wake the offline ones via their registered
   // agent identity. Never throws for unparseable input — a mention that
   // resolves to nobody (or to an online agent) is simply not woken.
+  // RC-2026-10-07: reaction-as-ack. The agent.wake payload carries the
+  // one-tap ack hint "react 👍 to acknowledge" — honor it: an active
+  // reaction marks the REACTING member's own undelivered wake signals for
+  // that message delivered. Only their own signals are touched (a reaction
+  // is personal acknowledgment, never someone else's), and a member with
+  // no identity link or no pending signals for the message is a no-op.
+  // Defensive against pre-schema databases; never throws.
+  ackWakesOnReaction(roomId, memberId, messageId) {
+    let link = null;
+    try {
+      link = this.db.prepare(
+        "SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?").get(roomId, memberId);
+    } catch { return; }
+    if (!link?.identityId) return;
+    try {
+      this.db.prepare(
+        "UPDATE agent_wake_signals SET delivered_at=? WHERE agent_id=? AND message_id=? AND delivered_at IS NULL"
+      ).run(this.now(), link.identityId, messageId);
+    } catch { /* pre agent_wake_signals schema: nothing to ack */ }
+  }
   maybeWakeOnMention(roomId, state, senderMemberId, data, eventId) {
     const targets = agentWakeTargets(state, senderMemberId, data, this.db, roomId);
     if (targets.size === 0) return;
