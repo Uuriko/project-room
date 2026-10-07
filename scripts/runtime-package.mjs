@@ -96,6 +96,7 @@ optional.push("server/jev-shadow-journal.mjs"); // Jev shadow-decision journal (
 optional.push("server/service-error.mjs"); // shared ServiceError (imported by server/store.mjs — re-exported — and server/jev-shadow-journal.mjs; pure, no imports of its own)
 optional.push("server/csv-export.mjs"); // structured CSV/JSON export (imported by server/inbox-outbox.mjs for the send-journal audit export; pure, no imports of its own)
 optional.push("scripts/stamp-version.mjs");
+optional.push("scripts/verify-build-artifacts.mjs"); // pre-upload signed-artifact verification (wired into the wrangler build command after sign-agent-card.mjs; 200-hard-tasks #171)
 optional.push("server/email-envelope.mjs", "server/graph-email.mjs", "server/email-import.mjs");
 optional.push("server/graph-fixture-sync.mjs");
 optional.push("server/graph-reply-draft.mjs");
