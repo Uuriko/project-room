@@ -612,23 +612,23 @@ test("hosted MCP lists and calls the land queue tools", async t => {
     body: JSON.stringify({ jsonrpc: "2.0", id: "t", method, ...(params === undefined ? {} : { params }) })
   });
   const names = (await (await rpc("tools/list", { profile: "full" })).json()).result.tools.map(tool => tool.name);
-  for (const name of ["add_land_item", "list_land_queue", "remove_land_item", "report_tip"]) {
+  for (const name of ["room_add_land_item", "room_list_land_queue", "room_remove_land_item", "room_report_land_tip"]) {
     assert.equal(names.includes(name), true, name);
   }
   const call = async (name, args) => {
     const body = await (await rpc("tools/call", { name, arguments: args })).json();
     return body.result;
   };
-  const added = await call("add_land_item", { roomId: created.roomId, repo: "acme/demo", prNumber: 969 });
+  const added = await call("room_add_land_item", { roomId: created.roomId, repo: "acme/demo", prNumber: 969 });
   assert.equal(added.structuredContent.item.claimantMemberId, created.ownerMemberId);
   assert.equal(added.structuredContent.item.prNumber, 969);
-  const listed = await call("list_land_queue", { roomId: created.roomId });
+  const listed = await call("room_list_land_queue", { roomId: created.roomId });
   assert.equal(listed.structuredContent.items.length, 1);
-  const tipped = await call("report_tip", {
+  const tipped = await call("room_report_land_tip", {
     roomId: created.roomId, itemId: added.structuredContent.item.itemId, sourceRevision: "rev-mcp"
   });
   assert.deepEqual(tipped.structuredContent.changed, ["tip"]);
-  const removed = await call("remove_land_item", {
+  const removed = await call("room_remove_land_item", {
     roomId: created.roomId, itemId: added.structuredContent.item.itemId
   });
   assert.equal(removed.structuredContent.removed, true);

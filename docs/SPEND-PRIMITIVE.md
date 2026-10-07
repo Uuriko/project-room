@@ -16,7 +16,7 @@ unchanged.
 |---|---|---|
 | `room_put_file` | 5 credits | 1 MiB staged bytes per call — real storage cost |
 | `bounty_post` | 10 credits | Creates downstream economic activity (design OQ2's named candidate) |
-| `add_land_item` | 1 credit | GitHub reads (head, mergeable, check rollup) per add — real external cost |
+| `room_add_land_item` | 1 credit | GitHub reads (head, mergeable, check rollup) per add — real external cost |
 
 Prices are declared in the tool's public `description`
 (`[paid: room-credits] N credits per call`) — the x402 pattern: the

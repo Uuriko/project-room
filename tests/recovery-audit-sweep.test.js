@@ -335,7 +335,7 @@ test("the event surface has not grown without this sweep noticing", () => {
   // holder's public progress message posted after that claim. The sweep does
   // not acquire one. The reducer's validation is covered by
   // tests/lease-renewal.test.js instead.
-  // land.updated is exercised above via report_tip (it is not a command).
+  // land.updated is exercised above via room_report_land_tip (it is not a command).
   // work_claim.updated is exercised above via emitWorkClaimEvent (it is not a command).
   // room.starter_seeded is exercised above via seedStarter (it is not a command).
   assert.equal(Object.values(T).length, 65,

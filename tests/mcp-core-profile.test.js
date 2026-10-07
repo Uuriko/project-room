@@ -225,7 +225,7 @@ test("room_needs_me and GET /api/needs-me list what changed across rooms", async
   assert.equal(kinds("bond_request", roomA)[0].id, bondId);
   assert.equal(kinds("bond_request", roomA)[0].next.tool, "bond_accept");
   assert.deepEqual(kinds("land_queue").map(item => item.id), ["changed-pr"]);
-  assert.equal(kinds("land_queue")[0].next.tool, "list_land_queue");
+  assert.equal(kinds("land_queue")[0].next.tool, "room_list_land_queue");
   for (const item of items) {
     assert.equal(typeof item.roomId, "string");
     assert.equal(Number.isSafeInteger(item.seq), true);
@@ -244,7 +244,7 @@ test("room_needs_me and GET /api/needs-me list what changed across rooms", async
     roomId: roomA, id: "bond-accept-1", bondId, scopes: ["peer.dm"]
   }, ada.secret);
   assert.equal(accepted.value.status, "accepted");
-  const sent = await call(origin, "dm_posted", {
+  const sent = await call(origin, "dm_send", {
     roomId: roomA, id: "peer-dm-1", to: ada.identityId, messageId: "peer-msg-1", body: "peer hello ada"
   }, bob.secret);
   assert.equal(sent.value.status, "posted");
@@ -349,7 +349,7 @@ test("tools/list focus is explicit, stateless discovery with full-catalog escape
   // but were invisible in every discovery view except profile=full —
   // Fo (2026-10-01) found 15 of 17 bonds stuck in "proposed" for exactly
   // this reason. The conversation focus already carried bond_list and
-  // dm_posted; the three missing lifecycle tools now join it.
+  // dm_send; the three missing lifecycle tools now join it.
   for (const name of ["bond_accept", "bond_decline", "bond_revoke", "bond_list"]) {
     assert.ok(namesOf(conversation).includes(name), `conversation focus advertises ${name}`);
   }

@@ -1,5 +1,5 @@
-// Issue #993: hosted MCP land-queue writes (add_land_item, remove_land_item,
-// report_tip) skipped the t1_readonly gate because callLandTool writes the
+// Issue #993: hosted MCP land-queue writes (room_add_land_item, room_remove_land_item,
+// room_report_land_tip) skipped the t1_readonly gate because callLandTool writes the
 // land queue directly without going through store.command().
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -51,12 +51,12 @@ test("t1_readonly agent is refused MCP land-queue writes but can list", async t 
   const mcp = createHostedRoomMcp(store);
   const call = (name, args) => mcp(rpc("tools/call", { name, arguments: args }), { authorization: `Bearer ${peer.secret}` });
 
-  const refused = resultValue(await call("add_land_item", { roomId: created.roomId, repo: "acme/demo", prNumber: 1 }));
+  const refused = resultValue(await call("room_add_land_item", { roomId: created.roomId, repo: "acme/demo", prNumber: 1 }));
   assert.equal(refused.status, 403);
   assert.equal(refused.code, "agent_readonly");
 
   // listing is a read: still allowed at the read-only tier
-  const listed = resultValue(await call("list_land_queue", { roomId: created.roomId }));
+  const listed = resultValue(await call("room_list_land_queue", { roomId: created.roomId }));
   assert.notEqual(listed.status, 403);
 });
 
@@ -68,10 +68,10 @@ test("t2_standard agent keeps full land-queue access; owner unaffected", async t
   const mcp = createHostedRoomMcp(store);
   const call = (name, args) => mcp(rpc("tools/call", { name, arguments: args }), { authorization: `Bearer ${owner.secret}` });
 
-  const added = resultValue(await call("add_land_item", { roomId: created.roomId, repo: "acme/demo", prNumber: 7 }));
+  const added = resultValue(await call("room_add_land_item", { roomId: created.roomId, repo: "acme/demo", prNumber: 7 }));
   assert.notEqual(added.status, 403);
 
-  const removed = resultValue(await call("remove_land_item", { roomId: created.roomId, itemId: "missing" }));
+  const removed = resultValue(await call("room_remove_land_item", { roomId: created.roomId, itemId: "missing" }));
   // unknown id errors for its own reasons, never for the tier
   assert.notEqual(removed.code, "agent_readonly");
 });

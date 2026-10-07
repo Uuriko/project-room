@@ -101,7 +101,7 @@ test("t1_readonly agent's tools/list withholds denied writes but keeps the call-
       }
     }
     assert.ok(!toolNames(tools).has("room_post_message"), `${profile}: room_post_message must be withheld from t1_readonly`);
-    assert.ok(!toolNames(tools).has("add_land_item"), `${profile}: add_land_item must be withheld from t1_readonly`);
+    assert.ok(!toolNames(tools).has("room_add_land_item"), `${profile}: room_add_land_item must be withheld from t1_readonly`);
     assert.ok(!toolNames(tools).has("room_put_file"), `${profile}: room_put_file must be withheld from t1_readonly`);
   }
 });

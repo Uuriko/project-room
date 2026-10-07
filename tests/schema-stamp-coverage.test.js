@@ -4,7 +4,7 @@
 // through 51803999 wrote the same stamp, because SPEND_GRANTS_SCHEMA and the
 // other additive ensure*Schema helpers were not hashed. A room stamped before
 // the spend deploy therefore never got spend_authorizations, and every priced
-// MCP call by a non-owner (room_put_file, add_land_item) died on
+// MCP call by a non-owner (room_put_file, room_add_land_item) died on
 // "no such table" -> 500 internal.
 import test from "node:test";
 import assert from "node:assert/strict";

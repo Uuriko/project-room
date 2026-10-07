@@ -25,7 +25,7 @@ function attentionRead(item) {
   if (item.kind === 'handoff') return { tool: 'room_read_work', arguments: { roomId, workItemId: item.id } };
   if (item.kind === 'direct_ask') return { tool: 'room_read_request', arguments: { roomId, requestMessageId: item.id } };
   if (item.kind === 'bond_request') return { tool: 'bond_list', arguments: { roomId } };
-  if (item.kind === 'land_queue') return { tool: 'list_land_queue', arguments: { roomId } };
+  if (item.kind === 'land_queue') return { tool: 'room_list_land_queue', arguments: { roomId } };
   if (item.next?.tool === 'room_list_peer_dms' && validId(item.next.arguments?.threadId)) {
     return { tool: 'room_list_peer_dms', arguments: { roomId, threadId: item.next.arguments.threadId } };
   }

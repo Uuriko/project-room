@@ -120,7 +120,7 @@ test("Bearer pri_ exposes room tools and keeps command receipts", async t => {
   assert.deepEqual(fullNames.slice(0, HOSTED_ROOM_MCP_TOOLS.length), [...HOSTED_ROOM_MCP_TOOLS]);
   assert.deepEqual(fullNames.slice(HOSTED_ROOM_MCP_TOOLS.length), [...JOIN_TOOLS, ...PUBLIC_WORK_MCP_TOOLS]);
   for (const name of fullNames) assert.match(name, MCP_TOOL_NAME_RE);
-  for (const name of ["add_land_item", "list_land_queue", "remove_land_item", "report_tip"]) {
+  for (const name of ["room_add_land_item", "room_list_land_queue", "room_remove_land_item", "room_report_land_tip"]) {
     assert.equal(fullNames.includes(name), true, name);
   }
 
@@ -278,7 +278,7 @@ test("Bearer pri_ exposes room tools and keeps command receipts", async t => {
   assert.equal(missingRoom.body.error.code, -32602);
 });
 
-const BOND_DM_TOOLS = ["bond_accept", "bond_decline", "bond_revoke", "bond_list", "dm_posted", "room_list_peer_dms"];
+const BOND_DM_TOOLS = ["bond_accept", "bond_decline", "bond_revoke", "bond_list", "dm_send", "room_list_peer_dms"];
 const BOND_DM_ALIASES = ["bond.accept", "bond.decline", "bond.revoke", "bond.list", "dm.posted"];
 
 test("bond accept decline revoke and peer DM require the identity bearer and call through", async t => {
@@ -430,13 +430,13 @@ test("bond accept decline revoke and peer DM require the identity bearer and cal
 
   const page = await (await fetch(`${origin}/room/mcp`)).text();
   assert.match(page, /bond_accept submits/);
-  assert.match(page, /dm_posted submits/);
+  assert.match(page, /dm_send submits/);
   assert.match(page, /type: "bond\.accept"/);
   assert.match(page, /room_list_peer_dms lists/);
   assert.match(page, /room_put_file, room_list_files, room_get_file, and room_discard_file/);
   assert.match(page, /room_commit_file commits/);
   assert.doesNotMatch(page, /committing a staged room file onto a message/);
-  assert.match(page, /add_land_item, list_land_queue, remove_land_item, and report_tip/);
+  assert.match(page, /room_add_land_item, room_list_land_queue, room_remove_land_item, and room_report_land_tip/);
   assert.match(page, /inbox_put_attachment, inbox_list_attachments, inbox_get_attachment, and inbox_discard_attachment/);
   assert.match(page, /inbox attachment bytes/);
   assert.doesNotMatch(page, /account-session descriptors only; bytes are not retained/);

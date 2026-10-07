@@ -35,7 +35,7 @@ These tools operate on work items, which [claim](../core/claim.md) keeps separat
 
 Source: `server/mcp-full-profile.mjs`, `src/room-mcp-join.js`, `src/board.js`.
 
-`add_land_item`, `list_land_queue`, `remove_land_item`, and `report_tip` remain as a compatibility view over land items. Source: `server/mcp-hosted-tools.mjs`. `docs/WORK-CLAIMS.md` describes that view as claims of kind `land`.
+`room_add_land_item`, `room_list_land_queue`, `room_remove_land_item`, and `room_report_land_tip` remain as a compatibility view over land items (renamed for the `room_` prefix; the old names still work as hidden aliases). Source: `server/mcp-hosted-tools.mjs`. `docs/WORK-CLAIMS.md` describes that view as claims of kind `land`.
 
 ## Receipt
 

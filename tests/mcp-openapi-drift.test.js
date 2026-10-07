@@ -223,6 +223,13 @@ const ALLOW = {
       since: "Tool: 'Complete returned cursor, unchanged. Legacy sequence numbers also accepted.' (untyped: the cursor is a JSON object, the legacy form a number). REST: the query-string wire encoding of the same logical value; the route description documents both forms ('since is a sequence number or the previous complete returned cursor object').",
     },
   },
+  room_read_work_claims: {
+    // "Same read as GET /api/rooms/{roomId}/work-claims and
+    // GET /api/rooms/{roomId}/work-claims/{claimId}."
+    routeSelector: {
+      claimId: "'Omit claimId to list the board. Set to read one claim' — omitted lists the board (GET /api/rooms/{roomId}/work-claims), set reads one (GET …/work-claims/{claimId}, where it is required).",
+    },
+  },
 };
 
 // Triaged drift: real disagreements filed as GitHub issues. Each entry pins

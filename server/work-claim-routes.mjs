@@ -382,6 +382,49 @@ export function buildWorkClaimPage(items, roomId, viewerId, query = new URLSearc
     ...(olderDone > 0 ? { olderDone, olderDoneQuery: "state=done" } : {}) });
 }
 
+// Shared board-read path for the HTTP list/single-claim routes and the MCP
+// room_read_work_claims tool. Lease expiry is evaluated on every read —
+// exactly like the HTTP routes — so neither surface shows stale claims:
+// lapsed leases auto-release (with the same lease_expired event and wake)
+// and their ids are returned in `swept`. Pass claimId to read one claim
+// with its full stored history; otherwise pass query { queue, limit, cursor }
+// for the board page. Any room member may read; callers authenticate first.
+export function readWorkClaimBoard({ store, roomId, caller, query = {}, claimId = null }) {
+  const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
+  const registry = store.workClaims;
+  const nowMs = typeof store.now === "function" ? store.now() : Date.now();
+  const run = () => {
+    const swept = sweepRoom(registry, roomId, nowMs, (item, before) => {
+      const receipt = emitWorkClaimEvent(store, roomId, {
+        actorId: before.owner, item, action: "lease_expired", previousOwnerId: before.owner,
+        atMs: nowMs, paths: before.files ?? []
+      });
+      enqueueClaimWake(store, roomId, before.owner,
+        `work-claim:${item.id}:lease_expired:${before.leaseExpiresAt ?? receipt?.sequence ?? nowMs}`,
+        { reason: "lease_expired", actorId: before.owner });
+    });
+    for (const item of registry.list(roomId)) {
+      if ((item.kind !== "land" && item.kind !== "deploy") || item.state === "done") continue;
+      const next = closeWhenLive(item, SOURCE_REVISION, nowMs);
+      if (!next) continue;
+      registry.set(roomId, next);
+      emitWorkClaimEvent(store, roomId, { actorId: caller, item: next, action: "state_changed", atMs: nowMs });
+      wakeNamedReviewers(store, roomId, next, { actorId: caller });
+    }
+    if (claimId !== null && claimId !== undefined) {
+      const item = registry.get(roomId, claimIdOf(reject, claimId));
+      if (!item) reject(404, "work_claim_not_found", `No work claim "${claimId}" in this room`);
+      return withContentTrust(stampClaim(item, caller));
+    }
+    const params = new URLSearchParams();
+    for (const key of ["queue", "limit", "cursor"]) {
+      if (query[key] !== undefined && query[key] !== null) params.set(key, String(query[key]));
+    }
+    return { ...buildWorkClaimPage(registry.list(roomId), roomId, caller, params, nowMs), swept };
+  };
+  return registry.transaction ? registry.transaction(run) : run();
+}
+
 // Evaluate lease expiry across the room's items; expired claims auto-release
 // (owner cleared, history stamped by releaseExpired). Returns the ids that
 // were released by this sweep.

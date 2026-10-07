@@ -144,9 +144,9 @@ test("guest-class direct calls are denied at call time", async t => {
   // Seed a land item so report/remove reach the handler (rather than a
   // missing-item error) on the pre-fix code.
   const added = resultValue(await call("tools/call", {
-    name: "add_land_item", arguments: { roomId, repo: "Uuriko/project-room", prNumber: 7 },
+    name: "room_add_land_item", arguments: { roomId, repo: "Uuriko/project-room", prNumber: 7 },
   }, owner.secret));
-  assert.ok(!added.isError, `owner add_land_item must work: ${JSON.stringify(added).slice(0, 200)}`);
+  assert.ok(!added.isError, `owner room_add_land_item must work: ${JSON.stringify(added).slice(0, 200)}`);
   const itemId = added.item?.itemId ?? added.itemId;
   assert.ok(itemId, "expected a land item id");
   assert.equal(githubReads.length, 3, "owner seed must exercise the real GitHub-backed queue read");
@@ -161,9 +161,9 @@ test("guest-class direct calls are denied at call time", async t => {
     ["heartbeat_ack", { signalIds: ["no-such-signal"] }],
     ["wake_register", { hostId: "h1", wakeUrl: "https://example.com/wake" }],
     ["room_create", { title: "Sneaky", purpose: "guest escalation" }],
-    ["add_land_item", { roomId, repo: "Uuriko/project-room", prNumber: 1 }],
-    ["remove_land_item", { roomId, itemId }],
-    ["report_tip", { roomId, itemId, sourceRevision: "abc123", buildId: "b1" }],
+    ["room_add_land_item", { roomId, repo: "Uuriko/project-room", prNumber: 1 }],
+    ["room_remove_land_item", { roomId, itemId }],
+    ["room_report_land_tip", { roomId, itemId, sourceRevision: "abc123", buildId: "b1" }],
   ];
   for (const [name, args] of cases) {
     const value = resultValue(await call("tools/call", { name, arguments: args }, guest.secret));
