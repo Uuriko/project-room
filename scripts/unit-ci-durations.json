@@ -694,6 +694,7 @@
   "tests/session-adapter-contract.test.js": 1800,
   "tests/session-expiry.test.js": 4213,
   "tests/session-fixation.test.js": 44613,
+  "tests/session-resume.test.js": 1641,
   "tests/share-invite-code.test.js": 13187,
   "tests/share-link-referrals.test.js": 11109,
   "tests/share-link-ui.test.js": 4045,
