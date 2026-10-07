@@ -14,21 +14,16 @@ APPROVE on the exact head, never with an open CHANGES REQUESTED.
 ## 1. The mechanical pass
 
 `review-mechanical` runs on `pull_request` (opened, synchronize, reopened,
-edited). One check run does two stages, both written to the same job summary:
+edited). Its **fast** report contains diff size and claim-scope match, with
+lint and tests explicitly pending. It uses `gh` and `node`, with no npm
+install or polling, and returns immediately after writing the report.
 
-- **fast** (immediately): diff size + claim-scope match. `gh` + `node`
-  only, no `npm install`, so the reviewer sees signal in ~1 minute.
-- **full** (same run, after a bounded ~40 min wait): the job polls for the
-  `test` workflow run on the PR head and appends the lint and test-suite
-  conclusions. If the wait times out, the report says `timed-out` honestly
-  instead of guessing.
-
-A second trigger, `workflow_run` on the `test` workflow, re-emits the full
-report event-driven with no polling — it activates once this workflow file
-is merged to the default branch. It binds the report to
-`workflow_run.head_sha` (the tested commit): if the PR head moved since the
-test run, it skips instead of pairing a stale conclusion with a new head —
-the `pull_request` job owns the current head. It reports:
+The `workflow_run` trigger on completed `test` workflows provides the
+**full** report with actual lint and test-suite conclusions. It binds the
+report to `workflow_run.head_sha` (the tested commit): if the PR head moved
+since the test run, it skips instead of pairing a stale conclusion with a
+new head. A later completed test event supplies the current head's final
+report. It reports:
 
 | signal | source |
 |---|---|

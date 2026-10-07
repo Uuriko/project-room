@@ -20,9 +20,8 @@ name: review-mechanical
 on:
   pull_request:
     types: [opened, synchronize, reopened, edited]
-  # Post-merge steady state: this trigger only fires once this file exists on
-  # the default branch. Until then the pull_request job below covers PRs by
-  # waiting (bounded) for the test workflow itself.
+  # Completed test runs provide final conclusions without occupying a runner
+  # while the independent test workflow is queued or running.
   workflow_run:
     workflows: ["test"]
     types: [completed]
@@ -40,8 +39,7 @@ concurrency:
 
 jobs:
   # Fast signals immediately (diff size + claim scope, gh + node only, no npm
-  # install), then a bounded wait for the `test` workflow on this head so the
-  # same check run also carries the lint and test-suite conclusions.
+  # install). The completed test event below owns final conclusions.
   mechanical:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -62,70 +60,14 @@ jobs:
           gh pr view "$PR_NUMBER" --json body --jq '.body' > /tmp/body.md
           HEAD_SHA=$(gh pr view "$PR_NUMBER" --json headRefOid --jq '.headRefOid')
           echo "HEAD_SHA=$HEAD_SHA" >> "$GITHUB_ENV"
-          {
-            echo "ADDITIONS=$(gh pr view "$PR_NUMBER" --json additions --jq '.additions')"
-            echo "DELETIONS=$(gh pr view "$PR_NUMBER" --json deletions --jq '.deletions')"
-          } >> "$GITHUB_ENV"
+          ADDITIONS=$(gh pr view "$PR_NUMBER" --json additions --jq '.additions')
+          DELETIONS=$(gh pr view "$PR_NUMBER" --json deletions --jq '.deletions')
           node scripts/review-scope-check.mjs --files-file /tmp/changed.txt --body-file /tmp/body.md > /tmp/scope.json
           node scripts/review-mechanical-report.mjs --stage fast --pr "$PR_NUMBER" \
             --head "$HEAD_SHA" --lint pending --tests pending \
             --additions "$ADDITIONS" --deletions "$DELETIONS" \
             --scope-json /tmp/scope.json >> "$GITHUB_STEP_SUMMARY"
           node scripts/review-mechanical-report.mjs --annotations --scope-json /tmp/scope.json
-      - name: Wait for the test workflow on this head
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HEAD_SHA: ${{ env.HEAD_SHA }}
-          HEAD_BRANCH: ${{ github.head_ref }}
-          REPO: ${{ github.repository }}
-        run: |
-          # Bounded wait (~40 min): re-resolve the test run every minute so a
-          # newer synchronize push supersedes the run we wait on.
-          deadline=$(( $(date +%s) + 2400 ))
-          RUN_ID=""
-          RUN_STATUS=""
-          CONCLUSION=""
-          while [ "$(date +%s)" -lt "$deadline" ]; do
-            RUN_JSON=$(gh run list --workflow test.yml --branch "$HEAD_BRANCH" --limit 5 \
-              --json databaseId,headSha,status,conclusion \
-              --jq "[.[] | select(.headSha==\"$HEAD_SHA\")][0] // empty")
-            if [ -n "$RUN_JSON" ]; then
-              RUN_STATUS=$(echo "$RUN_JSON" | jq -r .status)
-              RUN_ID=$(echo "$RUN_JSON" | jq -r .databaseId)
-              if [ "$RUN_STATUS" = "completed" ]; then
-                CONCLUSION=$(echo "$RUN_JSON" | jq -r .conclusion)
-                break
-              fi
-            fi
-            sleep 60
-          done
-          if [ -z "$RUN_ID" ]; then
-            CONCLUSION="not-started"
-          elif [ "$RUN_STATUS" != "completed" ]; then
-            CONCLUSION="timed-out"
-          fi
-          LINT="unknown"
-          if [ -n "$RUN_ID" ]; then
-            LINT=$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs" --paginate \
-              -q '[.jobs[] | select(.name=="lint")][0].conclusion // "unknown"')
-          fi
-          {
-            echo "TEST_CONCLUSION=$CONCLUSION"
-            echo "LINT_CONCLUSION=$LINT"
-          } >> "$GITHUB_ENV"
-      - name: Full report with lint and test conclusions
-        env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ env.HEAD_SHA }}
-          ADDITIONS: ${{ env.ADDITIONS }}
-          DELETIONS: ${{ env.DELETIONS }}
-          LINT_CONCLUSION: ${{ env.LINT_CONCLUSION }}
-          TEST_CONCLUSION: ${{ env.TEST_CONCLUSION }}
-        run: |
-          node scripts/review-mechanical-report.mjs --stage full --pr "$PR_NUMBER" \
-            --head "$HEAD_SHA" --lint "$LINT_CONCLUSION" --tests "$TEST_CONCLUSION" \
-            --additions "$ADDITIONS" --deletions "$DELETIONS" \
-            --scope-json /tmp/scope.json >> "$GITHUB_STEP_SUMMARY"
 
   # Full report once the `test` workflow finishes, event-driven (no polling).
   # Active once this file is merged to the default branch. Skips silently for
@@ -154,8 +96,8 @@ jobs:
           echo "PR_NUMBER=$PR_NUMBER" >> "$GITHUB_ENV"
           # Never pair a completed run's conclusion with a newer PR head: the
           # test result belongs to TESTED_SHA. On mismatch the pull_request
-          # mechanical job (which waits for the run on the current head)
-          # owns the report, so skip here.
+          # mechanical job supplies fast signals for the current head; the
+          # completed event for that head will supply its final report.
           CURRENT_HEAD=$(gh pr view "$PR_NUMBER" --json headRefOid --jq '.headRefOid')
           if [ "$TESTED_SHA" != "$CURRENT_HEAD" ]; then
             echo "HEAD_MISMATCH=true" >> "$GITHUB_ENV"
