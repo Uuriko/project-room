@@ -223,9 +223,9 @@ test("HTTP handler: try-mode refusal surfaces 409 with machine-readable position
 
 // #1615 review 4371 (John's Tab, Fo concurring): the queue needs an approval
 // gate. These are the cases the tick must refuse or pass.
-import { approvalGate, patchUnchanged } from "../server/merge-queue.mjs";
+import { approvalGate, patchUnchanged, queueCheckVerdict } from "../server/merge-queue.mjs";
 import { execFileSync as runSync } from "node:child_process";
-import { mkdtempSync as mkTemp, rmSync as rmTemp, writeFileSync as writeTemp } from "node:fs";
+import { mkdtempSync as mkTemp, rmSync as rmTemp, writeFileSync as writeTemp, readFileSync } from "node:fs";
 import { join as joinPath } from "node:path";
 import { tmpdir as tmpDir } from "node:os";
 const HEAD = "6c7c792b0a1b2c3d4e5f60718293a4b5c6d7e8f9";
@@ -252,6 +252,115 @@ test("approval gate: the latest review per reviewer wins; any current changes_re
   assert.equal(approvalGate({ claim: claimWith([approve, rev("inst", "changes_requested", "2026-10-06T08:05:00Z")]), headSha: HEAD }).ok, false);
   assert.equal(approvalGate({ claim: claimWith([approve, rev("fo", "changes_requested", "2026-10-06T08:05:00Z")]), headSha: HEAD }).ok, false, "a later CHANGES supersedes the reviewer's approve");
   assert.equal(approvalGate({ claim: claimWith([rev("fo", "changes_requested", "2026-10-06T07:00:00Z"), approve]), headSha: HEAD }).ok, true, "a later approve clears the reviewer's earlier CHANGES");
+});
+
+test("operator release authority is exact-head, advisory, and cannot be self-issued through the claim", () => {
+  const claim = claimWith([rev("fo", "changes_requested", "2026-10-07T12:00:00Z")]);
+  assert.deepEqual(approvalGate({ claim, headSha: HEAD, authorizedHeadSha: HEAD }),
+    { ok: true, approvedBy: [], authorization: "operator_exact_head" });
+  assert.equal(approvalGate({ claim: claimWith([]), headSha: HEAD, authorizedHeadSha: HEAD }).ok, true);
+  assert.equal(approvalGate({ claim: { ...claimWith([]), authorizedHeadSha: HEAD }, headSha: HEAD }).ok, false, "lane-controlled claim fields confer no authority");
+  assert.equal(approvalGate({ claim, headSha: HEAD, authorizedHeadSha: HEAD.slice(0, 7) }).ok, false);
+  assert.equal(approvalGate({ claim, headSha: HEAD, authorizedHeadSha: "a".repeat(40) }).ok, false);
+  assert.equal(approvalGate({ claim, headSha: HEAD.slice(0, 7), authorizedHeadSha: HEAD.slice(0, 7) }).ok, false);
+  assert.equal(approvalGate({ claim: null, headSha: HEAD, authorizedHeadSha: HEAD }).ok, false);
+  assert.equal(approvalGate({ claim: { ...claim, state: "blocked" }, headSha: HEAD, authorizedHeadSha: HEAD }).ok, false, "explicit Board hold still binds");
+});
+
+test("queue checks wait for pending or missing checks instead of ejecting the slot", () => {
+  const requiredChecks = ["test", "lint"];
+  const runs = [{ id: 1, name: "test", status: "in_progress", conclusion: null }];
+  assert.deepEqual(queueCheckVerdict({ runs, requiredChecks }), { state: "pending", pending: ["test", "lint"] });
+  for (const status of ["queued", "pending", "waiting", "requested"]) {
+    assert.equal(queueCheckVerdict({ runs: [{ name: "test", status }], requiredChecks }).state, "pending");
+  }
+});
+
+test("queue checks use the latest run per name and retain legacy status support", () => {
+  const requiredChecks = ["test", "lint"];
+  const runs = [
+    { id: 1, name: "test", status: "completed", conclusion: "failure" },
+    { id: 2, name: "test", status: "completed", conclusion: "success" },
+  ];
+  assert.deepEqual(queueCheckVerdict({ runs, legacy: [{ name: "lint", state: "success" }], requiredChecks }), { state: "success" });
+  assert.equal(queueCheckVerdict({ runs: [...runs, { id: 3, name: "test", status: "queued" }], legacy: [{ name: "test", state: "success" }, { name: "lint", state: "success" }], requiredChecks }).state, "pending", "old success cannot cover a new queued attempt");
+});
+
+test("queue checks refuse terminal failures, skipped required checks, and unknown completed results", () => {
+  for (const conclusion of ["failure", "cancelled", "timed_out", "action_required", "skipped", null]) {
+    assert.equal(queueCheckVerdict({ runs: [{ name: "test", status: "completed", conclusion }], requiredChecks: ["test"] }).state, "failure");
+  }
+  assert.equal(queueCheckVerdict({ legacy: [{ name: "test", state: "error" }], requiredChecks: ["test"] }).state, "failure");
+});
+
+test("live worker waits for CI, binds Project Room and the tested head, and refuses a head race", t => {
+  const dir = mkTemp(joinPath(tmpDir(), "mq-worker-"));
+  t.after(() => rmTemp(dir, { recursive: true, force: true }));
+  const fixture = joinPath(dir, "worker-fixture.mjs");
+  const worker = new URL("../scripts/merge-queue-worker.mjs", import.meta.url).pathname;
+  writeTemp(fixture, `
+import fs from 'node:fs'; import os from 'node:os'; import cp from 'node:child_process';
+import https from 'node:https'; import {EventEmitter} from 'node:events'; import {syncBuiltinESMExports} from 'node:module';
+const root=process.env.QUEUE_TEST_ROOT, head=process.env.QUEUE_TEST_HEAD, next='b'.repeat(40), repo='Uuriko/project-room';
+let polls=0; const record=(kind,value)=>fs.appendFileSync(root+'/'+process.env.QUEUE_TEST_CASE+'.jsonl',JSON.stringify({kind,value})+'\\n');
+os.homedir=()=>root;
+cp.execFileSync=(cmd,args,opts={})=>{
+ record(cmd,args);
+ if(cmd==='gh'){
+  if(args[0]==='--version')return 'gh 2';
+  if(args[0]==='pr'){
+   if(args[args.indexOf('--repo')+1]!==repo)throw Error('wrong repository');
+   if(args[1]==='view')return JSON.stringify(args.includes('reviews')?['CHANGES_REQUESTED']:{state:'OPEN',baseRefName:'main',headRefOid:head,headRefName:'lane/test',mergeable:'MERGEABLE',number:9000});
+   if(args[1]==='merge'){
+    if(polls<2)throw Error('merge attempted before CI passed');
+    if(args[args.indexOf('--match-head-commit')+1]!==next)throw Error('merge missing tested-head CAS');
+    if(process.env.QUEUE_TEST_CASE==='race')throw Object.assign(Error('head moved'),{stderr:'head moved'});
+    return '';
+   }
+  }
+  if(args[0]==='api'&&args[1]=== 'repos/'+repo+'/commits/'+next+'/check-runs?per_page=100'){
+   polls++;return JSON.stringify(['test','contract','lint','browser','cloudflare'].map((name,id)=>({id,name,status:polls===1?'queued':'completed',conclusion:polls===1?null:'success'})));
+  }
+  if(args[0]==='api'&&args[1]==='repos/'+repo+'/commits/'+next+'/status')return '[]';
+ }
+ if(cmd==='git'){
+  if(args[0]==='clone'){fs.mkdirSync(args.at(-1)+'/.git',{recursive:true});return '';}
+  if(['fetch','checkout','rebase','push'].includes(args[0]))return '';
+  if(args[0]==='merge-base')return 'a'.repeat(40);
+  if(args[0]==='rev-parse')return args[1]==='HEAD'?next:'c'.repeat(40);
+  if(args[0]==='diff')return 'diff --git a/a b/a\\n+same patch\\n';
+  if(args[0]==='patch-id'&&String(opts.input).includes('same patch'))return 'd'.repeat(40)+' '+next;
+ }
+ throw Error('unsupported command '+cmd+' '+args.join(' '));
+};
+https.request=(url,opts,callback)=>{
+ const p=new URL(url).pathname; record('room',p); let result;
+ if(p.endsWith('/merge-queue/status'))result={active:{pr:9000,headSha:head,claimId:'bound-claim',adoptedBy:null}};
+ else if(p.endsWith('/work-claims/bound-claim'))result={id:'bound-claim',owner:'lane',state:'in_progress',reviews:[]};
+ else if(['/merge-queue/adopt','/merge-queue/heartbeat','/merge-queue/release','/commands'].some(s=>p.endsWith(s)))result={ok:true};
+ else throw Error('unsupported room route '+p);
+ const request=new EventEmitter();request.end=()=>queueMicrotask(()=>{const response=new EventEmitter();response.statusCode=200;callback(response);response.emit('data',JSON.stringify(result));response.emit('end');});
+ request.destroy=()=>{throw Error('unexpected request timeout');}; return request;
+};
+syncBuiltinESMExports(); const originalTimer=globalThis.setTimeout;
+globalThis.setTimeout=(fn,ms,...args)=>originalTimer(fn,ms===60000?1:ms,...args);
+`);
+  for (const scenario of ["ok", "race"]) {
+    let exit = 0;
+    try {
+      runSync(process.execPath, [worker, "tick", "--live", "--authorized-head", HEAD], {
+        encoding: "utf8", env: { ...process.env, NODE_OPTIONS: `--import=${fixture}`,
+          ROOM_IDENTITY_SECRET: "synthetic-room-secret", QUEUE_TEST_ROOT: dir,
+          QUEUE_TEST_HEAD: HEAD, QUEUE_TEST_CASE: scenario },
+      });
+    } catch (error) { exit = error.status; }
+    const calls = readFileSync(joinPath(dir, `${scenario}.jsonl`), "utf8").trim().split("\n").map(line => JSON.parse(line));
+    assert.equal(exit, scenario === "ok" ? 0 : 1);
+    assert.equal(calls.filter(c => c.kind === "gh" && c.value[1]?.endsWith("check-runs?per_page=100")).length, 2, "pending CI must wait");
+    const release = calls.some(c => c.kind === "room" && c.value.endsWith("/merge-queue/release"));
+    assert.equal(release, scenario === "ok", "a head race must not be called a successful merge or release");
+    assert.equal(calls.filter(c => c.kind === "gh" && c.value[1] === "merge").length, 1);
+  }
 });
 
 test("patch-id after the worker's rebase: same patch passes, a dropped or changed hunk refuses", t => {

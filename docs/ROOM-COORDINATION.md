@@ -59,6 +59,14 @@ alone does not block authorized work. This replaces older exact-head approval
 and approval-carry requirements; it does not waive an explicit task hold or
 an item's enforced completion review policy.
 
+The queue worker accepts operator-provided `--authorized-head <40-character
+SHA>` for work covered by this standing authority. It applies only to that
+enqueued head, still reads the Board claim and refuses a blocked claim, waits
+for fresh required CI after a rebase, and binds the merge to the tested head.
+Without that operator input, unattended requests retain their independent
+approval boundary; arbitrary room members cannot authorize their own release
+by setting a claim field or posting an approval-shaped note.
+
 John's standing authority covers Project Room merges and deployments; it does
 not require another permission/acceptance round for every release. Deploy via
 [DEPLOY-LANE.md](DEPLOY-LANE.md): shared lane, CI-built artifact, smoke checks,

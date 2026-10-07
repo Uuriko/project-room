@@ -288,10 +288,10 @@ export async function handleMergeQueue({
   }
 }
 
-// Approval gate (John's Tab and Fo, #1615 review 4371): the queue merges only
-// a PR whose Board claim carries an independent approval of the exact head it
-// was enqueued at. Without this, any member could enqueue any PR and the tick
-// merged it unless someone had already posted CHANGES_REQUESTED on GitHub.
+// Unattended queue requests retain the #1615 independent approval boundary:
+// arbitrary room members must not authorize their own PRs through enqueue.
+// John's 2026-10-07 release direction also permits operator authority bound
+// to one full head SHA, supplied by the worker caller rather than the claim.
 // Pure: the worker reads the claim and passes it in.
 //   - latest review per reviewer counts (a later review supersedes an earlier one)
 //   - any current changes_requested blocks
@@ -302,9 +302,19 @@ const ownerOf = claim => (typeof claim?.owner === "object" ? claim?.owner?.membe
 const headsIn = text => (String(text ?? "").match(/\b[0-9a-f]{7,40}\b/gi) ?? []).map(sha => sha.toLowerCase());
 const sameSha = (a, b) => !!a && !!b && a.length >= 7 && b.length >= 7 && (a.startsWith(b) || b.startsWith(a));
 
-export function approvalGate({ claim, headSha }) {
+export function approvalGate({ claim, headSha, authorizedHeadSha }) {
   const head = String(headSha ?? "").toLowerCase();
-  if (!claim || !Array.isArray(claim.reviews)) return { ok: false, reason: `no Board claim with reviews to check; an independent reviewer must approve ${shortSha(head)} on the claim` };
+  if (!claim || !Array.isArray(claim.reviews)) return { ok: false, reason: "no readable Board claim with reviews; release refused" };
+  // Operator-supplied CLI authority, never a claim field or a lane self-report.
+  // John permits authorized releases without formal independent approval;
+  // unattended requests from arbitrary room members retain the default gate.
+  if (authorizedHeadSha != null) {
+    if (!/^[0-9a-f]{40}$/.test(head) || authorizedHeadSha !== head) {
+      return { ok: false, reason: "operator authorization must match the full enqueued head SHA" };
+    }
+    if (claim.state === "blocked") return { ok: false, reason: "Board claim is blocked; resolve its explicit hold before landing" };
+    return { ok: true, approvedBy: [], authorization: "operator_exact_head" };
+  }
   if (head.length < 7) return { ok: false, reason: "no enqueued head to bind an approval to" };
   const latest = new Map();
   for (const review of [...claim.reviews].sort((a, b) => Date.parse(a.at ?? 0) - Date.parse(b.at ?? 0))) {
@@ -318,6 +328,26 @@ export function approvalGate({ claim, headSha }) {
     && (sameSha(String(review.basis?.headSha ?? "").toLowerCase(), head) || headsIn(review.summary).some(sha => sameSha(sha, head))));
   if (!approvals.length) return { ok: false, reason: `no independent approve bound to head ${shortSha(head)} on claim ${claim.id ?? "?"}: a reviewer other than the owner must approve this exact head (name it in the review)` };
   return { ok: true, approvedBy: approvals.map(review => review.memberId) };
+}
+
+// GitHub returns multiple attempts/checks; judge the latest per name and wait
+// for nonterminal states. A pending check is not a failed check.
+export function queueCheckVerdict({ runs = [], legacy = [], requiredChecks }) {
+  const states = new Map();
+  for (const run of [...runs].sort((a, b) => Number(b.id ?? 0) - Number(a.id ?? 0))) {
+    if (requiredChecks.includes(run.name) && !states.has(run.name)) {
+      states.set(run.name, run.status === "completed" ? (run.conclusion ?? "unknown") : run.status);
+    }
+  }
+  for (const row of legacy) if (requiredChecks.includes(row.name) && !states.has(row.name)) states.set(row.name, row.state);
+  const missing = requiredChecks.filter(name => !states.has(name));
+  const nonterminal = new Set(["pending", "queued", "in_progress", "waiting", "requested"]);
+  const failing = requiredChecks.filter(name => states.has(name) && states.get(name) !== "success" && !nonterminal.has(states.get(name)));
+  if (failing.length) return { state: "failure", reason: `required checks failing: ${failing.map(name => `${name}=${states.get(name)}`).join(", ")}` };
+  const pending = requiredChecks.filter(name => nonterminal.has(states.get(name)));
+  return missing.length || pending.length
+    ? { state: "pending", pending: [...pending, ...missing] }
+    : { state: "success" };
 }
 
 // Second blocker from review 4404/4506: after its own rebase the worker must
