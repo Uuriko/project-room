@@ -746,6 +746,7 @@
   "tests/token-bucket.test.js": 4258,
   "tests/touch-targets-coarse.test.js": 3394,
   "tests/trust-tools.test.js": 3509,
+  "tests/two-trigger-discipline.test.js": 5177,
   "tests/typing-client.test.js": 5301,
   "tests/typing-routes.test.js": 4669,
   "tests/typing.test.js": 3764,
