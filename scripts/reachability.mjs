@@ -80,9 +80,13 @@ export const KEEP = [
   "server/work-claim-sqlite.mjs",
   "server/work-claims.mjs",
   // herdr redesign: wired by the integration step (mount in http.mjs +
-  // runtime-package registration). Not orphans; remove from KEEP when wired.
+  // runtime-package registration). Not orphans; remove when the mount lands.
   "server/session-adapter.mjs",
   "server/session-adapter/herdr-bridge-adapter.mjs",
+  // herdr redesign: wired by the #pr-view/triage view mount in src/app.js.
+  // Not orphans; remove from KEEP when the view is wired.
+  "src/triage-ui.js",
+  "src/triage-state.js",
 ];
 
 const KEEP_SET = new Set(KEEP);
