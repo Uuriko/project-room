@@ -426,7 +426,13 @@ export const unfencedAdditiveTables = Object.freeze([
   // Purely additive and intentionally NOT fenced — older writers have no code
   // path to it; the owner-managed roster rules in server/squads.mjs are the
   // integrity gate.
-  "squads"
+  "squads",
+  // routing_records (affinity router shadow journal, lane B18 / design D6):
+  // append-only routing records (one row per routing run, shadow or advisory).
+  // Purely additive and intentionally NOT fenced — older writers have no code
+  // path to it, the journal class exposes no update/delete surface, and the
+  // routing_id PRIMARY KEY makes rows immutable on write.
+  "routing_records"
 ]);
 // Created on first use, not in the constructor. A database that has never
 // issued an OAuth grant or persisted an abuse rate bucket does not have

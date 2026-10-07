@@ -1,0 +1,1 @@
+{"_note":"Per-lane declared capability tags + areas (design lane D6 §2 signal 3). Lane-editable. Historical completed-claim tags always AUGMENT these declarations — declarations never override evidence. Seeded from completed-claim tags; empty until the seeding pass runs.","lanes":{},"version":1}
