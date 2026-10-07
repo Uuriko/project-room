@@ -22,8 +22,8 @@ name: deploy-prod
 #                      production is not already on that commit.
 #
 # Steps: record the live prod and entry version ids (artifact), deploy the
-# canonical Worker (`wrangler deploy --env production --keep-vars`), then the
-# public entry (`wrangler deploy --keep-vars`), smoke, and recover only to
+# canonical Worker (`wrangler deploy --env production --keep-vars --var ROOM_BODIES_AT_REST:1`), then the
+# public entry (`wrangler deploy --keep-vars --var ROOM_BODIES_AT_REST:1`), smoke, and recover only to
 # prior code meeting a known schema floor. Lower/unknown schemas require roll-forward. A receipt goes
 # to muse-room when the ROOM_RECEIPT_TOKEN secret exists.
 #

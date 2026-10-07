@@ -20,12 +20,30 @@ Deploy only a commit that is on `main` and whose `test` and `schema-gate` push r
 3. The run:
    - refuses unless the commit is on `main` and `test` + `schema-gate` are green on it;
    - records each live Worker version, independently observed `/api/version/worker` source revision, and code schema parsed from that exact Git blob (artifact `pre-deploy-<sha>` and the run summary);
-   - pins `ROOM_BODIES_AT_REST=0` for this rollout on both Workers while preserving other variables;
-   - deploys `project-room` with `wrangler deploy --env production --keep-vars`, then the public entry `project-room-staging` with `wrangler deploy --keep-vars`;
+   - pins `ROOM_BODIES_AT_REST=1` on both Workers while preserving other variables (`--keep-vars` keeps every other dashboard-set variable; the explicit `--var` is applied on top);
+   - deploys `project-room` with `wrangler deploy --env production --keep-vars --var ROOM_BODIES_AT_REST:1`, then the public entry `project-room-staging` with `wrangler deploy --keep-vars --var ROOM_BODIES_AT_REST:1`;
    - smokes with `scripts/prod-deploy-smoke.mjs`: `/api/version` and `/api/version/worker` equal the sha on room.trydemigod.com and getdasha.com/room, `/api/health` ok, `/api/ready` ready, `/terms`, `/privacy` and `/` return 200, and `/.well-known/agent-card.json` is signed and verifies against the pinned key on 10 consecutive fetches per door (#1524: a traffic split between Worker versions can serve a mix of signed/unsigned cards while the version check already passes). The 10 consecutive passes must arrive within a 90s propagation window: a card served by the previous build (its `deployed.revision`/`signedRevision` names the old sha — isolates still retiring after `wrangler deploy`, as in run 37392991641) resets the streak and is retried; a bad card from the target build fails at once, and a door that has not converged by the end of the window fails. It then runs `scripts/live-smoke.mjs`;
    - on failure, first checks whether either deployment changed. It restores a prior Worker only when its independently recorded source/schema is known and its code schema is at least the candidate schema. Lower or unknown schemas leave the candidate deployed and report **ROLL FORWARD REQUIRED**. A rollback is reported as verified only after exact version allocation and source-revision readback;
    - posts a receipt to muse-room when the `ROOM_RECEIPT_TOKEN` secret exists.
 4. Post or confirm the receipt in muse-room and release `ROLE-DEPLOYER`.
+
+### Worker variable persistence
+
+`ROOM_BODIES_AT_REST=1` is pinned on the `wrangler deploy` command line
+(`--var ROOM_BODIES_AT_REST:1`), not in `wrangler.jsonc`. Verified against
+the pinned wrangler (G5 audit 2026-10-07):
+
+- CLI `--var` flags are applied even with `--keep-vars` (deploy-prod run
+  37633233290; flip verified live the same day). `--keep-vars` preserves all
+  other dashboard-set variables.
+- A later plain `wrangler deploy --keep-vars` without `--var` keeps the
+  current value, so the manual procedure in ROOM-DEPLOYMENT.md does not drop it.
+- `wrangler rollback` re-points traffic at an older version's immutable
+  bindings: rolling back to a version uploaded **before** the `--var` pin was
+  introduced leaves the variable unset, and the worker treats unset as off
+  (`env.ROOM_BODIES_AT_REST === "1"`). Rollback targets uploaded after the pin
+  keep it. After rolling back across the pin boundary, re-run deploy-prod (or
+  otherwise re-pin the variable) to restore the intended value.
 
 ### Optional auto-deploy
 
@@ -54,7 +72,7 @@ A failed run posts the actual recovery disposition for each Worker: `ROLL FORWAR
 
 ## Roll back
 
-Run **rollback-prod** with `prod_version_id`, an optional `entry_version_id` and a `reason`. Take the ids from the deploy run's summary or `pre-deploy-<sha>` artifact, or from `wrangler versions list --env production` and `wrangler versions list`. The automatic schema floor is necessary, not sufficient: equal schema numbers do not prove compatibility with new row semantics, fenced tables, or retained runtime. Schema migrations are forward-only. A code rollback does not undo one. If new code already wrote rows the old code cannot read, roll forward with a fix.
+Run **rollback-prod** with `prod_version_id`, an optional `entry_version_id` and a `reason`. Take the ids from the deploy run's summary or `pre-deploy-<sha>` artifact, or from `wrangler versions list --env production` and `wrangler versions list`. The automatic schema floor is necessary, not sufficient: equal schema numbers do not prove compatibility with new row semantics, fenced tables, or retained runtime. Schema migrations are forward-only. A code rollback does not undo one. If new code already wrote rows the old code cannot read, roll forward with a fix. Rolling back to a version uploaded before the `ROOM_BODIES_AT_REST` pin was introduced also drops that variable (see Worker variable persistence above); re-pin it afterwards.
 
 ## Taking ROLE-DEPLOYER on the Board
 

@@ -490,6 +490,22 @@ test("actual production workflow captures schemas before uploads and uses guarde
   assert.match(steps.find(step => step.name === "Summary").run, /Code schemas/);
 });
 
+test("runbook documents the same ROOM_BODIES_AT_REST pin the production workflow applies", () => {
+  const workflowSource = readFileSync(new URL("../.github/workflows/deploy-prod.yml", import.meta.url), "utf8");
+  const steps = parseYaml(workflowSource).jobs.deploy.steps;
+  const pinned = new Map();
+  for (const step of steps.filter(step => ["prod", "entry"].includes(step.id))) {
+    const match = step.run.match(/--var ROOM_BODIES_AT_REST:([01])/);
+    assert.ok(match, `${step.id} deploy step pins ROOM_BODIES_AT_REST`);
+    pinned.set(step.id, match[1]);
+  }
+  assert.equal(pinned.get("prod"), pinned.get("entry"), "both Workers pin the same value");
+  const doc = readFileSync(new URL("../docs/DEPLOY-LANE.md", import.meta.url), "utf8");
+  const docMatch = doc.match(/pins `ROOM_BODIES_AT_REST=([01])`/);
+  assert.ok(docMatch, "runbook documents the ROOM_BODIES_AT_REST pin");
+  assert.equal(docMatch[1], pinned.get("prod"), "runbook pin matches the workflow pin");
+});
+
 import { createServer } from "node:http";
 test("actual recovery CLI records independent exact source schemas and refuses a 37-to-38 fallback", async t => {
   const dir = tempDir(t, "deploy-recovery-cli-");
