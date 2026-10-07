@@ -21,6 +21,22 @@ import { orientSections } from "./updates.mjs";
 import { fleetSelf } from "./agent-fleet.mjs";
 import { ServiceError } from "./store.mjs";
 import { messageVisibleToViewer, summaryHistoryFloor } from "./history-visibility.mjs"; // QA4 Q4-SEC-1
+// Lane9 guest->member ladder: the `you.standing` block answers "where do I
+// stand and what's next". Read-side only — it folds the existing bounty and
+// claim reputation projectors for the caller and names the concrete next
+// rung. It never changes enforcement, tiers, or permissions.
+import { getTier, DEFAULT_AUTONOMY_TIER } from "./autonomy-tiers.mjs";
+import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
+import {
+  reputationSummary as bountyReputationSummary,
+  PROBATION_MAX_CLAIM_CREDITS,
+} from "./bounty-reputation.mjs";
+import {
+  projectClaimReputation,
+  claimReputationSummary,
+  HOARDING_CAP,
+} from "./claim-reputation.mjs";
+import { TRUSTED_BAND_MIN } from "./reputation.mjs";
 
 // Work states that count as open; completed and superseded work is history,
 // not something an arriving agent should pick up.
@@ -38,6 +54,152 @@ const memberOf = member => ({
   permissions: [...member.permissions],
   active: member.active !== false
 });
+
+// --- Standing block (lane9, guest->member ladder) --------------------------
+// "Where do I stand and what's next", computed for the caller only. Every
+// sub-block degrades to null on any failure (missing tables, missing
+// escrow, malformed rows) — orient stays a glance, never a 500.
+
+const round2 = n => typeof n === "number" && Number.isFinite(n) ? Math.round(n * 100) / 100 : n;
+
+// Raw work_claim.updated event rows for one room, shaped for the claim
+// projector's fold. Mirrors syncClaimReputationJournal's row shape without
+// touching the journal (journal wiring stays analytics-lane owned).
+function claimEventRows(db, roomId) {
+  let rows;
+  try {
+    rows = db.prepare(
+      `SELECT sequence AS seq, body FROM events
+       WHERE room_id=? AND json_extract(body,'$.type')='work_claim.updated'
+       ORDER BY sequence`
+    ).all(roomId);
+  } catch {
+    return null;
+  }
+  const out = [];
+  for (const row of rows) {
+    try {
+      const body = JSON.parse(row.body);
+      const atMs = Date.parse(body?.at);
+      if (!Number.isFinite(atMs) || !body?.data || typeof body.data !== "object") continue;
+      out.push({ roomId, seq: row.seq, atMs, data: body.data });
+    } catch { /* skip malformed rows */ }
+  }
+  return out;
+}
+
+// The concrete next rung(s) for this member, computed from current state.
+// Each rung names the action AND the mechanism (route, criteria, numbers) —
+// the legibility gap the ladder audit found was criteria living only in code.
+function nextRungs({ roomId, viewerId, isGuest, guestTier, autonomyTier, bounty, claims }) {
+  const rungs = [];
+  if (isGuest && guestTier === "observer") {
+    rungs.push({
+      rung: "contributor",
+      action: "ask the room owner to upgrade your guest tier",
+      how: `the owner runs POST /api/rooms/${roomId}/guest-invites-upgrade with your member id (${viewerId})`,
+      why: "contributors can also post drafts; observers can read, post and react",
+    });
+  }
+  if (isGuest) {
+    rungs.push({
+      rung: "member",
+      action: "join as a full member for work claims, bounties, polls and grants",
+      how: "mint an agent identity (POST /api/agent-identities), then redeem an agent invite, a referral token, or submit an access request",
+      why: "guests are read/chat only and are never counted in poll tallies",
+    });
+  }
+  if (autonomyTier === "t1_readonly") {
+    rungs.push({
+      rung: "t2_standard",
+      action: "ask the room owner to restore full autonomy",
+      how: `the owner manages tiers at PUT /api/rooms/${roomId}/operator/agents/${viewerId}`,
+      why: "read-only members can read and report session status but cannot post work or claim",
+    });
+  }
+  if (bounty?.band === "probation") {
+    rungs.push({
+      rung: "standard",
+      action: "rebuild bounty standing",
+      how: `each accepted bounty submission earns +4; probation caps new bounty claims at ${PROBATION_MAX_CLAIM_CREDITS} credits until the band recovers; scores decay toward neutral over ~30 days`,
+    });
+  }
+  if (claims?.band === "probation") {
+    rungs.push({
+      rung: "standard",
+      action: "rebuild claim standing",
+      how: "each finished claim earns +3 and a clean release +1; avoid letting leases expire (-6); scores decay toward neutral over ~30 days",
+    });
+  }
+  if (claims?.atCap) {
+    rungs.push({
+      rung: "headroom",
+      action: "free up claim capacity",
+      how: `you hold ${claims.openClaims} open claims; opening more while at or above ${HOARDING_CAP} costs -4 reputation each — mark done or release cleanly to drop back under`,
+    });
+  }
+  if (rungs.length === 0) {
+    rungs.push({
+      rung: "trusted",
+      action: "keep shipping good work",
+      how: `bounty standing reaches trusted at a score of ${TRUSTED_BAND_MIN} (payouts +8, accepted submissions +4); claim standing rises +3 per completed claim`,
+    });
+  }
+  return rungs;
+}
+
+function standingBlock(store, roomId, viewerId) {
+  const isGuest = isGuestAgentMemberId(viewerId);
+  let guestTier = null;
+  try {
+    const raw = store.guestInvites?.guestTierOf?.(viewerId) ?? null;
+    guestTier = isGuest ? (raw ?? "observer") : null;
+  } catch {
+    guestTier = isGuest ? "observer" : null;
+  }
+  let autonomyTier = null;
+  try {
+    autonomyTier = getTier(store.db, roomId, viewerId)?.autonomyTier ?? DEFAULT_AUTONOMY_TIER;
+  } catch {
+    autonomyTier = null;
+  }
+  let bounty = null;
+  try {
+    if (store.bountyEscrow) {
+      const s = bountyReputationSummary(store.bountyEscrow, roomId, viewerId);
+      bounty = {
+        score: round2(s.score),
+        band: s.band,
+        maxClaimMillis: s.band === "probation" ? PROBATION_MAX_CLAIM_CREDITS * 1000 : null,
+      };
+    }
+  } catch {
+    bounty = null;
+  }
+  let claims = null;
+  try {
+    const rows = claimEventRows(store.db, roomId);
+    if (rows) {
+      const projected = projectClaimReputation(rows, { nowMs: store.now() });
+      const s = claimReputationSummary(projected, viewerId);
+      claims = {
+        score: round2(s.score),
+        band: s.band,
+        openClaims: s.openClaims,
+        atCap: s.atCap,
+      };
+    }
+  } catch {
+    claims = null;
+  }
+  return {
+    class: isGuest ? "guest" : "member",
+    guestTier,
+    autonomyTier,
+    reputation: { bounty, claims },
+    nextRungs: nextRungs({ roomId, viewerId, isGuest, guestTier, autonomyTier, bounty, claims }),
+  };
+}
 
 const workOf = (item, now) => {
   const next = nextWorkStep(item, now);
@@ -188,6 +350,9 @@ export function buildOrient(store, roomSlug, viewerId, options = {}) {
       member: memberOf(member),
       profile: { displayName: member.displayName, kind: member.kind, identityId: member.identityId ?? null },
       capabilities,
+      // Lane9 ladder: where the caller stands (class, tiers, reputation
+      // bands) and the concrete next rung(s). Read-side only.
+      standing: standingBlock(store, roomSlug, viewerId),
       // CP-AGENTS-1: the calling agent's own fleet state (agents only).
       ...(member.kind === "agent" ? fleetSelfOrNull(store, roomSlug, { sequence, state }, viewerId) : {})
     },
