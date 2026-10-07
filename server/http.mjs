@@ -40,7 +40,7 @@ import { redactEventPage, redactEventRows, redactMessageTree, redactSnapshotStat
 import { messageInHistory, eventInHistory, indexMessages as indexHistoryMessages, requireExportOwner, recordRoomExport } from "./history-visibility.mjs"; // PRIV-2
 import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
 import { noteIdentityMint } from "./growth-loop.mjs";
-import { recordPluginFunnelStage, recordPluginFunnelReader, handlePluginFunnelRequest } from "./plugin-funnel.mjs"; // Lane 10: plug-in funnel metrics
+import { recordPluginFunnelReader, handlePluginFunnelRequest } from "./plugin-funnel.mjs"; // Plug-in funnel metrics
 import { createWikiReadApi } from "./wiki-read-api.mjs"; // W009: read-only wiki API for agents (prefix-delegated, no route literals here)
 import { buildOpenApiJson, discoverabilityErrorOverride, nextActionsForAccessRequest, nextActionsForAccessRequestStatus, nextActionsForInviteRedeem } from "./discoverability.mjs";
 import { MCP_SERVER_CARD_PATH, MCP_DISCOVERY_CACHE_CONTROL, MCP_SERVER_CARD_CORS } from "../src/mcp-server-card.mjs";
@@ -705,6 +705,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     const matches = (req.headers.cookie || "").split(";").map(value => value.trim()).filter(value => value.startsWith(`${scoped}=`));
     if (matches.length > 1) reject(401, "ambiguous_session_cookie", "Conflicting browser session cookies; clear this site's cookies and sign in again");
     return matches[0]?.slice(scoped.length + 1);
+  }
+  // Non-throwing account-session read for metrics paths: cookie() rejects
+  // (401) on ambiguous cookies, which must never turn a public doc serve
+  // into an auth error. Ambiguity is the auth layer's problem elsewhere.
+  function accountSessionSilent(req) {
+    try { return cookie(req, accountCookieName) ?? null; } catch { return null; }
   }
   function bearer(req) {
     if (!req.headers.authorization) return null;
@@ -1683,9 +1689,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         res.setHeader("Link", discoveryLinks(url));
         const packetBytes = Buffer.from(packet.body);
         res.writeHead(200, { "Content-Type": packet.type, "Content-Length": packetBytes.length });
-        // Plug-in funnel (lane 10): doc_read. Anonymous top-of-funnel count of
-        // discovery-packet readers; aggregate-only, never breaks the serve.
-        recordPluginFunnelReader(store.db, { address: remoteAddress, session: cookie(req, accountCookieName) });
+        // Plug-in funnel (H5 harden): doc_read counts anonymous prospect GETs
+        // only — the recorder skips crawlers, HEAD probes, and signed-in
+        // browsers. The session read is non-throwing: an ambiguous cookie
+        // must never turn a public doc serve into a 401.
+        recordPluginFunnelReader(store.db, {
+          address: remoteAddress,
+          session: accountSessionSilent(req),
+          userAgent: req.headers["user-agent"],
+          method: req.method,
+        });
         return res.end(req.method === "HEAD" ? undefined : packetBytes);
       }
       const discovery = discoveryDoc(url.pathname);
@@ -1717,9 +1730,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         const bytes = Buffer.from(docBody);
         res.writeHead(200, { "Content-Type": discovery.type, "Content-Length": bytes.length });
-        // Plug-in funnel (lane 10): doc_read for every served discovery doc
-        // (skill.md, agent.json, kits.txt, ...). Same aggregate-only recorder.
-        recordPluginFunnelReader(store.db, { address: remoteAddress, session: cookie(req, accountCookieName) });
+        // Plug-in funnel (H5 harden): doc_read for every served discovery doc
+        // (skill.md, agent.json, kits.txt, ...). Same anonymous-prospect-only
+        // recorder as the packet branch above.
+        recordPluginFunnelReader(store.db, {
+          address: remoteAddress,
+          session: accountSessionSilent(req),
+          userAgent: req.headers["user-agent"],
+          method: req.method,
+        });
         return res.end(req.method === "HEAD" ? undefined : bytes);
       }
       if (discovery) reject(405, "method_not_allowed", "Method not allowed");
@@ -2940,9 +2959,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           catch { /* an anonymous mint still records the address and browser session */ }
         }
         noteIdentityMint(store, created.identityId, { address: String(remoteAddress ?? ""), session: slotToken || null, accountId: mintAccountId });
-        // Plug-in funnel (lane 10): identity_mint stage. Aggregate-only, first
-        // reach wins; the recorder never throws into the mint path.
-        recordPluginFunnelStage(store.db, { identityId: created.identityId, stage: "identity_mint" });
+        // Plug-in funnel identity_mint is recorded at the AgentIdentities.create()
+        // choke point (server/agent-identities.mjs), which covers this door too.
         return json(res, 201, created);
       }
       // POST-only mint. GET must not look like a missing route (404) or an

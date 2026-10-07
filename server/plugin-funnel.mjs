@@ -18,6 +18,7 @@
 //   server already stores (messages, claim updates).
 
 import { createHash } from "node:crypto";
+import { AI_CRAWLERS } from "../deploy/agent-discovery.mjs";
 
 export const PLUGIN_FUNNEL_STAGES = Object.freeze([
   "doc_read",
@@ -60,7 +61,9 @@ export function funnelIdentityKey(identityId) {
 }
 
 // The funnel key for an anonymous doc reader (no identity yet). Built from the
-// client address + browser session the same way growth-loop hashes parties.
+// client address the same way growth-loop hashes parties. H5 harden: the
+// recorder no longer mixes the browser session in — a stable per-account key
+// would be per-user tracking, and signed-in browsers are skipped anyway.
 // Caveat, documented in docs/PLUGIN-FUNNEL.md: a static-salt hash of an IPv4
 // address is brute-forceable, so doc_read is a rough top-of-funnel counter,
 // never a tracking vector.
@@ -94,9 +97,41 @@ export function recordPluginFunnelStage(db, { identityId = null, readerKey = nul
   }
 }
 
+// H5 harden: doc_read counts anonymous prospect GETs only. Skipped:
+// - HEAD: a metadata probe (crawlers, proxies), never a read
+//   (server/feedback-routes.mjs:198 states the convention).
+// - crawlers: robots.txt explicitly invites the AI_CRAWLERS to /llms.txt and
+//   generic web crawlers fetch discovery docs constantly; counting them would
+//   drown the prospect signal in bot traffic and fake the top of the funnel.
+// - signed-in browsers (account_session cookie): not anonymous prospects,
+//   and a stable per-account key in the funnel table would be per-user
+//   tracking, which this funnel does not do.
+// The UA check is a documented heuristic, not a security boundary.
+// Built lazily: deploy/agent-discovery.mjs transitively imports this module
+// through the server graph, so reading AI_CRAWLERS at module-evaluation time
+// hits its temporal dead zone (import cycle). By first call time every module
+// is initialized.
+let botUaPattern = null;
+function getBotUaPattern() {
+  if (!botUaPattern) {
+    botUaPattern = new RegExp(
+      [...AI_CRAWLERS, "bot", "crawler", "spider", "slurp"]
+        .map(token => token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+        .join("|"),
+      "i"
+    );
+  }
+  return botUaPattern;
+}
+
 // Convenience for the doc-serving path: hash the reader, record doc_read.
-export function recordPluginFunnelReader(db, { address = "", session = null, atMs = Date.now() } = {}) {
-  const key = funnelReaderKey({ address, session });
+// The session is used only as the signed-in signal, never in the key: reader
+// keys are IP hashes only, so a stored row cannot be tied to an account.
+export function recordPluginFunnelReader(db, { address = "", session = null, userAgent = "", method = "GET", atMs = Date.now() } = {}) {
+  if (String(method).toUpperCase() === "HEAD") return false;
+  if (session) return false;
+  if (getBotUaPattern().test(String(userAgent ?? ""))) return false;
+  const key = funnelReaderKey({ address });
   if (!key) return false;
   return recordPluginFunnelStage(db, { readerKey: key, stage: "doc_read", atMs });
 }
@@ -121,8 +156,8 @@ function isoWeek(ms) {
 const round4 = value => (value === null || value === undefined ? null : Math.round(value * 10000) / 10000);
 
 export const PLUGIN_FUNNEL_DEFINITIONS = Object.freeze({
-  doc_read: "Anonymous reader fetched an agent discovery doc (llms.txt, skill.md, agent.json, kits.txt). Counted per hashed reader key; cannot be linked to later mints.",
-  identity_mint: "POST /api/agent-identities (or the MCP mint) returned 201 for an identity.",
+  doc_read: "Anonymous prospect fetched an agent discovery doc (llms.txt, skill.md, agent.json, kits.txt) via GET. Crawlers, HEAD probes, and signed-in browsers are excluded. Counted per hashed IP key; cannot be linked to later mints.",
+  identity_mint: "A new agent identity was created, through any mint door (HTTP, MCP, invite-code redeem, referral redeem, personal-room onboarding). Recoverable re-registration is not a mint.",
   room_join: "The identity's first identity_links row: it joined (or created) a room.",
   first_claim: "The identity's member took its first work claim (claimed action on the work-claims board).",
   first_receipt: "The identity's first owned claim reached done — the in-room receipt card posted.",
@@ -306,12 +341,16 @@ export function collectPluginFunnelInputs(store, { nowMs = Date.now() } = {}) {
     const windowStartMs = now - DAY7_WINDOW_MS;
     const windowStartIso = new Date(windowStartMs).toISOString();
     if (tableExists(db, "events")) {
+      // H5 harden: match the event type via json_extract (the server/store.mjs
+      // convention), not a body substring. The LIKE pre-filter missed
+      // pretty-printed envelopes and matched any event quoting the literal
+      // string in its payload.
       inputs.messageActivity = db.prepare(
         `SELECT room_id AS roomId,
                 json_extract(body, '$.actorId') AS memberId,
                 json_extract(body, '$.at') AS atIso
          FROM events
-         WHERE body LIKE '%"type":"message.posted"%'
+         WHERE json_extract(body, '$.type') = 'message.posted'
            AND json_extract(body, '$.at') >= ?`
       ).all(windowStartIso).map(row => ({
         roomId: row.roomId,
@@ -336,12 +375,28 @@ export function collectPluginFunnelInputs(store, { nowMs = Date.now() } = {}) {
   return inputs;
 }
 
+// H5 harden: the public report scans the events table, so cache it briefly —
+// an anonymous scrape must not turn the endpoint into a full-scan-per-request
+// load generator. Per-process, keyed by store identity; generatedAt labels the
+// staleness honestly. Aggregates move slowly; a few minutes of lag is not a
+// lie, but an unbounded cache would be.
+export const PLUGIN_FUNNEL_CACHE_TTL_MS = 5 * 60 * 1000;
+const funnelReportCache = new WeakMap();
+
 // GET /api/plugin-funnel handler body. Read-only: non-GET is a 405.
 export function handlePluginFunnelRequest(store, { method = "GET" } = {}) {
   if (method !== "GET") {
     return { status: 405, body: { error: { code: "method_not_allowed", message: "Use GET /api/plugin-funnel" } } };
   }
   const nowMs = typeof store?.now === "function" ? store.now() : Date.now();
+  const cacheable = store !== null && (typeof store === "object" || typeof store === "function");
+  if (cacheable) {
+    const cached = funnelReportCache.get(store);
+    if (cached && nowMs - cached.at < PLUGIN_FUNNEL_CACHE_TTL_MS) {
+      return { status: 200, body: cached.body };
+    }
+  }
   const report = pluginFunnelReport({ ...collectPluginFunnelInputs(store, { nowMs }), nowMs });
+  if (cacheable) funnelReportCache.set(store, { at: nowMs, body: report });
   return { status: 200, body: report };
 }

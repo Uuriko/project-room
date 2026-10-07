@@ -16,7 +16,7 @@ import { memberCan } from "../src/events.js";
 import { nextActionsForIdentityMint } from "./discoverability.mjs";
 import { checkAgentDisplayName, assertNotReservedRoleName } from "./display-name-guard.mjs";
 import { refreshDirectoryIdentity } from "./public-read-model.mjs";
-import { recordPluginFunnelStage } from "./plugin-funnel.mjs"; // Lane 10: plug-in funnel room_join stage
+import { recordPluginFunnelStage } from "./plugin-funnel.mjs"; // Plug-in funnel: identity_mint (create choke point) + room_join stages
 
 const fail = (status, code, message, headers = null, detail = null) => {
   const error = new ServiceError(status, code, message, headers);
@@ -389,6 +389,12 @@ export class AgentIdentities {
       const verifier = this.verifierColumns(secret);
       this.db.prepare("INSERT INTO agent_identities(identity_id,secret_hash,fallback_secret_hash,display_name,created_at,activated_at,mint_address,mint_network) VALUES(?,?,?,?,?,?,?,?)")
         .run(identityId, verifier.secretHash, verifier.fallbackHash, name, now, activatedAt, mintAddress, mintNetwork);
+      // Plug-in funnel (H5 harden): identity_mint at the single choke point.
+      // Every mint door — POST /api/agent-identities, the MCP mint tool, the
+      // personal-room onboarding mint, the invite-code redeem, the referral
+      // redeem — flows through create(). The duplicate paths return early
+      // above, so only genuine new identities are recorded. Never throws.
+      recordPluginFunnelStage(this.db, { identityId, stage: "identity_mint", atMs: now });
       // Bind the identity's Ed25519 claim-signing key at issuance: the
       // public key is registered in the agent-key registry (the
       // operator-attested binding — see server/agent-key-registry.mjs) and
