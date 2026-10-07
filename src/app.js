@@ -274,6 +274,8 @@ let agentConnectionsUI = null;
 let agentInvitesUI = null;
 let referralBoardUI = null;
 let landQueueUI = null;
+let openQuestionsUI = null;
+let retentionUI = null;
 let instructionsUI = null;
 let inboxUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
@@ -373,6 +375,8 @@ const client = new RoomClient({
     agentInvitesUI?.sync();
     referralBoardUI?.sync();
     landQueueUI?.sync();
+    openQuestionsUI?.sync();
+    retentionUI?.sync();
     if (presenceBoundary) startPresencePoll();
     if (firstSnapshot) {
       rememberLastRoom(roomId, undefined, state.room?.title);
@@ -460,6 +464,8 @@ const client = new RoomClient({
     agentInvitesUI?.reset();
     referralBoardUI?.reset();
     landQueueUI?.reset();
+    openQuestionsUI?.reset();
+    retentionUI?.reset();
     $("#room-more").open = false;
     $("#advanced-room-tools").open = false;
     instructionsUI?.reset();
@@ -620,6 +626,16 @@ landQueueUI = lazyDisclosure({ panel: $("#land-queue-panel"),
   load: () => import("./land-queue-board.js"),
   install: module => module.installLandQueueBoard({ client, getSession: () => session }),
   onError: () => notice("Could not load the land queue. Close and reopen to retry.", true) });
+// Open-questions radar (read-only view of the server's open-questions endpoint).
+openQuestionsUI = lazyDisclosure({ panel: $("#open-questions-panel"),
+  load: () => import("./open-questions-ui.js"),
+  install: module => module.installOpenQuestionsPanel({ client, getState: () => state, getSession: () => session }),
+  onError: () => notice("Could not load open questions. Close and reopen to retry.", true) });
+// Retention dashboard (read-only view of the work-claims retention endpoint).
+retentionUI = lazyDisclosure({ panel: $("#retention-panel"),
+  load: () => import("./retention-ui.js"),
+  install: module => module.installRetentionPanel({ client, getState: () => state, getSession: () => session }),
+  onError: () => notice("Could not load the retention dashboard. Close and reopen to retry.", true) });
 instructionsUI = installRoomInstructions({ client, getState: () => state, onSaved: text => notice(text) });
 // #662: owner "needs your attention" card (owner-gated; hidden for everyone else).
 // JDOT-MEMBER-PERMS-UI begin
