@@ -387,17 +387,28 @@ test("routing.mjs is pure: zero imports", () => {
   assert.ok(!/^import /m.test(src), "pure scorer must not import anything");
 });
 
-test("no server/ or scripts/ file outside the routing pair touches it (unmounted)", () => {
+test("router decisions stay unwired: no server/ or scripts/ file outside the routing pair imports routing behavior", () => {
+  // Shadow mode (D6 §4.3): scoring/deciding must not be wired into any
+  // runtime path. The one exception is schema plumbing: server/store.mjs
+  // imports ONLY the ROUTING_RECORDS_SCHEMA DDL so the journal table is
+  // created at store init (the additive-table discipline — auditRecovery
+  // requires every applicationTables entry to exist). Behavior imports
+  // (decide, scoreLane, createRoutingRoutes, ...) stay banned outside the pair.
   const offenders = [];
   for (const [rel, skip] of [["../server/", new Set(["routing.mjs", "routing-routes.mjs"])], ["../scripts/", new Set(["routing-eval.mjs"])]]) {
     const dir = new URL(rel, import.meta.url).pathname;
     for (const name of readdirSync(dir)) {
       if (!name.endsWith(".mjs") || skip.has(name)) continue;
       const src = readFileSync(dir + name, "utf8");
-      if (/from\s+["']\.\/routing(-routes)?\.mjs["']/.test(src) || /require\(["']\.\/routing/.test(src)) offenders.push(rel + name);
+      for (const m of src.matchAll(/import\s*\{([^}]*)\}\s*from\s*["']\.\/routing(-routes)?\.mjs["']/g)) {
+        const names = m[1].split(",").map(s => s.trim().split(/\s+as\s+/)[0].trim()).filter(Boolean);
+        if (names.some(n => n !== "ROUTING_RECORDS_SCHEMA")) offenders.push(`${rel}${name} imports ${names.join(",")}`);
+      }
+      const rest = src.replace(/import\s*\{[^}]*\}\s*from\s*["']\.\/routing(-routes)?\.mjs["']/g, "");
+      if (/from\s*["']\.\/routing(-routes)?\.mjs["']/.test(rest) || /require\(["']\.\/routing/.test(src)) offenders.push(rel + name);
     }
   }
-  assert.deepEqual(offenders, [], `router must stay unwired: ${offenders.join(", ")}`);
+  assert.deepEqual(offenders, [], `router behavior must stay unwired: ${offenders.join(", ")}`);
 });
 
 test("routing.mjs exports scores/guard/record/metrics only — no routing-action verbs", () => {
