@@ -215,14 +215,23 @@ function peerDmsOf(store, roomId, identityId, after) {
 
 function bondRequestsOf(store, roomId, pending, after) {
   const mine = pending.filter(row => row.roomHint === roomId);
+  // One query per chunk, not one per bond: the per-bond lookup has no index on
+  // the bondId extract, so each bond costs a full scan of the room's events.
+  // GROUP BY returns the same latest (MAX) sequence per bondId.
+  const seqByBond = new Map();
+  for (let i = 0; i < mine.length; i += 900) {
+    const chunk = mine.slice(i, i + 900);
+    const rows = store.db.prepare(
+      `SELECT json_extract(body,'$.data.bondId') AS bondId, MAX(sequence) AS sequence FROM events
+       WHERE room_id=? AND json_extract(body,'$.type')='bond.proposed'
+         AND json_extract(body,'$.data.bondId') IN (${chunk.map(() => "?").join(",")})
+       GROUP BY json_extract(body,'$.data.bondId')`
+    ).all(roomId, ...chunk.map(bond => bond.bondId));
+    for (const row of rows) seqByBond.set(row.bondId, row.sequence);
+  }
   const items = [];
   for (const bond of mine) {
-    const seq = store.db.prepare(
-      `SELECT sequence FROM events
-       WHERE room_id=? AND json_extract(body,'$.type')='bond.proposed'
-         AND json_extract(body,'$.data.bondId')=?
-       ORDER BY sequence DESC LIMIT 1`
-    ).get(roomId, bond.bondId)?.sequence ?? null;
+    const seq = seqByBond.get(bond.bondId) ?? null;
     if (seq == null || seq <= after) continue;
     items.push({
       kind: "bond_request",

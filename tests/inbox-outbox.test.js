@@ -183,8 +183,14 @@ test("full pilot capacity never prevents settling an already reserved reply", as
   // durability, and the database is disposable (rmSync'd in t.after), so relax
   // fsync for this fixture only. Every assertion below is unchanged.
   f.store.db.exec("PRAGMA synchronous=NORMAL");
-  for (let revision = 1; revision < 4998; revision++) f.apply({ action: "draft.save", requestId: "capacity-" + revision,
-    sourceId: "note", sourceRevision: 1, expectedRevision: revision, body: "Final capacity reply" });
+  // One outer transaction collapses the ~5000 applies into a single commit;
+  // store.transaction() nests safely (inner applies join the outer txn), and
+  // every assertion below reads state only after the loop, so collapsing the
+  // commits changes nothing the test observes.
+  f.store.transaction(() => {
+    for (let revision = 1; revision < 4998; revision++) f.apply({ action: "draft.save", requestId: "capacity-" + revision,
+      sourceId: "note", sourceRevision: 1, expectedRevision: revision, body: "Final capacity reply" });
+  });
   const request = f.reserve(); f.apply(request);
   assert.equal(f.store.db.prepare("SELECT count(*) n FROM private_inbox_commands").get().n, 5000);
   assert.equal((await f.run(request.requestId)).status, "accepted");
