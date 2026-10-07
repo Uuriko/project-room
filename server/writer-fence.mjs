@@ -426,7 +426,17 @@ export const unfencedAdditiveTables = Object.freeze([
   // Purely additive and intentionally NOT fenced — older writers have no code
   // path to it; the owner-managed roster rules in server/squads.mjs are the
   // integrity gate.
-  "squads"
+  "squads",
+  // herdr redesign B14 (worker-side session lifecycle, server/session-lifecycle.mjs):
+  // herdr_sessions + herdr_session_journal (session rows and the attach/
+  // detach/destroy audit journal), herdr_lane_optin (per-lane opt-in flags),
+  // herdr_backend_state (backend capability/advertisement state). Purely
+  // additive and intentionally NOT fenced — older writers have no code path
+  // to them, and the lifecycle module verifies its own schema on open.
+  "herdr_sessions",
+  "herdr_session_journal",
+  "herdr_lane_optin",
+  "herdr_backend_state"
 ]);
 // Created on first use, not in the constructor. A database that has never
 // issued an OAuth grant or persisted an abuse rate bucket does not have
