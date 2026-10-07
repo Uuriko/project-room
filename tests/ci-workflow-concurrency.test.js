@@ -12,7 +12,10 @@
 // `github.event_name != 'workflow_dispatch'` fails.
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
+import { parse } from "yaml";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -203,4 +206,33 @@ test("main pushes never cancel an in-progress test or schema-gate run", () => {
   assert.equal(evaluateGithubExpression(legacy, mainPush), true);
 
   for (const file of ["test.yml", "schema-gate.yml"]) assertMainDoesNotCancelInProgress(file);
+});
+
+// Execute the actual workflow shell command with a stand-in npm binary.
+// This catches manual suite lists drifting behind package.json and ensures
+// a failed runtime suite cannot be hidden by later browser success.
+test("Cloudflare CI runs canonical runtime then browser scripts and preserves failure", t => {
+  const workflow = parse(readFileSync(join(WORKFLOWS, "test.yml"), "utf8"));
+  const step = workflow.jobs.cloudflare.steps.find(item => item.name === "Verify the shared Workers runtime and restart journey");
+  assert.ok(step);
+  assert.equal(step["working-directory"], "cloudflare");
+  assert.equal(step["continue-on-error"], undefined);
+  const pkg = JSON.parse(readFileSync(new URL("../cloudflare/package.json", import.meta.url), "utf8"));
+  assert.ok(pkg.scripts.test.startsWith("node --test "));
+  assert.ok(pkg.scripts["test:browser"].startsWith("node --test "));
+  const dir = mkdtempSync(join(tmpdir(), "cloudflare-ci-command-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(join(dir, "npm"), `#!/usr/bin/env node
+import('node:fs').then(({appendFileSync})=>{const args=process.argv.slice(2);appendFileSync(process.env.CI_COMMAND_LOG,JSON.stringify(args)+'\\n');if(process.env.FAIL_RUNTIME==='1'&&args.join(' ')==='test')process.exitCode=17;});
+`, { mode: 0o755 });
+  for (const fail of [false, true]) {
+    const log = join(dir, fail ? "fail.log" : "success.log");
+    writeFileSync(log, "");
+    const result = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", step.run], {
+      cwd: dir, encoding: "utf8", env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, CI_COMMAND_LOG: log, FAIL_RUNTIME: fail ? "1" : "0" },
+    });
+    const calls = readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map(line => JSON.parse(line));
+    assert.deepEqual(calls, fail ? [["test"]] : [["test"], ["run", "test:browser"]]);
+    assert.equal(result.status, fail ? 17 : 0, result.stdout + result.stderr);
+  }
 });
