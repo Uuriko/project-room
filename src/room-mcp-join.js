@@ -7,6 +7,13 @@ export const PUBLIC_WORK_MCP_TOOLS = Object.freeze([
   "public_work_release", "public_work_finish", "public_work_my_review"
 ]);
 
+// Anonymous enrollment: a stranger mints its own identity secret natively over
+// MCP instead of dead-ending on the public catalog. The canonical name list
+// lives here; server/mcp-identity-mint.mjs asserts its definition matches.
+export const IDENTITY_MINT_MCP_TOOLS = Object.freeze([
+  "room_identity_mint"
+]);
+
 export const ROOM_MCP_PUBLIC_URL = "https://www.getdasha.com/room/mcp";
 export const ROOM_MCP_SERVER_NAME = "project-room";
 // initialize serverInfo.version. The server card copies this string.

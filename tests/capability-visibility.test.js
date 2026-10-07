@@ -225,10 +225,11 @@ test("capabilityVisibleTo: grant-edge seam refines tiers (slice-1 plug-in point)
 });
 
 test("listing endpoints: no leaks, no over-filtering", async t => {
-  // 1. Anonymous MCP: four join documents plus two executable read-only work tools.
+  // 1. Anonymous MCP: four join documents, two executable read-only work tools,
+  //    and the identity mint.
   const publicList = handleMcpJoinRpc(rpc("tools/list"));
   assert.deepEqual(toolNames(publicList.result.tools),
-    new Set(["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet", "public_work_recommend", "public_work_read_task"]));
+    new Set(["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet", "public_work_recommend", "public_work_read_task", "room_identity_mint"]));
 
   // 2. Server card: public by design, full unfiltered list.
   assert.deepEqual(toolNames(liveEnrolledMcpTools()), toolNames(listedMcpTools("core", false, null, "public_work")));

@@ -23,6 +23,7 @@ import { listedMcpTools, livePublicMcpTools, liveEnrolledMcpTools } from "../ser
 import { hostedMcpToolDefs } from "../server/mcp-hosted-tools.mjs";
 import { MCP_JOIN_TOOLS } from "../server/mcp-http.mjs";
 import { publicWorkMcpDefinitions, anonymousPublicWorkMcpTools } from "../server/mcp-public-work.mjs";
+import { identityMintMcpDefinitions } from "../server/mcp-identity-mint.mjs";
 
 function ardMcpTools() {
   const catalog = JSON.parse(aiCatalog());
@@ -55,6 +56,7 @@ function codeToolNames() {
     ...hostedMcpToolDefs.map(t => t.name),
     ...MCP_JOIN_TOOLS.map(t => t.name),
     ...publicWorkMcpDefinitions.map(t => t.name),
+    ...identityMintMcpDefinitions.map(t => t.name),
     ...(anonymousPublicWorkMcpTools ?? []).map(t => t.name),
   ]);
 }

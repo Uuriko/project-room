@@ -974,7 +974,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             // accepted), matching bearer()/carriesBearer() above.
             && /^bearer (?:pri_|rak_)/i.test(req.headers.authorization);
           const text = await readText(req, fileBody ? mcpAttachmentBodyBytes : JSON_BODY_BYTES, () => new ServiceError(413, "too_large", "Request is too large"));
-          return writeRoomMcpNode(req, res, url, { bodyText: text, roomMcp: hostedRoomMcp });
+          return writeRoomMcpNode(req, res, url, { bodyText: text, roomMcp: hostedRoomMcp, remoteAddress });
         }
         return writeRoomMcpNode(req, res, url);
       }
