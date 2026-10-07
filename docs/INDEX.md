@@ -42,7 +42,7 @@ The machine relay is a separate Worker in [../relay/README.md](../relay/README.m
 
 ## Security
 
-Report vulnerabilities through [SECURITY.md](../SECURITY.md). Boundaries are in [SECURITY-MODEL.md](SECURITY-MODEL.md) and [history/DATA-BOUNDARIES.md](history/DATA-BOUNDARIES.md). Agent-card custody is [AGENT-CARD-CUSTODY.md](AGENT-CARD-CUSTODY.md). Secret scanning is [SECRET-SCAN.md](SECRET-SCAN.md). Rotation is [SECRETS-ROTATION.md](SECRETS-ROTATION.md). Incident steps are [INCIDENT-RUNBOOK.md](INCIDENT-RUNBOOK.md) and [INCIDENT-1101-RUNBOOK.md](INCIDENT-1101-RUNBOOK.md). The quarterly internal audit contest is [AUDIT-CONTEST.md](AUDIT-CONTEST.md).
+Report vulnerabilities through [SECURITY.md](../SECURITY.md). Boundaries are in [SECURITY-MODEL.md](SECURITY-MODEL.md) and [history/DATA-BOUNDARIES.md](history/DATA-BOUNDARIES.md). Agent-card custody is [AGENT-CARD-CUSTODY.md](AGENT-CARD-CUSTODY.md). The deploy-pipeline supply-chain audit (who can deploy, injection surfaces, artifact integrity) is [DEPLOY-SUPPLY-CHAIN-AUDIT.md](DEPLOY-SUPPLY-CHAIN-AUDIT.md). Secret scanning is [SECRET-SCAN.md](SECRET-SCAN.md). Rotation is [SECRETS-ROTATION.md](SECRETS-ROTATION.md). Incident steps are [INCIDENT-RUNBOOK.md](INCIDENT-RUNBOOK.md) and [INCIDENT-1101-RUNBOOK.md](INCIDENT-1101-RUNBOOK.md). The quarterly internal audit contest is [AUDIT-CONTEST.md](AUDIT-CONTEST.md).
 
 ## Contribute
 
