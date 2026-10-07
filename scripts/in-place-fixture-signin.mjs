@@ -22,6 +22,8 @@ export async function signInFixtureInPlace(page, store, accessKey, roomId = "com
   const { email, password } = login;
   await page.locator("#auth-panel").waitFor({ state: "visible" });
   const form = page.locator('#auth-signin-ui [data-signin-form="password"]');
+  if (!await form.isVisible()) await page.getByRole("button", { name: "Log in", exact: true }).click();
+  await form.waitFor({ state: "visible" });
   await form.locator('[name="email"]').fill(email);
   await form.locator('[name="password"]').fill(password);
   const reply = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/password/login");

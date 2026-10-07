@@ -9,6 +9,7 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { signInFixture } from "./auth-signin.mjs";
+import { openSettings, closeSettings, ensureSidebarClosed } from "./room-chrome.mjs";
 
 async function setup(t, viewport = { width: 1440, height: 1000 }) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
@@ -34,9 +35,18 @@ async function setup(t, viewport = { width: 1440, height: 1000 }) {
   await page.locator("#auth-panel").waitFor({ state: "visible" });
   await signInFixture(page, f.keys.owner);
   await page.locator("#main").waitFor({ state: "visible" });
+  // A single-thread human room keeps channel controls under Advanced.
+  // Exercise that actual choice, then the existing channel-management journey.
+  await page.waitForFunction(() => document.body.classList.contains("human-experience"));
+  assert.equal(await page.locator('#channel-list [data-channel]').first().isVisible(), false);
+  await openSettings(page);
+  await page.locator('#advanced-room-tools > summary').click();
+  await page.locator('#human-advanced').check();
+  await closeSettings(page);
   if (viewport.width < 700) await page.locator("#sidebar-toggle").click();
   await page.locator('#channel-list [data-channel]').first().waitFor({ state: "visible" });
   const post = async body => {
+    await ensureSidebarClosed(page);
     await page.locator("#message-input").fill(body);
     await page.locator("#message-form button[type=submit]").click();
     await page.locator("#message-list .message-body", { hasText: body }).first().waitFor({ state: "visible" });
