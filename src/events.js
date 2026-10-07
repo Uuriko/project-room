@@ -444,6 +444,14 @@ export function validId(value) {
   return typeof value === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/.test(value) && !["constructor", "prototype", "__proto__"].includes(value);
 }
 
+// #1004 follow-up: member projections are plain objects from JSON.parse, so
+// members[id] resolves inherited Object.prototype names ("toString",
+// "valueOf", "hasOwnProperty", ...) that pass validId. Every "must be an
+// active room member" check on a caller-supplied id must resolve through
+// this helper so only own members of the projection satisfy it.
+export const ownMember = (members, id) =>
+  (members && Object.hasOwn(members, id) ? members[id] : undefined);
+
 export const WORK_STATES = Object.freeze({
   PROPOSED: "proposed",
   ACCEPTED: "accepted",

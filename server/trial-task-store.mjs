@@ -3,7 +3,7 @@ import {createFeeCreditLedger} from "./fee-credit-ledger.mjs";
 import {routeSettlement} from "./settlement-router.mjs";
 // Durable, room-scoped RECORD-ONLY trial authority. No keys, money or hosts are provisioned.
 import {canonicalJson} from '../src/audit-receipts.mjs';
-import {validId} from '../src/events.js';
+import {validId, ownMember} from '../src/events.js';
 import {createTrialTask,fundTrialTask,claimTrialTask,submitTrialTask,verdictTrialTask,receiptTrialTask,blockTrialTask,resumeTrialTask,releaseTrialTask} from './trial-tasks.mjs';
 import {verifyVettingReceipt} from './vetting-receipts.mjs';
 export const trialTaskSchema=`
@@ -70,7 +70,8 @@ export class TrialTasks {
      if(!owner)railFail(403,'owner_only','Only owner may record a trial');
      shape(input,['action','requestId','taskId','candidateId','buyerId','demigodReqId','title','trialScope','vettingRubric','feePolicyRef','budgetRecord']);
      if(this.db.prepare('SELECT 1 FROM room_trial_tasks WHERE room_id=? AND task_id=?').get(roomId,input.taskId))railFail(409,'trial_exists','Trial ID already exists');
-     for(const id of [input.candidateId,input.buyerId])if(!state.members[id]||state.members[id].active===false)railFail(422,'invalid_trial_party','Parties must be active room members');
+     // #1004 follow-up: own-property lookup — an inherited Object.prototype name must never satisfy "active room member".
+     for(const id of [input.candidateId,input.buyerId]){const party=ownMember(state.members,id);if(!party||party.active===false)railFail(422,'invalid_trial_party','Parties must be active room members');}
      if(input.candidateId===input.buyerId)railFail(422,'invalid_trial_party','Candidate and buyer must differ');
      task={...createTrialTask({...input,id:input.taskId},now),roomId,buyerId:input.buyerId,revision:0,recordOnly:true,paymentStatus:'not_configured'};
      if(input.budgetRecord)task=fundTrialTask(task,{...input.budgetRecord,recordedBy:actorId},now);
