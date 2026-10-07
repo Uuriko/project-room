@@ -7,11 +7,17 @@
 # the PR's current head SHA; a CHANGES_REQUESTED on an older commit is
 # superseded by the push and does not block.
 #
-# The gate logic always runs from the default branch (not the PR head), so a
-# PR can never neuter its own gate. Informative on PRs today; blocking once
+# The gate logic always runs from the event's own ref: the PR head on
+# pull_request / pull_request_review, the prospective-merge temp branch on
+# merge_group. On merge_group that is exactly the future state of main being
+# judged, so the verdict applies to what will land. (Required checks always
+# run the PR's code; the defense against a PR neutering its own gate is
+# review — the room's lander rule — not the checkout ref.)
+#
+# Backward compatible: the check only ever reports — it never merges,
+# comments, or dequeues. Informative on PRs today; blocking once
 # `mergehold-gate` (the job name — keep it exactly) is added as a required
-# check on the base branch / merge queue. Backward compatible: it only ever
-# reports, it never merges, comments, or dequeues.
+# check on the base branch / merge queue.
 name: mergehold-gate
 
 on:
@@ -30,8 +36,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: ${{ github.event.repository.default_branch }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
