@@ -7,9 +7,15 @@
 //
 // Allocation follows Node24 default test discovery; timing data never selects
 // membership: every Node-discovered test file is in exactly one shard.
-// Per-file durations live in scripts/unit-ci-durations.json (milliseconds,
-// measured on hosted CI, with documented local additions); files without a measurement get a conservative
-// default so a new test file lands in a shard instead of breaking the plan.
+// Per-file durations live in scripts/unit-ci-durations.json (milliseconds).
+// That file is SELF-UPDATING: each shard records per-file wall times into
+// its evidence artifact (scripts/unit-ci.mjs +
+// scripts/unit-file-durations-reporter.mjs), and
+// scripts/unit-durations-refresh.mjs regenerates the file from per-file
+// medians across recent successful main runs (weekly PR via
+// .github/workflows/unit-durations-refresh.yml). Files without a measurement
+// get a conservative default so a new test file lands in a shard instead of
+// breaking the plan.
 import { createHash } from "node:crypto";
 import { readFileSync, globSync } from "node:fs";
 

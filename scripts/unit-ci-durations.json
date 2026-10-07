@@ -767,6 +767,7 @@
   "tests/typing-routes.test.js": 4669,
   "tests/typing.test.js": 3764,
   "tests/unification.test.js": 4798,
+  "tests/unit-shard-balance.test.js": 23000,
   "tests/unit-shards.test.js": 24147,
   "tests/verify-affected.test.js": 2000,
   "tests/untested-modules-lint.test.js": 4521,

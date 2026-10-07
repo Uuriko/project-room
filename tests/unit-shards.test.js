@@ -15,7 +15,7 @@ test("unit shards execute each test file once and aggregate only complete curren
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   mkdirSync(join(dir, "scripts"));
   mkdirSync(join(dir, "tests"));
-  for (const name of ["check-deps.mjs", "failing-tests.mjs", "unit-ci.mjs", "unit-ci-durations.json", "unit-shards.mjs", "unit-shards-check.mjs"]) {
+  for (const name of ["check-deps.mjs", "failing-tests.mjs", "unit-ci.mjs", "unit-ci-durations.json", "unit-shards.mjs", "unit-shards-check.mjs", "unit-file-durations-reporter.mjs"]) {
     cpSync(join("scripts", name), join(dir, "scripts", name));
   }
   writeFileSync(join(dir, "package.json"), JSON.stringify({type:"module"}));

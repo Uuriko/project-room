@@ -4,12 +4,17 @@
 // Runs the shard's Node-discovered test files with `node --test` and writes a
 // receipt under test-results/ for scripts/unit-shards-check.mjs. The receipt
 // binds the shard to the exact plan (planHash), run, revision and attempt so
-// the `unit` merge gate can fail closed on stale or partial evidence.
+// the `unit` merge gate can fail closed on stale or partial evidence. The
+// shard also records per-file wall times
+// (test-results/unit-file-durations-<i>-of-3.json) for the shard balancer's
+// self-update (scripts/unit-durations-refresh.mjs); the durations file rides
+// the existing evidence artifact and the gate ignores it.
 //
 // Usage: node scripts/unit-ci.mjs --shard=1/3   (run from the repo root)
 // Use worktree-local scratch by default; create explicit TMPDIR before children.
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { unitPlan, parseShard } from "./unit-shards.mjs";
 import { parseFailingTests } from "./failing-tests.mjs";
@@ -18,8 +23,11 @@ import { parseFailingTests } from "./failing-tests.mjs";
  * Run test files with `node --test`, teeing the reporter stream to the console.
  * Returns { status, signal, failures }: failing test names parsed from the
  * spec-reporter output (advisory — [] on success or when nothing parsed).
+ * `extraReporters` is an optional flat list of `--test-reporter` /
+ * `--test-reporter-destination` pairs inserted before the file positionals
+ * (node --test only honors --test* options placed before the files).
  */
-export function runTestFiles(files) {
+export function runTestFiles(files, extraReporters = []) {
   // A child `node --test` spawned from inside a test-runner process refuses
   // to run ("recursively ... skipping running files") when it inherits
   // NODE_TEST_CONTEXT. Drop it so the child is always a fresh top-level
@@ -29,7 +37,7 @@ export function runTestFiles(files) {
   // Pipe (not inherit) so failing test names can be parsed out of the
   // reporter stream for the shard receipt; tee both streams to the console
   // so the job log keeps its exact old shape.
-  const result = spawnSync(process.execPath, ["--test", ...files], {
+  const result = spawnSync(process.execPath, ["--test", ...extraReporters, ...files], {
     stdio: ["inherit", "pipe", "pipe"],
     maxBuffer: 256 * 1024 * 1024,
     env,
@@ -72,7 +80,24 @@ function main() {
   rmSync(receiptPath, { force: true });
   console.log(`unit-ci: shard ${shard.index}/${shard.total}, ${files.length} test files`);
   const started = Date.now();
-  const { status, signal, failures } = runTestFiles(files);
+  // Per-file duration capture for the shard balancer's self-update: an extra
+  // reporter pair writes the per-file wall times next to the receipt, where
+  // the unit-shard-evidence artifact picks them up. Best-effort — it must
+  // never fail the shard. The default console reporter is reproduced
+  // explicitly (spec -> stdout) so log output is unchanged, since passing
+  // --test-reporter replaces the default.
+  const durationsPath = resolve(`test-results/unit-file-durations-${shard.index}-of-${shard.total}.json`);
+  const durationsReporter = fileURLToPath(new URL("./unit-file-durations-reporter.mjs", import.meta.url));
+  let extraReporters = [];
+  if (existsSync(durationsReporter)) {
+    extraReporters = [
+      "--test-reporter", "spec", "--test-reporter-destination", "stdout",
+      "--test-reporter", durationsReporter, "--test-reporter-destination", durationsPath,
+    ];
+  } else {
+    console.error("unit-ci: unit-file-durations-reporter.mjs missing; skipping per-file duration capture");
+  }
+  const { status, signal, failures } = runTestFiles(files, extraReporters);
   writeFileSync(
     receiptPath,
     JSON.stringify(
