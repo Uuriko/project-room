@@ -49,6 +49,24 @@ for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'deskto
   await page.locator('#message-input').fill('Keep my unsent thought.');
   await openSearch(page);
   await search.fill('Orbit');
+  await search.press('Escape');
+  assert.equal(await search.inputValue(), '', 'first Escape keeps native search clearing');
+  assert.equal(await page.locator('#search-form').isVisible(), true);
+  for (const options of [{ repeat: true }, { isComposing: true }, { keyCode: 229 }, { ctrlKey: true }, { metaKey: true }, { altKey: true }, { shiftKey: true }]) {
+    assert.equal(await search.evaluate((node, options) => {
+      const key = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true, ...options });
+      node.dispatchEvent(key); return key.defaultPrevented;
+    }, options), false, 'modified, repeated and composition keys remain untouched');
+    assert.equal(await page.locator('#search-form').isVisible(), true);
+  }
+  await search.press('Escape');
+  assert.equal(await page.locator('#search-form').isVisible(), false, 'empty search Escape closes the panel');
+  assert.equal(await page.locator('#topbar-search-toggle').getAttribute('aria-expanded'), 'false');
+  assert.equal(await page.locator('#topbar-search-toggle').evaluate(node => node === document.activeElement), true);
+  assert.equal(await page.locator('#message-input').inputValue(), 'Keep my unsent thought.');
+  assert.equal(auditRecovery(f.store).dataSha256, before, 'Escape search navigation is read-only');
+  await openSearch(page);
+  await search.fill('Orbit');
   assert.equal(await page.locator('#search-count').textContent(), '3 matches in this room');
   assert.equal(await hits.locator('[data-open-work]').count(), 2);
   assert.equal(await hits.locator('a').first().getAttribute('data-open-work'), pair, 'open work precedes finished work');
@@ -140,6 +158,20 @@ for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'deskto
   assert.deepEqual(await page.locator('#message-input').evaluate(node => [node.selectionStart, node.selectionEnd, node.selectionDirection]), [0, 8, 'forward'], 'the actual platform keyboard establishes the selection before navigation');
   const chatLink = page.locator('#message-list [data-message-record-id="search:same-id"] [data-open-work="search:same-id"]');
   const beforeChannelNavigation = auditRecovery(f.store).dataSha256;
+  await search.fill('Orbit');
+  await search.press('Escape');
+  assert.equal(await search.inputValue(), '');
+  assert.equal(await page.locator('#thread-bar').isVisible(), true, 'native query clearing cannot leave the thread');
+  await search.press('Escape');
+  assert.equal(await page.locator('#search-form').isVisible(), false);
+  assert.equal(await page.locator('#thread-bar').isVisible(), true, 'closing search cannot leave the thread');
+  assert.equal(await page.locator('#message-input').inputValue(), threadDraft);
+  assert.equal(await page.locator('#message-to-select').inputValue(), 'producer');
+  assert.equal(await page.locator('#request-mode-bar').isVisible(), true);
+  assert.deepEqual(await page.locator('#message-input').evaluate(node => [node.selectionStart, node.selectionEnd, node.selectionDirection]), [0, 8, 'forward']);
+  assert.equal(auditRecovery(f.store).dataSha256, beforeChannelNavigation);
+  await openSearch(page);
+  await search.fill('handoff-only');
   await chatLink.focus();
   assert.equal(await chatLink.getAttribute('href'), canonicalHash);
   await chatLink.press('Enter');

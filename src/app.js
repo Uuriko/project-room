@@ -4534,6 +4534,18 @@ document.addEventListener("keydown", event => {
 });
 $("#search-form").addEventListener("submit", e => { e.preventDefault(); if (state) renderSearch(); });
 $("#message-search").addEventListener("input", () => { if (state) renderSearch(); });
+$("#message-search").addEventListener("keydown", event => {
+  if (event.key !== "Escape") return;
+  // Search owns Escape: native query clearing must not dismiss a chat thread.
+  event.stopPropagation();
+  if (event.repeat || event.isComposing || event.keyCode === 229
+    || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey
+    || document.querySelector("dialog[open]") || event.currentTarget.value
+    || $("#search-form").hidden || $("#main").hidden) return;
+  event.preventDefault();
+  $("#topbar-search-toggle").click();
+  $("#topbar-search-toggle").focus();
+});
 $("#search-mentions").addEventListener("click", () => {
   const on = mentionsFilterOn();
   $("#search-mentions").setAttribute("aria-pressed", on ? "false" : "true");
