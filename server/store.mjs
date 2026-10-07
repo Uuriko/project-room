@@ -4285,7 +4285,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // PRIV-2: since_join readers page past events from before their join.
       const floor = this.historyFloor(roomId, viewerId, sequence);
       const floorMessages = floor ? indexHistoryMessages(this.room(roomId).state.messages) : null;
-      const dmVisible = dmEventVisibility(viewerId, this.room(roomId).state.messages, events); // SEC-19
+      // SEC-19: thunk keeps the zero-decode polling optimization: the full
+      // projection only decodes if the page actually holds a follow-up event.
+      const dmVisible = dmEventVisibility(viewerId, () => this.room(roomId).state.messages, events);
       const visible = events.filter(row => rowInHistory(row, floor, floorMessages) && dmVisible(row.event)
         && peerEventVisible(row.event, { memberId: viewerId, identityId, isOwner }));
       // #658: mention chips ride on message views. One batched query for

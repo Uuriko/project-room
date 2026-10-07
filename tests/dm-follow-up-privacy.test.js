@@ -83,3 +83,43 @@ test("SEC-19: DM follow-up events stay with the two DM parties", async t => {
     for (const type of followUps) if (type !== T.MESSAGE_REDACTED || seen.has(type)) assert.ok(seen.has(type), `party sees ${type}`);
   }
 });
+
+test("dmEventVisibility: follow-ups of a targeted DM are party-only", async t => {
+  const { dmEventVisibility } = await import("../server/dm-event-visibility.mjs");
+  const messages = [
+    { id: "dm-1", authorId: "alice", toMemberId: "bob", body: "secret" },
+    { id: "pub-1", authorId: "alice", body: "hello" },
+  ];
+  const edit = { type: T.MESSAGE_EDITED, actorId: "alice", data: { messageId: "dm-1", body: "EDITED" } };
+  const pubEdit = { type: T.MESSAGE_EDITED, actorId: "alice", data: { messageId: "pub-1", body: "fixed" } };
+  for (const party of ["alice", "bob"]) {
+    assert.equal(dmEventVisibility(party, messages)(edit), true, `${party} sees own DM follow-up`);
+  }
+  assert.equal(dmEventVisibility("owner", messages)(edit), false, "non-party is denied the DM follow-up");
+  assert.equal(dmEventVisibility("owner", messages)(pubEdit), true, "public follow-ups stay visible");
+});
+
+test("dmEventVisibility: messages thunk stays lazy until a follow-up is checked", async t => {
+  const { dmEventVisibility } = await import("../server/dm-event-visibility.mjs");
+  let calls = 0;
+  const thunk = () => { calls++; return [{ id: "dm-1", authorId: "alice", toMemberId: "bob" }]; };
+  const visible = dmEventVisibility("owner", thunk);
+  // Plain posts and non-follow-up events never resolve the projection.
+  assert.equal(visible({ type: T.MESSAGE_POSTED, actorId: "alice", data: { messageId: "pub", body: "hi" } }), true);
+  assert.equal(visible({ type: "work.proposed", actorId: "alice", data: {} }), true);
+  assert.equal(calls, 0, "no projection decode without a follow-up event");
+  // The first follow-up check resolves parties exactly once.
+  assert.equal(visible({ type: T.MESSAGE_EDITED, actorId: "alice", data: { messageId: "dm-1" } }), false);
+  assert.equal(calls, 1);
+  assert.equal(visible({ type: T.MESSAGE_DELETED, actorId: "alice", data: { messageId: "dm-1" } }), false);
+  assert.equal(calls, 1, "parties are memoized, not re-decoded");
+});
+
+test("dmEventVisibility: rows fallback covers DMs from the same event page", async t => {
+  const { dmEventVisibility } = await import("../server/dm-event-visibility.mjs");
+  const dmPost = { type: T.MESSAGE_POSTED, actorId: "alice", data: { messageId: "dm-new", toMemberId: "bob" }, id: "ev-1" };
+  const edit = { type: T.MESSAGE_EDITED, actorId: "alice", data: { messageId: "dm-new", body: "EDITED" } };
+  const visible = dmEventVisibility("owner", [], [{ event: dmPost }]);
+  assert.equal(visible(edit), false, "follow-up hidden even when the DM is only in the page rows");
+  assert.equal(dmEventVisibility("bob", [], [{ event: dmPost }])(edit), true, "the addressed party still sees it");
+});

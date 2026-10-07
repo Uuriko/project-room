@@ -31,24 +31,33 @@ function partiesFromMessages(messages) {
 }
 
 // Returns a predicate (event) => boolean for one viewer.
-// messages: the room projection's messages. rows: optional events in the
-// same read, so a DM that the projection no longer holds is still known.
-export function dmEventVisibility(viewerId, messages, rows = []) {
-  const parties = partiesFromMessages(messages);
-  for (const row of rows) {
-    const event = row?.event ?? row;
-    if (event?.type === T.MESSAGE_POSTED && typeof event?.data?.toMemberId === "string" && event.data.toMemberId) {
-      const id = typeof event.data.messageId === "string" ? event.data.messageId : event.id;
-      if (!parties.has(id)) parties.set(id, [event.actorId, event.data.toMemberId]);
+// messages: the room projection's messages, or a thunk returning them. The
+// thunk form keeps hot polling paths (eventsAfter) from decoding the full
+// projection when the page holds no follow-up events: parties resolve lazily
+// on the first follow-up check. rows: optional events in the same read, so a
+// DM that the projection no longer holds is still known.
+export function dmEventVisibility(viewerId, messagesOrThunk, rows = []) {
+  let parties = null;
+  const getParties = () => {
+    if (parties) return parties;
+    const messages = typeof messagesOrThunk === "function" ? messagesOrThunk() : messagesOrThunk;
+    parties = partiesFromMessages(messages);
+    for (const row of rows) {
+      const event = row?.event ?? row;
+      if (event?.type === T.MESSAGE_POSTED && typeof event?.data?.toMemberId === "string" && event.data.toMemberId) {
+        const id = typeof event.data.messageId === "string" ? event.data.messageId : event.id;
+        if (!parties.has(id)) parties.set(id, [event.actorId, event.data.toMemberId]);
+      }
     }
-  }
+    return parties;
+  };
   return event => {
     if (!event || typeof event !== "object") return true;
     if (event.type === T.MESSAGE_POSTED) {
       return !event.data?.toMemberId || event.actorId === viewerId || event.data.toMemberId === viewerId;
     }
     if (!DM_FOLLOW_UP_TYPES.has(event.type)) return true;
-    const pair = parties.get(event.data?.messageId);
+    const pair = getParties().get(event.data?.messageId);
     return !pair || pair.includes(viewerId);
   };
 }
