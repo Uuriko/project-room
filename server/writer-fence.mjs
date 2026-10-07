@@ -37,8 +37,7 @@ export const unfencedAdditiveTables = Object.freeze([
   "room_trial_tasks", "room_trial_requests", "room_vetting_keys", "room_vetting_receipts", "demigod_offer_profiles", "demigod_offer_requests", "demigod_contracts", "demigod_contract_requests", "buyer_signoff_loops", "buyer_signoff_requests", // Additive private record-only rails; older writers have no routes.
   "request_runs", // Permanent host reservations; older writers have no execution route.
   "private_inbox_reads",
-  "access_requests",
-  // room_access_auto_approve (standing auto-approve rule, RC-2026-09-29-3603):
+  "access_requests", // room_access_auto_approve (standing auto-approve rule, RC-2026-09-29-3603):
   // purely additive and intentionally NOT fenced — older writers have no code
   // path to it, and the manage_members-only config rule plus the
   // never-admin config validation are the integrity gate.
@@ -121,6 +120,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // uniqueness plus the pending->delivered|failed->dead_letter transitions
   // are the integrity gate.
   "agent_webhook_deliveries",
+  // inbound_webhooks (missing-features #7): per-room inbound webhook
+  // records. Purely additive and intentionally NOT fenced: older writers
+  // have no code path to it, and the signing-secret HMAC on every delivery
+  // plus the manage_members-only create/revoke rules are the integrity gate.
+  "inbound_webhooks",
   // Escrowed bounties (agent work exchange, slice 1): bounty_journal,
   // bounty_records, bounty_disputes, bounty_events, bounty_idempotency,
   // bounty_watchers, bounty_sequences. Slice 6 adds bounty_rubric_versions

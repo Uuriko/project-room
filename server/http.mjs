@@ -24,6 +24,7 @@ import { buildActivationPack } from "./room-activation-pack.mjs"; // Room activa
 import { buildOrient } from "./orient.mjs"; // Orient endpoint (jill lane, RC-2026-09-28 — the URL outside agents guess; ryska's 404).
 import { listRoomUpdates, listIdentityUpdates, listAccountUpdates, markUpdate, readEventTail } from "./updates.mjs"; // Updates projection (U batch).
 import { handleWorkClaims } from "./work-claim-routes.mjs"; // Work-claim leases/delivery/review (task RC-2026-09-18-041).
+import { verifySignatureHeader, parseDeliverPayload, InboundWebhookError } from "./inbound-webhooks.mjs"; // missing-features #7: inbound channel webhooks.
 import { handleAgentConnect } from "./routes/agent-connect.mjs";
 import { listMentionReceipts } from "./mention-receipts.mjs";
 import { handleMatchmaking } from "./matchmaking-routes.mjs"; // Arrival surface: declare, offer, match, and human decisions as work.
@@ -3354,6 +3355,121 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const projectOfferWithdrawMatch = /^\/api\/rooms\/([^/]{1,384})\/project-offers\/([^/]{1,128})\/withdraw$/.exec(url.pathname);
       const projectOfferClaimsMatch = /^\/api\/rooms\/([^/]{1,384})\/project-offers\/([^/]{1,128})\/claims$/.exec(url.pathname);
       const projectOfferActionMatch = projectOfferPublishMatch ?? projectOfferWithdrawMatch ?? projectOfferClaimsMatch;
+      // Inbound channel webhooks (missing-features #7): per-room webhook
+      // URLs that accept signed POSTs from third parties and deliver a
+      // message into the room. Keep the consts plain regex literals so the
+      // route-docs gate extracts them.
+      const inboundWebhooksMatch = /^\/api\/rooms\/([^/]{1,384})\/inbound-webhooks$/.exec(url.pathname);
+      const inboundWebhookItemMatch = /^\/api\/rooms\/([^/]{1,384})\/inbound-webhooks\/([^/]{1,64})$/.exec(url.pathname);
+      if (inboundWebhooksMatch || inboundWebhookItemMatch) {
+        const hookRoomId = pathId((inboundWebhooksMatch || inboundWebhookItemMatch)[1]);
+        const hookItemId = inboundWebhookItemMatch ? pathId(inboundWebhookItemMatch[2]) : null;
+        const hookError = error => {
+          if (error instanceof InboundWebhookError) {
+            const status = error.code === "unknown_webhook" ? 404
+              : error.code === "payload_too_large" ? 413 : 422;
+            reject(status, error.code, error.message);
+          }
+          throw error;
+        };
+        // Delivery: unauthenticated by session — the HMAC signing secret is
+        // the credential. Fail closed on anything unsigned or malformed.
+        if (hookItemId && req.method === "POST") {
+          if (!/^application\/json(?:\s*;|$)/i.test(req.headers["content-type"] || "")) {
+            reject(415, "json_required", "Use application/json");
+          }
+          rate(`inbound-hook:${hookRoomId}:${hookItemId}`, 60);
+          let hook;
+          try {
+            hook = store.inboundWebhooks.getForDelivery(hookItemId);
+          } catch (error) { hookError(error); }
+          if (hook.roomId !== hookRoomId) reject(404, "unknown_webhook", "Unknown webhook");
+          const rawText = await readText(req, 65536, () => new ServiceError(413, "too_large", "Request is too large"));
+          const raw = Buffer.from(rawText, "utf8");
+          if (!verifySignatureHeader(hook.secret, req.headers["x-signature-256"], raw)) {
+            reject(401, "bad_signature", "Missing or invalid X-Signature-256 header");
+          }
+          let payload;
+          try {
+            payload = parseDeliverPayload(raw);
+          } catch (error) { hookError(error); }
+          const deliverCommand = () => ({
+            id: randomUUID(), type: "message.posted",
+            data: { messageId: randomUUID(), body: payload.text,
+              ...(payload.card ? { card: payload.card } : {}) },
+          });
+          let result;
+          try {
+            result = store.command(hook.postToken, hookRoomId, deliverCommand());
+          } catch (error) {
+            if (error?.code === "unauthenticated" || error?.status === 401) {
+              // The server-held posting token lapsed (30-day rotation):
+              // rotate it and retry once, so integrations do not silently die.
+              const fresh = store.insertCredential(hookRoomId, hook.memberId, "access", null,
+                store.now() + 30 * 86400000);
+              store.inboundWebhooks.updatePostToken(hook.webhookId, fresh);
+              result = store.command(fresh, hookRoomId, deliverCommand());
+            } else throw error;
+          }
+          return json(res, result.duplicate ? 200 : 201,
+            { messageId: result.event?.data?.messageId ?? null, sequence: result.sequence });
+        }
+        // Management: authenticated room members; create/revoke need
+        // manage_members (a webhook posts as a new room member).
+        const hookSelected = roomCredentials(req, url);
+        const hookFence = hookSelected.mode === "account" ? accountBinding(req, null) : expectedBinding(req);
+        const hookAuth = roomAuth(hookSelected, hookRoomId, hookFence);
+        if (!hookAuth.member?.id) reject(401, "unauthenticated", "Sign in to manage inbound webhooks");
+        const hookAuthority = store.room(hookRoomId).state;
+        const hookCanManage = hookAuth.member.id === hookAuthority.room.ownerId
+          || memberCan(hookAuthority, hookAuth.member.id, "manage_members");
+        if (hookItemId) {
+          if (req.method === "DELETE") {
+            if (!hookCanManage) reject(403, "access_denied", "Managing inbound webhooks requires manage_members");
+            rate(`inbound-hook-manage:${hookAuth.credentialHash}`, 20);
+            try {
+              return json(res, 200, store.inboundWebhooks.revoke(hookItemId));
+            } catch (error) { hookError(error); }
+          }
+          reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST, DELETE" });
+        }
+        if (req.method === "GET") {
+          rate(`inbound-hook-read:${hookAuth.credentialHash}`, 60);
+          return json(res, 200, { webhooks: store.inboundWebhooks.listForRoom(hookRoomId) });
+        }
+        if (req.method === "POST") {
+          if (!hookCanManage) reject(403, "access_denied", "Managing inbound webhooks requires manage_members");
+          rate(`inbound-hook-manage:${hookAuth.credentialHash}`, 20);
+          const data = await body(req);
+          if (!data || typeof data.name !== "string" || Object.keys(data).length !== 1) {
+            reject(422, "invalid_webhook", "Supply exactly { name }");
+          }
+          const name = data.name.trim();
+          if (!name || name.length > 80) reject(422, "invalid_webhook", "name must be 1-80 characters");
+          try {
+            // The webhook posts as its own agent member: clean attribution,
+            // flood control, and markdown all come free. The posting token
+            // is server-held — the third party only ever sees the URL and
+            // the signing secret.
+            const memberId = `wh_${randomBytes(12).toString("hex")}`;
+            store.command(hookSelected.token, hookRoomId, {
+              id: randomUUID(), type: "member.added",
+              data: { memberId, displayName: name, kind: "agent", permissions: [] },
+            }, hookFence);
+            const postToken = store.insertCredential(hookRoomId, memberId, "access", null,
+              store.now() + 30 * 86400000);
+            const created = store.inboundWebhooks.create(
+              { roomId: hookRoomId, memberId, name, postToken });
+            return json(res, 201, {
+              webhookId: created.webhookId,
+              url: `/api/rooms/${hookRoomId}/inbound-webhooks/${created.webhookId}`,
+              secret: created.secret,
+              note: "Save the secret now — it is shown once. Sign the raw request body with HMAC-SHA256 and send it as the X-Signature-256 header (sha256=<hex>).",
+            });
+          } catch (error) { hookError(error); }
+        }
+        reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, POST" });
+      }
       const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|conversation|stream|cursor|project-offers|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|outside-agents|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|orient|verification-policy|dm-consents|bonds|peer-dms|directory|opportunities|public-face|needs-attention|jev-shadow|mentions|open-questions|human-push|thread-mutes|referrals|referral-invites|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.

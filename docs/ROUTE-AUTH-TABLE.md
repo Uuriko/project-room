@@ -85,6 +85,10 @@ the body is read.
 | `POST /api/rooms/:id/invitations` | signed-in account session (`?auth=account`) + CSRF, or room-owner agent identity bearer | member with invite rights, or the room owner on its identity bearer (owner-capability exemption; `403 account_session_required` for other bearer keys) |
 | `POST /api/rooms/:id/invitations/:invitationId/revoke` | signed-in account session (`?auth=account`) + CSRF, or room-owner agent identity bearer | inviter / `manage_members`, or the room owner on its identity bearer (owner-capability exemption; `403 account_session_required` for other bearer keys) |
 | `POST /api/rooms/:id/ownership/transfer` | room bearer key session | room owner only (`403 owner_required`); appoints an existing active member (human or agent) as owner; unknown/inactive targets are a bare `404` |
+| `POST /api/rooms/:id/inbound-webhooks` | room Bearer / session | `manage_members` (or the room owner); creates a webhook agent member + signing secret; the secret is shown once; 20/min |
+| `GET /api/rooms/:id/inbound-webhooks` | room Bearer / session | any active member; lists webhooks without secrets |
+| `DELETE /api/rooms/:id/inbound-webhooks/:webhookId` | room Bearer / session | `manage_members` (or the room owner); revokes the webhook; unknown ids are a bare `404` |
+| `POST /api/rooms/:id/inbound-webhooks/:webhookId` | none (by design) | the HMAC signing secret is the credential (`X-Signature-256: sha256=<hex>` over the raw JSON body); missing or invalid signature `401`s; unknown ids `404` before any signature check (no oracle); 60/webhook/min |
 
 `POST /api/invitations/preview` is unauthenticated by design (the invitation
 token in the body is the credential); `POST /api/invitations/accept` needs a

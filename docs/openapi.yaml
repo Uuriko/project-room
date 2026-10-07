@@ -13221,6 +13221,69 @@ paths:
         '200': { description: "{ roomId, removed } plus the viewer ownership envelope" }
         '403': { description: human_push_humans_only }
         '422': { description: invalid_human_push }
+  /api/rooms/{roomId}/inbound-webhooks:
+    get:
+      summary: List inbound webhooks
+      description: >-
+        Room-member-readable list of this room's inbound webhooks. Signing
+        secrets are never returned. Create/revoke need manage_members.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ webhooks: [{ webhookId, roomId, memberId, name, enabled, createdAt }] }" }
+    post:
+      x-room-permission: manage_members
+      summary: Create an inbound webhook
+      description: >-
+        Body is exactly `{ name }` (1-80 chars). Creates an agent member
+        named for the webhook plus a signing secret, and returns the
+        webhook URL and the secret — the secret is shown once. POST JSON
+        `{ text, card? }` to the URL with an X-Signature-256 header
+        (`sha256=` + hex HMAC-SHA256 of the raw body with the secret) to
+        deliver a message into the room. Card is a validated rich message
+        card (title, description, url, color, image, thumbnail, fields,
+        footer, timestamp); card media URLs render client-side only and are
+        never fetched by the server.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '403': { description: access_denied }
+        '201': { description: "{ webhookId, url, secret, note }" }
+        '422': { description: invalid_webhook }
+  /api/rooms/{roomId}/inbound-webhooks/{webhookId}:
+    post:
+      summary: Deliver a message through an inbound webhook
+      security: []
+      description: >-
+        Unauthenticated: the HMAC signing secret is the credential. Requires
+        Content-Type application/json and an X-Signature-256 header. Body is
+        `{ text, card? }`; text is required (1-4000 chars). 401 on any
+        missing or invalid signature. 60 deliveries/minute per webhook.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/WebhookId'
+      responses:
+        '401': { description: bad_signature }
+        '404': { description: unknown_webhook }
+        '201': { description: "{ messageId, sequence }" }
+        '422': { description: invalid_payload }
+        '429': { description: rate_limited }
+    delete:
+      x-room-permission: manage_members
+      summary: Revoke an inbound webhook
+      description: >-
+        Revokes the webhook: further signed deliveries 404. The webhook's
+        member stays in the room so posted history keeps its attribution.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/WebhookId'
+      responses:
+        '401': { description: unauthenticated }
+        '403': { description: access_denied }
+        '200': { description: "{ webhookId, revoked: true }" }
+        '404': { description: unknown_webhook }
   /api/rooms/{roomId}/thread-mutes:
     get:
       summary: List the caller's muted threads
@@ -15882,6 +15945,11 @@ components:
       in: path
       required: true
       schema: { type: string }
+    WebhookId:
+      name: webhookId
+      in: path
+      required: true
+      schema: { type: string, description: Inbound webhook id (wh_<hex>) }
   schemas:
     # JDOT-MEMBER-PERMS begin: public request schemas, not storage envelopes.
     RequestedRoomPermission:

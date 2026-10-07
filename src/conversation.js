@@ -1,5 +1,6 @@
 import { replyDraftKey, validReplyDraft, replyDraftData } from "./reply-requests.js";
 import { LEGACY_REACTIONS, foldedReactionMap, renderEmojiShortcodes } from "./emoji.js";
+import { validateMessageCard } from "./message-cards.js";
 // Conversation structure is derived from immutable reply links, including older logs.
 // Legacy names remain the input aliases. Pills render the Unicode key.
 export const REACTIONS = LEGACY_REACTIONS;
@@ -200,6 +201,36 @@ export function insertMention(text, caret, start, member) {
 
 const mentionRegExpSpecial = new Set(".*+?^${}()|[]\\");
 const escapeMentionName = value => [...String(value)].map(ch => mentionRegExpSpecial.has(ch) ? `\\${ch}` : ch).join("");
+
+// Rich message card renderer (missing-features #7). Presentation only: the
+// card was validated at write time (validateMessageCard), so render treats
+// it as untrusted-but-shaped and escapes every string through esc(). The
+// description and field values get the same Discord-style markdown as
+// bodies. Invalid cards render as nothing — never a broken half-card.
+export function messageCardHtml(card, esc) {
+  if (!card || typeof card !== "object" || Array.isArray(card)) return "";
+  try {
+    card = validateMessageCard(card);
+  } catch {
+    return "";
+  }
+  const accent = card.color ? ` style="border-left-color:${esc(card.color)}"` : "";
+  const title = card.url
+    ? `<a class="message-card-title" href="${esc(card.url)}" target="_blank" rel="noopener noreferrer">${esc(card.title)}</a>`
+    : `<span class="message-card-title">${esc(card.title)}</span>`;
+  const description = card.description ? `<div class="message-card-description">${markdownHtml(esc(card.description))}</div>` : "";
+  const image = card.image ? `<img class="message-card-image" src="${esc(card.image)}" alt="" loading="lazy">` : "";
+  const thumbnail = card.thumbnail ? `<img class="message-card-thumbnail" src="${esc(card.thumbnail)}" alt="" loading="lazy">` : "";
+  const fields = Array.isArray(card.fields) && card.fields.length
+    ? `<div class="message-card-fields">${card.fields.map(f =>
+        `<div class="message-card-field${f.inline ? " message-card-field-inline" : ""}"><div class="message-card-field-name">${esc(f.name)}</div><div class="message-card-field-value">${markdownHtml(esc(f.value))}</div></div>`).join("")}</div>`
+    : "";
+  const footerBits = [card.footer ? `<span>${esc(card.footer)}</span>` : "",
+    card.timestamp ? `<time datetime="${esc(card.timestamp)}">${esc(card.timestamp)}</time>` : ""]
+    .filter(Boolean).join(" · ");
+  const footer = footerBits ? `<div class="message-card-footer">${footerBits}</div>` : "";
+  return `<div class="message-card"${accent}>${thumbnail}<div class="message-card-main">${title}${description}${fields}${image}${footer}</div></div>`;
+}
 
 // Presentation only: the original body remains the source for copy, search and
 // message links. Native details keeps expansion usable without another handler.
