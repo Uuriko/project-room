@@ -1,8 +1,10 @@
 // PRIV-2: history visibility.
 //
 // A member under "since_join" reads messages and events from their own join
-// onward. The join point is the first member.added or
-// member.joined_via_invitation event for that member id: its sequence bounds
+// onward. The join point is the LATEST member.added or
+// member.joined_via_invitation event for that member id (#1523): a member
+// removed and later re-added must not read the removal gap, so the floor
+// moves forward to the reactivation join. Its sequence bounds
 // event-log reads, and its timestamp bounds reads over the message
 // projection, which carries createdAt but no sequence. Members who read
 // everything get a null floor, so their reads take no extra work.
@@ -23,7 +25,7 @@ export function historyFloor(db, state, roomId, memberId, headSequence = null) {
     `SELECT sequence, json_extract(body,'$.at') AS at FROM events
      WHERE room_id=? AND json_extract(body,'$.type') IN (${JOIN_TYPES.map(() => "?").join(",")})
        AND json_extract(body,'$.data.memberId')=?
-     ORDER BY sequence LIMIT 1`
+     ORDER BY sequence DESC LIMIT 1`
   ).get(roomId, ...JOIN_TYPES, memberId);
   if (!row || !Number.isSafeInteger(row.sequence) || typeof row.at !== "string") {
     const head = Number.isSafeInteger(headSequence) ? headSequence : 0;
