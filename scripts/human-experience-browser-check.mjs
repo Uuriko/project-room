@@ -185,3 +185,44 @@ test('human Advanced tools stay out of the door and preserve squad drafts and sa
   assert.equal(await page.locator('#squads-list input[name=goal]').inputValue(),'Keep this rejected draft');
   assert.deepEqual(errors,[]);
 });
+
+test('deleted assistant prompt shows only content-free stop controls and preserves the conversation draft', {timeout:60000}, async t => {
+  const f=createAcceptanceFixture(), server=createRoomServer({store:f.store,streamInterval:40});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const origin=`http://127.0.0.1:${server.address().port}`, browser=await chromium.launch({headless:true});
+  t.after(async()=>{await browser.close();server.closeStreams();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));f.store.close();rmSync(f.directory,{recursive:true,force:true});});
+  const api=async(actor,input)=>{
+    const response=await fetch(`${origin}/api/rooms/commons/assistant`,{method:'POST',headers:{authorization:`Bearer ${f.keys[actor]}`,'content-type':'application/json'},body:JSON.stringify({requestId:crypto.randomUUID(),...input})});
+    const value=await response.json();assert.equal(response.status,200,JSON.stringify(value));return value.result;
+  };
+  await api('owner',{action:'configure',expectedRevision:0,name:'Room',coordinatorMemberId:'producer'});
+  f.store.command(f.keys.owner,'commons',{id:crypto.randomUUID(),type:'message.posted',data:{messageId:'erase-browser-prompt',body:'ERASED-BROWSER-PROMPT'}});
+  await api('owner',{action:'invoke',runId:'deleted-browser-run',sourceMessageId:'erase-browser-prompt'});
+  await api('producer',{action:'claim',runId:'deleted-browser-run',attemptId:'browser-host',expectedRevision:0});
+  await api('producer',{action:'report',runId:'deleted-browser-run',attemptId:'browser-host',expectedRevision:1,state:'working',summary:'ERASED-BROWSER-PROMPT'});
+  const page=await browser.newPage();await page.goto(origin);await signInFixture(page,f.keys.owner);
+  await page.locator('#main').waitFor({state:'visible'});
+  await page.locator('#assistant-activity > summary').click();
+  const panel=page.locator('[data-assistant-run="deleted-browser-run"]');
+  await panel.getByRole('button',{name:'Original prompt',exact:true}).waitFor();
+  await page.locator('#message-input').fill('Keep my unsent conversation draft.');
+  // Keep the old assistant projection cached while real message deletion arrives.
+  await page.route('**/api/rooms/commons/assistant',route=>route.request().method()==='GET'?route.abort():route.continue());
+  const deletion=await fetch(`${origin}/api/rooms/commons/commands`,{method:'POST',headers:{authorization:`Bearer ${f.keys.owner}`,'content-type':'application/json'},body:JSON.stringify({id:crypto.randomUUID(),type:'message.deleted',data:{messageId:'erase-browser-prompt',expectedMessageRevision:0}})});
+  assert.equal(deletion.status,201,await deletion.text());
+  await panel.getByText('Deleted request',{exact:true}).waitFor({timeout:5000});
+  assert.doesNotMatch(await panel.textContent(),/ERASED-BROWSER-PROMPT/);
+  await page.unroute('**/api/rooms/commons/assistant');
+  for(const name of ['Original prompt','Add context','Change direction','Resolve direction','Resume']) assert.equal(await panel.getByRole('button',{name,exact:true}).count(),0);
+  await panel.getByRole('button',{name:'Pause',exact:true}).click();
+  await panel.getByText('Pausing · waiting for confirmation',{exact:true}).waitFor();
+  await api('producer',{action:'report',runId:'deleted-browser-run',attemptId:'browser-host',expectedRevision:3,state:'paused',summary:'Stopped'});
+  await panel.getByText('Paused',{exact:true}).waitFor();
+  assert.equal(await panel.getByRole('button',{name:'Resume',exact:true}).count(),0);
+  await panel.getByRole('button',{name:'Cancel',exact:true}).click();
+  await panel.getByText('Stopping · waiting for confirmation',{exact:true}).waitFor();
+  await api('producer',{action:'report',runId:'deleted-browser-run',attemptId:'browser-host',expectedRevision:5,state:'cancelled',summary:'Cancelled'});
+  await panel.getByText('Cancelled',{exact:true}).waitFor();
+  assert.equal(await panel.getByRole('button').count(),0);
+  assert.equal(await page.locator('#message-input').inputValue(),'Keep my unsent conversation draft.');
+});

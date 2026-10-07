@@ -1,7 +1,7 @@
 import { enforceAutonomyTierForAction } from './autonomy-tiers.mjs';
 import { validId } from '../src/events.js';
 import { isGuestAgentMemberId } from './guest-agent-links.mjs';
-import { historyFloor, messageVisibleToViewer } from './history-visibility.mjs';
+import { historyFloor, messageInHistory, messageVisibleToViewer } from './history-visibility.mjs';
 
 // Coordination records reserve one publisher. A host claim is an observation,
 // not a hosted execution service, and never grants that host additional rights.
@@ -19,6 +19,16 @@ const keys = {
   report: ['runId', 'attemptId', 'expectedRevision', 'state', 'summary', 'resultMessageId', 'appliedInputMessageIds'],
   resume: ['runId', 'expectedRevision'], pause: ['runId', 'expectedRevision'], cancel: ['runId', 'expectedRevision']
 };
+// Deleted prompts retain only a stop handle for their existing controllers.
+// The history floor still applies: deletion cannot reveal older work to newcomers.
+const controlsDeletedSource = (run, opening, actor, state, floor) => Boolean(
+  opening?.deletedAt && opening.body == null && !opening.toMemberId && messageInHistory(opening, floor)
+  && (actor.kind === 'human' && (actor.id === run.initiatorId || actor.id === state.room.ownerId)
+    || actor.kind === 'agent' && actor.id === run.coordinatorMemberId && run.attemptId && actor.permissions.includes('accept_work')));
+const deletedControl = run => Object.fromEntries([
+  ...['id', 'sourceMessageId', 'initiatorId', 'coordinatorMemberId', 'status', 'revision', 'attemptId', 'createdAt', 'updatedAt', 'hostReportedAt'].map(key => [key, run[key]]),
+  ['sourceDeleted', true], ['inputs', []], ['activity', []]
+]);
 export class RoomAssistant {
   constructor(store) { this.store = store; }
   init() { this.store.db.exec(roomAssistantSchema); }
@@ -37,7 +47,11 @@ export class RoomAssistant {
       const floor = historyFloor(this.store.db, state, roomId, auth.member.id);
       const visible = id => messageVisibleToViewer(state.messages.find(m => m.id === id), auth.member.id, floor);
       const runs = this.store.db.prepare('SELECT value FROM room_assistant_runs WHERE room_id=? ORDER BY rowid DESC LIMIT 100').all(roomId)
-        .map(row => JSON.parse(row.value)).filter(run => visible(run.sourceMessageId))
+        .map(row => JSON.parse(row.value)).flatMap(run => {
+          if (visible(run.sourceMessageId)) return [run];
+          const opening = state.messages.find(m => m.id === run.sourceMessageId);
+          return controlsDeletedSource(run, opening, auth.member, state, floor) ? [deletedControl(run)] : [];
+        })
         .map(run => ({ ...run, status: run.status === 'working' && (!Number.isFinite(run.hostReportedAt) || this.store.now() - run.hostReportedAt > 120000) ? 'unknown' : run.status }));
       const recent = runs.some(run => run.coordinatorMemberId === config.coordinatorMemberId && run.attemptId && Number.isFinite(run.hostReportedAt) && this.store.now() - run.hostReportedAt <= 120000 && !terminal.has(run.status));
       return { contractVersion: 1, roomId, assistant: { ...config, availability: !coordinator?.active || !coordinator.permissions.includes('accept_work') ? 'not_connected' : recent ? 'connected' : 'awaiting_host' }, runs };
@@ -55,16 +69,22 @@ export class RoomAssistant {
         fail('assistant_denied', 'Guests cannot coordinate shared work', 403);
       if (state.room.archivedAt) fail('assistant_archived', 'This room is archived');
       this.init();
-      const canonical = JSON.stringify(Object.fromEntries(Object.entries(input).sort(([a], [b]) => a.localeCompare(b))));
-      const old = this.store.db.prepare('SELECT input,result FROM room_assistant_ops WHERE room_id=? AND actor_id=? AND request_id=?').get(roomId, actor.id, input.requestId);
-      if (old) {
-        if (old.input !== canonical) fail('assistant_retry_conflict', 'Retry ID already records different input');
-        return JSON.parse(old.result);
-      }
       const config = this.config(roomId);
       const isOwner = state.room.ownerId === actor.id;
       const isHuman = actor.kind === 'human';
       const floor = historyFloor(this.store.db, state, roomId, actor.id);
+      const canonical = JSON.stringify(Object.fromEntries(Object.entries(input).sort(([a], [b]) => a.localeCompare(b))));
+      const old = this.store.db.prepare('SELECT input,result FROM room_assistant_ops WHERE room_id=? AND actor_id=? AND request_id=?').get(roomId, actor.id, input.requestId);
+      if (old) {
+        if (old.input !== canonical) fail('assistant_retry_conflict', 'Retry ID already records different input');
+        const response = JSON.parse(old.result);
+        const opening = state.messages.find(m => m.id === response.result?.sourceMessageId);
+        if (opening?.deletedAt) {
+          if (!controlsDeletedSource(response.result, opening, actor, state, floor)) fail('assistant_run_missing', 'Request not found', 404);
+          return { ...response, result: deletedControl(response.result) };
+        }
+        return response;
+      }
       const source = id => {
         const message = state.messages.find(m => m.id === id);
         if (!message || message.toMemberId || !messageVisibleToViewer(message, actor.id, floor) || message.authorId !== actor.id)
@@ -106,7 +126,11 @@ export class RoomAssistant {
         } else {
           if (!run) fail('assistant_run_missing', 'Request not found', 404);
           const opening = state.messages.find(m => m.id === run.sourceMessageId);
-          if (!messageVisibleToViewer(opening, actor.id, floor)) fail('assistant_run_missing', 'Request not found', 404);
+          if (!messageVisibleToViewer(opening, actor.id, floor)
+            && !(controlsDeletedSource(run, opening, actor, state, floor)
+              && (isHuman && ['pause', 'cancel'].includes(input.action)
+                || actor.kind === 'agent' && input.action === 'report' && ['paused', 'cancelled', 'failed'].includes(input.state))))
+            fail('assistant_run_missing', 'Request not found', 404);
           if (input.expectedRevision !== run.revision) fail('assistant_revision_conflict', 'The request changed; read it before retrying');
           if (terminal.has(run.status)) fail('assistant_run_closed', 'This request has finished');
           if (['contribute', 'resolve'].includes(input.action)) {
@@ -170,7 +194,7 @@ export class RoomAssistant {
         }
         run.updatedAt = this.store.now();
         this.store.db.prepare('INSERT INTO room_assistant_runs VALUES(?,?,?) ON CONFLICT(room_id,run_id) DO UPDATE SET value=excluded.value').run(roomId, run.id, JSON.stringify(run));
-        result = run;
+        result = state.messages.find(m => m.id === run.sourceMessageId)?.deletedAt ? deletedControl(run) : run;
       }
       const response = { contractVersion: 1, roomId, action: input.action, result };
       this.store.db.prepare('INSERT INTO room_assistant_ops VALUES(?,?,?,?,?)').run(roomId, actor.id, input.requestId, canonical, JSON.stringify(response));
