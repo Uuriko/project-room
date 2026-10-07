@@ -115,24 +115,14 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y bubblewrap
       - name: Permit the sandbox launcher to create its isolated namespaces
         # Ubuntu 24.04 denies capabilities inside unprivileged user namespaces
-        # unless the launcher has an application profile. Scope the exception to
-        # distro bubblewrap; keep global AppArmor restrictions and --unshare-all.
+        # unless the launcher has an application profile; Ubuntu 26.04 ships
+        # its own bwrap-userns-restrict profile and a custom profile for the
+        # same /usr/bin/bwrap path would create conflicting attachments and
+        # break sandbox startup. scripts/ci-host-isolation-setup.sh selects
+        # the right profile per release; global AppArmor restrictions and
+        # --unshare-all stay intact.
         # https://documentation.ubuntu.com/release-notes/24.04/#unprivileged-user-namespace-restrictions
-        run: |
-          if [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || true)" = "1" ]; then
-            if [ -f /etc/apparmor.d/bwrap ]; then
-              sudo apparmor_parser -r /etc/apparmor.d/bwrap
-            else
-              cat > "$RUNNER_TEMP/project-room-bwrap.apparmor" <<'PROFILE'
-          abi <abi/4.0>,
-          include <tunables/global>
-          /usr/bin/bwrap flags=(unconfined) {
-            userns,
-          }
-          PROFILE
-              sudo apparmor_parser -r "$RUNNER_TEMP/project-room-bwrap.apparmor"
-            fi
-          fi
+        run: bash scripts/ci-host-isolation-setup.sh
       - name: Verify automatic host namespace support without operator input
         run: node scripts/host-isolation-preflight.mjs
       - name: Run unit shard
@@ -154,6 +144,34 @@ jobs:
           name: unit-shard-evidence-${{ matrix.shard }}-attempt-${{ github.run_attempt }}
           path: test-results/
           if-no-files-found: ignore
+  # Ubuntu 26.04 sandbox regression gate (fail-first). The ubuntu-latest label
+  # migrates to 26.04 starting 2026-10-19, and 26.04 ships its own
+  # bwrap-userns-restrict AppArmor profile: the old 24.04-era step wrote a
+  # custom /usr/bin/bwrap profile that conflicts with the packaged one and
+  # breaks sandbox startup. This job pins ubuntu-26.04 and runs the real
+  # sandbox setup + isolation preflight + boundary tests, so a 24.04-specific
+  # step cannot silently break the suite after migration. Advisory for now:
+  # not in the `test` gate's needs; promote it once the fleet is green on 26.04.
+  sandbox-26:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Install Linux host isolation for automatic-run unit tests
+        run: sudo apt-get update -qq && sudo apt-get install -y bubblewrap
+      - name: Permit the sandbox launcher to create its isolated namespaces
+        run: bash scripts/ci-host-isolation-setup.sh
+      - name: Verify automatic host namespace support without operator input
+        run: node scripts/host-isolation-preflight.mjs
+      - name: Run sandbox boundary tests on the new image
+        run: mkdir -p .tmp && TMPDIR=$PWD/.tmp node --test tests/host-subprocess.test.js tests/host-policy-boundary.test.js
   # Keep the required check name stable. The gate passes only when the matrix
   # succeeded AND all three shards' exact-run receipts verify (same files,
   # same plan hash, same revision) — a partial or stale shard run fails closed.
