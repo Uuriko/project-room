@@ -3638,8 +3638,18 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const member = this.room(roomId).state.members[memberId];
       if (!member || member.active === false) fail(403, "access_denied", "Room member required");
       if (member.kind !== "agent") fail(403, "access_denied", "Join sessions are for agent joins");
+      // #1522 / RC-2026-09-23-106: bind the session to the member's current
+      // identity secret hash — the same binding createAgentSession already
+      // applies — so rotating (or revoking) the secret kills the outstanding
+      // 8-hour session. A member with no linked identity (not reachable from
+      // the join flows, but tolerated) keeps the legacy null binding, which
+      // authenticate() treats as unbound.
+      const linkRow = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?").get(roomId, memberId);
+      const secretHash = linkRow
+        ? this.db.prepare("SELECT secret_hash AS secretHash FROM agent_identities WHERE identity_id=?").get(linkRow.identityId)?.secretHash ?? null
+        : null;
       const expiresAt = this.now() + 8 * 3600000;
-      const token = this.insertCredential(roomId, memberId, "session", null, expiresAt);
+      const token = this.insertCredential(roomId, memberId, "session", null, expiresAt, secretHash);
       return { token, expiresAt };
     });
   }
