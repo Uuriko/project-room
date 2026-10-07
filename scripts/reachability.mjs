@@ -83,6 +83,8 @@ export const KEEP = [
   // runtime-package registration). Not orphans; remove from KEEP when wired.
   "server/session-adapter.mjs",
   "server/session-adapter/herdr-bridge-adapter.mjs",
+  "server/supervision.mjs",
+  "server/supervision-routes.mjs",
 ];
 
 const KEEP_SET = new Set(KEEP);
