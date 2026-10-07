@@ -65,3 +65,35 @@ export function pollOptionEmojis(message) {
   if (!message || message.kind !== "poll" || !Array.isArray(message.poll?.options)) return [];
   return message.poll.options.map(option => option.emoji);
 }
+
+// Render a poll message for the room timeline. Returns "" for anything that
+// is not a poll message. Open polls render one vote button per option, wired
+// to the existing reaction path (data-message-action="react" carries the
+// option emoji); the viewer's own vote is marked aria-pressed. Closed polls
+// render the results with no vote buttons. esc() escapes every user string;
+// no inline styles (the app's CSP) and no new event wiring.
+export function pollHtml(message, esc, viewerId) {
+  const tally = pollTally(message);
+  if (!tally) return "";
+  const closed = Boolean(message?.poll?.closedAt);
+  const total = tally.total;
+  const items = tally.results.map(result => {
+    const mine = result.voters.includes(viewerId);
+    const pct = total > 0 ? Math.round((result.votes / total) * 100) : 0;
+    const summary = `${result.votes} ${result.votes === 1 ? "vote" : "votes"}${total > 0 ? ` · ${pct}%` : ""}`;
+    const inner = `<span class="poll-emoji" aria-hidden="true">${esc(result.emoji)}</span>`
+      + `<span class="poll-label">${esc(result.label)}</span>`
+      + `<span class="poll-count">${esc(summary)}</span>`;
+    if (closed) return `<li><div class="poll-option">${inner}</div></li>`;
+    return `<li><button type="button" class="poll-option${mine ? " poll-mine" : ""}" data-message-action="react"`
+      + ` data-message-id="${esc(message.id)}" data-reaction="${esc(result.emoji)}" aria-pressed="${mine}"`
+      + ` aria-label="Vote for ${esc(result.label)}, ${esc(summary)}">${inner}</button></li>`;
+  }).join("");
+  const meta = `${total} ${total === 1 ? "vote" : "votes"}`
+    + ` · ${tally.allowMultiple ? "multiple choice" : "single choice"}`
+    + (closed ? ` · <span class="poll-closed">Closed</span>` : "");
+  return `<div class="poll" role="group" aria-label="Poll: ${esc(tally.question)}">`
+    + `<p class="poll-question">${esc(tally.question)}</p>`
+    + `<ul class="poll-options">${items}</ul>`
+    + `<p class="poll-meta">${meta}</p></div>`;
+}

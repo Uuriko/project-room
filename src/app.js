@@ -8,6 +8,7 @@ import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
 import { conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, messageBodyHtml, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
 import { canonicalReaction, clipGraphemes, emojiCatalog, emojiMatches, emojiName, emojiQuery, foldedReactionMap, frequentEmoji, insertEmoji, renderEmojiShortcodes } from "./emoji.js";
+import { pollHtml } from "./polls.js";
 import { nextWorkStep, workStatus, workActions, renderWorkActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, diffResultLines, diffResultSummary, workRecipeOptions } from "./workflow.js";
 import { coordinationLoops } from "./work-loops.js";
 import { RECIPE_CATALOG, activeRecipes, previewAllRecipes } from "./work-recipes.js";
@@ -2435,6 +2436,9 @@ function messageLinksHTML(m, { linked, moderation, count, muted, canReact = fals
   const clarify = request?.status === "open" && request.recipientId === session.member.id;
   const replyHtml = `<button class="message-to-work" data-message-action="reply" data-message-id="${esc(m.id)}" type="button"${clarify ? ' title="Reply without closing this request"' : ""}>${clarify ? "Clarify" : "Reply"}</button>`;
   const pinHtml = !m.deletedAt ? `<button class="message-to-work" data-message-action="pin" data-message-id="${esc(m.id)}" type="button" aria-pressed="${isPinned(state, m.id)}">${isPinned(state, m.id) ? "Unpin" : "Pin"}</button>` : "";
+  // Polls: the author or a steer-capable member can close voting from the ⋯ menu.
+  const closePollHtml = m.kind === "poll" && !m.deletedAt && !m.poll?.closedAt && (m.authorId === session.member.id || can("steer"))
+    ? `<button class="message-to-work" type="button" data-message-action="close-poll" data-message-id="${esc(m.id)}">Close poll</button>` : "";
   // Attention: mark-unread rewinds the read horizon; save/unsave toggles the
   // per-member "later" list. Both ride the ⋯ overflow menu.
   const markUnreadHtml = !m.deletedAt ? `<button class="message-to-work" data-message-action="mark-unread" data-message-id="${esc(m.id)}" type="button" title="Mark unread (u)">Mark unread</button>` : "";
@@ -2444,7 +2448,7 @@ function messageLinksHTML(m, { linked, moderation, count, muted, canReact = fals
     ? `<button class="message-to-work" data-message-action="work" data-message-id="${esc(m.id)}" type="button">Make this work</button>` : "";
   const decideHtml = !m.deletedAt && can("decide") && state.members[session.member.id]?.kind === "human"
     ? `<button class="message-to-work" data-message-action="decide" data-message-id="${esc(m.id)}" type="button">Record decision</button>` : "";
-  const overflow = [reactHtml, saveHtml, pinHtml, markUnreadHtml, laterHtml, workHtml, decideHtml, moderation].filter(Boolean).join("");
+  const overflow = [reactHtml, saveHtml, pinHtml, closePollHtml, markUnreadHtml, laterHtml, workHtml, decideHtml, moderation].filter(Boolean).join("");
   const menu = overflow ? `<details class="message-more"><summary aria-label="More actions for this message" title="More actions">⋯</summary><div class="message-more-menu">${overflow}</div></details>` : "";
   return `<div class="message-links">${requestControls(m)}${linked.map(i => `<a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">↳ ${esc(i.title)}</a>${doneChip(i)}`).join("")}${replyHtml}${threadHtml}${menu}</div>`;
 }
@@ -2609,10 +2613,13 @@ function messageContent(m, cluster = {}, unreadStart = false) {
   const parent = conversation.byId.get(m.replyToId);
   const count = (conversation.threads.get(m.id)?.length || 1) - 1;
   const reactionButtons = reactionButtonsFor(m);
+  // Polls render their question, options and live results below the body;
+  // votes ride the existing reaction buttons (data-message-action="react").
+  const pollBlock = !muted && !m.deletedAt && m.kind === "poll" ? pollHtml(m, esc, session.member.id) : "";
   const groupedTime = cluster.grouped
     ? `<time class="grouped-time" datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time>`
     : "";
-  return `${divider}${groupedTime}<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong>${isPinned(state, m.id) ? `<span class="pinned-chip">Pinned</span>` : ""}<a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · private</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${parent.deletedAt ? "Message deleted" : esc(clipGraphemes(renderEmojiShortcodes(parent.body ?? ""), 90))}</a>` : ""}</div>${muted ? `<p class="message-body message-muted">Hidden: you muted ${esc(authorLabel)}.</p>` : m.deletedAt ? `<p class="message-body message-tombstone">Message deleted</p>` : `<div class="message-body">${messageBodyHtml(m.body, Object.values(state.members), esc, m.id)}</div>${messageFileChips(m.id)}`}<div class="draft-feedback">${muted ? "" : draftFeedbackHTML(m)}</div><div class="reactions" role="group" aria-label="Reactions to message by ${esc(authorLabel)}">${muted || m.deletedAt ? "" : reactionButtons}</div>${messageLinksHTML(m, { linked, moderation, count, muted, canReact: !muted && !m.deletedAt })}</div>`;
+  return `${divider}${groupedTime}<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong>${isPinned(state, m.id) ? `<span class="pinned-chip">Pinned</span>` : ""}<a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · private</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${parent.deletedAt ? "Message deleted" : esc(clipGraphemes(renderEmojiShortcodes(parent.body ?? ""), 90))}</a>` : ""}</div>${muted ? `<p class="message-body message-muted">Hidden: you muted ${esc(authorLabel)}.</p>` : m.deletedAt ? `<p class="message-body message-tombstone">Message deleted</p>` : `<div class="message-body">${messageBodyHtml(m.body, Object.values(state.members), esc, m.id)}</div>${messageFileChips(m.id)}${pollBlock}`}<div class="draft-feedback">${muted ? "" : draftFeedbackHTML(m)}</div><div class="reactions" role="group" aria-label="Reactions to message by ${esc(authorLabel)}">${muted || m.deletedAt ? "" : reactionButtons}</div>${messageLinksHTML(m, { linked, moderation, count, muted, canReact: !muted && !m.deletedAt })}</div>`;
 }
 function mentionsFilterOn() {
   return $("#search-mentions")?.getAttribute("aria-pressed") === "true";
@@ -4110,6 +4117,7 @@ $("#message-list").addEventListener("click", e => {
   else if (button.dataset.messageAction === "react") setReaction(id, button.dataset.reaction);
   else if (button.dataset.messageAction === "add-reaction") openReactionSheet(id, button.closest("li.message"));
   else if (button.dataset.messageAction === "pin") setPinned(id);
+  else if (button.dataset.messageAction === "close-poll") setPollClosed(id);
   else if (button.dataset.messageAction === "mark-unread") void markMessageUnread(id);
   else if (button.dataset.messageAction === "save") void toggleSaved(id);
   else if (button.dataset.messageAction === "report") openReport(id);
@@ -4883,6 +4891,20 @@ async function setPinned(messageId) {
   } catch (error) {
     if (generation === client.generation && state) notice(`${error.message}. Nothing was pinned or unpinned.`, true);
   } finally { pendingPins.delete(messageId); if (state && generation === client.generation) renderMessages(); }
+}
+// Polls: close voting on a poll. The server admits only the author or a
+// steer-capable member; the menu already hides the action for everyone else.
+async function setPollClosed(messageId) {
+  const message = state && conversation.byId.get(messageId);
+  if (!message || message.kind !== "poll" || message.poll?.closedAt) return;
+  const pending = draftCommand(null, T.MESSAGE_POLL_CLOSED, { messageId });
+  const generation = client.generation;
+  try {
+    await client.send(pending.command);
+    if (generation === client.generation && state) notice("Poll closed. No more votes.");
+  } catch (error) {
+    if (generation === client.generation && state) notice(`${error.message}. The poll stays open.`, true);
+  } finally { if (state && generation === client.generation) renderMessages(); }
 }
 function renderPinned() {
   const panel = $("#pinned-panel"), list = $("#pinned-list");
