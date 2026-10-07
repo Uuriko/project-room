@@ -252,7 +252,7 @@ test("refetch POSTs and can surface a stale card", async () => {
 });
 
 test("pick on a retractable suggestion arms the client-held undo timer", async () => {
-  let now = 1_000_000;
+  const now = 1_000_000;
   const scheduled = [];
   const schedule = (fn, ms) => { const h = scheduled.push({ fn, ms, cancelled: false }) - 1; return h; };
   const cancelSchedule = (h) => { scheduled[h].cancelled = true; };
@@ -270,7 +270,7 @@ test("pick on a retractable suggestion arms the client-held undo timer", async (
 });
 
 test("retract cancels the timer and restores the card before the deadline", async () => {
-  let now = 1_000_000;
+  const now = 1_000_000;
   const scheduled = [];
   const schedule = (fn, ms) => scheduled.push({ fn, ms, cancelled: false }) - 1;
   const cancelSchedule = (h) => { scheduled[h].cancelled = true; };
@@ -314,7 +314,7 @@ test("when the hold lapses, the client fires the real write then re-reads the ca
 
 test("a confirm-only suggestion never arms a timer; it asks for explicit confirmation", async () => {
   const scheduled = [];
-  const { request, calls } = stub({ default: { card: { id: "card-a", state: "acting" }, needsConfirm: true } });
+  const { request } = stub({ default: { card: { id: "card-a", state: "acting" }, needsConfirm: true } });
   const client = createSupervisionClient({ roomId: "room1", request, schedule: (fn, ms) => scheduled.push(ms) });
   const out = await client.pick("card-a", 0);
   assert.equal(out.needsConfirm, true);
