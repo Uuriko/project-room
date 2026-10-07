@@ -2176,7 +2176,10 @@ export class BountyEscrow {
       this._acceptanceTransition(bounty, "refunded",
         { evidence: { decision: "rejected", reason, rejectedBy: lane } });
       const rejectEvent = this._event(roomId, "bounty.rejected",
-        { bountyId, actor: act, before: "submitted", after: "refunded", data: { reason, rejectedBy: lane } });
+        { bountyId, actor: act, before: "submitted", after: "refunded",
+          // Reputation projection reads this (server/bounty-reputation.mjs):
+          // work judged bad + the claim bond forfeited is bond_forfeited.
+          data: { reason, rejectedBy: lane, claimant: bounty.claimant } });
       // 2. Finality: the award was never attributed — refund the poster's
       // lock to the poster (never to the worker, never burned), no fee.
       this._requireFinalityMove(bounty, "refund");
