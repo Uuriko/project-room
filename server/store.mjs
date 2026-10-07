@@ -1,3 +1,4 @@
+import { dmEventVisibility } from "./dm-event-visibility.mjs";
 import { publicWorkClaimFenceSchema, verifyPublicWorkClaimFence } from "./public-work-claim-fence.mjs";
 import { PublicWorkClaims, publicWorkClaimsSchema } from "./public-work-claims.mjs";
 import { PublicWorkReviews, publicWorkReviewsSchema } from "./public-work-reviews.mjs";
@@ -445,8 +446,6 @@ const channelOfThreadId = threadId => {
   return match ? match[1] : null;
 };
 const canonical = value => Array.isArray(value) ? `[${value.map(canonical).join(",")}]` : value && typeof value === "object" ? `{${Object.keys(value).sort().map(k => `${JSON.stringify(k)}:${canonical(value[k])}`).join(",")}}` : JSON.stringify(value);
-const targetedEventVisible = (event, viewerId) => event?.type !== T.MESSAGE_POSTED || !event?.data?.toMemberId
-  || event.actorId === viewerId || event.data.toMemberId === viewerId;
 export const provisionalAccountPrefix = "acct-legacy-";
 const provisionalAccountId = (roomId, memberId) => `${provisionalAccountPrefix}${hash(`${roomId}\0${memberId}`).slice(0, 32)}`;
 const accountView = row => row ? { id: row.id, active: Boolean(row.active), revision: row.revision, authEpoch: row.auth_epoch } : null;
@@ -4293,7 +4292,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // PRIV-2: since_join readers page past events from before their join.
       const floor = this.historyFloor(roomId, viewerId, sequence);
       const floorMessages = floor ? indexHistoryMessages(this.room(roomId).state.messages) : null;
-      const visible = events.filter(row => rowInHistory(row, floor, floorMessages) && targetedEventVisible(row.event, viewerId)
+      // SEC-19: thunk keeps the zero-decode polling optimization: the full
+      // projection only decodes if the page actually holds a follow-up event.
+      const dmVisible = dmEventVisibility(viewerId, () => this.room(roomId).state.messages, events);
+      const visible = events.filter(row => rowInHistory(row, floor, floorMessages) && dmVisible(row.event)
         && peerEventVisible(row.event, { memberId: viewerId, identityId, isOwner }));
       // #658: mention chips ride on message views. One batched query for
       // the whole page (no N+1); only members who can read the room see it.
@@ -4469,7 +4471,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // an invisible page must still progress within its frozen horizon.
       const floor = this.historyFloor(roomId, auth.member.id, room.sequence); // PRIV-2
       const floorMessages = floor ? indexHistoryMessages(room.state.messages) : null;
-      brief.history.items = brief.history.items.filter(row => rowInHistory(row, floor, floorMessages) && targetedEventVisible(row.event, auth.member.id)
+      const dmVisible = dmEventVisibility(auth.member.id, room.state.messages, brief.history.items); // SEC-19
+      brief.history.items = brief.history.items.filter(row => rowInHistory(row, floor, floorMessages) && dmVisible(row.event)
         && peerEventVisible(row.event, { memberId: auth.member.id, identityId, isOwner }));
       return { roomId, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null, ...brief };
     });

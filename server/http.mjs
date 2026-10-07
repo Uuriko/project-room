@@ -1,4 +1,5 @@
 // JDOT-PUBLIC-CSP-RUM begin: public-page policy
+import { dmEventVisibility } from "./dm-event-visibility.mjs";
 import { publicPageCsp } from "../deploy/public-search.mjs";
 // JDOT-PUBLIC-CSP-RUM end
 import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchSitemap, PUBLIC_NOT_FOUND_HTML, PUBLIC_SEARCH_CSP, PUBLIC_PAGE_LASTMOD, reviewedPublicSearchPaths } from "../deploy/public-search.mjs";
@@ -3641,9 +3642,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const historyMessages = historyFloor ? indexHistoryMessages(store.room(roomId).state.messages) : null;
       const dmMessageVisible = message => messageInHistory(message, historyFloor)
         && (!message.toMemberId || message.authorId === viewerId || message.toMemberId === viewerId);
-      const dmEventVisible = event => eventInHistory(event, historyFloor, historyMessages) && (
-        event?.type !== "message.posted" || !event?.data?.toMemberId
-        || event.actorId === viewerId || event.data.toMemberId === viewerId);
+      // SEC-19: edits, deletes, redactions, reactions and pins of a DM follow
+      // the DM's own visibility (server/dm-event-visibility.mjs).
+      const dmPartyVisible = dmEventVisibility(viewerId, store.room(roomId).state.messages);
+      const dmEventVisible = event => eventInHistory(event, historyFloor, historyMessages) && dmPartyVisible(event);
       // --- end PRIV-2 ---
       // Bond receipts and peer DMs are ledger events, visible to the two
       // identities (bond metadata also to the room owner). Not room chat.
