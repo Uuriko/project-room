@@ -152,13 +152,17 @@ export async function createInboxCollaborationJourney({ mobile = false } = {}) {
         assert.equal(await page.locator("[data-inbox-result]").count(), 0);
         await page.locator("#nav-rooms").click();
       } else if (name === "finish") {
-        store.command(ownerKey, roomId, { id: randomUUID(), type: "message.posted", data: { messageId: "rationale-journey", body: "Rationale: simulated owner checked this exact draft." } });
         await action(page, "decide");
         await page.waitForFunction(body => document.querySelector("#action-text-body").textContent === body, input.expectedBody);
         await page.locator("#action-fields [name=decision]").selectOption("approved");
         await page.locator("#action-fields [name=reason]").fill("Simulated owner checked this exact draft. Approval is not sending.");
-        await page.locator("#action-fields [name=sourceMessageId]").fill("rationale-journey");
+        assert.equal(await page.locator("#action-fields [name=sourceMessageId]").count(), 0);
+        await page.getByText("Your reason will be posted to the room.", { exact: true }).waitFor();
         await submit(page); assert.equal(provider.count(), 0);
+        const rationale = state().messages.find(message => message.id === item().decision.sourceMessageId);
+        assert.equal(rationale.body, "Simulated owner checked this exact draft. Approval is not sending.");
+        assert.equal(rationale.authorId, "owner"); assert.equal(rationale.toMemberId, null);
+        assert.equal(item().decision.reason, rationale.body);
         await inbox(); await page.locator(`[data-inbox-result="${workItemId}"]`).click();
         await page.waitForFunction(body => document.querySelector("#inbox-result-body").textContent === body, input.expectedBody);
         await capture("07-private-adoption"); await page.locator("#inbox-result-use").click();
