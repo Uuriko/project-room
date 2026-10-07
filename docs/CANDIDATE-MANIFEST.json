@@ -115,7 +115,7 @@
     "src/share-links.js": "sha256:cbae43b13565d0a597daeca6508fe637cdc35412d55a24acaf25c932716deeb0",
     "src/squads-ui.js": "sha256:d31a321c10baab2e31f8c24fc6e55aa46d35b2bdcd933173dfa1a1c5672ba685",
     "src/strings.js": "sha256:16d9742fc2ef6f0e9dad2e933857a4c120bc923dc3a71ec86e255c0aa7561615",
-    "src/styles.css": "sha256:71426533055f4316d4b9aace0e534c3655836dc6d52d67ab800af235af2f749f",
+    "src/styles.css": "sha256:e805cbfaa3d8b5fcbe3a8381ca15a31d6e0651a65ff4bddd16722e9aaad8fe07",
     "src/updates-ui.js": "sha256:b65ad4d55345d88acc0b14b4e150f53807d35793a8259a22f2bc9ef20a075a47",
     "src/work-help.js": "sha256:5a7795f5ea12f5f16ab16efe3b978c9945928e46afd801446938bdd5914ef5ac",
     "src/work-item-session.js": "sha256:ceb06395aa89c1edf06b5cd4fe863a2de1438aad73fe3abe33009bf357920864",
