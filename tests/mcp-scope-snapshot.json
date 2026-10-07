@@ -1,0 +1,988 @@
+{
+ "add_land_item": {
+  "surfaces": [
+   "core",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "bond_accept": {
+  "surfaces": [
+   "focus:conversation",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "bond_decline": {
+  "surfaces": [
+   "focus:conversation",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "bond_list": {
+  "surfaces": [
+   "focus:conversation",
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "bond_propose": {
+  "surfaces": [
+   "core",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "bond_revoke": {
+  "surfaces": [
+   "focus:conversation",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "bounty_accept": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "bounty_claim": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "bounty_dispute": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "bounty_finalize": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "bounty_fund": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "bounty_list": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "bounty_post": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "bounty_read_balances": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "bounty_read_history": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "bounty_submit": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "bounty_transfer": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "bounty_watch": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "dm_posted": {
+  "surfaces": [
+   "core",
+   "focus:conversation",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "get_room_context": {
+  "surfaces": [
+   "focus:automation",
+   "focus:conversation",
+   "focus:review",
+   "focus:work",
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "heartbeat_ack": {
+  "surfaces": [
+   "focus:automation",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": false
+ },
+ "heartbeat_get": {
+  "surfaces": [
+   "focus:automation",
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "heartbeat_set": {
+  "surfaces": [
+   "focus:automation",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": false
+ },
+ "identity_list_verified": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "identity_read_verification": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "inbox_discard_attachment": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "inbox_get_attachment": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "inbox_list_attachments": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "inbox_put_attachment": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "list_land_queue": {
+  "surfaces": [
+   "core",
+   "focus:review",
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "public_work_claim": {
+  "surfaces": [
+   "enrolled",
+   "focus:public_work",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "public_work_finish": {
+  "surfaces": [
+   "enrolled",
+   "focus:public_work",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "public_work_my_review": {
+  "surfaces": [
+   "enrolled",
+   "focus:public_work",
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "public_work_read_task": {
+  "surfaces": [
+   "enrolled",
+   "focus:public_work",
+   "full",
+   "public"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "public_work_recommend": {
+  "surfaces": [
+   "enrolled",
+   "focus:public_work",
+   "full",
+   "public"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "public_work_release": {
+  "surfaces": [
+   "enrolled",
+   "focus:public_work",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "public_work_renew": {
+  "surfaces": [
+   "enrolled",
+   "focus:public_work",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "remove_land_item": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "report_tip": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_accept_work": {
+  "surfaces": [
+   "focus:work",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_acquire_claim": {
+  "surfaces": [
+   "focus:work",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_activation_pack": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "room_assistant_action": {
+  "surfaces": [
+   "focus:work",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_assistant_context": {
+  "surfaces": [
+   "focus:automation",
+   "focus:conversation",
+   "focus:review",
+   "focus:work",
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "room_begin_work": {
+  "surfaces": [
+   "focus:work",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_block_work": {
+  "surfaces": [
+   "focus:work",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_cancel_request": {
+  "surfaces": [
+   "focus:conversation",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_check_access": {
+  "surfaces": [
+   "core",
+   "focus:automation",
+   "focus:conversation",
+   "focus:review",
+   "focus:work",
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "room_clear_halt": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_commit_file": {
+  "surfaces": [
+   "core",
+   "focus:work",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_create": {
+  "surfaces": [
+   "core",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_create_agent_invite": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_decide_access_request": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_decline_help_offer": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_discard_file": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_get_file": {
+  "surfaces": [
+   "focus:review",
+   "focus:work",
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "room_identity_mint": {
+  "surfaces": [
+   "public"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_introduce_outside_agent": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_join": {
+  "surfaces": [
+   "core",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_join_kits": {
+  "surfaces": [
+   "core",
+   "enrolled",
+   "focus:automation",
+   "focus:conversation",
+   "focus:public_work",
+   "focus:review",
+   "focus:work",
+   "full",
+   "public"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "room_join_packet": {
+  "surfaces": [
+   "core",
+   "enrolled",
+   "focus:automation",
+   "focus:conversation",
+   "focus:public_work",
+   "focus:review",
+   "focus:work",
+   "full",
+   "public"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "room_join_prompt": {
+  "surfaces": [
+   "core",
+   "enrolled",
+   "focus:automation",
+   "focus:conversation",
+   "focus:public_work",
+   "focus:review",
+   "focus:work",
+   "full",
+   "public"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "room_link_work_claim_pr": {
+  "surfaces": [
+   "focus:work",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_list_access_requests": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "room_list_agent_invites": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "room_list_events": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "room_list_files": {
+  "surfaces": [
+   "focus:review",
+   "focus:work",
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "room_list_outside_agents": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "room_list_peer_dms": {
+  "surfaces": [
+   "focus:conversation",
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "room_list_requests": {
+  "surfaces": [
+   "core",
+   "focus:automation",
+   "focus:conversation",
+   "focus:review",
+   "focus:work",
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "room_list_work": {
+  "surfaces": [
+   "focus:review",
+   "focus:work",
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "room_mcp_snippet": {
+  "surfaces": [
+   "core",
+   "enrolled",
+   "focus:automation",
+   "focus:conversation",
+   "focus:public_work",
+   "focus:review",
+   "focus:work",
+   "full",
+   "public"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "room_member_card": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "room_needs_me": {
+  "surfaces": [
+   "core",
+   "focus:automation",
+   "focus:conversation",
+   "focus:review",
+   "focus:work",
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "room_offer_help": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_post_draft": {
+  "surfaces": [
+   "focus:work",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_post_message": {
+  "surfaces": [
+   "core",
+   "focus:automation",
+   "focus:conversation",
+   "focus:review",
+   "focus:work",
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": true
+ },
+ "room_propose_work": {
+  "surfaces": [
+   "focus:work",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_put_file": {
+  "surfaces": [
+   "core",
+   "focus:work",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_react": {
+  "surfaces": [
+   "core",
+   "focus:conversation",
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": true
+ },
+ "room_read_board": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "room_read_inbox": {
+  "surfaces": [
+   "focus:conversation",
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "room_read_messages": {
+  "surfaces": [
+   "core",
+   "focus:conversation",
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "room_read_request": {
+  "surfaces": [
+   "core",
+   "focus:automation",
+   "focus:conversation",
+   "focus:review",
+   "focus:work",
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "room_read_result": {
+  "surfaces": [
+   "focus:review",
+   "focus:work",
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "room_read_work": {
+  "surfaces": [
+   "focus:review",
+   "focus:work",
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "room_read_work_discussion": {
+  "surfaces": [
+   "focus:review",
+   "focus:work",
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "room_record_completion": {
+  "surfaces": [
+   "focus:work",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_record_handoff": {
+  "surfaces": [
+   "focus:work",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_record_verification": {
+  "surfaces": [
+   "focus:review",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_release_claim": {
+  "surfaces": [
+   "focus:work",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_release_help_offer": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_renew_claim": {
+  "surfaces": [
+   "focus:work",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_reply": {
+  "surfaces": [
+   "core",
+   "focus:automation",
+   "focus:conversation",
+   "focus:review",
+   "focus:work",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_request_history": {
+  "surfaces": [
+   "focus:conversation",
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "room_request_reply": {
+  "surfaces": [
+   "focus:automation",
+   "focus:conversation",
+   "focus:review",
+   "focus:work",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_resolve_blocker": {
+  "surfaces": [
+   "focus:work",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_respond_to_request": {
+  "surfaces": [
+   "core",
+   "focus:automation",
+   "focus:conversation",
+   "focus:review",
+   "focus:work",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_revoke_agent_invite": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_select_help_offer": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_set_member_claim_cap": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_start_work": {
+  "surfaces": [
+   "focus:work",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_submit_text_result": {
+  "surfaces": [
+   "focus:work",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_supersede_work": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_withdraw_help_offer": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "room_work_claim_provenance": {
+  "surfaces": [
+   "focus:work",
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "squads_create": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "squads_disband": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "squads_get": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "squads_list": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "squads_update_members": {
+  "surfaces": [
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "wake_clear": {
+  "surfaces": [
+   "focus:automation",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "wake_pause": {
+  "surfaces": [
+   "core",
+   "focus:automation",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "wake_register": {
+  "surfaces": [
+   "focus:automation",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "wake_resume": {
+  "surfaces": [
+   "core",
+   "focus:automation",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "webhook_list": {
+  "surfaces": [
+   "focus:automation",
+   "full"
+  ],
+  "guestHidden": false,
+  "t1Hidden": false
+ },
+ "webhook_subscribe": {
+  "surfaces": [
+   "focus:automation",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ },
+ "webhook_unsubscribe": {
+  "surfaces": [
+   "focus:automation",
+   "full"
+  ],
+  "guestHidden": true,
+  "t1Hidden": true
+ }
+}
