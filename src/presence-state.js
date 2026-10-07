@@ -5,6 +5,20 @@ export const PRESENCE_WORKING_WINDOW_MS = 5 * 60 * 1000;
 export const PRESENCE_IDLE_WINDOW_MS = 60 * 60 * 1000;
 export const PRESENCE_UNREACHABLE_AFTER_MS = 60 * 60 * 1000;
 
+// B16: herdr session badge for the People panel and claim cards. Pure HTML
+// builder — returns "" when there is no session, so a flag-off / non-opted-in
+// lane renders exactly the old markup (zero layout change). The state string
+// is always escaped; it originates server-side but is still untrusted text.
+const escChip = value => String(value ?? "").replace(/[&<>"']/g, c =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+export function herdrSessionChip(session) {
+  const state = typeof session?.state === "string" ? session.state.trim() : "";
+  if (!state) return "";
+  const label = escChip(state);
+  return `<span class="herdr-session-chip" data-herdr-state="${label}" title="herdr session: ${label}">herdr · ${label}</span>`;
+}
+
 const within = (at, now, windowMs) =>
   Number.isFinite(at) && Number.isFinite(now) && now - at >= 0 && now - at <= windowMs;
 

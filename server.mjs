@@ -42,7 +42,12 @@ const lockPath = process.env.ROOM_INSTANCE_LOCK_PATH || join(dirname(filename), 
 const instanceLock = paused ? null : acquireInstanceLock(lockPath);
 let store = null;
 try {
-  store = paused ? null : new RoomStore(filename, { stitch: stitchConfigFromEnv(process.env) });
+  store = paused ? null : new RoomStore(filename, {
+    stitch: stitchConfigFromEnv(process.env),
+    // B16: ROOM_HERDR_SESSIONS — parsed once at boot by the store; absent/off
+    // keeps every herdr surface inert.
+    herdrSessions: process.env.ROOM_HERDR_SESSIONS,
+  });
   if (store && production && !store.db.prepare("SELECT 1 FROM rooms LIMIT 1").get()) { store.close(); store = null; throw new Error("Provision a room before deployment"); }
 } catch (error) { instanceLock?.release(); throw error; }
 // Event-push dispatch: after an event commit journals webhook deliveries,
@@ -113,6 +118,14 @@ server.listen(port, host, () => {
   if (!paused) console.log(nodeJobs?.channelEnabled && nodeJobs.isRunning()
     ? `[channel-drain] scheduler started (tick every ${channelDrainIntervalMs}ms)`
     : "[channel-drain] scheduler disabled");
+  // B16: log the herdr session-surfacing flag once at boot (after the ready
+  // line — packaging tests treat the first stdout write as "server ready").
+  if (!paused && store) {
+    const scope = store.herdrSessionsScope;
+    console.log(scope?.enabled
+      ? `[herdr] session surfacing on${scope.rooms ? ` for rooms: ${scope.rooms.join(",")}` : " (all rooms)"}`
+      : "[herdr] session surfacing off");
+  }
 });
 // One scheduler for every node job in server/jobs.mjs. Growth watch and
 // channel drain keep their previous intervals. Webhook retry, land-queue,

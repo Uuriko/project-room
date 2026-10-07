@@ -172,7 +172,43 @@ import { validateHelpData, WORK_HELP_UPDATED } from "../src/work-help.js";
 import { auditWorkHelp } from "./work-help.mjs";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, validateHelpOfferData } from "../src/help-offers.js";
 import { classifyCommand } from "./action-classes.mjs";
-import { presenceState } from "../src/presence-state.js"; // #660: agent presence/working states.
+import { presenceState, PRESENCE_UNREACHABLE_AFTER_MS } from "../src/presence-state.js"; // #660: agent presence/working states.
+// B16: ROOM_HERDR_SESSIONS flag (Phase A gate for herdr session surfacing).
+// Raw values: unset/""/"off" (and other off-likes) -> disabled; "on" (and
+// on-likes) -> every room; "=r1,r2" -> only the listed rooms. Anything else
+// fails closed to disabled. Worker-safe: pure, no node: imports.
+export function parseHerdrSessionsFlag(raw) {
+  const text = typeof raw === "string" ? raw.trim() : "";
+  const keyword = text.toLowerCase();
+  if (text === "" || ["off", "0", "false", "no"].includes(keyword)) return { enabled: false, rooms: null };
+  if (["on", "1", "true", "yes"].includes(keyword)) return { enabled: true, rooms: null };
+  if (text.startsWith("=")) {
+    const rooms = text.slice(1).split(",").map(part => part.trim()).filter(Boolean);
+    return rooms.length > 0 ? { enabled: true, rooms } : { enabled: false, rooms: null };
+  }
+  return { enabled: false, rooms: null };
+}
+// B16: herdr_sessions rows are terminal in "destroyed" only; every other
+// lifecycle state (spawning/active/detached/suspended/reattaching/draining)
+// is honest surfacing data, never a claim signal (herdr done != claim done).
+const HERDR_TERMINAL_SESSION_STATES = new Set(["destroyed"]);
+const herdrText = value => typeof value === "string" && value.length > 0 ? value : null;
+const herdrMs = value => { const ms = Date.parse(value); return Number.isFinite(ms) ? ms : 0; };
+// Normalize one herdr_sessions row. B5 owns the DDL; tolerate snake_case and
+// camelCase column names so the surfacing does not hard-fail on a rename.
+// Returns null for rows with no usable state (including terminal "destroyed").
+function herdrSessionRowInfo(row) {
+  if (!row || typeof row !== "object") return null;
+  const state = herdrText(row.state ?? row.session_state ?? row.sessionState);
+  if (!state || HERDR_TERMINAL_SESSION_STATES.has(state)) return null;
+  return {
+    state,
+    sessionId: herdrText(row.session_id ?? row.sessionId ?? row.id) ?? "",
+    claimId: herdrText(row.claim_id ?? row.claimId),
+    laneMemberId: herdrText(row.lane_member_id ?? row.laneMemberId ?? row.member_id ?? row.memberId),
+    updatedAtMs: herdrMs(row.updated_at ?? row.updatedAt ?? row.created_at ?? row.createdAt),
+  };
+}
 import {
   isSessionStatus, isTerminalSession, sessionRecord, listWorkItemSessions, sessionCommandType, sessionWorker,
   sessionClaimConflict,
@@ -1151,13 +1187,19 @@ class ProjectionCache {
 
 export class RoomStore {
   constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined, integrity = "eager",
-    bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1" } = {}) {
+    bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1" , herdrSessions } = {}) {
     // Phase 1a: store large message bodies outside rooms.projection.
     this.bodiesAtRest = bodiesAtRest === true;
     const coldStart = startColdStart();
     if (integrity !== "eager" && integrity !== "deferred") throw new Error("integrity must be eager or deferred");
     if (readOnly && integrity === "deferred") throw new Error("Read-only integrity checks stay eager");
     this.integrityMode = integrity;
+    // B16: ROOM_HERDR_SESSIONS — parsed once at boot (fail-closed default
+    // off). The Node entry point passes process.env.ROOM_HERDR_SESSIONS and
+    // the Cloudflare entry passes env.ROOM_HERDR_SESSIONS; when neither is
+    // supplied the surfacing stays inert.
+    this.herdrSessionsScope = parseHerdrSessionsFlag(
+      herdrSessions ?? (typeof process !== "undefined" ? process.env?.ROOM_HERDR_SESSIONS : undefined));
     if (!Number.isInteger(storageFailureThreshold) || storageFailureThreshold < 1) throw new Error("Storage failure threshold must be a positive integer");
     // Cross-channel thread stitching (task #19): stitch is the frozen
     // { salt, epoch, enabled, bindings } triple from stitchConfigFromEnv, or
@@ -1173,6 +1215,12 @@ export class RoomStore {
     this.storageFailureThreshold = storageFailureThreshold;
     this.storageFailures = 0;
     this.now = now;
+    // B16: ROOM_HERDR_SESSIONS — parsed once at boot (fail-closed default
+    // off). The Node entry point passes process.env.ROOM_HERDR_SESSIONS and
+    // the Cloudflare entry passes env.ROOM_HERDR_SESSIONS; when neither is
+    // supplied the surfacing stays inert.
+    this.herdrSessionsScope = parseHerdrSessionsFlag(
+      herdrSessions ?? (typeof process !== "undefined" ? process.env?.ROOM_HERDR_SESSIONS : undefined));
     this.roomFlood = createRoomFloodGuard({ now: () => this.now() });
     this.db = database ?? new DatabaseSync(filename, { readOnly });
     this.storagePlatform = storagePlatform;
@@ -3900,6 +3948,50 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return this.command(token, roomId, { id: request.requestId, type, data }, expectedSessionBinding);
     });
   }
+  // B16: herdr session surfacing (additive, flag-gated). Returns null unless
+  // ROOM_HERDR_SESSIONS covers this room; otherwise { byMember, byClaim }
+  // built from the B5 tables (herdr_lane_optin x herdr_sessions). The
+  // conjunction rule is enforced here: a session surfaces only for a lane
+  // whose opt-in row carries sessionBackend "herdr" AND whose latest session
+  // row is non-terminal. Any read failure — tables not yet landed, renamed
+  // columns, corrupt rows — returns null: the room behaves exactly as before
+  // the flag existed (fail-closed, never throws).
+  herdrSessionsForRoom(roomId) {
+    const scope = this.herdrSessionsScope;
+    if (!scope?.enabled) return null;
+    if (scope.rooms && !scope.rooms.includes(roomId)) return null;
+    try {
+      const optedIn = new Set();
+      for (const row of this.db.prepare("SELECT * FROM herdr_lane_optin WHERE room_id = ?").all(roomId)) {
+        const member = herdrText(row.lane_member_id ?? row.laneMemberId ?? row.member_id ?? row.memberId);
+        const backend = herdrText(row.session_backend ?? row.sessionBackend ?? row.backend);
+        if (member && backend === "herdr") optedIn.add(member);
+      }
+      if (optedIn.size === 0) return null;
+      const byMemberRaw = new Map(), byClaimRaw = new Map();
+      for (const row of this.db.prepare("SELECT * FROM herdr_sessions WHERE room_id = ?").all(roomId)) {
+        const info = herdrSessionRowInfo(row);
+        if (!info || !info.laneMemberId || !optedIn.has(info.laneMemberId)) continue;
+        const rowRoom = herdrText(row.room_id ?? row.roomId);
+        if (rowRoom !== null && rowRoom !== roomId) continue;
+        // Latest row wins per member / per claim (compared on the parsed
+        // timestamp before the value is stripped to its public shape).
+        const keep = (map, key, value) => {
+          if (key === null || key === undefined) return;
+          const prev = map.get(key);
+          if (!prev || info.updatedAtMs >= prev.ms) map.set(key, { value, ms: info.updatedAtMs });
+        };
+        keep(byMemberRaw, info.laneMemberId,
+          { state: info.state, sessionId: info.sessionId, claimId: info.claimId });
+        keep(byClaimRaw, info.claimId,
+          { state: info.state, sessionId: info.sessionId, laneMemberId: info.laneMemberId });
+      }
+      const strip = raw => new Map([...raw].map(([key, entry]) => [key, entry.value]));
+      return { byMember: strip(byMemberRaw), byClaim: strip(byClaimRaw) };
+    } catch {
+      return null;
+    }
+  }
   // Who is around: the active roster, plus live SSE watchers and fresh
   // executing sessions. Legacy lastSeenAt also retains enrollment time.
   // Derived from existing data — no new tables, no people-data store.
@@ -3955,6 +4047,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (host.status === null) return null;
         return { status: host.status, lastSeenAt: host.lastSeenAt };
       };
+      // #660: unreachable threshold is 60 min or 3x the host heartbeat
+      // interval, whichever is smaller.
+      const unreachableAfterMs = Math.min(
+        PRESENCE_UNREACHABLE_AFTER_MS,
+        3 * this.agentHeartbeats.staleAfterMs
+      );
+      // B16: one bulk herdr-session read per presence request (null unless
+      // ROOM_HERDR_SESSIONS covers this room and B5's tables are readable).
+      const herdrSessions = this.herdrSessionsForRoom(roomId);
       const listed = Object.values(members)
         .filter(m => m && m.active !== false)
         .map(m => {
@@ -3962,6 +4063,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           const host = hostStatusOf(m.id);
           const workingOn = working.get(m.id) ?? [];
           const isWatching = watching.has(m.id);
+          // B16: additive session badge data; the key is omitted (not nulled)
+          // when there is nothing to show, so flag-off responses are
+          // byte-identical to the pre-herdr shape.
+          const herdrSession = herdrSessions?.byMember.get(m.id) ?? null;
           return {
             memberId: m.id, displayName: m.displayName, kind: m.kind,
             watching: isWatching, workingOn,
@@ -3990,6 +4095,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
             cardAgentId: m.kind === "agent" && host.identityId
               ? this.agentPlugin.cardAgentIdForIdentity(host.identityId)
               : null,
+            ...(herdrSession ? { herdrSession } : {}),
           };
         })
         .sort((a, b) => a.memberId < b.memberId ? -1 : 1);

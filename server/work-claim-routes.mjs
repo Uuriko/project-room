@@ -741,7 +741,15 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "list" && req.method === "GET") {
     closeLiveClaims();
-    return json(res, 200, { ...buildWorkClaimPage(registry.list(roomId), roomId, caller,
+    // B16: additive per-claim herdr session indicator. The key appears only
+    // for claims with a linked live session (flag on + lane opted in);
+    // otherwise the claim object is returned untouched (same reference).
+    const herdrSessions = store.herdrSessionsForRoom?.(roomId);
+    const claims = registry.list(roomId).map(item => {
+      const herdrSession = herdrSessions?.byClaim.get(item.id);
+      return herdrSession ? { ...item, herdrSession } : item;
+    });
+    return json(res, 200, { ...buildWorkClaimPage(claims, roomId, caller,
       url?.searchParams, nowMs), swept: sweptIds });
   }
   if (workClaimRoute === "receipts" && req.method === "GET") {
@@ -893,7 +901,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   if (workClaimRoute === "read" && req.method === "GET") {
     closeLiveClaims();
     // SEC-2: member-authored text is marked untrusted for the reader.
-    return json(res, 200, withContentTrust(stampClaim(load(claimIdOf(reject, workClaimId)), caller)));
+    const item = withContentTrust(stampClaim(load(claimIdOf(reject, workClaimId)), caller));
+    // B16: same additive herdrSession indicator as the list route.
+    const herdrSession = store.herdrSessionsForRoom?.(roomId)?.byClaim.get(item.id);
+    return json(res, 200, herdrSession ? { ...item, herdrSession } : item);
   }
   if (workClaimRoute === "claim" && req.method === "POST") {
     const data = body(req);

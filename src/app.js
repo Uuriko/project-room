@@ -32,7 +32,8 @@ import { createAccountSettingsUI, applyStoredTheme, organizeRoomSettings, ACCOUN
 import { createAuthSigninUI, classifyAuthLink } from "./auth-signin-ui.js";
 import { createAgentSigninUI } from "./agent-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, defaultRequestPermissions, validateAccessRequestForm, newAccessRequestId, stashAccessRequest, readAccessRequest } from "./invite-context.js";
-import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, authPanelTitle, roomIdFromNext, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
+import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, authPanelTitle, KEY_KIND_HINT, roomIdFromNext, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
+import { herdrSessionChip } from "./presence-state.js"; // B16: herdr session badge ("" unless the lane opted in).
 import { installAgentInvites } from "./agent-invite-ui.js";
 import { rememberLastRoom, rememberAccountHint, readLastRoom, readLastRoomTitle, readAccountHint, hasSessionHint, clearBrowserSessionHints, rememberMemberRoom, readMemberRoom, clearStoredPasswords, signInRoomTarget } from "./browser-session.js";
 import { attachmentFromBytes, composerAudienceNote, COMPOSER_FILE_BYTES, fileChipLabel } from "./composer-files.js";
@@ -1992,6 +1993,7 @@ function render() {
     const ownerChip = m.id === state.room.ownerId
       ? `<span class="owner-chip" title="Room owner">Owner</span>`
       : m.active !== false && m.permissions.includes("manage_members") ? `<span class="owner-chip" title="Can invite and manage members">Admin</span>` : "";
+    const herdrBadge = herdrSessionChip(serverPresence?.herdrSession);
     const workingOnTitle = !presenceUnrefreshed && serverState === "working" && serverPresence?.workingOn?.[0]?.title
       ? `<span class="member-working-on">${presenceStale ? "Last reported working on" : "working on"} ${esc(String(serverPresence.workingOn[0].title))}…</span>`
       : "";
@@ -2002,7 +2004,8 @@ function render() {
       ? `<p class="member-observation">Last host report: <time datetime="${esc(new Date(serverPresence.presence.lastSeenAt).toISOString())}">${esc(new Date(serverPresence.presence.lastSeenAt).toLocaleString())}</time></p>` : "";
     const lastReport = agent && presenceStale && serverState
       ? `<p class="member-observation">Last reported availability: ${esc(presenceLabel(serverState))}</p>` : "";
-    return `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-presence="${esc(presence)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}"${m.agentType ? ` data-agent-type="${esc(m.agentType)}"` : ""} ${m.active === false ? "" : `title="${esc(`Address ${m.displayName} in chat`)}"`}><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span><i class="presence-dot presence-${esc(presence)}" title="${esc(availability)}"></i></div><div><div class="member-head"><strong class="member-handle${m.kind === "agent" ? " member-handle-agent" : ""}">${esc(handle)}</strong><span class="sr-only">${esc(availability)}</span>${doneChip}${agentPauses.has(m.id) && m.active !== false ? `<span class="pause-chip" data-paused-member="${esc(m.id)}" title="Queued wakes will not start; a running attempt may finish">Wakes paused</span>` : ""}${friendBondHtml(m)}</div>${agent ? `<span class="member-availability">${esc(availability)}</span>` : ""}${workingOnTitle}${agent ? `<p class="member-status member-assignment">${esc(status)}</p>` : ""}<details class="member-profile"><summary data-focus-key="member-profile:${esc(m.id)}" aria-label="Member options for ${esc(m.displayName)}" title="Member options"><span aria-hidden="true">···</span></summary><div class="member-profile-body"><p class="form-hint">Member ID: <code>${esc(m.id)}</code></p><div class="member-profile-badges">${typeChip}${stateChip}${ownerChip}</div><p class="member-status">${esc(status)}</p>${lastReport}${hostReport}${ownedBy}${agentPauses.has(m.id) && agent ? `<p class="member-pause-explanation">Queued wakes will not start; a running attempt may finish.</p>` : ""}${memberActions(m)}${workControl(m)}<details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p>${adminControl(m)}${muteControl(m)}</details>${dmConsentDetails(m)}${directoryCardDetails(m)}</div></details></div></div>`;
+    return `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-presence="${esc(presence)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}"${m.agentType ? ` data-agent-type="${esc(m.agentType)}"` : ""} ${m.active === false ? "" : `title="${esc(`Address ${m.displayName} in chat`)}"`}><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span><i class="presence-dot presence-${esc(presence)}" title="${esc(availability)}"></i></div><div><div class="member-head"><strong class="member-handle${m.kind === "agent" ? " member-handle-agent" : ""}">${esc(handle)}</strong><span class="sr-only">${esc(availability)}</span>${doneChip}${agentPauses.has(m.id) && m.active !== false ? `<span class="pause-chip" data-paused-member="${esc(m.id)}" title="Queued wakes will not start; a running attempt may finish">Wakes paused</span>` : ""}${friendBondHtml(m)}</div>${agent ? `<span class="member-availability">${esc(availability)}</span>` : ""}${workingOnTitle}${agent ? `<p class="member-status member-assignment">${esc(status)}</p>` : ""}<details class="member-profile"><summary data-focus-key="member-profile:${esc(m.id)}" aria-label="Member options for ${esc(m.displayName)}" title="Member options"><span aria-hidden="true">···</span></summary><div class="member-profile-body"><p class="form-hint">Member ID: <code>${esc(m.id)}</code></p><div class="member-profile-badges">${typeChip}${stateChip}${ownerChip}${herdrBadge}</div><p class="member-status">${esc(status)}</p>${lastReport}${hostReport}${ownedBy}${agentPauses.has(m.id) && agent ? `<p class="member-pause-explanation">Queued wakes will not start; a running attempt may finish.</p>` : ""}${memberActions(m)}${workControl(m)}<details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p>${adminControl(m)}${muteControl(m)}</details>${dmConsentDetails(m)}${directoryCardDetails(m)}</div></details></div></div>`;
+
   };
   // E4: mute is the viewer's own preference; the owner (the appeal path) and yourself are never mutable.
   const muteControl = m => m.id === session?.member?.id || m.id === state.room.ownerId ? "" : `<button type="button" class="text-button mute-toggle" data-mute-member="${esc(m.id)}" data-muted="${isMutedBy(state, session?.member?.id, m.id)}" aria-pressed="${isMutedBy(state, session?.member?.id, m.id)}">${isMutedBy(state, session?.member?.id, m.id) ? `Unmute ${esc(m.displayName)}` : `Mute ${esc(m.displayName)} for me`}</button>`;
@@ -3284,6 +3287,16 @@ function claimStateLabel(i, now = Date.now()) {
   if (i.claim?.status === "released") return "released";
   return "expired";
 }
+// B16: session-state indicator for the claim card. The holder's herdr session
+// (if any) arrives with the 30s presence feed; when it is absent the card
+// renders exactly the old markup (zero layout change). Read-only: the chip
+// never mutates claim state.
+function claimHerdrChip(i) {
+  const holderId = i.claim?.holderId;
+  if (!holderId) return "";
+  const chip = herdrSessionChip(presenceStates.get(holderId)?.herdrSession);
+  return chip ? `<p class="claim-herdr">${chip}</p>` : "";
+}
 function receiptCard(i) {
   if (!i.receipt) return "";
   const receipt = i.receipt;
@@ -3383,7 +3396,7 @@ function workCard(i, now, drafts, messages = []) {
   const handoff = i.handoff?.open ? `<section class="blocker" data-work-handoff="${esc(i.id)}" aria-label="Work handoff"><strong>Handoff</strong><p>${esc(i.handoff.doneSummary)}</p><p><strong>Next:</strong> ${esc(i.handoff.nextAction)}</p>${source ? `<p><a class="source-link" href="${esc(recordHref("message", i.sourceMessageId))}" data-open-message="${esc(i.sourceMessageId)}" data-focus-key="work-handoff-source:${esc(i.id)}">Open discussion</a></p>` : ""}<details><summary>Why work paused</summary><p>${esc(i.handoff.limitReason)}</p>${i.handoff.haltAll ? "<p>A stop was requested. External process state is unknown.</p>" : ""}</details></section>` : "";
   const blocker = i.blocker ? `<div class="blocker"><strong>Blocked</strong><p>${esc(i.blocker.reason)}</p><p>${esc(i.blocker.nextAction)}</p></div>` : "";
   const decision = i.decision ? `<div class="decision"><strong>${esc(humanize(i.decision.decision))}</strong><p>${esc(i.decision.reason)}</p></div>` : "";
-  const claim = i.claim ? `<details class="claim"><summary data-focus-key="work-claim:${esc(i.id)}">Recorded scope · ${esc(claimStateLabel(i, now))}${claimOverlapCount(i) ? ` · <span class="claim-overlap">Overlaps ${claimOverlapCount(i)}</span>` : ""}</summary><p>${esc(memberLabel(i.claim.holderId))}</p><p>${esc(i.claim.repository)}:${esc(i.claim.ref)}</p><p>${esc(i.claim.paths.join(", "))}</p>${claimOverlapHtml(i)}<p>Expires ${esc(new Date(i.claim.expiresAt).toLocaleString())}. External activity is not measured.</p>${actions(i, true, now)}</details>` : "";
+  const claim = i.claim ? `<details class="claim"><summary data-focus-key="work-claim:${esc(i.id)}">Recorded scope · ${esc(claimStateLabel(i, now))}${claimOverlapCount(i) ? ` · <span class="claim-overlap">Overlaps ${claimOverlapCount(i)}</span>` : ""}</summary><p>${esc(memberLabel(i.claim.holderId))}</p><p>${esc(i.claim.repository)}:${esc(i.claim.ref)}</p><p>${esc(i.claim.paths.join(", "))}</p>${claimOverlapHtml(i)}<p>Expires ${esc(new Date(i.claim.expiresAt).toLocaleString())}. External activity is not measured.</p>${claimHerdrChip(i)}${actions(i, true, now)}</details>` : "";
   const checks = `<div><dt>Verifier</dt><dd>${i.independentVerificationRequired ? esc(memberLabel(i.verifierMemberId)) : "Not required"}</dd></div><div><dt>Decision</dt><dd>${i.ownerDecisionRequired ? esc(memberLabel(i.humanDecisionMakerId)) : "Not required"}</dd></div>`;
   const updated = `<p class="form-hint">Last recorded update: ${esc(new Date(i.updatedAt).toLocaleString())}. Live execution is not measured.</p>`;
   const attempts = attemptLedger(i);
