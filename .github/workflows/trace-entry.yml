@@ -3,7 +3,7 @@
 # When a pull request merges to the default branch, open a bot PR that appends
 # one line to docs/ROOM-TRACES.jsonl (the raw-traces plane), built from PR
 # metadata — number, title, merge SHA, linked Room-Work claim — by
-# scripts/trace-entry.mjs. No manual backfill, ever.
+# scripts/trace-entry.mjs. The normal reviewer and landing lane settle the PR.
 #
 # Why a bot PR and not a direct push: main's branch protection requires status
 # checks [test, contract, lint, browser, cloudflare] on merges, which blocks
@@ -27,13 +27,12 @@
 #   context, checks out main only, never executes untrusted PR code.
 # - Trace PRs themselves are excluded via the trace-entry/ head-ref prefix,
 #   so merging a trace PR does not spawn another trace run (no regress).
-# - concurrency group serializes merge-time runs: a later run always starts
-#   from a main that already contains the earlier run's merged trace PR, so
-#   the file stays append-only and date-ordered with no rebase conflicts.
+# - concurrency group serializes branch preparation. Pending trace PRs may
+#   need a refresh when another trace lands; serialization does not prove
+#   that an earlier trace PR has merged.
 # - Fail closed: scripts/check-wiki.mjs must pass before the bot branch is
-#   pushed; the trace PR is squash-merged only after GitHub reports it
-#   mergeable (required checks green). If it never becomes mergeable the job
-#   fails loudly and the trace PR stays open for a lane.
+#   pushed. Opening a PR is preparation, not approval or permission to merge.
+#   The bot never bypasses independent review or takes the shared merge-slot.
 # - The script is idempotent per PR number, so workflow re-runs can never
 #   duplicate a line; a re-run reuses the open trace PR if one exists.
 name: trace-entry
@@ -103,7 +102,7 @@ jobs:
           git -c http.extraheader="AUTHORIZATION: bearer ${GH_TOKEN}" \
             push --force origin "$BR"
           echo "branch=$BR" >> "$GITHUB_OUTPUT"
-      - name: Open trace PR and squash-merge when green
+      - name: Open trace PR for independent review
         if: steps.build.outputs.branch != ''
         env:
           GH_TOKEN: ${{ secrets.TRACE_ENTRY_TOKEN }}
@@ -116,21 +115,10 @@ jobs:
           TRACE_PR=$(gh pr list --head "$TRACE_BRANCH" --base "$DEFAULT_BRANCH" \
             --state open --json number --jq '.[0].number // empty')
           if [ -z "$TRACE_PR" ]; then
-            TRACE_PR=$(gh pr create --title "docs: trace entry for #${PR_NUMBER}" \
-              --body "Automated trace entry for PR #${PR_NUMBER}, appended to docs/ROOM-TRACES.jsonl by the W001 trace-entry automation (.github/workflows/trace-entry.yml). No manual step." \
-              --head "$TRACE_BRANCH" --base "$DEFAULT_BRANCH" \
-              --json number --jq '.number')
+            TRACE_URL=$(gh pr create --title "docs: trace entry for #${PR_NUMBER}" \
+              --body "Automated trace entry for PR #${PR_NUMBER}, prepared by the W001 trace-entry automation (.github/workflows/trace-entry.yml). Requires exact-head CI, independent review and the shared landing lane." \
+              --head "$TRACE_BRANCH" --base "$DEFAULT_BRANCH")
+            TRACE_PR=$(gh pr view "$TRACE_URL" --json number --jq '.number')
           fi
           echo "trace PR: #${TRACE_PR}"
-          # gh pr merge succeeds only once the required status checks are
-          # green, so retry until mergeable. Loud failure if it never is.
-          for i in $(seq 1 30); do
-            if gh pr merge --squash --delete-branch "$TRACE_PR"; then
-              echo "trace PR #${TRACE_PR} merged"
-              exit 0
-            fi
-            echo "not mergeable yet (attempt ${i}/30); waiting 120s"
-            sleep 120
-          done
-          echo "trace PR #${TRACE_PR} did not become mergeable in 60m; left open for a lane"
-          exit 1
+          echo "Trace PR #${TRACE_PR} prepared; independent review and shared landing required." >> "$GITHUB_STEP_SUMMARY"
