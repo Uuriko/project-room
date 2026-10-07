@@ -11,7 +11,6 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import { unitPlan, parseShard } from "./unit-shards.mjs";
 import { parseFailingTests } from "./failing-tests.mjs";
 
