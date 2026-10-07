@@ -1,0 +1,12 @@
+{
+ "version": "settlement-receipt/1",
+ "jobId": "job-settle-1",
+ "envelopeId": "env_abc123",
+ "providerId": "provider:evil-01",
+ "chainId": "monad-mock-10143",
+ "assetMint": "0xmockUSDC",
+ "amountRaw": "50000",
+ "issuedAtIso": "2026-10-07T16:33:24.511Z",
+ "nonce": "777f0e8198c15eeb269bcca38acbf11f",
+ "signature": "0fcbd59ce57d1789c2da3e491b8bf87ef79276ca8684e0a7f42b102f060137f74f47a2274b1314737871b9b97a0f39da72cabbb9566c48b722130e7e79205701"
+}

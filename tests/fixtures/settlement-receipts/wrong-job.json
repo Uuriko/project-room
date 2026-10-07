@@ -1,0 +1,12 @@
+{
+ "version": "settlement-receipt/1",
+ "jobId": "job-settle-999",
+ "envelopeId": "env_abc123",
+ "providerId": "provider:mac-mini-07",
+ "chainId": "monad-mock-10143",
+ "assetMint": "0xmockUSDC",
+ "amountRaw": "50000",
+ "issuedAtIso": "2026-10-07T16:33:24.603Z",
+ "nonce": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+ "signature": "471c099cb1f25bede4fd2ed153d0ad9272eca13ef5bac9333395bfc6f7515a44249a259e81b06de873fa1bd1d0ed62214bdbe0e2cda7f9904c416cc78a490506"
+}
