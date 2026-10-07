@@ -413,6 +413,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // projection_bodies: Phase 1a message bodies at rest. Older writers have no
   // path to it; rooms.projection rows they write carry full bodies.
   "projection_bodies",
+  // projection_telemetry / projection_warnings: H1 relief valve. Purely
+  // additive (no events, no projection impact); a missing row is simply no
+  // recorded sample. Older writers have no path to them.
+  "projection_telemetry",
+  "projection_warnings",
   // LEGAL: terms acceptance, public abuse reports, and operator unpublish.
   // Additive and unfenced. Older writers have no code path to them.
   "account_terms",

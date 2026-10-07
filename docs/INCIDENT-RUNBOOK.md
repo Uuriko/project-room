@@ -111,6 +111,34 @@ go fix it. Do not run commands that mutate state until you've named a theory.
 | `GET /api/health` → non-200 or unreachable | Process down or HTTP layer broken | Check the supervisor/host first, then server wiring |
 | `GET /api/version` → unexpected `sourceRevision` | Wrong revision deployed | Compare with the intended ship commit; roll back if needed |
 
+### Projection-cap relief valve (4 MiB rooms.projection cap)
+
+The cap is no longer a silent 409 dead-end. Every room write records its
+stored-projection size, and three warning thresholds fire — each exactly once
+per room — at **70%**, **85%**, and **95%** of `PILOT_LIMITS.projectionBytes`:
+
+| Signal | Meaning | First action |
+|--------|---------|--------------|
+| stderr `[projection-relief] ... threshold 70%` | Room is filling steadily | Note it; check growth rate in `projection_telemetry` |
+| stderr `[projection-relief] ... threshold 85%` | Headroom is getting thin | Tell the room owner; plan compaction or a cap raise |
+| stderr `[projection-relief] ... threshold 95%` | One bad write from the cap | Owner action now: raise the cap, or compact the room |
+| stderr `[projection-relief] ... archival paging absorbed a cap-breach write` | The valve fired: short bodies paged to `projection_bodies`, write landed | Same as 95% — the valve bought time, not a fix |
+| 409 `pilot_limit` "Room projection limit reached" | Even paging could not fit the write (only large bodies / non-message state left) | Owner raises the cap, or the room is compacted/archived |
+
+Room-visible surface (owner credential): `GET /api/rooms/{roomId}/diagnostics`
+→ additive `projectionHealth` field: `{ roomId, capBytes, bytes, ratio,
+thresholds, warnings[], latest }`. Warnings evaluate on *pressure* (the size
+the write would have stored before paging), so a near-miss the valve absorbed
+still warns. Telemetry lives in the `projection_telemetry` ring (last 200
+samples per room) and `projection_warnings` (one row per threshold per room);
+both are additive side tables — a telemetry outage can never break a write
+(the write path swallows telemetry failures after one stderr line).
+
+Do not "fix" a 95% warning by posting less for a while and moving on: the
+valve only pages short inline bodies (< 256 chars). Once a room's growth is
+dominated by long bodies or non-message state, there is nothing left to page
+and the next breach is the 409 row above.
+
 ## 5. Communication cadence
 
 Silence is the incident's second outage. Updates go out even when there is

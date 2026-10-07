@@ -43,6 +43,7 @@ import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFe
 import { WANTS_WORK_SCHEMA } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { CODE_DROPS_SCHEMA, CodeDrops } from "./code-drops.mjs"; // room-native patch exchange
 import { PROJECTION_BODIES_SCHEMA, storedProjection, hydrateProjection } from "./projection-at-rest.mjs"; // Phase 1a
+import { RELIEF_SCHEMA, recordProjectionSample, attemptProjectionRelief, readProjectionHealth } from "./projection-relief.mjs"; // H1 relief valve
 import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, syncMessageRows, runMessagesBackfill, checkMessagesParity as verifyMessagesParity } from "./messages-store.mjs";
 import { commitMessageRedaction } from "./message-redaction.mjs";
 import { historyFloor as readHistoryFloor, messageInHistory, rowInHistory, indexMessages as indexHistoryMessages } from "./history-visibility.mjs"; // PRIV-2
@@ -1059,6 +1060,7 @@ function roomSchemaStamp() {
     agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA, OPERATOR_ACTIONS_SCHEMA,
     INTEGRITY_JOB_CURSOR_SCHEMA, INTEGRITY_ROOM_STATE_SCHEMA, INTEGRITY_SWEEP_COLUMN,
     ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES, MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, WANTS_WORK_SCHEMA, CODE_DROPS_SCHEMA, PROJECTION_BODIES_SCHEMA,
+    RELIEF_SCHEMA,
     PUBLIC_READ_MODEL_SCHEMA,
     // Additive tables converged outside the version bump. A warm wake whose
     // stamp matches skips the whole schema pass, so any DDL the pass applies
@@ -1767,6 +1769,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // trigger when the projection stops referencing them. The stamp
       // includes this DDL.
       this.db.exec(PROJECTION_BODIES_SCHEMA);
+      // H1 relief valve: projection-size telemetry ring + cap warnings.
+      // Additive side tables (no events, no projection impact); the stamp
+      // includes this DDL.
+      this.db.exec(RELIEF_SCHEMA);
       // Idempotent: recreates fences for tables the additive schemas just
       // (re)created, and refuses a file whose existing triggers drifted.
       phase("fence");
@@ -2667,6 +2673,53 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   storedProjection(roomId, state) {
     return storedProjection(this.db, roomId, state, { enabled: this.bodiesAtRest });
   }
+  // H1 relief valve: run the archival paging + telemetry around a projection
+  // cap check. Returns { projection, bytes }. When the serialized row would
+  // exceed the cap, one deterministic paging pass runs first; the write lands
+  // if the paged row fits. Telemetry (and any threshold warnings) record the
+  // pre-relief pressure, so a near-miss the valve absorbed still warns.
+  // Never throws: telemetry failures are swallowed after a stderr line, so a
+  // telemetry outage cannot break a room write.
+  checkProjectionCap(roomId, state, sequence, { allowOverCap = false } = {}) {
+    let projection = this.storedProjection(roomId, state);
+    const pressure = Buffer.byteLength(projection);
+    let bytes = pressure;
+    let relieved = false;
+    if (pressure > PILOT_LIMITS.projectionBytes && !allowOverCap) {
+      const rescue = attemptProjectionRelief(this.db, roomId, state, PILOT_LIMITS.projectionBytes);
+      if (rescue) { projection = rescue.projection; bytes = rescue.bytes; relieved = true; }
+    }
+    this.observeProjection(roomId, sequence, { bytes, pressure, relieved });
+    return { projection, bytes };
+  }
+  observeProjection(roomId, sequence, { bytes, pressure, relieved }) {
+    try {
+      const { pressureRatio, fired } = recordProjectionSample(this.db, {
+        roomId, sequence, bytes, pressure,
+        capBytes: PILOT_LIMITS.projectionBytes, at: new Date(this.now()).toISOString(),
+      });
+      for (const threshold of fired) {
+        console.warn(`[projection-relief] room=${roomId} projection pressure ${(pressureRatio * 100).toFixed(1)}% of cap`
+          + ` (threshold ${(threshold * 100).toFixed(0)}%) at sequence=${sequence}${relieved ? " relieved=1" : ""}`);
+      }
+      if (relieved) {
+        console.warn(`[projection-relief] room=${roomId} archival paging absorbed a cap-breach write`
+          + ` at sequence=${sequence} (pressure=${pressure} stored=${bytes} bytes)`);
+      }
+    } catch (error) {
+      console.warn(`[projection-relief] telemetry failed for room=${roomId}: ${error?.message ?? error}`);
+    }
+  }
+  // H1 relief valve: room-visible projection-cap health. Read-only; null when
+  // the room has no recorded write yet. Backs the diagnostics route's
+  // additive projectionHealth field.
+  projectionHealth(roomId) {
+    try {
+      return readProjectionHealth(this.db, roomId, PILOT_LIMITS.projectionBytes);
+    } catch {
+      return null;
+    }
+  }
   // A body row can only go missing through a write outside storedProjection.
   // The event log is still the source of truth: replay it and refill.
   _restoreBodiesFromLog(roomId, sequence, state, missing) {
@@ -3420,8 +3473,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       let state;
       try { state = compact(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
       catch (error) { fail(409, "invitation_rejected", error.message); }
-      const projection = this.storedProjection(row.room_id, state);
-      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
+      // H1 relief valve: telemetry + one archival paging pass before the 409.
+      const { projection, bytes: projectionBytes } =
+        this.checkProjectionCap(row.room_id, state, room.sequence + 1);
+      if (projectionBytes > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
       const sequence = room.sequence + 1;
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, incoming.id, JSON.stringify(incoming));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
@@ -4720,8 +4775,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const conflict = conflictingClaim(room.state.workItems, state.workItems[incoming.data.workItemId], Date.parse(incoming.at));
         if (conflict) fail(409, "claim_conflict", `Scope is reserved by work ${conflict.id}. Coordinate or release that reservation first; no new claim was saved.`);
       }
-      const projection = this.storedProjection(roomId, state);
-      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes && !cleanup) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
+      // H1 relief valve: telemetry + one archival paging pass before the 409.
+      // The 409 code/message are unchanged (see #1810/#1892 for the copy).
+      const { projection, bytes: projectionBytes } =
+        this.checkProjectionCap(roomId, state, room.sequence + 1);
+      if (projectionBytes > PILOT_LIMITS.projectionBytes && !cleanup) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
       const sequence = room.sequence + 1;
       // R1 delivery-path tracing (RC-2026-09-26-966): delivery.log spans the
       // event-log persist. getTracer() is read per command (never at module
