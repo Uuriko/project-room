@@ -32,7 +32,7 @@ import { createAccountSettingsUI, applyStoredTheme, organizeRoomSettings, ACCOUN
 import { createAuthSigninUI, classifyAuthLink } from "./auth-signin-ui.js";
 import { createAgentSigninUI } from "./agent-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, defaultRequestPermissions, validateAccessRequestForm, newAccessRequestId, stashAccessRequest, readAccessRequest } from "./invite-context.js";
-import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, authPanelTitle, KEY_KIND_HINT, roomIdFromNext, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
+import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, authPanelTitle, roomIdFromNext, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
 import { herdrSessionChip } from "./presence-state.js"; // B16: herdr session badge ("" unless the lane opted in).
 import { installAgentInvites } from "./agent-invite-ui.js";
 import { rememberLastRoom, rememberAccountHint, readLastRoom, readLastRoomTitle, readAccountHint, hasSessionHint, clearBrowserSessionHints, rememberMemberRoom, readMemberRoom, clearStoredPasswords, signInRoomTarget } from "./browser-session.js";

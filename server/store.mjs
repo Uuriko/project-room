@@ -172,7 +172,7 @@ import { validateHelpData, WORK_HELP_UPDATED } from "../src/work-help.js";
 import { auditWorkHelp } from "./work-help.mjs";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, validateHelpOfferData } from "../src/help-offers.js";
 import { classifyCommand } from "./action-classes.mjs";
-import { presenceState, PRESENCE_UNREACHABLE_AFTER_MS } from "../src/presence-state.js"; // #660: agent presence/working states.
+import { presenceState } from "../src/presence-state.js"; // #660: agent presence/working states.
 // B16: ROOM_HERDR_SESSIONS flag (Phase A gate for herdr session surfacing).
 // Raw values: unset/""/"off" (and other off-likes) -> disabled; "on" (and
 // on-likes) -> every room; "=r1,r2" -> only the listed rooms. Anything else
@@ -4047,12 +4047,6 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (host.status === null) return null;
         return { status: host.status, lastSeenAt: host.lastSeenAt };
       };
-      // #660: unreachable threshold is 60 min or 3x the host heartbeat
-      // interval, whichever is smaller.
-      const unreachableAfterMs = Math.min(
-        PRESENCE_UNREACHABLE_AFTER_MS,
-        3 * this.agentHeartbeats.staleAfterMs
-      );
       // B16: one bulk herdr-session read per presence request (null unless
       // ROOM_HERDR_SESSIONS covers this room and B5's tables are readable).
       const herdrSessions = this.herdrSessionsForRoom(roomId);
