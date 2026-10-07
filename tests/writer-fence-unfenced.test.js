@@ -7,6 +7,8 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { applicationTables, lazyAdditiveTables, unfencedAdditiveTables } from "../server/writer-fence.mjs";
+import { RoomStore } from "../server/store.mjs";
+import { initialRoom } from "../server/bootstrap.mjs";
 
 const SERVER_DIR = new URL("../server/", import.meta.url).pathname;
 
@@ -88,4 +90,35 @@ test("runtime package create+verify succeeds at HEAD (allowlist covers the impor
       { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
     assert.equal(JSON.parse(out).verified, true);
   } finally { rmSync(dest, { recursive: true, force: true }); }
+});
+
+// H5: every table in applicationTables is REQUIRED by auditRecovery
+// (server/recovery.mjs: every required table must exist in the database).
+// A table whose DDL only runs lazily on first write must therefore live in
+// lazyAdditiveTables (allowed, never required) — registering it as required
+// broke recovery for every database that never recorded a funnel event:
+// plugin_funnel_events sat in unfencedAdditiveTables (⊂ applicationTables)
+// while ensurePluginFunnelSchema only ran inside recordPluginFunnelStage,
+// so auditRecovery threw "Recovery data requires operator reconciliation"
+// on fresh and pre-funnel databases alike.
+test("required application tables all exist in a freshly initialized store", () => {
+  const store = new RoomStore(":memory:");
+  try {
+    store.initialize(initialRoom("commons"));
+    const tables = new Set(
+      store.db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row => row.name)
+    );
+    const missing = applicationTables.filter(table => !tables.has(table));
+    assert.deepEqual(missing, [],
+      `auditRecovery would demand operator reconciliation for: ${missing.join(", ")}`);
+  } finally {
+    store.close();
+  }
+});
+
+test("plugin_funnel_events is allowed-but-optional (created on first funnel write)", () => {
+  assert.ok(lazyAdditiveTables.includes("plugin_funnel_events"),
+    "the lazily-created funnel table must be allowed, never required");
+  assert.ok(!applicationTables.includes("plugin_funnel_events"),
+    "the lazily-created funnel table must not be in the required set");
 });

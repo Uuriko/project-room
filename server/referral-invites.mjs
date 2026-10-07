@@ -40,6 +40,7 @@ import { assertAdmissibleMemberName } from "./display-name-guard.mjs";
 import { generateKeyPair } from "./agent-card-signing.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
+import { recordPluginFunnelStage } from "./plugin-funnel.mjs"; // Plug-in funnel: room_join for the redeem door
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { canInviteMembers, event as makeEvent, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION } from "../src/events.js";
 
@@ -458,6 +459,10 @@ export class ReferralInvites {
       this.store.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
       this.store.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
         .run(roomId, identityId, memberId, now);
+      // Plug-in funnel (H5 harden): room_join for the referral redeem door,
+      // which inserts identity_links directly instead of going through
+      // linkIdentity. Same transaction; the recorder never throws.
+      recordPluginFunnelStage(this.store.db, { identityId, stage: "room_join", atMs: now });
       // Compare-and-swap claim: exactly one redemption wins under
       // concurrency (the pre-check above is outside the transaction).
       const claimed = this.store.db.prepare(

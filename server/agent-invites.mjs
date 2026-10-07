@@ -18,6 +18,7 @@
 import { createHash, randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { ServiceError, PILOT_LIMITS, activeMemberCount } from "./store.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
+import { recordPluginFunnelStage } from "./plugin-funnel.mjs"; // Plug-in funnel: room_join for the redeem door
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { event, EVENT_TYPES as T, memberCan, canInviteMembers, MEMBERSHIP_AUTHORITY_POLICY_VERSION, PERMISSIONS, AGENT_INVITE_SAFE_PERMISSIONS } from "../src/events.js";
 import { nextActionsForInviteRedeem } from "./discoverability.mjs";
@@ -308,6 +309,10 @@ export class AgentInvites {
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
       this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
         .run(row.room_id, identity.identityId, memberId, now);
+      // Plug-in funnel (H5 harden): room_join for the invite-code redeem door,
+      // which inserts identity_links directly instead of going through
+      // linkIdentity. Same transaction; the recorder never throws.
+      recordPluginFunnelStage(this.db, { identityId: identity.identityId, stage: "room_join", atMs: now });
       // Compare-and-swap burn: exactly one redemption wins under concurrency.
       const burned = this.db.prepare(`UPDATE agent_invite_codes SET redeemed_at=?,redeemed_identity_id=?
         WHERE code_hash=? AND redeemed_at IS NULL AND revoked_at IS NULL`).run(now, identity.identityId, row.code_hash);

@@ -38,10 +38,6 @@ export const unfencedAdditiveTables = Object.freeze([
   "request_runs", // Permanent host reservations; older writers have no execution route.
   "private_inbox_reads",
   "access_requests",
-  // plugin_funnel_events (lane 10, plug-in funnel metrics): purely additive,
-  // first-reach-wins per (key, stage); older writers have no code path to it.
-  // Keys are domain-separated sha256 digests, never raw identity ids.
-  "plugin_funnel_events",
   // room_access_auto_approve (standing auto-approve rule, RC-2026-09-29-3603):
   // purely additive and intentionally NOT fenced — older writers have no code
   // path to it, and the manage_members-only config rule plus the
@@ -475,6 +471,13 @@ const ANALYTICS_ADDITIVE_TABLES = Object.freeze([
   "analytics_ctx",
   "claim_bond_shadow",
   "claim_reputation_signals",
+  // plugin_funnel_events (plug-in funnel metrics): purely additive,
+  // first-reach-wins per (key, stage), created on first use — allowed by the
+  // recovery audit but not required in every DB. Keys are domain-separated
+  // sha256 digests, never raw identity ids. (H5: was in unfencedAdditiveTables,
+  // which made auditRecovery demand it on databases that never recorded a
+  // funnel event — every pre-funnel backup failed "operator reconciliation".)
+  "plugin_funnel_events",
 ]);
 // seeker_declarations + work_offer_terms (matchmaking, Fo ship-train
 // 2026-10-05, server/work-declarations.mjs): purely additive, created on
