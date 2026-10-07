@@ -33,6 +33,7 @@ import { buildOpportunitiesFeed } from "./opportunities.mjs"; // Public opportun
 import { telegramConfig, TelegramLiveStatus } from "./channel-adapters/telegram-config.mjs";
 import { TelegramTransport } from "./channel-adapters/telegram-transport.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
+import { API_VERSION, deprecationHeadersFor } from "./api-versioning.mjs"; // API versioning + deprecation contract (audit F3).
 import { agentErrorBody, errorCategory, mergeErrorDetail, ERROR_COMMAND_TYPE } from "../src/agent-error.mjs";
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
@@ -798,9 +799,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   function setCookie(res, name, token, maxAge, sameSite = "Strict") {
     res.setHeader("Set-Cookie", `${scopedCookieName(name)}=${token}; Path=/; HttpOnly; SameSite=${sameSite}; Max-Age=${maxAge}${expectedOrigin().startsWith("https:") ? "; Secure" : ""}`);
   }
-  function json(res, status, value, head = false) {
+  function json(res, status, value, head = false, extraHeaders = null) {
     const body = JSON.stringify(value);
-    res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Content-Length": Buffer.byteLength(body) });
+    // Deprecation contract (docs/API-VERSIONING.md): every JSON response
+    // carries the API version; deprecated routes add Deprecation/Sunset/Link.
+    const headers = { "Content-Type": "application/json; charset=utf-8", "Content-Length": Buffer.byteLength(body), "X-API-Version": API_VERSION };
+    if (extraHeaders && typeof extraHeaders === "object")
+      for (const [headerName, headerValue] of Object.entries(extraHeaders)) headers[headerName] = String(headerValue);
+    res.writeHead(status, headers);
     res.end(head ? undefined : body);
   }
   // Read-time message redaction (server/redact-read.mjs). Responses that
@@ -3257,7 +3263,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         rate(`read:${auth.credentialHash}`, 600);
         if (action === "list_land_queue") {
           if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
-          return json(res, 200, store.landQueue.list(roomId, auth.member.id), req.method === "HEAD");
+          return json(res, 200, store.landQueue.list(roomId, auth.member.id), req.method === "HEAD", deprecationHeadersFor(url.pathname));
         }
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
         protectWrite(req, auth, selected.bearer);
@@ -3274,7 +3280,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             const result = await store.landQueue.add(roomId, auth.member.id, {
               repo: data.repo, prNumber: data.prNumber, claimantMemberId: claimant
             });
-            return json(res, result.duplicate ? 200 : 201, result);
+            return json(res, result.duplicate ? 200 : 201, result, false, deprecationHeadersFor(url.pathname));
           }
           if (action === "remove_land_item") {
             if (!exact(data, ["itemId"]) || typeof data.itemId !== "string") reject(422, "invalid_land_item", "itemId is required");
@@ -4964,7 +4970,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         ? { error: { code, message }, ...errorOverride, operationId, category }
         : { ...agentErrorBody({ httpStatus, code, message, roomId, workItemId, commandType: error[ERROR_COMMAND_TYPE] }), operationId, category },
       error.detail);
-      json(res, httpStatus, errorBody);
+      // Deprecation headers apply to error responses too: an agent probing a
+      // deprecated route with bad auth still learns the route is deprecated.
+      json(res, httpStatus, errorBody, false, deprecationHeadersFor(requestPathname(req.url)));
     }
   });
   server.requestTimeout = 15000;
