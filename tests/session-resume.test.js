@@ -400,13 +400,60 @@ test("E8 pane gone with a stored ref: native --resume spawn, argv adapter-constr
   assert.equal(res.paneId, "pane-new", "new pane attached to the same room session");
   assert.equal(res.occupantChanged, true);
   const spawn = adapter.calls.find(([name]) => name === "spawnAgent");
-  assert.deepEqual(spawn[1], {
-    kind: "claude",
-    command: "claude",
-    args: ["--resume", "sess-abc"],
-    resumeSessionRef: "sess-abc",
-  }, "argv rebuilt from the registered shape — never the stored bytes");
+  assert.equal(spawn[1].kind, "claude");
+  assert.equal(spawn[1].command, "claude");
+  assert.deepEqual(spawn[1].args, ["--resume", "sess-abc"],
+    "argv rebuilt from the registered shape — never the stored bytes");
+  assert.equal(spawn[1].resumeSessionRef, "sess-abc");
+  assert.ok(spawn[1].signal instanceof AbortSignal,
+    "reattach passes the timeout signal into spawnAgent");
   assert.ok(journal.some((e) => e.event === "pane_replaced_after_restart"));
+});
+
+test("E15 spawn racing the timeout is never attached and leaves no leaked pane", async () => {
+  // The V154 race: the reattach timeout fires while spawnAgent is still
+  // pending. When the slow spawn finally resolves, the session must NOT
+  // attach the raced pane (no transition) and the raced pane must be
+  // cleaned up (no leaked pane) — even when the adapter ignores the signal.
+  const closed = [];
+  let releaseSpawn;
+  const gate = new Promise((resolve) => { releaseSpawn = resolve; });
+  const calls = [];
+  const adapter = {
+    calls,
+    async getOccupant(paneId) {
+      calls.push(["getOccupant", paneId]);
+      return null; // pane gone -> the native --resume spawn path
+    },
+    async spawnAgent(opts) {
+      calls.push(["spawnAgent", opts]);
+      await gate; // slow bridge: the spawn stays pending across the timeout
+      return { paneId: "pane-raced", agentId: "ag-raced", occupantId: "occ-raced" };
+    },
+    async closePane(paneId) {
+      calls.push(["closePane", paneId]);
+      closed.push(paneId);
+    },
+  };
+  const m = createReattachManager({ adapter });
+  m.registerSession({
+    sessionId: "s1", kind: "claude", paneId: "pane-1",
+    agentId: "ag-1", occupantId: "occ-1",
+    resumeRef: { sessionRef: "sess-abc", resumeCommand: ["claude", "--resume", "sess-abc"] },
+  });
+  m.markDetached("s1", "bridge_health");
+  const { token } = m.mintReattachToken("s1");
+  await assert.rejects(
+    m.reattach({ token, idempotencyKey: "k-race", resumeTimeoutMs: 50 }),
+    (err) => err instanceof ResumeTimeoutError && err.code === "TIMEOUT");
+  const spawn = calls.find(([name]) => name === "spawnAgent");
+  assert.ok(spawn[1].signal instanceof AbortSignal, "the timeout signal reaches the adapter");
+  assert.equal(m.status("s1").state, "detached", "no transition when the window elapses");
+  releaseSpawn();
+  await new Promise((r) => setTimeout(r, 50)); // let the raced spawn land
+  assert.equal(m.status("s1").state, "detached", "the late resolution is never attached");
+  assert.equal(m.status("s1").paneId, "pane-1", "the session record keeps the old pane id");
+  assert.deepEqual(closed, ["pane-raced"], "the raced pane is closed, not leaked");
 });
 
 test("E9 pane gone without a stored ref: cannot resume, stays detached, no spawn", async () => {

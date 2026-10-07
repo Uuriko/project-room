@@ -531,6 +531,9 @@ export class HerdrBridgeAdapter {
    * (resumeSessionRef / resumeCommand) — never transcript replay. The bridge
    * builds argv from allowlisted kinds; the adapter never sends raw argv
    * beyond the documented resumeCommand (capped at 64 args / 8 KiB).
+   * opts.signal aborts the bridge call mid-flight (fetch abort); a caller
+   * that observes a late resolution must closePane the raced pane itself —
+   * the bridge may have spawned server-side before the abort landed.
    */
   async spawnAgent(opts = {}) {
     this._requireConnected();
@@ -542,6 +545,7 @@ export class HerdrBridgeAdapter {
       adapterMethod: 'spawnAgent',
       timeoutMs: BRIDGE_TIMEOUTS.spawn,
       write: true,
+      signal: opts.signal,
       body: {
         kind: opts.kind ?? null,
         command: opts.command,
