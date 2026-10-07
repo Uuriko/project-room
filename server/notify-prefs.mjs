@@ -14,6 +14,12 @@ const fail = (code, message) => { throw new NotifyError(code, message); };
 const check = (condition, message) => { if (!condition) fail("invalid_notify", message); };
 const LEVELS = ["all", "mentions", "muted"];
 const DEFAULT_LEVEL = "mentions";
+// Two-trigger discipline (lane B8): the classification level above
+// "mentions". Accepted as a level and used as the new-member default only
+// when createNotifyPrefs runs with { twoTrigger: true } (derived from the
+// ROOM_HERDR_SESSIONS worker flag). Default off: the level is rejected and
+// the default stays "mentions", bit-for-bit legacy.
+export const INTERRUPT_LEVEL = "interrupt";
 const BATCHINGS = ["immediate", "digest"];
 const HM_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 // True when `at` (ms epoch) falls inside the quiet-hours window. Half-open
@@ -57,8 +63,13 @@ export const normalizeQuietHours = value => {
   return Object.freeze({ start, end, tz: zone });
 };
 // Create a notification-preference manager. store is a caller-owned Map (userId -> prefs).
-export function createNotifyPrefs({ store } = {}) {
+// twoTrigger enables the two-trigger discipline (lane B8): the "interrupt"
+// level is accepted at every scope and members with no stored preference
+// resolve to it. Existing members keep their stored levels — no silent
+// downgrade. Default false: legacy behavior bit-for-bit.
+export function createNotifyPrefs({ store, twoTrigger = false } = {}) {
   check(store === undefined || store instanceof Map, "store must be a Map if given");
+  check(typeof twoTrigger === "boolean", "twoTrigger must be a boolean");
   const users = store ?? new Map();
   const prefsFor = userId => {
     check(typeof userId === "string" && userId.length > 0, "userId must be a non-empty string");
@@ -69,7 +80,8 @@ export function createNotifyPrefs({ store } = {}) {
     return users.get(userId);
   };
   const checkLevel = level => {
-    check(LEVELS.includes(level), `level must be one of ${LEVELS.join(", ")}`);
+    check(LEVELS.includes(level) || (twoTrigger && level === INTERRUPT_LEVEL),
+      `level must be one of ${LEVELS.join(", ")}${twoTrigger ? `, ${INTERRUPT_LEVEL}` : ""}`);
   };
   // Set global default.
   const setGlobal = (userId, { level }) => {
@@ -165,7 +177,9 @@ export function createNotifyPrefs({ store } = {}) {
     if (threadId && prefs.threads.has(threadId)) return prefs.threads.get(threadId);
     if (roomId && prefs.rooms.has(roomId)) return prefs.rooms.get(roomId);
     if (prefs.global) return prefs.global;
-    return DEFAULT_LEVEL;
+    // Two-trigger discipline (lane B8): with the switch on, a member with no
+    // stored preference defaults to interrupt-class pushes only.
+    return twoTrigger ? INTERRUPT_LEVEL : DEFAULT_LEVEL;
   };
   // Decide how one notification should be handled right now:
   //   deliver — push it immediately (urgent SLA-breach mail is never held)
@@ -191,7 +205,7 @@ export function createNotifyPrefs({ store } = {}) {
       reason: `connection "${connectionId}" uses digest batching (${connection.channel})` });
     return Object.freeze({ decision: "deliver", reason: "outside quiet hours; immediate delivery" });
   };
-  return Object.freeze({ setGlobal, setRoom, setThread, resolve, LEVELS: Object.freeze([...LEVELS]),
+  return Object.freeze({ setGlobal, setRoom, setThread, resolve, LEVELS: Object.freeze([...LEVELS, ...(twoTrigger ? [INTERRUPT_LEVEL] : [])]),
     setQuietHours, clearQuietHours, quietHoursFor,
     setConnection, removeConnection, connectionFor, snapshot, restore, decideNotification,
     BATCHINGS: Object.freeze([...BATCHINGS]) });

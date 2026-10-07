@@ -200,3 +200,54 @@ while the window is active the push is skipped but the message still lands.
 Two columns (`preview_enabled`, `quiet_hours`) were added to
 `human_push_preferences` with a converge migration in `server/store.mjs`.
 Delivery still needs the VAPID key tap; see `docs/PUSH-VAPID-KEYS.md`.
+
+## Two-trigger notification discipline (herdr redesign, flag-gated)
+
+Interrupts fire on exactly two triggers and nothing else:
+
+1. **A question or blocked item addressed to you** — an ASK / `REVIEW`-prefixed
+   message / `@mention` that names you, or a claim in `blocked` state naming
+   you directly or naming a claim / PR / merge-slot you own or verify.
+2. **Finish/done on something you own or verify** — a claim or work item you
+   own, proposed, or verify transitioning to `done`.
+
+Everything else is ambient: it routes to the triage inbox or the weekly
+digest, never to a push. An `@mention` alone is an addressing mechanism, not
+an interrupt — it upgrades only when the event meets trigger 1 or 2.
+
+- **The predicate is owned by lane B19** in `server/notify-classifier.mjs`:
+  `shouldNotify(event, prefs)` is a pure function returning true only for
+  the two triggers. The wiring below never re-implements it; it consumes it
+  through an injected `shouldNotify` parameter coded against that exact
+  signature, so B19's module drops in with no predicate fork.
+- **Flag gate.** Every change in this section is additive and gated on the
+  two-trigger switch (derived from the `ROOM_HERDR_SESSIONS` worker flag).
+  Switch off = the behavior documented above, bit-for-bit: the `interrupt`
+  level is rejected, the default level stays `mentions`, no item carries a
+  class annotation, and the push gate stays permissive.
+- **Preferences** (`server/notify-prefs.mjs`): with the switch on, an
+  `interrupt` level sits above `mentions`, and members with no stored
+  preference resolve to `interrupt` (interrupt-class pushes only). Existing
+  members keep their stored levels — no silent downgrade.
+- **Delivery** (`server/attention.mjs`): `interruptDelivery` folds the
+  interrupt class into the quiet-window arithmetic. Interrupts are never
+  held, only silenced inside quiet hours; the queue keeps owning what is
+  pending, delivery never mutates it.
+- **Mention lifecycle** (`server/mention-lifecycle.mjs`):
+  `mentionInterruptGate` drives interrupt suppression/re-arm off the
+  lifecycle transitions: `responded` never re-fires; `delivered` /
+  `acknowledged` collapse into the first interrupt inside the dedupe
+  window; only a fresh explicit request after `timed_out` re-arms.
+- **Push gate** (`server/notifications.mjs` — kept next to the feed
+  classifier because the delivery half (`server/push-subscriptions.mjs` /
+  `server/human-push.mjs`) is owned by the rich-push lane):
+  `twoTriggerPushGate` allows a push only for `class: "interrupt"` items
+  when the switch is on. Payloads stay content-free (room + count, never
+  bodies), per the existing rule.
+- **Feed annotation** (`server/notifications.mjs`): `classifyTwoTrigger`
+  stamps a derived feed item with `class: "interrupt" | "ambient"` by
+  calling the injected predicate. Without the predicate the switch
+  fail-closes to `ambient`: no interrupt is ever assumed.
+
+Evidence: `tests/two-trigger-discipline.test.js` owns these contracts;
+B19's eval harness owns the predicate itself.
