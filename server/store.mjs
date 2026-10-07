@@ -3421,7 +3421,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       try { state = compact(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
       catch (error) { fail(409, "invitation_rejected", error.message); }
       const projection = this.storedProjection(row.room_id, state);
-      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
+      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
       const sequence = room.sequence + 1;
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, incoming.id, JSON.stringify(incoming));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
@@ -4721,7 +4721,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (conflict) fail(409, "claim_conflict", `Scope is reserved by work ${conflict.id}. Coordinate or release that reservation first; no new claim was saved.`);
       }
       const projection = this.storedProjection(roomId, state);
-      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes && !cleanup) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
+      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes && !cleanup) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
       const sequence = room.sequence + 1;
       // R1 delivery-path tracing (RC-2026-09-26-966): delivery.log spans the
       // event-log persist. getTracer() is read per command (never at module

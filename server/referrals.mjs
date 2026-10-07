@@ -97,7 +97,7 @@ export class Referrals {
     try { state = compactState(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
     catch (error) { fail(409, "referral_rejected", error.message); }
     const projection = this.store.storedProjection(roomId, state);
-    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
+    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
     const sequence = room.sequence + 1;
     this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
