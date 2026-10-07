@@ -24,6 +24,34 @@ test('two humans share public assistant prompts, constraints, confirmed activity
     await page.locator('#main').waitFor({state:'visible'}); await page.waitForFunction(()=>document.body.classList.contains('human-experience')); pages.push(page);
   }
   const [owner,peer] = pages;
+  // A first personal room has nobody to select yet. Connect should open setup
+  // directly, without granting access or disturbing the unsent conversation.
+  for (const width of [1280,390]) {
+    const fresh = await (await browser.newContext({viewport:{width,height:900},isMobile:width===390,hasTouch:width===390})).newPage();
+    fresh.on('pageerror', e=>errors.push(e.message));
+    await fresh.goto(origin);
+    await fresh.getByRole('button',{name:'Create account',exact:true}).click();
+    await fresh.locator('#auth-signin-ui [name="email"]').fill(`first-connect-${width}@example.invalid`);
+    await fresh.locator('#auth-signin-ui [name="password"]').fill('synthetic-connect-password');
+    await fresh.locator('#auth-signin-ui button[type=submit]').click();
+    await fresh.locator('#main').waitFor({state:'visible'});
+    await fresh.locator('#assistant-setup').waitFor({state:'visible'});
+    const freshRoomId = new URL(fresh.url()).searchParams.get('room');
+    const beforeConnect = structuredClone(f.store.room(freshRoomId).state);
+    const connectionWrites = [];
+    fresh.on('request', request=>{if(request.method()==='POST' && /\/(agent-connections|assistant)$/.test(new URL(request.url()).pathname)) connectionWrites.push(request.url());});
+    await fresh.locator('#message-input').fill('Keep my first conversation draft.');
+    await fresh.locator('#assistant-setup').click();
+    assert.equal(await fresh.locator('#room-assistant-setup').isVisible(),false,'a room without agents skips the empty coordinator chooser');
+    await fresh.locator('#agent-connect-dialog').waitFor({state:'visible'});
+    assert.equal(await fresh.locator('#agent-connect-advanced').evaluate(node=>node.open),false);
+    await fresh.locator('#agent-connect-close').click();
+    assert.equal(await fresh.locator('#message-input').inputValue(),'Keep my first conversation draft.');
+    assert.equal(await fresh.evaluate(()=>document.activeElement.id),'assistant-setup');
+    assert.deepEqual(connectionWrites,[],'opening setup grants no agent access and does not configure the assistant');
+    assert.deepEqual(f.store.room(freshRoomId).state,beforeConnect);
+    await fresh.close();
+  }
   const api = async (actor, input) => {
     const response = await fetch(`${origin}/api/rooms/commons/assistant`, {method:input?'POST':'GET',headers:{Authorization:`Bearer ${f.keys[actor]}`,...(input?{'Content-Type':'application/json'}:{})},...(input?{body:JSON.stringify({requestId:crypto.randomUUID(),...input})}:{})});
     const json=await response.json(); assert.ok(response.ok,JSON.stringify(json));return json;
