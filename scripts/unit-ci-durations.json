@@ -903,6 +903,7 @@
   "tests/demigod-contracts.test.js": 382,
   "tests/demigod-jobs-money.test.js": 82,
   "tests/demigod-offers.test.js": 419,
+  "tests/triage-state.test.js": 200,
   "tests/trial-task-http.test.js": 4332,
   "tests/trial-tasks.test.js": 84,
   "tests/vetting-receipts.test.js": 95,

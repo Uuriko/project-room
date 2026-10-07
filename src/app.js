@@ -279,6 +279,11 @@ let openQuestionsUI = null;
 let retentionUI = null;
 let instructionsUI = null;
 let inboxUI = null;
+// B7 (herdr redesign): #pr-view/triage ("Triage"). The view module loads lazily
+// and stays inert until triageAvailable() reports herdr sessions for this
+// operator; with the flag off the nav entry stays hidden and the hash route
+// no-ops — zero impact on the existing UI.
+let triageUI = null, triageModule = null, triageFlight = null, triageNavRoomId = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
 // JDOT-COH-NAV begin
 let updatesUi = null, resetNavigationBoard = null, navigationBoardReady = null;
@@ -385,6 +390,7 @@ const client = new RoomClient({
       if (accountId) rememberMemberRoom(accountId, roomId, undefined, state.room?.title);
       if (session?.member?.id) rememberMemberRoom(session.member.id, roomId, undefined, state.room?.title);
       void refreshRoomFiles();
+      void refreshTriageNav(); // B7: reveals #nav-triage only when the herdr flag is on
       void refreshDmConsents();
       void refreshFriendBonds();
       void refreshSavedIds();
@@ -455,6 +461,10 @@ const client = new RoomClient({
     portableWorkUI?.reset();
     resultCopyUI?.reset();
     remindersUI?.reset();
+    triageUI?.reset(); // B7: unmounts the supervision data layer, hides the view
+    triageUI = null; // fresh install per room session
+    triageNavRoomId = null;
+    { const btn = $("#nav-triage"); if (btn) btn.hidden = true; }
     resetNotifications();
     resetAttention();
     // JDOT-MEMBER-PERMS-UI begin
@@ -1163,6 +1173,9 @@ $("#account-room-form").addEventListener("submit", async event => {
   } finally { delete form.dataset.busy; $("#account-room-submit").disabled = false; }
 });
 $("#choose-room").addEventListener("click", () => inboxUI.showRoomList(true));
+// B7 (herdr redesign): Triage nav entry. Hidden unless refreshTriageNav()
+// reveals it (flag on = herdr sessions exist for this operator).
+$("#nav-triage")?.addEventListener("click", () => { location.hash = "#pr-view/triage"; });
 $("#account-rooms-more").addEventListener("click", () => loadAccountRooms(true));
 window.addEventListener("focus", () => confirmAccount());
 document.addEventListener("visibilitychange", () => { if (!document.hidden) confirmAccount(); });
@@ -3153,6 +3166,50 @@ function revealEvent(id) {
 function decodeFragment(value) {
   try { return decodeURIComponent(value); } catch { return null; }
 }
+// B7 (herdr redesign): lazy #pr-view/triage plumbing. The module has no
+// top-level side effects; loading it alone changes nothing visible.
+function loadTriageModule() {
+  if (triageModule || triageFlight) return triageFlight;
+  triageFlight = import("./triage-ui.js").then(
+    m => { triageModule = m; triageFlight = null; },
+    () => { triageFlight = null; });
+  return triageFlight;
+}
+async function triageFlagOn() {
+  await loadTriageModule();
+  if (!triageModule || !state || !session) return false;
+  try {
+    return await triageModule.triageAvailable({ getRoom: () => state, getSession: () => session });
+  } catch { return false; }
+}
+// Reveal the Triage nav entry only when the flag is on for this room+operator.
+async function refreshTriageNav() {
+  const btn = $("#nav-triage");
+  if (!btn) return;
+  const roomId = state?.room?.id ?? session?.roomId ?? null;
+  if (!roomId) { btn.hidden = true; triageNavRoomId = null; return; }
+  if (triageNavRoomId === roomId && !btn.hidden) return; // already resolved for this room
+  const on = await triageFlagOn();
+  triageNavRoomId = roomId;
+  btn.hidden = !on;
+}
+async function openTriage() {
+  if (!state) return;
+  try {
+    await loadTriageModule();
+    if (!triageModule) return;
+    if (!await triageFlagOn()) return; // flag off: hidden, no-op
+    triageUI ??= triageModule.installTriage({
+      getRoom: () => state,
+      getSession: () => session,
+      notice,
+      onOpenDeepLink: link => { location.hash = link; },
+    });
+    await triageUI.open();
+  } catch (err) {
+    notice(`Could not open Triage: ${err?.message ?? err}`, true);
+  }
+}
 function revealLocationHash() {
   if (!location.hash) return;
   const hash = location.hash;
@@ -3184,6 +3241,8 @@ function revealLocationHash() {
     return;
   }
   // JDOT-COH-NAV end
+  // B7 (herdr redesign): room-member triage queue. Flag off → openTriage() no-ops.
+  if (hash === "#pr-view/triage") { void openTriage(); return; }
   const deepRoom = roomIdFromHash(hash);
   if (deepRoom) {
     if (state.room?.id === deepRoom) {

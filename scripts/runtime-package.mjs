@@ -346,6 +346,7 @@ optional.push("src/human-experience.js", "src/human-experience.css", "server/roo
 optional.push("server/trial-task-store.mjs", "server/trial-tasks.mjs", "server/vetting-receipts.mjs", "server/demigod-offers.mjs", "server/demigod-contracts.mjs", "server/buyer-signoff.mjs", "server/routes/record-rails.mjs", "server/demigod-policy-adapter.mjs", "server/settlement-router.mjs", "server/fee-credit-ledger.mjs");
 
 optional.push("src/spend-pricing-ui.js", "src/polls.js");
+optional.push("src/triage-ui.js", "src/triage-state.js"); // B7: #pr-view/triage view (lazy import() from src/app.js; inert until herdr flag on)
 export const allowed = new Set([...required, ...optional]);
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 // The contract stays exact: any mismatch fails. Each failure now names the
