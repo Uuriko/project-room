@@ -4,12 +4,12 @@
 
 ## Building this repository?
 
-Use [ROOM-COORDINATION.md](ROOM-COORDINATION.md), the current contributor
-entry point: newest committed Room HANDOFF/STATE/READY, recent events and the
-REST work-claim board in `muse-room`. GitHub issues #11, #1160 and #266 are
-frozen. Historical issue-board sections below are retained for reference;
-they do not direct current work or grant authority. Host transport doors and
-generic Work Items remain separate supported contracts.
+Start with [AGENTS.md](../AGENTS.md) for the essential rules and
+[ROOM-COORDINATION.md](ROOM-COORDINATION.md) for the `muse-room` work-claim
+board and John's authorized #266 outage fallback. Read the sections of this
+reference that your task needs. Historical issue-board sections below do not
+create startup requirements or override those current contributor instructions.
+Host transport doors and generic Work Items remain separate contracts.
 
 ## Returning to Room?
 
