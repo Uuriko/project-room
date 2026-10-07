@@ -12,6 +12,9 @@ import { RoomAssistant } from "../server/room-assistant.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
 export async function seedRecoveryCoverage(f) {
+  // Immutable account redemption history must survive captures and restarts.
+  const linkId = f.store.db.prepare("SELECT id FROM share_links LIMIT 1").get().id;
+  f.store.db.prepare("INSERT INTO share_link_join_redemptions(link_id,redemption_id,account_id,created_at) VALUES(?,?,?,?)").run(linkId, "recovery-account-redemption", f.owner.session.account.id, f.now());
   // Exercise assistant authority, public scope and durable attempt records so
   // recovery/cold-open coverage includes substantive rows in all three tables.
   const agent = f.store.room("commons").state.members.agent;

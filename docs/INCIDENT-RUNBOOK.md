@@ -23,8 +23,8 @@ always downgrade, and upgrading late costs time.
 
 | Severity | Definition | Paging threshold |
 |----------|------------|------------------|
-| **SEV1** | Service down or broadly unusable: `/api/health` returns `unhealthy` (HTTP 503), or the room cannot serve any user action (messages, work items, identity). Data at risk (corruption, loss, or suspected breach). | Page the incident commander immediately, day or night. Target acknowledge: **5 min**. |
-| **SEV2** | Core feature degraded for many users: `degraded` health status (a required dependency failing, or an optional dependency taking down a major feature), partial data loss, or a single lane of the app (inbox, agents, bridge) down while the rest works. | Page the on-call engineer. Target acknowledge: **15 min**. |
+| **SEV1** | Service down or broadly unusable: `/api/health` does not answer (process down or HTTP layer broken), or the room cannot serve any user action (messages, work items, identity). Data at risk (corruption, loss, or suspected breach). | Page the incident commander immediately, day or night. Target acknowledge: **5 min**. |
+| **SEV2** | Core feature degraded for many users: a failing dependency takes down a major feature, partial data loss, or a single lane of the app (inbox, agents, bridge) down while the rest works. | Page the on-call engineer. Target acknowledge: **15 min**. |
 | **SEV3** | Limited impact: intermittent errors, one endpoint slow, a minor feature broken, or a non-required dependency failing that only narrows functionality. No data loss. | Handle during working hours; no paging. Acknowledge same day. |
 | **SEV4** | No user impact: flaky monitor, noisy alert, cosmetic issue, or a problem found and fixed before it affected anyone. | Fix when convenient; log it in the incident log. |
 
@@ -229,9 +229,9 @@ gets re-raised.
 
 Don't declare for these — work them through the normal lanes:
 
-- A single failed health probe that recovers on the next check (a lone
-  failure with no user impact is noise — log it as SEV4 and widen the check
-  if it repeats).
+- A single transient request failure that recovers on retry with no user
+  impact (the thin health probe only reports process liveness, so a lone
+  failure with no impact is noise — log it as SEV4).
 - A deploy that succeeded and is behaving normally.
 - A feature request, a question, or a complaint about how something works.
 - A failing test on a branch that hasn't merged.
@@ -248,5 +248,5 @@ row in the Room.
 
 ---
 
-*Last reviewed: 2026-09-16. Review this doc after every SEV1/SEV2 postmortem,
+*Last reviewed: 2026-10-06. Review this doc after every SEV1/SEV2 postmortem,
 or at least once a quarter — whichever comes first.*

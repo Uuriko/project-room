@@ -32,7 +32,7 @@ test('actual MCP anonymous recommendations and task reads discover auth without 
  assert.deepEqual(unknown.body.error.data.next,[{command:'tools/list'}]);
  assert.match(unknown.body.error.data.hint,/tools\/list/);
  const listed=await f.rpc({jsonrpc:'2.0',id:1,method:'tools/list'});
- assert.deepEqual(listed.body.result.tools.map(tool=>tool.name),['room_join_packet','room_join_kits','room_join_prompt','room_mcp_snippet','public_work_recommend','public_work_read_task']);
+ assert.deepEqual(listed.body.result.tools.map(tool=>tool.name),['room_join_packet','room_join_kits','room_join_prompt','room_mcp_snippet','public_work_recommend','public_work_read_task','room_identity_mint']);
  const recommendation=value(await f.call('public_work_recommend',{skills:['JavaScript']}));assert.equal(recommendation.claim,null);assert.equal(recommendation.recommendations[0].task.taskId,'mcp:task');
  assert.equal(value(await f.call('public_work_read_task',{taskId:'mcp:task'})).claim.state,'unclaimed');
  const unauthorized=await f.call('public_work_claim',claim);assert.equal(unauthorized.body.error.code,-32001);

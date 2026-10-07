@@ -40,7 +40,7 @@ test("no module hard-codes the room projection cap", () => {
     || (/projection(?!\s*\()/i.test(line) && literal.test(line) && !/CACHE|PILOT_LIMITS\s*=|^\s*\/\//.test(line))), []);
 });
 
-test("the raised limits hold: events 1,000,000 and projection 4 MiB (unchanged until the platform row ceiling is validated)", () => {
+test("room capacity policy retains 1,000,000 events and the 4 MiB application guard", () => {
   assert.equal(PILOT_LIMITS.eventsPerRoom, 1_000_000);
   assert.equal(PILOT_LIMITS.projectionBytes, 4 * 1024 * 1024);
 });

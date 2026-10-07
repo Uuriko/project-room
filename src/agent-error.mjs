@@ -203,6 +203,21 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [tool("room_check_access"), command("Pause your own wakes, or ask the owner.")]
     };
   }
+  // Lane 5 (docspolish-error-quality): the board's permission gate must keep
+  // its code — the generic 403 branch below collapses it to access_denied
+  // and loses the profile requirement the message names.
+  if (reasonCode === "work_claims_not_permitted") {
+    const cap = /claim cap/i.test(String(message || ""));
+    return {
+      status: "action_required", reason: "work_claims_not_permitted",
+      hint: cap
+        ? "Only the room owner can set the per-member claim cap. Ask the owner to set it."
+        : "Work claims need a contribute, review, or collaborate profile. Ask the room owner to grant one.",
+      next: [tool("room_check_access"), command(cap
+        ? "Ask the room owner to set the per-member claim cap."
+        : "Ask the owner for a contribute, review, or collaborate profile before creating or claiming work.")]
+    };
+  }
   if (httpStatus === 403 || ["access_denied", "owner_required", "host_denied", "proxy_denied", "csrf_denied"].includes(reasonCode)) {
     return {
       status: "action_required",
@@ -487,6 +502,37 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [readWork, command("Read current work for the original requestId's outcome; do not send new input under this requestId")]
     };
   }
+  // Lane 5 (docspolish-error-quality): the already_* 409 family means the
+  // action already happened — "Check access and current work." sends the
+  // agent down the wrong path. Teach reconcile-instead-of-retry.
+  if (/^already_/.test(reasonCode)) {
+    const alreadyHints = {
+      already_member: /already linked/.test(String(message || ""))
+        ? "This identity is already a member of this room — do not create another membership. Act with the saved identity credential instead."
+        : "Re-check the current membership with the saved credential; do not create a duplicate membership.",
+      already_decided: "This request was already decided — the decision stands. Read the request to see the outcome; do not decide it again.",
+      already_owner: "That identity already holds full authority as room owner — nothing to grant.",
+      already_administers: "Membership administration is already held — nothing to transfer.",
+      already_inactive: "The membership is already inactive — the desired state already holds. Treat it as done.",
+      already_claimed: "This bounty is already claimed — pick another bounty, or wait for it to be released.",
+      already_appealed: "One appeal per filing — this filing was already appealed. No further appeal is possible.",
+    };
+    return {
+      status: "action_required", reason: reasonCode,
+      hint: alreadyHints[reasonCode] ?? "This action already happened — do not retry it. Read the current state to confirm.",
+      next: [tool("room_check_access"), command("Read the current state to confirm; do not retry the same action")]
+    };
+  }
+  // Lane 5 (docspolish-error-quality): a bad claim id is a board lookup
+  // problem, not an access problem — name the board, not "check access".
+  if (reasonCode === "work_claim_not_found") {
+    const boardPath = roomId ? `/api/rooms/${roomId}/work-claims` : listPath;
+    return {
+      status: "action_required", reason: "work_claim_not_found",
+      hint: "No work claim with that id in this room. Re-read the work-claims board for the current ids — a retired or mistyped id never resolves.",
+      next: [path(boardPath), command("GET the work-claims board and use a current claim id; do not guess ids")]
+    };
+  }
   if (httpStatus === 429 || reasonCode === "rate_limited") {
     return {
       status: "action_required", reason: "rate_limited",
@@ -509,6 +555,25 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
         command("Brute-force a nonce for the SHA-256 recipe in this 428's proof object, then resend displayName with proof"),
         command("Or ask a room member for a one-time invite code and POST /api/agent-invites/redeem {\"code\",\"displayName\"} -- no proof needed")
       ]
+    };
+  }
+  // Lane 5 (docspolish-error-quality): the availability-503 family needs its
+  // own recovery, not the generic 500 branch. storage_unavailable is the
+  // Retry-After retry docs/ERROR-TAXONOMY.md promises; mail_not_configured
+  // is a server config gap where retrying is futile and only the operator
+  // can fix it.
+  if (reasonCode === "storage_unavailable") {
+    return {
+      status: "action_required", reason: "storage_unavailable",
+      hint: "Storage is unavailable and the write was rolled back. Wait for Retry-After, then retry the exact request; reconcile afterward. No success is claimed.",
+      next: [command("Wait for Retry-After (30s), then retry the exact same request; reconcile afterward")]
+    };
+  }
+  if (reasonCode === "mail_not_configured") {
+    return {
+      status: "failed", reason: "mail_not_configured",
+      hint: "Email delivery is not configured on this server. Nothing was sent and retrying will not help — contact the room operator to configure it.",
+      next: [command("Contact the room operator to configure email delivery; do not retry the send until then")]
     };
   }
   if (httpStatus >= 500 || ["internal_error", "maintenance"].includes(reasonCode)) {
@@ -586,6 +651,25 @@ export function agentErrorBody({ httpStatus, code, message, roomId, workItemId, 
     console.warn(`error-trace ${trace.errorId} fp=${trace.fingerprint.slice(0, 16)} status=${httpStatus} code=${publicCode(code)}`);
   }
   return body;
+}
+
+// Merge a ServiceError's detail object onto a built error envelope.
+// Reserved envelope keys are never overwritten by detail: detail is
+// caller-supplied context (suggestions, reasons), never envelope shape.
+// #174 (error-leak audit): stack, message, code, cause, and the trace ids
+// stay reserved too — a detail carrying a stack trace or an internal
+// message must never reach the wire, and detail must not forge the 5xx
+// errorId/fingerprint the server mints.
+const RESERVED_DETAIL_KEYS = Object.freeze([
+  "error", "status", "reason", "hint", "next", "operationId", "category",
+  "message", "code", "stack", "cause", "errorId", "fingerprint", "trace",
+]);
+export function mergeErrorDetail(errorBody, detail) {
+  if (!detail || typeof detail !== "object" || Array.isArray(detail)) return errorBody;
+  for (const [key, value] of Object.entries(detail)) {
+    if (!RESERVED_DETAIL_KEYS.includes(key)) errorBody[key] = value;
+  }
+  return errorBody;
 }
 
 export function validAgentNext(next) {

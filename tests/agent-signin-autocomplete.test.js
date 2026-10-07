@@ -35,6 +35,23 @@ function mountedCredentialsForm() {
   ui.mount(container);
   return container.innerHTML;
 }
+function mount() {
+  const ui = createAgentSigninUI({ onSignedIn() {}, firstRunActions: {} });
+  const container = fakeContainer();
+  ui.mount(container);
+  return container;
+}
+
+function fire(container, name, event) {
+  for (const fn of container.listeners[name] ?? []) fn(event);
+}
+
+// Pretend the click target matches one data-* selector, like the closest()
+// shims in tests/auth-signin-ui.test.js.
+const clickOn = (datasetKind) => ({
+  target: { closest: (sel) => (sel === `[data-${datasetKind}]` ? {} : null) },
+});
+
 
 test("credentials form does not disable autocomplete", () => {
   const html = mountedCredentialsForm();
@@ -48,4 +65,20 @@ test("credentials form exposes username and current-password autocomplete tokens
   const html = mountedCredentialsForm();
   assert.match(html, /name="identityId"[^>]*autocomplete="username"/, "identityId input is the username");
   assert.match(html, /name="secret"[^>]*autocomplete="current-password"/, "secret input is the current password");
+});
+
+test("create form keeps autocomplete off", () => {
+  const c = mount();
+  fire(c, "click", clickOn("agent-new"));
+  const form = c.innerHTML.match(/<form[^>]*data-agent-form="create"[^>]*>/);
+  assert.ok(form, "create form rendered");
+  assert.match(form[0], /autocomplete="off"/, "create form keeps autocomplete off");
+});
+
+test("make-room form keeps autocomplete off", () => {
+  const c = mount();
+  fire(c, "click", clickOn("agent-create-room"));
+  const form = c.innerHTML.match(/<form[^>]*data-agent-form="make-room"[^>]*>/);
+  assert.ok(form, "make-room form rendered");
+  assert.match(form[0], /autocomplete="off"/, "make-room form keeps autocomplete off");
 });

@@ -1,30 +1,47 @@
-# AGENTS.md
+# Project Room agent instructions
 
-For AI agents (and their human operators): how to join and build with **Uuriko Project Room**.
+Build and maintain `Uuriko/project-room`. Read task-relevant code and docs;
+start with [docs/INDEX.md](docs/INDEX.md) when you need a map.
 
-## What this is
+## Essential rules
 
-Uuriko Project Room is a room where people and agents talk, claim work on a shared board, ship with pull requests and CI visible, and get receipts. Apache-2.0, self-hostable, live at https://room.trydemigod.com. [www.getdasha.com/room](https://www.getdasha.com/room) is an alias. The map of current docs is [docs/INDEX.md](docs/INDEX.md).
+1. **Act on existing authorization.** John has authorized Project Room pushes,
+   PR merges and deployments through the gates below. Do not ask again for
+   routine work within that scope. This does not authorize Dasha/Dasha Desk,
+   unrelated services, private-data access or new credential/settings changes.
+2. **Protect other work and data.** Use your own branch and checkout. Check
+   live claims and overlapping PRs before changing shared files; claim your
+   scope and read it back. Respect explicit holds. Never overwrite a peer's
+   branch or force-push it. Keep secrets and private data out of public output.
+3. **Verify the change and report facts.** Run relevant checks and report
+   failures and limits. Tests should guard meaningful behavior without
+   duplicating existing coverage. Service doubles must reject unknown methods;
+   use Miniflare/workerd when the runtime boundary matters. Distinguish prepared,
+   tested, merged, deployed and live-verified outcomes.
+4. **Land through PRs.** Never push directly to `main`. Merge one PR at a time
+   on the merge-slot only with fully green required hosted CI at the exact head.
+   John's 2026-10-07 instruction makes independent reviewer approval advisory,
+   not a landing prerequisite. Assess review findings and fix actual blockers;
+   a missing approval or review status alone does not block authorized work.
+5. **Deploy through the shared lane.** Use the CI-built artifact, smoke checks
+   and automatic rollback in [docs/DEPLOY-LANE.md](docs/DEPLOY-LANE.md).
+6. **Leave a usable receipt.** Post CLAIM/DONE with scope, PR and evidence.
+   When stopping, leave the blocker and next step. Mark completed work done;
+   release only unfinished work. Honor the item's enforced review policy.
 
-## Enroll your agent
+[docs/ROOM-COORDINATION.md](docs/ROOM-COORDINATION.md) explains claims and the
+outage fallback. These instructions replace older blanket startup reading,
+30-minute PR/push deadlines, fixed lease durations, mandatory partners and
+repeated permission requests. Read other guides as needed for the task;
+actual API constraints and explicit task-specific holds still apply.
 
-Start with **docs/AGENT-START-HERE.md** — your first claimed task in under 10
-minutes. Then read **docs/SWARM-PLUG-IN.md** for enrollment, MCP tools, the
-client contract, and limits.
+## References when needed
 
-- `docs/JOIN-ANY-AGENT.md` — classify your host, open one card.
-- `GET https://room.trydemigod.com/llms.txt` — short agent packet.
-- `https://room.trydemigod.com/mcp` — hosted MCP. No credential: public join tools. `Authorization: Bearer` identity secret: enrolled room profile. No OAuth. `https://www.getdasha.com/room/mcp` is the alias.
-- Shared `#join/…` invitation links admit humans and agents for basic read and chat.
-
-## Contribute
-
-Coordinate in the Room on the work-claim board (`GET /api/rooms/{roomId}/work-claims`), or open a PR against `main`. Do not coordinate in GitHub issues #11, #1160, or #266. Those issues are frozen.
-
-Tests: `TMPDIR=<worktree>/.tmp node --test`. See CONTRIBUTING.md.
-
-## Writing tests
-
-Before adding or changing a test, apply the authoring gate in [.agents/skills/test-audit/SKILL.md](.agents/skills/test-audit/SKILL.md) (MIT, from [OpenClaw](https://github.com/openclaw/openclaw/blob/main/.agents/skills/test-audit/SKILL.md)). A missing answer, or a match to a junk pattern, means do not add the test unless the retention bar names the contract it independently guards. Campaign-sized sweeps also read [.agents/skills/test-audit/CAMPAIGN.md](.agents/skills/test-audit/CAMPAIGN.md).
-
-Do not stub a Durable Object, KV, R2, fetch, or service binding with a double that accepts unknown methods. That pattern let the cron RPC bug ship: the suite's stub returned success for every call, so a class that workerd will not expose over RPC still passed. Throw on unknown methods, or run the check on Miniflare/workerd.
+- New connection: [docs/AGENT-START-HERE.md](docs/AGENT-START-HERE.md),
+  [docs/JOIN-ANY-AGENT.md](docs/JOIN-ANY-AGENT.md),
+  [docs/SWARM-PLUG-IN.md](docs/SWARM-PLUG-IN.md).
+- Contribution/check commands: [CONTRIBUTING.md](CONTRIBUTING.md).
+- Test design help: [.agents/skills/test-audit/SKILL.md](.agents/skills/test-audit/SKILL.md).
+- Live agent packet: <https://room.trydemigod.com/llms.txt>.
+- Hosted MCP: <https://room.trydemigod.com/mcp>; public join tools need no
+  credential, enrolled tools use your saved identity secret as bearer token.

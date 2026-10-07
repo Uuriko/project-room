@@ -1,3 +1,4 @@
+import { dmEventVisibility } from "./dm-event-visibility.mjs";
 import { publicWorkClaimFenceSchema, verifyPublicWorkClaimFence } from "./public-work-claim-fence.mjs";
 import { PublicWorkClaims, publicWorkClaimsSchema } from "./public-work-claims.mjs";
 import { PublicWorkReviews, publicWorkReviewsSchema } from "./public-work-reviews.mjs";
@@ -421,6 +422,8 @@ const fail = (status, code, message) => { throw new ServiceError(status, code, m
 // ~0.7 days from refusing writes, with the event cap ~10 days out. Raised per
 // the owner's word relayed at room seq 3425. Every event cap check reads
 // eventsPerRoom from here (tests/pilot-limits-single-source.test.js).
+// Keep the application guard at 4 MiB. Bodies-at-rest supplies projection
+// headroom; a larger guard does not establish the deployed storage ceiling.
 export const PILOT_LIMITS = Object.freeze({ eventsPerRoom: 1_000_000, membersPerRoom: 100, workItemsPerRoom: 500, projectionBytes: 4 * 1024 * 1024 });
 // Inactive members retain their history, but do not occupy an admission seat.
 export const activeMemberCount = members => Object.values(members ?? {}).filter(member => member?.active !== false).length;
@@ -438,8 +441,6 @@ const channelOfThreadId = threadId => {
   return match ? match[1] : null;
 };
 const canonical = value => Array.isArray(value) ? `[${value.map(canonical).join(",")}]` : value && typeof value === "object" ? `{${Object.keys(value).sort().map(k => `${JSON.stringify(k)}:${canonical(value[k])}`).join(",")}}` : JSON.stringify(value);
-const targetedEventVisible = (event, viewerId) => event?.type !== T.MESSAGE_POSTED || !event?.data?.toMemberId
-  || event.actorId === viewerId || event.data.toMemberId === viewerId;
 export const provisionalAccountPrefix = "acct-legacy-";
 const provisionalAccountId = (roomId, memberId) => `${provisionalAccountPrefix}${hash(`${roomId}\0${memberId}`).slice(0, 32)}`;
 const accountView = row => row ? { id: row.id, active: Boolean(row.active), revision: row.revision, authEpoch: row.auth_epoch } : null;
@@ -707,7 +708,7 @@ const shapes = {
   [T.MEMBER_STATUS_UPDATED]: "memberId message",
   [T.NOTIFICATION_PREFERENCES_SET]: "preferences",
   [T.MEMBER_MUTE_SET]: "memberId muted",
-  [T.MESSAGE_POSTED]: `messageId body channelId workItemId replyToId toMemberId packetId basisRevision allowOlderBasis alsoSendToChannel ${REPLY_FIELDS.join(" ")}`,
+  [T.MESSAGE_POSTED]: `messageId body channelId workItemId replyToId toMemberId packetId basisRevision allowOlderBasis alsoSendToChannel kind poll ${REPLY_FIELDS.join(" ")}`,
   [T.MESSAGE_EDITED]: "messageId body expectedMessageRevision",
   [T.MESSAGE_DELETED]: "messageId expectedMessageRevision reason",
   [T.REPLY_REQUEST_CANCELLED]: "requestMessageId expectedRequestRevision reason",
@@ -793,7 +794,7 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "scopes", "pullRequests", "blocks"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence"].includes(name) ? "object" : "string";
+    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "scopes", "pullRequests", "blocks"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence", "poll"].includes(name) ? "object" : "string";
     if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : type === "outputs" ? !(typeof value === "string" || (Array.isArray(value) && value.every(v => typeof v === "string"))) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (command.type === T.MESSAGE_POSTED && (typeof command.data.body !== "string" || !command.data.body.trim())) fail(422, "invalid_command", messageBody);
@@ -1108,7 +1109,7 @@ const LOOKUP_INDEXES = `
   CREATE INDEX IF NOT EXISTS guest_selfserve_idem_member ON guest_selfserve_idem(member_id);
 `;
 
-// MSG-0: parsed projection cache. A hit reads sequence only, so a 4 MiB
+// MSG-0: parsed projection cache. A hit reads sequence only, so a 64 MiB
 // room does not JSON.parse again until the sequence changes or a rooms
 // write drops the entry. Commit and rollback of a write transaction drop
 // the whole cache, including a parse of uncommitted bytes. Callers receive
@@ -1572,6 +1573,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // RC-2026-09-24-310: web-research per-request journal — purely additive
       // side table (no events, no projection impact), same pattern.
       this.db.exec(webResearchSchema);
+      // Share-link schemas are additive (IF NOT EXISTS): re-apply on every
+      // eager open so additive table additions inside shareLinkSchema (e.g.
+      // share_link_join_redemptions, the #770 redemption idempotency table)
+      // converge on existing databases without a schema version bump. The
+      // room schema stamp already hashes shareLinkSchema, so deferred wakes
+      // re-run this block too.
+      this.db.exec(shareLinkSchema);
       // #658: mention lifecycle tracking. Purely additive side tables (no
       // events, no projection impact): IF NOT EXISTS is idempotent, no
       // schema version bump, intentionally outside the writer fence.
@@ -1595,6 +1603,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // schema version bump, intentionally outside the writer fence.
       this.db.exec(humanPushSchema);
       this.db.exec(humanPushPrefsSchema);
+      // Rich push (sender/preview/deep link): converge existing databases.
+      // Old rows read preview as on and quiet hours as unset, preserving
+      // today's delivery exactly until the member touches the switches.
+      {
+        const prefColumns = new Set(this.db.prepare("PRAGMA table_info(human_push_preferences)").all().map(c => c.name));
+        if (!prefColumns.has("preview_enabled")) this.db.exec("ALTER TABLE human_push_preferences ADD COLUMN preview_enabled INTEGER NOT NULL DEFAULT 0");
+        if (!prefColumns.has("quiet_hours")) this.db.exec("ALTER TABLE human_push_preferences ADD COLUMN quiet_hours TEXT");
+      }
       // Gap #2 (PR #562): explicit account_id/source_id columns converge on
       // existing databases via ALTER TABLE; old rows backfill NULL and keep
       // reading as { accountId: null, sourceId: null }.
@@ -2225,6 +2241,21 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         PRIMARY KEY(link_id,slot_hash,redemption_id)
       )`);
       db.exec("INSERT INTO share_link_joins SELECT * FROM share_link_joins_legacy_v34");
+      // The additive redemption journal also references share_links. SQLite
+      // retargets that foreign key during the parent rename, so preserve its
+      // rows and rebuild it before dropping the legacy parent.
+      if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='share_link_join_redemptions'").get()) {
+        db.exec("DROP TRIGGER IF EXISTS share_link_join_redemptions_no_update");
+        db.exec("DROP TRIGGER IF EXISTS share_link_join_redemptions_no_delete");
+        db.exec("ALTER TABLE share_link_join_redemptions RENAME TO share_link_join_redemptions_legacy_v34");
+        db.exec(`CREATE TABLE share_link_join_redemptions (
+          link_id TEXT NOT NULL REFERENCES share_links(id), redemption_id TEXT NOT NULL,
+          account_id TEXT NOT NULL REFERENCES accounts(id), created_at INTEGER NOT NULL,
+          PRIMARY KEY(link_id,redemption_id)
+        )`);
+        db.exec("INSERT INTO share_link_join_redemptions SELECT * FROM share_link_join_redemptions_legacy_v34");
+        db.exec("DROP TABLE share_link_join_redemptions_legacy_v34");
+      }
       // Children first, then the parents nothing references anymore.
       db.exec("DROP TABLE share_link_joins_legacy_v34");
       db.exec("DROP TABLE membership_invitation_events_legacy_v34");
@@ -4286,7 +4317,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // PRIV-2: since_join readers page past events from before their join.
       const floor = this.historyFloor(roomId, viewerId, sequence);
       const floorMessages = floor ? indexHistoryMessages(this.room(roomId).state.messages) : null;
-      const visible = events.filter(row => rowInHistory(row, floor, floorMessages) && targetedEventVisible(row.event, viewerId)
+      // SEC-19: thunk keeps the zero-decode polling optimization: the full
+      // projection only decodes if the page actually holds a follow-up event.
+      const dmVisible = dmEventVisibility(viewerId, () => this.room(roomId).state.messages, events);
+      const visible = events.filter(row => rowInHistory(row, floor, floorMessages) && dmVisible(row.event)
         && peerEventVisible(row.event, { memberId: viewerId, identityId, isOwner }));
       // #658: mention chips ride on message views. One batched query for
       // the whole page (no N+1); only members who can read the room see it.
@@ -4462,7 +4496,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // an invisible page must still progress within its frozen horizon.
       const floor = this.historyFloor(roomId, auth.member.id, room.sequence); // PRIV-2
       const floorMessages = floor ? indexHistoryMessages(room.state.messages) : null;
-      brief.history.items = brief.history.items.filter(row => rowInHistory(row, floor, floorMessages) && targetedEventVisible(row.event, auth.member.id)
+      const dmVisible = dmEventVisibility(auth.member.id, room.state.messages, brief.history.items); // SEC-19
+      brief.history.items = brief.history.items.filter(row => rowInHistory(row, floor, floorMessages) && dmVisible(row.event)
         && peerEventVisible(row.event, { memberId: auth.member.id, identityId, isOwner }));
       return { roomId, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null, ...brief };
     });

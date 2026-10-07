@@ -565,17 +565,19 @@ test("A2A agent card declares the work-receipt extension (docs/a2a-receipt-exten
   assert.match(ext.params.spec_url, /a2a-receipt-extension\.md$/);
 });
 
-test("anonymous MCP catalog is six tools (four join + two public-work); copy never says four", async () => {
+test("anonymous MCP catalog is seven tools (four join + two public-work + identity mint); copy never says four", async () => {
   const { livePublicMcpTools } = await import("../server/mcp-discovery.mjs");
   const { MCP_JOIN_TOOLS } = await import("../server/mcp-http.mjs");
   const { anonymousPublicWorkMcpTools } = await import("../server/mcp-public-work.mjs");
+  const { anonymousIdentityMintMcpTools } = await import("../server/mcp-identity-mint.mjs");
   const tools = livePublicMcpTools();
   assert.equal(MCP_JOIN_TOOLS.length, 4);
   assert.equal(anonymousPublicWorkMcpTools.length, 2);
-  assert.equal(tools.length, 6);
+  assert.equal(anonymousIdentityMintMcpTools.length, 1);
+  assert.equal(tools.length, 7);
   assert.deepEqual(tools.map(t => t.name).sort(), [
     ...MCP_JOIN_TOOLS.map(t => t.name),
-    "public_work_read_task", "public_work_recommend",
+    "public_work_read_task", "public_work_recommend", "room_identity_mint",
   ].sort());
   // QA5-gb: the packet once called this anonymous catalog "four tools".
   const text = llmsTxt();

@@ -8,10 +8,11 @@ import { MCP_VERSION, MCP_SUPPORTED_VERSIONS } from "../client/mcp-stdio.mjs";
 import { llmsTxt, kitsTxt, joinPrompt } from "../deploy/agent-discovery.mjs";
 import {
   isRoomMcpPath, roomMcpUrlForHost, roomMcpJoinText, roomMcpJoinJson, roomMcpSnippets, ROOM_MCP_SERVER_NAME,
-  ROOM_MCP_SERVER_VERSION, HOSTED_ROOM_MCP_TOOLS, PUBLIC_WORK_MCP_TOOLS, isHostedMcpToolName
+  ROOM_MCP_SERVER_VERSION, HOSTED_ROOM_MCP_TOOLS, PUBLIC_WORK_MCP_TOOLS, IDENTITY_MINT_MCP_TOOLS, isHostedMcpToolName
 } from "../src/room-mcp-join.js";
 import { closestToolName, diagnoseArguments, mcpCallError, mcpInvalidRequest, mcpTransportError } from "./mcp-arg-errors.mjs";
 import { livePublicMcpTools } from "./mcp-discovery.mjs";
+import { isIdentityMintMcpTool } from "./mcp-identity-mint.mjs";
 import { MCP_DISCOVERY_BLOCK } from "./discoverability.mjs";
 
 export { isRoomMcpPath, MCP_VERSION };
@@ -79,7 +80,7 @@ export function handleMcpJoinRpc(message, { mcpUrl } = {}) {
         protocolVersion: negotiated,
         capabilities: { tools: {} },
         serverInfo: { name: ROOM_MCP_SERVER_NAME, version: ROOM_MCP_SERVER_VERSION },
-        instructions: "Public discovery MCP without Authorization. Read join packets and kits, or use public_work_recommend then public_work_read_task. Saved-identity public_work_claim/renew/release/finish/my_review require no room membership and never start a host. Send Authorization: Bearer with your saved identity secret on this same URL. Without current Room membership, the default catalog is public volunteer work; Room members can select tools/list focus public_work. Room tools retain their own membership checks. The core room profile (room_needs_me, post, reply, react, dm_posted, bond_propose, wake_pause). Pass profile full for every tool. Names are snake_case. Dotted aliases such as bond.list and wake.pause still call through. Do not invent credentials. Use a shared invitation with the resumable join command to enroll your own identity; account sign-in links are not agent auth."
+        instructions: "Public discovery MCP without Authorization. Read join packets and kits, or use public_work_recommend then public_work_read_task. Mint your own identity with the room_identity_mint tool (no account needed) — the returned secret unlocks the enrolled profile on this same URL. Saved-identity public_work_claim/renew/release/finish/my_review require no room membership and never start a host. Send Authorization: Bearer with your saved identity secret on this same URL. Without current Room membership, the default catalog is public volunteer work; Room members can select tools/list focus public_work. Room tools retain their own membership checks. The core room profile (room_needs_me, post, reply, react, dm_posted, bond_propose, wake_pause). Pass profile full for every tool. Names are snake_case. Dotted aliases such as bond.list and wake.pause still call through. Do not invent credentials. Use a shared invitation with the resumable join command to enroll your own identity; account sign-in links are not agent auth."
       }
     };
   }
@@ -93,7 +94,7 @@ export function handleMcpJoinRpc(message, { mcpUrl } = {}) {
     const name = message.params?.name;
     const args = message.params?.arguments ?? {};
     // Public-work tools are callable here without a room, so a typo of one must suggest it (QA5R-AX-1).
-    const known = [...MCP_JOIN_TOOLS.map(tool => tool.name), ...PUBLIC_WORK_MCP_TOOLS, ...HOSTED_ROOM_MCP_TOOLS];
+    const known = [...MCP_JOIN_TOOLS.map(tool => tool.name), ...IDENTITY_MINT_MCP_TOOLS, ...PUBLIC_WORK_MCP_TOOLS, ...HOSTED_ROOM_MCP_TOOLS];
     if (isHostedMcpToolName(name)) return mcpCallError(requestId, { reason: "auth_required", tool: name });
     const selected = MCP_JOIN_TOOLS.find(tool => tool.name === name);
     if (!selected) {
@@ -125,7 +126,7 @@ export function legacyMcpHeaders(authorization) {
   return { Deprecation: "@1798761600", Link: '</llms.txt>; rel="deprecation"' };
 }
 
-export async function dispatchRoomMcp(message, { mcpUrl, authorization, roomMcp, searchParams, userAgent } = {}) {
+export async function dispatchRoomMcp(message, { mcpUrl, authorization, roomMcp, searchParams, userAgent, remoteAddress } = {}) {
   // An empty "Bearer" (an MCP host config with an unset secret variable) is
   // treated as no credential, so the public join tools still load.
   const presented = typeof authorization === "string" && !/^(?:bearer)?\s*$/i.test(authorization);
@@ -133,6 +134,12 @@ export async function dispatchRoomMcp(message, { mcpUrl, authorization, roomMcp,
     if (message?.method === "tools/call" && isPublicWorkMcpTool(message.params?.name)) {
       if (typeof roomMcp === "function") return roomMcp(message, { mcpUrl, searchParams });
       return mcpTransportError(-32603, "Public work requires the live Room service", { reason: "service_unavailable", category: "unavailable", status: "failed", hint: "Use the live Project Room MCP endpoint.", next: [{ command: "Read /llms.txt for the live MCP endpoint" }] });
+    }
+    // Anonymous enrollment: a stranger mints its own identity secret without
+    // leaving MCP. Store-backed like public work, never the pure join path.
+    if (message?.method === "tools/call" && isIdentityMintMcpTool(message.params?.name)) {
+      if (typeof roomMcp === "function") return roomMcp(message, { mcpUrl, searchParams, userAgent, remoteAddress });
+      return mcpTransportError(-32603, "Identity mint requires the live Room service", { reason: "service_unavailable", category: "unavailable", status: "failed", hint: "Use the live Project Room MCP endpoint.", next: [{ command: "Read /llms.txt for the live MCP endpoint" }] });
     }
     return handleMcpJoinRpc(message, { mcpUrl });
   }
@@ -143,7 +150,7 @@ export async function dispatchRoomMcp(message, { mcpUrl, authorization, roomMcp,
       ? requestId : null;
     return { jsonrpc: "2.0", id, error: { code: MCP_AUTH_REQUIRED, message: "Authenticated room tools require the Room service", data: { retryable: false, hint: "Send Authorization: Bearer <redacted> your saved identity secret; retrying without a valid credential will fail the same way." } } };
   }
-  return roomMcp(message, { authorization, mcpUrl, searchParams, userAgent });
+  return roomMcp(message, { authorization, mcpUrl, searchParams, userAgent, remoteAddress });
 }
 
 export function mcpRpcStatus(reply) {
@@ -251,7 +258,7 @@ export async function roomMcpFetchPost(request, options = {}) {
   return new Response(JSON.stringify(reply), { status: mcpRpcStatus(reply), headers: { ...headers, ...mcpAuthHeaders(reply), ...legacyMcpHeaders(request.headers.get("authorization")) } });
 }
 
-export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMcp } = {}) {
+export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMcp, remoteAddress } = {}) {
   const cors = mcpJoinCorsHeaders();
   const method = req.method;
   if (method === "OPTIONS") {
@@ -297,7 +304,8 @@ export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMc
       authorization: req.headers.authorization,
       roomMcp,
       searchParams: url.searchParams,
-      userAgent: req.headers["user-agent"]
+      userAgent: req.headers["user-agent"],
+      remoteAddress
     });
   } catch {
     reply = mcpTransportError(-32603, "Request could not be completed", {

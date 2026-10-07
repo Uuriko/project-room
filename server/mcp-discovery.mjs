@@ -1,4 +1,5 @@
 import { anonymousPublicWorkMcpTools, publicWorkMcpDefinitions } from './mcp-public-work.mjs';
+import { anonymousIdentityMintMcpTools } from './mcp-identity-mint.mjs';
 // Binds the one server card to the tool lists the hosted MCP actually serves.
 import { MCP_SUPPORTED_VERSIONS } from "../client/mcp-stdio.mjs";
 import { ROOM_ORIGIN, ROOM_SOURCE, bindLiveMcpServerCard } from "../deploy/agent-discovery.mjs";
@@ -10,7 +11,7 @@ import { capabilityVisibleTo } from "./capability-visibility.mjs";
 import { withOpenWorldHint } from "./content-trust.mjs";
 
 export function livePublicMcpTools() {
-  return [...MCP_JOIN_TOOLS, ...anonymousPublicWorkMcpTools].map(withOpenWorldHint);
+  return [...MCP_JOIN_TOOLS, ...anonymousPublicWorkMcpTools, ...anonymousIdentityMintMcpTools].map(withOpenWorldHint);
 }
 
 // Same list tools/list returns. Default is the core profile (short blurbs,

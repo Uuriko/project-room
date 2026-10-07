@@ -504,7 +504,7 @@ test("onboarding: success bodies name the next step", { timeout: 30000 }, async 
     "list-tools pointer names public_work_recommend");
   assert.ok(listTools.description.includes("public_work_read_task"),
     "list-tools pointer names public_work_read_task");
-  assert.ok(listTools.description.includes("six"), "list-tools pointer states the six-tool count");
+  assert.ok(listTools.description.includes("seven"), "list-tools pointer states the seven-tool count");
   for (const step of minted.nextActions) {
     assert.equal(typeof step.transport, "string", "nextActions names the transport");
     assert.ok(step.method || step.tool, "nextActions names the method or tool");

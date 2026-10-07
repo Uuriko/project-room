@@ -8,13 +8,7 @@ import { pathToFileURL } from "node:url";
 
 const v8Assets = ["index.html", ...["app.js", "client.js", "events.js", "conversation.js", "workflow.js", "share-links.js",
   "return-brief.js", "work-selectors.js", "work-status.js", "work-packet.js", "portable-work.js", "reminders.js", "reminder-time.js", "styles.css"].map(name => "src/" + name)];
-const v9Assets = [...v8Assets, "src/agent-connections.js"];
-const v11Assets = [...v9Assets, "src/room-charter.js", "src/room-instructions.js"];
-const v12Assets = [...v11Assets, "src/reply-requests.js"];
-const v13Assets = [...v12Assets, "src/work-help.js"];
-const v14Assets = [...v13Assets, "src/help-offers.js"];
-const inboxAssets = [...v14Assets, "src/inbox-client.js", "src/inbox-ui.js", "src/inbox-quarantine-ui.js"];
-export const publicAssets = ["src/board-mine.js", "strings/en.js", "strings/en.json", inboxAssets[0], "about.html", "offers.html", "src/project-offers-ui.js", "src/owner-project-offers-ui.js", "src/project-offers.css", "favicon.svg", "icon.svg", "manifest.webmanifest", "push-sw.js", inboxAssets[1], "src/strings.js", "src/human-experience.js", "src/human-experience.css", "src/member-display-names.js", "src/room-layout.js", ...inboxAssets.slice(2, 4), "src/display-name-guard.js", ...inboxAssets.slice(4, 6), "src/human-push.js", "src/human-push-display.js", ...inboxAssets.slice(6), "src/account-setup-ui.js", "src/gmail-ui.js", "src/inbox-send-ui.js", "src/room-roster.js", "src/account-settings-ui.js", "src/auth-signin-ui.js", "src/agent-signin-ui.js", "src/agent-first-run.js", "src/invite-context.js", "src/request-access.js", "src/room-deep-link.js", "src/browser-session.js", "src/composer-files.js", "src/session-expiry.js", "src/agent-invite-ui.js", "src/referral-board.js", "src/land-queue-board.js", "src/board-ui.js", "src/board.css", "src/squads-ui.js", "src/join.js", "src/join-watchdog.js", "src/work-item-session.js", "src/work-loops.js", "src/work-recipes.js", "src/chat-suggestions.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "src/dm-consents.js", "src/friend-bond.js", "src/needs-attention.js", "src/updates-ui.js", "src/emoji.js", "src/emoji-catalog.js", "src/public-a11y.css", "connectors/muse.md", "compare/project-room-vs-slack.html", "compare/project-room-vs-discord.html", "compare/agent-collaboration-tool.html", "compare/multi-agent-workspace.html", "compare/ai-agent-coordination.html", "compare/project-room-vs-agent-room.html", "og/home.png", "og/fonts/Inter-Regular.ttf", "og/fonts/OFL.txt", "og/about.png", "og/offers.png", "og/compare.png", "og/receipts.png", "offline.html", "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-512.png", "icons/apple-touch-icon-180.png", "src/pwa-install.js", "src/push-ask.js"];// Read the selected source's explicit asset declaration, never today's list for
+export const publicAssets = ["src/board-mine.js", "strings/en.js", "strings/en.json", "index.html", "about.html", "offers.html", "src/project-offers-ui.js", "src/owner-project-offers-ui.js", "src/project-offers.css", "favicon.svg", "icon.svg", "manifest.webmanifest", "push-sw.js", "src/app.js", "src/strings.js", "src/human-experience.js", "src/human-experience.css", "src/member-display-names.js", "src/room-layout.js", "src/client.js", "src/events.js", "src/display-name-guard.js", "src/conversation.js", "src/workflow.js", "src/human-push.js", "src/human-push-display.js", "src/spend-pricing-ui.js", "src/polls.js", "src/share-links.js", "src/return-brief.js", "src/work-selectors.js", "src/work-status.js", "src/work-packet.js", "src/portable-work.js", "src/reminders.js", "src/reminder-time.js", "src/styles.css", "src/agent-connections.js", "src/room-charter.js", "src/room-instructions.js", "src/reply-requests.js", "src/work-help.js", "src/help-offers.js", "src/inbox-client.js", "src/inbox-ui.js", "src/inbox-quarantine-ui.js", "src/account-setup-ui.js", "src/gmail-ui.js", "src/inbox-send-ui.js", "src/room-roster.js", "src/account-settings-ui.js", "src/auth-signin-ui.js", "src/agent-signin-ui.js", "src/agent-first-run.js", "src/invite-context.js", "src/request-access.js", "src/room-deep-link.js", "src/browser-session.js", "src/composer-files.js", "src/session-expiry.js", "src/agent-invite-ui.js", "src/referral-board.js", "src/land-queue-board.js", "src/open-questions-ui.js", "src/retention-ui.js", "src/board-ui.js", "src/board.css", "src/squads-ui.js", "src/join.js", "src/join-watchdog.js", "src/work-item-session.js", "src/work-loops.js", "src/work-recipes.js", "src/chat-suggestions.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "src/dm-consents.js", "src/friend-bond.js", "src/needs-attention.js", "src/updates-ui.js", "src/emoji.js", "src/emoji-catalog.js", "src/public-a11y.css", "connectors/muse.md", "compare/project-room-vs-slack.html", "compare/project-room-vs-discord.html", "compare/agent-collaboration-tool.html", "compare/multi-agent-workspace.html", "compare/ai-agent-coordination.html", "compare/project-room-vs-agent-room.html", "og/home.png", "og/fonts/Inter-Regular.ttf", "og/fonts/OFL.txt", "og/about.png", "og/offers.png", "og/compare.png", "og/receipts.png", "offline.html", "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-512.png", "icons/apple-touch-icon-180.png", "src/pwa-install.js", "src/push-ask.js", "scripts/install.sh", "docs/agents/index.html", "docs/agents/claude-code.html", "docs/agents/codex.html", "docs/agents/cursor.html", "docs/agents/cline.html", "docs/agents/vscode.html", "docs/agents/aider.html", "docs/agents/openai-agents-sdk.html", "docs/agents/langgraph.html", "docs/agents/crewai.html", "examples/integrations/claude-code/README.md", "examples/integrations/codex/README.md", "examples/integrations/cursor/README.md", "examples/integrations/cline/README.md", "examples/integrations/vscode/README.md", "examples/integrations/aider/README.md", "examples/integrations/openai-agents-sdk/README.md", "examples/integrations/langgraph/README.md", "examples/integrations/crewai/README.md", "operator.html", "src/operator-ui.js", "src/operator.css"];// Read the selected source's explicit asset declaration, never today's list for
 // an older schema. Parse only this repository's data-only array/spread/map shape;
 // do not execute packaged JavaScript. Missing advertised assets remain errors.
 function assetsFor(files) {
@@ -125,6 +119,7 @@ optional.push("src/mcp-server-card.mjs"); // one MCP server card rendered from t
 optional.push("server/mcp-hosted-tools.mjs"); // hosted MCP tool definitions (imported by server/mcp-room-profile.mjs and server/mcp-discovery.mjs)
 optional.push("server/mcp-discovery.mjs"); // binds the server card to those live lists (imported by server/mcp-http.mjs and deploy/room-entry.mjs)
 optional.push("server/mcp-arg-errors.mjs"); // structured MCP tools/call errors (imported by server/mcp-http.mjs and server/mcp-room-profile.mjs)
+optional.push("server/mcp-identity-mint.mjs"); // anonymous MCP identity mint (imported by server/mcp-http.mjs and server/mcp-room-profile.mjs)
 optional.push("server/mcp-room-profile.mjs"); // authenticated hosted MCP room tools (imported by server/http.mjs)
 optional.push("server/spend-grants.mjs"); // spend-primitive MVP: per-agent spend grants + charge-then-forward (imported by server/mcp-room-profile.mjs, server/mcp-full-profile.mjs, server/http.mjs)
 optional.push("server/a2a-jsonrpc.mjs"); // public A2A JSON-RPC join reply at /a2a (imported by server/http.mjs)
@@ -274,12 +269,15 @@ optional.push("src/session-expiry.js"); // Session-expiry locale rendering (impo
 optional.push("src/agent-invite-ui.js"); // People-rail invite-code mint (collaborate/contribute)
 optional.push("src/referral-board.js"); // People-rail referral board (imports agent-invite-ui for "my referral link" mint)
 optional.push("src/land-queue-board.js"); // Land-queue board card (imported by src/app.js)
+optional.push("src/open-questions-ui.js"); // Open-questions radar (imported by src/app.js)
+optional.push("src/retention-ui.js"); // Retention dashboard (imported by src/app.js)
 optional.push("src/board-ui.js", "src/board-mine.js", "src/board.css"); // Tasks › Board (imported by src/app.js)
 optional.push("src/squads-ui.js");
 optional.push("server/room-export-html.mjs");
 optional.push("server/room-export.mjs", "cloudflare/room-backup.mjs");
 optional.push("server/jobs.mjs"); // shared job registry (imported by cloudflare/job-heartbeat.mjs and server.mjs)
 optional.push("server/redact-read.mjs"); // read-time message tombstone (imported by server/http.mjs and the MCP room tools)
+optional.push("server/dm-event-visibility.mjs"); // SEC-19 DM follow-up visibility (imported by server/store.mjs and server/http.mjs)
 optional.push("about.html");
 optional.push("join.html"); // Self-serve join template (loaded by GET /join, not a raw URL)
 optional.push("favicon.svg", "icon.svg", "manifest.webmanifest", "src/public-a11y.css");
@@ -336,17 +334,18 @@ optional.push("LICENSE", "NOTICE", "THIRD_PARTY.md");
 optional.push("server/routes/dispatch.mjs", "server/routes/table.mjs", "server/routes/inbox.mjs", "server/routes/auth.mjs", "server/routes/desktop-auth.mjs", "server/routes/work-claims.mjs"); // batch RT: declarative route table (imported by server/http.mjs)
 // DX-1a begin: installer, agent docs, and the example pages those docs link to.
 const dx1aAssets = ["scripts/install.sh", "docs/agents/index.html", "docs/agents/claude-code.html", "docs/agents/codex.html", "docs/agents/cursor.html", "docs/agents/cline.html", "docs/agents/vscode.html", "docs/agents/aider.html", "docs/agents/openai-agents-sdk.html", "docs/agents/langgraph.html", "docs/agents/crewai.html", "examples/integrations/claude-code/README.md", "examples/integrations/codex/README.md", "examples/integrations/cursor/README.md", "examples/integrations/cline/README.md", "examples/integrations/vscode/README.md", "examples/integrations/aider/README.md", "examples/integrations/openai-agents-sdk/README.md", "examples/integrations/langgraph/README.md", "examples/integrations/crewai/README.md"];
-publicAssets.push(...dx1aAssets);
+
 optional.push(...dx1aAssets, "server/connect-snippets.mjs");
 // CP-ADMIN-1: operator console (unlinked, token-only).
 const operatorConsoleAssets = ["operator.html", "src/operator-ui.js", "src/operator.css"];
-publicAssets.push(...operatorConsoleAssets);
+
 optional.push(...operatorConsoleAssets);
 // DX-1a end
 optional.push("src/human-experience.js", "src/human-experience.css", "server/room-assistant.mjs", "server/routes/room-assistant.mjs", "client/assistant-tools.mjs");
 
 optional.push("server/trial-task-store.mjs", "server/trial-tasks.mjs", "server/vetting-receipts.mjs", "server/demigod-offers.mjs", "server/demigod-contracts.mjs", "server/buyer-signoff.mjs", "server/routes/record-rails.mjs", "server/demigod-policy-adapter.mjs", "server/settlement-router.mjs", "server/fee-credit-ledger.mjs");
 
+optional.push("src/spend-pricing-ui.js", "src/polls.js");
 export const allowed = new Set([...required, ...optional]);
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 // The contract stays exact: any mismatch fails. Each failure now names the

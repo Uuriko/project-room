@@ -8,13 +8,17 @@
 // Three decisions are worth stating, because each is easy to get wrong in a way
 // that shows up months later:
 //
-// 1. A push carries no room content. RFC 8291 encryption means the push service
-//    cannot read the payload, but the payload still lands on a device and is
-//    shown, often on a locked screen, to whoever is holding it. So a push says
-//    how much is waiting and where, never what was said. The member follows it
-//    back into the room and re-authenticates, which is the only place the
-//    content is ever released. tests/push-subscriptions.test.js asserts this
-//    against a deliberately quotable message rather than trusting the comment.
+// 1. A push carries no room content unless the member opts into previews.
+//    RFC 8291 encryption means the push service cannot read the payload, but
+//    the payload still lands on a device and is shown, often on a locked
+//    screen, to whoever is holding it. So a push says how much is waiting
+//    and where, never what was said — until the member turns their preview
+//    switch on, at which point richPushPayloadFor adds sender, a clipped
+//    preview, and a deep link, and only for that member in that room. The
+//    member follows it back into the room and re-authenticates, which is the
+//    only place the full content is ever released.
+//    tests/human-push.test.js asserts the default against a deliberately
+//    quotable message rather than trusting the comment.
 //
 // 2. Dead subscriptions are retired on the push service's word. A browser that
 //    has been cleared, reinstalled or revoked answers 404 or 410 forever. Left
@@ -135,6 +139,78 @@ export function encodePayload(payload) {
   const encoded = textEncoder.encode(JSON.stringify(payload));
   if (encoded.length > MAX_PAYLOAD_BYTES) refuse("push_payload_too_large", "That payload is larger than a push service will carry");
   return encoded;
+}
+
+// ---------------------------------------------------------------------------
+// Rich payloads (v2): sender, preview, deep link
+// ---------------------------------------------------------------------------
+
+const PREVIEW_MAX_CHARS = 140;
+const SENDER_NAME_MAX_CHARS = 80;
+const ROOM_NAME_MAX_CHARS = 80;
+
+const stripControls = value =>
+  String(value ?? "").replace(/[\r\n\x00-\u001f\x7f]/g, " ").trim();
+
+/**
+ * A lock-screen-safe snippet of a message body: control characters flattened,
+ * trimmed, and clipped. Returns null when nothing readable remains, so the
+ * caller falls back to the counts rendering instead of showing an empty body.
+ */
+export function previewSnippet(body, maxChars = PREVIEW_MAX_CHARS) {
+  const text = stripControls(body);
+  if (!text) return null;
+  return text.length > maxChars ? text.slice(0, maxChars) : text;
+}
+
+const shortField = (value, maxChars) => {
+  const text = stripControls(value);
+  if (!text) return null;
+  return text.length > maxChars ? text.slice(0, maxChars) : text;
+};
+
+/**
+ * Build the deep link a notification tap opens. It reuses the client's
+ * existing routes: ?room= selects the room on a cold open and
+ * #pr-record/message/<id> reveals the message once the room is loaded.
+ * Always relative and component-encoded; never an absolute URL, so a payload
+ * can never turn a tap into a navigation off the room's origin.
+ */
+export function pushDeepLink({ roomId, messageId } = {}) {
+  if (typeof roomId !== "string" || !roomId) refuse("push_payload_room_required", "A push names the room it is about");
+  const room = `/?room=${encodeURIComponent(roomId)}`;
+  if (typeof messageId !== "string" || !messageId) return room;
+  return `${room}#pr-record/message/${encodeURIComponent(messageId)}`;
+}
+
+/**
+ * Build the v2 push payload: sender, preview, and deep link on top of the
+ * v1 counts.
+ *
+ * `preview` is the member's preview preference. When it is not exactly true
+ * this returns the v1 counts-only payload unchanged — no sender name, no
+ * body, no URL — so turning preview off restores the original privacy
+ * posture byte for byte. Content only ever enters a payload through this
+ * flag, which the member controls per room.
+ */
+export function richPushPayloadFor({
+  roomId, roomName = null, unread, notifications = [], sequence = null,
+  kind = null, sender = null, body = null, messageId = null, preview = false
+} = {}) {
+  if (preview !== true) return pushPayloadFor({ roomId, unread, notifications, sequence });
+  if (typeof roomId !== "string" || !roomId) refuse("push_payload_room_required", "A push names the room it is about");
+  const base = pushPayloadFor({ roomId, unread, notifications, sequence });
+  const memberId = typeof sender?.memberId === "string" && sender.memberId ? sender.memberId : null;
+  const name = shortField(sender?.name, SENDER_NAME_MAX_CHARS);
+  return {
+    ...base,
+    v: 2,
+    kind: typeof kind === "string" && kind ? kind : null,
+    roomName: shortField(roomName, ROOM_NAME_MAX_CHARS),
+    sender: memberId || name ? { memberId, name } : null,
+    preview: previewSnippet(body),
+    url: pushDeepLink({ roomId, messageId })
+  };
 }
 
 // ---------------------------------------------------------------------------

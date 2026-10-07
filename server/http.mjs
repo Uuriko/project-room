@@ -1,4 +1,5 @@
 // JDOT-PUBLIC-CSP-RUM begin: public-page policy
+import { dmEventVisibility } from "./dm-event-visibility.mjs";
 import { publicPageCsp } from "../deploy/public-search.mjs";
 // JDOT-PUBLIC-CSP-RUM end
 import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchSitemap, PUBLIC_NOT_FOUND_HTML, PUBLIC_SEARCH_CSP, PUBLIC_PAGE_LASTMOD, reviewedPublicSearchPaths } from "../deploy/public-search.mjs";
@@ -32,7 +33,7 @@ import { buildOpportunitiesFeed } from "./opportunities.mjs"; // Public opportun
 import { telegramConfig, TelegramLiveStatus } from "./channel-adapters/telegram-config.mjs";
 import { TelegramTransport } from "./channel-adapters/telegram-transport.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
-import { agentErrorBody, errorCategory, ERROR_COMMAND_TYPE } from "../src/agent-error.mjs";
+import { agentErrorBody, errorCategory, mergeErrorDetail, ERROR_COMMAND_TYPE } from "../src/agent-error.mjs";
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { redactEventPage, redactEventRows, redactMessageTree, redactSnapshotState } from "./redact-read.mjs";
@@ -278,8 +279,27 @@ export function touchLruEntry(map, key, makeValue, capacity) {
   return value;
 }
 
+// A runtime package's reviewed public HTML is immutable for this server's
+// lifetime. Retain its successful bytes for BOTH page serving and sitemap
+// probes, so the map never advertises bytes the loader cannot actually serve.
+// The finite reviewed catalog bounds this cache; failed reads are not retained.
+function defaultAssetLoader(assetRoot) {
+  const cacheable = new Set([...publicSearchAssets(publicAssetPaths)]
+    .filter(([path]) => reviewedPublicSearchPaths.includes(path)).map(([, file]) => file));
+  const loaded = new Map();
+  return path => {
+    if (!cacheable.has(path)) return readFile(new URL(path, assetRoot));
+    if (!loaded.has(path)) {
+      const pending = readFile(new URL(path, assetRoot));
+      loaded.set(path, pending);
+      pending.catch(() => { if (loaded.get(path) === pending) loaded.delete(path); });
+    }
+    return loaded.get(path);
+  };
+}
+
 export function createRoomServer({ store, origin, assetRoot = new URL("../", import.meta.url), streamInterval = STREAM_INTERVAL_DEFAULT_MS, streamQueueCap = 65536, trustedLocalProxy = false,
-  loadAsset = path => readFile(new URL(path, assetRoot)), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
+  loadAsset = defaultAssetLoader(assetRoot), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
   resolveRequestSignal = () => null, syntheticInboxTransport = null, channelWebhooks = null, cookieNamespace = "",
   telegram = telegramConfig(), telegramStatus = store?.telegramLiveStatus ?? new TelegramLiveStatus(), channelTransports = null,
   googleAuth = null, gmailAuth = null, directSendFetch = null,
@@ -974,7 +994,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             // accepted), matching bearer()/carriesBearer() above.
             && /^bearer (?:pri_|rak_)/i.test(req.headers.authorization);
           const text = await readText(req, fileBody ? mcpAttachmentBodyBytes : JSON_BODY_BYTES, () => new ServiceError(413, "too_large", "Request is too large"));
-          return writeRoomMcpNode(req, res, url, { bodyText: text, roomMcp: hostedRoomMcp });
+          return writeRoomMcpNode(req, res, url, { bodyText: text, roomMcp: hostedRoomMcp, remoteAddress });
         }
         return writeRoomMcpNode(req, res, url);
       }
@@ -1919,11 +1939,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // --- end LEGAL ---
       if (url.pathname === "/sitemap.xml" && ["GET", "HEAD"].includes(req.method)) {
         // Confirm bytes exist before advertising an asset-backed canonical URL.
-        const available = [];
-        for (const [path, file] of publicSearchAssets(publicAssetPaths)) {
-          if (!reviewedPublicSearchPaths.includes(path)) continue;
-          try { await loadAsset(file); available.push(path); } catch { /* Unavailable pages are not advertised. */ }
-        }
+        const candidates = [...publicSearchAssets(publicAssetPaths)]
+          .filter(([path]) => reviewedPublicSearchPaths.includes(path));
+        // Independent immutable assets need no serial I/O round trips. Keep
+        // catalog order and use the same loader as page serving; a failed
+        // read still excludes the page rather than poisoning the whole map.
+        const availability = await Promise.allSettled(candidates.map(async ([, file]) => loadAsset(file)));
+        const available = candidates.filter((_, i) => availability[i].status === "fulfilled")
+          .map(([path]) => path);
         const receiptEntries = listPublicReceiptSitemap(store).map(item => ({
           path: item.path,
           lastmod: item.lastmod || PUBLIC_PAGE_LASTMOD,
@@ -3641,9 +3664,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const historyMessages = historyFloor ? indexHistoryMessages(store.room(roomId).state.messages) : null;
       const dmMessageVisible = message => messageInHistory(message, historyFloor)
         && (!message.toMemberId || message.authorId === viewerId || message.toMemberId === viewerId);
-      const dmEventVisible = event => eventInHistory(event, historyFloor, historyMessages) && (
-        event?.type !== "message.posted" || !event?.data?.toMemberId
-        || event.actorId === viewerId || event.data.toMemberId === viewerId);
+      // SEC-19: edits, deletes, redactions, reactions and pins of a DM follow
+      // the DM's own visibility (server/dm-event-visibility.mjs).
+      const dmPartyVisible = dmEventVisibility(viewerId, store.room(roomId).state.messages);
+      const dmEventVisible = event => eventInHistory(event, historyFloor, historyMessages) && dmPartyVisible(event);
       // --- end PRIV-2 ---
       // Bond receipts and peer DMs are ledger events, visible to the two
       // identities (bond metadata also to the room owner). Not room chat.
@@ -4936,14 +4960,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       try {
         errorOverride = discoverabilityErrorOverride({ pathname: requestPathname(req.url), httpStatus, code });
       } catch { /* base envelope keeps its shape on parse failure */ }
-      const errorBody = errorOverride
+      const errorBody = mergeErrorDetail(errorOverride
         ? { error: { code, message }, ...errorOverride, operationId, category }
-        : { ...agentErrorBody({ httpStatus, code, message, roomId, workItemId, commandType: error[ERROR_COMMAND_TYPE] }), operationId, category };
-      if (error.detail && typeof error.detail === "object" && !Array.isArray(error.detail)) {
-        for (const [key, value] of Object.entries(error.detail)) {
-          if (!["error", "status", "reason", "hint", "next", "operationId", "category"].includes(key)) errorBody[key] = value;
-        }
-      }
+        : { ...agentErrorBody({ httpStatus, code, message, roomId, workItemId, commandType: error[ERROR_COMMAND_TYPE] }), operationId, category },
+      error.detail);
       json(res, httpStatus, errorBody);
     }
   });

@@ -1,4 +1,5 @@
 import { canonicalReaction, foldedReactionMap, MAX_REACTIONS_PER_MESSAGE } from "./emoji.js";
+import { normalizePoll, pollOptionEmojis } from "./polls.js";
 import { assertMemberDisplayNameAvailable } from "./display-name-guard.js";
 import { proposalContext, nativeTextEvidence, reportedProducer, validateResultSegments } from "./work-packet.js";
 import { CHARTER_TYPE, charterFromEvent } from "./room-charter.js";
@@ -663,7 +664,10 @@ function validateEnvelope(incoming) {
       || Object.keys(action).some(field => field !== "claimId" && field !== "label")))) throw new Error(`Invalid ${key}`);
     // work_claim.updated deletion receipts name stranded dependents: claim ids.
     if (key === "dependents" && (!Array.isArray(value) || value.length > 64 || value.some(v => typeof v !== "string" || !validId(v)))) throw new Error(`Invalid ${key}`);
-    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "scopes", "acceptedScopes", "changed", "state", "pullRequest", "pullRequests", "blocks", "actions", "dependents"].includes(key)) throw new Error(`Invalid ${key}`);
+    // Polls (missing-features #5): a kind "poll" message carries a poll
+    // payload { question, options, allowMultiple }. The envelope guard admits
+    // the object key; the applier runs the full option validation.
+    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "scopes", "acceptedScopes", "changed", "state", "pullRequest", "pullRequests", "blocks", "actions", "dependents", "poll"].includes(key)) throw new Error(`Invalid ${key}`);
   }
 }
 
@@ -1139,7 +1143,9 @@ function postMessage(state, incoming) {
   if (incoming.data.toMemberId) (requestMode === "respond" ? knownMember : requireMember)(state, incoming.data.toMemberId);
   if (!redacted && typeof incoming.data.body !== "string") throw new Error("Message body must be text");
   // ACT-1a: receipt cards and starter choice buttons. Absent on ordinary posts.
-  if (incoming.data.kind != null && incoming.data.kind !== "receipt_card") throw new Error("Message kind must be receipt_card");
+  // Polls (missing-features #5): kind "poll" carries a validated poll payload.
+  if (incoming.data.kind != null && !["receipt_card", "poll"].includes(incoming.data.kind)) throw new Error("Message kind must be receipt_card or poll");
+  const poll = incoming.data.kind === "poll" ? normalizePoll(incoming.data) : null;
   if (incoming.data.kind === "receipt_card") {
     requireFields(incoming.data, ["claimId", "title", "closedBy", "deliveryMode", "evidence"]);
     if (!["result", "merged", "production"].includes(incoming.data.deliveryMode)) throw new Error("Invalid deliveryMode");
@@ -1183,7 +1189,8 @@ function postMessage(state, incoming) {
       deliveryMode: incoming.data.deliveryMode,
       evidence: incoming.data.evidence,
       ...(incoming.data.pullRequestUrl ? { pullRequestUrl: incoming.data.pullRequestUrl } : {})
-    } : {})
+    } : {}),
+    ...(poll ? { kind: "poll", poll } : {})
   });
   // "Also send to channel": a public thread reply also lands as a top-level
   // message in the thread's channel, in the same event. The derived id is
@@ -1431,6 +1438,21 @@ function setMessageReaction(state, incoming) {
   } else members.delete(actor.id);
   if (members.size) message.reactions[key] = [...members].sort();
   else delete message.reactions[key];
+  // Polls: one vote per member on single-choice polls. Setting a vote moves it
+  // off the other options; unvoting and allowMultiple polls leave the rest.
+  if (active && message.kind === "poll" && message.poll?.allowMultiple !== true) {
+    const optionEmojis = pollOptionEmojis(message);
+    if (optionEmojis.includes(key)) {
+      for (const other of optionEmojis) {
+        if (other === key) continue;
+        const voters = message.reactions[other];
+        if (!Array.isArray(voters) || !voters.includes(actor.id)) continue;
+        const rest = voters.filter(id => id !== actor.id);
+        if (rest.length) message.reactions[other] = rest;
+        else delete message.reactions[other];
+      }
+    }
+  }
 }
 
 function proposeWork(state, incoming) {

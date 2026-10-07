@@ -208,6 +208,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // Purely additive and intentionally NOT fenced — older writers have no code
   // path to them, and share_links.verify() plus hash-only storage are the gate.
   "share_link_codes",
+  // share_link_join_redemptions: per-(link, redemptionId) idempotency for the
+  // membership-reuse join path, which writes no share_link_joins row (the
+  // #770 lost-cookie gap). Purely additive and intentionally NOT fenced —
+  // older writers have no code path to it; the immutable triggers are the gate.
+  "share_link_join_redemptions",
   // dm_consents (directional DM-consent journal) + room_public_settings
   // (opt-in public read-only face settings) are purely additive and intentionally
   // NOT fenced: older writers have no code path to them, and each module

@@ -42,6 +42,7 @@ import { installHumanPush } from "./human-push.js";
 import { chatSuggestions, ASK_AGENT_AFTER_MS } from "./chat-suggestions.js";
 import { paintClaimChat } from "./board-ui.js";
 import { installHumanExperience } from "./human-experience.js";
+import { createSpendPricingKillSwitch } from "./spend-pricing-ui.js";
 
 // Keep a connector/native consent journey through password or provider login.
 // Only our exact consent path is a return target; never follow arbitrary URLs.
@@ -274,6 +275,8 @@ let agentConnectionsUI = null;
 let agentInvitesUI = null;
 let referralBoardUI = null;
 let landQueueUI = null;
+let openQuestionsUI = null;
+let retentionUI = null;
 let instructionsUI = null;
 let inboxUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
@@ -373,6 +376,8 @@ const client = new RoomClient({
     agentInvitesUI?.sync();
     referralBoardUI?.sync();
     landQueueUI?.sync();
+    openQuestionsUI?.sync();
+    retentionUI?.sync();
     if (presenceBoundary) startPresencePoll();
     if (firstSnapshot) {
       rememberLastRoom(roomId, undefined, state.room?.title);
@@ -460,6 +465,8 @@ const client = new RoomClient({
     agentInvitesUI?.reset();
     referralBoardUI?.reset();
     landQueueUI?.reset();
+    openQuestionsUI?.reset();
+    retentionUI?.reset();
     $("#room-more").open = false;
     $("#advanced-room-tools").open = false;
     instructionsUI?.reset();
@@ -620,6 +627,16 @@ landQueueUI = lazyDisclosure({ panel: $("#land-queue-panel"),
   load: () => import("./land-queue-board.js"),
   install: module => module.installLandQueueBoard({ client, getSession: () => session }),
   onError: () => notice("Could not load the land queue. Close and reopen to retry.", true) });
+// Open-questions radar (read-only view of the server's open-questions endpoint).
+openQuestionsUI = lazyDisclosure({ panel: $("#open-questions-panel"),
+  load: () => import("./open-questions-ui.js"),
+  install: module => module.installOpenQuestionsPanel({ client, getState: () => state, getSession: () => session }),
+  onError: () => notice("Could not load open questions. Close and reopen to retry.", true) });
+// Retention dashboard (read-only view of the work-claims retention endpoint).
+retentionUI = lazyDisclosure({ panel: $("#retention-panel"),
+  load: () => import("./retention-ui.js"),
+  install: module => module.installRetentionPanel({ client, getState: () => state, getSession: () => session }),
+  onError: () => notice("Could not load the retention dashboard. Close and reopen to retry.", true) });
 instructionsUI = installRoomInstructions({ client, getState: () => state, onSaved: text => notice(text) });
 // #662: owner "needs your attention" card (owner-gated; hidden for everyone else).
 // JDOT-MEMBER-PERMS-UI begin
@@ -5163,6 +5180,26 @@ function renderSpendAllowance() {
     $("#spend-allowance-input").value = allowance ? (allowance.allowanceCents / 100).toFixed(2) : "";
     $("#spend-period-input").value = String(allowance?.periodDays ?? 30);
   }
+  renderSpendPricingKillSwitch();
+}
+// Emergency spend-pricing kill switch (audit item 10): owner-only toggle in
+// the Billing / plan section, wired to the existing owner-gated POST
+// /api/rooms/:id/spend-pricing route. The toggle reads its state from the
+// SSE-carried projection (state.room.spendPricing); the server gate is the
+// real authorization. The container is created in JS so index.html stays
+// untouched.
+const spendPricingKillSwitch = createSpendPricingKillSwitch();
+function renderSpendPricingKillSwitch() {
+  const panel = $("#spend-panel");
+  if (!panel || !state?.room || !client) return;
+  let box = $("#spend-pricing-killswitch");
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "spend-pricing-killswitch";
+    box.className = "spend-pricing-killswitch";
+    panel.appendChild(box);
+  }
+  spendPricingKillSwitch.sync(box, { session, state, client, roomId: state.room.id });
 }
 function submitSpendAllowance(data, done, failureHint) {
   const form = $("#spend-allowance-form");

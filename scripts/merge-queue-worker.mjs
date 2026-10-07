@@ -7,7 +7,7 @@
 //
 // Usage:
 //   node scripts/merge-queue-worker.mjs status [--room muse-room]
-//   node scripts/merge-queue-worker.mjs tick [--room muse-room] [--live]
+//   node scripts/merge-queue-worker.mjs tick [--room muse-room] [--live] [--authorized-head <40-char SHA>]
 //   node scripts/merge-queue-worker.mjs sweep [--room muse-room]
 //
 // tick processes the active slot once. Dry-run is the default: it verifies
@@ -30,7 +30,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import https from "node:https";
 import { randomUUID } from "node:crypto";
-import { approvalGate, patchUnchanged } from "../server/merge-queue.mjs";
+import { approvalGate, patchUnchanged, queueCheckVerdict } from "../server/merge-queue.mjs";
 
 const ORIGIN = "https://room.trydemigod.com";
 const REPO = "Uuriko/project-room";
@@ -46,6 +46,12 @@ function argValue(name) {
 }
 const ROOM = argValue("--room") || "muse-room";
 const LIVE = process.argv.includes("--live");
+// Only the operator holding GitHub credentials supplies this exact-head
+// release authority. Queue members cannot set it through their Board claim.
+const AUTHORIZED_HEAD = argValue("--authorized-head");
+if (process.argv.includes("--authorized-head") && !/^[0-9a-f]{40}$/.test(AUTHORIZED_HEAD ?? "")) {
+  throw new Error("--authorized-head requires a full lowercase 40-character SHA");
+}
 const CHECK_TIMEOUT_MS = (Number(argValue("--check-timeout-minutes")) || 60) * 60 * 1000;
 
 function identitySecret() {
@@ -90,7 +96,8 @@ async function postRoom(body) {
 
 function gh(args, { encoding = "utf8" } = {}) {
   try {
-    return execFileSync("gh", args, { encoding, stdio: ["ignore", "pipe", "pipe"] }).trim();
+    const bound = args[0] === "pr" ? [...args, "--repo", REPO] : args;
+    return execFileSync("gh", bound, { encoding, stdio: ["ignore", "pipe", "pipe"] }).trim();
   } catch (e) {
     const msg = (e.stderr || e.message || "").toString().split("\n")[0];
     throw new Error(`gh ${args.slice(0, 3).join(" ")} failed: ${msg}`);
@@ -139,14 +146,15 @@ async function cmdSweep() {
 
 // Eject the active slot: release it and tell the room why. The lane fixes
 // the problem and re-enqueues; the queue keeps moving.
-// The Board claim is the review record the room uses (reviews[].basis, see
-// docs/WORK-CLAIMS.md); a missing or unreadable claim refuses, never passes.
+// The Board claim is required even for operator-authorized releases. A missing
+// or unreadable claim refuses; caller-provided exact-head authority can make
+// independent review advisory without authorizing arbitrary queued PRs.
 async function claimGate(claimId, headSha) {
   try {
     const data = await roomApi("GET", `/api/rooms/${ROOM}/work-claims/${encodeURIComponent(claimId)}`);
-    return approvalGate({ claim: data?.claim ?? data, headSha });
+    return approvalGate({ claim: data?.claim ?? data, headSha, authorizedHeadSha: AUTHORIZED_HEAD });
   } catch (err) {
-    return { ok: false, reason: `could not read Board claim ${claimId} to check approvals: ${err.message}` };
+    return { ok: false, reason: `could not read Board claim ${claimId} to check release authorization: ${err.message}` };
   }
 }
 
@@ -170,18 +178,13 @@ async function waitForChecks(pr, headSha, heartbeat) {
   const deadline = Date.now() + CHECK_TIMEOUT_MS;
   let lastBeat = 0;
   for (;;) {
-    const runs = ghJson(["api", `repos/${REPO}/commits/${headSha}/check-runs`, "--jq", "[.check_runs[] | {name, status, conclusion}]"]);
+    const runs = ghJson(["api", `repos/${REPO}/commits/${headSha}/check-runs?per_page=100`, "--jq", "[.check_runs[] | {id, name, status, conclusion}]"]);
     const legacy = ghJson(["api", `repos/${REPO}/commits/${headSha}/status`, "--jq", "[.statuses[] | {name: .context, state}]"]);
-    const states = {};
-    for (const r of runs) if (REQUIRED_CHECKS.includes(r.name)) states[r.name] = r.status === "completed" ? r.conclusion : r.status;
-    for (const s of legacy) if (REQUIRED_CHECKS.includes(s.name) && !(s.name in states)) states[s.name] = s.state;
-    const missing = REQUIRED_CHECKS.filter(c => !(c in states));
-    const failing = REQUIRED_CHECKS.filter(c => c in states && states[c] !== "success");
-    const pending = REQUIRED_CHECKS.filter(c => c in states && !["success", "failure", "cancelled", "timed_out"].includes(states[c]));
-    if (failing.length > 0) return { ok: false, reason: `required checks failing: ${failing.map(c => `${c}=${states[c]}`).join(", ")}` };
-    if (missing.length === 0 && pending.length === 0) return { ok: true };
+    const verdict = queueCheckVerdict({ runs, legacy, requiredChecks: REQUIRED_CHECKS });
+    if (verdict.state === "failure") return { ok: false, reason: verdict.reason };
+    if (verdict.state === "success") return { ok: true };
     if (Date.now() > deadline) {
-      return { ok: false, reason: `check timeout: still pending/missing after ${CHECK_TIMEOUT_MS / 60000}min (${[...pending, ...missing].join(", ")})` };
+      return { ok: false, reason: `check timeout: still pending/missing after ${CHECK_TIMEOUT_MS / 60000}min (${verdict.pending.join(", ")})` };
     }
     if (Date.now() - lastBeat > 5 * 60 * 1000) { await heartbeat(); lastBeat = Date.now(); }
     await new Promise(r => setTimeout(r, 60_000));
@@ -206,7 +209,7 @@ async function cmdTick() {
     console.log(`dry-run: slot for PR #${pr} ${headSha.slice(0, 7)} (claim ${claimId}) is held; verifying (reads only).`);
     console.log(`  PR state=${info.state} base=${info.baseRefName} head=${info.headRefOid.slice(0, 7)} mergeable=${info.mergeable} url=${info.url}`);
     const gate = await claimGate(claimId, headSha);
-    console.log(`  approval gate: ${gate.ok ? `ok (approved by ${gate.approvedBy.join(", ")})` : `REFUSED: ${gate.reason}`}`);
+    console.log(`  release gate: ${gate.ok ? (gate.authorization ?? `approved by ${gate.approvedBy.join(", ")}`) : `REFUSED: ${gate.reason}`}`);
     if (gate.ok && info.state === "OPEN" && info.headRefOid === headSha && info.baseRefName === BASE) {
       console.log(`dry-run plan for PR #${pr}:`);
       console.log(`  1. adopt the slot, heartbeat the lease`);
@@ -216,7 +219,7 @@ async function cmdTick() {
       console.log(`  5. gh pr merge --squash`);
       console.log(`  6. release the slot, post DONE to the room`);
     } else {
-      console.log("dry-run: PR would be ejected (no bound approval / not open / head moved / wrong base).");
+      console.log("dry-run: PR would be ejected (release gate refused / not open / head moved / wrong base).");
     }
     console.log("dry-run: no writes performed. Re-run with --live to execute.");
     return;
@@ -257,13 +260,14 @@ async function cmdTick() {
       return;
     }
     const reviews = ghJson(["pr", "view", String(pr), "--json", "reviews", "--jq", "[.reviews[] | .state]"]);
-    if (reviews.includes("CHANGES_REQUESTED")) {
+    if (reviews.includes("CHANGES_REQUESTED") && AUTHORIZED_HEAD !== headSha) {
       await eject(claimId, "open CHANGES_REQUESTED review (lander rule: merge only after rev-reviewer APPROVE on the exact head)", pr);
       return;
     }
+    if (reviews.includes("CHANGES_REQUESTED")) console.log("Review findings present; exact-head operator authorization confirms they were assessed. Review status alone is advisory.");
     const gate = await claimGate(claimId, headSha);
     if (!gate.ok) { await eject(claimId, gate.reason, pr); return; }
-    console.log(`approval gate: approved on ${headSha.slice(0, 7)} by ${gate.approvedBy.join(", ")}`);
+    console.log(`release gate on ${headSha.slice(0, 7)}: ${gate.authorization ?? `approved by ${gate.approvedBy.join(", ")}`}`);
     if (info.mergeable === "CONFLICTING") {
       // CONFLICTING at enqueue-time head vs main: the rebase below resolves
       // it; only unresolvable conflicts eject (caught at rebase).
@@ -287,7 +291,7 @@ async function cmdTick() {
     const runGit = (args, input) => execFileSync("git", args, { cwd: WORKER_DIR, encoding: "utf8", input, maxBuffer: 64 * 1024 * 1024 });
     const same = patchUnchanged(runGit, { oldBase, oldHead: headSha, newBase: `origin/${BASE}`, newHead });
     if (!same.ok) {
-      await eject(claimId, `the rebase changed the approved patch (patch-id ${same.before.slice(0, 12) || "empty"} -> ${same.after.slice(0, 12) || "empty"}): re-review the rebased head before merging`, pr);
+      await eject(claimId, `the rebase changed the authorized patch (patch-id ${same.before.slice(0, 12) || "empty"} -> ${same.after.slice(0, 12) || "empty"}): inspect and authorize the changed head before merging`, pr);
       return;
     }
     await heartbeat();
@@ -307,7 +311,7 @@ async function cmdTick() {
 
     // --- live: merge ----------------------------------------------------
     await heartbeat();
-    sh("gh", ["pr", "merge", String(pr), "--squash"]);
+    sh("gh", ["pr", "merge", String(pr), "--repo", REPO, "--squash", "--match-head-commit", newHead]);
     sh("git", ["fetch", "origin"], { cwd: WORKER_DIR });
     const mainSha = sh("git", ["rev-parse", `origin/${BASE}`], { cwd: WORKER_DIR });
     await roomApi("POST", `/api/rooms/${ROOM}/merge-queue/release`, { claimId });

@@ -70,6 +70,9 @@ if (githubApp.status !== 0) process.exit(githubApp.status || 1);
 // the CI early-exit that skips the unit suite.
 const contrast = spawnSync(process.execPath, ["scripts/design-contrast-check.mjs"], { stdio: "inherit" });
 if (contrast.status !== 0) process.exit(contrast.status || 1);
+// The app stylesheet's token blocks are generated from src/design-tokens.js.
+const tokensCss = spawnSync(process.execPath, ["scripts/sync-design-tokens-css.mjs", "--check"], { stdio: "inherit" });
+if (tokensCss.status !== 0) process.exit(tokensCss.status || 1);
 // CI runs the root suite in the dedicated unit job; local check runs it here.
 if (process.env.CI) {
   console.log("check: skipping node --test in CI (covered by test jobs)");

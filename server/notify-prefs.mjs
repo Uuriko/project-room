@@ -44,7 +44,7 @@ export function isQuietAt(quietHours, at = Date.now()) {
   if (endMin > startMin) return minutes >= startMin && minutes < endMin;
   return minutes >= startMin || minutes < endMin; // overnight wrap
 }
-const normalizeQuietHours = value => {
+export const normalizeQuietHours = value => {
   if (value === null || value === undefined) return null;
   check(typeof value === "object" && !Array.isArray(value), "quietHours must be an object or null");
   const { start, end, tz } = value;

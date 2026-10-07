@@ -81,17 +81,32 @@ test("edits and deletes release the old text at rest", t => {
 });
 
 test("the room size cap counts the stored row, so long patches stop filling it", t => {
-  const count = Math.ceil(PILOT_LIMITS.projectionBytes / 60000) + 2;
-  const fill = room => {
-    for (let i = 0; i < count; i += 1) {
-      try { room.post(`p${i}`, big(`p${i}`, 59000)); }
+  // Size the fill from the bytes actually posted (not a rounder figure), so the
+  // posted volume always exceeds the cap whatever PILOT_LIMITS.projectionBytes is.
+  const bodyChars = 59000;
+  const postedBytes = Buffer.byteLength(big("p0", bodyChars));
+  const count = Math.ceil(PILOT_LIMITS.projectionBytes / postedBytes) + 2;
+  const fill = (room, from = 0) => {
+    for (let i = from; i < count; i += 1) {
+      try { room.post(`p${i}`, big(`p${i}`, bodyChars)); }
       catch (error) { return { stoppedAt: i, code: error.code }; }
     }
     return { stoppedAt: null };
   };
   // A moving clock keeps the per-member message rate limit out of the way.
   const clock = () => { let at = Date.parse("2026-10-06T00:00:00Z"); return () => (at += 120000); };
-  assert.equal(fill(open(t, { bodiesAtRest: false, now: clock() })).code, "pilot_limit", "without bodies at rest the room fills up");
+  // Without bodies at rest, fast-forward to just under the cap with a synthetic
+  // inline filler (re-serialising ~1,100 real posts of a 64 MiB row is
+  // quadratic), then the last few real posts must hit the cap.
+  const fat = open(t, { bodiesAtRest: false, now: clock() });
+  const headroomPosts = 8;
+  const room = fat.store.room.bind(fat.store);
+  fat.store.room = id => { const result = room(id); return { sequence: result.sequence,
+    state: { ...result.state, capacityFixture: "x".repeat(PILOT_LIMITS.projectionBytes - headroomPosts * postedBytes) } }; };
+  const capped = fill(fat, count - headroomPosts - 2);
+  assert.equal(capped.code, "pilot_limit", "without bodies at rest the room fills up");
+  assert.ok(capped.stoppedAt < count, "the cap is reached before the posted volume runs out");
+  // With bodies at rest the full volume, which exceeds the cap, fits.
   const slim = open(t, { bodiesAtRest: true, now: clock() });
   assert.equal(fill(slim).stoppedAt, null);
   assert.ok(Buffer.byteLength(slim.raw()) < 64 * 1024);
@@ -161,4 +176,38 @@ test("every rooms.projection write goes through the serializer", () => {
   }
   assert.deepEqual(offenders, []);
   assert.ok(BODY_AT_REST_MIN_CHARS >= 256);
+});
+
+test("incident 2026-10-07: the 4 MiB guard refuses growth and bodies-at-rest restores writes without losing text", t => {
+  const clock = () => { let at = Date.parse("2026-10-06T00:00:00Z"); return () => (at += 120000); };
+  const bodyBytes = 45000;
+  const count = Math.ceil(PILOT_LIMITS.projectionBytes / bodyBytes) + 2;
+  const fat = open(t, { bodiesAtRest: false, now: clock() });
+  let refused = false;
+  for (let i = 0; i < count; i += 1) {
+    const before = fat.raw();
+    try { fat.post(`m${i}`, big(`m${i}`, bodyBytes)); }
+    catch (error) {
+      assert.equal(error.code, "pilot_limit");
+      assert.equal(fat.raw(), before, "refused growth must not alter the stored projection");
+      refused = true;
+      break;
+    }
+  }
+  assert.equal(refused, true, "inline bodies must reach the configured guard");
+  assert.ok(Buffer.byteLength(fat.raw()) <= PILOT_LIMITS.projectionBytes);
+  const messages = fat.store.room("commons").state.messages;
+  assert.ok(messages.length > 0, "the recovery fixture contains retained message bodies");
+
+  // The release lane enables ROOM_BODIES_AT_REST=1. The next write slims
+  // the stored row while retaining every previously accepted full body.
+  fat.reopen({ bodiesAtRest: true, now: clock() });
+  fat.post("recovery", big("recovery", bodyBytes));
+  assert.ok(Buffer.byteLength(fat.raw()) < PILOT_LIMITS.projectionBytes);
+  fat.reopen({ bodiesAtRest: true, now: clock() });
+  const recovered = fat.store.room("commons").state.messages;
+  assert.deepEqual(recovered.filter(m => m.id !== "recovery"), messages,
+    "all retained messages remain readable after slimming and restart");
+  assert.equal(recovered.find(m => m.id === "recovery").body, big("recovery", bodyBytes));
+  auditRecovery(fat.store);
 });

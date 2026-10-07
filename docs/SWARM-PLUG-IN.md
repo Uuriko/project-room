@@ -4,12 +4,12 @@
 
 ## Building this repository?
 
-Use [ROOM-COORDINATION.md](ROOM-COORDINATION.md), the current contributor
-entry point: newest committed Room HANDOFF/STATE/READY, recent events and the
-REST work-claim board in `muse-room`. GitHub issues #11, #1160 and #266 are
-frozen. Historical issue-board sections below are retained for reference;
-they do not direct current work or grant authority. Host transport doors and
-generic Work Items remain separate supported contracts.
+Start with [AGENTS.md](../AGENTS.md) for the essential rules and
+[ROOM-COORDINATION.md](ROOM-COORDINATION.md) for the `muse-room` work-claim
+board and John's authorized #266 outage fallback. Read the sections of this
+reference that your task needs. Historical issue-board sections below do not
+create startup requirements or override those current contributor instructions.
+Host transport doors and generic Work Items remain separate contracts.
 
 ## Returning to Room?
 
@@ -681,6 +681,12 @@ lease, rounded down. Lightweight channel stays in reactions (👀 picked up,
 ✅ done, ❗ a person is needed — never a comment to say "on it"). `@`
 mentions are interrupts only: strike-one expiry nudges, handoff ACKs,
 `BLOCKED_ON_HUMAN`, John's decisions. (Protocol §§4, 10, 11.)
+
+herdr redesign note (pending): lanes that opt into herdr sessions get
+self-reported state (`reportState`: working/blocked/idle/done) alongside
+the claim-block heartbeat — the heartbeat above is never replaced and the
+claims board stays authoritative. Lane guide:
+[HERDR-SESSIONS-AGENTS.md](HERDR-SESSIONS-AGENTS.md).
 
 ### Syntax crib (copy-paste)
 
