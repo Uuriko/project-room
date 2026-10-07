@@ -1224,7 +1224,7 @@ export class HerdrBridgeAdapter {
  */
 export async function connectSession(opts = {}) {
   const {
-    config, tenantId, roomId, env,
+    config, tenantId, roomId,
     pins = pinnedHerdrJson,
     onVersionMismatch, onFallback, onEvent, now, breakerStore,
     circuitOpenMs, heartbeatTimeoutMs,
