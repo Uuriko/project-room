@@ -608,6 +608,10 @@ export class HerdrBridgeAdapter {
     this._requireConnected();
     if (typeof text !== 'string') throw new Error('sendText: text must be a string');
     const { agentId, occupantId } = splitTarget(target, 'sendText');
+    if (opts.wait && (!Array.isArray(opts.wait.until) || opts.wait.until.length === 0
+      || typeof opts.wait.timeoutMs !== 'number' || !(opts.wait.timeoutMs >= 0))) {
+      throw new Error('sendText: opts.wait must be { until: non-empty AgentState[], timeoutMs: non-negative number }');
+    }
     const res = await this._call({
       adapterMethod: 'sendText',
       timeoutMs: BRIDGE_TIMEOUTS.send,
@@ -616,9 +620,6 @@ export class HerdrBridgeAdapter {
     });
     const result = { ok: res?.ok !== false, agentId, bytes: text.length };
     if (opts.wait) {
-      if (!Array.isArray(opts.wait.until) || typeof opts.wait.timeoutMs !== 'number') {
-        throw new Error('sendText: opts.wait must be { until: AgentState[], timeoutMs: number }');
-      }
       result.finalState = await this.waitForState(agentId, opts.wait.until, { timeoutMs: opts.wait.timeoutMs });
     }
     return result;
@@ -1339,7 +1340,7 @@ function validateResumeCommand(resumeCommand) {
   if (resumeCommand.length > MAX_RESUME_ARGS) {
     throw new Error(`resumeCommand exceeds the ${MAX_RESUME_ARGS}-arg cap (got ${resumeCommand.length})`);
   }
-  const bytes = resumeCommand.join(' ').length;
+  const bytes = new TextEncoder().encode(resumeCommand.join(' ')).byteLength;
   if (bytes > MAX_RESUME_BYTES) {
     throw new Error(`resumeCommand exceeds the ${MAX_RESUME_BYTES}-byte cap (got ${bytes})`);
   }

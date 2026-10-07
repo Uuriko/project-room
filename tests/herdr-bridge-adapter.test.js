@@ -855,7 +855,7 @@ test('K5: snapshot is authenticated and disconnect closes an active subscription
   } finally { await mock.close(); }
 });
 
-test('K6: wire errors retain taxonomy and never replay a rejected write', async t => {
+test('K6: wire errors retain taxonomy; only empty server failures get a bounded same-key retry', async t => {
   const mock = await startMockBridge();
   try {
     const { adapter } = await connectedAdapter(t, mock);
@@ -874,5 +874,59 @@ test('K6: wire errors retain taxonomy and never replay a rejected write', async 
       assert.equal(attempts.length, status === 500 ? 2 : 1, `bounded attempts for ${status}/${code}`);
       if (status === 500) assert.equal(attempts[0].headers['x-idempotency-key'], attempts[1].headers['x-idempotency-key']);
     }
+  } finally { await mock.close(); }
+});
+
+test('K7: invalid send-and-wait options are rejected before sending text', async t => {
+  const mock = await startMockBridge();
+  try {
+    const { adapter } = await connectedAdapter(t, mock);
+    for (const wait of [{ until: 'done', timeoutMs: 100 }, { until: [], timeoutMs: 100 },
+      { until: ['done'] }, { until: ['done'], timeoutMs: -1 }, { until: ['done'], timeoutMs: NaN }]) {
+      await assert.rejects(adapter.sendText('a', 'must not execute', { wait }), /wait|states|timeoutMs/);
+    }
+    assert.equal(mock.state.requests.filter(r => r.route === '/v1/send').length, 0,
+      'a rejected send-and-wait request must not execute text before failing');
+  } finally { await mock.close(); }
+});
+
+test('K8: invalid public inputs never reach the bridge; malformed handles and unknown agents are typed errors', async t => {
+  const mock = await startMockBridge();
+  try {
+    const { adapter } = await connectedAdapter(t, mock);
+    const before = mock.state.requests.length;
+    for (const call of [
+      () => adapter.spawnAgent({}), () => adapter.getAgent(''),
+      () => adapter.readPane('p', 'unknown-source'), () => adapter.sendText(null, 'x'),
+      () => adapter.reportMetadata('p', []), () => adapter.reportMetadata('p', { label: 42 }),
+      () => adapter.reportMetadata('p', { label: 'x' }, { ttlMs: -1 }),
+      () => adapter.subscribe([], () => {}), () => adapter.subscribe(['*'], null),
+      () => adapter.reportResume('p', { resumeCommand: ['🦊'.repeat(3000)] }),
+    ]) await assert.rejects(call());
+    assert.equal(mock.state.requests.length, before);
+    mock.state.handlers['/v1/spawn'] = ({ send }) => send(200, { id: 'a' });
+    await assert.rejects(adapter.spawnAgent({ command: 'claude' }), e => e.code === 'invalid_response');
+    mock.state.handlers['/v1/list'] = ({ send }) => send(200, {});
+    await assert.rejects(adapter.getAgent('unknown'), e => e.code === 'not_found');
+    assert.deepEqual(await adapter.listAgents(), []);
+    const result = await adapter.sendText('a', 'execute once', { wait: { until: ['done'], timeoutMs: 1000 } });
+    assert.equal(result.finalState, 'done');
+    assert.equal(mock.state.requests.filter(r => r.route === '/v1/send').length, 1);
+  } finally { await mock.close(); }
+});
+
+test('K9: caller abort cancels an in-flight wait without a second bridge request', async t => {
+  let arrived;
+  const started = new Promise(resolve => { arrived = resolve; });
+  const mock = await startMockBridge({ handlers: { '/v1/wait': ({ res }) => {
+    arrived(); return new Promise(resolve => res.once('close', resolve));
+  } } });
+  try {
+    const { adapter } = await connectedAdapter(t, mock);
+    const controller = new AbortController();
+    const waiting = adapter.waitForState('a', ['done'], { timeoutMs: 1000, signal: controller.signal });
+    const rejection = assert.rejects(waiting, /aborted/);
+    await started; controller.abort(); await rejection;
+    assert.equal(mock.state.requests.filter(r => r.route === '/v1/wait').length, 1);
   } finally { await mock.close(); }
 });
