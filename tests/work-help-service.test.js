@@ -117,9 +117,9 @@ for (const corruption of ["help", "basis", "definition", "access", "event-author
 test("withdrawal remains possible at event and projection capacity; reopening does not", t => {
   const f = setup(t); f.send();
   const state = structuredClone(f.store.room("commons").state); state.messages.push({ body: "x".repeat(PILOT_LIMITS.projectionBytes) });
-  f.store.db.prepare("UPDATE rooms SET sequence=10000,projection=? WHERE id='commons'").run(JSON.stringify(state));
+  f.store.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id='commons'").run(PILOT_LIMITS.eventsPerRoom, JSON.stringify(state));
   assert.throws(() => f.send(f.command({ scope: "Updated" })), { code: "pilot_limit" });
-  const withdrawal = f.withdraw(); assert.equal(f.send(withdrawal, "owner").sequence, 10001);
+  const withdrawal = f.withdraw(); assert.equal(f.send(withdrawal, "owner").sequence, PILOT_LIMITS.eventsPerRoom + 1);
   assert.equal(f.send(withdrawal, "owner").duplicate, true);
   assert.throws(() => f.send(), { code: "pilot_limit" });
   // Deliberately synthetic capacity state is not claimed to be a recoverable history.
