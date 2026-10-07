@@ -44,6 +44,12 @@ on:
         description: "Optional note for the receipt"
         required: false
         type: string
+      bodies_at_rest:
+        description: "Projection body mode on both doors: keep current value, 0 disable, 1 enable"
+        required: true
+        default: keep
+        type: choice
+        options: [keep, "0", "1"]
       probe_override:
         description: "Only when ROOM_ONBOARDING_GATE is 1: deploy even if the staging onboarding probe fails, recording this reason"
         required: false
@@ -181,6 +187,7 @@ jobs:
     timeout-minutes: 40
     env:
       SHA: ${{ needs.gate.outputs.sha }}
+      BODIES_AT_REST_MODE: ${{ inputs.bodies_at_rest || 'keep' }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
@@ -225,7 +232,13 @@ jobs:
           ROOM_AGENT_CARD_SIGNING_KEY: ${{ secrets.ROOM_AGENT_CARD_SIGNING_KEY }}
         run: |
           set -euo pipefail
-          pnpm exec wrangler deploy --env production --keep-vars --var ROOM_BODIES_AT_REST:0 | tee "$RUNNER_TEMP/deploy-prod.txt"
+          body_args=()
+          case "$BODIES_AT_REST_MODE" in
+            keep) ;;
+            0|1) body_args=(--var "ROOM_BODIES_AT_REST:$BODIES_AT_REST_MODE") ;;
+            *) echo "::error::invalid bodies-at-rest mode"; exit 1 ;;
+          esac
+          pnpm exec wrangler deploy --env production --keep-vars "${body_args[@]}" | tee "$RUNNER_TEMP/deploy-prod.txt"
           VERSION="$(grep -oE 'Current Version ID: [0-9a-f-]{36}' "$RUNNER_TEMP/deploy-prod.txt" | awk '{print $4}' | tail -1)"
           [ -n "$VERSION" ] || { echo "::error::could not read the new prod version id"; exit 1; }
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -236,7 +249,13 @@ jobs:
           ROOM_AGENT_CARD_SIGNING_KEY: ${{ secrets.ROOM_AGENT_CARD_SIGNING_KEY }}
         run: |
           set -euo pipefail
-          pnpm exec wrangler deploy --keep-vars --var ROOM_BODIES_AT_REST:0 | tee "$RUNNER_TEMP/deploy-entry.txt"
+          body_args=()
+          case "$BODIES_AT_REST_MODE" in
+            keep) ;;
+            0|1) body_args=(--var "ROOM_BODIES_AT_REST:$BODIES_AT_REST_MODE") ;;
+            *) echo "::error::invalid bodies-at-rest mode"; exit 1 ;;
+          esac
+          pnpm exec wrangler deploy --keep-vars "${body_args[@]}" | tee "$RUNNER_TEMP/deploy-entry.txt"
           VERSION="$(grep -oE 'Current Version ID: [0-9a-f-]{36}' "$RUNNER_TEMP/deploy-entry.txt" | awk '{print $4}' | tail -1)"
           [ -n "$VERSION" ] || { echo "::error::could not read the new entry version id"; exit 1; }
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -328,6 +347,7 @@ jobs:
               console.log(recoveryDescription(report));
               console.log("Schema floor is necessary, not proof of same-schema row/runtime compatibility. Schema migrations are not reversed.");
             '
+            echo "Bodies-at-rest mode on both doors: $BODIES_AT_REST_MODE"
             echo "Recovery step: ${ROLLBACK_OUTCOME:-not run}"
             echo "Onboarding probe gate: ${PROBE_VERDICT:-off}${PROBE_OVERRIDE:+ (override: $PROBE_OVERRIDE)}"
           } >> "$GITHUB_STEP_SUMMARY"

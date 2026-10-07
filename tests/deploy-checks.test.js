@@ -483,7 +483,7 @@ test("actual production workflow captures schemas before uploads and uses guarde
   assert.match(steps.find(step => step.name === "Receipt to muse-room").run, /recoveryDescription/);
   assert.doesNotMatch(steps.find(step => step.name === "Receipt to muse-room").run, /FAILED · rolled back/);
   for (const step of steps.filter(step => ["prod", "entry"].includes(step.id))) {
-    assert.match(step.run, /--keep-vars --var ROOM_BODIES_AT_REST:0/);
+    assert.match(step.run, /--keep-vars/);
     assert.ok(step.env.ROOM_AGENT_CARD_SIGNING_KEY);
   }
   assert.equal(workflow.concurrency["cancel-in-progress"], false);
@@ -536,4 +536,44 @@ const fs=require('node:fs'),a=process.argv.slice(2);fs.appendFileSync(process.en
   assert.equal(report.workers.entry.disposition, "unchanged");
   assert.ok(requests.every(path => path.endsWith("/api/version/worker")), "predeployment probes must never instantiate room storage");
   assert.ok(!readFileSync(log, "utf8").includes('"rollback"'));
+});
+
+// Release contract: execute the actual workflow shell with an argv-recording
+// Wrangler fixture. The old unconditional :0 breaks keep and enable modes.
+// This guards both doors without a production-only export or flag seam.
+test("production deploy shell preserves or explicitly selects bodies-at-rest on both doors", async t => {
+  const workflow = parseYaml(readFileSync(new URL("../.github/workflows/deploy-prod.yml", import.meta.url), "utf8"));
+  const dir = tempDir(t, "deploy-body-mode-");
+  const bin = join(dir, "bin"), log = join(dir, "argv.json");
+  mkdirSync(bin);
+  writeFileSync(join(bin, "pnpm"), `#!/usr/bin/env node
+const fs = require('node:fs'), args = process.argv.slice(2);
+if (args.slice(0, 3).join(' ') !== 'exec wrangler deploy') throw new Error('unexpected command');
+fs.writeFileSync(process.env.ARGV_LOG, JSON.stringify(args));
+console.log('Current Version ID: 11111111-1111-4111-8111-111111111111');
+`, { mode: 0o755 });
+  writeFileSync(join(dir, "package.json"), '{"type":"commonjs"}');
+  const steps = workflow.jobs.deploy.steps.filter(step => ["prod", "entry"].includes(step.id));
+  assert.equal(steps.length, 2);
+  for (const step of steps) {
+    for (const mode of ["keep", "1", "0"]) {
+      rmSync(log, { force: true });
+      await execFileAsync("bash", ["-c", step.run], { cwd: dir, env: {
+        ...process.env, PATH: `${bin}:${process.env.PATH}`, ARGV_LOG: log,
+        RUNNER_TEMP: dir, GITHUB_OUTPUT: join(dir, "output"), BODIES_AT_REST_MODE: mode,
+      } });
+      const expected = ["exec", "wrangler", "deploy", ...(step.id === "prod" ? ["--env", "production"] : []),
+        "--keep-vars", ...(mode === "keep" ? [] : ["--var", `ROOM_BODIES_AT_REST:${mode}`])];
+      assert.deepEqual(JSON.parse(readFileSync(log, "utf8")), expected, `${step.id}: ${mode}`);
+    }
+    rmSync(log, { force: true });
+    await assert.rejects(execFileAsync("bash", ["-c", step.run], { cwd: dir, env: {
+      ...process.env, PATH: `${bin}:${process.env.PATH}`, ARGV_LOG: log,
+      RUNNER_TEMP: dir, GITHUB_OUTPUT: join(dir, "output"), BODIES_AT_REST_MODE: "invalid",
+    } }));
+    assert.throws(() => readFileSync(log), { code: "ENOENT" }, "invalid mode must refuse before upload");
+  }
+  assert.equal(workflow.on.workflow_dispatch.inputs.bodies_at_rest.default, "keep");
+  assert.deepEqual(workflow.on.workflow_dispatch.inputs.bodies_at_rest.options, ["keep", "0", "1"]);
+  assert.equal(workflow.jobs.deploy.env.BODIES_AT_REST_MODE, "${{ inputs.bodies_at_rest || 'keep' }}");
 });

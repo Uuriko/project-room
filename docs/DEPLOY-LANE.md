@@ -14,18 +14,39 @@ Deploy only a commit that is on `main` and whose `test` and `schema-gate` push r
 
 1. Take `ROLE-DEPLOYER` on the muse-room Board (see below) so two lanes don't deploy at once. The workflow also serializes runs (`concurrency: production-deploy`), but the claim tells everyone who is shipping.
 2. Run **deploy-prod** with the full 40-character commit SHA:
-   - Actions tab → `deploy-prod` → Run workflow → `sha`, optional `reason`; or
+   - Actions tab → `deploy-prod` → Run workflow → `sha`, optional `reason`, and `bodies_at_rest` (`keep` by default); or
    - `gh workflow run deploy-prod.yml -R Uuriko/project-room -f sha=<40-hex> -f reason="<why>"`; or
    - REST `POST /repos/Uuriko/project-room/actions/workflows/deploy-prod.yml/dispatches` with `{"ref":"main","inputs":{"sha":"<40-hex>"}}`.
 3. The run:
    - refuses unless the commit is on `main` and `test` + `schema-gate` are green on it;
    - records each live Worker version, independently observed `/api/version/worker` source revision, and code schema parsed from that exact Git blob (artifact `pre-deploy-<sha>` and the run summary);
-   - pins `ROOM_BODIES_AT_REST=0` for this rollout on both Workers while preserving other variables;
+   - preserves the current `ROOM_BODIES_AT_REST` setting on both Workers by default; an explicit dispatch with `bodies_at_rest=0` or `1` sets that value on both doors while preserving other variables;
    - deploys `project-room` with `wrangler deploy --env production --keep-vars`, then the public entry `project-room-staging` with `wrangler deploy --keep-vars`;
    - smokes with `scripts/prod-deploy-smoke.mjs`: `/api/version` and `/api/version/worker` equal the sha on room.trydemigod.com and getdasha.com/room, `/api/health` ok, `/api/ready` ready, `/terms`, `/privacy` and `/` return 200, and `/.well-known/agent-card.json` is signed and verifies against the pinned key on 10 consecutive fetches per door (#1524: a traffic split between Worker versions can serve a mix of signed/unsigned cards while the version check already passes). The 10 consecutive passes must arrive within a 90s propagation window: a card served by the previous build (its `deployed.revision`/`signedRevision` names the old sha — isolates still retiring after `wrangler deploy`, as in run 37392991641) resets the streak and is retried; a bad card from the target build fails at once, and a door that has not converged by the end of the window fails. It then runs `scripts/live-smoke.mjs`;
    - on failure, first checks whether either deployment changed. It restores a prior Worker only when its independently recorded source/schema is known and its code schema is at least the candidate schema. Lower or unknown schemas leave the candidate deployed and report **ROLL FORWARD REQUIRED**. A rollback is reported as verified only after exact version allocation and source-revision readback;
    - posts a receipt to muse-room when the `ROOM_RECEIPT_TOKEN` secret exists.
 4. Post or confirm the receipt in muse-room and release `ROLE-DEPLOYER`.
+
+### Projection-cap recovery
+
+For the approved muse-room recovery, deploy the merged, dual-green recovery
+SHA with `bodies_at_rest=1` through this lane. For example:
+
+```sh
+gh workflow run deploy-prod.yml -R Uuriko/project-room -f sha=<40-hex> -f bodies_at_rest=1 -f reason="muse-room projection recovery"
+```
+
+Keep the application guard at 4 MiB. After the normal lane smoke passes, verify
+`/api/version` against the deployed SHA, a real message write, a real work-claim
+write, and full retained message-body reads in `muse-room`. Record the IDs and
+results in the receipt. A version check alone does not prove the room is
+writable. Do not drain queued posts until these checks pass.
+
+Normal/manual releases default to `keep`. Automatic releases also preserve the
+current setting; they never silently re-disable slimming. Selecting `0` restores
+inline projection writes and can hit the guard again; do not use it as recovery
+for a full room. Guarded code rollback remains subject to stored-row/runtime
+compatibility and does not itself prove body-mode recovery.
 
 ### Optional auto-deploy
 
