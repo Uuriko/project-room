@@ -3705,20 +3705,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     });
   }
   snapshot(token, roomId, expectedSessionBinding = null, view = "full", helpContext = false, offerContext = false) {
-    // Roles with hierarchy (missing-features #6): seed the invite-preset
-    // defaults and map preset members onto them on first sight, so rooms
-    // created before roles existed converge without a migration. Idempotent;
-    // backfill never mutates permission bits. Writes stay outside the
-    // query-only read transaction below; a missing room still 401/404s on
-    // the normal path.
-    try {
-      this.roomRoles.ensureRoomRoles(roomId);
-      const boot = this.room(roomId);
-      this.roomRoles.backfillRoleAssignments(roomId, Object.values(boot.state.members), boot.state.room.ownerId);
-    } catch (error) {
-      if (!(error instanceof ServiceError) || error.code !== "room_not_found") throw error;
-    }
     // One read transaction keeps sequence, projection, and audit tail at the same commit.
+    // Roles with hierarchy (missing-features #6): the snapshot is a pure
+    // read — role seeding/backfill converge on write paths (initialize,
+    // invitation redemption) and on the explicit GET /roles read, never
+    // here, so read probes stay byte-stable.
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       if (!["full", "work"].includes(view)) fail(422, "invalid_snapshot_view", "Choose a supported snapshot view");

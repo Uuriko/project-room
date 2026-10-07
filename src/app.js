@@ -343,6 +343,15 @@ const client = new RoomClient({
     if (presenceBoundary) stopPresencePoll();
     state = snapshot.state; session = identity;
     roomRoles = snapshot.roles ?? null;
+    if (firstSnapshot) {
+      // Roles with hierarchy: the roles read converges default roles and
+      // preset assignments for rooms created before roles existed; refresh
+      // once afterwards so the member list can render role chips.
+      const generation = client.generation;
+      client.request(client.path("/roles")).then(() => {
+        if (generation === client.generation && state) client.refresh();
+      }).catch(() => {});
+    }
     displayNames = createMemberDisplayNames(state.members);
     void refreshRequestRuns();
     offerContextVersion = snapshot.offerContextVersion === 1 ? 1 : null;

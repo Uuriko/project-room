@@ -46,7 +46,13 @@ async function readBody(ctx) {
 export async function listRoomRoles(ctx) {
   const store = ctx.store;
   const { roomId } = roomContext(ctx, false);
+  // Explicit roles read converges: seed the invite-preset defaults and map
+  // preset members onto them, so rooms created before roles existed heal on
+  // first sight. Idempotent; backfill never mutates permission bits. (The
+  // room snapshot itself stays a pure read so read probes stay byte-stable.)
   store.roomRoles.ensureRoomRoles(roomId);
+  const state = store.room(roomId).state;
+  store.roomRoles.backfillRoleAssignments(roomId, Object.values(state.members), state.room.ownerId);
   return ctx.json(ctx.res, 200, {
     roomId,
     roles: store.roomRoles.listRoles(roomId),
