@@ -83,6 +83,10 @@ export const KEEP = [
   // runtime-package registration). Not orphans; remove from KEEP when wired.
   "server/session-adapter.mjs",
   "server/session-adapter/herdr-bridge-adapter.mjs",
+  // herdr redesign: wired by the integration step (consumed by the
+  // supervision API + mount in http.mjs). Not orphans; remove from KEEP
+  // when wired.
+  "server/supervision-sqlite.mjs",
 ];
 
 const KEEP_SET = new Set(KEEP);
