@@ -279,8 +279,27 @@ export function touchLruEntry(map, key, makeValue, capacity) {
   return value;
 }
 
+// A runtime package's reviewed public HTML is immutable for this server's
+// lifetime. Retain its successful bytes for BOTH page serving and sitemap
+// probes, so the map never advertises bytes the loader cannot actually serve.
+// The finite reviewed catalog bounds this cache; failed reads are not retained.
+function defaultAssetLoader(assetRoot) {
+  const cacheable = new Set([...publicSearchAssets(publicAssetPaths)]
+    .filter(([path]) => reviewedPublicSearchPaths.includes(path)).map(([, file]) => file));
+  const loaded = new Map();
+  return path => {
+    if (!cacheable.has(path)) return readFile(new URL(path, assetRoot));
+    if (!loaded.has(path)) {
+      const pending = readFile(new URL(path, assetRoot));
+      loaded.set(path, pending);
+      pending.catch(() => { if (loaded.get(path) === pending) loaded.delete(path); });
+    }
+    return loaded.get(path);
+  };
+}
+
 export function createRoomServer({ store, origin, assetRoot = new URL("../", import.meta.url), streamInterval = STREAM_INTERVAL_DEFAULT_MS, streamQueueCap = 65536, trustedLocalProxy = false,
-  loadAsset = path => readFile(new URL(path, assetRoot)), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
+  loadAsset = defaultAssetLoader(assetRoot), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
   resolveRequestSignal = () => null, syntheticInboxTransport = null, channelWebhooks = null, cookieNamespace = "",
   telegram = telegramConfig(), telegramStatus = store?.telegramLiveStatus ?? new TelegramLiveStatus(), channelTransports = null,
   googleAuth = null, gmailAuth = null, directSendFetch = null,
@@ -1920,11 +1939,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // --- end LEGAL ---
       if (url.pathname === "/sitemap.xml" && ["GET", "HEAD"].includes(req.method)) {
         // Confirm bytes exist before advertising an asset-backed canonical URL.
-        const available = [];
-        for (const [path, file] of publicSearchAssets(publicAssetPaths)) {
-          if (!reviewedPublicSearchPaths.includes(path)) continue;
-          try { await loadAsset(file); available.push(path); } catch { /* Unavailable pages are not advertised. */ }
-        }
+        const candidates = [...publicSearchAssets(publicAssetPaths)]
+          .filter(([path]) => reviewedPublicSearchPaths.includes(path));
+        // Independent immutable assets need no serial I/O round trips. Keep
+        // catalog order and use the same loader as page serving; a failed
+        // read still excludes the page rather than poisoning the whole map.
+        const availability = await Promise.allSettled(candidates.map(async ([, file]) => loadAsset(file)));
+        const available = candidates.filter((_, i) => availability[i].status === "fulfilled")
+          .map(([path]) => path);
         const receiptEntries = listPublicReceiptSitemap(store).map(item => ({
           path: item.path,
           lastmod: item.lastmod || PUBLIC_PAGE_LASTMOD,

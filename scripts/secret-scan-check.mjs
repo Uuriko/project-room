@@ -127,6 +127,12 @@ export const ALLOWLIST = [
 // Exact non-secret tokens only. Unlike the line allowlist, these suppress
 // entropy noise without skipping credential-pattern checks or adjacent tokens.
 export const SAFE_ENTROPY_TOKENS = [
+  // Public release artifact URLs in the herdr pin manifest; they contain no
+  // credentials. Exact tokens retain scanning of all neighboring values.
+  "https://github.com/Uuriko/herdr/releases/download/demigod/pkg-v1/herdr-linux-aarch64",
+  "https://github.com/Uuriko/herdr/releases/download/demigod/pkg-v1/herdr-linux-x86_64",
+  "https://github.com/Uuriko/herdr/releases/download/demigod/pkg-v1/herdr-macos-aarch64",
+  "https://github.com/Uuriko/herdr/releases/download/demigod/pkg-v1/herdr-macos-x86_64",
   // Public operator runbook socket-path example; not an authentication token.
   "HERDR_SOCKET_PATH=/srv/herdr/tenants/T/socket/herdr.sock",
   "ROOM_WATCH_WATERMARK:-$HOME/workspace/goals/agent-swarm-coordination/hidden_files/room-watch-watermark.txt",

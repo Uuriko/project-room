@@ -19,9 +19,10 @@ start with [docs/INDEX.md](docs/INDEX.md) when you need a map.
    use Miniflare/workerd when the runtime boundary matters. Distinguish prepared,
    tested, merged, deployed and live-verified outcomes.
 4. **Land through PRs.** Never push directly to `main`. Merge one PR at a time
-   on the merge-slot only with fully green required hosted CI at the exact head,
-   exact-head reviewer APPROVE (or verified identical-patch approval carry),
-   and no open CHANGES REQUESTED.
+   on the merge-slot only with fully green required hosted CI at the exact head.
+   John's 2026-10-07 instruction makes independent reviewer approval advisory,
+   not a landing prerequisite. Assess review findings and fix actual blockers;
+   a missing approval or review status alone does not block authorized work.
 5. **Deploy through the shared lane.** Use the CI-built artifact, smoke checks
    and automatic rollback in [docs/DEPLOY-LANE.md](docs/DEPLOY-LANE.md).
 6. **Leave a usable receipt.** Post CLAIM/DONE with scope, PR and evidence.
