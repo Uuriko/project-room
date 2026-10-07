@@ -138,6 +138,25 @@ test("search can list messages that address you without a new inbox", () => {
   assert.equal(searchMessages(state, "@meow", 50, { viewer: maya }).total, 0);
 });
 
+// PRIV-1: a redacted message keeps its slot with a null body. Room search
+// must skip it as a body match, never throw on it — the search input handler
+// calls searchMessages directly, so a throw kills search for the whole room.
+test("search skips bodyless (redacted) messages instead of throwing", () => {
+  const state = {
+    members: {},
+    messages: [
+      { id: "redacted", body: null, redacted: true, authorId: "agent" },
+      { id: "missing", authorId: "agent" },
+      { id: "plain", body: "hello world", authorId: "agent" }
+    ]
+  };
+  const hits = searchMessages(state, "hello");
+  assert.equal(hits.total, 1);
+  assert.equal(hits.messages[0].id, "plain");
+  assert.equal(searchMessages(state, "world").total, 1);
+  assert.equal(searchMessages(state, "nothing matches this").total, 0);
+});
+
 test("navigation preserves independent reply targets and retry IDs; a new session has no old drafts", () => {
   const drafts = new ConversationDrafts();
   const pending = draftCommand(null, T.MESSAGE_POSTED, { body: "Thread thought", replyToId: "reply" });

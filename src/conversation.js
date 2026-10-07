@@ -365,7 +365,7 @@ export function searchMessages(state, query, limit = 50, { viewer = null, mentio
   }
   if (!term && !only && !pinnedOnly) return { messages: [], total: 0, mentionsOnly: false };
   const matches = !term ? pool : pool.filter(message =>
-    message.body.toLocaleLowerCase().includes(term) ||
+    (message.body ?? "").toLocaleLowerCase().includes(term) ||
     (state.members[message.authorId]?.displayName || "").toLocaleLowerCase().includes(term));
   return { messages: matches.slice(-limit).reverse(), total: matches.length, mentionsOnly: only };
 }
