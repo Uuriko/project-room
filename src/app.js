@@ -390,7 +390,6 @@ const client = new RoomClient({
       if (accountId) rememberMemberRoom(accountId, roomId, undefined, state.room?.title);
       if (session?.member?.id) rememberMemberRoom(session.member.id, roomId, undefined, state.room?.title);
       void refreshRoomFiles();
-      showRoomGuide();
       void refreshTriageNav(); // B7: reveals #nav-triage only when the herdr flag is on
       void refreshDmConsents();
       void refreshFriendBonds();
