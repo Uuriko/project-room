@@ -128,7 +128,34 @@ export function verifyReceipt(receipt, prevHash, key) {
 // vacuously. The first receipt must be a genesis receipt (seq 0 with a
 // prevHash of 64 zeros); every later receipt must continue the seq and link
 // onto the previous receipt's hash.
-export function verifyChain(receipts, key) {
+//
+// Truncation anchor (issue #1847): a hash chain is self-consistent for ANY
+// authentic prefix, so without an external anchor a truncated chain is
+// indistinguishable from a complete one. Pass `expectedLength` and/or
+// `expectedHeadHash` — the caller's external checkpoint (the published seq
+// and hash of the chain head, e.g. alongside the SECRETS-ROTATION.md §3.4
+// key-rotation checkpoint) — to make truncation detectable:
+//
+//   - expectedLength: the chain must hold exactly this many receipts. A
+//     shorter chain returns receipts.length (the first missing position);
+//     a longer chain returns expectedLength (the first receipt past the
+//     checkpoint).
+//   - expectedHeadHash: the last receipt's hash must equal this 64-char hex
+//     string, else the head index (receipts.length - 1) is returned; an
+//     empty chain returns 0.
+//
+// The anchor options are validated (TypeError on bad shapes) and the
+// internal chain check runs first: a broken link is reported at its own
+// index even when anchors are also supplied. Omitting the third argument
+// preserves the historical behavior exactly.
+export function verifyChain(receipts, key, anchors = {}) {
+  const { expectedLength, expectedHeadHash } = anchors ?? {};
+  if (expectedLength !== undefined && (!Number.isInteger(expectedLength) || expectedLength < 0)) {
+    throw new TypeError("verifyChain: expectedLength must be a non-negative integer");
+  }
+  if (expectedHeadHash !== undefined && !isHex64(expectedHeadHash)) {
+    throw new TypeError("verifyChain: expectedHeadHash must be a 64-char hex string");
+  }
   if (!Array.isArray(receipts)) return 0;
   for (let i = 0; i < receipts.length; i++) {
     const receipt = receipts[i];
@@ -141,6 +168,13 @@ export function verifyChain(receipts, key) {
       if (receipt.seq !== prev.seq + 1) return i;
       if (!verifyReceipt(receipt, prev.hash, key)) return i;
     }
+  }
+  if (expectedLength !== undefined && receipts.length !== expectedLength) {
+    return Math.min(receipts.length, expectedLength);
+  }
+  if (expectedHeadHash !== undefined) {
+    if (receipts.length === 0) return 0;
+    if (!safeEqualHex(receipts[receipts.length - 1].hash, expectedHeadHash)) return receipts.length - 1;
   }
   return -1;
 }

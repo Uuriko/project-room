@@ -176,3 +176,62 @@ test("timing-safe comparison does not accept prefix-forged values", () => {
   tampered.signature = tampered.signature.slice(0, 32); // not 64 hex chars
   assert.equal(verifyReceipt(tampered, receipts[0].hash, KEY), false);
 });
+
+// #1847: a truncated chain is an authentic prefix, so plain verifyChain
+// cannot tell it apart from a complete chain. The expectedLength /
+// expectedHeadHash anchors (the caller's external checkpoint) make
+// truncation detectable without changing the default behavior.
+test("truncated chain is detected with the expectedLength anchor", () => {
+  const full = buildChain(5);
+  const truncated = full.slice(0, 3);
+  assert.equal(verifyChain(truncated, KEY), -1, "unauthenticated prefix verifies without an anchor");
+  assert.equal(verifyChain(truncated, KEY, { expectedLength: 5 }), 3);
+});
+
+test("truncated chain is detected with the expectedHeadHash anchor", () => {
+  const full = buildChain(5);
+  const truncated = full.slice(0, 3);
+  assert.equal(verifyChain(truncated, KEY, { expectedHeadHash: full[4].hash }), 2);
+});
+
+test("complete chain passes when anchors match the checkpoint", () => {
+  const full = buildChain(5);
+  assert.equal(
+    verifyChain(full, KEY, { expectedLength: 5, expectedHeadHash: full[4].hash }),
+    -1
+  );
+});
+
+test("mismatched head hash is rejected at the head index", () => {
+  const full = buildChain(5);
+  assert.equal(verifyChain(full, KEY, { expectedHeadHash: "ff".repeat(32) }), 4);
+});
+
+test("chain extending past expectedLength is rejected at the checkpoint index", () => {
+  const full = buildChain(5);
+  assert.equal(verifyChain(full, KEY, { expectedLength: 3 }), 3);
+});
+
+test("anchor options are validated", () => {
+  const full = buildChain(3);
+  assert.throws(() => verifyChain(full, KEY, { expectedLength: -1 }), TypeError);
+  assert.throws(() => verifyChain(full, KEY, { expectedLength: 2.5 }), TypeError);
+  assert.throws(() => verifyChain(full, KEY, { expectedLength: "3" }), TypeError);
+  assert.throws(() => verifyChain(full, KEY, { expectedHeadHash: "not-hex" }), TypeError);
+  assert.throws(() => verifyChain(full, KEY, { expectedHeadHash: "ab".repeat(16) }), TypeError);
+});
+
+test("empty chain honors the anchors", () => {
+  assert.equal(verifyChain([], KEY, { expectedLength: 0 }), -1);
+  assert.equal(verifyChain([], KEY, { expectedLength: 2 }), 0);
+  assert.equal(verifyChain([], KEY, { expectedHeadHash: "ab".repeat(32) }), 0);
+});
+
+test("internal chain failure still wins over anchor mismatch", () => {
+  const receipts = buildChain(5);
+  const tampered = structuredClone(receipts[2]);
+  tampered.entry.event.data.messageId = "m_attacker";
+  const chain = receipts.map((r, i) => (i === 2 ? tampered : r));
+  // The broken link at index 2 is reported, not the anchor mismatch.
+  assert.equal(verifyChain(chain, KEY, { expectedLength: 5, expectedHeadHash: receipts[4].hash }), 2);
+});

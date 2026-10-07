@@ -212,6 +212,9 @@ closed.
 ### Audit-receipt signing key (F020)
 - [ ] `verifyChain` passes across the checkpoint with the correct key per
       segment (old key for `seq` < checkpoint, new key at/above)
+- [ ] Chain head is anchored at the checkpoint: the published `seq` + `hash`
+      of the last receipt are passed as `verifyChain(..., { expectedLength,
+      expectedHeadHash })` so a truncated chain cannot verify (#1847)
 - [ ] Old key can no longer sign (caller-side enforcement confirmed)
 
 ## 7. Not covered / out of scope
