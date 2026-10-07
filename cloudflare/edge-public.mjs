@@ -9,7 +9,7 @@ import { discoveryDoc, EDGE_DOOR_HOSTS, ROOM_ORIGIN, SKILLS_CATALOG_PATH } from 
 import { buildOpenApiJson } from '../server/discoverability.mjs';
 import { MCP_SERVER_CARD_PATH, MCP_DISCOVERY_CACHE_CONTROL, MCP_SERVER_CARD_CORS } from '../src/mcp-server-card.mjs';
 
-const APP_CSP = "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
+const APP_CSP = "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
 const ASSET_CACHE_MAX = 96;
 const assetCache = new Map();
 let openApiCache = null;
@@ -18,6 +18,8 @@ const assetType = path => path.endsWith('.js') ? 'text/javascript'
   : path.endsWith('.css') ? 'text/css'
   : path.endsWith('.html') ? 'text/html'
   : path.endsWith('.png') ? 'image/png'
+  : path.endsWith('.ttf') ? 'font/ttf'
+  : path.endsWith('.txt') ? 'text/plain'
   : path.endsWith('.svg') ? 'image/svg+xml'
   : path.endsWith('.webmanifest') ? 'application/manifest+json'
   : 'text/markdown; charset=utf-8';
@@ -210,7 +212,7 @@ async function assetResponse(request, env, url) {
     headers.set('Content-Type', 'text/plain; charset=utf-8');
     return new Response(request.method === 'HEAD' ? null : 'Not found\n', { status: 404, headers });
   }
-  const contentType = type.startsWith('image/') && !type.includes('svg') ? type : (type.includes('charset') ? type : `${type}; charset=utf-8`);
+  const contentType = (type.startsWith('image/') && !type.includes('svg')) || type.startsWith('font/') ? type : (type.includes('charset') ? type : `${type}; charset=utf-8`);
   headers.set('Content-Type', contentType);
   headers.set('Content-Length', String(bytes.byteLength));
   return new Response(request.method === 'HEAD' ? null : bytes, { status: 200, headers });

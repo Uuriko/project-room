@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
 import { build } from 'esbuild';
 import { Miniflare } from 'miniflare';
 
@@ -47,6 +48,8 @@ test('static assets and discovery documents do not enter the Durable Object', as
   });
   const origin = 'https://room.example.test';
   let assetFetches = 0;
+  const wordmarkFont = readFileSync(new URL('../og/fonts/Inter-Regular.ttf', import.meta.url));
+  const fontLicense = readFileSync(new URL('../og/fonts/OFL.txt', import.meta.url));
   const mf = new Miniflare({
     modules: true, script: bundled.outputFiles[0].text,
     compatibilityDate: '2026-07-30', compatibilityFlags: ['nodejs_compat'],
@@ -56,6 +59,8 @@ test('static assets and discovery documents do not enter the Durable Object', as
       ASSETS: async request => {
         assetFetches += 1;
         const path = new URL(request.url).pathname;
+        if (path === '/og/fonts/Inter-Regular.ttf') return new Response(wordmarkFont);
+        if (path === '/og/fonts/OFL.txt') return new Response(fontLicense);
         const bodies = { '/index.html': '<div id="message-input">', '/about.html': 'about-page', '/src/app.js': 'app-js', '/manifest.webmanifest': '{"name":"Room"}' };
         if (!bodies[path]) return new Response(null, { status: 404 });
         return new Response(bodies[path]);
@@ -75,6 +80,7 @@ test('static assets and discovery documents do not enter the Durable Object', as
     assert.match(page.headers.get('link'), /llms\.txt/);
     assert.equal(page.headers.get('x-robots-tag'), 'all');
     assert.match(page.headers.get('content-security-policy'), /script-src 'self'/);
+    assert.match(page.headers.get('content-security-policy'), /(?:^|;\s*)font-src 'self'(?:;|$)/, 'the actual Worker policy permits its same-origin wordmark font');
     assert.equal(page.headers.get('permissions-policy'), 'camera=(), microphone=(), geolocation=(), payment=(), usb=()');
     assert.equal(page.headers.get('cross-origin-opener-policy'), 'same-origin');
 
@@ -100,6 +106,21 @@ test('static assets and discovery documents do not enter the Durable Object', as
     assert.equal(alias.status, 301);
     assert.equal(alias.headers.get('location'), '/about');
     assert.equal(alias.headers.get('x-test-do-fetches'), '0');
+
+    const fontResponse = await call('/og/fonts/Inter-Regular.ttf');
+    assert.equal(fontResponse.status, 200);
+    assert.equal(fontResponse.headers.get('content-type'), 'font/ttf');
+    assert.equal(fontResponse.headers.get('x-test-do-fetches'), '0');
+    assert.deepEqual(Buffer.from(await fontResponse.arrayBuffer()), wordmarkFont, 'Worker preserves the actual font bytes');
+    const fontHead = await call('/og/fonts/Inter-Regular.ttf', { method: 'HEAD' });
+    assert.equal(fontHead.status, 200);
+    assert.equal(fontHead.headers.get('content-type'), 'font/ttf');
+    assert.equal(fontHead.headers.get('content-length'), String(wordmarkFont.byteLength));
+    assert.equal((await fontHead.arrayBuffer()).byteLength, 0);
+    const licenseResponse = await call('/og/fonts/OFL.txt');
+    assert.equal(licenseResponse.status, 200);
+    assert.match(licenseResponse.headers.get('content-type'), /^text\/plain/);
+    assert.deepEqual(Buffer.from(await licenseResponse.arrayBuffer()), fontLicense);
 
     const script = await call('/src/app.js');
     assert.equal(script.headers.get('x-test-do-fetches'), '0');
