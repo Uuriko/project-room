@@ -1,0 +1,45 @@
+# Lander rule as code: a PR merges only after a reviewer's explicit APPROVE on
+# the EXACT head SHA. This workflow posts a check run named exactly
+# `lander-gate` (the name branch protection will require) — on
+# `pull_request` for the early signal, and on `merge_group` for the
+# enforcement point, re-verified against the exact prospective merge state
+# (heads move while a PR sits in the queue).
+#
+# The gate itself lives in scripts/lander-gate.mjs. The verdict is posted via
+# the Checks API so the required-check name is exactly `lander-gate` (an
+# Actions job's own check run would be `lander-gate / <job>`).
+#
+# Backward compatible by construction: this workflow only *reports* a check
+# run. Nothing is blocked until `lander-gate` is added to the branch
+# protection required checks (and the merge queue enabled) — a separate
+# settings tap. See docs/MERGE-QUEUE-DESIGN.md §2 and the research at
+# ~/workspace/research_notes/merge-queue-designs-2026-10-06/report.md §3.3.
+name: lander-gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
+    types: [checks_requested]
+
+permissions:
+  contents: read
+  pull-requests: read
+  checks: write
+
+concurrency:
+  group: lander-gate-${{ github.event.pull_request.number || github.event.merge_group.head_sha }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: lander-gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - run: node scripts/lander-gate.mjs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
