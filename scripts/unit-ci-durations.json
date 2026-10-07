@@ -585,6 +585,7 @@
   "tests/recovery-comparison.test.js": 300000,
   "tests/recovery.test.js": 229341,
   "tests/referral-board.test.js": 6242,
+  "tests/referral-invite-email-gate.test.js": 12000,
   "tests/referral-invites.test.js": 94831,
   "tests/referrals.test.js": 70452,
   "tests/regex-parity.test.js": 3708,
