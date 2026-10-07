@@ -456,7 +456,11 @@ export class RoomClient {
           const snapshot = await this.request(this.path(), { offerContext: true });
           if (generation !== this.generation || !this.session) return;
           if (!this.ownsResponse(snapshot)) { this.endAccess(); return; }
-          if (snapshot.sequence >= this.sequence) { this.sequence = snapshot.sequence; this.onSnapshot(snapshot, this.session); }
+          // A snapshot older than our cursor means the room history was replaced
+          // (import) and the sequence regressed: adopt the new head instead of
+          // discarding it. Sequences are monotonic otherwise, so keeping the
+          // old cursor would wedge the stream on 409 cursor_ahead forever.
+          this.sequence = snapshot.sequence; this.onSnapshot(snapshot, this.session);
         } while (flight.again || flight.sequence > this.sequence);
       } catch (error) {
         if (generation !== this.generation) return;
