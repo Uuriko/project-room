@@ -7,6 +7,11 @@ on:
   push:
     branches: [main]
 
+# A newer push to the same PR cancels the older run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   quarantine-check:
     runs-on: ubuntu-latest
@@ -21,7 +26,10 @@ jobs:
   # Non-blocking lane for quarantined tests (docs/FLAKY-QUARANTINE.md step 3):
   # runs the quarantined list with QUARANTINE_RUN=1 and reports, but never
   # fails the PR — a red result here is honest signal for the repair owner.
+  # Runs on main pushes only: it never gates a PR, and a full npm ci +
+  # Playwright install per PR push was occupying runners other PRs need.
   quarantined-tests:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
