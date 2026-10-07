@@ -526,6 +526,7 @@
   "tests/password-reset.test.js": 38961,
   "tests/peer-dm-room-scope.test.js": 37025,
   "tests/perf-budget.test.js": 32477,
+  "tests/perm-matrix-channel.test.js": 1297,
   "tests/persisted-row.test.js": 5959,
   "tests/pinned-messages.test.js": 47059,
   "tests/pins-dm-visibility.test.js": 39377,
