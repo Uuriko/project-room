@@ -211,3 +211,25 @@ test("incident 2026-10-07: the 4 MiB guard refuses growth and bodies-at-rest res
   assert.equal(recovered.find(m => m.id === "recovery").body, big("recovery", bodyBytes));
   auditRecovery(fat.store);
 });
+
+test("the projection-cap rejection names the recovery (ask the owner, or retry later)", t => {
+  // 2026-10-07 muse-room incident: every state-changing write 409'd with
+  // "Room projection limit reached; no data was changed" — a dead end that
+  // named no recovery. The message must tell the user what to do.
+  const clock = () => { let at = Date.parse("2026-10-06T00:00:00Z"); return () => (at += 120000); };
+  const room = open(t, { bodiesAtRest: false, now: clock() });
+  const bodyChars = 59000;
+  const postedBytes = Buffer.byteLength(big("p0", bodyChars));
+  const headroomPosts = 1;
+  const store = room.store;
+  const boundRoom = store.room.bind(store);
+  store.room = id => { const result = boundRoom(id); return { sequence: result.sequence,
+    state: { ...result.state, capacityFixture: "x".repeat(PILOT_LIMITS.projectionBytes - headroomPosts * postedBytes) } }; };
+  let failure = null;
+  try { room.post("p0", big("p0", bodyChars)); } catch (error) { failure = error; }
+  assert.ok(failure, "the projection cap refuses the write");
+  assert.equal(failure.code, "pilot_limit");
+  assert.match(failure.message, /no data was changed/, "keeps the no-write guarantee");
+  assert.match(failure.message, /room owner/i, "names asking the room owner as the recovery");
+  assert.match(failure.message, /try again later/i, "names retrying later as the recovery");
+});
