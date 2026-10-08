@@ -81,7 +81,7 @@ import { membershipDelegationJournalSchema, MembershipDelegationJournal } from "
 import { membershipDelegationSchema, MembershipDelegation } from "./membership-delegation.mjs";
 import { ownerDelegateSchema, OwnerDelegates } from "./owner-delegates.mjs";
 import { agentRoomSchema } from "./agent-rooms.mjs";
-import { directSendSchema } from "./inbox-outbox.mjs";
+import { directSendSchema, ensureDirectSendTable } from "./inbox-outbox.mjs";
 import { inboxStitchSchema } from "./inbox-stitch-store.mjs";
 import { ensureAttachmentSchema, verifyAttachmentSchema } from "./attachment-schema.mjs";
 import { RoomAttachmentBytes } from "./room-attachment-bytes.mjs";
@@ -799,6 +799,19 @@ export function validateCommand(command) {
   }
   if (command.type === T.MESSAGE_POSTED && (typeof command.data.body !== "string" || !command.data.body.trim())) fail(422, "invalid_command", messageBody);
   const messageBodyCommand = command.type === T.MESSAGE_POSTED || command.type === T.MESSAGE_EDITED;
+  // QA8 (2026-10-08, gap-hunt D-M2): message bodies accepted NUL and bidi
+  // override characters verbatim, so "\u202Eexe.txt" rendered as "txt.exe"
+  // in the room UI and in agent transcripts, and NUL broke downstream C-string
+  // and CSV consumers. The Board already refuses both (work-claim-integrity);
+  // message bodies now refuse NUL, unpaired surrogates and the embedding,
+  // override and isolate controls (U+202A-202E, U+2066-2069). LRM/RLM marks,
+  // tabs, line breaks, ANSI escapes and emoji joiners stay allowed.
+  if ((messageBodyCommand || command.type === T.DM_POSTED) && typeof command.data.body === "string") {
+    const body = command.data.body;
+    if (body.includes("\u0000")) fail(422, "invalid_command", "body must not contain NUL (U+0000) characters");
+    if (!body.isWellFormed()) fail(422, "invalid_command", "body must not contain unpaired surrogate characters");
+    if (/[\u202A-\u202E\u2066-\u2069]/u.test(body)) fail(422, "invalid_command", "body must not contain bidirectional embedding, override or isolate characters (U+202A-202E, U+2066-2069)");
+  }
   if (messageBodyCommand && typeof command.data.body === "string" && command.data.body.length > MAX_MESSAGE_BODY_CHARS)
     fail(422, "invalid_command", `body must be at most ${MAX_MESSAGE_BODY_CHARS} characters`);
   // Message commands carry a long body. Every other command stays at 16 KiB.
@@ -1742,7 +1755,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Direct channel-send journal: purely additive, intentionally outside
       // the writer fence (see unfencedAdditiveTables). Applied here (not only in
       // createRoomServer) so store-only fixtures and the recovery audit see it.
-      this.db.exec(directSendSchema);
+      // ensureDirectSendTable (not a bare schema exec) so existing databases
+      // converge on the request_id idempotency column and its unique index.
+      ensureDirectSendTable(this.db);
       // Cross-channel thread stitching (task #19): hash-only identity index.
       // Purely additive, intentionally outside the writer fence like the
       // journals above — older writers have no code path to these tables.
@@ -4176,16 +4191,24 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         }
       }
       if (kind === "all" || kind === "work") {
+        const workHits = [];
         for (const w of Object.values(room.state.workItems ?? {})) {
           const haystack = `${w.title ?? ""} ${w.description ?? ""} ${w.definitionOfDone ?? ""}`.toLowerCase();
           if (haystack.includes(needle)) {
             result.total += 1;
-            result.workItems.push({ id: w.id, title: w.title, state: w.state, accountableMemberId: w.accountableMemberId });
-            // Keep the newest `limit` matches (still chronological), like the
-            // messages loop above: the first ones leave every newer match
-            // unreachable — there is no offset, and limit tops out at 200.
-            if (result.workItems.length > limit) result.workItems.shift();
+            workHits.push(w);
           }
+        }
+        // Keep the newest `limit` matches (still chronological), like the
+        // messages loop above: the first ones leave every newer match
+        // unreachable — there is no offset, and limit tops out at 200.
+        // Order by createdAt, NOT by object key order: JS enumerates
+        // integer-like keys ("2","10") in ascending numeric order regardless
+        // of insertion, so key order is not creation order for numeric ids
+        // (validId permits them). Stable sort keeps insertion order on ties.
+        workHits.sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
+        for (const w of workHits.slice(-limit)) {
+          result.workItems.push({ id: w.id, title: w.title, state: w.state, accountableMemberId: w.accountableMemberId });
         }
       }
       return stampSearch(result, auth.member.id);
@@ -4257,7 +4280,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (!validId(workItemId) || typeof includeSource !== "boolean" || typeof includeOffers !== "boolean") fail(422, "invalid_work_context", "Choose one work ID and boolean context options");
       const room = this.room(roomId), now = this.now();
       if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
-      return { ...selectedWorkContext({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence, now, includeSource, includeOffers }),
+      return { ...selectedWorkContext({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence, now, includeSource, includeOffers,
+        floor: this.historyFloor(roomId, auth.member.id, room.sequence) }),
         viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
     });
@@ -4273,7 +4297,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (!anchorId || (window.anchorId !== null && window.anchorId !== anchorId)) fail(409, "discussion_history_changed", "Discussion history changed; restart after recovery");
       const metadata = this.db.prepare("SELECT sequence,id,json_extract(body,'$.data.messageId') AS message_id FROM events WHERE room_id=? AND sequence<=? AND json_extract(body,'$.type')=? ORDER BY sequence").all(roomId, window.horizon, T.MESSAGE_POSTED);
       return { ...selectedWorkDiscussion({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence,
-        now: this.now(), metadata, window, anchorId, cursor }),
+        now: this.now(), metadata, window, anchorId, cursor,
+        floor: this.historyFloor(roomId, auth.member.id, room.sequence) }),
         viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
     });
@@ -4652,6 +4677,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           fail(403, "work_claims_not_permitted", "Creating, claiming, renewing, or updating work claims needs a contribute, review, or collaborate profile.");
         }
       }
+      // A reaction on a DM is shown to its parties and the answer would
+      // confirm the private id, so a non-party is told "no such message".
+      // Live admission only; reactions already in a log keep replaying.
+      if (command.type === T.MESSAGE_REACTION_SET && typeof command.data?.messageId === "string") {
+        const target = (room.state.messages || []).find(m => m.id === command.data.messageId);
+        // Reply requests are directed but room-threaded: members may react to them.
+        if (target?.toMemberId && !Object.hasOwn(room.state.replyRequests ?? {}, target.id)
+            && target.authorId !== auth.member.id && target.toMemberId !== auth.member.id) {
+          fail(422, "command_rejected", "Reaction must reference a message in this Room");
+        }
+      }
       // A reply joins its parent's thread. A DM's thread belongs to its two
       // parties: a bystander replying to a DM id would thread into a private
       // conversation and learn from the answer that the id exists. Live
@@ -4660,6 +4696,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (command.type === T.MESSAGE_POSTED && typeof command.data?.replyToId === "string") {
         const byId = new Map((room.state.messages || []).map(m => [m.id, m]));
         const seen = new Set();
+        let dmAncestor = null;
         for (let m = byId.get(command.data.replyToId); m && !seen.has(m.id); m = byId.get(m.replyToId)) {
           seen.add(m.id);
           // Reply requests are directed but room-threaded by design: members may
@@ -4668,7 +4705,23 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
               && m.authorId !== auth.member.id && m.toMemberId !== auth.member.id) {
             fail(422, "command_rejected", "Reply must reference a message in this Room");
           }
+          if (!dmAncestor && m.toMemberId) dmAncestor = m;
           if (!m.replyToId) break;
+        }
+        // CH-2011: a party's reply continues the DM thread, so it inherits
+        // the thread's parties. Every read surface keys DM visibility on the
+        // message's own toMemberId; without the stamp, a reply posted without
+        // one (the natural thread continuation) is served to the whole room —
+        // snapshot, events, search, /thread, conversation, MCP, notifications —
+        // and its replyToId confirms the DM id the refusal above protects.
+        // Reply-request threads stay room-visible by design, and an explicit
+        // toMemberId on the reply is the author's choice and is kept.
+        // Live admission only, like the refusal.
+        if (dmAncestor && !Object.hasOwn(room.state.replyRequests ?? {}, dmAncestor.id)
+            && (typeof command.data.toMemberId !== "string" || !command.data.toMemberId)
+            && (dmAncestor.authorId === auth.member.id || dmAncestor.toMemberId === auth.member.id)) {
+          const otherParty = dmAncestor.authorId === auth.member.id ? dmAncestor.toMemberId : dmAncestor.authorId;
+          if (typeof otherParty === "string" && otherParty) command.data.toMemberId = otherParty;
         }
       }
       // Bond / peer DM. Room chat (message.posted) is unchanged and still

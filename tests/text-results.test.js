@@ -66,9 +66,10 @@ test("native evidence rejects wrong IDs, work, hash, parent and mixed formats wi
   const unlinked = f.send(T.MESSAGE_POSTED, { messageId: "unlinked", body: "Only a reply", replyToId: "test-request" });
   assert.throws(() => f.send(T.WORK_COMPLETED, f.input(unlinked)), { code: "command_rejected" });
   await assert.rejects(f.client.workResult(f.workItemId, { draftMessageId: "unlinked" }), { code: "result_unavailable" });
-  const malformed = f.post("legacy \uD800");
-  assert.throws(() => textVersion(malformed.event.data.body));
-  assert.throws(() => f.mutate(T.WORK_COMPLETED, { ...original, evidenceMessageId: malformed.event.data.messageId, evidenceMessageEventId: malformed.event.id }), { code: "command_rejected" });
+  // Unpaired surrogates are refused at live admission (#2106), so a malformed
+  // body can no longer become evidence; legacy bodies still fail textVersion.
+  assert.throws(() => f.post("legacy \uD800"), { code: "invalid_command" });
+  assert.throws(() => textVersion("legacy \uD800"));
   assert.notEqual(textVersion("é"), textVersion("e\u0301")); assert.doesNotThrow(() => auditRecovery(f.store));
 });
 

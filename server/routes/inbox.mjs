@@ -9,7 +9,7 @@ import { validId } from "../../src/events.js";
 import { GmailSync } from "../gmail-sync.mjs";
 import { GmailActions } from "../gmail-actions.mjs";
 import { GmailSender, gmailCredentialsFor, sendTelegramDirect } from "../inbox-transport.mjs";
-import { validateDirectSend, recordDirectSend, completeDirectSend, publicDirectSend } from "../inbox-outbox.mjs";
+import { validateDirectSend, recordDirectSend, completeDirectSend, publicDirectSend, getDirectSendByRequestId } from "../inbox-outbox.mjs";
 import { channelSyncLimits, syncTelegramConnection } from "../channel-import.mjs";
 import { telegramLiveView } from "../channel-adapters/telegram-config.mjs";
 import { webhookAcceptsHash, webhookRotationDefaults } from "../channel-adapters/telegram-rotation.mjs";
@@ -311,6 +311,25 @@ export async function handleInboxMount(ctx) {
       if (data && typeof data === "object" && !Array.isArray(data) && typeof data.channel === "string") {
         rate(`inbox-direct-send:${auth.account.id}`, 20);
         validateDirectSend(data);
+        const bodyHash = createHash("sha256").update(data.body, "utf8").digest("hex");
+        const viewer = { accountId: auth.account.id, authEpoch: auth.account.authEpoch,
+          sessionBinding: auth.sessionBinding, sessionRevision: auth.sessionRevision };
+        // Idempotency (ch-2039 follow-up): a caller-supplied requestId makes an
+        // uncertain retry safe. Same key + same content replays the journaled
+        // send without touching the provider or the send budget; same key +
+        // different content is a 409 (mirrors private_inbox_commands). A
+        // journaled failure is terminal for its key — retrying it replays the
+        // failure receipt instead of re-sending on uncertainty.
+        const sameContent = row => row.channel === data.channel && row.recipient === data.to
+          && row.subject === data.subject && row.body_hash === bodyHash && (row.thread_id ?? null) === (data.threadId ?? null);
+        if (typeof data.requestId === "string") {
+          const prior = getDirectSendByRequestId(store.db, auth.account.id, data.requestId);
+          if (prior) {
+            if (!sameContent(prior)) reject(409, "direct_send_idempotency_conflict",
+              "This request id already recorded a different direct send.");
+            return json(res, 200, { contractVersion: 1, viewer, send: publicDirectSend(prior) });
+          }
+        }
         // Per-connection send budget (task #41): a Telegram send costs one
         // token; exhaustion is an honest 429 with Retry-After before
         // anything is journaled, instead of hammering the provider into a
@@ -321,9 +340,21 @@ export async function handleInboxMount(ctx) {
           sendBudgets.check({ channel: "telegram", accountId: auth.account.id, connectionId: null });
         const fetchImpl = directSendFetch ?? fetch;
         const sendId = randomUUID();
-        const bodyHash = createHash("sha256").update(data.body, "utf8").digest("hex");
-        recordDirectSend(store.db, { id: sendId, accountId: auth.account.id, channel: data.channel,
-          to: data.to, subject: data.subject, bodyHash, threadId: data.threadId ?? null, at: store.now() });
+        try {
+          recordDirectSend(store.db, { id: sendId, accountId: auth.account.id, channel: data.channel,
+            to: data.to, subject: data.subject, bodyHash, threadId: data.threadId ?? null,
+            requestId: typeof data.requestId === "string" ? data.requestId : null, at: store.now() });
+        } catch (error) {
+          // Lost race: a concurrent request with the same requestId won the
+          // unique index. Replay the winner's journaled send, never a second
+          // provider delivery.
+          const winner = error?.code === "SQLITE_CONSTRAINT_UNIQUE" && typeof data.requestId === "string"
+            ? getDirectSendByRequestId(store.db, auth.account.id, data.requestId) : null;
+          if (!winner) throw error;
+          if (!sameContent(winner)) reject(409, "direct_send_idempotency_conflict",
+            "This request id already recorded a different direct send.");
+          return json(res, 200, { contractVersion: 1, viewer, send: publicDirectSend(winner) });
+        }
         // R1 delivery-path tracing (RC-2026-09-26-966): delivery.bridge_send
         // spans the provider send; delivery.receipt spans the journal settle
         // that records the delivery confirmation. Only the channel, the send
@@ -353,9 +384,7 @@ export async function handleInboxMount(ctx) {
           receiptSpan.setAttribute(ATTR.OUTCOME, sendError ? "error" : "ok");
           receiptSpan.setStatusOk();
           if (sendError) throw sendError;
-          return json(res, 200, { contractVersion: 1,
-            viewer: { accountId: auth.account.id, authEpoch: auth.account.authEpoch, sessionBinding: auth.sessionBinding, sessionRevision: auth.sessionRevision },
-            send: publicDirectSend(settled) });
+          return json(res, 200, { contractVersion: 1, viewer, send: publicDirectSend(settled) });
         } finally {
           receiptSpan.end();
         }
