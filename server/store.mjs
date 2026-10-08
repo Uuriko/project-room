@@ -4303,10 +4303,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.flipExpiredMentions(roomId);
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
-      if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) fail(422, "invalid_cursor", "Invalid event cursor or limit");
-      if (actor !== null && (typeof actor !== "string" || !actor)) fail(422, "invalid_cursor", "Invalid actor filter");
+      // REL-10: the 422 keeps its code (no silent clamp, no contract change)
+      // but names the offending field and its bound, and points the caller
+      // at next/hasMore or tail (/events limit caps at 100; tail takes 1..200).
+      if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) fail(422, "invalid_cursor", "Invalid event cursor: `after` must be a non-negative integer and `limit` must be 1..100 — continue with the previous response's `next`/`hasMore`, or use `tail` (newest N events, 1..200)");
+      if (actor !== null && (typeof actor !== "string" || !actor)) fail(422, "invalid_cursor", "Invalid event cursor: `actor` must be a non-empty string");
       for (const [name, value] of [["since", since], ["until", until]]) {
-        if (value !== null && (typeof value !== "string" || Number.isNaN(Date.parse(value)))) fail(422, "invalid_cursor", `Invalid ${name} timestamp`);
+        if (value !== null && (typeof value !== "string" || Number.isNaN(Date.parse(value)))) fail(422, "invalid_cursor", `Invalid event cursor: \`${name}\` must be an ISO-8601 timestamp`);
       }
       const authority = this.roomAuthority(roomId);
       const sequence = authority.sequence;

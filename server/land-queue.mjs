@@ -446,6 +446,10 @@ const viewFromClaim = (item, roomId) => {
     claimantMemberId: item.owner,
     addedByMemberId: item.history?.[0]?.agentId ?? item.owner,
     headSha: item.ci?.headSha ?? null,
+    // REL-07: claims with no PR have no land_queue row, so mergeable/checks
+    // never resolve — flag them so the board renders a room item ("no PR",
+    // no checks dot) instead of a stuck PR card.
+    roomOnly: pull == null,
     mergeable: "unknown",
     behind: false,
     checks: item.ci?.state === "success" ? "green" : item.ci?.state === "failure" ? "red" : "pending",

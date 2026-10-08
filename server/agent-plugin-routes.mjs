@@ -797,7 +797,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       await store.agentHeartbeats.assertPushDns(data.pushNotification.url);
     }
     // Q3-B: the store page includes `more` when pendingWakes is truncated.
-    const { host, pendingWakes, more, pushConfigured, pushSuspended, reachability } = store.transaction(() => {
+    const { host, pendingWakes, more, wakeQueueStats, pushConfigured, pushSuspended, reachability } = store.transaction(() => {
       auth = heartbeatActor(req, requiredScope("heartbeats:report"));
       if (auth.identityId !== initialIdentity) reject(403, "identity_changed", "Credential identity changed during request");
       let hostId = data.hostId;
@@ -819,7 +819,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       action: "rearm-push", method: "POST", path: "/api/agent-heartbeats",
       description: "Your push subscription was suspended after 3 failed deliveries; POST a fresh pushNotification to re-arm.",
     }));
-    return json(res, 200, { agentId: auth.identityId, host, pendingWakes, more: more === true, next, pushConfigured, reachability });
+    return json(res, 200, { agentId: auth.identityId, host, pendingWakes, more: more === true, next, pushConfigured, reachability, wakeQueueStats });
   });
 
   const ackHeartbeats = translate(async (req, res, { remoteAddress }) => {
@@ -896,7 +896,8 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
         "No host has reported for this identity yet — POST /api/agent-heartbeats first, then poll.");
       if (immediate.pendingWakes.length > 0 || waitMs === 0) {
         return json(res, 200, { agentId: auth.identityId, pendingWakes: immediate.pendingWakes,
-          waitedMs: 0, timedOut: false, next: wakeNext(immediate.pendingWakes) });
+          waitedMs: 0, timedOut: false, next: wakeNext(immediate.pendingWakes),
+          wakeQueueStats: immediate.wakeQueueStats });
       }
       const startedAt = Date.now();
       const timer = setTimeout(done, waitMs);
@@ -916,7 +917,8 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       const fresh = store.agentHeartbeats.notePoll({ agentId: current.identityId, roomId });
       const timedOut = !woken && fresh.pendingWakes.length === 0;
       return json(res, 200, { agentId: auth.identityId, pendingWakes: fresh.pendingWakes,
-        waitedMs: Date.now() - startedAt, timedOut, next: wakeNext(fresh.pendingWakes) });
+        waitedMs: Date.now() - startedAt, timedOut, next: wakeNext(fresh.pendingWakes),
+        wakeQueueStats: fresh.wakeQueueStats });
     } finally {
       release();
     }

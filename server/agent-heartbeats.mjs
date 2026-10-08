@@ -36,6 +36,22 @@ export const HEARTBEAT_STALE_AFTER_MS = 180000;
 // live listener from an idle agent whose queue merely looks empty.
 export const WAKEABLE_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MAX_PENDING_WAKES = 50;
+// REL-09 (2026-10-07): stale wake signals fill the poll queue (50 pending
+// mention signals measured on prod, oldest >24h, every poll returning the
+// same page). ROOM_WAKE_SIGNAL_TTL_HOURS, off by default, hides signals
+// older than the TTL from the poll page. Nothing is deleted or acked — the
+// queue is only hidden at read time, and ackWakes still clears hidden
+// signals. Flag off (unset/blank) preserves current behavior exactly. A bad
+// value is a 500 invalid_heartbeat_config.
+const WAKE_SIGNAL_TTL_ENV = "ROOM_WAKE_SIGNAL_TTL_HOURS";
+const wakeSignalTtlMs = () => {
+  const raw = process.env[WAKE_SIGNAL_TTL_ENV];
+  if (raw === undefined || raw === null || String(raw).trim() === "") return null;
+  const hours = Number(String(raw).trim());
+  if (!Number.isFinite(hours) || hours <= 0)
+    fail(500, "invalid_heartbeat_config", `${WAKE_SIGNAL_TTL_ENV} must be a positive number of hours`);
+  return hours * 3600 * 1000;
+};
 const AGENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const HOST_ID_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
 // Push wake path (RC-2026-09-24-203): token bounds, delivery timeout, and
@@ -364,7 +380,7 @@ export class AgentHeartbeats {
     const page = this.pendingWakePage(agentId, { hostId, roomId: workScopeRoomId });
     return Object.freeze({
       host: { ...host, workWakes: this.store.workWakes?.hostEnabled(agentId, hostId) ?? false },
-      pendingWakes: page.signals, more: page.more,
+      pendingWakes: page.signals, more: page.more, wakeQueueStats: page.wakeQueueStats,
       pushConfigured, pushSuspended, reachability,
     });
   }
@@ -561,9 +577,23 @@ export class AgentHeartbeats {
       .all(agentId, roomId, roomId, probe).map(signalView);
     const work = this.store.workWakes?.pending(agentId, { roomId, hostId, limit: probe }) ?? [];
     const combined = [...messages, ...work].sort((a, b) => a.createdAt - b.createdAt);
+    // REL-09: the TTL hides stale signals from the poll page only. Stats
+    // describe the full unacknowledged queue so agents can see what the
+    // page is hiding (stale) and how old the queue is (oldestCreatedAt).
+    const ttlMs = wakeSignalTtlMs();
+    const cutoff = ttlMs === null ? -Infinity : this.now() - ttlMs;
+    const visible = ttlMs === null ? combined : combined.filter(signal => !(signal.createdAt < cutoff));
+    const createdAts = combined.map(signal => signal.createdAt).filter(Number.isFinite);
+    const wakeQueueStats = Object.freeze({
+      pending: combined.length,
+      oldestCreatedAt: createdAts.length ? Math.min(...createdAts) : null,
+      stale: ttlMs === null ? 0 : combined.length - visible.length,
+      ttlMs,
+    });
     return Object.freeze({
-      signals: Object.freeze(combined.slice(0, limit)),
-      more: combined.length > limit,
+      signals: Object.freeze(visible.slice(0, limit)),
+      more: visible.length > limit,
+      wakeQueueStats,
     });
   }
 
@@ -582,8 +612,10 @@ export class AgentHeartbeats {
     if (!known) return Object.freeze({ agentId, registered: false, pendingWakes: Object.freeze([]) });
     // plan-wake-live: the poll itself is listener evidence.
     this.recordPollActivity(agentId);
+    const page = this.pendingWakePage(agentId, { roomId });
     return Object.freeze({
-      agentId, registered: true, pendingWakes: this.pendingWakes(agentId, { roomId }),
+      agentId, registered: true, pendingWakes: page.signals,
+      wakeQueueStats: page.wakeQueueStats,
     });
   }
 
