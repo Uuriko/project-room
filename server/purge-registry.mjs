@@ -1035,13 +1035,12 @@ const ROWS = [
   {
     "table": "pending_channel_updates",
     "key": "account_id",
-    "action": "retain",
+    "action": "delete",
     "match": {
       "account": [
         "account_id"
       ]
-    },
-    "reason": "Channel update rows stay with the retained email connection they reference."
+    }
   },
   {
     "table": "private_attention_commands",
@@ -1077,24 +1076,22 @@ const ROWS = [
   {
     "table": "private_email_connections",
     "key": "account_id",
-    "action": "retain",
+    "action": "delete",
     "match": {
       "account": [
         "account_id"
       ]
-    },
-    "reason": "Email connections stay so retained import receipts keep their parent."
+    }
   },
   {
     "table": "private_email_folders",
     "key": "account_id",
-    "action": "retain",
+    "action": "delete",
     "match": {
       "account": [
         "account_id"
       ]
-    },
-    "reason": "Email folder rows stay with the retained connection they reference."
+    }
   },
   {
     "table": "private_inbox_commands",
@@ -1110,46 +1107,42 @@ const ROWS = [
   {
     "table": "private_inbox_drafts",
     "key": "account_id",
-    "action": "retain",
+    "action": "delete",
     "match": {
       "account": [
         "account_id"
       ]
-    },
-    "reason": "Inbox drafts stay with the retained source versions they reference."
+    }
   },
   {
     "table": "private_inbox_reads",
     "key": "account_id",
-    "action": "retain",
+    "action": "delete",
     "match": {
       "account": [
         "account_id"
       ]
-    },
-    "reason": "Inbox read markers stay with the retained sources they reference."
+    }
   },
   {
     "table": "private_inbox_sources",
     "key": "account_id",
-    "action": "retain",
+    "action": "delete",
     "match": {
       "account": [
         "account_id"
       ]
-    },
-    "reason": "Inbox sources stay so retained receipt rows keep their parent."
+    }
   },
   {
     "table": "private_inbox_versions",
     "key": "account_id",
-    "action": "retain",
+    "action": "delete",
     "match": {
       "account": [
         "account_id"
       ]
-    },
-    "reason": "Inbox source versions are append-only and stay with the account tombstone. Account deletion does not rewrite them."
+    }
   },
   {
     "table": "private_next_action_dismissals",
