@@ -113,3 +113,40 @@ test("append PR refuses stale rounds, unsafe input and stopped ownership without
   assert.equal(appendWorkPullRequest(full, "quill", fullInput), full);
   throwsCode(() => appendWorkPullRequest(full, "quill", { ...fullInput, pullRequest: "https://github.com/acme/repo/pull/17" }), "invalid_claim_input");
 });
+
+// Authoring gate: requestId idempotency on the update path (crash-recovery
+// guild priority fix — retried updates double-applied 100% before this).
+// Contract: a retried update carrying the same requestId must not append a
+// duplicate history entry and must return the already-updated item.
+// Credible regression: dropping the tail check re-introduces double-apply
+// on retries (lost-response replays); expectedHistoryLength tests cover CAS
+// only, and no existing test passes requestId. No test-only production
+// seam: requestId is a production API field (route body -> updateWork).
+test("updateWork replays a retried update with the same requestId instead of double-applying", () => {
+  const claimed = claimWork({ id: "idem-1" }, "quill");
+  const once = updateWork(claimed, "quill", { note: "first", requestId: "req-1" });
+  assert.equal(once.history.length, 2);
+  assert.equal(once.history[once.history.length - 1].requestId, "req-1");
+  const twice = updateWork(once, "quill", { note: "first", requestId: "req-1" });
+  assert.equal(twice, once); // the stored item itself, unchanged
+  assert.equal(twice.history.length, 2); // no duplicate entry
+  const other = updateWork(once, "quill", { note: "second", requestId: "req-2" });
+  assert.equal(other.history.length, 3); // a new key still applies
+  const plain = updateWork(other, "quill", { note: "third" });
+  assert.equal(plain.history.length, 4); // absent requestId keeps current behavior
+  throwsCode(() => updateWork(plain, "quill", { note: "bad", requestId: "not a key!" }), "invalid_claim_input");
+  throwsCode(() => updateWork(plain, "quill", { note: "bad", requestId: "" }), "invalid_claim_input");
+});
+
+// The replay check must run before every mutation guard: a retried
+// done-transition (response lost after the state moved) must replay the
+// done item, not trip the done-immutability check.
+test("a retried done-transition with the same requestId replays instead of failing", () => {
+  const claimed = claimWork({ id: "idem-2" }, "quill");
+  const started = updateWork(claimed, "quill", { state: "in_progress" });
+  const done = updateWork(started, "quill", { state: "done", note: "shipped", requestId: "req-done" });
+  assert.equal(done.state, "done");
+  const replayed = updateWork(done, "quill", { state: "done", note: "shipped", requestId: "req-done" });
+  assert.equal(replayed, done);
+  assert.equal(replayed.history.length, done.history.length);
+});

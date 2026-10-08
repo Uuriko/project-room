@@ -933,7 +933,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "update" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?}");
+    if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs", "requestId"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?, requestId?}");
     if (data.state === undefined && data.note === undefined) invalidInput(reject, "a state transition or a note");
     const item = load(claimIdOf(reject, workClaimId));
     if (item.owner !== caller) reject(403, "work_not_owner", `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
@@ -975,7 +975,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     }
     const updated = runPure(reject, () => updateWork(item, caller,
       { state: data.state, note: data.note, deliveryMode: data.deliveryMode, reviewedBy: data.reviewedBy,
-        tags: data.tags, blobs: data.blobs, now: nowMs }));
+        tags: data.tags, blobs: data.blobs, now: nowMs, requestId: data.requestId }));
     if (data.state === "done") {
       // Jev-harness receipt-acceptance gate, shadow mode (docs/JEV-GATES.md):
       // score the receipt, journal the would-be verdict (flagging
