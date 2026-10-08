@@ -24,6 +24,7 @@ import {
   guestAgentMemberId,
   isGuestAgentMemberId,
 } from "./guest-agent-links.mjs";
+import { guestHistoryAccessLead } from "./history-visibility.mjs";
 
 class GuestInviteError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
@@ -512,7 +513,7 @@ export class GuestInvites {
         kind: "guest-invite",
         tier: row.tier,
         scopes: [...GUEST_INVITE_TIERS[row.tier]],
-        access: GUEST_ACCESS_TEXT,
+        access: `${guestHistoryAccessLead(room)}, post messages, and react. Drafts only with the contributor tier. No work lifecycle, invites, polls, or administration.`,
         credentialTtlMs: row.credential_ttl_ms,
         redeemBy: row.redeem_by,
         hashPath: GUEST_INVITE_HASH_PATH,
