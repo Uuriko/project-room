@@ -21,14 +21,17 @@ const WORK_CLAIM_FIELDS = ["id", "title", "state", "owner", "history", "claimedA
   "attestations", "tags", "files", "fileBlocks", "blobs", "dependsOn", "parentClaimId", "evidenceRefs",
   "premiseFlag", "pullRequest", "pullRequests", "updatedAt",
   "repo", "branch", "chain", "supersededBy", "workItemId", "squadId",
-  "kind", "revision", "ci", "reviews", "historyOmitted", "readingAcks", "deploy"];
+  "kind", "revision", "ci", "reviews", "historyOmitted", "readingAcks", "deploy",
+  // F3 (wave300-fanout): the boardSeq at which this claim row was last
+  // mutated. Rows written before boardSeq existed decode as 0.
+  "boardSeq"];
 const WORK_CLAIM_DEFAULTS = { title: null, state: "unclaimed", owner: null, history: [],
   claimedAt: null, leaseStartAt: null, leaseExpiresAt: null, deliveryMode: null,
   reviewPolicy: null, reviewedBy: null, attestations: [], tags: [], files: [], fileBlocks: {}, blobs: [],
   dependsOn: [], parentClaimId: null, evidenceRefs: [], premiseFlag: null,
   pullRequest: null, pullRequests: [], updatedAt: null,
   repo: null, branch: null, chain: [], supersededBy: null, workItemId: null, squadId: null,
-  kind: "work", revision: null, ci: null, reviews: [], readingAcks: {}, deploy: null };
+  kind: "work", revision: null, ci: null, reviews: [], readingAcks: {}, deploy: null, boardSeq: 0 };
 const decodeItem = text => {
   const item = decodeRow(text, { kind: WORK_CLAIM_ROW_KIND, fields: WORK_CLAIM_FIELDS, defaults: WORK_CLAIM_DEFAULTS });
   if (item.title == null) item.title = item.id; // workOf: title ?? id
@@ -81,8 +84,36 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
     return row ? parse(row.config_json) : {};
   };
 
+  // F3 (wave300-fanout): per-room monotonic board cursor. Bumped on every
+  // claim write inside the same transaction as the write — these statements
+  // run on the caller's db connection, so a registry.transaction(run)
+  // wrapper covers the bump and the claim row together. The table is created
+  // lazily and is deliberately NOT part of workClaimSchema, so
+  // verifySchema()'s exact-shape check can never fire on existing databases
+  // (no reconciliation path, no schema version bump).
+  let boardSeqTableReady = false;
+  const ensureBoardSeqTable = () => {
+    if (boardSeqTableReady) return;
+    db.exec(`CREATE TABLE IF NOT EXISTS work_claim_board_seq (
+      room_id TEXT PRIMARY KEY,
+      seq INTEGER NOT NULL
+    )`);
+    boardSeqTableReady = true;
+  };
+  const bumpBoardSeq = statement(`INSERT INTO work_claim_board_seq (room_id, seq) VALUES (?, 1)
+    ON CONFLICT(room_id) DO UPDATE SET seq = seq + 1 RETURNING seq`);
+  const selectBoardSeq = statement("SELECT seq FROM work_claim_board_seq WHERE room_id=?");
+  const nextBoardSeq = roomId => {
+    ensureBoardSeqTable();
+    return bumpBoardSeq.get(roomId).seq;
+  };
+
   return {
     transaction,
+    boardSeq(roomId) {
+      ensureBoardSeqTable();
+      return selectBoardSeq.get(roomId)?.seq ?? 0;
+    },
     verifySchema({ allowAbsent = false } = {}) {
       const normalize = sql => sql?.trim().replace(/;$/, "").replace(/IF NOT EXISTS /g, "").replace(/\s+/g, " ");
       const definitions = workClaimSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean);
@@ -97,9 +128,11 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
     },
     set(roomId, item) {
       if (!item || typeof item.id !== "string") throw new TypeError("work claim item needs an id");
-      upsert.run(roomId, item.id, JSON.stringify(encodeRow(WORK_CLAIM_ROW_KIND, item)), now());
+      // F3: the stored row carries the boardSeq of this mutation.
+      const stamped = { ...item, boardSeq: nextBoardSeq(roomId) };
+      upsert.run(roomId, item.id, JSON.stringify(encodeRow(WORK_CLAIM_ROW_KIND, stamped)), now());
       if (typeof onChange === "function") onChange(roomId);
-      return item;
+      return stamped;
     },
     list(roomId) { return selectRoom.all(roomId).map(row => decodeItem(row.item_json)); },
     has(roomId, id) { return selectOne.get(roomId, id) != null; },
@@ -114,8 +147,13 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
       const dependents = selectRoom.all(roomId)
         .map(row => decodeItem(row.item_json))
         .filter(item => item && item.id !== id && Array.isArray(item.dependsOn) && item.dependsOn.includes(id));
+      // F3: a deletion changes the visible board, so it advances the cursor —
+      // one advance for the whole operation, recorded on every touched row
+      // (no tombstones — see the delta protocol notes in
+      // docs/WAVE300-FANOUT-DESIGN.md).
+      const seq = nextBoardSeq(roomId);
       for (const item of dependents) {
-        const waived = { ...item, dependsOn: item.dependsOn.filter(dep => dep !== id) };
+        const waived = { ...item, boardSeq: seq, dependsOn: item.dependsOn.filter(dep => dep !== id) };
         upsert.run(roomId, item.id, JSON.stringify(encodeRow(WORK_CLAIM_ROW_KIND, waived)), now());
       }
       db.prepare("DELETE FROM work_claims WHERE room_id=? AND claim_id=?").run(roomId, id);

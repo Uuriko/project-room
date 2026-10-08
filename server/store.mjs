@@ -1113,13 +1113,15 @@ const LOOKUP_INDEXES = `
 `;
 
 // MSG-0: parsed projection cache. A hit reads sequence only, so a 64 MiB
-// room does not JSON.parse again until the sequence changes or a rooms
-// write drops the entry. Commit and rollback of a write transaction drop
-// the whole cache, including a parse of uncommitted bytes. Callers receive
-// a frozen snapshot; a rewrite clones it first.
+// room does not JSON.parse again until its sequence changes. F4: entries
+// are keyed on rooms.sequence and every hot-path writer bumps sequence
+// with the projection, so writes to other rooms (or a rollback, which
+// restores the old sequence) can never serve a stale entry — no blanket
+// invalidation. The rare repair writers that change a projection without
+// bumping sequence invalidate their own room's entry explicitly.
+// Callers receive a frozen snapshot; a rewrite clones it first.
 const PROJECTION_CACHE_MAX_ROOMS = 32;
 const PROJECTION_CACHE_MAX_BYTES = 64 * 1024 * 1024;
-const ROOMS_WRITE = /\b(?:insert\s+into|update|delete\s+from|replace\s+into)\s+rooms\b/i;
 
 function deepFreeze(value) {
   if (value === null || typeof value !== "object" || Object.isFrozen(value)) return value;
@@ -1131,6 +1133,16 @@ function deepFreeze(value) {
 class ProjectionCache {
   constructor() { this.entries = new Map(); this.bytes = 0; }
   clear() { this.entries.clear(); this.bytes = 0; }
+  // F4 (wave300-fanout): targeted drop for the rare writers that change a
+  // projection without bumping rooms.sequence (projection repairs). Every
+  // hot-path writer bumps sequence with the projection, so lookup()'s
+  // sequence check already invalidates those — no blanket clear needed.
+  invalidate(roomId) {
+    const prior = this.entries.get(roomId);
+    if (!prior) return;
+    this.entries.delete(roomId);
+    this.bytes -= prior.weight;
+  }
   lookup(roomId, sequence) {
     const entry = this.entries.get(roomId);
     if (!entry || entry.sequence !== sequence) return null;
@@ -2521,6 +2533,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const state = JSON.parse(row.projection);
       if (!ensureDefaultChannelState(state)) continue;
       update.run(this.storedProjection(row.id, state), row.id);
+      // F4: this repair rewrites the projection without bumping sequence,
+      // so the sequence-keyed cache cannot see it — drop this room's entry.
+      this._dropProjectionRoom(row.id);
     }
     const linked = this.db.prepare(`
       SELECT rooms.id AS id, json_extract(rooms.projection, '$.workItems') AS workItems
@@ -2535,7 +2550,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (skipIds.has(row.id)) continue;
       if (!repairInvalidSupersessions({ workItems: parseStoredJson(row.workItems, {}) })) continue;
       const state = JSON.parse(this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(row.id).projection);
-      if (repairInvalidSupersessions(state)) update.run(this.storedProjection(row.id, state), row.id);
+      if (repairInvalidSupersessions(state)) {
+        update.run(this.storedProjection(row.id, state), row.id);
+        this._dropProjectionRoom(row.id); // F4: no sequence bump — drop explicitly.
+      }
     }
   }
   replayProvenance(rooms, { upgradeV1 }) {
@@ -2549,7 +2567,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (upgradeV1) {
         const state = JSON.parse(room.projection);
         const changed = applyProvenanceRepair(state, events);
-        if (changed) update.run(this.storedProjection(room.id, state), room.id);
+        if (changed) {
+          update.run(this.storedProjection(room.id, state), room.id);
+          this._dropProjectionRoom(room.id); // F4: no sequence bump — drop explicitly.
+        }
         // Checkpoints keep full bodies (replay applies edits to them).
         saveCheckpoint.run(room.id, room.sequence, JSON.stringify(hydrateProjection(this.db, room.id, state).state));
         continue;
@@ -2562,53 +2583,35 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       };
       if (!applyProvenanceRepair(partial, events)) continue;
       const state = JSON.parse(this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(room.id).projection);
-      if (applyProvenanceRepair(state, events)) update.run(this.storedProjection(room.id, state), room.id);
+      if (applyProvenanceRepair(state, events)) {
+        update.run(this.storedProjection(room.id, state), room.id);
+        this._dropProjectionRoom(room.id); // F4: no sequence bump — drop explicitly.
+      }
     }
   }
   close() { this._projectionCache?.clear(); this.db.close(); }
-  // MSG-0: drop parsed projections when a write transaction commits or rolls
-  // back, so a parse of uncommitted bytes cannot outlive the transaction.
-  _dropProjectionCache() { this._projectionCache?.clear(); }
-  _armProjectionWatch() {
-    if (this._projectionWatch || typeof this.db?.prepare !== "function") return;
-    this._projectionWatch = true;
-    const cache = () => this._projectionCache;
-    const prepare = this.db.prepare.bind(this.db);
-    this.db.prepare = sql => {
-      const stmt = prepare(sql);
-      if (typeof sql === "string" && ROOMS_WRITE.test(sql) && typeof stmt.run === "function") {
-        const run = stmt.run.bind(stmt);
-        stmt.run = (...args) => {
-          const result = run(...args);
-          cache()?.clear();
-          return result;
-        };
-      }
-      return stmt;
-    };
-    if (typeof this.db.exec === "function") {
-      const exec = this.db.exec.bind(this.db);
-      this.db.exec = sql => {
-        const result = exec(sql);
-        if (typeof sql === "string" && ROOMS_WRITE.test(sql)) cache()?.clear();
-        return result;
-      };
-    }
-  }
+  // F4 (wave300-fanout): the blanket projection-cache clear on every write
+  // is gone. lookup() is keyed on rooms.sequence and every hot-path writer
+  // bumps sequence with the projection, so a stale entry is unreachable;
+  // clearing the whole cache on every scratch-room write forced every pump
+  // tick to re-decode every room's projection (measured: warm p99 0.20ms ->
+  // 7.37ms dropped at SIM scale). Only the no-sequence-bump repair writers
+  // below need a targeted drop.
+  _dropProjectionRoom(roomId) { this._projectionCache?.invalidate(roomId); }
   transaction(fn, { isolated = false } = {}) {
     // Nested startup helpers share the outer migration transaction and its rollback.
     const outermost = !this.db.isTransaction;
-    this._armProjectionWatch();
     // Only a commit that changed rows proves storage is writable again; an
     // idempotent replay commits nothing. Measured only while degraded.
     const before = outermost && this.storageFailures > 0 ? this.storagePlatform.changes?.(this.db) : null;
     let result;
     try { result = this.storagePlatform.transaction(this.db, fn, false, { isolated }); }
     catch (error) {
-      if (outermost || isolated) this._dropProjectionCache();
+      // F4: no projection-cache drop here. A rollback restores the old
+      // rooms.sequence, so the sequence-keyed lookup misses any entry cached
+      // from uncommitted bytes — staleness is unreachable without a clear.
       throw this.storageFailure(error, outermost);
     }
-    if (outermost || isolated) this._dropProjectionCache();
     if (before !== null && (before === undefined || this.storagePlatform.changes(this.db) !== before)) this.storageRecovered();
     return result;
   }
@@ -2639,8 +2642,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return { failures: this.storageFailures, threshold: this.storageFailureThreshold, unavailable: this.storageFailures >= this.storageFailureThreshold };
   }
   room(roomId) {
-    // MSG-0 projection cache. The hit path reads sequence only.
-    this._armProjectionWatch();
+    // MSG-0 projection cache. The hit path reads sequence only. F4: the
+    // sequence check is the invalidation — entries survive writes to other
+    // rooms and any write that leaves this room's sequence alone must
+    // invalidate its own entry explicitly (repair paths below).
     const cache = this._projectionCache ??= new ProjectionCache();
     const meta = (this._roomSequenceStmt ??= this.db.prepare("SELECT sequence FROM rooms WHERE id=?")).get(roomId);
     if (!meta) fail(404, "room_not_found", "Room not found");
@@ -2663,7 +2668,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       for (const { id } of this.db.prepare("SELECT id FROM rooms WHERE projection LIKE '%\"bodyRef\"%'").all()) {
         const state = this.room(id).state;
         this.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(storedProjection(this.db, id, state, { enabled: false }), id);
-        this._projectionCache?.clear?.();
+        this._dropProjectionRoom(id); // F4: no sequence bump — drop this room's entry.
         count += 1;
       }
       return count;

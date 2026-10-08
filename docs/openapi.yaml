@@ -4874,12 +4874,26 @@ paths:
           description: |
             Opaque nextCursor from the previous page. Order is updatedAt
             descending, then id. Pages from one board do not overlap.
+        - name: since
+          in: query
+          schema: { type: integer, minimum: 0 }
+          description: |
+            Delta poll: return only claims mutated after this boardSeq, in
+            mutation order, plus the room's current boardSeq and open/terminal
+            counts. Every board page carries top-level boardSeq; poll with the
+            last seen value to fetch just what changed. since is accepted
+            alongside limit and view but the delta is never truncated by
+            limit; with cursor, queue, or state it is 400 invalid_input, as
+            is any non-integer value. Deletions advance boardSeq without
+            tombstones: on an unexplained seq jump, re-fetch the full page.
       responses:
         '200':
           description: |
-            One page of the room's work claims: `{ roomId, swept, claims, nextCursor, hasMore }`.
+            One page of the room's work claims: `{ roomId, swept, boardSeq, claims, nextCursor, hasMore }`.
             With `queue=ready`, only unheld claims whose dependencies are done:
-            `{ roomId, queue: "ready", swept, claims, nextCursor, hasMore }`.
+            `{ roomId, queue: "ready", swept, boardSeq, claims, nextCursor, hasMore }`.
+            With `since=N`, the delta: `{ roomId, boardSeq, openClaims, terminalClaims,
+            claims (each with its boardSeq), hasMore: false, nextCursor: null, historyScope: "delta" }`.
           content:
             application/json:
               schema:
@@ -4890,12 +4904,28 @@ paths:
                     type: array
                     items: { type: string }
                     description: Claim ids auto-released by lease expiry on this read
+                  boardSeq:
+                    type: integer
+                    minimum: 0
+                    description: |
+                      The room's current board cursor: a per-room monotonic
+                      counter bumped inside the same transaction as every claim
+                      mutation. Pass it back as ?since= to poll the delta.
+                  openClaims:
+                    type: integer
+                    minimum: 0
+                    description: Delta responses only — open (non-terminal) claims in the room
+                  terminalClaims:
+                    type: integer
+                    minimum: 0
+                    description: Delta responses only — terminal (done/closed) claims in the room
                   claims:
                     type: array
                     items:
                       $ref: '#/components/schemas/WorkClaim'
                   nextCursor: { type: [string, 'null'] }
                   hasMore: { type: boolean }
+        '400': { description: invalid_input (bad since value or since combined with cursor, queue, or state) }
         '401': { description: unauthenticated }
         '403': { description: work_claims_not_permitted (writes only; reads stay open to members) }
     post:
@@ -16914,6 +16944,13 @@ components:
       properties:
         id: { type: string }
         title: { type: string }
+        boardSeq:
+          type: integer
+          minimum: 0
+          description: |
+            The board cursor value at which this claim was last mutated.
+            Present on delta (?since=) responses; stripped from full board
+            pages so their claim shape is unchanged.
         state: { type: string, enum: [unclaimed, claimed, in_progress, blocked, done, closed] }
         owner: { type: [string, 'null'] }
         claimedAt: { type: [string, 'null'], format: date-time }

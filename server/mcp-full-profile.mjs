@@ -300,7 +300,7 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
     const snapshot = store.snapshot(secret, roomId);
     const now = typeof store.now === "function" ? store.now() : Date.now();
     const { claims, ...claimsPage } = buildWorkClaimPage(store.workClaims.list(roomId), roomId,
-      auth.member.id, new URLSearchParams(rest), now);
+      auth.member.id, new URLSearchParams(rest), now, store.workClaims.boardSeq(roomId));
     return { value: stampBoard({ ...projectBoard(snapshot.state, Date.now()), roomId: snapshot.roomId,
       evaluatedThrough: snapshot.sequence, evaluatedAt: new Date().toISOString(), claims, claimsPage }), isError: false };
   }

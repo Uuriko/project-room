@@ -65,16 +65,30 @@ import { isRoomArchived } from "../src/events.js";
 const CLAIM_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
 // Per-room registry: roomId -> { items: Map(id -> work item), config: { defaultLeaseHours?, reviewPolicy? } }.
+// F3 (wave300-fanout): each room also carries a monotonic boardSeq, bumped
+// on every set() inside the same (in-memory: trivially atomic) write as the
+// claim mutation. The stored item records the seq of its last mutation.
 export function createWorkClaimRegistry() {
   const rooms = new Map();
+  const seqs = new Map();
   const room = roomId => {
     let entry = rooms.get(roomId);
     if (!entry) { entry = { items: new Map(), config: {} }; rooms.set(roomId, entry); }
     return entry;
   };
+  const nextBoardSeq = roomId => {
+    const next = (seqs.get(roomId) ?? 0) + 1;
+    seqs.set(roomId, next);
+    return next;
+  };
   return {
     get(roomId, id) { return room(roomId).items.get(id) ?? null; },
-    set(roomId, item) { room(roomId).items.set(item.id, item); return item; },
+    set(roomId, item) {
+      const stamped = { ...item, boardSeq: nextBoardSeq(roomId) };
+      room(roomId).items.set(stamped.id, stamped);
+      return stamped;
+    },
+    boardSeq(roomId) { return seqs.get(roomId) ?? 0; },
     list(roomId) { return [...room(roomId).items.values()]; },
     has(roomId, id) { return room(roomId).items.has(id); },
     configure(roomId, config) {
@@ -139,7 +153,7 @@ const WORK_CLAIM_PROFILES = Object.freeze({
 });
 const BOARD_LIMIT_DEFAULT = 50;
 const BOARD_LIMIT_MAX = 200;
-const BOARD_QUERY = new Set(["queue", "auth", "limit", "cursor", "state", "view"]);
+const BOARD_QUERY = new Set(["queue", "auth", "limit", "cursor", "state", "view", "since"]);
 
 // QA7-13: compact per-claim projection for ?view=summary — the fields a
 // board overview needs (id, title, state, owner, lease expiry) without the
@@ -278,8 +292,23 @@ const boardLimitOf = (reject, raw) => {
   return Number(raw);
 };
 
-const boardCursorOf = (reject, raw) => {
-  try {
+// F3 (wave300-fanout): ?since=<boardSeq> asks for the delta — only claims
+// mutated after the given cursor. 400 invalid_input on anything that is not
+// a non-negative integer, or when combined with cursor/queue/state (the
+// delta is defined on the default board view only).
+const boardDeltaSinceOf = (reject, params) => {
+  if (!params.has("since")) return null;
+  const raw = params.get("since");
+  if (typeof raw !== "string" || !/^\d+$/.test(raw)) {
+    reject(400, "invalid_input", "Expected since as a non-negative integer boardSeq.");
+  }
+  if (params.has("cursor") || params.has("queue") || params.has("state")) {
+    reject(400, "invalid_input", "since combines only with limit and view, not cursor, queue, or state.");
+  }
+  return Number(raw);
+};
+
+const boardCursorOf = (reject, raw) => {  try {
     const parsed = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       if (parsed.q === "ready" && typeof parsed.i === "string") return parsed;
@@ -338,25 +367,50 @@ function pageReady(items, limit, cursor) {
 // Shared stored-state projection. No registry/store access or lifecycle effects:
 // ordinary GET calls this after housekeeping; derived reads call it directly.
 // Pages are live, not a snapshot fenced by the legacy room event sequence.
-export function buildWorkClaimPage(items, roomId, viewerId, query = new URLSearchParams(), nowMs = Date.now()) {
+//
+// F3 (wave300-fanout): boardSeq is the room's current board cursor, supplied
+// by the caller from registry.boardSeq(roomId); every page carries it
+// top-level. With ?since=N the page is a delta: only claims with
+// boardSeq > N, in mutation order, plus room-wide open/terminal counts;
+// each delta claim keeps its boardSeq so the delta is self-describing.
+// Without since the page is today's full page — per-claim boardSeq is
+// stripped so the claim shape is unchanged.
+export function buildWorkClaimPage(items, roomId, viewerId, query = new URLSearchParams(), nowMs = Date.now(), boardSeq = 0) {
   const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
   const params = query ?? new URLSearchParams();
   for (const key of params.keys()) {
     if (!BOARD_QUERY.has(key) || params.getAll(key).length !== 1) {
-      invalidInput(reject, "a single queue, state, limit, cursor, or view query parameter");
+      invalidInput(reject, "a single queue, state, limit, cursor, since, or view query parameter");
     }
   }
+  const deltaSince = boardDeltaSinceOf(reject, params);
+  const seqNow = Number.isSafeInteger(boardSeq) && boardSeq >= 0 ? boardSeq : 0;
   const limit = boardLimitOf(reject, params.get("limit"));
   const cursor = params.has("cursor") ? boardCursorOf(reject, params.get("cursor")) : null;
   const view = params.get("view");
   if (view !== null && view !== "summary") invalidInput(reject, "view=summary");
   const metadata = { roomId, source: "work-claims", evaluatedAt: new Date(nowMs).toISOString(),
     consistency: "live", limit, historyLimit: LIST_HISTORY_ENTRIES };
-  const present = page => {
-    const stamped = stampClaimPage({ ...metadata, ...page,
-      claims: page.claims.map(item => summarizeClaimHistory(item, LIST_HISTORY_ENTRIES)) }, viewerId);
+  const stripBoardSeq = item => {
+    if (!Object.hasOwn(item, "boardSeq")) return item;
+    const { boardSeq: _dropped, ...rest } = item;
+    return rest;
+  };
+  const present = (page, { delta = false } = {}) => {
+    const projected = page.claims
+      .map(item => summarizeClaimHistory(item, LIST_HISTORY_ENTRIES))
+      .map(item => (delta ? item : stripBoardSeq(item)));
+    const stamped = stampClaimPage({ ...metadata, ...page, boardSeq: seqNow, claims: projected }, viewerId);
     return view === "summary" ? withContentTrust({ ...stamped, claims: stamped.claims.map(summarizeBoardClaim) }) : stamped;
   };
+  if (deltaSince !== null) {
+    const changed = items
+      .filter(item => (item.boardSeq ?? 0) > deltaSince)
+      .sort((a, b) => ((a.boardSeq ?? 0) - (b.boardSeq ?? 0)) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    const openClaims = items.filter(item => !isTerminalClaimState(item.state)).length;
+    return present({ claims: changed, hasMore: false, nextCursor: null,
+      openClaims, terminalClaims: items.length - openClaims, historyScope: "delta" }, { delta: true });
+  }
   if (params.has("queue")) {
     if (params.get("queue") !== "ready") invalidInput(reject, "queue=ready");
     if (params.has("state")) invalidInput(reject, "either queue=ready or state, not both");
@@ -788,7 +842,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   if (workClaimRoute === "list" && req.method === "GET") {
     closeLiveClaims();
     return json(res, 200, { ...buildWorkClaimPage(registry.list(roomId), roomId, caller,
-      url?.searchParams, nowMs), swept: sweptIds });
+      url?.searchParams, nowMs, typeof registry.boardSeq === "function" ? registry.boardSeq(roomId) : 0), swept: sweptIds });
   }
   if (workClaimRoute === "receipts" && req.method === "GET") {
     // RC-2026-09-24-205: receipts search. The room block already rejected

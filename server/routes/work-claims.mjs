@@ -57,7 +57,7 @@ export async function getWorkClaimsRead(ctx) {
   const { roomId, auth } = authenticateRead(ctx);
   const now = typeof ctx.store.now === "function" ? ctx.store.now() : Date.now();
   return ctx.json(ctx.res, 200, buildWorkClaimPage(ctx.store.workClaims.list(roomId), roomId,
-    auth.member.id, ctx.url.searchParams, now));
+    auth.member.id, ctx.url.searchParams, now, ctx.store.workClaims.boardSeq(roomId)));
 }
 
 export async function provenanceRoute(ctx) {
