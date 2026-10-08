@@ -142,6 +142,9 @@ test("walkthrough: one word (invite) joins through all four mechanisms", async t
   assert.equal(guestJoin.status, 200);
   const guestJoinJson = await guestJoin.json();
   assert.ok(guestJoinJson.memberId);
+  // GA-2 (issue #941): join() issues a separate session credential — it is
+  // a secret too, so mask it before the vocabulary check.
+  secrets.push(guestJoinJson.token);
   // A bad guest token fails in invite vocabulary.
   const badGuest = await post("/api/guest-agent-links/join", { linkToken: "bogus" });
   assert.equal(badGuest.status, 410);

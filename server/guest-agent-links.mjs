@@ -32,6 +32,21 @@ export const GUEST_REFRESH_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 export const GUEST_AGENT_MEMBER_PREFIX = "guest-agent-";
 export const GUEST_AGENT_STATUS = "live";
 export const GUEST_AGENT_DEFAULT_NAME = "Guest agent";
+// GA-2 (issue #941): single-use link redemptions. join() consumes the link
+// and issues a separate session credential for the seat; this table records
+// the exchange so a later join() with the session credential is idempotent
+// (no rotation) instead of minting yet another credential. Purely additive
+// side table: no events, no projection impact.
+export const guestLinkExchangeSchema = `
+  CREATE TABLE IF NOT EXISTS guest_link_exchanges (
+    link_hash TEXT PRIMARY KEY,
+    room_id TEXT NOT NULL,
+    member_id TEXT NOT NULL,
+    session_hash TEXT NOT NULL,
+    exchanged_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS guest_link_exchanges_seat ON guest_link_exchanges(room_id, member_id);
+`;
 const ACCESS = "Read the room and its history, post messages, and react. No membership administration or work approvals.";
 
 export function isRoomAccessToken(token) {
@@ -323,7 +338,27 @@ export class GuestAgentLinks {
       const member = row && this.store.room(row.room_id).state.members[row.member_id];
       if (!this.liveCredential(row, member)) fail(410, "link_unavailable", "This guest invite is not valid.");
       const preview = this.previewPublic(row, member);
-      return { ...preview, memberId: member.id, access: "read_chat" };
+      const base = { ...preview, memberId: member.id, access: "read_chat" };
+      // GA-2 (issue #941): the link is single-use. The first join consumes
+      // the link and issues a separate session credential for the seat —
+      // the GX invite shape: a forwarded copy of the link grants nothing
+      // after redemption. The session keeps the link's expiry (no lifetime
+      // extension on exchange; refresh() is the renewal path).
+      const exchanged = this.db.prepare("SELECT 1 FROM guest_link_exchanges WHERE room_id=? AND member_id=?")
+        .get(row.room_id, member.id);
+      if (exchanged) {
+        // This seat already redeemed its link: the caller holds the seat's
+        // bearer, so the join is idempotent — no new credential is issued.
+        return { ...base, exchanged: false };
+      }
+      const sessionToken = GUEST_AGENT_TOKEN_PREFIX + randomBytes(32).toString("base64url");
+      this.db.prepare("INSERT INTO credentials(hash,room_id,member_id,kind,parent_hash,expires_at,account_id,account_auth_epoch) VALUES(?,?,?,'access',NULL,?,NULL,NULL)")
+        .run(hash(sessionToken), row.room_id, member.id, row.expires_at);
+      this.db.prepare("UPDATE credentials SET revoked=1 WHERE hash=?").run(row.hash);
+      this.db.prepare("INSERT INTO guest_link_exchanges(link_hash,room_id,member_id,session_hash,exchanged_at) VALUES(?,?,?,?,?)")
+        .run(row.hash, row.room_id, member.id, hash(sessionToken), this.store.now());
+      // The response token is the seat's bearer: persist it. The link is dead.
+      return { ...base, token: sessionToken, exchanged: true };
     });
   }
 
