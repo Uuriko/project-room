@@ -197,13 +197,18 @@ export function createEvaluatorSeat(store, opts = {}) {
       assignment_slice_millis, registry_bond_id, face_dasha_millis, dasha_per_credit_rate,
       created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
     bondMove: db.prepare(`UPDATE eval_bonds SET encumbered_millis = ?, forfeited_millis = ?,
-      slashed_millis = ?, released_millis = ?, state = ?, updated_at = ? WHERE bond_id = ?`),
+      slashed_millis = ?, released_millis = ?, state = ?, updated_at = ? WHERE bond_id = ?
+      AND encumbered_millis = ? AND forfeited_millis = ? AND slashed_millis = ?
+      AND released_millis = ? AND state = ?`),
     assignGet: db.prepare("SELECT * FROM eval_assignments WHERE room_id = ? AND job_id = ?"),
     assignInsert: db.prepare(`INSERT INTO eval_assignments (room_id, job_id, panel_json, client, provider,
       job_value_millis, fee_millis_per_evaluator, state, commit_window_ends_at, reveal_window_ends_at,
       created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'committing', ?, ?, ?)`),
+    // Atomic finalization guard: the loser's UPDATE touches zero rows when a
+    // concurrent finalizer already won, so retry-after-timeout can never
+    // double-apply even if the read-then-check above raced.
     assignFinalize: db.prepare(`UPDATE eval_assignments SET state = ?, verdict = ?, settlement_json = ?,
-      finalized_at = ? WHERE room_id = ? AND job_id = ?`),
+      finalized_at = ? WHERE room_id = ? AND job_id = ? AND state NOT IN ('finalized', 'deadlocked')`),
     commitGet: db.prepare("SELECT * FROM eval_commits WHERE room_id = ? AND job_id = ? AND evaluator = ?"),
     commitCount: db.prepare("SELECT COUNT(*) AS n FROM eval_commits WHERE room_id = ? AND job_id = ?"),
     commitInsert: db.prepare(`INSERT INTO eval_commits (room_id, job_id, evaluator, commit_hash, committed_at)
@@ -216,8 +221,27 @@ export function createEvaluatorSeat(store, opts = {}) {
     challengeInsert: db.prepare(`INSERT INTO eval_challenges (challenge_id, room_id, job_id, challenger, target,
       allegation, proof_json, bond_millis, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
     challengeResolve: db.prepare(`UPDATE eval_challenges SET state = ?, bond_state = ?, resolved_at = ?, decider = ?
-      WHERE challenge_id = ?`),
+      WHERE challenge_id = ? AND state = 'open'`),
   };
+
+  // Compare-and-swap bond write. Every bond mutation computes its next balances
+  // from a row it just read; the write lands only if the row is unchanged
+  // since that read. Under concurrent writers (callers may share one database
+  // across connections, and the default store.transaction is per-operation)
+  // the loser gets seat/write-conflict instead of silently clobbering the
+  // winner's balances — a lost update here is how a racing slash/assign pair
+  // resurrects a fraudster's bond, or a racing slash/slash pair erases a full
+  // slash. Callers must retry the whole operation; the retry re-reads fresh
+  // state. Concurrency contract: back store.transaction with BEGIN IMMEDIATE
+  // (or an equivalent mutex) and concurrent operations wait instead of fail.
+  function bondMoveCas(expected, next, t) {
+    const info = q.bondMove.run(
+      next.encumbered, next.forfeited, next.slashed, next.released, next.state, t,
+      expected.bond_id,
+      expected.encumbered_millis, expected.forfeited_millis, expected.slashed_millis,
+      expected.released_millis, expected.state);
+    if (info.changes !== 1) err("seat/write-conflict", "bond changed under a concurrent write; retry the operation");
+  }
 
   function getSeat(roomId) {
     const row = q.seatGet.get(roomId);
@@ -302,12 +326,15 @@ export function createEvaluatorSeat(store, opts = {}) {
       if (!Number.isInteger(n) || n < 1) err("seat/bad-config", "panelSize must be a positive integer");
       if (q.assignGet.get(roomId, jobId)) err("seat/job-exists", "job already has an assignment");
       const eligible = [];
+      const eligibleBonds = new Map(); // evaluator -> raw bond row at eligibility-check time
       for (const c of new Set(candidates)) {
         if (c === client || c === provider) continue; // independence: never the client, never the provider
-        const bond = bondView(q.bondByEvaluator.get(roomId, c));
+        const raw = q.bondByEvaluator.get(roomId, c);
+        const bond = bondView(raw);
         if (!bond || bond.state !== "active") continue;
         if (bond.availableMillis < bond.assignmentSliceMillis) continue;
         eligible.push(c);
+        eligibleBonds.set(c, raw);
       }
       if (eligible.length < n) err("seat/insufficient-eligible", `need ${n} bonded evaluators, found ${eligible.length}`);
       const panel = shuffledPanel(roomId, jobId, eligible, n);
@@ -316,10 +343,18 @@ export function createEvaluatorSeat(store, opts = {}) {
       const commitEnds = t + cfg.commitWindowMs;
       const revealEnds = commitEnds + cfg.revealWindowMs;
       // Encumber one bond slice per seat, atomically with the assignment.
+      // The CAS pins the eligibility-time row: a slash that lands between the
+      // eligibility check and this write fails the whole assignment instead of
+      // silently resurrecting the bond to active with a fresh encumbrance.
       for (const e of panel) {
-        const bond = q.bondByEvaluator.get(roomId, e);
-        q.bondMove.run(bond.encumbered_millis + bond.assignment_slice_millis, bond.forfeited_millis,
-          bond.slashed_millis, bond.released_millis, "active", t, bond.bond_id);
+        const bond = eligibleBonds.get(e);
+        bondMoveCas(bond, {
+          encumbered: bond.encumbered_millis + bond.assignment_slice_millis,
+          forfeited: bond.forfeited_millis,
+          slashed: bond.slashed_millis,
+          released: bond.released_millis,
+          state: "active",
+        }, t);
       }
       q.assignInsert.run(roomId, jobId, JSON.stringify(panel), client, provider,
         jobValueMillis, fee, commitEnds, revealEnds, t);
@@ -454,14 +489,16 @@ export function createEvaluatorSeat(store, opts = {}) {
         const slice = bond.assignment_slice_millis;
         const convertible = Math.min(slice, Math.max(0, bond.encumbered_millis));
         const revealed = commits.has(e);
-        q.bondMove.run(
-          bond.encumbered_millis - convertible,
-          bond.forfeited_millis + (revealed ? 0 : convertible),
-          bond.slashed_millis,
-          bond.released_millis + (revealed ? convertible : 0),
-          bond.state, t, bond.bond_id);
+        bondMoveCas(bond, {
+          encumbered: bond.encumbered_millis - convertible,
+          forfeited: bond.forfeited_millis + (revealed ? 0 : convertible),
+          slashed: bond.slashed_millis,
+          released: bond.released_millis + (revealed ? convertible : 0),
+          state: bond.state,
+        }, t);
       }
-      q.assignFinalize.run(state, verdict, JSON.stringify(settlement), t, roomId, jobId);
+      const fin = q.assignFinalize.run(state, verdict, JSON.stringify(settlement), t, roomId, jobId);
+      if (fin.changes !== 1) err("seat/already-finalized", "assignment already finalized");
       return {
         roomId, jobId, state, verdict,
         feeMillisPerEvaluator: fee, payments, settlement,
@@ -491,10 +528,14 @@ export function createEvaluatorSeat(store, opts = {}) {
       const take = amountMillis === undefined ? slashable : Math.min(amountMillis, slashable);
       if (!Number.isInteger(take) || take <= 0) err("seat/nothing-to-slash", "no slashable balance");
       const fromEncumbered = Math.min(bond.encumbered_millis, take);
-      q.bondMove.run(bond.encumbered_millis - fromEncumbered, bond.forfeited_millis,
-        bond.slashed_millis + take, bond.released_millis,
-        bond.posted_millis - bond.forfeited_millis - (bond.slashed_millis + take) - bond.released_millis <= 0 ? "slashed" : "active",
-        now(), bondId);
+      const remaining = bond.posted_millis - bond.forfeited_millis - (bond.slashed_millis + take) - bond.released_millis;
+      bondMoveCas(bond, {
+        encumbered: bond.encumbered_millis - fromEncumbered,
+        forfeited: bond.forfeited_millis,
+        slashed: bond.slashed_millis + take,
+        released: bond.released_millis,
+        state: remaining <= 0 ? "slashed" : "active",
+      }, now());
       return { bondId, evaluator: bond.evaluator, slashedMillis: take, reason, decider, proof };
     });
   }
@@ -536,14 +577,22 @@ export function createEvaluatorSeat(store, opts = {}) {
           const take = Math.min(bond.assignment_slice_millis, slashable);
           if (take > 0) {
             const fromEnc = Math.min(bond.encumbered_millis, take);
-            q.bondMove.run(bond.encumbered_millis - fromEnc, bond.forfeited_millis,
-              bond.slashed_millis + take, bond.released_millis, "active", t, bond.bond_id);
+            const remaining = bond.posted_millis - bond.forfeited_millis - (bond.slashed_millis + take) - bond.released_millis;
+            bondMoveCas(bond, {
+              encumbered: bond.encumbered_millis - fromEnc,
+              forfeited: bond.forfeited_millis,
+              slashed: bond.slashed_millis + take,
+              released: bond.released_millis,
+              state: remaining <= 0 ? "slashed" : "active",
+            }, t);
           }
         }
-        q.challengeResolve.run("upheld", "released", t, decider, challengeId);
+        const res = q.challengeResolve.run("upheld", "released", t, decider, challengeId);
+        if (res.changes !== 1) err("seat/challenge-closed", "challenge already resolved");
       } else {
         // Failed challenge: the challenger bond is forfeited to the room pool (pays the panel's time).
-        q.challengeResolve.run("rejected", "forfeited", t, decider, challengeId);
+        const res = q.challengeResolve.run("rejected", "forfeited", t, decider, challengeId);
+        if (res.changes !== 1) err("seat/challenge-closed", "challenge already resolved");
       }
       const done = q.challengeGet.get(challengeId);
       return { challengeId, state: done.state, bondState: done.bond_state, decider, resolvedAt: t };
