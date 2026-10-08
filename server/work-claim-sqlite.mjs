@@ -35,6 +35,13 @@ const decodeItem = text => {
   return item;
 };
 
+// PHOENIX W4 gap #1: work_claim_idempotency is the requestId idempotency
+// journal for the work-claim write routes. Dedupe key
+// (room_id, claim_id, actor_id, request_id); the fingerprint is the sha256 of
+// the canonicalized request content, so an identical retry replays 200
+// duplicate:true and a same-requestId / different-content retry is a 409
+// idempotency_conflict. Purely additive: registered in
+// server/writer-fence.mjs unfencedAdditiveTables.
 export const workClaimSchema = `
   CREATE TABLE IF NOT EXISTS work_claims (
     room_id TEXT NOT NULL,
@@ -48,12 +55,6 @@ export const workClaimSchema = `
     config_json TEXT NOT NULL,
     updated_at INTEGER NOT NULL
   );
-  -- PHOENIX W4 gap #1: requestId idempotency journal for work-claim write
-  -- routes. Dedupe key (room_id, claim_id, actor_id, request_id); the
-  -- fingerprint is the sha256 of the canonicalized request content, so an
-  -- identical retry replays 200 duplicate:true and a same-requestId /
-  -- different-content retry is a 409 idempotency_conflict. Purely additive:
-  -- registered in server/writer-fence.mjs unfencedAdditiveTables.
   CREATE TABLE IF NOT EXISTS work_claim_idempotency (
     room_id TEXT NOT NULL,
     claim_id TEXT NOT NULL,
