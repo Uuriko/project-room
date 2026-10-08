@@ -1,5 +1,6 @@
 import { canonicalReaction, foldedReactionMap, MAX_REACTIONS_PER_MESSAGE } from "./emoji.js";
 import { normalizePoll, pollOptionEmojis } from "./polls.js";
+import { validateMessageCard } from "./message-cards.js";
 import { assertMemberDisplayNameAvailable } from "./display-name-guard.js";
 import { proposalContext, nativeTextEvidence, reportedProducer, validateResultSegments } from "./work-packet.js";
 import { CHARTER_TYPE, charterFromEvent } from "./room-charter.js";
@@ -667,7 +668,10 @@ function validateEnvelope(incoming) {
     // Polls (missing-features #5): a kind "poll" message carries a poll
     // payload { question, options, allowMultiple }. The envelope guard admits
     // the object key; the applier runs the full option validation.
-    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "scopes", "acceptedScopes", "changed", "state", "pullRequest", "pullRequests", "blocks", "actions", "dependents", "poll"].includes(key)) throw new Error(`Invalid ${key}`);
+    // Rich message cards (missing-features #7): the envelope guard is coarse
+    // (object shape only); postMessage runs the full card validator.
+    if (key === "card" && (!value || typeof value !== "object" || Array.isArray(value))) throw new Error(`Invalid ${key}`);
+    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "scopes", "acceptedScopes", "changed", "state", "pullRequest", "pullRequests", "blocks", "actions", "dependents", "poll", "card"].includes(key)) throw new Error(`Invalid ${key}`);
   }
 }
 
@@ -1150,6 +1154,10 @@ function postMessage(state, incoming) {
     requireFields(incoming.data, ["claimId", "title", "closedBy", "deliveryMode", "evidence"]);
     if (!["result", "merged", "production"].includes(incoming.data.deliveryMode)) throw new Error("Invalid deliveryMode");
   }
+  // Rich message cards (missing-features #7): a validated card object rides on
+  // the message. Absent on ordinary posts — plain-text messages are untouched.
+  // Validation throws on anything malformed, so a bad card fails the event.
+  const messageCard = incoming.data.card == null ? null : validateMessageCard(incoming.data.card);
   if (incoming.data.workItemId) requireWorkItem(state, incoming.data.workItemId);
   // Replies pin to their thread root's channel so a thread can't drift across
   // channels, no matter what channelId the command carries.
@@ -1180,6 +1188,7 @@ function postMessage(state, incoming) {
     toMemberId: incoming.data.toMemberId || null,
     createdAt: incoming.at,
     ...(proposal ? { proposal } : {}),
+    ...(messageCard ? { card: messageCard } : {}),
     ...(Array.isArray(incoming.data.actions) ? { actions: incoming.data.actions.map(action => ({ claimId: action.claimId, label: action.label })) } : {}),
     ...(incoming.data.kind === "receipt_card" ? {
       kind: "receipt_card",

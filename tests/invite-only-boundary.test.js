@@ -160,6 +160,11 @@ const PROBES = {
   // an unknown one — 404 invite_unavailable, never an oracle.
   "POST /api/referral-invites/preview": [{ token: "ref1.probe.probe" }, 404],
   "POST /api/referral-invites/redeem": [{ token: "ref1.probe.probe" }, 404],
+  // Inbound channel webhook delivery (missing-features #7): unauthenticated
+  // by design — the HMAC signing secret is the credential. An unknown
+  // webhook id 404s before any signature check, so the route tells a prober
+  // nothing about which webhooks exist.
+  "POST /api/rooms/{}/inbound-webhooks/{}": [{ text: "Boundary probe" }, 404],
   "POST /api/share-links/preview": [{ linkToken: token() }, 410],
   "POST /api/invitations/preview": [{ invitationToken: token() }, 404],
   "POST /api/guest-agent-links/preview": [{ linkToken: `gt_${token()}` }, 410],

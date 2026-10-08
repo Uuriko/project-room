@@ -354,6 +354,7 @@
   "tests/identity-mint-capacity.test.js": 51164,
   "tests/identity-ratelimit.test.js": 4895,
   "tests/identity-verification.test.js": 54149,
+  "tests/inbound-webhooks.test.js": 5000,
   "tests/inbox-adoption.test.js": 56770,
   "tests/inbox-agent-routing.test.js": 1590,
   "tests/inbox-approval.test.js": 6155,

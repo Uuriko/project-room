@@ -174,6 +174,23 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .message-show-less { display: none; }
 .message-expansion[open] > summary .message-preview, .message-expansion[open] > summary .message-show-more { display: none; }
 .message-expansion[open] > summary .message-show-less { display: block; }
+/* Rich message cards (missing-features #7): Discord-embed-style card attached
+   to a message. Rendered by messageCardHtml in conversation.js; every string
+   is HTML-escaped before these selectors ever see it. */
+.message-card { display: flex; gap: .6rem; max-width: 32rem; margin: .35rem 0; padding: .7rem .8rem; border: 1px solid var(--line); border-left: 3px solid var(--violet); border-radius: .5rem; background: var(--panel-raised); overflow-wrap: anywhere; }
+.message-card-main { min-width: 0; flex: 1; }
+.message-card-title { display: block; margin-bottom: .3rem; color: var(--text); font-weight: 750; font-size: var(--text-md); }
+a.message-card-title { color: var(--blue); text-decoration: none; }
+a.message-card-title:hover { text-decoration: underline; }
+.message-card-description { margin-bottom: .4rem; color: var(--text); font-size: var(--text-sm); line-height: 1.5; }
+.message-card-fields { display: flex; flex-wrap: wrap; gap: .4rem .8rem; margin-bottom: .4rem; }
+.message-card-field { min-width: 8rem; flex: 1 1 100%; }
+.message-card-field-inline { flex: 1 1 30%; }
+.message-card-field-name { color: var(--muted); font-size: var(--text-xs); font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+.message-card-field-value { color: var(--text); font-size: var(--text-sm); }
+.message-card-image { display: block; max-width: 100%; margin-top: .4rem; border-radius: .35rem; }
+.message-card-thumbnail { width: 4.5rem; height: 4.5rem; flex: none; border-radius: .35rem; object-fit: cover; }
+.message-card-footer { margin-top: .4rem; color: var(--muted); font-size: var(--text-xs); }
 .message-expansion > summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; border-radius: .3rem; }
 .work-link { color: var(--muted); font-size: .72rem; text-decoration: none; }
 .work-link:hover { color: var(--blue); }
