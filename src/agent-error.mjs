@@ -569,7 +569,8 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
     return {
       status: "action_required", reason: "not_found",
       hint: "Nothing exists at this path for this method, or the id is unknown. Nothing was changed. Check the exact path and HTTP method in /openapi.json and /llms.txt.",
-      next: [path("/openapi.json"), path("/llms.txt"), command("Re-read ids from their list route instead of guessing; check the HTTP method (some reads are GET with query params)")]
+      next: [path("/openapi.json"), path("/llms.txt"), command("Re-read ids from their list route instead of guessing; check the HTTP method (some reads are GET with query params)"),
+        tool("room_check_access")]
     };
   }
   if (httpStatus === 429 || reasonCode === "rate_limited") {
