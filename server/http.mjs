@@ -64,6 +64,7 @@ import { isWebFetchGuest, WebFetchError } from "./web-fetch.mjs";
 // board_vtwo_* tables stay in place; nothing here drops them.
 import { validateClaimText, CLAIM_TEXT_MAX_LENGTH } from "./claim-validate.mjs"; // Synchronous pre-post claim-block validation (RC-2026-09-24-204): pure, no store.
 import { getTracer, SPAN_NAMES, ATTR } from "./delivery-tracing.mjs"; // R1 opt-in delivery-path tracing (RC-2026-09-26-966).
+import { createCommandAdmission } from "./command-admission.mjs"; // WAVE-300 item 2: command admission gate (honest backpressure).
 import { guestInviteContract } from "./guest-invites.mjs";
 import { isSessionStatus } from "../src/work-item-session.js";
 import { accessReviewReport } from "./access-review.mjs";
@@ -664,6 +665,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // another. Map insertion order doubles as the recency order.
   const RATE_FAMILY_KEYS = 2000;
   const rates = new Map(), rateFamilies = new Map();
+  // WAVE-300 item 2 (honest backpressure): command admission gate, one per
+  // server instance. Default bound 16 leaves conservative headroom over the
+  // measured effective origin parallelism of ~2 (200-agent exercise: 184/184
+  // silent timeouts, zero 429/503). Retune via the load-calendar thresholds
+  // in docs/HONEST-BACKPRESSURE-SPEC.md, not ad hoc.
+  const commandAdmission = createCommandAdmission();
   const rateFamily = id => id.slice(0, id.indexOf(":"));
   const dropRate = (id, family = rateFamily(id)) => {
     const entry = rates.get(id);
@@ -4851,37 +4858,57 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "stream" && req.method === "GET") return stream(req, res, selected.token, roomId, Number(req.headers["last-event-id"] ?? url.searchParams.get("after") ?? 0), auth, operationId);
       if (route === "commands" && req.method === "POST") {
-        // RC-2026-09-23-100: per-guest message token bucket (chat spam
-        // mitigation). The per-request scope gate in RoomStore#command is
-        // the authority boundary; this is volume control.
-        if (typeof selected.token === "string" && selected.token.startsWith(GUEST_AGENT_TOKEN_PREFIX)) {
-          rate(`guest-post:${rateHash(selected.token)}`, 120);
+        // WAVE-300 item 2 (honest backpressure): fast load shedding. The gate
+        // is checked BEFORE buffering the body or touching the store, so a
+        // shed request is refused in microseconds instead of silently
+        // queueing behind the single-threaded loop / SQLite write lock.
+        const admission = commandAdmission.enter();
+        if (!admission.admitted) {
+          res.setHeader("Retry-After", String(Math.ceil(admission.retryAfterMs / 1000)));
+          return json(res, 503, {
+            code: "shed_load",
+            message: "The server is shedding load; retry after the suggested delay",
+            retryAfterMs: admission.retryAfterMs,
+            inFlight: admission.inFlight,
+          });
         }
-        const command = await body(req, { limit: MAX_MESSAGE_COMMAND_BYTES });
-        // R1 delivery-path tracing (RC-2026-09-26-966): delivery.inbound spans
-        // request receipt through store.command. Opt-in via TELEMETRY=true;
-        // disabled tracers return null spans, so the default path pays nothing
-        // and needs no branching. Only ids and the command type are recorded —
-        // never bodies.
-        const inboundSpan = getTracer().startSpan(SPAN_NAMES.INBOUND, { attributes: {
-          [ATTR.ROOM_ID]: roomId, [ATTR.INGRESS]: "api" } });
         try {
-          if (typeof command?.type === "string") inboundSpan.setAttribute(ATTR.EVENT_TYPE, command.type);
-          const result = store.command(selected.token, roomId, command, fence);
-          const messageId = result?.event?.data?.messageId ?? result?.event?.id;
-          if (typeof messageId === "string") inboundSpan.setAttribute(ATTR.MESSAGE_ID, messageId);
-          inboundSpan.setAttribute(ATTR.OUTCOME, result?.duplicate ? "duplicate" : "ok");
-          inboundSpan.setStatusOk();
-          return json(res, result.duplicate ? 200 : 201, result);
-        } catch (error) {
-          inboundSpan.recordException(error);
-          // G7 (#940): hand the refused command's type to the AX layer via a
-          // symbol key (never serialized) so bond/dm field-shape errors can
-          // enumerate the expected data shape. Codes/messages unchanged.
-          if (error instanceof ServiceError && typeof command?.type === "string") error[ERROR_COMMAND_TYPE] = command.type;
-          throw error;
+          // RC-2026-09-23-100: per-guest message token bucket (chat spam
+          // mitigation). The per-request scope gate in RoomStore#command is
+          // the authority boundary; this is volume control.
+          if (typeof selected.token === "string" && selected.token.startsWith(GUEST_AGENT_TOKEN_PREFIX)) {
+            rate(`guest-post:${rateHash(selected.token)}`, 120);
+          }
+          const command = await body(req, { limit: MAX_MESSAGE_COMMAND_BYTES });
+          // R1 delivery-path tracing (RC-2026-09-26-966): delivery.inbound spans
+          // request receipt through store.command. Opt-in via TELEMETRY=true;
+          // disabled tracers return null spans, so the default path pays nothing
+          // and needs no branching. Only ids and the command type are recorded —
+          // never bodies.
+          const inboundSpan = getTracer().startSpan(SPAN_NAMES.INBOUND, { attributes: {
+            [ATTR.ROOM_ID]: roomId, [ATTR.INGRESS]: "api" } });
+          try {
+            if (typeof command?.type === "string") inboundSpan.setAttribute(ATTR.EVENT_TYPE, command.type);
+            const result = store.command(selected.token, roomId, command, fence);
+            const messageId = result?.event?.data?.messageId ?? result?.event?.id;
+            if (typeof messageId === "string") inboundSpan.setAttribute(ATTR.MESSAGE_ID, messageId);
+            inboundSpan.setAttribute(ATTR.OUTCOME, result?.duplicate ? "duplicate" : "ok");
+            inboundSpan.setStatusOk();
+            return json(res, result.duplicate ? 200 : 201, result);
+          } catch (error) {
+            inboundSpan.recordException(error);
+            // G7 (#940): hand the refused command's type to the AX layer via a
+            // symbol key (never serialized) so bond/dm field-shape errors can
+            // enumerate the expected data shape. Codes/messages unchanged.
+            if (error instanceof ServiceError && typeof command?.type === "string") error[ERROR_COMMAND_TYPE] = command.type;
+            throw error;
+          } finally {
+            inboundSpan.end();
+          }
         } finally {
-          inboundSpan.end();
+          // The gauge must never leak: every admitted request releases its
+          // slot on the way out, including on throw.
+          commandAdmission.leave();
         }
       }
       if (route === "return-brief" && req.method === "GET") {
