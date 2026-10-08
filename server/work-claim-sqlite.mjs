@@ -48,6 +48,21 @@ export const workClaimSchema = `
     config_json TEXT NOT NULL,
     updated_at INTEGER NOT NULL
   );
+  -- PHOENIX W4 gap #1: requestId idempotency journal for work-claim write
+  -- routes. Dedupe key (room_id, claim_id, actor_id, request_id); the
+  -- fingerprint is the sha256 of the canonicalized request content, so an
+  -- identical retry replays 200 duplicate:true and a same-requestId /
+  -- different-content retry is a 409 idempotency_conflict. Purely additive:
+  -- registered in server/writer-fence.mjs unfencedAdditiveTables.
+  CREATE TABLE IF NOT EXISTS work_claim_idempotency (
+    room_id TEXT NOT NULL,
+    claim_id TEXT NOT NULL,
+    actor_id TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (room_id, claim_id, actor_id, request_id)
+  );
 `;
 
 const parse = text => {
@@ -71,6 +86,12 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
   const selectConfig = statement("SELECT config_json FROM work_claim_config WHERE room_id=?");
   const upsertConfig = statement(`INSERT INTO work_claim_config (room_id, config_json, updated_at) VALUES (?, ?, ?)
     ON CONFLICT(room_id) DO UPDATE SET config_json=excluded.config_json, updated_at=excluded.updated_at`);
+  // PHOENIX W4 gap #1: requestId idempotency journal. Check-then-record runs
+  // inside the registry transaction (the routes call these between their
+  // read and their commit), so the dedupe is atomic with the write.
+  const selectIdempotency = statement("SELECT fingerprint FROM work_claim_idempotency WHERE room_id=? AND claim_id=? AND actor_id=? AND request_id=?");
+  const insertIdempotency = statement(`INSERT INTO work_claim_idempotency (room_id, claim_id, actor_id, request_id, fingerprint, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)`);
 
   const rawConfig = roomId => {
     const row = selectConfig.get(roomId);
@@ -112,5 +133,12 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
     },
     configFor(roomId) { return roomWorkClaimConfig({ workClaims: rawConfig(roomId) }); },
     rawConfig(roomId) { return { ...rawConfig(roomId) }; },
+    findIdempotencyRecord(roomId, claimId, actorId, requestId) {
+      const row = selectIdempotency.get(roomId, claimId, actorId, requestId);
+      return row ? { fingerprint: row.fingerprint } : null;
+    },
+    recordIdempotencyRecord(roomId, claimId, actorId, requestId, fingerprint) {
+      insertIdempotency.run(roomId, claimId, actorId, requestId, fingerprint, now());
+    },
   };
 }
