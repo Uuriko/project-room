@@ -797,19 +797,13 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     registry.set(roomId, stamped);
     return stamped;
   };
-  const closeLiveClaims = () => {
-    const closed = [];
-    for (const item of registry.list(roomId)) {
-      if ((item.kind !== "land" && item.kind !== "deploy") || isTerminalClaimState(item.state)) continue;
-      const next = closeWhenLive(item, SOURCE_REVISION, nowMs);
-      if (!next) continue;
-      commit(next, "state_changed");
-      closed.push(next.id);
-    }
-    return closed;
-  };
   const roomLike = { workClaims: registry.rawConfig(roomId) };
-  const sweptIds = sweepRoom(registry, roomId, nowMs, (item, before) => {
+  // READ PURITY (wave300): lease-expiry sweeping never runs on a read path.
+  // The server-side reaper (30s tick, zero room events per reap) owns expiry;
+  // POST /sweep below is the only route that triggers a manual sweep, via
+  // runSweep(). GET list/read/status are pure: no releases, no room events,
+  // no wakes.
+  const runSweep = () => sweepRoom(registry, roomId, nowMs, (item, before) => {
     const receipt = emitWorkClaimEvent(store, roomId, {
       actorId: before.owner, item, action: "lease_expired", previousOwnerId: before.owner,
       atMs: nowMs, paths: before.files ?? []
@@ -883,14 +877,12 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   };
 
   if (workClaimRoute === "status" && req.method === "GET") {
-    closeLiveClaims();
     const status = deployStatus ?? { live: SOURCE_REVISION, main: null, behind: null, checkedAt: null };
     return json(res, 200, { live: status.live, main: status.main, behind: status.behind, checkedAt: status.checkedAt,
       stale: status.stale === true, ...(status.heldUntil ? { heldUntil: status.heldUntil } : {}),
       eventsRemaining: roomEventsRemaining(access.authority?.sequence) });
   }
   if (workClaimRoute === "list" && req.method === "GET") {
-    closeLiveClaims();
     // W5 boardSeq: the room event sequence is the board's monotonic version —
     // every claim change appends a room event inside the write transaction.
     // ?since= lets pollers short-circuit the full-board decode with a 304.
@@ -915,7 +907,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const claims = order.size > 0
       ? page.claims.map(item => order.has(item.id) ? { ...item, queuePosition: order.get(item.id) } : item)
       : page.claims;
-    return json(res, 200, { ...page, boardSeq, claims, swept: sweptIds });
+    return json(res, 200, { ...page, boardSeq, claims, swept: [] });
   }
   if (workClaimRoute === "receipts" && req.method === "GET") {
     // RC-2026-09-24-205: receipts search. The room block already rejected
@@ -972,7 +964,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       writeClaimPullBudget(store, pullBatch.rateLimitedUntil, nowMs);
     }
     return json(res, 200, {
-      roomId, released: sweptIds, sweptAt: new Date(nowMs).toISOString(),
+      roomId, released: runSweep(), sweptAt: new Date(nowMs).toISOString(),
       pullRequests: { checked, updated, ...(rateLimited ? { rateLimited: true } : {}) }
     });
   }
@@ -1105,7 +1097,6 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     return json(res, 201, stampCreatedSeq(created, receipt));
   }
   if (workClaimRoute === "read" && req.method === "GET") {
-    closeLiveClaims();
     // SEC-2: member-authored text is marked untrusted for the reader.
     return json(res, 200, withContentTrust(stampClaim(load(claimIdOf(reject, workClaimId)), caller)));
   }
