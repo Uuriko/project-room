@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { exportNdjsonStream, exportNdjsonText, operatorExportResponse, replayNdjson } from "../server/room-export.mjs";
+import { exportNdjsonStream, exportNdjsonText, operatorExportResponse, replayNdjson, sanitizeCell, REPLAY_SKIPPED_TABLES } from "../server/room-export.mjs";
 import { backupTarget, writeDailyBackup, writeKvBackup } from "../cloudflare/room-backup.mjs";
 import { assembleKvBackup, summarizeRoom } from "../scripts/restore-room-backup.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
@@ -228,4 +228,55 @@ test("a KV backup split into many parts reassembles byte-equal, replays, and cat
   tampered[0] ^= 1;
   assert.throws(() => assembleKvBackup(get(manifest.key), key => key === manifest.parts[1].key ? tampered : get(key)), /does not match its manifest/);
   assert.equal(existsSync(join(directory, "restore", "other.sqlite")), false);
+});
+
+test("Durable Object BLOB cells (ArrayBuffer) export as base64, not {}", () => {
+  const bytes = Uint8Array.from({ length: 256 }, (_, i) => i);
+  const expected = { $base64: Buffer.from(bytes).toString("base64") };
+  assert.deepEqual(sanitizeCell("bytes", bytes.buffer.slice(0)), expected);
+  assert.deepEqual(sanitizeCell("bytes", new DataView(bytes.buffer)), expected);
+  const padded = new Uint8Array(260); padded.set(bytes, 2);
+  assert.deepEqual(sanitizeCell("bytes", new Uint8Array(padded.buffer, 2, 256)), expected);
+  assert.notEqual(JSON.stringify(sanitizeCell("bytes", bytes.buffer)), "{}");
+});
+
+test("a version 1 KV manifest for today is rewritten; a current one is kept", async t => {
+  const { store } = openStore(t, 2);
+  const kv = fakeKv();
+  const room = { exportRoomNdjson: () => exportNdjsonStream(store.db) };
+  const when = new Date(Date.UTC(2026, 9, 8, 9));
+  await kv.put("room-backups/2026-10-08.ndjson", JSON.stringify({ kind: "room-backup-manifest", version: 1, parts: [] }), {});
+  const wrote = await writeDailyBackup({ ROOM_BACKUPS_KV: kv }, room, when);
+  assert.equal(wrote.wrote, "room-backups/2026-10-08.ndjson");
+  assert.equal(JSON.parse(kv.map.get("room-backups/2026-10-08.ndjson").value.toString()).version, 2);
+  assert.equal((await writeDailyBackup({ ROOM_BACKUPS_KV: kv }, room, when)).skipped, "exists");
+});
+
+test("replay skips Durable Object runtime and retired tables and reports them", t => {
+  const { directory, store } = openStore(t, 3);
+  const extra = [
+    { table: "room_writer_permit", row: { singleton: 1, version: 41 } },
+    { table: "room_runtime_version", row: { singleton: 1, version: 41 } },
+    { table: "emissary_journal", row: { room_id: "commons", id: "j1" } }
+  ].map(line => JSON.stringify(line)).join("\n");
+  assert.ok(REPLAY_SKIPPED_TABLES.includes("room_writer_permit"));
+  const ndjson = `${exportNdjsonText(store.db)}${extra}\n`;
+  const result = replayNdjson(ndjson, join(directory, "skip", "room.sqlite"));
+  assert.equal(result.verified, true);
+  assert.deepEqual(result.skippedTables, { room_runtime_version: 1, room_writer_permit: 1, emissary_journal: 1 });
+  const unknown = `${exportNdjsonText(store.db)}${JSON.stringify({ table: "not_a_table", row: { a: 1 } })}\n`;
+  assert.throws(() => replayNdjson(unknown, join(directory, "unknown", "room.sqlite")), /does not have/);
+});
+
+test("audit report restores a store whose stored projection drifted from the reducer, strict refuses it", t => {
+  const { directory, store } = openStore(t, 2);
+  store.db.prepare("UPDATE rooms SET projection=json_set(projection, '$.drift', 1) WHERE id='commons'").run();
+  const ndjson = exportNdjsonText(store.db);
+  assert.throws(() => replayNdjson(ndjson, join(directory, "strict", "room.sqlite")), /reconciliation/);
+  const report = replayNdjson(ndjson, join(directory, "report", "room.sqlite"), { audit: "report" });
+  assert.equal(report.verified, true);
+  assert.equal(report.audit.ok, false);
+  assert.match(report.audit.error, /reconciliation/);
+  assert.equal(replayNdjson(exportNdjsonText(openStore(t, 1).store.db), join(directory, "clean", "room.sqlite"), { audit: "report" }).audit.ok, true);
+  assert.throws(() => replayNdjson(ndjson, join(directory, "bad", "room.sqlite"), { audit: "loose" }), /strict or report/);
 });
