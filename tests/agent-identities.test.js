@@ -184,6 +184,34 @@ test("identity-links accepts an empty permissions array: read/chat-only link", a
   assert.equal(cliLinked.json.memberId, cliOther.identityId);
 });
 
+test("#1004: link with an inherited Object.prototype memberId returns 422, not 409, and writes no row", async t => {
+  const { store, origin, ownerCommons } = await serve(t);
+  const { identityId } = await createAgentIdentity(origin, "Prototype Bot");
+  // These names pass MEMBER_ID_PATTERN but are inherited, not members. A
+  // bare members[id] lookup resolves them to Object.prototype's functions
+  // (truthy), which used to fail closed with a misleading 409
+  // identity_conflict ("Member id is already taken").
+  for (const reserved of ["constructor", "toString", "valueOf", "hasOwnProperty"]) {
+    const res = await fetch(`${origin}/api/rooms/commons/identity-links`, {
+      method: "POST", headers: { "Content-Type": "application/json", Origin: origin, Authorization: `Bearer ${ownerCommons}` },
+      body: JSON.stringify({ identityId, memberId: reserved, permissions: [] }),
+    });
+    assert.equal(res.status, 422, reserved);
+    const body = await res.json();
+    assert.equal(body.error.code, "invalid_identity", reserved);
+    assert.match(body.error.message, /reserved name/, reserved);
+  }
+  // No identity_links row was written for any of the refused attempts.
+  const row = store.db.prepare("SELECT * FROM identity_links WHERE room_id=? AND identity_id=?").get("commons", identityId);
+  assert.equal(row, undefined);
+  // A normal link for the same identity still works afterwards.
+  const ok = await fetch(`${origin}/api/rooms/commons/identity-links`, {
+    method: "POST", headers: { "Content-Type": "application/json", Origin: origin, Authorization: `Bearer ${ownerCommons}` },
+    body: JSON.stringify({ identityId, permissions: [] }),
+  });
+  assert.equal(ok.status, 201);
+});
+
 test("CLI plug-in loop: a new AI goes from no credential to connected member", async t => {
   const { store, origin, ownerCommons } = await serve(t);
   const ownerEnv = { ROOM_AGENT_ROOM: "commons", ROOM_AGENT_MEMBER: "owner", ROOM_AGENT_TOKEN: ownerCommons };
