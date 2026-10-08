@@ -613,10 +613,31 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   // to request_failed, and keep the specific work_not_found /
   // work_claim_not_found branches above untouched.
   if (reasonCode === "not_found") {
+    // ch-2056 challenge (QA-200, 2026-10-08): the identity exists here — it
+    // just holds no membership-administration authority
+    // (server/membership-delegation.mjs revoke: 404 not_found "No
+    // membership-administration authority for this identity"). Diagnosing a
+    // missing id ("use a current id; do not guess ids") loops forever; name
+    // the authority state instead.
+    if (/authority/i.test(String(message || ""))) {
+      return {
+        status: "action_required", reason: "not_found",
+        hint: "That identity holds no membership-administration authority — there is nothing to revoke. Nothing was changed.",
+        next: [command("Confirm the identity's current authority (e.g. re-list this room's delegation grants) before acting; retrying the same id returns the same result")]
+      };
+    }
+    // ch-2056 challenge (QA-200, 2026-10-08): the room-scoped 404s that emit
+    // bare not_found (e.g. membership-delegation grant, "No such linked
+    // agent identity in this room") reach this branch with roomId set, but
+    // the original next step named GET /api/public-work/tasks — a global
+    // board that can never hold the room's ids. Mirror the
+    // work_claim_not_found branch above: name a room-scoped re-list when
+    // roomId is known.
+    const relistExample = roomId ? `GET /api/rooms/${roomId}/presence` : "GET /api/public-work/tasks";
     return {
       status: "action_required", reason: "not_found",
       hint: "That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.",
-      next: [command("Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids"),
+      next: [command(`Re-list the resource (e.g. ${relistExample}) and retry with a current id; do not guess ids`),
         tool("room_check_access")]
     };
   }
