@@ -20,15 +20,21 @@ const WORK_CLAIM_FIELDS = ["id", "title", "state", "owner", "history", "claimedA
   "leaseStartAt", "leaseExpiresAt", "deliveryMode", "reviewPolicy", "reviewedBy",
   "attestations", "tags", "files", "fileBlocks", "blobs", "dependsOn", "pullRequest", "pullRequests", "updatedAt",
   "repo", "branch", "chain", "supersededBy", "workItemId",
-  "kind", "revision", "ci", "reviews", "historyOmitted"];
+  "kind", "revision", "ci", "reviews", "historyOmitted",
+  "leaseSeq", "epoch", "priorActiveState", "lastHeartbeatAt", "consecutiveHeartbeats",
+  "standby", "createdSeq", "filesDeclared"];
 const WORK_CLAIM_DEFAULTS = { title: null, state: "unclaimed", owner: null, history: [],
   claimedAt: null, leaseStartAt: null, leaseExpiresAt: null, deliveryMode: null,
   reviewPolicy: null, reviewedBy: null, attestations: [], tags: [], files: [], fileBlocks: {}, blobs: [],
   dependsOn: [], pullRequest: null, pullRequests: [], updatedAt: null,
   repo: null, branch: null, chain: [], supersededBy: null, workItemId: null,
-  kind: "work", revision: null, ci: null, reviews: [] };
+  kind: "work", revision: null, ci: null, reviews: [],
+  leaseSeq: 1, epoch: 1, priorActiveState: null, lastHeartbeatAt: null,
+  consecutiveHeartbeats: 0, standby: [], createdSeq: null, filesDeclared: true };
 const decodeItem = text => {
-  const item = decodeRow(text, { kind: WORK_CLAIM_ROW_KIND, fields: WORK_CLAIM_FIELDS, defaults: WORK_CLAIM_DEFAULTS });
+  // passthroughUnknown: production rows carry fields this checkout doesn't
+  // know (squadId, parentClaimId, readingAcks, ...) — never drop them.
+  const item = decodeRow(text, { kind: WORK_CLAIM_ROW_KIND, fields: WORK_CLAIM_FIELDS, defaults: WORK_CLAIM_DEFAULTS, passthroughUnknown: true });
   if (item.title == null) item.title = item.id; // workOf: title ?? id
   // SEC-2 history cap: only claims that dropped history carry the counter.
   if (item.historyOmitted == null) delete item.historyOmitted;
