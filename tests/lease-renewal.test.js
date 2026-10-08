@@ -292,7 +292,10 @@ test("handler: renew without a progress message id extends the lease", async () 
   const before = registry.get("room1", "w1").leaseExpiresAt;
   const { out, error } = await runRoute({ route: "renew", id: "w1", body: {}, registry });
   assert.equal(error, null);
-  assert.ok(Date.parse(out.value.leaseExpiresAt) > Date.parse(before));
+  // >= not >: since the footgun fix an empty renew preserves the existing
+  // window, so a claim and renew landing in the same millisecond have equal
+  // expiries. The footgun itself is locked by the short-lease test below.
+  assert.ok(Date.parse(out.value.leaseExpiresAt) >= Date.parse(before));
   assert.match(out.value.history.at(-1).note, /no progress note/);
 });
 
