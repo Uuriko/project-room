@@ -84,4 +84,6 @@ failure inside any cone's file set was missed by the cone.
 Collision demo: PR #1594 vs PR #1595 (two independent implementations of the
 same work-claim board change, overlapping `server/work-claim-routes.mjs`) —
 collision detected via intersecting changed files; #1595 green + 133-line diff
-beats #1594 red + 192-line diff. Winner: #1595's approach.
+beats #1594 pass-with-baseline-failures + 192-line diff (adjudication proved
+the board-test failure pre-existing: reproduced at base 2/2). Winner: #1595's
+approach. End-to-end `collide`: 301 s.
