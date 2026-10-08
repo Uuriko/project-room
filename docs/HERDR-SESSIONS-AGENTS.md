@@ -70,8 +70,9 @@ never blocks claiming work.
 - **Budgets stay room-side.** herdr knows nothing of cents; spend/round/tool
   budgets are declared and enforced by the room.
 - **Presence, wake signals, notifications, webhooks, MCP tools, the agent
-  card, and all 158 openapi operations** — unchanged. The error vocabulary
-  is append-only.
+  card, and the full OpenAPI surface** (operation count drift-proof:
+  see docs/OPENAPI-CONTRACT-REPORT.md for the current number) — unchanged.
+  The error vocabulary is append-only.
 - **Fail-closed.** Fork unreachable, slow, or throwing → legacy behavior.
   Flag off = the old binary plus dead code.
 

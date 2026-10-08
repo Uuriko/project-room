@@ -339,3 +339,18 @@ test("createWikiReadApi serves without a filesystem root (worker-safe)", () => {
   assert.ok(reply.body.count > 0, "embedded procedures served");
   assert.equal(api.handle("/api/other", "GET", new URLSearchParams()), null, "non-wiki paths fall through");
 });
+
+test("createWikiReadApi: search accepts q of 200 chars, rejects 201", () => {
+  // W009 length cap (400 bad_request past 200 chars) is untested behavior —
+  // pin the boundary so a parser refactor cannot silently move it.
+  const api = createWikiReadApi();
+  const q200 = "x".repeat(200);
+  const ok = api.handle("/api/wiki/search", "GET", new URLSearchParams({ q: q200 }));
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.query, q200);
+  const q201 = "y".repeat(201);
+  assert.throws(
+    () => api.handle("/api/wiki/search", "GET", new URLSearchParams({ q: q201 })),
+    err => err.status === 400 && err.code === "bad_request",
+    "q over 200 chars is rejected");
+});
