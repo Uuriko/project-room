@@ -117,6 +117,14 @@ test("shared mapper keeps error.code/message and adds status/reason/hint/next", 
   assert.match(wrongMethod.hint, /does not accept that HTTP method/);
   assert.match(wrongMethod.hint, /Allow header/);
   assert.doesNotMatch(wrongMethod.hint, /Unknown error/);
+  // QA 2026-10-07: identity_already_linked is idempotent success (the link is
+  // live), not a failure — the hint must say so instead of "check access",
+  // or agents mint duplicate identities retrying the link create.
+  const alreadyLinked = agentErrorAx({ httpStatus: 409, code: "identity_already_linked", message: "This identity is already linked to this room" });
+  assert.equal(alreadyLinked.reason, "identity_already_linked");
+  assert.match(alreadyLinked.hint, /earlier link is live/);
+  assert.match(alreadyLinked.hint, /do not mint another identity/);
+  assert.ok(alreadyLinked.next.some(step => step.tool === "room_check_access"));
 });
 
 test("public-work 409s teach: conflict names holder+lease expiry, stale says changed-vs-expired", () => {

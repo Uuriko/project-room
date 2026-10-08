@@ -505,8 +505,12 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   // Lane 5 (docspolish-error-quality): the already_* 409 family means the
   // action already happened — "Check access and current work." sends the
   // agent down the wrong path. Teach reconcile-instead-of-retry.
-  if (/^already_/.test(reasonCode)) {
+  // (2026-10-07 buildqa: identity_already_linked is the same family —
+  // idempotent 409 success from the identity-link routes, not a failure —
+  // but starts with identity_, not already_. It joins the family too.)
+  if (/^already_/.test(reasonCode) || reasonCode === "identity_already_linked") {
     const alreadyHints = {
+      identity_already_linked: "This identity is already linked to this room — the earlier link is live. Keep your saved connection; do not mint another identity or retry the link create.",
       already_member: /already linked/.test(String(message || ""))
         ? "This identity is already a member of this room — do not create another membership. Act with the saved identity credential instead."
         : "Re-check the current membership with the saved credential; do not create a duplicate membership.",
