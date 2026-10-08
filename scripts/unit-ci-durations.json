@@ -962,7 +962,8 @@
   "tests/saved-history-floor.test.js": 464,
   "tests/rebuild-stale-checkpoint.test.js": 2200,
   "tests/work-claim-settle-double.test.js": 1500,
-  "tests/dm-thread-read-privacy.test.js": 25663
+  "tests/moderation-dm-privacy.test.js": 952,
+  "tests/notify-classifier.test.js": 1200
  },
  "_note": "Per-file wall-clock ms of `node --test <file>` measured 2026-10-06 on a 2-CPU host with 16-way parallelism (values are contention-inflated; used only as relative weights for shard balancing, never for membership). Files hitting the 300s measurement timeout are capped at 300000.",
  "releaseRecordMeasurement": "Eight record-rail files measured on macOS Node26, four concurrent real Node processes, 2026-10-06; all eight passed. Timing allocates files only.",
@@ -990,11 +991,11 @@
   "purpose": "Measured allocation only; test discovery remains authoritative."
  },
  "releaseStaleCheckpointMeasurement": "tests/rebuild-stale-checkpoint.test.js: 2200 wall-clock ms (solo runs 2212/1407/6380 on Linux Node v24.20.0, 2026-10-08; both tests passed). Timing allocates files only, not membership.",
- "dmThreadReadPrivacyMeasurement": {
-  "date": "2026-10-08",
+ "moderationDmPrivacyMeasurement": {
+  "date": "2026-10-07",
   "runtime": "Node v22.23.3 Linux local",
-  "file": "tests/dm-thread-read-privacy.test.js",
-  "milliseconds": 25663,
+  "file": "tests/moderation-dm-privacy.test.js",
+  "milliseconds": 952,
   "method": "Median of five solo node --test wall-clock runs; all passed.",
   "purpose": "Measured allocation only; test discovery remains authoritative."
  }
