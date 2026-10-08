@@ -346,6 +346,7 @@ optional.push("src/human-experience.js", "src/human-experience.css", "server/roo
 optional.push("server/trial-task-store.mjs", "server/trial-tasks.mjs", "server/vetting-receipts.mjs", "server/demigod-offers.mjs", "server/demigod-contracts.mjs", "server/buyer-signoff.mjs", "server/routes/record-rails.mjs", "server/demigod-policy-adapter.mjs", "server/settlement-router.mjs", "server/fee-credit-ledger.mjs");
 
 optional.push("src/spend-pricing-ui.js", "src/polls.js");
+optional.push("server/attested-votes.mjs", "server/attested-vote-routes.mjs", "server/routes/attested-votes.mjs"); // identity-sybil guild W6: attested-ballot protocol (imported by server/store.mjs and server/routes/table.mjs)
 export const allowed = new Set([...required, ...optional]);
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 // The contract stays exact: any mismatch fails. Each failure now names the

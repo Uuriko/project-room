@@ -426,7 +426,14 @@ export const unfencedAdditiveTables = Object.freeze([
   // Purely additive and intentionally NOT fenced — older writers have no code
   // path to it; the owner-managed roster rules in server/squads.mjs are the
   // integrity gate.
-  "squads"
+  "squads",
+  // vote_rooms + voter_allowlist + voter_registrations + vote_challenges +
+  // attested_ballots (identity-sybil guild W6, attested-ballot protocol):
+  // purely additive and intentionally NOT fenced — older writers have no
+  // code path to them; the UNIQUE(vote_room_id, identity_id) constraint plus
+  // the Ed25519 verify pipeline in server/attested-votes.mjs are the
+  // integrity gate.
+  "vote_rooms", "voter_allowlist", "voter_registrations", "vote_challenges", "attested_ballots"
 ]);
 // Created on first use, not in the constructor. A database that has never
 // issued an OAuth grant or persisted an abuse rate bucket does not have

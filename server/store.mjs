@@ -98,6 +98,7 @@ import { WebFetch, webFetchSchema, migrateWebFetchLogColumns } from "./web-fetch
 import { WebResearch, webResearchSchema } from "./web-research.mjs"; // RC-2026-09-24-310: knowledge router (additive)
 import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensureIdentityCapacitySchema, ensureIdentityLinkCodeSchema, identityLinkCodeSchema, isIdentitySecret } from "./agent-identities.mjs";
 import { AgentKeyRegistry, agentKeyRegistrySchema } from "./agent-key-registry.mjs"; // Integration map slice 9: agent public-key registry.
+import { AttestedVotes, attestedVoteSchema } from "./attested-votes.mjs"; // Identity-sybil guild W6: attested-ballot protocol (additive).
 // Board v2 is retired. These tables stay so existing databases and the
 // recovery audit still see them. Nothing drops board_vtwo_*.
 const RETIRED_BOARD_V2_SCHEMA = `
@@ -1058,7 +1059,7 @@ function roomSchemaStamp() {
     accessRequestSchema, membershipDelegationSchema, membershipDelegationJournalSchema,
     ownerDelegateSchema, agentRoomSchema, oauthPendingSchema, gmailSchema, requestRunSchema, roomAssistantSchema,
     directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA,
-    agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA, OPERATOR_ACTIONS_SCHEMA,
+    agentKeyRegistrySchema, attestedVoteSchema, INTEGRITY_SNAPSHOT_SCHEMA, OPERATOR_ACTIONS_SCHEMA,
     INTEGRITY_JOB_CURSOR_SCHEMA, INTEGRITY_ROOM_STATE_SCHEMA, INTEGRITY_SWEEP_COLUMN,
     ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES, MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, WANTS_WORK_SCHEMA, CODE_DROPS_SCHEMA, PROJECTION_BODIES_SCHEMA,
     PUBLIC_READ_MODEL_SCHEMA,
@@ -1184,6 +1185,7 @@ export class RoomStore {
     this.delegationJournal = new MembershipDelegationJournal(this);
     this.ownerDelegates = new OwnerDelegates(this);
     this.keyRegistry = new AgentKeyRegistry(this); // Slice 9: Ed25519 public-key registry (bound at identity issuance).
+    this.attestedVotes = new AttestedVotes(this); // Identity-sybil guild W6: attested-ballot vote rooms (additive).
     this.invites = new AgentInvites(this);
     this.referralInvites = new ReferralInvites(this);
     this.referrals = new Referrals(this);
@@ -1438,6 +1440,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // unfencedAdditiveTables). Applied here (not only in createRoomServer)
       // so store-only fixtures and the recovery audit see it.
       this.db.exec(agentKeyRegistrySchema);
+      // Identity-sybil guild W6: attested-ballot tables (vote_rooms,
+      this.db.exec(attestedVoteSchema);
       // PR #1144: board-v2 durable registry (claims/events/mirror/idempotency)
       // is purely additive — IF NOT EXISTS is idempotent, no schema version
       // bump, intentionally outside the writer fence (see unfencedAdditiveTables).

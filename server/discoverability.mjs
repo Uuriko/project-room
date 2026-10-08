@@ -113,6 +113,34 @@ const CLAIM_VALIDATE_BODY = Object.freeze({ required: true, content: { "applicat
     text: { type: "string", description: "The ```room-claim block text to validate." },
   },
 } } } });
+// Attested ballots (identity-sybil guild W6): request bodies for the vote-room
+// surface. The voter binds via the x-identity-secret header, not the body.
+const VOTE_ROOM_CREATE_BODY = Object.freeze({ required: true, content: { "application/json": { schema: {
+  type: "object", additionalProperties: false, required: ["title", "mode", "options"], properties: {
+    title: { type: "string", description: "Vote-room title." },
+    mode: { type: "string", enum: ["allowlist", "open"], description: "Pinned admitted-delegate roster, or open-with-registration." },
+    identityIds: { type: "array", items: { type: "string" }, description: "Admitted-delegate roster (allowlist mode, required non-empty)." },
+    options: { type: "array", minItems: 2, items: { type: "object", required: ["id", "label"], properties: { id: { type: "string" }, label: { type: "string" } } } },
+    opensAt: { type: "integer", description: "Optional ms epoch; ballots before it get 409 vote_closed." },
+    closesAt: { type: "integer", description: "Optional ms epoch; ballots after it get 409 vote_closed." },
+    proofMode: { type: "string", enum: ["signature", "server", "either"], description: "Default signature." },
+  },
+} } } });
+const VOTER_IDENTITY_BODY = Object.freeze({ required: true, content: { "application/json": { schema: {
+  type: "object", additionalProperties: false, required: ["identityId"], properties: {
+    identityId: { type: "string", description: "The voting identity; must match the x-identity-secret header's identity." },
+  },
+} } } });
+const BALLOT_CAST_BODY = Object.freeze({ required: true, content: { "application/json": { schema: {
+  type: "object", additionalProperties: false, required: ["identityId", "choice"], properties: {
+    identityId: { type: "string", description: "The voting identity; must match the x-identity-secret header's identity." },
+    choice: { description: "Option id, or ranked list of option ids." },
+    nonce: { type: "string", description: "Signature mode: the challenge nonce, signed back verbatim." },
+    challengeId: { type: "string", description: "Signature mode: the single-use challenge id." },
+    issuedAt: { type: "integer", description: "Client ms epoch; must be within 5 minutes of server time." },
+    signature: { type: "string", description: "Signature mode: base64 Ed25519 signature over the canonical ballot bytes." },
+  },
+} } } });
 
 export const DISCOVERABILITY_ROUTES = Object.freeze([
   // Public discovery documents (no credential).
@@ -227,6 +255,22 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   // Agent claim-block pre-validation (QA2 2026-10-04: served spec omitted it).
   route("/api/claims/validate", ["POST"], "open", "Validate a ```room-claim block before posting it. Unauthenticated by design; a pure function of the request body.", "validateClaimText",
     { requestBodies: { POST: CLAIM_VALIDATE_BODY } }),
+  // Attested ballots (identity-sybil guild W6): Ed25519 challenge-response
+  // vote rooms. The voter binds separately from the room member: challenge,
+  // register and ballot requests carry the voter's pri_ identity secret in
+  // the x-identity-secret header.
+  route("/api/rooms/{roomId}/vote-rooms", ["GET"], "room-member", "List the room's vote rooms (no ballots).", "listVoteRooms"),
+  route("/api/rooms/{roomId}/vote-rooms", ["POST"], "room-member", "Open a vote room: title, options, an admitted-delegate allowlist (or open-with-registration), and a proof mode (signature default; server/either degradation). Owner (manage_members) only.", "createVoteRoom",
+    { requestBodies: { POST: VOTE_ROOM_CREATE_BODY } }),
+  route("/api/rooms/{roomId}/vote-rooms/{voteRoomId}", ["GET"], "room-member", "Read one vote room: roster size and ballots cast (no ballots).", "readVoteRoom"),
+  route("/api/rooms/{roomId}/vote-rooms/{voteRoomId}/register", ["POST"], "room-member", "Register one identity in an open-mode vote room (one registration per identity; the identity secret attests ownership).", "registerVoter",
+    { requestBodies: { POST: VOTER_IDENTITY_BODY } }),
+  route("/api/rooms/{roomId}/vote-rooms/{voteRoomId}/challenge", ["POST"], "room-member", "Issue a single-use 5-minute challenge nonce to an admitted identity (stored hashed; the raw nonce is shown once).", "issueBallotChallenge",
+    { requestBodies: { POST: VOTER_IDENTITY_BODY } }),
+  route("/api/rooms/{roomId}/vote-rooms/{voteRoomId}/ballots", ["POST"], "room-member", "Cast an attested ballot: signature mode signs the canonical ballot bytes with the mint-issued Ed25519 key; server mode casts over bearer auth. One ballot per identityId (UNIQUE) — doubles get 409 ballot_duplicate.", "castBallot",
+    { requestBodies: { POST: BALLOT_CAST_BODY } }),
+  route("/api/rooms/{roomId}/vote-rooms/{voteRoomId}/ballots", ["GET"], "room-member", "List every ballot with its full proof (publicKey + signature): anyone with read access can recount offline.", "listBallots"),
+  route("/api/rooms/{roomId}/vote-rooms/{voteRoomId}/tally", ["GET"], "room-member", "Tally a vote room: per-option counts, ballots cast, admitted count, and the duplicate-detection recount (empty in a healthy election).", "tallyVoteRoom"),
 ]);
 
 // MCP tools/list discovery block: every tools/list response (public and

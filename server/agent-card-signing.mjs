@@ -78,7 +78,9 @@ const importPrivateKey = privateKey => {
 
 // Recursively sort object keys; arrays keep their order (capability order
 // is part of what the signature covers). undefined values are dropped.
-const canonicalize = value => {
+// Exported: offline verifiers (e.g. the attested-ballot recount in
+// server/attested-votes.mjs) canonicalize payloads the same way.
+export const canonicalize = value => {
   if (Array.isArray(value)) return value.map(canonicalize);
   if (value !== null && typeof value === "object") {
     const out = {};
@@ -187,6 +189,34 @@ export function verifyKeyRotation({ agentId, card, newPublicKey, oldPublicKey, r
     const sig = Buffer.from(typeof rotationSignature === "string" ? rotationSignature : "", "base64");
     if (sig.length !== 64) return false;
     return verify(null, rotationBytes({ agentId, card, newPublicKey }), key, sig);
+  } catch {
+    return false;
+  }
+}
+
+// Sign arbitrary bytes with an Ed25519 private key (seed, canonical base64).
+// Throws SigningError on bad inputs. The generic counterpart to signCard:
+// clients (e.g. ballot voters) sign canonical payloads the server verifies
+// with verifySignatureBytes.
+export function signBytes({ privateKey, bytes }) {
+  const key = importPrivateKey(privateKey);
+  if (!(bytes instanceof Uint8Array) && !Buffer.isBuffer(bytes)) {
+    fail("invalid_signing_input", "bytes must be a Buffer or Uint8Array");
+  }
+  return sign(null, bytes, key).toString("base64");
+}
+
+// Verify an Ed25519 signature over arbitrary bytes. Returns false (never
+// throws) for any malformed or non-matching input: verifiers treat "no" as
+// the safe answer. The generic counterpart to verifyCardSignature — this is
+// the one crypto addition the attested-ballot protocol needs.
+export function verifySignatureBytes({ publicKey, signature, bytes }) {
+  try {
+    const key = importPublicKey(publicKey);
+    const sig = Buffer.from(typeof signature === "string" ? signature : "", "base64");
+    if (sig.length !== 64) return false;
+    if (!(bytes instanceof Uint8Array) && !Buffer.isBuffer(bytes)) return false;
+    return verify(null, bytes, key, sig);
   } catch {
     return false;
   }

@@ -133,6 +133,25 @@ export class AgentKeyRegistry {
     });
   }
 
+  // The key whose validity window covers `at` (ms epoch): valid_from <= at,
+  // valid_until open or after `at`, not revoked at or before `at`. Latest
+  // valid_from wins. Returns the frozen entry or null. Used by the
+  // attested-ballot verifier (server/attested-votes.mjs): verification binds
+  // the ballot's issuedAt — not verify-time — to the window, so ballots cast
+  // before a compromise still verify and ballots cast after do not.
+  keyForIdentityAt(identityId, at) {
+    if (typeof identityId !== "string" || !IDENTITY_ID_PATTERN.test(identityId)) return null;
+    if (!Number.isInteger(at) || at < 0) return null;
+    const row = this.db.prepare(
+      `SELECT * FROM agent_key_registry
+        WHERE identity_id=? AND valid_from<=?
+          AND (valid_until IS NULL OR valid_until>?)
+          AND (revoked_at IS NULL OR revoked_at>?)
+        ORDER BY valid_from DESC LIMIT 1`
+    ).get(identityId, at, at, at);
+    return row ? freezeEntry(row) : null;
+  }
+
   // The directory read surface: every key row ever registered for the
   // identity, oldest first. Append-only — revocation and rotation only add
   // lifecycle metadata, so history is never rewritten.

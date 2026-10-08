@@ -4849,6 +4849,276 @@ paths:
         '403': { description: lane_not_registered }
         '404': { description: decision_not_found }
         '422': { description: invalid_matchmaking_input }
+  /api/rooms/{roomId}/vote-rooms:
+    get:
+      x-room-permission: member
+      summary: List vote rooms
+      description: |
+        The room's attested-ballot vote rooms (identity-sybil guild W6). No
+        ballots are returned here — this is the roster of elections, not the
+        votes. Any room member may read; guests may read but never cast.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: The room's vote rooms
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  voteRooms:
+                    type: array
+                    items: { $ref: '#/components/schemas/VoteRoom' }
+        '401': { description: unauthenticated }
+    post:
+      x-room-permission: owner
+      summary: Open a vote room
+      description: |
+        Opens an attested-ballot vote room. `mode` is `allowlist` (default:
+        the `identityIds` roster is pinned at creation — only those
+        identities may cast) or `open` (any identity registers once, and the
+        registration set becomes the roster). `proofMode` is `signature`
+        (default: Ed25519 challenge-response, publicly auditable), `server`
+        (bearer-auth ballots for dumb clients and legacy identities — still
+        double-vote-guarded, but not independently auditable), or `either`
+        (both; receipts are labeled). Only the room owner (`manage_members`)
+        may open a vote room.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VoteRoomCreate' }
+      responses:
+        '201':
+          description: The opened vote room
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  voteRoomId: { type: string }
+                  voteRoom: { $ref: '#/components/schemas/VoteRoom' }
+        '401': { description: unauthenticated }
+        '403': { description: access_denied — only the room owner (manage_members) can open a vote room }
+        '422': { description: invalid_vote_room }
+  /api/rooms/{roomId}/vote-rooms/{voteRoomId}:
+    get:
+      x-room-permission: member
+      summary: Read one vote room
+      description: |
+        One vote room: its roster size (`admittedCount`) and ballots cast —
+        never the ballots themselves (see the ballots route for the public
+        proof set).
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: voteRoomId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The vote room
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  voteRoom: { $ref: '#/components/schemas/VoteRoom' }
+                  admittedCount: { type: integer }
+                  ballotsCast: { type: integer }
+        '401': { description: unauthenticated }
+        '404': { description: vote_room_not_found }
+  /api/rooms/{roomId}/vote-rooms/{voteRoomId}/register:
+    post:
+      x-room-permission: member
+      summary: Register in an open vote room
+      description: |
+        Registers one identity in an `open`-mode vote room (one registration
+        per identity; a second attempt is `409 already_registered`).
+        Registration attests identity ownership: the `x-identity-secret`
+        header must belong to `identityId`, or the request is
+        `403 invite_identity_mismatch`. Allowlist rooms refuse with
+        `403 registration_closed`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: voteRoomId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [identityId]
+              properties:
+                identityId: { type: string }
+      responses:
+        '201':
+          description: The registration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  voteRoomId: { type: string }
+                  identityId: { type: string }
+                  registeredAt: { type: integer }
+        '401': { description: unauthenticated }
+        '403': { description: registration_closed on allowlist rooms; unendorsed_identity when the identity is not endorsed; invite_identity_mismatch when the identity secret belongs to another identity }
+        '404': { description: vote_room_not_found }
+        '409': { description: already_registered }
+  /api/rooms/{roomId}/vote-rooms/{voteRoomId}/challenge:
+    post:
+      x-room-permission: member
+      summary: Issue a ballot challenge nonce
+      description: |
+        Issues a single-use 5-minute challenge nonce to an admitted identity.
+        The nonce is stored hashed — the raw value is shown once, in this
+        response. The voter signs the canonical ballot bytes
+        (`type: "project-room/ballot-v1"`, binding `voteRoomId + identityId +
+        choice + nonce + challengeId`) with the mint-issued Ed25519 private
+        key and submits the signature to the ballots route. The voter is the
+        identity behind the `x-identity-secret` header, not the room member:
+        `body.identityId` must match it. Legacy identities with no registered
+        key get `409 no_identity_key`; the error detail names the
+        self-service upgrade (`POST /api/agent-identities/{identityId}/keys/rotate`).
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: voteRoomId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [identityId]
+              properties:
+                identityId: { type: string }
+      responses:
+        '201':
+          description: The challenge
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  voteRoomId: { type: string }
+                  identityId: { type: string }
+                  nonce: { type: string, description: 16+ random bytes, base64url; sign these back verbatim }
+                  expiresAt: { type: integer }
+                  challengeId: { type: string }
+        '401': { description: unauthenticated }
+        '403': { description: not_admitted when the identity is not on the admitted-delegate list; unendorsed_identity when the identity is not endorsed; invite_identity_mismatch when the identity secret belongs to another identity; guest_scope_denied for guest agents }
+        '404': { description: vote_room_not_found }
+        '409': { description: no_identity_key for legacy identities without a registered key; vote_closed outside the vote window }
+  /api/rooms/{roomId}/vote-rooms/{voteRoomId}/ballots:
+    get:
+      x-room-permission: member
+      summary: List ballots with their proofs
+      description: |
+        Every recorded ballot WITH its full proof (`publicKey`, `signature`,
+        `proofMode`). This is what makes the vote countable: anyone with read
+        access recomputes the canonical ballot bytes and Ed25519-verifies
+        each signature offline, no server trust required for the count.
+        "ATTESTED BY X" manual phrases are never machine evidence — only
+        these signatures count.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: voteRoomId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The public ballot set
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  voteRoomId: { type: string }
+                  ballots:
+                    type: array
+                    items: { $ref: '#/components/schemas/BallotReceipt' }
+        '401': { description: unauthenticated }
+        '404': { description: vote_room_not_found }
+    post:
+      x-room-permission: member
+      summary: Cast an attested ballot
+      description: |
+        Casts one ballot for the identity behind the `x-identity-secret`
+        header (`body.identityId` must match it). In `signature` rooms the
+        body carries `nonce`, `challengeId`, `issuedAt` and `signature` over
+        the canonical ballot bytes; the server verifies against the
+        registered public key whose validity window covers `issuedAt`. In
+        `server` rooms the ballot is bearer-auth only (no signature fields).
+        `UNIQUE(vote_room_id, identity_id)` collapses ten delegates sharing
+        one identity to one counted ballot: the second is
+        `409 ballot_duplicate`. Guests may read but never cast
+        (`403 guest_scope_denied`).
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: voteRoomId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BallotCast' }
+      responses:
+        '201':
+          description: The recorded ballot receipt, carrying the proof
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BallotReceipt' }
+        '401': { description: unauthenticated }
+        '403': { description: not_admitted when the identity is not on the admitted-delegate list; unendorsed_identity when the identity is not endorsed; invite_identity_mismatch when the identity secret belongs to another identity; guest_scope_denied for guest agents }
+        '404': { description: vote_room_not_found }
+        '409': { description: ballot_duplicate on a second ballot from the same identity; challenge_reused when the nonce was already consumed; vote_closed outside the vote window; no_identity_key when no registered key covers issuedAt }
+        '410': { description: challenge_expired when the nonce TTL lapsed }
+        '422': { description: bad_signature when Ed25519 verification fails; stale_ballot when issuedAt is outside the 5-minute skew bound; invalid_ballot on malformed input }
+  /api/rooms/{roomId}/vote-rooms/{voteRoomId}/tally:
+    get:
+      x-room-permission: member
+      summary: Tally a vote room
+      description: |
+        Per-option counts, ballots cast, the admitted-delegate count, and the
+        duplicate-detection recount (`duplicates` is empty in a healthy
+        election — the UNIQUE constraint makes double votes impossible, and
+        this query is the public proof).
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: voteRoomId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The tally
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  voteRoomId: { type: string }
+                  tally: { type: object, additionalProperties: { type: integer } }
+                  ballotsCast: { type: integer }
+                  admittedCount: { type: integer }
+                  duplicates: { type: array, items: { type: object } }
+        '401': { description: unauthenticated }
+        '404': { description: vote_room_not_found }
   /api/rooms/{roomId}/work-claims:
     get:
       summary: List work claims
@@ -16902,6 +17172,91 @@ components:
         next:
           type: array
           items: { type: object }
+    VoteRoom:
+      description: |
+        An attested-ballot vote room (identity-sybil guild W6). `mode` is
+        `allowlist` (the admitted-delegate roster pinned at creation) or
+        `open` (the registration set is the roster). `proofMode` is
+        `signature` (Ed25519 challenge-response, publicly auditable),
+        `server` (bearer-auth ballots, double-vote-guarded but not
+        independently auditable), or `either` (both; receipts are labeled).
+      type: object
+      properties:
+        voteRoomId: { type: string }
+        roomId: { type: string }
+        title: { type: string }
+        mode: { type: string, enum: [allowlist, open] }
+        proofMode: { type: string, enum: [signature, server, either] }
+        options:
+          type: array
+          items:
+            type: object
+            required: [id, label]
+            properties:
+              id: { type: string }
+              label: { type: string }
+        opensAt: { type: [integer, 'null'] }
+        closesAt: { type: [integer, 'null'] }
+        createdBy: { type: string }
+        createdAt: { type: integer }
+    VoteRoomCreate:
+      type: object
+      additionalProperties: false
+      required: [title, mode, options]
+      properties:
+        title: { type: string, maxLength: 200 }
+        mode: { type: string, enum: [allowlist, open] }
+        identityIds:
+          type: array
+          items: { type: string }
+          description: Admitted-delegate roster; required non-empty in allowlist mode.
+        options:
+          type: array
+          minItems: 2
+          items:
+            type: object
+            required: [id, label]
+            properties:
+              id: { type: string }
+              label: { type: string }
+        opensAt: { type: integer }
+        closesAt: { type: integer }
+        proofMode: { type: string, enum: [signature, server, either], default: signature }
+    BallotReceipt:
+      description: |
+        A recorded attested ballot, WITH its full proof. Anyone with read
+        access recomputes the canonical ballot bytes
+        ({ type: "project-room/ballot-v1", voteRoomId, identityId, choice,
+        nonce, challengeId, issuedAt }, keys sorted, no whitespace) and
+        Ed25519-verifies `signature` against `publicKey` — the count needs no
+        server trust. In `server` proof mode publicKey/signature/nonce/
+        challengeId are null and the ballot is server-attested.
+      type: object
+      properties:
+        ballotId: { type: string }
+        voteRoomId: { type: string }
+        identityId: { type: string }
+        choice: { description: Option id, or ranked list of option ids. }
+        nonce: { type: [string, 'null'] }
+        challengeId: { type: [string, 'null'] }
+        issuedAt: { type: integer }
+        recordedAt: { type: integer }
+        publicKey: { type: [string, 'null'] }
+        signature: { type: [string, 'null'] }
+        proofMode: { type: string, enum: [signature, server] }
+    BallotCast:
+      type: object
+      additionalProperties: false
+      required: [identityId, choice]
+      properties:
+        identityId:
+          type: string
+          description: The voting identity; must match the x-identity-secret header's identity.
+        choice: { description: Option id, or ranked list of option ids. }
+        nonce: { type: string, description: Signature mode only; the challenge nonce, signed back verbatim. }
+        challengeId: { type: string, description: Signature mode only; the single-use challenge id. }
+        issuedAt: { type: integer, description: Client ms epoch; must be within 5 minutes of server time. }
+        signature: { type: string, description: Signature mode only; base64 Ed25519 signature over the canonical ballot bytes. }
     WorkClaim:
       description: |
         A work-claim registry item. Claims carry a lease (`claimedAt` +
