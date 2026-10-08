@@ -37,7 +37,7 @@ import {
   createWork, claimWork, updateWork, appendWorkPullRequest, attestWork, recordReview, reassignWork, releaseExpired, canCloseWork,
   renewWork, roomWorkClaimConfig, closeWhenLive, isReceiptTag, ClaimError, REVIEW_POLICIES, CLAIM_KINDS,
   claimUpdatedAt, ACTIVE_CLAIM_STATES, MAX_LEASE_HOURS, STATES, summarizeClaimHistory, isHardWork,
-  walkProvenance, flagPremiseInvalid, clearPremiseFlag, closeWork, isTerminalClaimState,
+  walkProvenance, flagPremiseInvalid, clearPremiseFlag, closeWork, isTerminalClaimState, claimHistoryLength,
 } from "./work-claims.mjs";
 import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
@@ -777,6 +777,24 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (mayManageAnyClaim(access)) return true;
     reject(403, "work_not_owner", `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
   };
+  // QA200 ch-2037 challenge: the file-lease exclusivity check lived only on
+  // the claim route. create-with-assignee and reassign are acquire paths
+  // too — they must refuse overlapping leases with the same 409 body, or a
+  // lease can be landed silently around the conflict check. fileLeaseConflicts
+  // already excludes the item itself by id.
+  const refuseFileLeaseConflict = item => {
+    const conflicts = fileLeaseConflicts(registry.list(roomId), item);
+    if (conflicts.length === 0) return;
+    const conflict = fileLeaseConflictBody(item, conflicts);
+    const body = {
+      ...agentErrorBody({ httpStatus: 409, code: "file_lease_conflict", message: conflict.error.message, roomId, workItemId: item.id }),
+      ...conflict
+    };
+    const error = new Error(body.error.message);
+    error.code = "file_lease_conflict";
+    error.body = body;
+    throw error;
+  };
 
   if (workClaimRoute === "status" && req.method === "GET") {
     closeLiveClaims();
@@ -825,6 +843,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "sweep" && req.method === "POST") {
     if (!maySweepWorkClaims(access)) refuseSweep();
+    // QA200-CH-2033: a sweep settles PR links and records CI facts, which
+    // emit room events — it is a Board write, so the event-budget floor
+    // applies here exactly like the other Board write routes.
+    requireEventBudget();
     const data = body(req);
     if (!shape(data, {})) invalidInput(reject, "an empty JSON object");
     let updated = 0;
@@ -921,6 +943,11 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       item = runPure(reject, () => claimWork(item, assignee, {
         note: data.note ?? `assigned by ${caller}`, room: roomLike, now: nowMs
       }));
+      // QA200 ch-2037: create-with-assignee lands a lease without touching
+      // the claim route, so run the exclusivity check here. The whole request
+      // is one transaction — a conflict fails atomically and the item is
+      // never created.
+      refuseFileLeaseConflict(item);
       // Retention ack (research brief 2026-09-28, mechanic #2): every claim
       // gets the bot's immediate structured receipt, so no contribution sits
       // at zero replies from t=0. First-time contributors carry the 24h
@@ -999,7 +1026,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "update" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs", "readingAck", "parentClaimId", "evidenceRefs"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?, readingAck?, parentClaimId?, evidenceRefs?}");
+    if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs", "readingAck", "parentClaimId", "evidenceRefs", "expectedClaimedAt", "expectedHistoryLength"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?, readingAck?, parentClaimId?, evidenceRefs?, expectedClaimedAt?, expectedHistoryLength?}");
     if (data.state === undefined && data.note === undefined && data.readingAck === undefined) invalidInput(reject, "a state transition, a note, or a reading ack");
     // W012 required reading: the owner confirms they read the enrollment
     // reading list. { docs: [...] } is validated by the pure machine; a
@@ -1009,6 +1036,28 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (item.owner !== caller) reject(403, "work_not_owner", `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
     requireWriter();
     requireEventBudget();
+    // QA-200 worker-13 (C3/E4): opt-in round precondition on plain note/state
+    // updates. The appendPullRequest variant binds its write to claimedAt +
+    // history length; a plain update had no such binding, so a stale client
+    // (timeout retry, replayed or abandoned-then-resent payload) silently
+    // clobbered newer state with 200. When either precondition is present it
+    // must describe the claim exactly as the client last read it, otherwise
+    // the write is refused with 409 work_claim_conflict. Absent preconditions
+    // keep the legacy behavior unchanged.
+    if (Object.hasOwn(data, "expectedClaimedAt") || Object.hasOwn(data, "expectedHistoryLength")) {
+      if (!(typeof data.expectedClaimedAt === "string" && data.expectedClaimedAt.length <= 100
+        && Number.isFinite(Date.parse(data.expectedClaimedAt)))) invalidInput(reject, "expectedClaimedAt must be the current claim timestamp");
+      if (!(Number.isSafeInteger(data.expectedHistoryLength) && data.expectedHistoryLength >= 0)) invalidInput(reject, "expectedHistoryLength must be the current history length");
+      if (item.claimedAt !== data.expectedClaimedAt || claimHistoryLength(item) !== data.expectedHistoryLength) {
+        const href = `/api/rooms/${encodeURIComponent(roomId)}/work-claims/${encodeURIComponent(workClaimId)}`;
+        const hint = "Read the current claim and check its owner and round before retrying. Do not release or reacquire it.";
+        const refusal = new ServiceError(409, "work_claim_conflict",
+          `Stale update basis for "${item.id}": the claim changed since this request was prepared.`);
+        refusal.body = { ...agentErrorBody({ httpStatus: 409, code: "work_claim_conflict", message: refusal.message, roomId, workItemId: workClaimId }),
+          hint, next: [{ path: href }, { command: hint }] };
+        throw refusal;
+      }
+    }
     if (Object.hasOwn(data, "note")) data.note = text("note", data.note, { multiline: true });
     if (data.state === "done") {
       // QA-Sec 2026-09-19: the reviewer must be authenticated. For
@@ -1183,6 +1232,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const previousOwnerId = item.owner;
     const note = text("note", data.note, { multiline: true });
     const reassigned = runPure(reject, () => reassignWork(item, caller, target, { note, now: nowMs, authority, room: roomLike }));
+    // QA200 ch-2037: reassign moves a lease to a new holder (and a fresh
+    // unclaimed item lands claimed) without touching the claim route — run
+    // the exclusivity check here too.
+    refuseFileLeaseConflict(reassigned);
     commit(reassigned, "reassigned", {
       previousOwnerId,
       attention: "assigned", attentionMemberId: target,
