@@ -184,11 +184,13 @@ test("renewWork starts a fresh lease window from now", () => {
   assert.equal(claimed.leaseStartAt, iso(T0));
   const renewed = renewWork(claimed, "quill", { now: T0 + 2 * H });
   assert.equal(renewed.leaseStartAt, iso(T0 + 2 * H));
-  assert.equal(renewed.leaseExpiresAt, iso(T0 + 26 * H)); // the room's default 24h
+  // W2 fix-lanes: an absent leaseHours preserves the claim's 6h duration —
+  // it must NOT fall back to the room's default 24h.
+  assert.equal(renewed.leaseExpiresAt, iso(T0 + 8 * H));
   assert.equal(renewed.owner, "quill");
   assert.equal(renewed.state, "claimed");
   assert.equal(renewed.history.at(-1).action, "renewed");
-  assert.match(renewed.history.at(-1).note, /lease: 24h/);
+  assert.match(renewed.history.at(-1).note, /lease: 6h/);
 });
 
 test("renewWork records the caller's note in history", () => {
@@ -261,14 +263,20 @@ test("handler: renew extends the lease on a fresh public check-in", async () => 
   assert.ok(Date.parse(out.value.leaseExpiresAt) > Date.parse(before));
   assert.ok(Date.parse(out.value.leaseStartAt) >= Date.parse(out.value.claimedAt));
   assert.equal(out.value.history.at(-1).action, "renewed");
+  // claimedRegistry uses a 6h lease: renew without leaseHours preserves it,
+  // it must not silently become the 24h default.
+  const durationMs = Date.parse(out.value.leaseExpiresAt) - Date.parse(out.value.leaseStartAt);
+  assert.equal(durationMs, 6 * 3600 * 1000);
 });
 
-test("handler: renew without a progress message id extends the lease", async () => {
+test("handler: renew without a progress message id is refused (heartbeat bodies no longer renew)", async () => {
   const registry = await claimedRegistry();
   const before = registry.get("room1", "w1").leaseExpiresAt;
   const { out, error } = await runRoute({ route: "renew", id: "w1", body: {}, registry });
-  assert.equal(error, null);
-  assert.ok(Date.parse(out.value.leaseExpiresAt) > Date.parse(before));
+  assert.equal(out, null);
+  assert.equal(error.status, 422);
+  assert.equal(error.code, "claim_renewal_source_required");
+  assert.equal(registry.get("room1", "w1").leaseExpiresAt, before);
 });
 
 test("handler: renew with a DM check-in is refused", async () => {

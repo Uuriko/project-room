@@ -5827,10 +5827,11 @@ paths:
       summary: Renew a work claim's lease
       description: |
         Owner-only; starts a fresh lease window from now, extending
-        leaseExpiresAt by the lease duration (explicit leaseHours, else the
-        room's default). A heartbeat body is enough. progressMessageId is
-        optional evidence: when present it must be the holder's own public
-        message posted after the current lease window began. Refused on
+        leaseExpiresAt by the lease duration (explicit leaseHours overrides,
+        explicit null opts out of leases, absent leaseHours preserves the
+        claim's existing lease duration — never the room default).
+        progressMessageId is REQUIRED evidence: it must be the holder's own
+        public message posted after the current lease window began. Refused on
         claims without a lease and on lapsed leases (claim again instead).
         API keys need `rooms:write`.
       parameters:
