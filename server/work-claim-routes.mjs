@@ -53,6 +53,7 @@ import {
 } from "./work-claim-integrity.mjs";
 import { stampClaim, stampClaimPage, stampReceipts, withContentTrust } from "./content-trust.mjs";
 import { agentErrorBody } from "../src/agent-error.mjs";
+import { createHash } from "node:crypto";
 import { SOURCE_REVISION } from "./version.mjs";
 import { ServiceError } from "./service-error.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
@@ -68,11 +69,22 @@ export function createWorkClaimRegistry() {
     if (!entry) { entry = { items: new Map(), config: {} }; rooms.set(roomId, entry); }
     return entry;
   };
+  // PHOENIX W4 gap #1: in-memory requestId journal for the pure-test
+  // fixture. Same contract as the durable work_claim_idempotency table
+  // (keyed by room_id|claim_id|actor_id|request_id).
+  const idemKey = (roomId, claimId, actorId, requestId) => `${roomId}|${claimId}|${actorId}|${requestId}`;
+  const idempotency = new Map();
   return {
     get(roomId, id) { return room(roomId).items.get(id) ?? null; },
     set(roomId, item) { room(roomId).items.set(item.id, item); return item; },
     list(roomId) { return [...room(roomId).items.values()]; },
     has(roomId, id) { return room(roomId).items.has(id); },
+    findIdempotencyRecord(roomId, claimId, actorId, requestId) {
+      return idempotency.get(idemKey(roomId, claimId, actorId, requestId)) ?? null;
+    },
+    recordIdempotencyRecord(roomId, claimId, actorId, requestId, fingerprint) {
+      idempotency.set(idemKey(roomId, claimId, actorId, requestId), { fingerprint });
+    },
     configure(roomId, config) {
       const entry = room(roomId);
       if (config !== undefined && config !== null) {
@@ -114,6 +126,54 @@ const invalidInput = (reject, expected) => reject(422, "invalid_claim_input", `E
 const claimIdOf = (reject, id) => {
   if (typeof id !== "string" || !CLAIM_ID_PATTERN.test(id)) invalidInput(reject, "a work id matching [A-Za-z0-9_-]{1,128}");
   return id;
+};
+
+// PHOENIX W4 gap #1: optional requestId idempotency on the work-claim write
+// routes (create, claim, update, release, reassign, renew). Mirrors the
+// room-commands contract: dedupe in-transaction on (claim_id, actor_id,
+// requestId); an identical retry replays 200 with duplicate:true; the same
+// requestId carrying different content is a 409 idempotency_conflict; a
+// request with no requestId keeps the legacy behavior unchanged.
+const REQUEST_ID_PATTERN = /^\S{1,128}$/;
+const canonicalJson = value => Array.isArray(value) ? `[${value.map(canonicalJson).join(",")}]`
+  : value && typeof value === "object"
+    ? `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`
+    : JSON.stringify(value);
+// The fingerprint covers the route plus every request field except the
+// requestId itself (a replay carries the same requestId by definition).
+const fingerprintRequest = (route, body) => {
+  const content = { ...body };
+  delete content.requestId;
+  return createHash("sha256").update(`${route}:${canonicalJson(content)}`).digest("hex");
+};
+const requestIdOf = (reject, data) => {
+  if (!Object.hasOwn(data, "requestId")) return undefined;
+  const value = data.requestId;
+  if (typeof value !== "string" || !REQUEST_ID_PATTERN.test(value)) {
+    invalidInput(reject, "requestId as a non-empty string of at most 128 characters with no whitespace");
+  }
+  return value;
+};
+// Checks the idempotency journal inside the caller's transaction and returns
+// one of: null (no requestId — legacy path), { replay: true, response } (the
+// caller must return response immediately, no write), or
+// { replay: false, record } (the caller must invoke record() after the write
+// commits, in the same transaction). A same-requestId/different-content
+// write is refused with 409 idempotency_conflict before anything applies.
+const useRequestId = (reject, json, res, registry, { roomId, claimId, actorId, route, data }) => {
+  const requestId = requestIdOf(reject, data);
+  if (requestId === undefined) return null;
+  const fingerprint = fingerprintRequest(route, data);
+  const prior = registry.findIdempotencyRecord(roomId, claimId, actorId, requestId);
+  if (prior) {
+    if (prior.fingerprint !== fingerprint) {
+      reject(409, "idempotency_conflict",
+        `Request ID "${requestId}" was already used for a different ${route} request on "${claimId}" — retry with the original body`);
+    }
+    const item = registry.get(roomId, claimId);
+    return { replay: true, response: json(res, 200, item ? { ...item, duplicate: true } : { duplicate: true }) };
+  }
+  return { replay: false, record: () => registry.recordIdempotencyRecord(roomId, claimId, actorId, requestId, fingerprint) };
 };
 
 // W1 (QA 2026-09-28): `data.leaseHours ?? undefined` converts an explicit
@@ -825,10 +885,12 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "create" && req.method === "POST") {
     const raw = body(req);
-    if (!shape(raw, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files", "dependsOn", "pullRequest", "pullRequests", "repo", "branch", "kind", "revision", "assignee"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, pullRequest?, pullRequests?, repo?, branch?, kind?, revision?, assignee?}");
+    if (!shape(raw, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files", "dependsOn", "pullRequest", "pullRequests", "repo", "branch", "kind", "revision", "assignee", "requestId"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, pullRequest?, pullRequests?, repo?, branch?, kind?, revision?, assignee?}");
     requireWriter();
     requireEventBudget();
     const id = claimIdOf(reject, raw.id);
+    const idem = useRequestId(reject, json, res, registry, { roomId, claimId: id, actorId: caller, route: "create", data: raw });
+    if (idem?.replay) return idem.response;
     const data = clientPullRequestInput(reject, boardTextFields(reject, raw, { title: {}, note: { multiline: true } }));
     assertDependsOnKnown(reject, data, { selfId: id, has: other => registry.has(roomId, other) });
     if (registry.has(roomId, id)) reject(409, "work_claim_exists", `Work claim "${id}" already exists in this room`);
@@ -870,9 +932,11 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
         attention: "assigned", attentionMemberId: assignee,
         wakeMemberId: assignee, wakeReason: "assigned"
       });
+      idem?.record();
       return json(res, 201, ackedAssignee);
     }
     commit(item, "created");
+    idem?.record();
     return json(res, 201, item);
   }
   if (workClaimRoute === "read" && req.method === "GET") {
@@ -882,9 +946,12 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "claim" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { optional: ["note", "leaseHours", "files", "advisory", "dependsOn", "pullRequest", "pullRequests", "repo", "branch"] })) invalidInput(reject, "{note?, leaseHours?, files?, advisory?, dependsOn?, pullRequest?, pullRequests?, repo?, branch?}");
+    if (!shape(data, { optional: ["note", "leaseHours", "files", "advisory", "dependsOn", "pullRequest", "pullRequests", "repo", "branch", "requestId"] })) invalidInput(reject, "{note?, leaseHours?, files?, advisory?, dependsOn?, pullRequest?, pullRequests?, repo?, branch?}");
     if ("advisory" in data && typeof data.advisory !== "boolean") invalidInput(reject, "advisory true or false");
-    const item = load(claimIdOf(reject, workClaimId));
+    const claimId = claimIdOf(reject, workClaimId);
+    const idem = useRequestId(reject, json, res, registry, { roomId, claimId, actorId: caller, route: "claim", data });
+    if (idem?.replay) return idem.response;
+    const item = load(claimId);
     if (item.state !== "unclaimed") reject(409, "work_claim_conflict", `Work "${item.id}" is already ${item.state} — release it first`);
     requireWriter();
     requireEventBudget();
@@ -929,13 +996,17 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const first = isFirstContribution(registry.list(roomId).filter(entry => entry.id !== item.id), caller);
     const acked = retentionAck(claimed, { now: nowMs, first, agentId: caller });
     commit(acked, "claimed");
+    idem?.record();
     return json(res, 200, { ...acked, fileWarnings: data.advisory === true ? fileWarningsFor(registry.list(roomId), acked) : [] });
   }
   if (workClaimRoute === "update" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?}");
+    if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs", "requestId"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?}");
     if (data.state === undefined && data.note === undefined) invalidInput(reject, "a state transition or a note");
-    const item = load(claimIdOf(reject, workClaimId));
+    const claimId = claimIdOf(reject, workClaimId);
+    const idem = useRequestId(reject, json, res, registry, { roomId, claimId, actorId: caller, route: "update", data });
+    if (idem?.replay) return idem.response;
+    const item = load(claimId);
     if (item.owner !== caller) reject(403, "work_not_owner", `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
     requireWriter();
     requireEventBudget();
@@ -1003,6 +1074,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     }
     // Q3-A: a note-only update coalesces with this claim's last room event.
     commit(updated, "state_changed", { coalesce: data.state === undefined || data.state === item.state });
+    idem?.record();
     return json(res, 200, updated);
   }
   if (workClaimRoute === "review" && req.method === "POST") {
@@ -1047,8 +1119,11 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "release" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { optional: ["note", "reason"] })) invalidInput(reject, "{reason?, note?}");
-    let item = load(claimIdOf(reject, workClaimId));
+    if (!shape(data, { optional: ["note", "reason", "requestId"] })) invalidInput(reject, "{reason?, note?}");
+    const claimId = claimIdOf(reject, workClaimId);
+    const idem = useRequestId(reject, json, res, registry, { roomId, claimId, actorId: caller, route: "release", data });
+    if (idem?.replay) return idem.response;
+    let item = load(claimId);
     const authority = authorityOver(item);
     requireEventBudget();
     const reason = text(Object.hasOwn(data, "reason") ? "reason" : "note", data.reason ?? data.note, { multiline: true });
@@ -1062,12 +1137,16 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     }
     const released = runPure(reject, () => updateWork(item, caller, { state: "unclaimed", note: reason, now: nowMs, authority }));
     commit(released, "released");
+    idem?.record();
     return json(res, 200, released);
   }
   if (workClaimRoute === "reassign" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { required: ["newOwner"], optional: ["note"] })) invalidInput(reject, "{newOwner, note?}");
-    const item = load(claimIdOf(reject, workClaimId));
+    if (!shape(data, { required: ["newOwner"], optional: ["note", "requestId"] })) invalidInput(reject, "{newOwner, note?}");
+    const claimId = claimIdOf(reject, workClaimId);
+    const idem = useRequestId(reject, json, res, registry, { roomId, claimId, actorId: caller, route: "reassign", data });
+    if (idem?.replay) return idem.response;
+    const item = load(claimId);
     const authority = authorityOver(item);
     // W3 (QA 2026-09-28): /reassign used to accept any newOwner string, so a
     // typo stranded the claim on a nonexistent member (owner-only routes
@@ -1089,6 +1168,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       attention: "assigned", attentionMemberId: target,
       wakeMemberId: target, wakeReason: "assigned"
     });
+    idem?.record();
     return json(res, 200, reassigned);
   }
   if (workClaimRoute === "renew" && req.method === "POST") {
@@ -1097,8 +1177,11 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // the current lease window began. Renewals are discussed in the channel —
     // a stale holder can't hold work indefinitely without showing progress.
     const data = body(req);
-    if (!shape(data, { optional: ["progressMessageId", "note", "leaseHours"] })) invalidInput(reject, "{progressMessageId?, note?, leaseHours?}");
-    const item = load(claimIdOf(reject, workClaimId));
+    if (!shape(data, { optional: ["progressMessageId", "note", "leaseHours", "requestId"] })) invalidInput(reject, "{progressMessageId?, note?, leaseHours?}");
+    const claimId = claimIdOf(reject, workClaimId);
+    const idem = useRequestId(reject, json, res, registry, { roomId, claimId, actorId: caller, route: "renew", data });
+    if (idem?.replay) return idem.response;
+    const item = load(claimId);
     // W4 (QA 2026-09-28): a lapsed lease auto-releases the claim (owner
     // cleared), so the ownership check below would misdiagnose it as an
     // access problem ("owned by nobody — ask the owner for a guest invite").
@@ -1141,6 +1224,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const renewed = runPure(reject, () => renewWork(item, caller,
       { note: data.note, leaseHours: leaseHoursOfBody(data), room: roomLike, now: nowMs }));
     commit(renewed, "renewed", { coalesce: true });
+    idem?.record();
     return json(res, 200, renewed);
   }
   if (workClaimRoute === "config" && (req.method === "GET" || req.method === "POST")) {
