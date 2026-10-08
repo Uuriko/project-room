@@ -14,7 +14,7 @@
 // without a lease behave exactly as before (never expire). Leases are
 // configurable per room: a room object carrying
 //   room.workClaims = { defaultLeaseHours, reviewPolicy }
-// overrides the defaults; see roomWorkClaimConfig. The lease cap is 168h
+// overrides the defaults; see roomWorkClaimConfig. The lease cap is 2h
 // (7 days). null opts out only when the route has already allowed it
 // (room owner or manage_claims).
 //
