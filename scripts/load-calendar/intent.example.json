@@ -1,0 +1,1 @@
+{"contact":"w1 (intent-schema worker)","expected_total":3000,"guild":"perf","intent_id":"a1b2c3d4-0001-4000-8000-000000000001","kind":"write","ramp":"gradual","rate_rps":5,"scratch_only":true,"status":"planned","stop_condition":"first degradation or any 5xx spike","target":"scratch:load-test-room","window_end":"2026-10-08T03:30:00Z","window_start":"2026-10-08T03:00:00Z"}
