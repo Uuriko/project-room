@@ -126,7 +126,7 @@ export function enqueueClaimWake(store, roomId, memberId, messageId, { reason, a
 // means in_progress or a linked PR, the same rule as needs-me reviewAsks. The
 // message id carries the head, so repeats coalesce and a new head wakes again.
 export function wakeNamedReviewers(store, roomId, item, { actorId } = {}) {
-  if (!item || item.state === "done" || !item.owner || item.supersededBy) return [];
+  if (!item || item.state === "done" || item.state === "closed" || !item.owner || item.supersededBy) return [];
   if (!(item.state === "in_progress" || item.pullRequest || (item.pullRequests ?? []).length)) return [];
   const head = item.ci?.headSha ?? item.revision ?? item.claimedAt ?? "none";
   let members = {};
