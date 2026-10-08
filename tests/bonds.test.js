@@ -442,3 +442,19 @@ test('L4: revoked linked identity cannot use residual room key for bond or peer 
   assert.equal(ownerRevoke.status, 201, 'active room owner may still revoke its own room bond');
   assert.equal(ownerRevoke.body.event.type, 'bond.revoked');
 });
+
+test("proposing back while the peer's proposal is pending says so instead of answering duplicate", async t => {
+  const { origin, roomId, owner, friend, command } = await roomOf(t);
+  const first = await jsonOf(await command(owner.secret, "bond.propose", { to: friend.identityId, scopes: ["peer.card"] }));
+  assert.equal(first.status, 201);
+  const back = await jsonOf(await command(friend.secret, "bond.propose", { to: owner.identityId, scopes: ["peer.dm", "peer.wake"] }));
+  assert.equal(back.status, 409);
+  assert.equal(back.body.error.code, "bond_proposed_by_peer");
+  assert.match(back.body.error.message, new RegExp(first.body.event.data.bondId));
+  const proposed = (await eventsOf(origin, roomId, owner.secret)).filter(event => event.type === "bond.proposed");
+  assert.equal(proposed.length, 1);
+  // The proposer's own retry is still idempotent.
+  const again = await jsonOf(await command(owner.secret, "bond.propose", { to: friend.identityId, scopes: ["peer.card"] }));
+  assert.equal(again.status, 200);
+  assert.equal(again.body.duplicate, true);
+});
