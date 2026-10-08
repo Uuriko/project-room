@@ -4649,7 +4649,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Live admission only; reactions already in a log keep replaying.
       if (command.type === T.MESSAGE_REACTION_SET && typeof command.data?.messageId === "string") {
         const target = (room.state.messages || []).find(m => m.id === command.data.messageId);
-        if (target?.toMemberId && target.authorId !== auth.member.id && target.toMemberId !== auth.member.id) {
+        // Reply requests are directed but room-threaded: members may react to them.
+        if (target?.toMemberId && !Object.hasOwn(room.state.replyRequests ?? {}, target.id)
+            && target.authorId !== auth.member.id && target.toMemberId !== auth.member.id) {
           fail(422, "command_rejected", "Reaction must reference a message in this Room");
         }
       }
