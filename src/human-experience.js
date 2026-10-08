@@ -160,7 +160,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
       await client.send(entry.command); if (stamp !== key() || resultEntry !== entry) return;
       const messageId = entry.command.data.messageId; resultEntry = null; resultDialog.close(); selectResult(entry.workId, messageId);
     } catch (failure) {
-      if (stamp !== key()) return;
+      if (stamp !== key() || resultEntry !== entry) return;
       entry.rejected = failure.status >= 400 && failure.status < 500;
       $('#human-share-error').textContent = entry.rejected
         ? uiText("human.copy.020", { fragmentA: failure.message })
@@ -168,7 +168,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
       resultDialog.querySelector('textarea').disabled = true;
       $('#human-share-refresh').hidden = !entry.rejected;
       button.textContent = entry.rejected ? 'Review result' : uiText("human.copy.022");
-    } finally { button.disabled = Boolean(resultEntry === entry && entry.rejected); }
+    } finally { if (stamp === key() && resultEntry === entry) button.disabled = Boolean(entry.rejected); }
   };
   $('#human-existing-drafts').onclick = event => {
     const button = event.target.closest('[data-result-draft]'); if (!button || resultEntry?.boundary !== key()) return;

@@ -17,7 +17,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { auditRecovery } from "../server/recovery.mjs";
 import { readConversation } from "../server/conversation-sync.mjs";
-import { BODY_AT_REST_MIN_CHARS } from "../server/projection-at-rest.mjs";
+import { BODY_AT_REST_MIN_CHARS, hydrateRecordText } from "../server/projection-at-rest.mjs";
 
 function open(t, options = {}) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-at-rest-"));
@@ -267,4 +267,53 @@ test("the projection-cap rejection names the recovery (ask the owner, or retry l
   assert.match(failure.message, /no data was changed/, "keeps the no-write guarantee");
   assert.match(failure.message, /room owner/i, "names asking the room owner as the recovery");
   assert.match(failure.message, /try again later/i, "names retrying later as the recovery");
+});
+
+test("certified indexed reads return full bodies while the stored row stays slim", t => {
+  // Phase 1a x certified index interaction: the indexed path skips
+  // hydrateRecordText by design, so the messages table must always carry
+  // complete records even when rooms.projection is slimmed. If a future
+  // change slims the indexed records too, readers would see bodyRef.
+  const room = open(t, { bodiesAtRest: true });
+  const text = big("indexed");
+  room.post("m", text);
+  room.post("short", "hello");
+  const stored = JSON.parse(room.raw());
+  assert.match(stored.messages.find(m => m.id === "m").bodyRef, /^[0-9a-f]{64}$/,
+    "precondition: the stored projection row is slimmed");
+  for (let page = 0; page < 20; page++) if (room.store.backfillMessages({ limit: 400 }).done) break;
+  assert.equal(room.store.checkMessagesParity().checked, 1, "precondition: the certified index covers the head");
+  const page = readConversation(room.store, room.owner(), "commons", { limit: 10 });
+  assert.equal(page.messages.find(m => m.id === "m")?.body, text);
+  assert.equal(page.messages.some(m => "bodyRef" in m), false, "indexed records must never leak bodyRef to readers");
+});
+
+test("the unindexed conversation read recovers a tampered body row from the log", t => {
+  // Out-of-band corruption, not just a missing row: the body row exists but
+  // its content no longer matches the sha the projection references. The
+  // recover fallback (8956bc3b2) must serve the true body from the event log.
+  const room = open(t, { bodiesAtRest: true });
+  const text = big("tampered");
+  room.post("m", text);
+  const sha = JSON.parse(room.raw()).messages.find(m => m.id === "m").bodyRef;
+  assert.match(sha, /^[0-9a-f]{64}$/, "precondition: the stored record is slimmed");
+  room.store.db.prepare("UPDATE projection_bodies SET body=? WHERE room_id='commons' AND sha=?")
+    .run("x".repeat(6000), sha);
+  const page = readConversation(room.store, room.owner(), "commons", { limit: 10 });
+  assert.equal(page.messages.find(m => m.id === "m")?.body, text);
+});
+
+test("hydrateRecordText without a recovery source fails closed on a missing body", t => {
+  // Fail-closed contract: with no recover function a missing body row is a
+  // hard error, never an empty body or a leaked bodyRef.
+  const room = open(t, { bodiesAtRest: true });
+  room.post("m", big("gone"));
+  const record = JSON.parse(room.raw()).messages.find(m => m.id === "m");
+  assert.ok(typeof record.bodyRef === "string", "precondition: the stored record is slimmed");
+  room.store.db.prepare("DELETE FROM projection_bodies").run();
+  assert.throws(() => hydrateRecordText(room.store.db, "commons", JSON.stringify(record)),
+    /projection_corrupt/, "a missing body with no recovery source throws");
+  const inline = JSON.stringify({ id: "s", body: "hi" });
+  assert.equal(hydrateRecordText(room.store.db, "commons", inline), inline,
+    "records without a bodyRef pass through untouched");
 });
