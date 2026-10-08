@@ -15,6 +15,7 @@ import { validateAttachment, AttachmentError } from "./attachments.mjs";
 import { validId } from "../src/events.js";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
+import { messageInHistory } from "./history-visibility.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
@@ -147,10 +148,15 @@ export class RoomAttachmentBytes {
   // Visibility rule (2026-09-24, #983): a staged file is visible only to
   // its uploader; a file committed onto a DM (toMemberId) is visible only
   // to the message author and recipient. Everything else stays room-wide.
-  visibleTo(row, messages, memberId) {
+  // PRIV-2: a committed file follows its message's history visibility. A
+  // since_join member cannot read a file attached before their join, and a
+  // file on a deleted message is no longer readable.
+  visibleTo(row, messages, memberId, floor = null) {
     if (row.state === "staged") return row.uploader_id === memberId;
     if (row.message_id) {
       const message = messages.get(row.message_id);
+      if (message?.deletedAt) return false;
+      if (message && !messageInHistory(message, floor)) return false;
       if (message?.toMemberId) {
         return message.authorId === memberId || message.toMemberId === memberId;
       }
@@ -168,10 +174,11 @@ export class RoomAttachmentBytes {
       this.expire(roomId, this.store.now());
       const messages = this.messageIndex(roomId);
       const memberId = auth.member.id;
+      const floor = this.store.historyFloor(roomId, memberId);
       const files = this.db.prepare(`SELECT * FROM room_attachments
         WHERE room_id=? AND state IN ('staged','committed')
         ORDER BY created_at DESC, id`).all(roomId)
-        .filter(row => this.visibleTo(row, messages, memberId))
+        .filter(row => this.visibleTo(row, messages, memberId, floor))
         .map(view);
       return { roomId, files };
     });
@@ -188,7 +195,7 @@ export class RoomAttachmentBytes {
         fail(410, "attachment_unavailable", "Attachment bytes are no longer available");
       }
       // Invisible files 404 (not 403) so the id does not leak existence.
-      if (!this.visibleTo(row, this.messageIndex(roomId), auth.member.id)) {
+      if (!this.visibleTo(row, this.messageIndex(roomId), auth.member.id, this.store.historyFloor(roomId, auth.member.id))) {
         fail(404, "attachment_not_found", "Attachment not found");
       }
       return {
