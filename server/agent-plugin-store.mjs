@@ -154,6 +154,34 @@ export const RECENT_WEBHOOK_DELIVERIES_SQL =
    ORDER BY created_at DESC, rowid DESC
    LIMIT ${WEBHOOK_DELIVERY_KEEP}`;
 
+// WAVE-300 F2: how many deliveries one drain keeps in flight. Bounded so a
+// full batch of slow receivers cannot hold the drain (or the event loop)
+// hostage; wide enough that wake fan-out latency stops being the sum of
+// every POST. The pool's only await point is the network POST itself —
+// every DB mutation stays in a synchronous this.mutate(...) callback, so
+// per-delivery transaction semantics are identical to the old sequential
+// loop and workers can never interleave a transaction.
+export const WEBHOOK_DRAIN_CONCURRENCY = 8;
+
+// Run fn over items with at most `limit` promises in flight. Results come
+// back in input order. fn must not hold a database transaction across an
+// await — better-sqlite3 is synchronous and shared here.
+async function runBounded(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  const workers = Array.from(
+    { length: Math.max(1, Math.min(limit, items.length)) },
+    async () => {
+      for (;;) {
+        const i = next++;
+        if (i >= items.length) return;
+        results[i] = await fn(items[i], i);
+      }
+    });
+  await Promise.all(workers);
+  return results;
+}
+
 function cachedDelivery(row) {
   return {
     deliveryId: row.delivery_id,
@@ -1340,6 +1368,50 @@ export class AgentPluginStore {
     });
   }
 
+  // WAVE-300 F2: coalescing key for one due row. Multiple pending
+  // agent.wake deliveries to the SAME effective target URL carrying the
+  // SAME eventId are the same signal (the wake ping is receipt-idempotent),
+  // so one batch POSTs it once and marks the duplicates delivered. Null
+  // unless every coalescing condition holds: wake event type, a non-null
+  // eventId (null cannot prove "same signal"), and a resolvable effective
+  // URL (per-row target_url override, else the subscription's URL). Never
+  // coalesces across different eventIds or different URLs.
+  wakeCoalesceKey(row) {
+    if (row.event_type !== WAKE_PING_EVENT) return null;
+    if (typeof row.event_id !== "string" || row.event_id === "") return null;
+    const url = row.target_url ?? this.subs.get(row.subscription_id)?.url;
+    if (typeof url !== "string" || url === "") return null;
+    return `${url}${row.event_id}`;
+  }
+
+  // Attempt a coalesced group: only the leader is POSTed (the dispatch-time
+  // SSRF guard still runs per POST, unchanged). When the leader delivers,
+  // each follower is marked delivered carrying the leader's exact signature
+  // + envelope — the signal that actually went out — with the same
+  // pure-module cache update the leader path does. Any other leader outcome
+  // (retried/deadLettered) leaves followers pending for a later sweep.
+  // Returns the leader's outcome string plus the number of rows the group
+  // settled, for the drain summary.
+  async attemptCoalescedGroup(leader, followers, { fetchImpl, now, dnsResolvers }) {
+    const outcome = await this.attemptStoredDelivery(leader, { fetchImpl, now, dnsResolvers });
+    if (outcome !== "delivered" || followers.length === 0) {
+      return { outcome, settled: 1 };
+    }
+    const posted = this.db.prepare(
+      "SELECT signature, payload_json FROM agent_webhook_deliveries WHERE delivery_id=?")
+      .get(leader.delivery_id);
+    const envelope = JSON.parse(posted.payload_json);
+    for (const follower of followers) {
+      this.mutate(() => {
+        try {
+          this.webhooks.recordAttempt(follower.delivery_id, { ok: true, error: null, terminal: true });
+        } catch { /* cache may lag; the table is authoritative */ }
+        this.markDelivered(follower.delivery_id, { signature: posted.signature, issuedAt: now, envelope, now });
+      });
+    }
+    return { outcome, settled: 1 + followers.length };
+  }
+
   // Sweep due deliveries (pending/failed with next_attempt_at <= now).
   // Called by the Cloudflare cron tick and by the agent-triggered process
   // endpoint (agentId scopes it to one identity's deliveries). Each
@@ -1351,6 +1423,12 @@ export class AgentPluginStore {
   // webhook lookup, when set, is the resolver for this drain. fetchImpl is an optional
   // override (tests); omitted, postDelivery uses its DNS-pinned transport
   // on Node (plain fetch on Workers) — the M-1 rebinding fix.
+  //
+  // WAVE-300 F2: the batch dispatches through a bounded pool of
+  // WEBHOOK_DRAIN_CONCURRENCY in-flight attempts. Per-delivery transaction
+  // semantics, retry/backoff/dead-letter states, and the dispatch-time SSRF
+  // guard are unchanged; duplicate agent.wake pings to the same URL with
+  // the same eventId coalesce to one POST (wakeCoalesceKey).
   async drainWebhookDeliveries({ fetchImpl, now = this.store.now(), limit = 25, agentId = null, dnsResolvers } = {}) {
     const resolvers = dnsResolvers ?? (this.webhookLookup ? { lookup: this.webhookLookup } : undefined);
     // Only rows that can actually be attempted fill the batch. Deliveries of a
@@ -1369,10 +1447,29 @@ export class AgentPluginStore {
          OR EXISTS (SELECT 1 FROM identity_links l WHERE l.room_id = d.room_id AND l.identity_id = d.agent_id))))
        ORDER BY d.next_attempt_at ASC LIMIT ?`)
       .all(...(agentId ? [now, agentId, limit] : [now, limit]));
-    const summary = { processed: 0, delivered: 0, retried: 0, deadLettered: 0, skipped: 0 };
+    // WAVE-300 F2: group duplicate wake pings before dispatch (see
+    // wakeCoalesceKey). The first row in due order leads each group; the
+    // pool below only ever POSTs leaders.
+    const groups = [];
+    const byKey = new Map();
     for (const row of due) {
-      summary.processed++;
-      summary[await this.attemptStoredDelivery(row, { fetchImpl, now, dnsResolvers: resolvers })]++;
+      const key = this.wakeCoalesceKey(row);
+      if (key === null) { groups.push({ leader: row, followers: [] }); continue; }
+      const group = byKey.get(key);
+      if (group) group.followers.push(row);
+      else { const next = { leader: row, followers: [] }; byKey.set(key, next); groups.push(next); }
+    }
+    // Bounded-parallel dispatch (was: one awaited POST per row, so wake
+    // fan-out latency was the sum of every POST). Per-delivery transaction
+    // semantics, retry/backoff/dead-letter states, and the dispatch-time
+    // SSRF guard are exactly as before — the pool's only await point is
+    // the network POST.
+    const summary = { processed: 0, delivered: 0, retried: 0, deadLettered: 0, skipped: 0 };
+    const results = await runBounded(groups, WEBHOOK_DRAIN_CONCURRENCY,
+      group => this.attemptCoalescedGroup(group.leader, group.followers, { fetchImpl, now, dnsResolvers: resolvers }));
+    for (const { outcome, settled } of results) {
+      summary.processed += settled;
+      summary[outcome] += settled;
     }
     return Object.freeze(summary);
   }
