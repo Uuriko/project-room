@@ -54,7 +54,7 @@ test("append PR keeps prior observations, invalidates approval, and needs a fres
   const now = Date.parse("2026-10-03T13:00:00Z");
   let work = claimWork(createWork({ id: "reviewed", reviewPolicy: "distinct_member",
     pullRequest: { url: "https://github.com/acme/repo/pull/1", outcome: "merged", syncedAt: new Date(now).toISOString(), etag: '"old"', nextPollAt: now + 4000 },
-    files: [{ path: "src/held.js", block: "owned" }], dependsOn: ["prerequisite"], repo: "acme/repo", branch: "draft", revision: "retained" }, { now }), "quill", { now, leaseHours: 6 });
+    files: [{ path: "src/held.js", block: "owned" }], dependsOn: ["prerequisite"], repo: "acme/repo", branch: "draft", revision: "retained" }, { now }), "quill", { now, leaseHours: 1 });
   work = recordCi(work, { state: "success", headSha: "a".repeat(40) }, now).item;
   work = recordReview(work, "reviewer", { verdict: "approve", summary: "Reviewed original links", now });
   const policy = { reviewMembers: ["reviewer"] };
@@ -78,7 +78,7 @@ test("append PR keeps prior observations, invalidates approval, and needs a fres
 test("append PR refuses stale rounds, unsafe input and stopped ownership without changing work", async () => {
   const { appendWorkPullRequest, createWork, renewWork } = await import("../server/work-claims.mjs");
   const now = Date.parse("2026-10-03T13:00:00Z");
-  const work = claimWork(createWork({ id: "held" }, { now }), "quill", { now, leaseHours: 6 });
+  const work = claimWork(createWork({ id: "held" }, { now }), "quill", { now, leaseHours: 1 });
   const input = { pullRequest: "https://github.com/acme/repo/pull/1", expectedClaimedAt: work.claimedAt, expectedHistoryLength: work.history.length, now };
   const original = JSON.stringify(work);
   for (const pullRequest of [null, { url: input.pullRequest, outcome: "merged" }, "https://other.example/acme/repo/pull/1", "https://user:password@github.com/acme/repo/pull/1", input.pullRequest + "?x=1", input.pullRequest + "#fragment", "https://github.com:8443/acme/repo/pull/1", "https://github.com/acme/repo/pull/0", "x".repeat(301)]) {
@@ -95,7 +95,7 @@ test("append PR refuses stale rounds, unsafe input and stopped ownership without
   for (const changed of [{ ...work, state: "unclaimed", owner: null }, { ...work, state: "done" }, { ...work, supersededBy: "new" }]) {
     throwsCode(() => appendWorkPullRequest(changed, "quill", input), "work_claim_conflict");
   }
-  const reclaimed = claimWork(updateWork(work, "quill", { state: "unclaimed", now }), "quill", { now, leaseHours: 6 });
+  const reclaimed = claimWork(updateWork(work, "quill", { state: "unclaimed", now }), "quill", { now, leaseHours: 1 });
   assert.equal(reclaimed.claimedAt, work.claimedAt);
   throwsCode(() => appendWorkPullRequest(reclaimed, "quill", input), "work_claim_conflict");
   const roundTrip = reassignWork(reassignWork(work, "quill", "grok", { now }), "grok", "quill", { now });
