@@ -894,7 +894,12 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "create" && req.method === "POST") {
     const raw = body(req);
-    if (!shape(raw, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files", "dependsOn", "pullRequest", "pullRequests", "repo", "branch", "kind", "revision", "assignee"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, pullRequest?, pullRequests?, repo?, branch?, kind?, revision?, assignee?}");
+    // Schema drift: unknown fields pass through verbatim (never dropped),
+    // so the shape check only requires id — it does not reject unrecognized
+    // keys. Known fields are still validated individually below.
+    if (raw === null || typeof raw !== "object" || Array.isArray(raw) || !Object.hasOwn(raw, "id")) {
+      invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, pullRequest?, pullRequests?, repo?, branch?, kind?, revision?, assignee?, ...unknown passthrough}");
+    }
     requireWriter();
     requireEventBudget();
     const id = claimIdOf(reject, raw.id);
@@ -930,7 +935,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       reject(422, "files_required",
         `Work "${id}" declares no files — claim creation requires a non-empty files array so the file-lease arbiter can see the scope (the room may set workClaims.requireClaimFiles:false to allow undeclared scope)`);
     }
-    let item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy: data.reviewPolicy, note: data.note, tags: data.tags, files: data.files, dependsOn: data.dependsOn, pullRequest: data.pullRequest, pullRequests: data.pullRequests, repo: data.repo, branch: data.branch, kind: data.kind, revision: data.revision, filesDeclared: declaredFiles }, { now: nowMs, agentId: caller }));
+    let item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy: data.reviewPolicy, note: data.note, tags: data.tags, files: data.files, dependsOn: data.dependsOn, pullRequest: data.pullRequest, pullRequests: data.pullRequests, repo: data.repo, branch: data.branch, kind: data.kind, revision: data.revision, filesDeclared: declaredFiles,
+      // Schema drift: unknown body fields pass through verbatim.
+      ...Object.fromEntries(Object.entries(data).filter(([key]) =>
+        !["id", "title", "reviewPolicy", "note", "tags", "files", "dependsOn", "pullRequest", "pullRequests", "repo", "branch", "kind", "revision", "assignee"].includes(key))) }, { now: nowMs, agentId: caller }));
     if (assignee) {
       const held = registry.list(roomId).filter(entry => entry.owner === assignee && HELD_CLAIM_STATES.includes(entry.state)).length;
       if (held >= config.maxMemberOpenClaims) {

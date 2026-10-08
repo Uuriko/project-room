@@ -532,7 +532,8 @@ const pullList = (pullRequest, pullRequests) => {
 // claiming an unknown id is refused so claims always reference real work.
 // `tags` may be supplied up front (free-form, recorded on the item); blobs
 // are evidence pointers and are only recorded on the done transition.
-export function createWork({ id, title, reviewPolicy, note, tags, files, dependsOn, pullRequest, pullRequests, repo, branch, fileBlocks, workItemId, kind, revision, filesDeclared } = {}, { now, agentId } = {}) {
+export function createWork(input = {}, { now, agentId } = {}) {
+  const { id, title, reviewPolicy, note, tags, files, dependsOn, pullRequest, pullRequests, repo, branch, fileBlocks, workItemId, kind, revision, filesDeclared } = input;
   const atMs = nowMsOf(now);
   idOf(id, "work id", 256);
   if (title !== undefined) check(typeof title === "string" && title.length > 0 && title.length <= 512, "title must be 1..512 characters");
@@ -561,7 +562,10 @@ export function createWork({ id, title, reviewPolicy, note, tags, files, depends
     kind: claimKind, revision: claimRevision, ci: null, reviews: Object.freeze([]),
     leaseSeq: 1, epoch: 1, priorActiveState: null, lastHeartbeatAt: null,
     consecutiveHeartbeats: 0, standby: Object.freeze([]), createdSeq: null,
-    filesDeclared: filesDeclared === undefined ? true : filesDeclared === true };
+    filesDeclared: filesDeclared === undefined ? true : filesDeclared === true,
+    // Schema drift: unknown input fields pass through verbatim.
+    ...Object.fromEntries(Object.entries(input).filter(([key]) =>
+      !["id", "title", "reviewPolicy", "note", "tags", "files", "dependsOn", "pullRequest", "pullRequests", "repo", "branch", "fileBlocks", "workItemId", "kind", "revision", "filesDeclared"].includes(key))) };
   // The creating member when the route knows it; "system" for internal creates.
   return withHistory(item, atMs, agentId === undefined ? "system" : agentOf(agentId), "created", note);
 }
