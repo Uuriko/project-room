@@ -777,6 +777,24 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (mayManageAnyClaim(access)) return true;
     reject(403, "work_not_owner", `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
   };
+  // QA200 ch-2037 challenge: the file-lease exclusivity check lived only on
+  // the claim route. create-with-assignee and reassign are acquire paths
+  // too — they must refuse overlapping leases with the same 409 body, or a
+  // lease can be landed silently around the conflict check. fileLeaseConflicts
+  // already excludes the item itself by id.
+  const refuseFileLeaseConflict = item => {
+    const conflicts = fileLeaseConflicts(registry.list(roomId), item);
+    if (conflicts.length === 0) return;
+    const conflict = fileLeaseConflictBody(item, conflicts);
+    const body = {
+      ...agentErrorBody({ httpStatus: 409, code: "file_lease_conflict", message: conflict.error.message, roomId, workItemId: item.id }),
+      ...conflict
+    };
+    const error = new Error(body.error.message);
+    error.code = "file_lease_conflict";
+    error.body = body;
+    throw error;
+  };
 
   if (workClaimRoute === "status" && req.method === "GET") {
     closeLiveClaims();
@@ -825,6 +843,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "sweep" && req.method === "POST") {
     if (!maySweepWorkClaims(access)) refuseSweep();
+    // QA200-CH-2033: a sweep settles PR links and records CI facts, which
+    // emit room events — it is a Board write, so the event-budget floor
+    // applies here exactly like the other Board write routes.
+    requireEventBudget();
     const data = body(req);
     if (!shape(data, {})) invalidInput(reject, "an empty JSON object");
     let updated = 0;
@@ -921,6 +943,11 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       item = runPure(reject, () => claimWork(item, assignee, {
         note: data.note ?? `assigned by ${caller}`, room: roomLike, now: nowMs
       }));
+      // QA200 ch-2037: create-with-assignee lands a lease without touching
+      // the claim route, so run the exclusivity check here. The whole request
+      // is one transaction — a conflict fails atomically and the item is
+      // never created.
+      refuseFileLeaseConflict(item);
       // Retention ack (research brief 2026-09-28, mechanic #2): every claim
       // gets the bot's immediate structured receipt, so no contribution sits
       // at zero replies from t=0. First-time contributors carry the 24h
@@ -1194,6 +1221,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const previousOwnerId = item.owner;
     const note = text("note", data.note, { multiline: true });
     const reassigned = runPure(reject, () => reassignWork(item, caller, target, { note, now: nowMs, authority, room: roomLike }));
+    // QA200 ch-2037: reassign moves a lease to a new holder (and a fresh
+    // unclaimed item lands claimed) without touching the claim route — run
+    // the exclusivity check here too.
+    refuseFileLeaseConflict(reassigned);
     commit(reassigned, "reassigned", {
       previousOwnerId,
       attention: "assigned", attentionMemberId: target,

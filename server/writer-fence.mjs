@@ -252,6 +252,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // verifies its own schema on open.
   "guest_selfserve",
   "guest_selfserve_idem",
+  // guest_link_exchanges (GA-2, issue #941): single-use ga1. link
+  // redemption records. Purely additive and intentionally NOT fenced —
+  // older writers have no code path to it, and the redemption is recorded
+  // in the same transaction as the credential exchange.
+  "guest_link_exchanges",
   // activity_events + read_horizons + saved_messages
   // (attention: activity feed, mark unread, save for later) are purely
   // additive and intentionally NOT fenced: older writers have no code path
