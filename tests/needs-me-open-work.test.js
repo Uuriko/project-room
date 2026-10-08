@@ -234,3 +234,26 @@ test('myWork carries the caller\'s own held claims that need attention: lease ex
   assert.deepEqual(collectNeedsMe(store, ada.secret, {}).myWork[0].top.map(row => row.id), ['soon']);
   assert.equal(collectNeedsMe(store, rex.secret, {}).myWork, undefined);
 });
+
+test("the three work sections share one claim-board read per room", t => {
+  const { store, ada, owner, put } = setup(t);
+  const memberOf = identity => store.db.prepare("SELECT member_id AS m FROM identity_links WHERE identity_id=? AND room_id=?").get(identity.identityId, "board").m;
+  const adaId = memberOf(ada), ownerId = memberOf(owner);
+  const now = Date.parse("2026-10-01T02:00:00Z");
+  put("open-1", 0);
+  const claimed = claimWork(put("review-1", 1, { tags: [`rev-${adaId}`] }), ownerId, { now });
+  const ready = recordCi(updateWork(claimed, ownerId, { state: "in_progress", now }), { state: "success", headSha: "a".repeat(40) }, now).item;
+  store.workClaims.set("board", ready);
+  // Count board reads per room.
+  const reads = [];
+  const inner = store.workClaims.list.bind(store.workClaims);
+  store.workClaims.list = (roomId, ...rest) => { reads.push(roomId); return inner(roomId, ...rest); };
+  const page = collectNeedsMe(store, ada.secret, {});
+  assert.equal(reads.filter(roomId => roomId === "board").length, 1,
+    "openWork/reviewAsks/myWork must share one board read (was 3 per room)");
+  // The shared list still feeds every section.
+  assert.equal(page.openWork?.length, 1);
+  assert.equal(page.openWork[0].top[0].id, "open-1");
+  assert.equal(page.reviewAsks?.length, 1);
+  assert.equal(page.reviewAsks[0].top[0].id, "review-1");
+});
