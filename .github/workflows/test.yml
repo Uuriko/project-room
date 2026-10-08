@@ -22,13 +22,16 @@ concurrency:
 
 jobs:
   # Pull requests only. Push to main skips this job so the full matrix starts
-  # immediately. Shards run unless this job explicitly sets browser=false.
+  # immediately. Shards run unless this job explicitly sets browser=false;
+  # the coverage suite re-run is skipped unless the diff can move module
+  # line coverage (coverage=false).
   changes:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
       browser: ${{ steps.plan.outputs.browser }}
+      coverage: ${{ steps.plan.outputs.coverage }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -314,6 +317,12 @@ jobs:
   # job in the graph was skipped, so an intentional browser-shard skip would
   # skip this required check. Evaluate the direct results instead.
   coverage:
+    needs: [changes]
+    # Skip only when the merge-base diff explicitly cannot move module line
+    # coverage (no measured source, test, or gate-file changes). A skipped or
+    # failed filter, and every main push, still runs the suite: the verdict
+    # can only be skipped when it provably cannot change.
+    if: always() && !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.coverage != 'false')
     # Per-module coverage ratchet (backlog Q015): runs the root unit suite
     # with V8 coverage and fails when any module in coverage-thresholds.json
     # drops below its threshold. Zero dependencies; the script points TMPDIR
@@ -379,6 +388,11 @@ jobs:
             name=${pair%%:*}
             result=${pair#*:}
             echo "$name=$result"
+            # coverage=skipped is provably the intentional skip: the coverage
+            # job's if: only skips when the changes job succeeded with
+            # coverage=false (diff cannot move module line coverage). Every
+            # other path runs the suite.
+            if [ "$name" = "coverage" ] && [ "$result" = "skipped" ]; then continue; fi
             if [ "$result" != "success" ]; then failed=1; fi
           done
           exit "$failed"
