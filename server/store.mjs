@@ -4172,16 +4172,24 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         }
       }
       if (kind === "all" || kind === "work") {
+        const workHits = [];
         for (const w of Object.values(room.state.workItems ?? {})) {
           const haystack = `${w.title ?? ""} ${w.description ?? ""} ${w.definitionOfDone ?? ""}`.toLowerCase();
           if (haystack.includes(needle)) {
             result.total += 1;
-            result.workItems.push({ id: w.id, title: w.title, state: w.state, accountableMemberId: w.accountableMemberId });
-            // Keep the newest `limit` matches (still chronological), like the
-            // messages loop above: the first ones leave every newer match
-            // unreachable — there is no offset, and limit tops out at 200.
-            if (result.workItems.length > limit) result.workItems.shift();
+            workHits.push(w);
           }
+        }
+        // Keep the newest `limit` matches (still chronological), like the
+        // messages loop above: the first ones leave every newer match
+        // unreachable — there is no offset, and limit tops out at 200.
+        // Order by createdAt, NOT by object key order: JS enumerates
+        // integer-like keys ("2","10") in ascending numeric order regardless
+        // of insertion, so key order is not creation order for numeric ids
+        // (validId permits them). Stable sort keeps insertion order on ties.
+        workHits.sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
+        for (const w of workHits.slice(-limit)) {
+          result.workItems.push({ id: w.id, title: w.title, state: w.state, accountableMemberId: w.accountableMemberId });
         }
       }
       return stampSearch(result, auth.member.id);
