@@ -7699,8 +7699,28 @@ paths:
       responses:
         '201':
           description: The queued item, with changed empty on the first observation
+          headers:
+            X-API-Version:
+              description: API contract version; see docs/API-VERSIONING.md
+              schema: { type: string }
+            Deprecation:
+              description: 'RFC 8594 deprecation instant "@1791158400" (2026-10-05); this route is deprecated'
+              schema: { type: string }
+            Link:
+              description: 'Successor view: </api/rooms/{roomId}/work-claims>; rel="successor-version"'
+              schema: { type: string }
         '200':
           description: The pull request was already queued (duplicate true)
+          headers:
+            X-API-Version:
+              description: API contract version; see docs/API-VERSIONING.md
+              schema: { type: string }
+            Deprecation:
+              description: 'RFC 8594 deprecation instant "@1791158400" (2026-10-05); this route is deprecated'
+              schema: { type: string }
+            Link:
+              description: 'Successor view: </api/rooms/{roomId}/work-claims>; rel="successor-version"'
+              schema: { type: string }
         '401': { description: unauthenticated }
         '404': { description: pr_not_found when a token is set and GitHub has no such pull request }
         '409': { description: land_queue_full }
@@ -7726,6 +7746,16 @@ paths:
       responses:
         '200':
           description: "{ roomId, items }"
+          headers:
+            X-API-Version:
+              description: API contract version; see docs/API-VERSIONING.md
+              schema: { type: string }
+            Deprecation:
+              description: 'RFC 8594 deprecation instant "@1791158400" (2026-10-05); this route is deprecated'
+              schema: { type: string }
+            Link:
+              description: 'Successor view: </api/rooms/{roomId}/work-claims>; rel="successor-version"'
+              schema: { type: string }
         '401': { description: unauthenticated }
   /api/rooms/{roomId}/remove_land_item:
     post:

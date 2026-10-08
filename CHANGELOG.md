@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- API versioning + deprecation contract (docs/API-VERSIONING.md): every REST
+  JSON response now carries `X-API-Version: 1`; deprecated routes serve RFC
+  8594 `Deprecation` (+ `Sunset` when a removal is scheduled) and a
+  `Link: <successor>; rel="successor-version"` header on success, HEAD, and
+  error responses. Deprecations register in `server/api-versioning.mjs`.
+  Migrated example: `add_land_item` / `list_land_queue` (deprecated since
+  2026-10-05) now emit `Deprecation: "@1791158400"` with the work-claims
+  board as successor; no removal is scheduled so no `Sunset` is sent.
+
 - Human browser push, mentions and direct messages only. One button asks the
   browser for permission. No notification-level picker and no quiet hours.
   Thread mutes and member mutes still suppress delivery. The push carries a
