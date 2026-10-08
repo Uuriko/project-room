@@ -769,6 +769,16 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (!item) reject(404, "work_claim_not_found", `No work claim "${id}" in this room`);
     return item;
   };
+  // QA8 (2026-10-08): a done or closed item is final. Without this guard,
+  // claim answered "already closed — release it first" (release then 422'd
+  // "immutable"), update/renew answered 403 "owned by nobody" with a "claim
+  // it first" hint, and release answered 422 invalid_claim_input. Name the
+  // real state once, with the same 409 code close/cancel already use.
+  const refuseTerminal = (item, verb) => {
+    if (isTerminalClaimState(item.state)) {
+      reject(409, "work_claim_terminal", `Cannot ${verb} "${item.id}": it is already ${item.state}, which is final. Create a new item for further work`);
+    }
+  };
   // Returns true when the caller is the room owner or holds manage_claims
   // and is acting on someone else's claim. The claim holder takes the
   // ordinary path. Fixtures that do not name an owner stay holder-only.
@@ -946,6 +956,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (!shape(data, { optional: ["note", "leaseHours", "files", "advisory", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch"] })) invalidInput(reject, "{note?, leaseHours?, files?, advisory?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?}");
     if ("advisory" in data && typeof data.advisory !== "boolean") invalidInput(reject, "advisory true or false");
     const item = load(claimIdOf(reject, workClaimId));
+    refuseTerminal(item, "claim");
     if (item.state !== "unclaimed") reject(409, "work_claim_conflict", `Work "${item.id}" is already ${item.state} — release it first`);
     requireWriter();
     requireEventBudget();
@@ -1006,6 +1017,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // malformed ack is a 422, never a silent drop.
     if (data.readingAck !== undefined && !shape(data.readingAck, { required: ["docs"] })) invalidInput(reject, "readingAck: {docs: [...]}");
     const item = load(claimIdOf(reject, workClaimId));
+    refuseTerminal(item, "update");
     if (item.owner !== caller) reject(403, "work_not_owner", `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
     requireWriter();
     requireEventBudget();
@@ -1138,6 +1150,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const data = body(req);
     if (!shape(data, { optional: ["note", "reason"] })) invalidInput(reject, "{reason?, note?}");
     let item = load(claimIdOf(reject, workClaimId));
+    refuseTerminal(item, "release");
     const authority = authorityOver(item);
     requireEventBudget();
     const reason = text(Object.hasOwn(data, "reason") ? "reason" : "note", data.reason ?? data.note, { multiline: true });
@@ -1157,6 +1170,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const data = body(req);
     if (!shape(data, { required: ["newOwner"], optional: ["note"] })) invalidInput(reject, "{newOwner, note?}");
     const item = load(claimIdOf(reject, workClaimId));
+    refuseTerminal(item, "reassign");
     const authority = authorityOver(item);
     // W3 (QA 2026-09-28): /reassign used to accept any newOwner string, so a
     // typo stranded the claim on a nonexistent member (owner-only routes
@@ -1198,6 +1212,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const data = body(req);
     if (!shape(data, { optional: ["progressMessageId", "note", "leaseHours"] })) invalidInput(reject, "{progressMessageId?, note?, leaseHours?}");
     const item = load(claimIdOf(reject, workClaimId));
+    refuseTerminal(item, "renew");
     // W4 (QA 2026-09-28): a lapsed lease auto-releases the claim (owner
     // cleared), so the ownership check below would misdiagnose it as an
     // access problem ("owned by nobody — ask the owner for a guest invite").

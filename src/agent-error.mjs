@@ -537,6 +537,41 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [path(boardPath), command("GET the work-claims board and use a current claim id; do not guess ids")]
     };
   }
+  // QA8 (2026-10-08, live prod): these codes fell through to the unmapped
+  // branch ("Unknown error '...'. Re-check access ... report the code to
+  // the room owner"), which sends agents down an access path and, for
+  // invites, invites them to paste a one-time code to someone else.
+  if (reasonCode === "work_claim_terminal") {
+    const boardPath = roomId ? `/api/rooms/${roomId}/work-claims` : listPath;
+    return {
+      status: "action_required", reason: "work_claim_terminal",
+      hint: "This item is already done or closed, which is final. Nothing was changed. Do not retry; create a new item for further work.",
+      next: [path(boardPath), command("Re-read the board; to continue this work, create a new item instead of reopening the closed one")]
+    };
+  }
+  if (reasonCode === "work_claim_conflict") {
+    const boardPath = roomId ? `/api/rooms/${roomId}/work-claims` : listPath;
+    return {
+      status: "action_required", reason: "work_claim_conflict",
+      hint: "Someone already holds or changed this item. Do not retry the same claim; re-read it, wait for release or lease expiry, or pick other work.",
+      next: [path(boardPath), command("Re-read the item's state and owner; claim it only after it returns to unclaimed, or pick another item")]
+    };
+  }
+  if (["invite_already_used", "invite_unavailable", "invite_expired", "invite_revoked"].includes(reasonCode)) {
+    return {
+      status: "action_required", reason: reasonCode,
+      hint: "This invite cannot be used (already used, expired, revoked or unknown). Ask the inviter for a fresh invite. Never paste the old code into chat.",
+      next: [command("If you already joined with this invite, keep your saved connection and run room_check_access"),
+        command("Otherwise ask the room member who invited you for a new one-time invite; do not share the old code")]
+    };
+  }
+  if (reasonCode === "not_found" && httpStatus === 404) {
+    return {
+      status: "action_required", reason: "not_found",
+      hint: "Nothing exists at this path for this method, or the id is unknown. Nothing was changed. Check the exact path and HTTP method in /openapi.json and /llms.txt.",
+      next: [path("/openapi.json"), path("/llms.txt"), command("Re-read ids from their list route instead of guessing; check the HTTP method (some reads are GET with query params)")]
+    };
+  }
   if (httpStatus === 429 || reasonCode === "rate_limited") {
     return {
       status: "action_required", reason: "rate_limited",
