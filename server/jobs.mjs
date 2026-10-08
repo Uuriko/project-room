@@ -446,6 +446,14 @@ export function startNodeScheduler({
   }
   const gmailSync = gmailAuth ? new GmailSync(new GmailMailbox(store, gmailAuth)) : null;
   const lastRan = new Map();
+  // REL-24: per-job run record for GET /api/health/jobs on Node.
+  const records = new Map();
+  const record = (name, at, ok) => {
+    const prior = records.get(name) ?? { consecutiveFailures: 0 };
+    records.set(name, ok
+      ? { ...prior, lastRunAt: at, lastSuccessAt: at, consecutiveFailures: 0 }
+      : { ...prior, lastRunAt: at, lastErrorAt: at, consecutiveFailures: prior.consecutiveFailures + 1 });
+  };
   const ctxBase = { env, fetchImpl, dnsResolvers, now, gmailSync, drainer, retentionIndex: 0 };
   let timer = null;
   let running = false;
@@ -465,9 +473,11 @@ export function startNodeScheduler({
         try {
           const result = await job.run(store, { ...ctxBase, deadline, growthTick });
           lastRan.set(job.name, at);
+          record(job.name, at, !summaryFailed(result));
           outcomes.push({ job: job.name, ok: true, result });
         } catch (error) {
           lastRan.set(job.name, at);
+          record(job.name, at, false);
           console.warn(`[${job.name}] tick failed: ${oneLine(error?.message ?? error)}`);
           outcomes.push({ job: job.name, ok: false });
         }
@@ -485,8 +495,39 @@ export function startNodeScheduler({
     },
     stop() { if (timer) { clearInterval(timer); timer = null; } },
     isRunning() { return timer !== null; },
+    // Every registry job, in registry order. Node reports run facts only;
+    // it does not grade health (no top-level status), so a fresh boot with
+    // no runs yet is not reported as stale.
+    jobHealth() {
+      const iso = ms => (Number.isFinite(ms) ? new Date(ms).toISOString() : null);
+      return JOBS.map(job => {
+        const inRuntime = job.runtimes.includes("node");
+        const gated = (job.name === "growth-watch" && !growthEnabled) || (job.name === "channel-drain" && !channelEnabled);
+        const enabled = inRuntime && !gated && jobEnabled(job, env, store);
+        const reason = !inRuntime ? (job.singleRuntimeReason ?? "Runs on the Worker only")
+          : gated ? "Disabled for this process" : enabled ? null : jobDisabledReason(job, env, store);
+        const rec = records.get(job.name) ?? {};
+        return {
+          name: job.name, runtime: inRuntime ? "node" : "worker-only", enabled, reason,
+          periodSeconds: Math.round((overrides.get(job.name) ?? job.cadenceMs) / 1000),
+          lastRunAt: iso(rec.lastRunAt), lastSuccessAt: iso(rec.lastSuccessAt), lastErrorAt: iso(rec.lastErrorAt),
+          consecutiveFailures: rec.consecutiveFailures ?? 0
+        };
+      });
+    },
     runOnce
   };
+}
+
+// The scheduler wired for this process, read by GET /api/health/jobs.
+let wiredScheduler = null;
+export function nodeJobHealth() {
+  return wiredScheduler ? wiredScheduler.jobHealth() : null;
+}
+
+function summaryFailed(result) {
+  if (!result || typeof result !== "object") return false;
+  return Boolean(result.scanError) || Number(result.errors) > 0;
 }
 
 export function wireNodeJobs(store, options = {}) {
@@ -499,5 +540,6 @@ export function wireNodeJobs(store, options = {}) {
   });
   const scheduler = startNodeScheduler({ store, ...options });
   scheduler.start();
+  wiredScheduler = scheduler;
   return scheduler;
 }

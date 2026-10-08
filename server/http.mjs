@@ -1971,9 +1971,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (acquisition && ["GET", "HEAD"].includes(req.method)) {
         rate(`acquisition:${remoteAddress}`, 120);
         const ref = url.searchParams.get("ref") ?? "";
-        const sendPage = (status, html, jsonBody, canonical) => {
+        const sendPage = (status, html, jsonBody, canonical, cacheControl = "public, max-age=60") => {
           if (!url.search) res.setHeader("X-Robots-Tag", "all");
-          res.setHeader("Cache-Control", "public, max-age=60");
+          res.setHeader("Cache-Control", cacheControl);
           res.setHeader("Link", publicPageLinks(url, canonical));
           if (jsonBody) {
             const body = Buffer.from(JSON.stringify(jsonBody));
@@ -2012,7 +2012,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return res.end(req.method === "HEAD" ? undefined : body);
         }
         if (!page) reject(404, "not_found", "Not found");
-        return sendPage(200, page.html, roomPage[2] ? page.document : null, `/r/${roomPage[1]}`);
+        // Owner-only public-receipts toggle: the room page lists receipt
+        // titles, so like the receipts routes it must never sit in a shared
+        // cache — a response cached while public would keep disclosing a
+        // room's receipts after the owner switches privacy off.
+        return sendPage(200, page.html, roomPage[2] ? page.document : null, `/r/${roomPage[1]}`, "no-store");
       }
       if (acquisition) reject(405, "method_not_allowed", "Method not allowed");
       // --- end GR2 ---
