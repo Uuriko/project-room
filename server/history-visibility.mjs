@@ -2,17 +2,55 @@
 //
 // A member under "since_join" reads messages and events from their own join
 // onward. The join point is the LATEST member.added or
-// member.joined_via_invitation event for that member id (#1523): a guest who
-// is removed and later reactivated must not read messages posted during the
-// removal gap. The event's sequence bounds event-log reads, and its timestamp
-// bounds reads over the message projection, which carries createdAt but no
-// sequence. Members who read everything get a null floor, so their reads take
-// no extra work.
+// member.joined_via_invitation event for that member id (#1523), or the latest
+// reactivation: a member.access_changed with active:true that follows a
+// deactivation. The live reactivation path (server/guest-invites.mjs
+// reactivateGuestSeat) emits member.access_changed, not a fresh member.added,
+// so a join-only floor never moves and the removal gap stays readable. A
+// guest who is removed and later reactivated must not read messages posted
+// during the removal gap. The event's sequence bounds event-log reads, and
+// its timestamp bounds reads over the message projection, which carries
+// createdAt but no sequence. Members who read everything get a null floor, so
+// their reads take no extra work.
 
 import { randomUUID } from "node:crypto";
 import { EVENT_TYPES as T, memberHistoryVisibility, isRoomArchived } from "../src/events.js";
 
 const JOIN_TYPES = [T.MEMBER_ADDED, T.MEMBER_JOINED_VIA_INVITATION];
+const MEMBERSHIP_TYPES = [...JOIN_TYPES, T.MEMBER_ACCESS_CHANGED];
+
+// The start of the member's current active spell: the latest join event, or
+// the latest reactivation (access_changed active:true whose previous
+// membership event for the member was a deactivation). Affirmations
+// (active:true while already active) do not start a new spell, so they leave
+// the floor alone. Returns null when no activation point is found in the
+// recent window or the member's newest membership event is a deactivation;
+// callers fall back to the join-only lookup (previous behavior).
+function activationAnchor(db, roomId, memberId) {
+  const rows = db.prepare(
+    `SELECT sequence, json_extract(body,'$.at') AS at, json_extract(body,'$.type') AS type,
+            json_extract(body,'$.data.active') AS active FROM events
+     WHERE room_id=? AND json_extract(body,'$.type') IN (${MEMBERSHIP_TYPES.map(() => "?").join(",")})
+       AND json_extract(body,'$.data.memberId')=?
+     ORDER BY sequence DESC LIMIT 32`
+  ).all(roomId, ...MEMBERSHIP_TYPES, memberId);
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (JOIN_TYPES.includes(row.type)) return row;
+    if (row.type === T.MEMBER_ACCESS_CHANGED && row.active === 1) {
+      const older = rows[i + 1];
+      const wasInactive = !older
+        || (older.type === T.MEMBER_ACCESS_CHANGED && older.active === 0);
+      if (wasInactive) return row;
+      // Affirmation while already active: the spell started further back.
+      continue;
+    }
+    // A deactivation (or anything unexpected) as the newest membership event:
+    // keep the previous join-only behavior for the currently-inactive member.
+    if (i === 0) break;
+  }
+  return null;
+}
 
 // Returns null (no limit) or { sequence, at, sameInstant } for the member's
 // join event. Timestamps have millisecond precision, so `sameInstant` lists
@@ -21,7 +59,7 @@ const JOIN_TYPES = [T.MEMBER_ADDED, T.MEMBER_JOINED_VIA_INVITATION];
 // event cannot be found reads nothing older than the room head (fail closed).
 export function historyFloor(db, state, roomId, memberId, headSequence = null) {
   if (memberHistoryVisibility(state, memberId) !== "since_join") return null;
-  const row = db.prepare(
+  const row = activationAnchor(db, roomId, memberId) ?? db.prepare(
     `SELECT sequence, json_extract(body,'$.at') AS at FROM events
      WHERE room_id=? AND json_extract(body,'$.type') IN (${JOIN_TYPES.map(() => "?").join(",")})
        AND json_extract(body,'$.data.memberId')=?
