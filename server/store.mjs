@@ -4163,9 +4163,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           if (m.toMemberId && m.authorId !== auth.member?.id && m.toMemberId !== auth.member?.id) continue;
           if (m.body.toLowerCase().includes(needle)) {
             result.total += 1;
-            if (result.messages.length < limit) {
-              result.messages.push({ id: m.id, authorId: m.authorId, body: m.body, createdAt: m.createdAt, workItemId: m.workItemId });
-            }
+            result.messages.push({ id: m.id, authorId: m.authorId, body: m.body, createdAt: m.createdAt, workItemId: m.workItemId });
+            // Keep the newest `limit` matches (still chronological). Keeping the first
+            // ones left every newer match unreachable: there is no offset, and limit
+            // tops out at 200.
+            if (result.messages.length > limit) result.messages.shift();
           }
         }
       }
@@ -4642,6 +4644,25 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const actor = room.state.members?.[auth.member.id];
         if (!mayWriteBoardClaims(actor, room.state.room?.ownerId)) {
           fail(403, "work_claims_not_permitted", "Creating, claiming, renewing, or updating work claims needs a contribute, review, or collaborate profile.");
+        }
+      }
+      // A reply joins its parent's thread. A DM's thread belongs to its two
+      // parties: a bystander replying to a DM id would thread into a private
+      // conversation and learn from the answer that the id exists. Live
+      // admission only, so replies already in a log keep replaying; the
+      // refusal reads like an unknown id so it confirms nothing.
+      if (command.type === T.MESSAGE_POSTED && typeof command.data?.replyToId === "string") {
+        const byId = new Map((room.state.messages || []).map(m => [m.id, m]));
+        const seen = new Set();
+        for (let m = byId.get(command.data.replyToId); m && !seen.has(m.id); m = byId.get(m.replyToId)) {
+          seen.add(m.id);
+          // Reply requests are directed but room-threaded by design: members may
+          // clarify or comment under them (tests/reply-requests.test.js).
+          if (m.toMemberId && !Object.hasOwn(room.state.replyRequests ?? {}, m.id)
+              && m.authorId !== auth.member.id && m.toMemberId !== auth.member.id) {
+            fail(422, "command_rejected", "Reply must reference a message in this Room");
+          }
+          if (!m.replyToId) break;
         }
       }
       // Bond / peer DM. Room chat (message.posted) is unchanged and still
