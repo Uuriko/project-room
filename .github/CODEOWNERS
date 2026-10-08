@@ -1,0 +1,23 @@
+# CODEOWNERS — Uuriko/project-room
+#
+# Why this exists: several workflows run on `push: branches: [main]`
+# (staging.yml, test.yml, machine.yml, relay.yml, ...) and staging.yml
+# passes deploy secrets (CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID,
+# ROOM_AGENT_CARD_SIGNING_KEY) into those post-merge runs. With reviews
+# advisory, a PR that rewrites a workflow file could merge and then
+# exfiltrate secrets on the next main push. So workflow changes need the
+# owner's explicit review.
+#
+# This file only takes effect once the branch-protection rule for `main`
+# enables "Require review from Code Owners" (admin setting, one click:
+# repo Settings → Branches → main rule → check the box). Until then these
+# entries are advisory, like all other reviews in this repo.
+#
+# Action `uses:` refs in this repo are already SHA-pinned; this file is the
+# remaining half of the workflow-integrity fix.
+
+# Workflow definitions: owner review required.
+.github/workflows/ @Uuriko
+
+# This file itself: don't let a PR quietly drop the gate.
+.github/CODEOWNERS @Uuriko
