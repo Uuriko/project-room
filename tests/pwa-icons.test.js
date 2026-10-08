@@ -56,3 +56,12 @@ test("a declarative push stays under 4KB and is omitted when the flag is off", (
   const huge = declarativePushPayload({ ...base, pad: "x".repeat(5000) }, { enabled: true });
   assert.equal(huge.web_push, undefined);
 });
+
+test("#1606: service worker is registered at app startup (not only on push opt-in)", () => {
+  const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  assert.match(
+    app,
+    /navigator\.serviceWorker\.register\("\/push-sw\.js",\s*\{\s*scope:\s*"\/"/,
+    "src/app.js registers /push-sw.js at startup with scope /"
+  );
+});

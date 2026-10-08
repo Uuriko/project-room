@@ -4312,6 +4312,13 @@ function syncComposerHint() {
 }
 touchKeyboard.addEventListener("change", syncComposerHint);
 syncComposerHint();
+// #1606: register the service worker at startup so PWA installability signals
+// are present for every user, not just push opt-ins. push-sw.js is the same
+// worker human-push.js registers (same URL + scope "/"), so that call remains
+// a no-op returning the existing registration.
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/push-sw.js", { scope: "/" }).catch(() => {});
+}
 $("#message-input").addEventListener("keydown", e => {
   const list = $("#mention-list"), open = list && !list.hidden;
   const matches = open ? mentionChoices() : [];
