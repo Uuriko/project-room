@@ -282,3 +282,14 @@ test("audit report restores a store whose stored projection drifted from the red
   assert.equal(replayNdjson(exportNdjsonText(openStore(t, 1).store.db), join(directory, "clean", "room.sqlite"), { audit: "report" }).audit.ok, true);
   assert.throws(() => replayNdjson(ndjson, join(directory, "bad", "room.sqlite"), { audit: "loose" }), /strict or report/);
 });
+
+test("Durable Object BLOB cells (bare SharedArrayBuffer) export as base64, not {}", () => {
+  // JSON.stringify(new SharedArrayBuffer(n)) is '{}' -- the same trap PR #2029
+  // closed for ArrayBuffer. A bare SAB is neither an ArrayBuffer nor a view.
+  const bytes = Uint8Array.from({ length: 64 }, (_, i) => i);
+  const sab = new SharedArrayBuffer(64);
+  new Uint8Array(sab).set(bytes);
+  const expected = { $base64: Buffer.from(bytes).toString("base64") };
+  assert.deepEqual(sanitizeCell("bytes", sab), expected);
+  assert.notEqual(JSON.stringify(sanitizeCell("bytes", sab)), "{}");
+});
