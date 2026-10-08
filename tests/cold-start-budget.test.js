@@ -29,7 +29,11 @@ const EMPTY_UNTIL_CRON = new Set([
   // Spend grants and authorizations exist only after an owner issues a grant.
   "spend_grant_terms",
   "spend_authorizations",
-  "spend_room_reservations"
+  "spend_room_reservations",
+  // The work-claim requestId idempotency journal (PHOENIX W4) stays empty
+  // until a client actually sends a requestId write — same opt-in rationale
+  // as the spend grants above.
+  "work_claim_idempotency",
 ]);
 
 const EVENTS = 200_000;
