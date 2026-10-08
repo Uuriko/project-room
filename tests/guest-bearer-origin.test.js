@@ -8,7 +8,6 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
-import { GUEST_AGENT_TOKEN_PREFIX } from "../server/guest-agent-links.mjs";
 
 // RC-2026-09-23-bearer-origin: public guest routes called checkOrigin(req,
 // true), demanding a browser Origin header. Bearer-authenticated agent
