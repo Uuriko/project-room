@@ -4874,6 +4874,13 @@ paths:
           description: |
             Opaque nextCursor from the previous page. Order is updatedAt
             descending, then id. Pages from one board do not overlap.
+        - name: namespace
+          in: query
+          schema: { type: string }
+          description: |
+            Select one claim board (1..64 chars, [A-Za-z0-9_-]); absent
+            means the default board. `*` read-merges every board into one
+            read-only view with each claim's namespace stamped.
       responses:
         '200':
           description: |
@@ -4902,13 +4909,16 @@ paths:
       summary: Register a work claim item
       description: |
         Creates an unclaimed work-claim item agents can then claim. `id`
-        matches [A-Za-z0-9_-]{1,128}. `reviewPolicy` overrides the room's
-        default review policy for this item. Duplicate ids get 409
-        `work_claim_exists`. A room already at its open-claim cap (default
-        200; done claims do not count) gets 409 `work_board_full`. Creating
-        needs a contribute, review, or collaborate profile, the room owner,
-        or a human with contribute rights; otherwise 403
-        `work_claims_not_permitted`. API keys need `rooms:write`.
+        matches [A-Za-z0-9_-]{1,128} and is unique across all boards in the
+        room. `namespace` (optional, 1..64 chars [A-Za-z0-9_-], default
+        `default`) routes the claim to one board. `reviewPolicy` overrides
+        the room's default review policy for this item. Duplicate ids get
+        409 `work_claim_exists`. A board already at its open-claim cap
+        (default 200 per board; done claims do not count) gets 409
+        `work_board_full` naming the board. Creating needs a contribute,
+        review, or collaborate profile, the room owner, or a human with
+        contribute rights; otherwise 403 `work_claims_not_permitted`.
+        API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -4920,6 +4930,7 @@ paths:
               required: [id]
               properties:
                 id: { type: string, description: Claim id, pattern: '[A-Za-z0-9_-]{1,128}' }
+                namespace: { type: string, description: Claim board namespace, pattern: '[A-Za-z0-9_-]{1,64}', default: default }
                 title: { type: string }
                 reviewPolicy: { type: string, enum: [self_attested, distinct_member, independent_principal] }
                 note: { type: string }
@@ -4979,19 +4990,24 @@ paths:
     get:
       summary: Read the room's work-claim caps
       description: |
-        Returns the room's open-claim caps. maxMemberOpenClaims defaults to
-        20. API keys need `rooms:read`.
+        Returns the room's open-claim caps. maxOpenClaims defaults to 200
+        per board, maxMemberOpenClaims defaults to 20 (room-wide).
+        boards maps a namespace to its per-board { maxOpenClaims }.
+        API keys need `rooms:read`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
         '200': { description: Caps for this room }
         '401': { description: unauthenticated }
     post:
-      summary: Set the per-member open claim cap
+      summary: Set work-claim caps
       description: |
-        The room owner sets maxMemberOpenClaims, an integer from 1 to 10000.
-        The next claim past that cap is 409 too_many_open_claims. Anyone else
-        gets 403 work_claims_not_permitted. API keys need `rooms:write`.
+        The room owner sets maxMemberOpenClaims (integer 1..10000,
+        room-wide), maxOpenClaims (integer 1..10000, fallback for boards
+        without an entry), and boards (map of namespace to
+        { maxOpenClaims } for per-board caps). At least one field is
+        required. Anyone else gets 403 work_claims_not_permitted.
+        API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -5000,13 +5016,32 @@ paths:
           application/json:
             schema:
               type: object
-              required: [maxMemberOpenClaims]
               properties:
                 maxMemberOpenClaims: { type: integer, minimum: 1, maximum: 10000 }
+                maxOpenClaims: { type: integer, minimum: 1, maximum: 10000 }
+                boards:
+                  type: object
+                  additionalProperties:
+                    type: object
+                    required: [maxOpenClaims]
+                    properties:
+                      maxOpenClaims: { type: integer, minimum: 1, maximum: 10000 }
       responses:
         '200': { description: The saved caps }
         '403': { description: work_claims_not_permitted }
         '422': { description: invalid_claim_input }
+  /api/rooms/{roomId}/work-claim-boards:
+    get:
+      summary: List the room's claim boards
+      description: |
+        Per-board census for every namespace holding claims, plus the
+        default board: { namespace, open, total, cap }. Read-only; never a
+        contention point. API keys need `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: Board census for this room }
+        '401': { description: unauthenticated }
   /api/rooms/{roomId}/work-claims/status:
     get:
       summary: Live revision compared with GitHub main
@@ -16913,6 +16948,7 @@ components:
       type: object
       properties:
         id: { type: string }
+        namespace: { type: string, description: Claim board namespace (default board when absent) }
         title: { type: string }
         state: { type: string, enum: [unclaimed, claimed, in_progress, blocked, done, closed] }
         owner: { type: [string, 'null'] }

@@ -520,12 +520,15 @@ export function roomWorkClaimConfig(room) {
   const defaultLeaseHours = typeof raw.defaultLeaseHours === "number" && raw.defaultLeaseHours > 0 && raw.defaultLeaseHours <= MAX_LEASE_HOURS
     ? raw.defaultLeaseHours : DEFAULT_LEASE_HOURS;
   const reviewPolicy = REVIEW_POLICIES.includes(raw.reviewPolicy) ? raw.reviewPolicy : DEFAULT_REVIEW_POLICY;
+  const boards = boardsOf(raw.boards);
   return Object.freeze({
     defaultLeaseHours,
     reviewPolicy,
     maxOpenClaims: positiveCap(raw.maxOpenClaims, DEFAULT_MAX_OPEN_CLAIMS),
     maxMemberOpenClaims: positiveCap(raw.maxMemberOpenClaims, DEFAULT_MAX_MEMBER_OPEN_CLAIMS),
-    boards: boardsOf(raw.boards),
+    // Present only when a room actually configures boards: the frozen shape
+    // is byte-identical to the pre-shard config otherwise.
+    ...(Object.keys(boards).length > 0 ? { boards } : {}),
   });
 }
 // The open-claim cap for one board: its own entry wins, else the room-level
