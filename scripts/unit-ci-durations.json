@@ -498,6 +498,7 @@
   "tests/next-actions.test.js": 50788,
   "tests/notification-feed.test.js": 149110,
   "tests/notification-preferences.test.js": 16790,
+  "tests/notify-classifier.test.js": 1200,
   "tests/notify-policy.test.js": 15274,
   "tests/notify-preferences.test.js": 3573,
   "tests/notify-quiet-hours.test.js": 4478,
