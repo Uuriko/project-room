@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 import { validId } from "../src/events.js";
 import { nextWorkStep } from "../src/workflow.js";
 import { stampDiscussion } from "./content-trust.mjs";
+import { messageInHistory } from "./history-visibility.mjs";
 
 const DISCUSSION_DEFAULT_LIMIT = 20;
 export const DISCUSSION_MAX_LIMIT = 50, DISCUSSION_BYTE_LIMIT = 65536;
@@ -38,7 +39,7 @@ const pick = (value, keys) => Object.fromEntries(keys.split(" ").filter(key => O
 
 // Metadata contains only immutable message-post IDs/sequences through the frozen
 // horizon. Bodies come from the canonical projection; mutable reactions are omitted.
-export function selectedWorkDiscussion({ state, workItemId, viewerId, sequence, now, metadata, window, anchorId, cursor = null }) {
+export function selectedWorkDiscussion({ state, workItemId, viewerId, sequence, now, metadata, window, anchorId, cursor = null, floor = null }) {
   const item = state.workItems[workItemId], byId = new Map(state.messages.map(message => [message.id, message]));
   const included = new Set(), selected = [];
   for (const post of metadata) {
@@ -54,6 +55,9 @@ export function selectedWorkDiscussion({ state, workItemId, viewerId, sequence, 
     // cannot reveal their existence, count, or metadata. They stay in
     // `included` so public descendants of a hidden DM remain selected.
     if (message.toMemberId && message.toMemberId !== viewerId && message.authorId !== viewerId) continue;
+    // PRIV-2: pre-join messages are hidden the same way (still in `included`,
+    // so later public replies stay selected).
+    if (!messageInHistory(message, floor)) continue;
     selected.push({ sequence: post.sequence, eventId: post.id, relation, message });
   }
   if (cursor !== null && !selected.some(row => row.sequence === window.after)) fail("invalid_discussion", "Continuation must follow a selected message");
