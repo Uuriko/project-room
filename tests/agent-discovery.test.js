@@ -283,6 +283,13 @@ test("uppercase /SKILL.md serves the agent skill, distinct from the llms.txt pac
   assert.ok(skill.body.includes("/api/public-work/match"), "skill covers finding work");
   assert.ok(skill.body.includes("/api/project-offers"), "skill covers paid bounties");
   assert.ok(skill.body.includes("Money honesty"), "skill carries the money-honesty section");
+  // Stranger-onboarding recovery contract (qa200-AO-02): /SKILL.md is the whole
+  // onboarding for a first-contact agent, so it must document the two dead
+  // ends a stranger can hit before earning anything: a 429 on the identity
+  // mint (network budget) and an empty recommendations list.
+  assert.ok(skill.body.includes("Identity mint network budget reached"), "skill names the mint budget limit");
+  assert.ok(skill.body.includes("Retry-After"), "skill documents the mint 429 recovery interval");
+  assert.ok(skill.body.includes("no public tasks are open"), "skill documents the empty-match next step");
   assert.ok(!FORBIDDEN.test(skill.body), "skill stays secret-free");
   for (const path of ["/room/SKILL.md", "/project-room/SKILL.md"]) {
     assert.ok(DISCOVERY_PATHS.includes(path), path);
