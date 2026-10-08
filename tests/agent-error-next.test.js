@@ -109,6 +109,14 @@ test("shared mapper keeps error.code/message and adds status/reason/hint/next", 
   const leaky = agentErrorAx({ httpStatus: 404, code: "PRIVATE_DETAIL token", message: "do not paste" });
   assert.equal(leaky.reason, "request_failed");
   assert.doesNotMatch(JSON.stringify(leaky), /PRIVATE_DETAIL|do not paste|plugin\.jup\.ag/);
+  // QA 2026-10-07 (live fuzz): method_not_allowed 405 is a method problem,
+  // not an access problem — the hint must name the allowed-method fix
+  // instead of the unmapped-code "Unknown error ... re-check access" copy.
+  const wrongMethod = agentErrorAx({ httpStatus: 405, code: "method_not_allowed", message: "Method not allowed" });
+  assert.equal(wrongMethod.reason, "method_not_allowed");
+  assert.match(wrongMethod.hint, /does not accept that HTTP method/);
+  assert.match(wrongMethod.hint, /Allow header/);
+  assert.doesNotMatch(wrongMethod.hint, /Unknown error/);
 });
 
 test("public-work 409s teach: conflict names holder+lease expiry, stale says changed-vs-expired", () => {

@@ -583,6 +583,19 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [tool("room_check_access"), command("Retry the exact same command after checking access")]
     };
   }
+  // 2026-10-07 buildqa (live fuzz): method_not_allowed 405 fell through to
+  // the unmapped-code branch — "Unknown error 'method_not_allowed'. Re-check
+  // access..." sends the agent down an access path for a method problem. A
+  // 405 names the fix itself: resend with an allowed method. The response
+  // carries an Allow header naming the accepted methods; the error body
+  // does not repeat it, so the hint points there instead of guessing.
+  if (httpStatus === 405 || reasonCode === "method_not_allowed") {
+    return {
+      status: "action_required", reason: "method_not_allowed",
+      hint: "This route does not accept that HTTP method — nothing was changed. Resend with one of the route's allowed methods (the 405 response carries an Allow header naming them); do not retry the same method.",
+      next: [command("Read the 405 response's Allow header (or the route docs) for the accepted methods, then resend with an allowed method; do not retry the same method")]
+    };
+  }
   // Unmapped code: name the code and the recovery (report code + message
   // to the room owner) instead of a bare "check access" pointer — the old
   // generic hint stranded every caller on a code with no known recovery.
