@@ -185,6 +185,31 @@ test("rotate replaces the secret (old stops working) and revoke ends the key", a
   assert.equal(await errorCode(await post(origin, "/api/agent-keys/rak_nope/rotate", { confirm: true }, identity.secret)), "unknown_key");
 });
 
+test("rotating a scoped key resets usage telemetry, including the last-used UA", async t => {
+  // The lastUsedUa field (added with the room-scoped MCP tokens) tracks the
+  // client that presented the key. Rotation issues a fresh secret, so the
+  // old client's telemetry must not ride along on the new credential:
+  // lastUsedAt resets already, lastUsedUa must reset with it.
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const identity = f.store.identities.create("key-agent-ua");
+  const first = await (await post(origin, "/api/agent-keys", { scopes: ["rooms:read"] }, identity.secret)).json();
+  const keyId = first.keyId;
+
+  f.store.agentPlugin.notePresentedKeyUse(keyId, { ua: "probe-client/1.0" });
+  const used = (await (await get(origin, "/api/agent-keys", identity.secret)).json()).keys;
+  assert.equal(used.find(k => k.keyId === keyId).lastUsedUa, "probe-client/1.0");
+
+  const rotated = await post(origin, `/api/agent-keys/${keyId}/rotate`, { confirm: true }, identity.secret);
+  assert.equal(rotated.status, 200);
+  const after = (await (await get(origin, "/api/agent-keys", identity.secret)).json()).keys;
+  assert.equal(after.find(k => k.keyId === keyId).lastUsedAt, null);
+  assert.equal(after.find(k => k.keyId === keyId).lastUsedUa, null);
+  const row = f.store.db.prepare("SELECT last_used_at, last_used_ua FROM agent_api_keys WHERE key_id=?").get(keyId);
+  assert.equal(row.last_used_at, null);
+  assert.equal(row.last_used_ua, null);
+});
+
 test("one identity cannot rotate or revoke another identity's key", async t => {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);

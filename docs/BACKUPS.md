@@ -27,6 +27,12 @@ node scripts/replay-room-export.mjs --from room-export.ndjson --to /var/lib/proj
 
 A failed replay prints one line and leaves the destination unpromoted. The script does not print row contents.
 
+## Torn exports
+
+The watermark is written before the first table is dumped, but the hosted room keeps serving requests while the export streams, so a write can land mid-stream. The watermark's event count does not always catch that: a write whose event row misses the `events` scan but whose side effects land in a later-scanned table (a join captured in `member_accounts`, a claim row, an attachment row) keeps the dumped count equal to the watermark while the data is inconsistent. Such a torn export used to replay with `verified: true`.
+
+Every export now ends with a trailer line (`{"kind": "trailer", "version": 1, "events", "eventsHash"}`): a fresh count of the event log plus a sha256 over every event's `room_id`, `sequence` and `id`, taken after the last table. Replay refuses a torn export loudly instead of verifying it — the count catches the common case, the hash catches a same-count tear (an event deleted and another inserted in the window). The nightly KV writer applies the same count check before writing the manifest: a torn stream writes no manifest (its parts expire on their own) and the job logs `[room-backup]`. Exports written before the trailer exist replay as before; the restore script reports `trailer: "verified"` or `"absent"`. The R2 path streams without the write-time check; restore time is its backstop.
+
 ## Nightly copy (KV now, R2 when enabled)
 
 The production cron writes one backup a day of the whole Durable Object store (every room). The key is `room-backups/YYYY-MM-DD.ndjson` in UTC. If that day's backup is already there, the tick does nothing. A failed write is logged as `[room-backup]` and does not fail the rest of the cron.
