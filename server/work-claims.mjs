@@ -629,8 +629,14 @@ export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClai
   // When the round is not provable either way, the no-op wins.
   const outcomeMs = typeof settledLink?.syncedAt === "string" ? Date.parse(settledLink.syncedAt) : NaN;
   const roundStartMs = typeof item.claimedAt === "string" ? Date.parse(item.claimedAt) : NaN;
+  // At the exact same millisecond the timestamps cannot order the outcome
+  // against the round start. Equality counts as stale only when the claim's
+  // own history shows an earlier round (a second "claimed" stamp); a link
+  // settled in the same tick as the first claim is current-round truth.
+  const priorRoundRecorded = (item.history ?? []).filter(entry => entry?.action === "claimed").length >= 2;
   const staleOutcome = Boolean(settledLink?.outcome)
-    && Number.isFinite(outcomeMs) && Number.isFinite(roundStartMs) && outcomeMs <= roundStartMs;
+    && Number.isFinite(outcomeMs) && Number.isFinite(roundStartMs)
+    && (outcomeMs < roundStartMs || (outcomeMs === roundStartMs && priorRoundRecorded));
   if (settledLink && !staleOutcome) return work;
   check(item.pullRequests.length < MAX_PULLS, `pullRequests must list at most ${MAX_PULLS} pull requests`);
   // Keep the existing observations verbatim; only the server's poller may
