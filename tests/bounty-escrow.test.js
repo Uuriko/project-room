@@ -593,3 +593,77 @@ test("persistence across restart: journal, bounties, watchers and sequences rehy
   const { rmSync } = await import("node:fs");
   rmSync(dir, { recursive: true, force: true });
 });
+
+// qa200-reg-13 regression sweep: the dispute SPLIT settlement path had no
+// escrow-level test. It moves real money (halves the award, returns the
+// challenger's bond), so these lock in the exact amounts, the no-double-move
+// behavior, and conservation. Post-accept and pre-accept (re-attribute) shapes.
+
+// Post -> fund -> claim -> submit (no accept): dispute freezes a locked award.
+function runToSubmitted(escrow, { amount = 10, verifier = null } = {}) {
+  const bounty = post(escrow, { amount, verifierId: verifier });
+  escrow.fundBounty(ROOM, bounty.bountyId, { funder: JILL });
+  escrow.claimBounty(ROOM, bounty.bountyId, { claimant: GROK });
+  escrow.submitWork(ROOM, bounty.bountyId, { claimant: GROK,
+    evidence: { evidenceUrl: "https://example.com/pr/1", summary: "did the thing" } });
+  return escrow.getBounty(ROOM, bounty.bountyId);
+}
+
+test("dispute SPLIT from accepted: exact halves, challenger bond returned (never forfeited)", () => {
+  const { escrow } = makeEscrow();
+  const bounty = runToAccepted(escrow, { amount: 10, verifier: INSTINCT });
+  escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 2.5, grounds: "partial credit" });
+  const { bounty: settled } = escrow.decideDispute(ROOM, bounty.bountyId,
+    { decider: INSTINCT, outcome: "split", reasonCodes: ["criterion-unmet"] });
+  assert.equal(settled.resolution.kind, "split");
+  assert.equal(settled.resolution.bondForfeited, false, "split returns the bond; it never forfeits it");
+  assert.equal(settled.state, "approved");
+  // Half the award refunded to the poster in full (no fee), half vested with the worker.
+  assert.equal(bal(escrow, JILL).payable, 95, "poster: 90 + 5 refund");
+  assert.equal(bal(escrow, CODEX).payable, 100, "challenger bond returned in full");
+  assert.equal(bal(escrow, CODEX).locked, 0);
+  escrow.closeEpoch(ROOM, {});
+  // Worker's half sweeps at 99% + 1% pool fee; the 1-credit claim bond returns.
+  assert.equal(bal(escrow, GROK).payable, 99 + 4.95 + 1);
+  assert.equal(bal(escrow, "pool").payable, 0.05);
+  assert.equal(escrow.getBounty(ROOM, bounty.bountyId).group, "paid");
+  expectConserved(escrow);
+});
+
+test("dispute SPLIT from submitted: award is attributed first, then split — no lost move", () => {
+  const { escrow } = makeEscrow();
+  const bounty = runToSubmitted(escrow, { amount: 10, verifier: INSTINCT });
+  escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 2.5, grounds: "partial credit" });
+  const { bounty: settled } = escrow.decideDispute(ROOM, bounty.bountyId,
+    { decider: INSTINCT, outcome: "split", reasonCodes: ["criterion-unmet"] });
+  assert.equal(settled.resolution.kind, "split");
+  assert.equal(settled.resolution.bondForfeited, false);
+  assert.equal(bal(escrow, JILL).payable, 95, "poster: 90 + 5 refund");
+  assert.equal(bal(escrow, CODEX).payable, 100, "challenger bond returned in full");
+  // Nothing sits in a transient state: the full 10 moved out of the award lots.
+  const lots = escrow.balances(ROOM, GROK);
+  assert.equal(lots.attributed, 0, "attribute-then-split leaves no attributed lot behind");
+  escrow.closeEpoch(ROOM, {});
+  assert.equal(bal(escrow, GROK).payable, 99 + 4.95 + 1);
+  assert.equal(bal(escrow, "pool").payable, 0.05);
+  expectConserved(escrow);
+});
+
+test("dispute SPLIT leaves no duplicate or dust: halves sum to the award exactly", () => {
+  const { escrow } = makeEscrow();
+  // Odd-millis award: floor/ceil split must still sum to the whole.
+  const bounty = runToSubmitted(escrow, { amount: 0.011, verifier: INSTINCT });
+  escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 0.003, grounds: "partial" });
+  const { bounty: settled } = escrow.decideDispute(ROOM, bounty.bountyId,
+    { decider: INSTINCT, outcome: "split", reasonCodes: ["criterion-unmet"] });
+  assert.equal(settled.resolution.kind, "split");
+  // 11 millis -> worker half 5, poster half 6; the poster's locked escrow is fully drained.
+  assert.equal(bal(escrow, JILL).payable, 100 - 0.011 + 0.006);
+  escrow.closeEpoch(ROOM, {});
+  // Worker half sweeps with a floored 1% fee: floor(5/100) = 0 millis, so the
+  // earner keeps the full 5 millis and the pool gets nothing.
+  assert.equal(bal(escrow, GROK).payable, 99 + 1 + 0.005);
+  assert.equal(bal(escrow, "pool").payable, 0);
+  assert.equal(bal(escrow, CODEX).payable, 100);
+  expectConserved(escrow);
+});

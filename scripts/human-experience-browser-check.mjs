@@ -4,8 +4,51 @@ import { rmSync, mkdirSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
-import { openCatchUpPanel } from './room-chrome.mjs';
+import { initialRoom } from '../server/bootstrap.mjs';
+import { clickChrome, openCatchUpPanel } from './room-chrome.mjs';
 import { signInFixture } from './auth-signin.mjs';
+
+function deferredResultResponse() {
+  let resolve;
+  const promise = new Promise(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+async function openHumanResult(page, workId) {
+  const task = page.locator(`[data-work-record-id="${workId}"]`), details = task.locator('details.work-details');
+  if (!await details.evaluate(node => node.open)) await details.locator(':scope > summary').click();
+  await task.locator('[data-action="complete"]').click();
+  await page.locator('#human-share-result').waitFor({state:'visible'});
+}
+
+async function holdResultResponse(page, body, { offline = false, roomId = 'commons' } = {}) {
+  const captured = deferredResultResponse(), release = deferredResultResponse();
+  let intercepted = false;
+  await page.route(`**/api/rooms/${roomId}/commands`, async route => {
+    const command = route.request().postDataJSON();
+    if (intercepted || command?.data?.body !== body) { await route.fallback(); return; }
+    intercepted = true;
+    const response = offline ? null : await route.fetch();
+    captured.resolve({ command, response });
+    await release.promise;
+    if (offline) await route.abort('connectionfailed');
+    else await route.fulfill({ response });
+  });
+  return {
+    captured: captured.promise, release: release.resolve,
+    async deliver() {
+      const finished = offline
+        ? page.waitForEvent('requestfailed', request => request.postDataJSON()?.data?.body === body)
+        : page.waitForResponse(response => response.request().postDataJSON()?.data?.body === body);
+      release.resolve();
+      const response = await finished;
+      if (!offline) await response.finished();
+      // Let the response's promise handlers and the resulting paint finish.
+      // Successful receipts are already visible in the stream before release.
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    }
+  };
+}
 
 test('two humans share public assistant prompts, constraints, confirmed activity and results; banter stays quiet', { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
@@ -73,17 +116,29 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   assert.equal(await owner.locator('#human-share-result textarea').inputValue(),humanResultBody);
   // A committed draft with a lost response is a different case: retry the
   // same immutable command, even if transport confirmation is unavailable.
-  const draftCommands = [];
+  const draftCommands = [], draftPending = deferredResultResponse(), releaseDraft = deferredResultResponse();
   await owner.route('**/api/rooms/commons/commands',async route=>{
     const command=route.request().postDataJSON();
     if(command?.data?.body===humanResultBody) {
       draftCommands.push(command);
-      if(draftCommands.length===1) { await route.fetch(); await route.abort(); return; }
+      if(draftCommands.length===1) { await route.fetch(); draftPending.resolve(); await releaseDraft.promise; await route.abort(); return; }
     }
     await route.continue();
   });
   await owner.locator('#human-share-result button[type=submit]').click();
+  await draftPending.promise;
+  try {
+    await owner.locator('#human-share-result [data-close-share]').click();
+    await openHumanResult(owner,'human-result-task');
+    assert.equal(await owner.locator('#human-share-result textarea').inputValue(),humanResultBody);
+    assert.equal(await owner.locator('#human-share-result button[type=submit]').isDisabled(),true,'reopening the same task keeps its pending send locked');
+  } finally { releaseDraft.resolve(); }
   await owner.locator('#human-share-result button[type=submit]').filter({hasText:'Retry original draft'}).waitFor();
+  await owner.locator('#human-share-result [data-close-share]').click();
+  await openHumanResult(owner,'human-result-task');
+  assert.equal(await owner.locator('#human-share-result textarea').isDisabled(),true);
+  assert.equal(await owner.locator('#human-share-result textarea').inputValue(),humanResultBody);
+  assert.match(await owner.locator('#human-share-result button[type=submit]').textContent(),/Retry original draft/);
   assert.equal(await owner.locator('#human-share-refresh').isVisible(),false);
   await owner.locator('#human-share-result button[type=submit]').click();
   await owner.locator('#action-dialog').waitFor({state:'visible'});
@@ -130,6 +185,104 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   assert.equal(await peer.locator('[data-message-record-id="public-result"]').count(),1);
   mkdirSync('test-results',{recursive:true}); await peer.screenshot({path:'test-results/human-shared-conversation.png',fullPage:false});
   assert.deepEqual(errors,[]);
+});
+
+// Result-editor ownership belongs at this real browser boundary. The active-entry
+// conflict and exact-retry cases above cannot detect a closed editor's delayed
+// catch/finally mutating its replacement. Routes delay real responses, without
+// exposing production state or adding an alternate implementation of the editor.
+test('a closed result editor cannot mutate its replacement after a delayed response', {timeout:90000}, async t => {
+  const f = createAcceptanceFixture(), server = createRoomServer({store:f.store,streamInterval:40});
+  const memberId = 'result-race-human', accountId = 'result-race-account', otherRoom = 'result-race-other';
+  f.store.command(f.keys.owner,'commons',{id:crypto.randomUUID(),type:'member.added',data:{memberId,displayName:'Result reader',kind:'human',permissions:f.store.room('commons').state.members.owner.permissions}});
+  f.store.createAccount(accountId); f.store.completeOnboarding(accountId);
+  f.store.bindHumanAccount('commons',memberId,accountId);
+  const other = initialRoom(otherRoom,memberId);
+  other[0].data.title = 'Other result room';
+  f.store.initialize(other);
+  f.store.bindHumanAccount(otherRoom,memberId,accountId);
+  const roomKeys = {commons:f.store.issueAccessKey('commons',memberId),[otherRoom]:f.store.issueAccessKey(otherRoom,memberId)};
+  for (const [roomId,key] of Object.entries(roomKeys)) for (const workItemId of ['result-race-a','result-race-b']) {
+    for (const [type,data] of [
+      ['work.proposed',{workItemId,title:workItemId,definitionOfDone:'Save a readable result',accountableMemberId:memberId,mode:'read',independentVerificationRequired:false,ownerDecisionRequired:false}],
+      ['work.accepted',{workItemId,expectedRevision:0}],
+      ['work.started',{workItemId,expectedRevision:1}]
+    ]) f.store.command(key,roomId,{id:crypto.randomUUID(),type,data});
+  }
+  await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  let browser = null;
+  t.after(async () => { await browser?.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve=>server.close(resolve)); f.store.close(); rmSync(f.directory,{recursive:true,force:true}); });
+  browser = await chromium.launch({headless:true});
+  for (const outcome of ['offline','conflict','success','new session','new room']) {
+    await t.test(`late ${outcome} leaves the current result editor owned by its own request`, async t => {
+      const context = await browser.newContext({viewport:{width:1280,height:900}}), page = await context.newPage(), held = [], errors = [];
+      t.after(async () => { for (const response of held) response.release(); await page.unrouteAll({behavior:'wait'}); await context.close(); });
+      page.on('pageerror', failure => errors.push(failure.message));
+      await page.goto(origin); await signInFixture(page,roomKeys.commons);
+      await page.waitForFunction(() => document.body.classList.contains('human-experience'));
+      const oldBody = `Old result: ${outcome}`, currentBody = `Current result: ${outcome}`;
+      const crossesBoundary = outcome === 'new session' || outcome === 'new room', pendingReplacement = outcome === 'success' || crossesBoundary;
+      const currentRoom = outcome === 'new room' ? otherRoom : 'commons';
+      await openHumanResult(page,'result-race-a');
+      await page.locator('#human-share-result textarea').fill(oldBody);
+      if (outcome === 'conflict') {
+        const revision = f.store.room('commons').state.workItems['result-race-a'].revision;
+        f.store.command(roomKeys.commons,'commons',{id:crypto.randomUUID(),type:'work.blocked',data:{workItemId:'result-race-a',expectedRevision:revision,reason:'Changed requirement',nextAction:'Review the task'}});
+        f.store.command(roomKeys.commons,'commons',{id:crypto.randomUUID(),type:'work.started',data:{workItemId:'result-race-a',expectedRevision:revision+1,resolvedBlocker:'Requirement reviewed'}});
+      }
+      const old = await holdResultResponse(page,oldBody,{offline:outcome === 'offline'}); held.push(old);
+      await page.locator('#human-share-result button[type=submit]').click();
+      const captured = await old.captured;
+      if (captured.response) assert.equal(captured.response.status(),outcome === 'conflict' ? 409 : 201);
+      assert.equal(await page.locator('#human-share-result button[type=submit]').isDisabled(),true);
+      if (pendingReplacement) {
+        await page.locator(`[data-message-record-id="${captured.command.data.messageId}"]`).waitFor({state:'attached'});
+      }
+      await page.locator('#human-share-result [data-close-share]').click();
+      if (crossesBoundary) {
+        // Restore the same human, optionally in another room, without reloading:
+        // the old callback must survive to exercise the actual boundary guard.
+        await clickChrome(page,'#signout-button');
+        await page.locator('#auth-panel').waitFor({state:'visible'});
+        const restored = await context.request.post(`${origin}/api/session`,{headers:{Origin:origin},data:{accessKey:roomKeys[currentRoom]},maxRedirects:0});
+        assert.equal(restored.status(),201);
+        assert.equal((await restored.json()).roomId,currentRoom);
+        await page.evaluate(() => history.replaceState(null,'','/'));
+        await page.locator('#refresh-button').evaluate(button => button.click());
+        await page.locator('#main').waitFor({state:'visible'});
+        await page.waitForFunction(title => document.querySelector('#room-title').textContent === title,f.store.room(currentRoom).state.room.title);
+      }
+      const currentWork = crossesBoundary ? 'result-race-a' : 'result-race-b';
+      await openHumanResult(page,currentWork);
+      await page.locator('#human-share-result textarea').fill(currentBody);
+      let current;
+      if (pendingReplacement) {
+        current = await holdResultResponse(page,currentBody,{roomId:currentRoom}); held.push(current);
+        await page.locator('#human-share-result button[type=submit]').click();
+        const pending = await current.captured;
+        assert.equal(pending.response.status(),201);
+        await page.locator(`[data-message-record-id="${pending.command.data.messageId}"]`).waitFor({state:'attached'});
+        assert.equal(await page.locator('#human-share-result button[type=submit]').isDisabled(),true);
+      }
+      await old.deliver();
+      assert.equal(await page.locator('#human-share-result').isVisible(),true);
+      assert.equal(await page.locator('#human-share-result textarea').inputValue(),currentBody);
+      assert.equal(await page.locator('#human-share-result textarea').isEnabled(),true,'an obsolete failure must not lock the current draft');
+      assert.equal(await page.locator('#human-share-error').textContent(),'','an obsolete failure must not replace the current error');
+      assert.equal(await page.locator('#human-share-refresh').isVisible(),false);
+      assert.equal(await page.locator('#human-share-result button[type=submit]').textContent(),'Review result');
+      assert.equal(await page.locator('#human-share-result button[type=submit]').isDisabled(),Boolean(current),'an obsolete completion must not unlock a newer pending send');
+      assert.equal(await page.locator('#action-dialog').isVisible(),false,'an obsolete success must not select its result');
+      if (current) {
+        await current.deliver();
+        await page.locator('#human-share-result').waitFor({state:'hidden'});
+        await page.locator('#action-dialog').waitFor({state:'visible'});
+        assert.equal(f.store.room(currentRoom).state.messages.find(message => message.body === currentBody).workItemId,currentWork);
+      }
+      assert.deepEqual(errors,[]);
+    });
+  }
 });
 
 // Owns post-login discovery, preference persistence, draft recovery and first-screen simplicity.

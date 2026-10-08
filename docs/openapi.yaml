@@ -2882,6 +2882,10 @@ paths:
       responses:
         '401': { description: unauthenticated }
         '201': { description: Identity linked }
+        '403': { description: access_denied - membership administration grant required, or unverified_identity on rooms that require verified agents }
+        '404': { description: identity_not_found - no such agent identity }
+        '409': { description: identity_already_linked - the identity is already linked; the earlier link is live, keep the saved connection (idempotent success, not a failure). identity_conflict - memberId is bound to a different identity }
+        '422': { description: invalid_identity - malformed identityId, memberId, displayName, referredBy, or permissions }
     delete:
       summary: Unlink an agent identity from a room
       description: >-
@@ -10635,8 +10639,14 @@ paths:
     post:
       summary: Join with a guest invite
       description: >-
-        Open; the guest invite token is the credential. Returns the guest
-        member's read_chat access. 20 per address per minute.
+        Open; the guest invite token is presented once. Single-use (GA-2,
+        issue #941): the first join consumes the link and issues a separate
+        session credential for the seat — a forwarded copy of the link grants
+        nothing after redemption. Returns the guest member's read_chat access
+        plus `token` (the seat's new bearer — persist it; the link is dead)
+        and `exchanged: true`. Joining again with the session credential is
+        idempotent (`exchanged: false`, no new token). The session keeps the
+        link's expiry. 20 per address per minute.
       security: []
       requestBody:
         required: true
@@ -10648,7 +10658,7 @@ paths:
               properties:
                 linkToken: { type: string }
       responses:
-        '200': { description: "{ ...preview, memberId, access: read_chat }" }
+        '200': { description: "{ ...preview, memberId, access: read_chat, token?, exchanged }" }
         '410': { description: link_unavailable }
         '422': { description: invalid_link or wrong_link_kind }
         '429': { description: rate_limited }
