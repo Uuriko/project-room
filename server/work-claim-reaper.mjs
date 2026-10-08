@@ -594,10 +594,3 @@ export function reaperDueAt(store, nowMs) {
     return null;
   }
 }
-
-// Distinct room ids holding work claims (for the tick's room sweep).
-export function reaperRooms(store) {
-  const db = store?.db;
-  if (!db?.prepare) return [];
-  try { return distinctRooms(db); } catch { return []; }
-}
