@@ -41,6 +41,7 @@ import {
   HEARTBEAT_IDEMPOTENCY_MS, STATES, summarizeClaimHistory, isHardWork,
   walkProvenance, flagPremiseInvalid, clearPremiseFlag, closeWork, isTerminalClaimState,
   promoteWork, countsTowardBoardCap, standbyEnqueuedAt, DEFAULT_MAX_STANDBY_CLAIMS,
+  assertClaimBasis,
 } from "./work-claims.mjs";
 import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
@@ -437,6 +438,22 @@ const claimErrorStatus = code => {
   if (code === "claim_lease_lapsed") return 410;
   if (code === "claim_lease_stale" || code === "stale_epoch" || code === "claim_renewal_required") return 409;
   return 422;
+};
+
+// Compare-and-release (collide guild P0-1): optional optimistic-concurrency
+// preconditions on update/release, generalizing the appendWorkPullRequest
+// pattern. When the caller supplies expectedClaimedAt and/or
+// expectedHistoryLength, the claim must still match the read they acted on —
+// otherwise 409 "The claim changed since it was read". Malformed
+// expectations are 422. Absent expectations skip the check (legacy path).
+const assertBasis = (reject, item, data) => {
+  if (data.expectedClaimedAt === undefined && data.expectedHistoryLength === undefined) return;
+  try {
+    assertClaimBasis(item, { expectedClaimedAt: data.expectedClaimedAt, expectedHistoryLength: data.expectedHistoryLength });
+  } catch (error) {
+    if (!(error instanceof ClaimError)) throw error;
+    reject(error.code === "work_claim_conflict" ? 409 : 422, error.code, error.message);
+  }
 };
 
 // Receipts (RC-2026-09-24-205): the "what has this room already solved"
@@ -1138,7 +1155,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "update" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs", "readingAck", "parentClaimId", "evidenceRefs", "leaseSeq", "epoch"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?, readingAck?, parentClaimId?, evidenceRefs?, leaseSeq?, epoch?}");
+    if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs", "readingAck", "parentClaimId", "evidenceRefs", "leaseSeq", "epoch", "expectedClaimedAt", "expectedHistoryLength"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?, readingAck?, parentClaimId?, evidenceRefs?, leaseSeq?, epoch?, expectedClaimedAt?, expectedHistoryLength?}");
     if (data.state === undefined && data.note === undefined && data.readingAck === undefined) invalidInput(reject, "a state transition, a note, or a reading ack");
     // W012 required reading: the owner confirms they read the enrollment
     // reading list. { docs: [...] } is validated by the pure machine; a
@@ -1156,6 +1173,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     assertFencing(data, item);
     requireWriter();
     requireEventBudget();
+    assertBasis(reject, item, data);
     if (Object.hasOwn(data, "note")) data.note = text("note", data.note, { multiline: true });
     if (data.state === "done") {
       // QA-Sec 2026-09-19: the reviewer must be authenticated. For
@@ -1274,11 +1292,14 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   // reachable via MCP room_close_work_claim with an explicit verb.
   if (workClaimRoute === "release" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { optional: ["note", "reason", "leaseSeq", "epoch"] })) invalidInput(reject, "{reason?, note?, leaseSeq?, epoch?}");
+    if (!shape(data, { optional: ["note", "reason", "leaseSeq", "epoch", "expectedClaimedAt", "expectedHistoryLength"] })) invalidInput(reject, "{reason?, note?, leaseSeq?, epoch?, expectedClaimedAt?, expectedHistoryLength?}");
     let item = load(claimIdOf(reject, workClaimId));
     const authority = authorityOver(item);
     assertFencing(data, item);
     requireEventBudget();
+    // Compare-and-release: the expectations bind the item as the caller
+    // read it — before the pause transition below rewrites state/history.
+    assertBasis(reject, item, data);
     const reason = text(Object.hasOwn(data, "reason") ? "reason" : "note", data.reason ?? data.note, { multiline: true });
     // W2 (QA 2026-09-28): /release used to 422 on in_progress claims with no
     // recovery path. The pure machine's release path is claimed -> unclaimed,

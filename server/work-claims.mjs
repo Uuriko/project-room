@@ -867,6 +867,26 @@ export function ensureLease(work, { room, now } = {}) {
 // reset (outcome cleared) and the poller re-reads it — without the reset
 // the stale outcome would veto every future poll of the reopened PR.
 // A same-round duplicate stays a byte-identical no-op.
+// Optimistic-concurrency basis check (collide guild P0-1, generalized from
+// appendWorkPullRequest): when the caller supplies expectedClaimedAt and/or
+// expectedHistoryLength, the claim must still match the read the caller
+// acted on. Each provided expectation is validated (invalid_claim_input on
+// malformed) and compared; any mismatch fails work_claim_conflict with
+// "The claim changed since it was read". Absent expectations skip the
+// check entirely — callers opt into the protection per request.
+export function assertClaimBasis(item, { expectedClaimedAt, expectedHistoryLength } = {}) {
+  const checked = workOf(item);
+  if (expectedClaimedAt !== undefined) {
+    check(typeof expectedClaimedAt === "string" && expectedClaimedAt.length <= 100
+      && Number.isFinite(Date.parse(expectedClaimedAt)), "expectedClaimedAt must be the current claim timestamp");
+    if (checked.claimedAt !== expectedClaimedAt) fail("work_claim_conflict", "The claim changed since it was read");
+  }
+  if (expectedHistoryLength !== undefined) {
+    check(Number.isSafeInteger(expectedHistoryLength) && expectedHistoryLength >= 0,
+      "expectedHistoryLength must be a non-negative integer");
+    if (claimHistoryLength(checked) !== expectedHistoryLength) fail("work_claim_conflict", "The claim changed since it was read");
+  }
+}
 export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClaimedAt, expectedHistoryLength, now } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(typeof pullRequest === "string" && pullRequest.length <= 300, "pullRequest must be a URL string of at most 300 characters");
@@ -903,6 +923,7 @@ export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClai
     && Number.isFinite(outcomeMs) && Number.isFinite(roundStartMs)
     && (outcomeMs < roundStartMs || (outcomeMs === roundStartMs && priorRoundRecorded));
   if (settledLink && !staleOutcome) return work;
+
   check(item.pullRequests.length < MAX_PULLS, `pullRequests must list at most ${MAX_PULLS} pull requests`);
   // Keep the existing observations verbatim; only the server's poller may
   // fill in the new link's outcome, polling metadata, or CI.

@@ -5428,6 +5428,15 @@ paths:
                       items: { type: string, maxLength: 512 }
                       maxItems: 16
                       description: Documentary evidence pointers (sha256:<64 hex> or https:// URLs without credentials); may be set on any owner update including done, where they join the receipt
+                    expectedClaimedAt:
+                      type: string
+                      format: date-time
+                      maxLength: 100
+                      description: Optional optimistic-concurrency precondition — exact claimedAt from the current item; binds the ownership round. When provided and the claim moved since the read, the write is 409 "The claim changed since it was read".
+                    expectedHistoryLength:
+                      type: integer
+                      minimum: 0
+                      description: Optional optimistic-concurrency precondition — exact history.length + (historyOmitted ?? 0) from the same read. When provided and the claim moved since the read, the write is 409 "The claim changed since it was read".
                 - type: object
                   additionalProperties: false
                   required: [appendPullRequest, expectedClaimedAt, expectedHistoryLength]
@@ -5458,7 +5467,7 @@ paths:
         '403': { description: work_not_owner, work_claims_not_permitted, work_review_rejected, insufficient_scope, or existing membership/autonomy refusal }
         '404': { description: work_claim_not_found }
         '409':
-          description: Append refused with work_claim_conflict for stale basis or inactive/superseded work, claim_lease_lapsed for an expired lease, or room_archived. Read the current item before deciding whether a fresh same-round request is appropriate
+          description: work_claim_conflict for a stale expectedClaimedAt/expectedHistoryLength basis ("The claim changed since it was read") or a stale PR-link basis, claim_lease_lapsed for an expired lease, or room_archived. Read the current item before deciding whether a fresh same-round request is appropriate
         '422': { description: invalid_claim_input, including mixed append/state bodies, non-string PR input, malformed preconditions, or a seventeenth distinct URL }
   /api/rooms/{roomId}/work-claims/{claimId}/provenance:
     get:
@@ -5631,6 +5640,15 @@ paths:
               properties:
                 reason: { type: string, description: Why the claim was released. Recorded on the history entry. }
                 note: { type: string, description: Older alias for reason. reason wins when both are sent. }
+                expectedClaimedAt:
+                  type: string
+                  format: date-time
+                  maxLength: 100
+                  description: Optional optimistic-concurrency precondition — exact claimedAt from the current item; binds the ownership round. When provided and the claim moved since the read, the release is 409 "The claim changed since it was read" (compare-and-release: a stale retry can no longer destroy a fresh re-claim).
+                expectedHistoryLength:
+                  type: integer
+                  minimum: 0
+                  description: Optional optimistic-concurrency precondition — exact history.length + (historyOmitted ?? 0) from the same read. When provided and the claim moved since the read, the release is 409 "The claim changed since it was read".
       responses:
         '200':
           description: The released item
@@ -5641,6 +5659,7 @@ paths:
         '401': { description: unauthenticated }
         '403': { description: work_not_owner }
         '404': { description: work_claim_not_found }
+        '409': { description: work_claim_conflict when expectedClaimedAt/expectedHistoryLength no longer match the claim — it changed since it was read }
         '422': { description: invalid_claim_input }
   /api/rooms/{roomId}/work-claims/{claimId}/close:
     post:
