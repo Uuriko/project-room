@@ -273,3 +273,31 @@ test("L-P2-13: transitionHandoff permission check survives the 500-cap list limi
   const row = store.db.prepare("SELECT status FROM inbox_handoffs WHERE handoff_id=?").get(targetId);
   assert.equal(row.status, "open");
 });
+
+// ---------------------------------------------------------------------------
+// M-7(c)/L-P2-13: the room-scoped permission lookup branch
+// ---------------------------------------------------------------------------
+
+test("M-7(c): a room-scoped scope still refuses a third-party transition", (t) => {
+  const { store, collab, accountId, makeHandoff } = handoffHarness(t);
+  // resolveHandoffAccount's owner-account path yields { accountId, roomId }
+  // with roomId non-null, so the permission lookup runs the JOIN branch
+  // against inbox_handoff_rooms. Existing tests only exercise the
+  // account-scoped branch; the journal's transition enforces no from/to
+  // parties of its own, so a silently-missed lookup here would let any
+  // caller move someone else's handoff.
+  const scope = { accountId, roomId: "commons" };
+  const thirdId = makeHandoff("thread-rs-third");
+  let forbidden = null;
+  try {
+    collab.transitionHandoff(scope, thirdId, "accepted", { by: "agent-c", roomId: "commons" });
+  } catch (e) { forbidden = e; }
+  assert.ok(forbidden, "expected transitionHandoff to throw for a third party under a room-scoped scope");
+  assert.equal(forbidden.code, "handoff_forbidden");
+  const untouched = store.db.prepare("SELECT status FROM inbox_handoffs WHERE handoff_id=?").get(thirdId);
+  assert.equal(untouched.status, "open");
+  // The recipient can still move it through the same room-scoped path.
+  const accepted = collab.transitionHandoff(scope, makeHandoff("thread-rs-recipient"), "accepted",
+    { by: "agent-b", roomId: "commons" });
+  assert.equal(accepted.status, "accepted");
+});
