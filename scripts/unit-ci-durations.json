@@ -488,6 +488,7 @@
   "tests/mime-fuzz.test.js": 41833,
   "tests/mime-message.test.js": 5498,
   "tests/mixed-room-arrival.test.js": 28136,
+  "tests/moderation-dm-privacy.test.js": 952,
   "tests/moderation-report-autonomy-tier.test.js": 15370,
   "tests/moderation.test.js": 50689,
   "tests/native-host-binary-resolution.test.js": 17282,
@@ -973,6 +974,14 @@
   "runtime": "macOS solo real node --test",
   "file": "tests/landing-facts.test.js",
   "milliseconds": 70,
+  "purpose": "Measured allocation only; test discovery remains authoritative."
+ },
+ "moderationDmPrivacyMeasurement": {
+  "date": "2026-10-07",
+  "runtime": "Node v22.23.3 Linux local",
+  "file": "tests/moderation-dm-privacy.test.js",
+  "milliseconds": 952,
+  "method": "Median of five solo node --test wall-clock runs; all passed.",
   "purpose": "Measured allocation only; test discovery remains authoritative."
  }
 }
