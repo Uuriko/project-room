@@ -24,16 +24,15 @@
 // re-mint (test 3).
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { GUEST_AGENT_TOKEN_PREFIX, GUEST_AGENT_TTL_MS } from "../server/guest-agent-links.mjs";
+import { GUEST_AGENT_TTL_MS } from "../server/guest-agent-links.mjs";
 
-const guestToken = () => GUEST_AGENT_TOKEN_PREFIX + randomBytes(32).toString("base64url");
 const sha256 = value => createHash("sha256").update(value).digest("hex");
 
 async function serve(t) {
@@ -68,7 +67,7 @@ const joinLink = (request, linkToken) =>
 
 test("guest token dies exactly at its expiry instant: no grace, no skew", async t => {
   const { store, request, ownerKey, advance, now } = await serve(t);
-  const mintedRes = await mint(request, ownerKey, { linkToken: guestToken() });
+  const mintedRes = await mint(request, ownerKey);
   assert.equal(mintedRes.status, 201);
   const minted = await mintedRes.json();
   const token = minted.token;
@@ -126,7 +125,7 @@ test("a bearer in active use over HTTP is cut off at expiry with 401", async t =
 test("an expired token is never revived: re-mint on the same requestId is rejected, the old bearer stays dead", async t => {
   const { store, request, ownerKey, advance } = await serve(t);
   const requestId = randomUUID();
-  const first = await mint(request, ownerKey, { requestId, linkToken: guestToken() });
+  const first = await mint(request, ownerKey, { requestId });
   assert.equal(first.status, 201);
   const minted = await first.json();
   const token = minted.token;

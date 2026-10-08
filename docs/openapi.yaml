@@ -13514,10 +13514,13 @@ paths:
       description: >-
         Owner by ID with `manage_members`: room bearer key, or browser room or
         account session with CSRF. Minting stays account-bound (403
-        account_session_required for an accountless owner). Body: `{ requestId, linkToken? (the optional guest invite token),
-        expectedOwnerRevision, displayName?, roomId? }`; the link token the
-        caller generated becomes the guest member's read_chat credential and
-        only its hash is stored. `linkToken` is optional: when omitted, the server generates a secret and returns it once; an exact tokenless retry returns a receipt without redisclosing that secret. 30 per address per minute. `GET` on the
+        account_session_required for an accountless owner). Body: `{ requestId,
+        expectedOwnerRevision, displayName?, roomId? }`; the server always
+        issues the guest credential (GA-1, issue #941) — a 256-bit server-generated
+        token returned once, only its hash stored. Supplying
+        `linkToken` is rejected with 422 `client_token_rejected`. An exact
+        retry returns a receipt without redisclosing the secret. 30 per
+        address per minute. `GET` on the
         top-level path is the open contract document.
       parameters:
         - $ref: '#/components/parameters/RoomId'
@@ -13530,7 +13533,6 @@ paths:
               required: [requestId, expectedOwnerRevision]
               properties:
                 requestId: { type: string }
-                linkToken: { type: string }
                 expectedOwnerRevision: { type: integer }
                 displayName: { type: string }
                 roomId: { type: string }

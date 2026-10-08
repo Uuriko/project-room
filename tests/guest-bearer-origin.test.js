@@ -8,7 +8,6 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
-import { GUEST_AGENT_TOKEN_PREFIX } from "../server/guest-agent-links.mjs";
 
 // RC-2026-09-23-bearer-origin: public guest routes called checkOrigin(req,
 // true), demanding a browser Origin header. Bearer-authenticated agent
@@ -108,9 +107,11 @@ test("owner bearer mints guest-agent links with no Origin header", async t => {
   const { request, ownerKey } = await serve(t);
   const minted = await request("/api/guest-agent-links", {
     method: "POST", token: ownerKey,
-    data: { roomId: "commons", requestId: randomUUID(), linkToken: GUEST_AGENT_TOKEN_PREFIX + randomBytes(32).toString("base64url"), expectedOwnerRevision: 0 },
+    // GA-1 (issue #941): the token is always server-issued.
+    data: { roomId: "commons", requestId: randomUUID(), expectedOwnerRevision: 0 },
   });
   assert.equal(minted.status, 201);
+  assert.match((await minted.json()).token, /^ga1\.[A-Za-z0-9_-]{43}$/);
 });
 
 test("www Origin on a JSON API is 403 origin_denied with an Origin hint", async t => {

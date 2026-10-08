@@ -21,7 +21,6 @@ import { fileURLToPath } from "node:url";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { GUEST_AGENT_TOKEN_PREFIX } from "../server/guest-agent-links.mjs";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -128,13 +127,17 @@ test("walkthrough: one word (invite) joins through all four mechanisms", async t
   assert.match(badLinkJson.error.message, /[Ii]nvite link/);
 
   // --- 3. Guest invite: the owner mints; the agent joins short-lived. ---
-  const guestToken = GUEST_AGENT_TOKEN_PREFIX + randomBytes(32).toString("base64url");
-  secrets.push(guestToken, linkToken);
+  // (GA-1, issue #941: tokens are server-issued — omit linkToken, use the
+  // bearer the mint response returns once.)
   const guestMint = await post("/api/guest-agent-links", {
-    roomId: "commons", requestId: randomUUID(), linkToken: guestToken,
+    roomId: "commons", requestId: randomUUID(),
     expectedOwnerRevision: 0, displayName: "Walker Guest",
   }, ownerKey);
   assert.ok([200, 201].includes(guestMint.status));
+  const guestMintJson = await guestMint.json();
+  const guestToken = guestMintJson.token;
+  assert.ok(typeof guestToken === "string" && guestToken.length > 0);
+  secrets.push(guestToken, linkToken);
   const guestJoin = await post("/api/guest-agent-links/join", { linkToken: guestToken });
   assert.equal(guestJoin.status, 200);
   const guestJoinJson = await guestJoin.json();

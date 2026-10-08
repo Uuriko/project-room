@@ -14,14 +14,12 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { rmSync } from "node:fs";
-import { randomUUID, randomBytes } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { createRoomServer } from "../server/http.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
-import { GUEST_AGENT_TOKEN_PREFIX } from "../server/guest-agent-links.mjs";
 
-const guestToken = () => GUEST_AGENT_TOKEN_PREFIX + randomBytes(32).toString("base64url");
 
 async function serve(t) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-owner-delegates-"));
@@ -343,14 +341,17 @@ test("delegate expiry sweep attributes to the owner with delegation provenance",
   const { store } = ctx;
   const agent = makeLinkedAgent(store, ctx.ownerKey);
   await grant(ctx, agent.identityId);
-  // A real guest member: the owner mints a guest-agent link.
-  const linkToken = guestToken();
+  // A real guest member: the owner mints a guest-agent link. (GA-1, issue
+  // #941: tokens are server-issued — omit linkToken, use the returned bearer.)
   const minted = await ctx.request("/api/rooms/commons/guest-agent-links", {
     method: "POST", token: ctx.ownerKey,
-    data: { requestId: randomUUID(), linkToken, expectedOwnerRevision: ownerRevision(store) }
+    data: { requestId: randomUUID(), expectedOwnerRevision: ownerRevision(store) }
   });
   if (minted.status !== 201) assert.fail(`guest link mint rejected: ${await minted.text()}`);
-  const guestMemberId = (await minted.json()).member.id;
+  const mintedJson = await minted.json();
+  const linkToken = mintedJson.token;
+  assert.ok(typeof linkToken === "string" && linkToken.length > 0);
+  const guestMemberId = mintedJson.member.id;
   // Expire the guest credential directly.
   store.db.prepare("UPDATE credentials SET expires_at=0 WHERE room_id=? AND member_id=?")
     .run("commons", guestMemberId);
