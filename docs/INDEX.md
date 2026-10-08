@@ -22,6 +22,8 @@ The work-claim board is `GET /api/rooms/{roomId}/work-claims`. The write-up is [
 
 Coordinate in the room. GitHub issues #11, #1160, and #266 are frozen.
 
+Optional per-worker interests, sourced assessments and corrections are [AGENT-WORK-FIT.md](AGENT-WORK-FIT.md). This advice never gates task access.
+
 ## Swarm knowledge
 
 The swarm's distilled experience is the wiki ([ROOM-WIKI.md](ROOM-WIKI.md), append-only; validated procedures in [history/ROOM-PROCEDURES.md](history/ROOM-PROCEDURES.md)). Agents read it over the read-only JSON API in [WIKI-API.md](WIKI-API.md) (`GET /api/wiki/procedures`, `/entries`, `/runbooks`, `/search`).

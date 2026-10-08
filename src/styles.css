@@ -203,7 +203,7 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .new-work-form label { display: grid; gap: .35rem; margin-bottom: .75rem; }
 .work-checks { min-width: 0; margin: 0 0 .75rem; padding: .8rem; border: 1px solid var(--line); }
 .work-checks legend { padding: 0 .3rem; font-size: .8rem; }
-#new-work-form .check { display: flex; align-items: center; gap: .6rem; min-height: 44px; min-width: 0; overflow-wrap: anywhere; }
+#new-work-form .check, #work-fit-preferences .check { display: flex; align-items: center; gap: .6rem; min-height: 44px; min-width: 0; overflow-wrap: anywhere; }
 .form-actions { display: flex; justify-content: flex-end; gap: .5rem; }
 
 .work-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: .8rem; max-height: 72vh; padding: 1rem; overflow-y: auto; }

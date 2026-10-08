@@ -10,7 +10,7 @@
     "05e73f00b3696af89eb50076bd2f81023b87afd9",
     "41cc5c5bca139ff028101e8927897adfff80bf39"
   ],
-  "note": "Per-file junit durations averaged over two Ubuntu CI runs (2026-10-06), rounded to whole ms; scripts/visual-regression-browser-check.mjs measured once (run 37499506413, 4.6s). Timing data rebalances shard membership only; it never selects which tests run. Added message-preview and human-experience owners measured on the integrated local Mac on 2026-10-06 (5319ms and15298ms); remeasure on Ubuntu CI after first combined run. These estimates do not select test membership. Desktop Google browser owner measured on isolated 8bf751aa plus pending-terms repair, local Mac 2026-10-06: 1744ms for two real browser journeys; remeasure on Ubuntu after first required run. Selected-provider extension measured on the same isolated local Mac 2026-10-06: 5216ms for eight required real browser journeys, including cancellation, authenticated account selection, GitHub navigation and hostile entrance refusal; replaces the initial two-case estimate, remeasure on Ubuntu.",
+  "note": "Per-file junit durations averaged over two Ubuntu CI runs (2026-10-06), rounded to whole ms; scripts/visual-regression-browser-check.mjs measured once (run 37499506413, 4.6s). Timing data rebalances shard membership only; it never selects which tests run. Added message-preview and human-experience owners measured on the integrated local Mac on 2026-10-06 (5319ms and15298ms); remeasure on Ubuntu CI after first combined run. These estimates do not select test membership. Desktop Google browser owner measured on isolated 8bf751aa plus pending-terms repair, local Mac 2026-10-06: 1744ms for two real browser journeys; remeasure on Ubuntu after first required run. Selected-provider extension measured on the same isolated local Mac 2026-10-06: 5216ms for eight required real browser journeys, including cancellation, authenticated account selection, GitHub navigation and hostile entrance refusal; replaces the initial two-case estimate, remeasure on Ubuntu. Work-fit owners measured locally on macOS 2026-10-07: scripts/work-fit-browser-check.mjs 2369ms. Remeasure on hosted Ubuntu CI; estimates do not select test membership.",
   "milliseconds": {
     "scripts/a11y-composer-browser-check.mjs": 3361,
     "scripts/a11y-login-browser-check.mjs": 4515,
@@ -138,6 +138,7 @@
     "scripts/work-resume-browser-check.mjs": 3019,
     "scripts/work-reuse-browser-check.mjs": 16583,
     "scripts/work-search-browser-check.mjs": 7327,
-    "scripts/workflow-browser-check.mjs": 14454
+    "scripts/workflow-browser-check.mjs": 14454,
+    "scripts/work-fit-browser-check.mjs": 2369
   }
 }

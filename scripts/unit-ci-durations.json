@@ -940,7 +940,9 @@
   "tests/open-questions-ui.test.js": 264,
   "tests/error-leak-shapes.test.js": 272,
   "tests/guest-invites-agent-api-docs.test.mjs": 1026,
-  "tests/herdr-bridge-adapter.test.js": 6100
+  "tests/herdr-bridge-adapter.test.js": 6100,
+  "tests/agent-work-fit.test.js": 809,
+  "tests/mcp-work-fit.test.js": 391
  },
  "_note": "Per-file wall-clock ms of `node --test <file>` measured 2026-10-06 on a 2-CPU host with 16-way parallelism (values are contention-inflated; used only as relative weights for shard balancing, never for membership). Files hitting the 300s measurement timeout are capped at 300000.",
  "releaseRecordMeasurement": "Eight record-rail files measured on macOS Node26, four concurrent real Node processes, 2026-10-06; all eight passed. Timing allocates files only.",
@@ -958,5 +960,6 @@
   "file": "tests/landing-facts.test.js",
   "milliseconds": 70,
   "purpose": "Measured allocation only; test discovery remains authoritative."
- }
+ },
+ "note": " Work-fit owners measured locally on macOS 2026-10-07: tests/agent-work-fit.test.js 809ms, tests/mcp-work-fit.test.js 391ms. Remeasure on hosted Ubuntu CI; estimates do not select test membership."
 }
