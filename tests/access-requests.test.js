@@ -45,6 +45,59 @@ test("unauthenticated identity can request access; idempotent on requestId", asy
   assert.equal(retry.status, "pending");
 });
 
+// QA200-MUT-14: an idempotency-key retry must not double-apply side effects.
+// The retry branch returns the stored request; it must not insert a second
+// row or emit a second access.requested timeline event (which would fan out
+// duplicate owner notifications).
+test("idempotent retry does not double-apply: one row, one timeline event", async t => {
+  const { store, requests, identity } = setup(t);
+  const input = {
+    identityId: identity.identityId,
+    displayName: "Requesting Agent",
+    requestedPermissions: ["accept_work"],
+    note: "retry me",
+    requestId: "ar_no_double_apply"
+  };
+  requests.request("commons", input);
+  requests.request("commons", input);
+  const rows = store.db.prepare(
+    "SELECT count(*) AS n FROM access_requests WHERE request_id='ar_no_double_apply'").get().n;
+  assert.equal(rows, 1, "retry with the same requestId must not insert a second row");
+  const events = store.db.prepare(
+    `SELECT count(*) AS n FROM events WHERE room_id='commons'
+     AND json_extract(body, '$.type')='access.requested'
+     AND json_extract(body, '$.data.requestId')='ar_no_double_apply'`).get().n;
+  assert.equal(events, 1, "retry with the same requestId must not emit a second access.requested event");
+});
+
+// QA200-MUT-14: a replayed idempotency key must return the ORIGINAL result,
+// not a stale or corrupted cached body. Caught a mutation that returned
+// requestedPermissions ["steer"] on replay while all prior tests stayed green.
+test("idempotent retry returns the original request body", async t => {
+  const { requests, identity } = setup(t);
+  const first = requests.request("commons", {
+    identityId: identity.identityId,
+    displayName: "Requesting Agent",
+    requestedPermissions: ["accept_work", "complete_work"],
+    note: "original note",
+    requestId: "ar_replay_body"
+  });
+  const retry = requests.request("commons", {
+    identityId: identity.identityId,
+    displayName: "Requesting Agent",
+    requestedPermissions: ["accept_work", "complete_work"],
+    requestId: "ar_replay_body"
+  });
+  assert.equal(retry.requestId, first.requestId);
+  assert.equal(retry.roomId, first.roomId);
+  assert.equal(retry.identityId, first.identityId);
+  assert.equal(retry.displayName, first.displayName);
+  assert.deepEqual(retry.requestedPermissions, first.requestedPermissions);
+  assert.deepEqual(retry.requestedPermissions, ["accept_work", "complete_work"]);
+  assert.equal(retry.note, first.note);
+  assert.equal(retry.status, first.status);
+});
+
 test("requestId collision across identities is rejected", async t => {
   const { store, requests, identity } = setup(t);
   const other = store.identities.create("Other Agent");

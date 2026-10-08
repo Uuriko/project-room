@@ -336,3 +336,59 @@ test("removeMethod allows removing an email method once the account is verified"
   const removed = logins.removeMethod("acct-4", pw.id);
   assert.equal(removed.removed, true);
 });
+
+// QA200-MUT-13 Probe A (2026-10-08): a wrong email-verify code must never
+// verify the address. Mutation-skipping the digest comparison was UNCAUGHT.
+test("consumeEmailVerifyCode rejects a wrong code without verifying the email", () => {
+  const { store, logins } = makeStore();
+  store.createAccount("acct-muta", "password-signup");
+  logins.linkPasswordMethod("acct-muta", { email: "ada@example.com", verifier: "scrypt$v1" });
+  const issued = logins.issueEmailVerifyCode({ accountId: "acct-muta", email: "ada@example.com" });
+  const wrong = issued.code === "000000" ? "000001" : "000000";
+  assert.throws(
+    () => logins.consumeEmailVerifyCode({ accountId: "acct-muta", code: wrong }),
+    error => error.status === 401 && error.code === "invalid_email_code"
+  );
+  assert.equal(logins.emailStatus("acct-muta"), "unverified", "wrong code must not verify the email");
+  assert.equal(logins.listMethods("acct-muta").filter(m => m.type === "magic").length, 0,
+    "wrong code must not create a magic-link method");
+  // The real code still works after the wrong attempt.
+  assert.equal(logins.consumeEmailVerifyCode({ accountId: "acct-muta", code: issued.code }).email, "ada@example.com");
+});
+
+// QA200-MUT-13 Probe B (2026-10-08): a disabled OAuth method must not resolve
+// an account — otherwise the OAuth login path (server/http.mjs link*Subject)
+// signs in through a revoked method. Dropping the disabled=0 filter was
+// UNCAUGHT.
+test("findAccountByOAuth ignores disabled OAuth methods", () => {
+  const { store, logins } = makeStore();
+  store.createAccount("acct-mutb", "test");
+  const method = logins.linkOAuthMethod("acct-mutb", { provider: "github", subject: "sub-1", email: "ada@example.com" });
+  logins.linkMagicMethod("acct-mutb", { email: "ada@example.com" });
+  assert.equal(logins.findAccountByOAuth("github", "sub-1"), "acct-mutb");
+  logins.setMethodDisabled("acct-mutb", method.id, true);
+  assert.equal(logins.findAccountByOAuth("github", "sub-1"), null,
+    "a disabled OAuth method must not resolve an account for login");
+});
+
+// QA200-MUT-13 Probe C2 (2026-10-08): magic-code failures must be
+// indistinguishable by error code — "no live code for this email" vs "wrong
+// code" vs "expired code" must all surface invalid_magic_code, or the error
+// becomes an oracle. Returning a distinct code for the no-live-code case was
+// UNCAUGHT.
+test("consumeMagicCode failures are uniform: no oracle by error code", () => {
+  const { logins } = makeStore();
+  const capture = fn => { try { fn(); } catch (error) { return error; } return null; };
+  // Email with no live code at all.
+  const noCode = capture(() => logins.consumeMagicCode({ email: "ghost@example.com", code: "wrong" }));
+  // Live code exists, wrong guess.
+  const issued = logins.issueMagicCode({ email: "a@example.com" });
+  const wrong = capture(() => logins.consumeMagicCode({ email: "a@example.com", code: "wrong" }));
+  for (const failure of [noCode, wrong]) {
+    assert.ok(failure, "consume must fail");
+    assert.equal(failure.status, 401);
+    assert.equal(failure.code, "invalid_magic_code");
+    assert.match(failure.message, /not valid/);
+  }
+  assert.equal(issued.code.length >= 20, true);
+});
