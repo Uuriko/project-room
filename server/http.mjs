@@ -101,6 +101,7 @@ import { listOpenQuestions } from "./open-questions.mjs";
 import { GoogleSignIn, GOOGLE_START_PATH, GOOGLE_CALLBACK_PATH, googlePostLoginPage } from "./google-oauth.mjs";
 import { createMagicLinkMailer } from "./magic-links.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
+import { tripwires } from "../telemetry/gauges.mjs"; // WAVE-300 trip-wire gauges: zero room events, zero read-path writes
 import { emailLookupHash, normalizeEmail } from "./account-login-methods.mjs";
 import { createPasskeyAuth, resolvePasskeyParams } from "./account-passkeys.mjs";
 import { createDeletionSecret, executeAccountDeletion, issueDeletionToken, planAccountDeletion, verifyDeletionToken, RETENTION_POLICY } from "./account-deletion.mjs"; // RC-2026-09-19-078: account-management surface
@@ -134,7 +135,7 @@ for (const name of ["favicon.svg", "icon.svg", "manifest.webmanifest"]) {
   if (asset) assets.set(`/room/${name}`, asset);
 }
 // GET/HEAD-only liveness paths; any other method is 405 with Allow (#1529).
-const LIVENESS_GET_ONLY_PATHS = new Set(["/api/health", "/api/health/", "/api/version"]);
+const LIVENESS_GET_ONLY_PATHS = new Set(["/api/health", "/api/health/", "/api/version", "/api/health/tripwires"]);
 // W009: the wiki read API owns every /api/wiki/ template inside
 // server/wiki-read-api.mjs (reads are lazy per request; import is side-effect-free).
 const wikiReadApi = createWikiReadApi();
@@ -350,6 +351,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   const resetConsumeEmailLimiter = createRateLimiter({ capacity: 10, refillPerSecond: 10 / 3600 });
   const magicConsumeEmailLimiter = createRateLimiter({ capacity: 10, refillPerSecond: 10 / 3600 });
   const signupEmailLimiter = createRateLimiter({ capacity: 3, refillPerSecond: 3 / 3600 });
+  // WAVE-300 trip-wire gauges: cheap in-process health signals. The slow tick
+  // (>= 60 s) is the ONLY place that reads the room store or samples the
+  // event-loop histogram; hook points below do in-memory counter ops only.
+  // The interval is unref'd so it never holds the process open.
+  tripwires.collect(store);
+  const tripwireTick = setInterval(() => {
+    try { tripwires.collect(store); }
+    catch (error) { console.warn("tripwire tick failed", error?.message ?? error); }
+  }, 60000);
+  if (typeof tripwireTick.unref === "function") tripwireTick.unref();
   const magicEmailLimit = (limiter, normalized) => {
     const checked = limiter.check(rateHash(normalized));
     if (!checked.allowed) {
@@ -696,8 +707,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const stride = Math.max(1, Math.floor(maximum / 4));
       if (entry.n >= maximum || entry.n % stride === 0) saveAbuseRateBucket(store.db, id, entry);
     }
-    if (entry.n > maximum) throw new ServiceError(429, "rate_limited", "Too many requests; retry after a minute",
-      { "X-RateLimit-Limit": maximum, "X-RateLimit-Remaining": 0, "X-RateLimit-Reset": Math.ceil(entry.until / 1000) });
+    if (entry.n > maximum) {
+      // WAVE-300 trip wire: a refused "write"-family caller enters the
+      // penalty box. One in-memory counter op on the refusal path only.
+      if (family === "write") tripwires.recordWriteLimiterPenalty();
+      throw new ServiceError(429, "rate_limited", "Too many requests; retry after a minute",
+        { "X-RateLimit-Limit": maximum, "X-RateLimit-Remaining": 0, "X-RateLimit-Reset": Math.ceil(entry.until / 1000) });
+    }
   }
   function cookie(req, name) {
     const scoped = scopedCookieName(name);
@@ -1070,6 +1086,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       })) return;
       if ((url.pathname === "/api/health" || url.pathname === "/api/health/" || isHealthAliasPath(inboundPath) || isHealthAliasPath(url.pathname)) && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, { status: "ok", mode: serviceMode, ...deploymentField }, req.method === "HEAD");
+      }
+      // WAVE-300 trip-wire gauges: read-only registry snapshot. No auth
+      // beyond the liveness endpoints' posture, no writes, no room events.
+      if (url.pathname === "/api/health/tripwires" && ["GET", "HEAD"].includes(req.method)) {
+        return json(res, 200, tripwires.snapshot(), req.method === "HEAD");
       }
       if (url.pathname === "/api/version" && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, { status: "ok", mode: serviceMode, sourceRevision: SOURCE_REVISION, buildId: BUILD_ID, ...deploymentField }, req.method === "HEAD");
@@ -4854,6 +4875,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // disabled tracers return null spans, so the default path pays nothing
         // and needs no branching. Only ids and the command type are recorded —
         // never bodies.
+        // WAVE-300 trip wire: track the command outcome (ok / 429 / 5xx /
+        // timeout). One in-memory op per request; a connection that dies
+        // before any response is written records "timeout" via the close
+        // listener. Emits no room events.
+        const commandOutcome = tripwires.trackCommandOutcome(res);
         const inboundSpan = getTracer().startSpan(SPAN_NAMES.INBOUND, { attributes: {
           [ATTR.ROOM_ID]: roomId, [ATTR.INGRESS]: "api" } });
         try {
@@ -4863,8 +4889,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (typeof messageId === "string") inboundSpan.setAttribute(ATTR.MESSAGE_ID, messageId);
           inboundSpan.setAttribute(ATTR.OUTCOME, result?.duplicate ? "duplicate" : "ok");
           inboundSpan.setStatusOk();
+          commandOutcome.record("ok");
           return json(res, result.duplicate ? 200 : 201, result);
         } catch (error) {
+          // Outcome taxonomy for the silent-timeout gauge: ok / 429 / 5xx /
+          // timeout. Remaining 4xx record as "other" (still denominator).
+          // Non-ServiceError throws become 500 in the outer handler.
+          if (error instanceof ServiceError) commandOutcome.record(error.status === 429 ? "429" : error.status >= 500 ? "5xx" : "other");
+          else commandOutcome.record("5xx");
           inboundSpan.recordException(error);
           // G7 (#940): hand the refused command's type to the AX layer via a
           // symbol key (never serialized) so bond/dm field-shape errors can

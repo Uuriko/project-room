@@ -346,6 +346,8 @@ optional.push("src/human-experience.js", "src/human-experience.css", "server/roo
 optional.push("server/trial-task-store.mjs", "server/trial-tasks.mjs", "server/vetting-receipts.mjs", "server/demigod-offers.mjs", "server/demigod-contracts.mjs", "server/buyer-signoff.mjs", "server/routes/record-rails.mjs", "server/demigod-policy-adapter.mjs", "server/settlement-router.mjs", "server/fee-credit-ledger.mjs");
 
 optional.push("src/spend-pricing-ui.js", "src/polls.js");
+optional.push("server/tripwires.mjs"); // WAVE-300 trip-wire gauges: in-process registry (imported by telemetry/gauges.mjs; Worker-safe, no static node: imports)
+optional.push("telemetry/gauges.mjs"); // WAVE-300 trip-wire registry contract view (imported by server/http.mjs)
 export const allowed = new Set([...required, ...optional]);
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 // The contract stays exact: any mismatch fails. Each failure now names the
