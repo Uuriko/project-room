@@ -127,6 +127,24 @@ test("shared mapper keeps error.code/message and adds status/reason/hint/next", 
   assert.ok(alreadyLinked.next.some(step => step.tool === "room_check_access"));
 });
 
+test("challenge ch-2031: 405 hint does not promise an Allow header that usually isn't there", () => {
+  // QA challenge 2026-10-08 vs #2031: the merged hint asserted "the 405
+  // response carries an Allow header naming them". But 60 of 106 server 405
+  // reject() sites omit Allow (verified live 2026-10-08: POST
+  // /api/public/rooms/directory and POST /api/opportunities.json both 405
+  // with no Allow header). Sending the agent to read a header that usually
+  // doesn't exist is a new flavor of misleading hint — the same class of bug
+  // #2031 fixed. The hint must hedge: point at the header only as a
+  // possibility, and always name the route docs fallback.
+  const ax = agentErrorAx({ httpStatus: 405, code: "method_not_allowed", message: "Method not allowed" });
+  assertAx(ax, { reason: "method_not_allowed" });
+  assert.doesNotMatch(ax.hint, /carries an Allow header/,
+    "hint must not assert the Allow header is always present");
+  assert.match(ax.hint, /Allow header/); // still a valid lead when present
+  assert.match(ax.hint, /route docs/);   // always-available fallback
+  assert.doesNotMatch(JSON.stringify(ax.next), /carries an Allow header/);
+});
+
 test("public-work 409s teach: conflict names holder+lease expiry, stale says changed-vs-expired", () => {
   // G4: a raced claim's 409 names who holds the claim and when the lease ends.
   const conflict = agentErrorAx({ httpStatus: 409, code: "public_work_claim_conflict",

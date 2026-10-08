@@ -625,14 +625,18 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   // 2026-10-07 buildqa (live fuzz): method_not_allowed 405 fell through to
   // the unmapped-code branch — "Unknown error 'method_not_allowed'. Re-check
   // access..." sends the agent down an access path for a method problem. A
-  // 405 names the fix itself: resend with an allowed method. The response
-  // carries an Allow header naming the accepted methods; the error body
-  // does not repeat it, so the hint points there instead of guessing.
+  // 405 names the fix itself: resend with an allowed method. Many 405s carry
+  // an Allow header naming the accepted methods (e.g. the MCP transport and
+  // POST-only mint routes), but most server reject() sites omit it (60/106
+  // as of 2026-10-08 — verified live on POST /api/public/rooms/directory
+  // and POST /api/opportunities.json), and the error body does not repeat
+  // it. So the hint hedges: point at the header as a possibility, always
+  // name the route-docs fallback — never assert the header is there.
   if (httpStatus === 405 || reasonCode === "method_not_allowed") {
     return {
       status: "action_required", reason: "method_not_allowed",
-      hint: "This route does not accept that HTTP method — nothing was changed. Resend with one of the route's allowed methods (the 405 response carries an Allow header naming them); do not retry the same method.",
-      next: [command("Read the 405 response's Allow header (or the route docs) for the accepted methods, then resend with an allowed method; do not retry the same method")]
+      hint: "This route does not accept that HTTP method — nothing was changed. Resend with an allowed method (Allow header or route docs); do not retry the same method.",
+      next: [command("Read the 405 response's Allow header when present — otherwise the route docs — for the accepted methods, then resend with an allowed method; do not retry the same method")]
     };
   }
   // Unmapped code: name the code and the recovery (report code + message
