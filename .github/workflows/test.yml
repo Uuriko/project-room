@@ -148,11 +148,8 @@ jobs:
       - name: Report failures to PR
         if: failure() && github.event_name == 'pull_request'
         run: |
-          BODY="## Unit test failures, shard ${{ matrix.shard }}/3 (debug)
-
-          See the job log for the failing file and assertion. Shard receipts
-          are in the unit-shard-evidence artifact."
-          gh pr comment "$PR_NUMBER" --repo Uuriko/project-room --body "$BODY" || echo "comment failed"
+          node scripts/report-unit-failures.mjs --shard=${{ matrix.shard }}/3 --body-file="$RUNNER_TEMP/unit-failures.md"
+          gh pr comment "$PR_NUMBER" --repo Uuriko/project-room --body-file "$RUNNER_TEMP/unit-failures.md" || echo "comment failed"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
