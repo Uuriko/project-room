@@ -491,3 +491,16 @@ test("fresh wakeable hosts queue durable wakes without activating offline-only p
   assert.equal(hb.pendingWakes("ai_testagent").length, 1);
   assert.deepEqual(hb.pushTargets("ai_testagent"), [], "durable queue eligibility must not widen push eligibility");
 });
+
+// Round 29: one heartbeat with an absurd cadence used to read "online" for
+// good (window = cadence x 1.5), so land-queue never woke the claimant.
+test("cadenceSeconds is bounded so one heartbeat cannot stay online indefinitely", t => {
+ const { hb, advance } = unit(t);
+ for (const cadenceSeconds of [1e300, 604801]) {
+ assert.throws(() => hb.heartbeat({ ...wakeable(), cadenceSeconds }), err =>
+ err instanceof HeartbeatError && err.status === 422 && err.code === "invalid_heartbeat", String(cadenceSeconds));
+ }
+ hb.heartbeat({ ...wakeable(), cadenceSeconds: 604800 });
+ advance(604800 * 1500 + 1);
+ assert.equal(hb.statusOf("ai_testagent").status, "offline", "the longest window still ends");
+});

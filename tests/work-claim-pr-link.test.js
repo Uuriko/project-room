@@ -410,3 +410,23 @@ test("re-linking a settled PR URL in a new round resets the link for re-polling"
   assert.match(relinked.history.at(-1).note, /pull\/7/);
   assert.deepEqual(store.workClaims.get("commons", "relink-pr").pullRequests[0].outcome, null);
 });
+
+// Regression: the previous round's outcome and the next claim can share a
+// millisecond (webhook + re-claim in the same tick). Equal timestamps must
+// still read as a stale outcome, or the closed link survives the re-link.
+test("re-linking resets a settled PR even when syncedAt equals claimedAt", async t => {
+  const { store, call } = await room(t);
+  const now = Date.parse("2026-10-03T13:00:00Z");
+  store.now = () => now;
+  await call("create", null, { id: "relink-same-ms", title: "relink" });
+  const claimed = (await call("claim", "relink-same-ms", {})).value;
+  await call("update", "relink-same-ms", { appendPullRequest: URL_A, expectedClaimedAt: claimed.claimedAt, expectedHistoryLength: claimed.history.length });
+  applyPullRequestWebhook(store, { action: "closed", pull_request: { html_url: URL_A, merged: false, state: "closed" } }, { nowMs: now });
+  const released = store.workClaims.get("commons", "relink-same-ms");
+  assert.equal(released.pullRequests[0].outcome, "closed");
+  const round2 = (await call("claim", "relink-same-ms", {})).value;
+  assert.equal(round2.pullRequests[0].syncedAt, round2.claimedAt, "fixture must force syncedAt == claimedAt");
+  const relinked = (await call("update", "relink-same-ms", { appendPullRequest: URL_A, expectedClaimedAt: round2.claimedAt, expectedHistoryLength: round2.history.length })).value;
+  assert.equal(relinked.pullRequests[0].outcome, null);
+  assert.equal(relinked.history.at(-1).action, "pr_linked");
+});

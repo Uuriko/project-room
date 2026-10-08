@@ -5,7 +5,9 @@ import { openMemberProfile } from "./room-chrome.mjs";
 // Real Chromium + local server; no production hooks or timing threshold.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { chromium } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
@@ -14,6 +16,8 @@ import { openSettings, clickChrome } from './room-chrome.mjs';
 import { signInFixtureInPlace } from './in-place-fixture-signin.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { admitHistoricalMember } from './unstamped-member.mjs';
+import { RoomStore } from '../server/store.mjs';
+import { EVENT_TYPES as T, event } from '../src/events.js';
 
 test('ordinary chat arrivals preserve historical DOM and fetch only changed request subscriptions', { timeout: 30000 }, async t => {
   const f = createAcceptanceFixture({ dmConsent: true });
@@ -125,4 +129,54 @@ test('snapshot labels update duplicates while preserving focus and selection, an
   assert.equal(await page.locator('[data-message-record-id="held-private-old"]').count(), 0);
   assert.equal(await page.locator('#presence-list').textContent().then(text => text.includes('Room owner')), false);
   assert.deepEqual(errors, []);
+});
+
+// QA-2026-10-07: measurable regression target for the unbounded renderMessages
+// finding. Keep opt-in while the renderer is unwindowed; remove the gate when
+// the fix lands. Workload retains 2,000 total history records and about 1.7 MB
+// of body text, including ten patch-dump-sized messages.
+test('large room history completes initial render with a bounded live message DOM', {
+  timeout: 90000,
+  skip: process.env.ROOM_ENABLE_RENDER_WINDOW_REGRESSION !== '1'
+    ? 'TODO(QA-2026-10-07): enable when renderMessages windowing lands; finding: unbounded full-room DOM render.'
+    : false
+}, async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'project-room-render-window-'));
+  const store = new RoomStore(join(directory, 'room.sqlite'));
+  const base = initialRoom('commons', 'owner');
+  const heavy = 'patch dump line with representative source text\n'.repeat(800); // 40 KB each
+  const normal = 'ordinary synthetic room history entry '.padEnd(650, 'x');
+  const createdAt = Date.now();
+  const messages = [];
+  for (let index = 1; index <= 2000; index++) {
+    messages.push(event({ roomId: 'commons', actorId: 'owner',
+      type: T.MESSAGE_POSTED, at: new Date(createdAt + index * 1000).toISOString(),
+      data: { messageId: `render-window-message-${String(index).padStart(4, '0')}`, body: index <= 10 ? heavy : normal } }));
+  }
+  store.initialize([...base, ...messages]);
+  const ownerKey = store.issueAccessKey('commons', 'owner');
+  const historyCount = store.snapshot(ownerKey, 'commons').state.messages.length;
+  assert.equal(historyCount, 2000, 'synthetic workload must remain full room history');
+
+  const server = createRoomServer({ store, streamInterval: 50 });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+  t.after(async () => {
+    await browser.close(); server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    store.close(); rmSync(directory, { recursive: true, force: true });
+  });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  page.setDefaultTimeout(15000);
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await signInFixture(page, ownerKey);
+  const started = performance.now();
+  await page.locator('[data-message-record-id="render-window-message-1998"] .message-body').waitFor({ state: 'attached' });
+  const initialRenderMs = performance.now() - started;
+  const rendered = await page.locator('#message-list .message').count();
+  assert.ok(rendered <= 250, `expected <= 250 live message nodes, got ${rendered}`);
+  assert.equal(store.snapshot(ownerKey, 'commons').state.messages.length, 2000, 'DOM windowing must not discard room history');
+  assert.deepEqual(errors, [], 'initial render completes without browser errors');
+  console.log(`render window workload: 2,000 messages, ~1.7 MB text, ${rendered} live nodes, ${initialRenderMs.toFixed(0)} ms until sentinel`);
 });

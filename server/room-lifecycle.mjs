@@ -134,20 +134,23 @@ export function createAccountRoom(store, token, binding, request) {
     if (memberships.length > 0) store.accountLogins.assertEmailVerified(accountId);
     // The same per-room check discovery uses (active human membership with its
     // invitation evidence intact), then owner or manage_members in that room.
-    // Zero memberships means a stranger's first room: always allowed, they
-    // become its owner. An account that already belongs to rooms keeps the
+    // No active memberships means a first room: allowed (an old, inactive
+    // audit binding is not current membership). An account still in rooms keeps the
     // administration requirement for additional rooms.
     // A growth-funded room does not count as administering one: owning it
     // must not unlock the ordinary 100-room allowance.
     let foundedWithGrowth = false;
-    const naturallyAdministers = memberships.length === 0 || memberships.some(({ room_id }) => {
-      const origin = store.db.prepare("SELECT origin FROM member_accounts WHERE room_id=? AND account_id=?").get(room_id, accountId)?.origin;
-      if (origin === GROWTH_ROOM_ORIGIN) return false;
+    let activeMemberships = 0;
+    const administers = memberships.some(({ room_id }) => {
       let member;
       try { member = store.authenticateAccountSession(token, room_id, binding).member; }
       catch (error) { if (error.status === 403) return false; throw error; }
+      activeMemberships += 1;
+      const origin = store.db.prepare("SELECT origin FROM member_accounts WHERE room_id=? AND account_id=?").get(room_id, accountId)?.origin;
+      if (origin === GROWTH_ROOM_ORIGIN) return false;
       return member.id === store.roomAuthority(room_id).ownerId || member.permissions.includes("manage_members");
     });
+    const naturallyAdministers = activeMemberships === 0 || administers;
     if (!naturallyAdministers) {
       const credits = accountRoomCredits(store, accountId);
       const growthRooms = store.db.prepare("SELECT count(*) AS n FROM member_accounts WHERE account_id=? AND origin=?").get(accountId, GROWTH_ROOM_ORIGIN).n;
