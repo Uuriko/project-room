@@ -499,7 +499,6 @@
   "tests/next-actions.test.js": 50788,
   "tests/notification-feed.test.js": 149110,
   "tests/notification-preferences.test.js": 16790,
-  "tests/notify-classifier.test.js": 1200,
   "tests/notify-policy.test.js": 15274,
   "tests/notify-preferences.test.js": 3573,
   "tests/notify-quiet-hours.test.js": 4478,
@@ -957,7 +956,8 @@
   "tests/error-leak-shapes.test.js": 272,
   "tests/guest-invites-agent-api-docs.test.mjs": 1026,
   "tests/herdr-bridge-adapter.test.js": 6100,
-  "tests/rebuild-determinism.test.js": 9500
+  "tests/rebuild-determinism.test.js": 9500,
+  "tests/saved-history-floor.test.js": 464
  },
  "_note": "Per-file wall-clock ms of `node --test <file>` measured 2026-10-06 on a 2-CPU host with 16-way parallelism (values are contention-inflated; used only as relative weights for shard balancing, never for membership). Files hitting the 300s measurement timeout are capped at 300000.",
  "releaseRecordMeasurement": "Eight record-rail files measured on macOS Node26, four concurrent real Node processes, 2026-10-06; all eight passed. Timing allocates files only.",

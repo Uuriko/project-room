@@ -513,3 +513,18 @@ test("hard work defaults to a distinct reviewer at create; an explicit policy st
   const plain = await call(coordKey, "/work-claims", { id: "plain-1", title: "Plain", tags: ["wk41"] });
   assert.equal(plain.value.reviewPolicy, null);
 });
+
+test("reassign honors the room's per-member open-claim cap", async t => {
+  const f = await fixture(t);
+  await f.call(f.ownerKey, "/work-claims/config", { maxMemberOpenClaims: 1 });
+  assert.equal((await f.call(f.coordKey, "/work-claims", { id: "reassign-cap-1" })).status, 201);
+  assert.equal((await f.call(f.coordKey, "/work-claims/reassign-cap-1/claim", {})).status, 200);
+  assert.equal((await f.call(f.ownerKey, "/work-claims", { id: "reassign-cap-2" })).status, 201);
+  assert.equal((await f.call(f.ownerKey, "/work-claims/reassign-cap-2/claim", {})).status, 200);
+  const sequence = f.store.room("commons").sequence;
+  const result = await f.call(f.ownerKey, "/work-claims/reassign-cap-2/reassign", { newOwner: "coord" });
+  assert.equal(result.status, 409);
+  assert.equal(result.value.error.code, "too_many_open_claims");
+  assert.equal(f.store.room("commons").sequence, sequence, "a refused handoff writes nothing");
+  assert.equal(f.store.workClaims.get("commons", "reassign-cap-2").owner, "owner");
+});

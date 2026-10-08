@@ -232,3 +232,40 @@ test("a durable claim keeps the updatedAt used for board order", async t => {
   assert.equal(stored.updatedAt, out.value.updatedAt);
   assert.equal(Number.isFinite(Date.parse(stored.updatedAt)), true);
 });
+
+test("close and cancel retire open items over HTTP and free open-claim slots", async () => {
+  // Route refusals throw through helpers.reject in this harness; read them as {status, code}.
+  const outcome = async promise => {
+    try { const result = await promise; return { status: result.status, code: result.value?.error?.code, value: result.value }; }
+    catch (error) { if (!Number.isInteger(error?.status)) throw error; return { status: error.status, code: error.code }; }
+  };
+  const registry = createWorkClaimRegistry();
+  registry.configure("room1", { maxOpenClaims: 2 });
+  assert.equal((await call(registry, "contribute", "create", null, { id: "mine" })).status, 201);
+  assert.equal((await call(registry, "owner", "create", null, { id: "theirs" })).status, 201);
+  assert.equal((await call(registry, "owner", "create", null, { id: "over" })).value.error.code, "work_board_full");
+
+  // A non-manager cannot close or cancel an unclaimed item someone else opened.
+  assert.deepEqual(await outcome(call(registry, "contribute", "cancel", "theirs", {})), { status: 403, code: "work_not_owner" });
+  assert.deepEqual(await outcome(call(registry, "contribute", "close", "mine", {})), { status: 403, code: "work_not_owner" });
+
+  // The opener cancels their own unclaimed item; the reason is on the history.
+  const cancelled = await call(registry, "contribute", "cancel", "mine", { reason: "duplicate of theirs" });
+  assert.equal(cancelled.status, 200);
+  assert.equal(cancelled.value.state, "closed");
+  assert.deepEqual([cancelled.value.history.at(-1).action, cancelled.value.history.at(-1).note], ["cancelled", "duplicate of theirs"]);
+  assert.equal((await call(registry, "owner", "create", null, { id: "over" })).status, 201);
+
+  // A manager closes a held claim; a second close is a 409 conflict.
+  await call(registry, "holder", "claim", "theirs", {});
+  const closed = await call(registry, "owner", "close", "theirs", { reason: "stale" });
+  assert.equal(closed.status, 200);
+  assert.deepEqual([closed.value.state, closed.value.owner], ["closed", null]);
+  assert.deepEqual(await outcome(call(registry, "owner", "close", "theirs", {})), { status: 409, code: "work_claim_terminal" });
+  assert.ok((await outcome(call(registry, "holder", "update", "theirs", { state: "in_progress" }))).status >= 400);
+  assert.equal((await outcome(call(registry, "owner", "close", "mine", { extra: 1 }))).status, 422);
+  // Closed items are retained but not listed as open work by state filter default.
+  const listed = await call(registry, "owner", "list", null, undefined, "?state=closed");
+  assert.equal(listed.status, 200);
+  assert.deepEqual(listed.value.claims.map(item => item.id).sort(), ["mine", "theirs"]);
+});

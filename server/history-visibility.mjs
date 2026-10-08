@@ -1,8 +1,9 @@
 // PRIV-2: history visibility.
 //
 // A member under "since_join" reads messages and events from their own join
-// onward. The join point is the LATEST member.added or
-// member.joined_via_invitation event for that member id (#1523): a guest who
+// onward. The join point is the member's latest move to active: the LATEST
+// member.added / member.joined_via_invitation, or a member.access_changed
+// that reactivates a removed member (#1523): a guest who
 // is removed and later reactivated must not read messages posted during the
 // removal gap. The event's sequence bounds event-log reads, and its timestamp
 // bounds reads over the message projection, which carries createdAt but no
@@ -21,12 +22,27 @@ const JOIN_TYPES = [T.MEMBER_ADDED, T.MEMBER_JOINED_VIA_INVITATION];
 // event cannot be found reads nothing older than the room head (fail closed).
 export function historyFloor(db, state, roomId, memberId, headSequence = null) {
   if (memberHistoryVisibility(state, memberId) !== "since_join") return null;
-  const row = db.prepare(
-    `SELECT sequence, json_extract(body,'$.at') AS at FROM events
-     WHERE room_id=? AND json_extract(body,'$.type') IN (${JOIN_TYPES.map(() => "?").join(",")})
+  // The reducer refuses a second member.added for a known id, so a removed
+  // member comes back through member.access_changed { active: true }. The
+  // floor is the member's most recent move from absent-or-inactive to active,
+  // whichever event made it; role/permission edits while active do not move it.
+  const rows = db.prepare(
+    `SELECT sequence, json_extract(body,'$.at') AS at, json_extract(body,'$.type') AS type,
+            json_extract(body,'$.data.active') AS active FROM events
+     WHERE room_id=? AND json_extract(body,'$.type') IN (${[...JOIN_TYPES, T.MEMBER_ACCESS_CHANGED].map(() => "?").join(",")})
        AND json_extract(body,'$.data.memberId')=?
-     ORDER BY sequence DESC LIMIT 1`
-  ).get(roomId, ...JOIN_TYPES, memberId);
+     ORDER BY sequence`
+  ).all(roomId, ...JOIN_TYPES, T.MEMBER_ACCESS_CHANGED, memberId);
+  let row = null, active = false;
+  for (const entry of rows) {
+    let nowActive;
+    if (JOIN_TYPES.includes(entry.type)) nowActive = true;
+    else if (entry.active === 1 || entry.active === true) nowActive = true;
+    else if (entry.active === 0 || entry.active === false) nowActive = false;
+    else continue; // access_changed without an explicit active flag says nothing about activation
+    if (nowActive && !active) row = entry;
+    active = nowActive;
+  }
   if (!row || !Number.isSafeInteger(row.sequence) || typeof row.at !== "string") {
     const head = Number.isSafeInteger(headSequence) ? headSequence : 0;
     return { sequence: head + 1, at: "9999-12-31T23:59:59.999Z", sameInstant: new Set() };
