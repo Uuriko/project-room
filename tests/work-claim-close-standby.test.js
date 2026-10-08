@@ -72,7 +72,7 @@ test("closing a claim frees a board slot: full -> close -> create succeeds", asy
   assert.equal(capCount(store), 3);
   const refused = await call(store, { route: "create", body: { id: "d" } });
   assert.equal(refused.status, 409);
-  assert.equal(refused.code, "work_board_full");
+  assert.equal(refused.body.error.code, "work_board_full");
   const closed = await call(store, { route: "close", id: "a", body: { reason: "no longer needed" } });
   assert.equal(closed.status, 200);
   assert.equal(capCount(store), 2);
@@ -132,6 +132,7 @@ test("closing an already-done claim is 422", async () => {
   const { store } = fixture();
   await call(store, { route: "create", body: { id: "c1" } });
   assert.equal((await call(store, { route: "claim", id: "c1", member: "alice" })).status, 200);
+  assert.equal((await call(store, { route: "update", id: "c1", member: "alice", body: { state: "in_progress" } })).status, 200);
   assert.equal((await call(store, { route: "update", id: "c1", member: "alice", body: { state: "done" } })).status, 200);
   const closed = await call(store, { route: "close", id: "c1", member: "alice" });
   assert.equal(closed.status, 422);
@@ -199,7 +200,7 @@ test("standby has its own cap: standby_full 409", async () => {
   assert.equal((await call(store, { route: "create", body: { id: "s1", standby: true } })).status, 201);
   const refused = await call(store, { route: "create", body: { id: "s2", standby: true } });
   assert.equal(refused.status, 409);
-  assert.equal(refused.code, "standby_full");
+  assert.equal(refused.body.error.code, "standby_full");
   store.close();
 });
 
@@ -226,6 +227,7 @@ test("a done transition also promotes the oldest standby claim", async () => {
   for (const id of ["a", "b"]) await call(store, { route: "create", body: { id } });
   await call(store, { route: "create", body: { id: "s1", standby: true } });
   assert.equal((await call(store, { route: "claim", id: "a", member: "alice" })).status, 200);
+  assert.equal((await call(store, { route: "update", id: "a", member: "alice", body: { state: "in_progress" } })).status, 200);
   const done = await call(store, { route: "update", id: "a", member: "alice", body: { state: "done" } });
   assert.equal(done.status, 200);
   assert.equal(done.body.promoted?.id, "s1");
@@ -249,11 +251,10 @@ test("standby claims in the list carry queuePosition in FIFO order", async () =>
   await call(store, { route: "create", body: { id: "s2", standby: true } });
   const listed = await call(store, { route: "list", method: "GET" });
   assert.equal(listed.status, 200);
-  const parked = listed.body.claims.filter(item => item.state === "standby");
-  assert.equal(parked.length, 2);
-  assert.equal(parked[0].queuePosition, 1);
-  assert.equal(parked[1].queuePosition, 2);
-  assert.deepEqual(parked.map(item => item.id), ["s1", "s2"]);
+  const byId = new Map(listed.body.claims.filter(item => item.state === "standby").map(item => [item.id, item]));
+  assert.equal(byId.size, 2);
+  assert.equal(byId.get("s1").queuePosition, 1);
+  assert.equal(byId.get("s2").queuePosition, 2);
   store.close();
 });
 
@@ -294,9 +295,10 @@ test("the MCP mirror cap predicate also excludes cancelled and standby claims", 
   const item = mirrorProjectionClaim(store, "commons", "owner",
     { type: "claim.acquired", at, data: { workItemId: "mirror-one" } });
   assert.ok(item);
-  assert.equal(item.state, "unclaimed");
-  // But a genuinely full board still 409s on the mirror path.
-  for (const id of ["y1", "y2"]) store.workClaims.set("commons", createWork({ id }, { now: Date.now(), agentId: "owner" }));
+  assert.equal(item.state, "claimed"); // claim.acquired creates AND claims
+  // But a genuinely full board still 409s on the mirror path: mirror-one is
+  // now held, so one more open claim reaches the cap of 2.
+  store.workClaims.set("commons", createWork({ id: "y1" }, { now: Date.now(), agentId: "owner" }));
   assert.throws(() => mirrorProjectionClaim(store, "commons", "owner",
     { type: "claim.acquired", at, data: { workItemId: "mirror-two" } }),
     error => error?.status === 409 && error?.code === "work_board_full");

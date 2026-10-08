@@ -34,17 +34,34 @@
 // Note-only attestations remain caller-bound records but cannot approve work.
 // This does not gate automatic PR/land/deploy settlement or bind artifact bytes.
 import { parsePullRequestUrl } from "./claim-coordination.mjs";
-const STATES = ["unclaimed", "claimed", "in_progress", "blocked", "done"];
+const STATES = ["unclaimed", "claimed", "in_progress", "blocked", "standby", "cancelled", "done"];
 const CLAIM_KINDS = ["work", "land", "deploy"];
 const CI_STATES = ["pending", "success", "failure", "neutral"];
 const REVIEW_VERDICTS = ["approve", "changes_requested", "comment"];
 const TRANSITIONS = {
-  unclaimed: ["claimed"],
-  claimed: ["in_progress", "blocked", "unclaimed"], // unclaimed = release
-  in_progress: ["blocked", "done", "claimed"],       // claimed = pause
-  blocked: ["in_progress", "claimed"],
+  unclaimed: ["claimed", "cancelled"],
+  claimed: ["in_progress", "blocked", "unclaimed", "cancelled"], // unclaimed = release
+  in_progress: ["blocked", "done", "claimed", "cancelled"],      // claimed = pause
+  blocked: ["in_progress", "claimed", "cancelled"],
+  // standby is create-only (never a target of updateWork): it enters via
+  // create with standby:true and leaves via promotion (standby -> unclaimed)
+  // or closeWork (standby -> cancelled). The cancelled state is terminal and
+  // is reached only through closeWork, never through updateWork — the close
+  // route owns the holder/owner/manage_claims auth shape for it.
+  standby: [],
+  cancelled: [],
   done: [],
 };
+// Terminal states — a claim in one of these never returns to the board.
+export const TERMINAL_CLAIM_STATES = ["cancelled", "done"];
+// Board-cap predicate: only states that still occupy a board slot count.
+// Cancelled and standby claims (and done ones) are excluded — closing or
+// parking a claim must actually free a slot.
+export const countsTowardBoardCap = item => item.state !== "done" && item.state !== "cancelled" && item.state !== "standby";
+// FIFO position of a standby claim: the moment it entered standby. Items
+// carry no createdAt field, so the first (created) history stamp is the
+// enqueue instant; registry list order (rowid ASC) breaks same-ms ties.
+export const standbyEnqueuedAt = item => item?.history?.[0]?.at ?? "";
 const DELIVERY_MODES = ["result", "merged", "production"];
 const REVIEW_POLICIES = ["self_attested", "distinct_member", "independent_principal"];
 // Receipt tags (RC-2026-09-24-205): free-form labels recorded when work is
@@ -223,6 +240,7 @@ const DEFAULT_LEASE_HOURS = 24;
 const MAX_LEASE_HOURS = 168;
 export const DEFAULT_MAX_OPEN_CLAIMS = 200;
 export const DEFAULT_MAX_MEMBER_OPEN_CLAIMS = 20;
+export const DEFAULT_MAX_STANDBY_CLAIMS = 1000;
 const CONFIG_CAP_CEILING = 10000;
 const DEFAULT_REVIEW_POLICY = "self_attested";
 const ACTIVE_CLAIM_STATES = ["claimed", "in_progress", "blocked"];
@@ -405,6 +423,7 @@ export function roomWorkClaimConfig(room) {
     reviewPolicy,
     maxOpenClaims: positiveCap(raw.maxOpenClaims, DEFAULT_MAX_OPEN_CLAIMS),
     maxMemberOpenClaims: positiveCap(raw.maxMemberOpenClaims, DEFAULT_MAX_MEMBER_OPEN_CLAIMS),
+    maxStandbyClaims: positiveCap(raw.maxStandbyClaims, DEFAULT_MAX_STANDBY_CLAIMS),
   });
 }
 const leaseHoursOf = value => {
@@ -425,9 +444,13 @@ const pullList = (pullRequest, pullRequests) => {
 // claiming an unknown id is refused so claims always reference real work.
 // `tags` may be supplied up front (free-form, recorded on the item); blobs
 // are evidence pointers and are only recorded on the done transition.
-export function createWork({ id, title, reviewPolicy, note, tags, files, dependsOn, pullRequest, pullRequests, repo, branch, fileBlocks, workItemId, kind, revision } = {}, { now, agentId } = {}) {
+export function createWork({ id, title, reviewPolicy, note, tags, files, dependsOn, pullRequest, pullRequests, repo, branch, fileBlocks, workItemId, kind, revision, state } = {}, { now, agentId } = {}) {
   const atMs = nowMsOf(now);
   idOf(id, "work id", 256);
+  // Only creation-legal states: a claim enters as unclaimed, or parked in
+  // standby when the requester asked to queue behind a full board.
+  check(state === undefined || state === "unclaimed" || state === "standby",
+    `state must be unclaimed or standby on create`);
   if (title !== undefined) check(typeof title === "string" && title.length > 0 && title.length <= 512, "title must be 1..512 characters");
   // SEC2: the create note is stored on the "created" history stamp and served
   // on every board list — without a bound, a direct API caller can stash an
@@ -439,7 +462,7 @@ export function createWork({ id, title, reviewPolicy, note, tags, files, depends
   if (claimKind === "deploy") check(claimRevision, "a deploy claim needs a revision");
   const declared = files === undefined || files === null ? { files: Object.freeze([]), fileBlocks: Object.freeze({}) } : claimedFilesOf(files);
   const links = pullList(pullRequest, pullRequests);
-  const item = { id, title: title ?? id, state: "unclaimed", owner: null, history: [],
+  const item = { id, title: title ?? id, state: state ?? "unclaimed", owner: null, history: [],
     claimedAt: null, leaseStartAt: null, leaseExpiresAt: null, deliveryMode: null,
     reviewPolicy: reviewPolicy ?? null, reviewedBy: null, attestations: Object.freeze([]),
     tags: tags === undefined || tags === null ? Object.freeze([]) : tagsOf(tags),
@@ -551,6 +574,7 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(authority === true || item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can update it`);
   check(item.state !== "done", `work "${item.id}" is done and immutable`);
+  check(item.state !== "cancelled", `work "${item.id}" is cancelled and immutable`);
   if (state !== undefined) {
     check(STATES.includes(state), `state must be one of ${STATES.join(", ")}`);
     const allowed = TRANSITIONS[item.state] ?? [];
@@ -594,6 +618,30 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     tags: state === "done" && tags != null ? tagsOf(tags) : item.tags,
     blobs: state === "done" && blobs != null ? blobsOf(blobs) : item.blobs };
   return withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note);
+}
+// Close (cancel) a claim: terminal transition to "cancelled". The holder's
+// ownership and lease are cleared; everything else is kept for the audit
+// trail. Closing frees a board slot — cancelled claims do not count toward
+// maxOpenClaims. The route owns the auth (holder, room owner, or
+// manage_claims); the pure machine enforces the terminal-state rules.
+export function closeWork(work, agentId, { reason, now, authority = false } = {}) {
+  const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  check(authority === true || item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can close it`);
+  check(item.state !== "done", `work "${item.id}" is done and immutable`);
+  check(item.state !== "cancelled", `work "${item.id}" is already cancelled`);
+  if (reason !== undefined && reason !== null) check(typeof reason === "string" && reason.length <= 4000, "reason must be a string of at most 4000 characters");
+  const next = { ...item, state: "cancelled", owner: null,
+    leaseStartAt: null, leaseExpiresAt: null };
+  return withHistory(next, atMs, agent, "closed", reason ?? null);
+}
+// FIFO promotion: the oldest standby claim takes a freed board slot,
+// standby -> unclaimed. The caller becomes the promoting actor on the
+// history entry; promotion does not assign an owner — the promoted claim
+// is plain ready work, claimable like any other unclaimed item.
+export function promoteWork(work, agentId, { now } = {}) {
+  const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  check(item.state === "standby", `work "${item.id}" is ${item.state} — only standby claims promote to the board`);
+  return withHistory({ ...item, state: "unclaimed" }, atMs, agent, "promoted", "board slot freed — promoted from standby");
 }
 // Record a note from the caller's own authenticated session. A new note
 // supersedes that member's active verdict but cannot approve reviewed completion.
@@ -695,6 +743,7 @@ export function reassignWork(work, agentId, newOwner, { note, now, authority = f
   const item = workOf(work), agent = agentOf(agentId), target = agentOf(newOwner), atMs = nowMsOf(now);
   check(authority === true || item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can reassign it`);
   check(item.state !== "done", `work "${item.id}" is done and immutable`);
+  check(item.state !== "cancelled", `work "${item.id}" is cancelled and immutable`);
   return withHistory({ ...item, owner: target, attestations: Object.freeze([]), reviews: Object.freeze([]) }, atMs, agent, `reassigned:${target}`, note);
 }
 // True when the item holds an active claim whose lease has lapsed. Items

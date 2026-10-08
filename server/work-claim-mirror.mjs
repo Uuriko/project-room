@@ -1,7 +1,7 @@
 // Projection claim commands (MCP and the work-item form) write the same
 // work-claims board the REST routes use. A handoff or supersede leaves a
 // successor card that depends on the source, so the chain is visible there.
-import { createWork, claimWork, renewWork, updateWork, roomWorkClaimConfig } from "./work-claims.mjs";
+import { createWork, claimWork, renewWork, updateWork, roomWorkClaimConfig, countsTowardBoardCap } from "./work-claims.mjs";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
 
 const BOARD_ID = /^[A-Za-z0-9_-]{1,128}$/;
@@ -50,7 +50,7 @@ function claimBoard(store, roomId, actorId, id, data, nowMs) {
     const config = typeof registry.configFor === "function"
       ? registry.configFor(roomId)
       : roomWorkClaimConfig(roomLike(registry, roomId));
-    const open = registry.list(roomId).filter(entry => entry.state !== "done").length;
+    const open = registry.list(roomId).filter(countsTowardBoardCap).length;
     if (open >= config.maxOpenClaims) {
       const error = new Error(`This room already has ${config.maxOpenClaims} open claims. Close stale claims before opening another.`);
       error.status = 409;

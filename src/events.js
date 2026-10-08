@@ -1669,8 +1669,8 @@ function recordLandUpdate(state, incoming) {
   }
 }
 
-export const WORK_CLAIM_EVENT_ACTIONS = Object.freeze(["created", "claimed", "state_changed", "reviewed", "released", "reassigned", "renewed", "lease_expired", "pr_merged", "pr_closed", "ci_changed", "deleted"]);
-const WORK_CLAIM_EVENT_STATES = ["unclaimed", "claimed", "in_progress", "blocked", "done"];
+export const WORK_CLAIM_EVENT_ACTIONS = Object.freeze(["created", "claimed", "state_changed", "reviewed", "released", "reassigned", "renewed", "lease_expired", "pr_merged", "pr_closed", "ci_changed", "deleted", "closed", "standby_queued", "standby_promoted"]);
+const WORK_CLAIM_EVENT_STATES = ["unclaimed", "claimed", "in_progress", "blocked", "standby", "cancelled", "done"];
 
 // Thin receipt: validated, never copied into the projection.
 function recordStarterSeeded(state, incoming) {
