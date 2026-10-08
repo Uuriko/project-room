@@ -436,7 +436,7 @@ export class AgentPluginStore {
       this.keyRecordForOwner(keyId, identityId);
       const rotated = this.apiKeys.rotate(keyId);
       const record = this.keys.get(keyId);
-      this.db.prepare("UPDATE agent_api_keys SET key_hash=?, last_used_at=NULL WHERE key_id=?")
+      this.db.prepare("UPDATE agent_api_keys SET key_hash=?, last_used_at=NULL, last_used_ua=NULL WHERE key_id=?")
         .run(record.keyHash, keyId);
       return rotated;
     });
