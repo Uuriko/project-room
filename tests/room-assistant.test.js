@@ -84,6 +84,45 @@ test('completion accounts for late group contributions and refuses partial compl
   assert.equal((await api('guest')).runs[0].activity.length,2);
 });
 
+test('shared assistant inputs and results stay in the originating channel and thread', async t => {
+  for (const scenario of [
+    { name: 'another channel', threaded: false, foreign: { channelId: 'design' } },
+    { name: 'another thread in the same channel', threaded: false, foreign: { replyToId: 'foreign-root' } },
+    { name: 'outside the originating thread', threaded: true, foreign: {} },
+    { name: 'another thread from a threaded request', threaded: true, foreign: { replyToId: 'foreign-root' } }
+  ]) await t.test(scenario.name, async t => {
+    const { f, api, message } = await setup(t);
+    await api('owner', { action: 'configure', expectedRevision: 0, name: 'Room', coordinatorMemberId: 'producer' });
+    f.store.command(f.keys.owner, 'commons', { id: randomUUID(), type: 'channel.created', data: { channelId: 'design', name: 'design' } });
+    message('owner', 'root'); message('owner', 'foreign-root');
+    message('owner', 'question', 'Help with this conversation', scenario.threaded ? { replyToId: 'root' } : {});
+    await api('owner', { action: 'invoke', runId: 'bound-run', sourceMessageId: 'question' });
+    message('guest', 'foreign-input', 'An unrelated conversation', scenario.foreign);
+    const refusal = await api('guest', { action: 'contribute', runId: 'bound-run', sourceMessageId: 'foreign-input', expectedRevision: 0 }, 409);
+    assert.equal(refusal.error.code, 'assistant_conversation_mismatch');
+    assert.equal((await api('owner')).runs[0].revision, 0);
+    assert.deepEqual((await api('owner')).runs[0].inputs.map(input => input.sourceMessageId), ['question']);
+    const replyToId = scenario.threaded ? 'root' : 'question';
+    message('guest', 'context', 'Relevant context', { replyToId: 'question' });
+    await api('guest', { action: 'contribute', runId: 'bound-run', sourceMessageId: 'context', expectedRevision: 0 });
+    await api('producer', { action: 'claim', runId: 'bound-run', attemptId: 'host', expectedRevision: 1 });
+    message('producer', 'foreign-result', 'Unrelated result', scenario.foreign);
+    const completion = { action: 'report', requestId: 'complete-bound-run', runId: 'bound-run', attemptId: 'host', expectedRevision: 2, state: 'done', summary: 'Result ready', resultMessageId: 'foreign-result', appliedInputMessageIds: ['question', 'context'] };
+    const rejected = await api('producer', completion, 409);
+    assert.equal(rejected.error.code, 'assistant_conversation_mismatch');
+    const unchanged = (await api('owner')).runs[0];
+    assert.equal(unchanged.status, 'working'); assert.equal(unchanged.revision, 2);
+    assert.equal(unchanged.resultMessageId, undefined);
+    assert.deepEqual(unchanged.inputs.map(input => input.status), ['pending', 'pending']);
+    message('producer', 'result', 'The actual answer', { replyToId });
+    // A refused completion never consumes the retry ID or changes the run.
+    const corrected = { ...completion, resultMessageId: 'result' };
+    const done = await api('producer', corrected);
+    assert.equal(done.result.status, 'done'); assert.equal(done.result.resultMessageId, 'result');
+    assert.deepEqual(await api('producer', corrected), done);
+  });
+});
+
 test('conflict is explicit, decision is authorized, and cancellation awaits host confirmation', async t => {
   const { api, message } = await setup(t);
   await api('owner', {action:'configure',expectedRevision:0, name:'Room', coordinatorMemberId:'producer'});
