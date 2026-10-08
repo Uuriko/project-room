@@ -70,7 +70,7 @@ const freezeDeep = node => {
 // seen, verification tier) — it is never self-asserted by the card publisher.
 const validateTrust = record => {
   if (record === null || record === undefined) return null;
-  check(record !== null && typeof record === "object", "trust() must return an object or null");
+  check(record !== null && typeof record === "object" && !Array.isArray(record), "trust() must return an object or null");
   const {
     approvedBy = null,
     approvedAt = null,
@@ -157,7 +157,7 @@ const validateOwns = value => {
 const PRESENCE_STATUSES = ["online", "offline", "unregistered"];
 const validatePresence = record => {
   if (record === null || record === undefined) return null;
-  check(record !== null && typeof record === "object", "presence() must return an object or null");
+  check(record !== null && typeof record === "object" && !Array.isArray(record), "presence() must return an object or null");
   const {
     status = "unregistered",
     lastSeenAt = null,
