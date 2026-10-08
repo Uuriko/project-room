@@ -17,6 +17,7 @@ import { createWatcher } from "../src/growth-watch.js";
 import { defaultOnAlert, defaultGrowthRules, DEFAULT_INTERVAL_MS } from "../src/growth-scheduler.js";
 import { growthCollector } from "../src/growth-emit.js";
 import { writeDailyBackup } from "../cloudflare/room-backup.mjs";
+import { reapTick, reaperDueAt, REAPER_TICK_MS } from "./work-claim-reaper.mjs";
 
 export const JOB_BUDGET_MS = 5000;
 export const MINUTE_MS = 60 * 1000;
@@ -301,6 +302,17 @@ export const JOBS = Object.freeze([
         console.error(`[room-backup] ${oneLine(error?.message ?? error)}`);
         return { errors: 1 };
       }
+    }
+  }),
+  defineJob({
+    name: "claim-reaper",
+    cadenceMs: REAPER_TICK_MS, // 30 s: measured lease 300s + sweep 30s; never tighter than ~L/10
+    runtimes: Object.freeze(["worker", "node"]),
+    enabled(_env, store) { return store ? reaperDueAt(store, Date.now()) != null : true; },
+    disabledReason: () => "No claim lease is due for reaping",
+    nextDueAt: (store, now) => reaperDueAt(store, now),
+    async run(store, ctx) {
+      return reapTick(store, { now: ctx.now ?? (() => Date.now()) });
     }
   }),
   defineJob({

@@ -23,7 +23,7 @@ const WORK_CLAIM_FIELDS = ["id", "title", "state", "owner", "history", "claimedA
   "repo", "branch", "chain", "supersededBy", "workItemId", "squadId",
   "kind", "revision", "ci", "reviews", "historyOmitted", "readingAcks", "deploy",
   "leaseSeq", "epoch", "priorActiveState", "lastHeartbeatAt", "consecutiveHeartbeats",
-  "standby", "createdSeq", "filesDeclared"];
+  "standby", "createdSeq", "filesDeclared", "successorHint"];
 const WORK_CLAIM_DEFAULTS = { title: null, state: "unclaimed", owner: null, history: [],
   claimedAt: null, leaseStartAt: null, leaseExpiresAt: null, deliveryMode: null,
   reviewPolicy: null, reviewedBy: null, attestations: [], tags: [], files: [], fileBlocks: {}, blobs: [],
@@ -31,8 +31,13 @@ const WORK_CLAIM_DEFAULTS = { title: null, state: "unclaimed", owner: null, hist
   pullRequest: null, pullRequests: [], updatedAt: null,
   repo: null, branch: null, chain: [], supersededBy: null, workItemId: null, squadId: null,
   kind: "work", revision: null, ci: null, reviews: [], readingAcks: {}, deploy: null,
-  leaseSeq: 1, epoch: 1, priorActiveState: null, lastHeartbeatAt: null,
-  consecutiveHeartbeats: 0, standby: [], createdSeq: null, filesDeclared: true };
+  leaseSeq: 1, priorActiveState: null, lastHeartbeatAt: null,
+  consecutiveHeartbeats: 0, standby: [], createdSeq: null, filesDeclared: true,
+  // Epoch fencing: the fencing epoch rides the durable row so the reaper's
+  // CAS and stale_epoch rejections see it; pre-existing rows hydrate to 0
+  // (matches workOf's epochOf). successorHint is the reaper's succession
+  // input (worker-nominated).
+  epoch: 0, successorHint: null };
 const decodeItem = text => {
   // passthroughUnknown: production rows carry fields this checkout doesn't
   // know (squadId, parentClaimId, readingAcks, ...) — never drop them.

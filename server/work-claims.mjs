@@ -33,6 +33,23 @@
 // reviewer authority supplied by the HTTP layer. self_attested is unchanged.
 // Note-only attestations remain caller-bound records but cannot approve work.
 // This does not gate automatic PR/land/deploy settlement or bind artifact bytes.
+//
+// Epoch fencing (crash-recovery guild, W8): every claim carries a monotonic
+// `epoch` (default 0 for pre-existing claims — backward compatible). Every
+// ownership transition — claimWork, reassignWork, electClaimSuccessor, a
+// release via updateWork, and releaseExpired's auto-release — stamps
+// epoch+1. updateWork accepts an optional `expectedEpoch`: the epoch the
+// caller based its decision on. When presented and stale, the mutation is
+// rejected with ClaimError code "stale_epoch" rather than applied, so a
+// resurrected (previously dead) holder cannot clobber a successor's work.
+// The check runs before the owner check: a stale epoch is the accurate
+// refusal for a holder whose world moved on. expectedEpoch is optional in
+// the pure function for backward compatibility; callers that omit it get the
+// old behavior. ROUTE MIGRATION: the HTTP layer should read the claim,
+// hand its epoch to the client, accept `expectedEpoch` on the update body,
+// pass it through, and map ClaimError "stale_epoch" to HTTP 409 (the
+// appendPullRequest path already maps unknown ClaimError codes to 409; the
+// update path's runPure currently maps every ClaimError to 422).
 import { parsePullRequestUrl } from "./claim-coordination.mjs";
 const STATES = ["unclaimed", "claimed", "in_progress", "blocked", "expired", "done", "closed"];
 const CLAIM_KINDS = ["work", "land", "deploy"];
@@ -371,11 +388,6 @@ const leaseSeqOf = value => {
   check(Number.isSafeInteger(value) && value >= 1, "leaseSeq must be a positive integer");
   return value;
 };
-const epochOf = value => {
-  if (value === undefined || value === null) return 1;
-  check(Number.isSafeInteger(value) && value >= 1, "epoch must be a positive integer");
-  return value;
-};
 const priorActiveStateOf = value => {
   if (value === undefined || value === null) return null;
   check(["claimed", "in_progress", "blocked"].includes(value), "priorActiveState must be claimed, in_progress or blocked");
@@ -522,14 +534,11 @@ const workOf = value => {
     repo: repoOf(value.repo), branch: branchOf(value.branch),
     chain: chainOf(value.chain), supersededBy: optionalId(value.supersededBy, "supersededBy"),
     workItemId: optionalId(value.workItemId, "workItemId"),
-    squadId: optionalId(value.squadId, "squadId"), // plan-squads: work offer targeted at a squad
-    kind, revision, ci: ciOf(value.ci), reviews: reviewsOf(value.reviews),
-    leaseSeq: leaseSeqOf(value.leaseSeq), epoch: epochOf(value.epoch),
-    priorActiveState: priorActiveStateOf(value.priorActiveState),
-    lastHeartbeatAt: isoOrNull(value.lastHeartbeatAt, "lastHeartbeatAt"),
-    consecutiveHeartbeats: countOf(value.consecutiveHeartbeats),
     standby: standbyOf(value.standby), createdSeq: createdSeqOf(value.createdSeq),
-    filesDeclared: value.filesDeclared === undefined ? true : value.filesDeclared === true };
+    filesDeclared: value.filesDeclared === undefined ? true : value.filesDeclared === true,
+    // Reaper succession input: worker-nominated successor, preserved through
+    // the machine so it survives round-trips (B2 guild-claimsboard).
+    successorHint: optionalId(value.successorHint, "successorHint") };
   // Schema drift: production rows may carry fields added by other lanes or
   // newer checkouts. Unknown fields pass through verbatim — never dropped,
   // never interpreted. historyOmitted keeps its conditional (absent unless > 0).
@@ -548,6 +557,14 @@ const stamp = (atMs, agentId, action, note) =>
 // still changes on every write (the PR-link concurrency check reads it).
 export const MAX_CLAIM_HISTORY = 200;
 const historyOmittedOf = value => (Number.isSafeInteger(value) && value > 0 ? value : 0);
+// Epoch fencing (W8): the fencing epoch. Pre-existing claims (no epoch
+// stored) hydrate to 0 — backward compatible. Only ownership transitions
+// bump it; see withEpochBump.
+const epochOf = value => (Number.isSafeInteger(value) && value >= 0 ? value : 0);
+// Every ownership transition stamps epoch+1, fencing out resurrected former
+// holders. The caller's history stamp records the transition itself; the
+// bump rides along on the item.
+const withEpochBump = item => ({ ...item, epoch: epochOf(item.epoch) + 1 });
 export const claimHistoryLength = item =>
   (Array.isArray(item?.history) ? item.history.length : 0) + historyOmittedOf(item?.historyOmitted);
 const withHistory = (work, atMs, agentId, action, note) => {
@@ -643,6 +660,7 @@ export function createWork(input = {}, { now, agentId } = {}) {
   const declared = files === undefined || files === null ? { files: Object.freeze([]), fileBlocks: Object.freeze({}) } : claimedFilesOf(files);
   const links = pullList(pullRequest, pullRequests);
   const item = { id, title: title ?? id, state: "unclaimed", owner: null, history: [],
+    epoch: 0, // epoch fencing (W8): no owner yet, the fence starts here
     claimedAt: null, leaseStartAt: null, leaseExpiresAt: null, deliveryMode: null,
     reviewPolicy: reviewPolicy ?? null, reviewedBy: null, attestations: Object.freeze([]),
     tags: tags === undefined || tags === null ? Object.freeze([]) : tagsOf(tags),
@@ -659,7 +677,7 @@ export function createWork(input = {}, { now, agentId } = {}) {
     chain: Object.freeze([]), supersededBy: null, workItemId: optionalId(workItemId, "workItemId"),
     squadId: optionalId(squadId, "squadId"), // plan-squads: work offer targeted at a squad
     kind: claimKind, revision: claimRevision, ci: null, reviews: Object.freeze([]),
-    leaseSeq: 1, epoch: 1, priorActiveState: null, lastHeartbeatAt: null,
+    leaseSeq: 1, priorActiveState: null, lastHeartbeatAt: null,
     consecutiveHeartbeats: 0, standby: Object.freeze([]), createdSeq: null,
     filesDeclared: filesDeclared === undefined ? true : filesDeclared === true,
     // Schema drift: unknown input fields pass through verbatim.
@@ -688,7 +706,8 @@ export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, p
   const effective = wanted ?? leaseDefaultHours(room, kind);
   const declared = files === undefined || files === null ? null : claimedFilesOf(files);
   const links = pullRequest === undefined && pullRequests === undefined ? null : pullList(pullRequest, pullRequests);
-  const claimed = { ...item, state: "claimed", owner: agent, claimedAt: isoOf(atMs),
+  // Epoch fencing (W8): nobody -> agent is an ownership transition — bump.
+  const claimed = withEpochBump({ ...item, state: "claimed", owner: agent, claimedAt: isoOf(atMs),
     files: declared ? declared.files : item.files,
     fileBlocks: declared
       ? Object.freeze({ ...fileBlocksOf(fileBlocks), ...declared.fileBlocks })
@@ -707,7 +726,7 @@ export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, p
     // renews never touch leaseSeq — only claim / succession / reclaim do.
     leaseSeq: item.claimedAt == null ? 1 : (item.leaseSeq ?? 0) + 1,
     epoch: item.epoch ?? 1,
-    priorActiveState: null, lastHeartbeatAt: null, consecutiveHeartbeats: 0 };
+    priorActiveState: null, lastHeartbeatAt: null, consecutiveHeartbeats: 0 });
   return withHistory(claimed, atMs, agent, "claimed", note ?? `lease: ${effective}h`);
 }
 // The window (hours) the item's current lease was minted with — the middle
@@ -880,8 +899,19 @@ export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClai
 // four are recorded on the item and then frozen with the done state. tags
 // and blobs are only meaningful on the done transition and are refused
 // anywhere else.
-export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, now, authority = false } = {}) {
+export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, expectedEpoch, now, authority = false } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  // Epoch fencing (W8): when the caller presents the epoch its decision was
+  // based on, it must match the claim's current epoch. A resurrected former
+  // holder presents a stale epoch after a claim/reassign/succession/release
+  // bumped it — reject rather than apply, before the owner check, so the
+  // refusal names the real problem. Optional for backward compatibility:
+  // callers that omit expectedEpoch get the old behavior.
+  if (expectedEpoch !== undefined && expectedEpoch !== null) {
+    check(Number.isSafeInteger(expectedEpoch) && expectedEpoch >= 0, "expectedEpoch must be a non-negative integer");
+    if (item.epoch !== expectedEpoch) fail("stale_epoch",
+      `work "${item.id}" is at epoch ${item.epoch} — the update was based on epoch ${expectedEpoch}; read the claim again`);
+  }
   check(authority === true || item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can update it`);
   check(!isTerminalClaimState(item.state), `work "${item.id}" is ${item.state} and immutable`);
   if (state !== undefined) {
@@ -919,6 +949,9 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
   };
   const next = state === undefined ? { ...item, ...withProvenance } : { ...item, state,
     owner: released ? null : item.owner,
+    // Epoch fencing (W8): a release is an ownership transition
+    // (owner -> nobody) — bump so the released holder is fenced out.
+    epoch: released ? item.epoch + 1 : item.epoch,
     leaseStartAt: released ? null : item.leaseStartAt, // a released claim holds no lease
     leaseExpiresAt: released ? null : item.leaseExpiresAt, // a released claim holds no lease
     // a released claim drops its reviews too — attestations belong to the
@@ -1074,7 +1107,9 @@ export function reassignWork(work, agentId, newOwner, { note, now, authority = f
   const claim = fresh ? { state: "claimed", claimedAt: isoOf(atMs),
     leaseStartAt: hours === null ? null : isoOf(atMs),
     leaseExpiresAt: hours === null ? null : isoOf(atMs + hours * 3600 * 1000) } : {};
-  return withHistory({ ...item, ...claim, owner: target, attestations: Object.freeze([]), reviews: Object.freeze([]) }, atMs, agent, `reassigned:${target}`, note);
+  // Epoch fencing (W8): owner -> new owner is an ownership transition — bump.
+  return withHistory(withEpochBump({ ...item, ...claim, owner: target, attestations: Object.freeze([]), reviews: Object.freeze([]) }),
+    atMs, agent, `reassigned:${target}`, note);
 }
 // True when the item holds an active claim whose lease has lapsed. Items
 // without a lease, and items not under claim, never expire.
@@ -1097,11 +1132,48 @@ export function releaseExpired(items, now) {
     // 2026-09-30 (phase-2 gap audit L-P2-8): mirrors updateWork, where a
     // released claim drops its reviews too (attestations belong to the
     // lapsed owner's round of work, never to whoever claims next).
-    const released = { ...item, state: "unclaimed", owner: null, leaseStartAt: null, leaseExpiresAt: null,
-      files: Object.freeze([]), fileBlocks: Object.freeze({}), attestations: Object.freeze([]), reviews: Object.freeze([]) };
+    // Epoch fencing (W8): auto-release is an ownership transition
+    // (owner -> nobody) — bump so the lapsed holder is fenced out.
+    const released = withEpochBump({ ...item, state: "unclaimed", owner: null, leaseStartAt: null, leaseExpiresAt: null,
+      files: Object.freeze([]), fileBlocks: Object.freeze({}), attestations: Object.freeze([]), reviews: Object.freeze([]) });
     return withHistory(released, atMs, item.owner ?? "system", "lease_expired",
       `claim by ${item.owner ?? "nobody"} lapsed at ${item.leaseExpiresAt} — auto-released`);
   });
+}
+// Succession-election hook (crash-recovery guild: W-succession / W3).
+//
+// W-succession's unprivileged election decides the new holder after
+// lease+grace expiry. It must apply the decision through THIS function —
+// never by setting `owner` directly — because the ownership change has to
+// bump the epoch atomically with the handoff. The bump is what fences out
+// the resurrected former holder: their next updateWork presenting the
+// pre-election epoch fails closed with stale_epoch instead of clobbering
+// the successor's work.
+//
+// Precondition (the election's responsibility, not this function's): the
+// lease+grace window really has expired. This function only refuses
+// nonsense inputs — done and unclaimed items cannot be successed.
+//
+// The successor starts a clean round: state returns to claimed,
+// claimedAt and the lease restart from now, and the lapsed owner's
+// attestations, reviews, and file declarations are cleared (the same rule
+// as release — they belong to the dead round, never to the next holder).
+// The history stamp is `succession:<newOwner>`; the epoch bump rides along.
+export function electClaimSuccessor(work, newOwner, { note, leaseHours, room, now, agentId } = {}) {
+  const item = workOf(work), target = agentOf(newOwner), atMs = nowMsOf(now);
+  check(item.state !== "done", `work "${item.id}" is done and immutable`);
+  check(item.state !== "unclaimed", `work "${item.id}" is unclaimed — claim it instead of successing it`);
+  // QA D-1: the same 4000-char note bound as create/claim — see claimWork.
+  if (note !== undefined && note !== null) check(typeof note === "string" && note.length <= 4000, "note must be a string of at most 4000 characters");
+  const wanted = leaseHoursOf(leaseHours);
+  const effective = wanted === null ? null : wanted ?? roomWorkClaimConfig(room).defaultLeaseHours;
+  const elected = withEpochBump({ ...item, state: "claimed", owner: target, claimedAt: isoOf(atMs),
+    leaseStartAt: effective === null ? null : isoOf(atMs),
+    leaseExpiresAt: effective === null ? null : isoOf(atMs + effective * 3600 * 1000),
+    attestations: Object.freeze([]), reviews: Object.freeze([]),
+    files: Object.freeze([]), fileBlocks: Object.freeze({}) });
+  return withHistory(elected, atMs, agentId === undefined ? "system" : agentOf(agentId),
+    `succession:${target}`, note ?? `lease+grace expired — ownership elected to ${target}`);
 }
 // Review-policy gate for the done transition. policy resolves from the
 // explicit option, then the work item, then self_attested. verifyMembers is
