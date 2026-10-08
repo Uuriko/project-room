@@ -29,6 +29,7 @@ import { replyDraftKey, replyDraftData, validReplyDraft, replyFollowUp, creditQu
 import { workHelpContext, validateHelpData } from "./work-help.js";
 import { workOffersContext, validateHelpOfferData } from "./help-offers.js";
 import { installInbox } from "./inbox-ui.js";
+import { nameBeforeFirstRoom } from "./account-setup-ui.js";
 import { createAccountSettingsUI, applyStoredTheme, organizeRoomSettings, ACCOUNT_DELETED_MESSAGE } from "./account-settings-ui.js";
 import { createAuthSigninUI, classifyAuthLink } from "./auth-signin-ui.js";
 import { createAgentSigninUI } from "./agent-signin-ui.js";
@@ -1028,7 +1029,7 @@ async function loadAccountRooms(more = false) {
     // fresh account with no rooms and no pending invitation gets its default
     // room created and opened.
     if (!more && !$("#account-rooms-list").children.length && !roomListCursor
-      && !startRoomIntent && !startRoomFlight) ensureDefaultRoom();
+      && !startRoomIntent && !startRoomFlight) nameThenEnsureDefaultRoom();
   } catch (error) {
     if (version !== roomListVersion || (accountClient.session && accountClient.session !== owned)) return;
     if ([401, 403].includes(error.status) || !accountClient.session) endAccountAccess();
@@ -1039,6 +1040,8 @@ async function loadAccountRooms(more = false) {
 // invitation is being redeemed — the invite flow owns the landing. Idempotent
 // server-side; a second call returns the existing room.
 let defaultRoomFlight = null;
+const nameThenEnsureDefaultRoom = nameBeforeFirstRoom({
+  askName: () => inboxUI.askSetupName?.(), ensure: () => ensureDefaultRoom(), session: () => accountClient.session });
 async function ensureDefaultRoom() {
   if (defaultRoomFlight) return defaultRoomFlight;
   // Never create a default room when entering through an invitation or a
