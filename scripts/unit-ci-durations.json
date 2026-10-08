@@ -841,6 +841,7 @@
   "tests/work-session-budget.test.js": 30381,
   "tests/work-snapshot.test.js": 40108,
   "tests/work-templates.test.js": 6784,
+  "tests/work-history-floor.test.js": 439,
   "tests/workflow.test.js": 5073,
   "tests/writer-fence-property.test.js": 300000,
   "tests/writer-fence-unfenced.test.js": 58675,
@@ -973,6 +974,14 @@
   "runtime": "macOS solo real node --test",
   "file": "tests/landing-facts.test.js",
   "milliseconds": 70,
+  "purpose": "Measured allocation only; test discovery remains authoritative."
+ },
+ "workHistoryFloorMeasurement": {
+  "date": "2026-10-07",
+  "runtime": "Node v22.23.3 Linux local",
+  "file": "tests/work-history-floor.test.js",
+  "milliseconds": 439,
+  "method": "Median of five solo node --test wall-clock runs; all passed.",
   "purpose": "Measured allocation only; test discovery remains authoritative."
  }
 }
