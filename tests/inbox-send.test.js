@@ -4,6 +4,7 @@
 // credentials, no message bodies in logs. Unconnected channels fail honestly.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { telegramConfig } from "../server/channel-adapters/telegram-config.mjs";
@@ -240,4 +241,103 @@ test("direct-send journal records pending then settles exactly once", async t =>
   assert.equal(getDirectSend(f.store.db, "send-1").status, "sent");
   try { completeDirectSend(f.store.db, "send-1", { status: "failed", errorCode: "x", at: at + 2 }); assert.fail("should settle once"); }
   catch (error) { assert.equal(error.code, "direct_send_settled"); }
+});
+
+test("requestId makes an uncertain retry replay the journaled send without a second provider delivery", async t => {
+  // ch-2039 challenge follow-up: before the fix, two identical direct-send
+  // POSTs (e.g. a retry after a dropped response) delivered twice — the
+  // journal had no idempotency key and each request minted a fresh send id.
+  const f = fixture(t);
+  let providerCalls = 0;
+  const { post } = await serve(t, f, telegramOptions(async () => {
+    providerCalls++;
+    return Response.json({ ok: true, result: { message_id: 4242 } });
+  }));
+  const data = { channel: "telegram", to: "123456", subject: "", body: "retry me", requestId: randomUUID() };
+  const first = await post(data);
+  assert.equal(first.status, 200);
+  const firstSend = (await first.json()).send;
+  assert.equal(firstSend.status, "sent");
+  // Uncertain retry: the first response was lost, so the caller replays the
+  // same request — same requestId, same content.
+  const second = await post(data);
+  assert.equal(second.status, 200);
+  const secondSend = (await second.json()).send;
+  assert.equal(secondSend.id, firstSend.id, "retry replays the original send, not a new one");
+  assert.equal(providerCalls, 1, "provider must be hit once");
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM direct_channel_sends WHERE account_id=? AND status='sent'").get(f.accountId).n, 1);
+});
+
+test("same requestId with different content is a 409, never a second send", async t => {
+  const f = fixture(t);
+  let providerCalls = 0;
+  const { post } = await serve(t, f, telegramOptions(async () => {
+    providerCalls++;
+    return Response.json({ ok: true, result: { message_id: 4242 } });
+  }));
+  const requestId = randomUUID();
+  const first = await post({ channel: "telegram", to: "123456", subject: "", body: "original", requestId });
+  assert.equal(first.status, 200);
+  const clash = await post({ channel: "telegram", to: "123456", subject: "", body: "different body", requestId });
+  assert.equal(clash.status, 409);
+  assert.equal((await clash.json()).error.code, "direct_send_idempotency_conflict");
+  assert.equal(providerCalls, 1);
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM direct_channel_sends WHERE account_id=?").get(f.accountId).n, 1);
+});
+
+test("concurrent same-requestId direct sends collapse to one provider delivery", async t => {
+  const f = fixture(t);
+  let providerCalls = 0;
+  const { post } = await serve(t, f, telegramOptions(async () => {
+    providerCalls++;
+    await new Promise(resolve => setTimeout(resolve, 30)); // widen the race window
+    return Response.json({ ok: true, result: { message_id: 4242 } });
+  }));
+  const data = { channel: "telegram", to: "123456", subject: "", body: "double click", requestId: randomUUID() };
+  const [r1, r2] = await Promise.all([post(data), post(data)]);
+  assert.equal(r1.status, 200); assert.equal(r2.status, 200);
+  assert.equal((await r1.json()).send.id, (await r2.json()).send.id, "both callers see the same send");
+  assert.equal(providerCalls, 1, "provider must be hit once");
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM direct_channel_sends WHERE account_id=? AND status='sent'").get(f.accountId).n, 1);
+});
+
+test("a journaled failure replays on retry instead of re-sending", async t => {
+  const f = fixture(t);
+  let providerCalls = 0;
+  const { post } = await serve(t, f, telegramOptions(async () => { providerCalls++; throw new Error("network down"); }));
+  const data = { channel: "telegram", to: "123456", subject: "", body: "try again", requestId: randomUUID() };
+  const first = await post(data);
+  assert.equal(first.status, 502);
+  // The failure is terminal for its key: the retry replays the journaled
+  // failure receipt instead of delivering again on uncertainty.
+  const second = await post(data);
+  assert.equal(second.status, 200);
+  const replayed = (await second.json()).send;
+  assert.equal(replayed.status, "failed");
+  assert.equal(replayed.id, f.store.db.prepare("SELECT id FROM direct_channel_sends WHERE account_id=?").get(f.accountId).id);
+  assert.equal(providerCalls, 1);
+});
+
+test("sends without a requestId keep one-row-per-request behavior", async t => {
+  // The idempotency key is opt-in: keyless callers get no dedupe, as before.
+  const f = fixture(t);
+  let providerCalls = 0;
+  const { post } = await serve(t, f, telegramOptions(async () => {
+    providerCalls++;
+    return Response.json({ ok: true, result: { message_id: 4242 } });
+  }));
+  const data = { channel: "telegram", to: "123456", subject: "", body: "no key" };
+  assert.equal((await post(data)).status, 200);
+  assert.equal((await post(data)).status, 200);
+  assert.equal(providerCalls, 2);
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM direct_channel_sends WHERE account_id=? AND status='sent'").get(f.accountId).n, 2);
+});
+
+test("an invalid requestId is rejected before anything is journaled", async t => {
+  const f = fixture(t);
+  const { post } = await serve(t, f, telegramOptions(telegramOkFetch));
+  const res = await post({ channel: "telegram", to: "123456", subject: "", body: "bad key", requestId: "../evil" });
+  assert.equal(res.status, 422);
+  assert.equal((await res.json()).error.code, "invalid_direct_send");
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM direct_channel_sends WHERE account_id=?").get(f.accountId).n, 0);
 });
