@@ -568,7 +568,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       const inviterLine = $("#join-inviter-line");
       if (inviterLine) inviterLine.textContent = preview.inviterDisplayName ? `${preview.inviterDisplayName} invited you.` : "";
       const returning = preview.link.status !== "active";
-      $("#join-link-scope").textContent = returning ? "You already belong to this room. Open it without using another invitation place." : "Read history and join the conversation. Everyone in the room can read your messages.";
+      $("#join-link-scope").textContent = returning ? "You already belong to this room. Open it without using another invitation place." : "Join the conversation. Everyone in the room can read your messages.";
       $("#join-link-permissions").textContent = preview.access;
       $("#join-link-expiry").textContent = `Invitation expires ${date(preview.link.expiresAt)} · ${preview.link.remainingJoins} places left.`;
       const sharedUrl = publicJoinInviteHref(joinSecret);
