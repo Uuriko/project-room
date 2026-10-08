@@ -41,6 +41,7 @@ import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchem
 import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./invitation-evidence.mjs";
 import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
 import { WANTS_WORK_SCHEMA } from "./work-wants.mjs"; // BOARD-WAKE-2
+import { SUMMONS_SCHEMA, maybeNoteCapabilitiesAdvertised } from "./summons.mjs"; // The Summons: the room calls the agent by name
 import { CODE_DROPS_SCHEMA, CodeDrops } from "./code-drops.mjs"; // room-native patch exchange
 import { PROJECTION_BODIES_SCHEMA, storedProjection, hydrateProjection } from "./projection-at-rest.mjs"; // Phase 1a
 import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, syncMessageRows, runMessagesBackfill, checkMessagesParity as verifyMessagesParity } from "./messages-store.mjs";
@@ -1060,7 +1061,7 @@ function roomSchemaStamp() {
     directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA,
     agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA, OPERATOR_ACTIONS_SCHEMA,
     INTEGRITY_JOB_CURSOR_SCHEMA, INTEGRITY_ROOM_STATE_SCHEMA, INTEGRITY_SWEEP_COLUMN,
-    ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES, MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, WANTS_WORK_SCHEMA, CODE_DROPS_SCHEMA, PROJECTION_BODIES_SCHEMA,
+    ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES, MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, WANTS_WORK_SCHEMA, SUMMONS_SCHEMA, CODE_DROPS_SCHEMA, PROJECTION_BODIES_SCHEMA,
     PUBLIC_READ_MODEL_SCHEMA,
     // Additive tables converged outside the version bump. A warm wake whose
     // stamp matches skips the whole schema pass, so any DDL the pass applies
@@ -1762,6 +1763,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // BOARD-WAKE-2: opt-in ready-work preference. Unfenced, empty until an
       // agent opts in. The stamp includes this DDL.
       this.db.exec(WANTS_WORK_SCHEMA);
+      // The Summons: standing public calls for capabilities the room needs.
+      // Unfenced and additive like the journals above — older writers have
+      // no code path to these tables. The stamp includes this DDL.
+      this.db.exec(SUMMONS_SCHEMA);
       // Code drops: patch metadata and review checks. Unfenced and additive;
       // the bytes stay in room_attachments. The stamp includes this DDL.
       this.db.exec(CODE_DROPS_SCHEMA);
@@ -4535,7 +4540,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   }
   command(token, roomId, command, expectedSessionBinding = null) {
     validateCommand(command);
-    return this.transaction(() => {
+    const outcome = this.transaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       // RC-2026-09-23-100: guest-agent scope gate (dual-check part 2 of the
       // GX-invite design). Guest members may post chat messages and set
@@ -4895,6 +4900,19 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return { sequence, event: incoming, duplicate: false, ...(note ? { note } : {}),
         ...((Array.isArray(mentionWarnings) && mentionWarnings.length > 0) ? { mentionWarnings } : {}) };
     });
+    // The Summons, post-commit trigger (server/summons.mjs): the room
+    // answers the moment it learns what a member can do, over every
+    // transport that funnels through command() (HTTP commands, MCP,
+    // internal callers). Runs after the command's transaction commits, and
+    // never fails the command that triggered it.
+    if (command?.type === T.CAPABILITIES_ADVERTISED) {
+      try {
+        maybeNoteCapabilitiesAdvertised(this, roomId, command, outcome);
+      } catch (error) {
+        console.error("summons call failed:", error?.message ?? error);
+      }
+    }
+    return outcome;
   }
 
   // Jev-harness receipt-acceptance gate, shadow mode (docs/JEV-GATES.md):

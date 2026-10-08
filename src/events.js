@@ -108,7 +108,16 @@ export const EVENT_TYPES = Object.freeze({
   WORK_CLAIM_UPDATED: "work_claim.updated",
   // ACT-1a: a room's starter task and Room Guide were seeded once.
   // ACT-1b (/start, landing, receipt UI) waits on S1, RT, and GR2 deployed.
-  ROOM_STARTER_SEEDED: "room.starter_seeded"
+  ROOM_STARTER_SEEDED: "room.starter_seeded",
+  // The Summons (server/summons.mjs): the room calls the agent by name.
+  // The room_summons table is the source of truth; these events are the
+  // timeline-visible fanfare — issued when a standing call is posted,
+  // called when the room names a member who can answer it, answered when
+  // they do. The handlers validate the envelope and record nothing in
+  // the projection (same split as access.requested).
+  SUMMONS_ISSUED: "summons.issued",
+  SUMMONS_CALLED: "summons.called",
+  SUMMONS_ANSWERED: "summons.answered"
 });
 
 // Room channels (Phase 2 of the Discord/Slack-like redesign): every room has
@@ -583,7 +592,10 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.DM_POSTED]: recordPeerDm,
     [EVENT_TYPES.LAND_UPDATED]: recordLandUpdate,
     [EVENT_TYPES.WORK_CLAIM_UPDATED]: recordWorkClaimUpdate,
-    [EVENT_TYPES.ROOM_STARTER_SEEDED]: recordStarterSeeded
+    [EVENT_TYPES.ROOM_STARTER_SEEDED]: recordStarterSeeded,
+    [EVENT_TYPES.SUMMONS_ISSUED]: recordSummonsIssued,
+    [EVENT_TYPES.SUMMONS_CALLED]: recordSummonsCalled,
+    [EVENT_TYPES.SUMMONS_ANSWERED]: recordSummonsAnswered
   };
   const handler = handlers[incoming.type];
   if (!Object.hasOwn(handlers, incoming.type)) throw new Error(`Unsupported event type: ${incoming.type}`);
@@ -664,10 +676,19 @@ function validateEnvelope(incoming) {
       || Object.keys(action).some(field => field !== "claimId" && field !== "label")))) throw new Error(`Invalid ${key}`);
     // work_claim.updated deletion receipts name stranded dependents: claim ids.
     if (key === "dependents" && (!Array.isArray(value) || value.length > 64 || value.some(v => typeof v !== "string" || !validId(v)))) throw new Error(`Invalid ${key}`);
+    // The Summons: summons.called carries the cards it is calling about —
+    // id, labels, note, summoner, and when the call was posted.
+    if (key === "summons" && (!Array.isArray(value) || value.length === 0 || value.length > 16
+      || value.some(card => !card || typeof card !== "object" || Array.isArray(card)
+        || typeof card.id !== "string" || !validId(card.id)
+        || !Array.isArray(card.labels) || card.labels.some(label => typeof label !== "string" || !label.trim() || label.length > 64)
+        || typeof card.note !== "string" || !card.note.trim() || card.note.length > 512
+        || (card.summonerId != null && (typeof card.summonerId !== "string" || !validId(card.summonerId)))
+        || (card.createdAt != null && (typeof card.createdAt !== "string" || Number.isNaN(Date.parse(card.createdAt))))))) throw new Error(`Invalid ${key}`);
     // Polls (missing-features #5): a kind "poll" message carries a poll
     // payload { question, options, allowMultiple }. The envelope guard admits
     // the object key; the applier runs the full option validation.
-    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "scopes", "acceptedScopes", "changed", "state", "pullRequest", "pullRequests", "blocks", "actions", "dependents", "poll"].includes(key)) throw new Error(`Invalid ${key}`);
+    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "scopes", "acceptedScopes", "changed", "state", "pullRequest", "pullRequests", "blocks", "actions", "dependents", "poll", "summons"].includes(key)) throw new Error(`Invalid ${key}`);
   }
 }
 
@@ -1744,6 +1765,38 @@ function recordWorkClaimUpdate(state, incoming) {
   if (data.ciState !== undefined && !["pending", "success", "failure", "neutral"].includes(data.ciState)) throw new Error("Event data missing ciState");
   if (data.verdict !== undefined && !["approve", "changes_requested", "comment"].includes(data.verdict)) throw new Error("Event data missing verdict");
   if (data.action === "ci_changed" && (data.reason !== "ci_changed" || !data.ciState)) throw new Error("Event data missing ciState");
+}
+
+// The Summons (server/summons.mjs): validate-only handlers. The
+// room_summons table is the source of truth; these events are the
+// timeline-visible fanfare and record nothing in the projection.
+function recordSummonsIssued(state, incoming) {
+  requireMember(state, incoming.actorId);
+  const data = incoming.data ?? {};
+  if (typeof data.summonsId !== "string" || !data.summonsId.trim()) throw new Error("Event data missing summonsId");
+  if (!Array.isArray(data.labels) || data.labels.length === 0) throw new Error("Event data missing labels");
+  if (typeof data.note !== "string" || !data.note.trim()) throw new Error("Event data missing note");
+}
+
+function recordSummonsCalled(state, incoming) {
+  requireMember(state, incoming.actorId);
+  const data = incoming.data ?? {};
+  requireMember(state, data.calledMemberId);
+  if (data.trigger !== "capabilities_advertised" && data.trigger !== "summons_issued") {
+    throw new Error("Event data missing trigger");
+  }
+  if (!Array.isArray(data.summons) || data.summons.length === 0) throw new Error("Event data missing summons");
+  for (const card of data.summons) {
+    if (!card || typeof card.id !== "string" || !card.id.trim()) throw new Error("Event data missing summons id");
+  }
+}
+
+function recordSummonsAnswered(state, incoming) {
+  requireMember(state, incoming.actorId);
+  const data = incoming.data ?? {};
+  if (typeof data.summonsId !== "string" || !data.summonsId.trim()) throw new Error("Event data missing summonsId");
+  requireMember(state, data.summonerId);
+  if (data.summonerId === incoming.actorId) throw new Error("a member cannot answer their own summons");
 }
 
 function recordReferral(state, incoming) {

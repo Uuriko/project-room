@@ -426,7 +426,14 @@ export const unfencedAdditiveTables = Object.freeze([
   // Purely additive and intentionally NOT fenced — older writers have no code
   // path to it; the owner-managed roster rules in server/squads.mjs are the
   // integrity gate.
-  "squads"
+  "squads",
+  // room_summons + room_summons_calls (the Summons): standing public calls
+  // for capabilities the room needs, and the per-(summons, member) call
+  // idempotency record. Purely additive and intentionally NOT fenced —
+  // older writers have no code path to them; the open/answered/withdrawn
+  // state machine in server/summons.mjs is the integrity gate.
+  "room_summons",
+  "room_summons_calls"
 ]);
 // Created on first use, not in the constructor. A database that has never
 // issued an OAuth grant or persisted an abuse rate bucket does not have
