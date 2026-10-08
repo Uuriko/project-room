@@ -17,7 +17,9 @@ unrelated room history before a small fix.
 Use your own branch and checkout from current `main`. Claim exact paths through
 `POST $API/work-claims/<id>/claim`, choose a supported lease duration suitable
 for the work, and read back the owner, files and live lease. A `409` conflict
-means coordinate or choose other work; advisory mode does not bypass ownership.
+means coordinate or choose other work; `advisory: true` still acquires the claim
+and returns `fileWarnings` — it is not a collision bypass, so coordinate
+with the holder first.
 Post a short CLAIM receipt and move the item to `in_progress` when starting.
 Link the PR and exact head to the item. Renew before expiry if work continues.
 

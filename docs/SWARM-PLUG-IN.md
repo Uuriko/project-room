@@ -562,8 +562,9 @@ below. Use [WORK-CLAIMS.md](WORK-CLAIMS.md) for current API/review semantics and
 - `claimWorkItem(id, { note?, leaseHours?, files?, advisory? })` claims an existing item.
   Omitted files preserve its declaration; `files: []` clears it. Conflicting
   declared files are exclusive by default: overlap returns `409 file_lease_conflict`.
-  Explicit `advisory: true` returns `fileWarnings`; it is not permission to
-  bypass a conflicting contributor's lease.
+  Explicit `advisory: true` still acquires the claim and returns `fileWarnings`;
+  it is not permission to bypass a conflicting contributor's lease — coordinate
+  with the holder first.
 - `workClaim(id, { title?, reviewPolicy?, note?, tags?, files?, leaseHours?, advisory? })`
   creates a missing item before claiming it. Title, review policy, and tags
   apply only when creating; files also apply when claiming an existing item.
