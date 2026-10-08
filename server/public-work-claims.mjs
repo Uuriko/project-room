@@ -34,7 +34,7 @@ const shape = (input, required, optional = []) => {
 };
 const lease = value => {
   const hours = value === undefined ? 1 : value;
-  check(typeof hours === 'number' && Number.isFinite(hours) && hours > 0 && hours <= 24, 'Lease must be greater than zero and at most 24 hours');
+  check(typeof hours === 'number' && Number.isFinite(hours) && hours > 0 && hours <= 2, 'Lease must be greater than zero and at most 2 hours (the hard cap, all claim kinds)');
   return hours;
 };
 const filesOf = input => {

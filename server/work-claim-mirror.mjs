@@ -1,10 +1,20 @@
 // Projection claim commands (MCP and the work-item form) write the same
 // work-claims board the REST routes use. A handoff or supersede leaves a
 // successor card that depends on the source, so the chain is visible there.
-import { createWork, claimWork, renewWork, updateWork, roomWorkClaimConfig, HELD_CLAIM_STATES } from "./work-claims.mjs";
+import { createWork, claimWork, renewWork, updateWork, roomWorkClaimConfig, HELD_CLAIM_STATES, MAX_LEASE_HOURS } from "./work-claims.mjs";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
 
 const BOARD_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+// The legacy work-item flow carries its own expiresAt; the board enforces
+// the 2h hard cap, so the mirror translates (clamped). Missing or past
+// expiries fall back to the kind default.
+const legacyLeaseHours = (expiresAt, nowMs) => {
+  if (typeof expiresAt !== "string") return undefined;
+  const ms = Date.parse(expiresAt) - nowMs;
+  if (!Number.isFinite(ms) || ms <= 0) return undefined;
+  return Math.min(ms / 3600000, MAX_LEASE_HOURS);
+};
 
 export function boardClaimId(workItemId) {
   if (typeof workItemId === "string" && BOARD_ID.test(workItemId)) return workItemId;
@@ -98,7 +108,8 @@ function claimBoardInner(store, roomId, actorId, id, data, nowMs) {
     error.code = "too_many_open_claims";
     throw error;
   }
-  const claimed = claimWork(item, actorId, { ...fields, room: roomLike(registry, roomId), now: nowMs });
+  const claimed = claimWork(item, actorId, { ...fields, leaseHours: legacyLeaseHours(data.expiresAt, nowMs),
+    room: roomLike(registry, roomId), now: nowMs });
   return commit(store, roomId, actorId, claimed, "claimed", nowMs);
 }
 
@@ -123,7 +134,8 @@ export function mirrorProjectionClaim(store, roomId, actorId, incoming) {
   if (incoming.type === "claim.renewed") {
     const item = registry.get(roomId, id);
     if (!item || item.state === "unclaimed" || item.owner !== actorId) return claimBoard(store, roomId, actorId, id, data, nowMs);
-    return commit(store, roomId, actorId, renewWork(item, actorId, { room: roomLike(registry, roomId), now: nowMs }), "renewed", nowMs);
+    return commit(store, roomId, actorId, renewWork(item, actorId, { leaseHours: legacyLeaseHours(data.expiresAt, nowMs),
+      room: roomLike(registry, roomId), now: nowMs }), "renewed", nowMs);
   }
   if (incoming.type === "claim.released") {
     // Release-atomic like the REST route: pause + release share one
