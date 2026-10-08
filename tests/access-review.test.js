@@ -16,7 +16,6 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { GUEST_AGENT_TOKEN_PREFIX } from "../server/guest-agent-links.mjs";
 import { accessReviewReport, assembleAccessReview, renderAccessReview, ACCESS_REVIEW_FORMAT } from "../server/access-review.mjs";
 
 const execFileAsync = promisify(execFile);

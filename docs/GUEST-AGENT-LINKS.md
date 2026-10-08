@@ -49,7 +49,7 @@ HTTP:
 
 Mint body (exact known fields): `requestId`, `expectedOwnerRevision`, optional `displayName` (default `Guest
 agent`). GA-1 (issue #941): the token is always issued by the server — a
-256-bit CSPRNG `ga1.` secret returned once, only its hash stored. A mint
+256-bit CSPRNG secret returned once, only its hash stored. A mint
 that supplies `linkToken` is rejected with `422 client_token_rejected`
 (the client must never pick the credential — a low-entropy caller token
 would become a live 2h room credential).

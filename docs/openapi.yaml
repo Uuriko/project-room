@@ -13441,7 +13441,7 @@ paths:
         account_session_required for an accountless owner). Body: `{ requestId,
         expectedOwnerRevision, displayName?, roomId? }`; the server always
         issues the guest credential (GA-1, issue #941) — a 256-bit CSPRNG
-        `ga1.` token returned once, only its hash stored. Supplying
+        token returned once, only its hash stored. Supplying
         `linkToken` is rejected with 422 `client_token_rejected`. An exact
         retry returns a receipt without redisclosing the secret. 30 per
         address per minute. `GET` on the

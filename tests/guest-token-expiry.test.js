@@ -31,9 +31,8 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { GUEST_AGENT_TOKEN_PREFIX, GUEST_AGENT_TTL_MS } from "../server/guest-agent-links.mjs";
+import { GUEST_AGENT_TTL_MS } from "../server/guest-agent-links.mjs";
 
-const guestToken = () => GUEST_AGENT_TOKEN_PREFIX + randomBytes(32).toString("base64url");
 const sha256 = value => createHash("sha256").update(value).digest("hex");
 
 async function serve(t) {
