@@ -4644,6 +4644,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           fail(403, "work_claims_not_permitted", "Creating, claiming, renewing, or updating work claims needs a contribute, review, or collaborate profile.");
         }
       }
+      // A reaction on a DM is shown to its parties and the answer would
+      // confirm the private id, so a non-party is told "no such message".
+      // Live admission only; reactions already in a log keep replaying.
+      if (command.type === T.MESSAGE_REACTION_SET && typeof command.data?.messageId === "string") {
+        const target = (room.state.messages || []).find(m => m.id === command.data.messageId);
+        if (target?.toMemberId && target.authorId !== auth.member.id && target.toMemberId !== auth.member.id) {
+          fail(422, "command_rejected", "Reaction must reference a message in this Room");
+        }
+      }
       // Bond / peer DM. Room chat (message.posted) is unchanged and still
       // requires room membership plus DM consent when toMemberId is set.
       // Peer DMs are a separate command, gated by an active bond with peer.dm.
