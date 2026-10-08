@@ -100,6 +100,33 @@ function uniqueTarget(candidates, senderMemberId) {
   return targets.length ? targets[0] : null;
 }
 
+// Two-trigger discipline (lane B8): interrupt suppression/re-arm driven off
+// the mention lifecycle transitions. `state` is the mention's current
+// lifecycle state; the caller supplies whether a second interrupt for the
+// same request falls inside the 30-minute dedupe window (collapses into the
+// first) and whether a fresh explicit request re-arms a timed-out mention.
+// Pure and additive: terminal `responded` never re-fires; `delivered` /
+// `acknowledged` fire once per window; only a fresh explicit request after
+// `timed_out` re-arms.
+export function mentionInterruptGate({ state, explicitReRequest = false, withinDedupeWindow = false } = {}) {
+  if (!isMentionState(state)) throw new Error(`unknown mention state: ${state}`);
+  if (state === "responded") return Object.freeze({ fire: false, reason: "mention already responded" });
+  if (state === "timed_out") {
+    return explicitReRequest
+      ? Object.freeze({ fire: true, reason: "fresh explicit request after timeout re-arms the interrupt" })
+      : Object.freeze({ fire: false, reason: "timed out without a fresh explicit request" });
+  }
+  return withinDedupeWindow
+    ? Object.freeze({ fire: false, reason: "collapsed into the pending interrupt (dedupe window)" })
+    : Object.freeze({ fire: true, reason: "first interrupt for this request" });
+}
+
+// Resolve an @name to a room member id. `members` is the room projection's
+// members map ({ memberId: { displayName, kind, active } });
+// `identityNames` maps memberId -> linked agent-identity display name.
+// Match order: memberId, then displayName, then identity display name —
+// all case-insensitive, first match wins. Skips the sender and inactive
+// members; returns null when nothing resolves (never invent a recipient).
 export function resolveMentionTarget(members, identityNames, name, senderMemberId) {
   if (typeof name !== "string" || !name) return null;
   return uniqueTarget(mentionCandidates(members, identityNames)
