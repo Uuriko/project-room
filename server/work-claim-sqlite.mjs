@@ -8,7 +8,7 @@
 // every item it reads (workOf), so a row is never trusted without passing
 // through it first.
 
-import { roomWorkClaimConfig } from "./work-claims.mjs";
+import { roomWorkClaimConfig, MAX_LEASE_HOURS } from "./work-claims.mjs";
 import { encodeRow, decodeRow } from "./persisted-row.mjs";
 
 // Replay-safe row kind for claim items (RC-2026-09-27-2730). The fields mirror
@@ -112,7 +112,16 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
     configure(roomId, config) {
       if (config !== undefined && config !== null) {
         if (typeof config !== "object" || Array.isArray(config)) throw new Error("room work-claim config must be an object");
-        upsertConfig.run(roomId, JSON.stringify({ ...rawConfig(roomId), ...config }), now());
+        // Normalize on write: a defaultLeaseHours over the 2h hard cap is
+        // clamped (never persisted as-is), an invalid one is dropped so the
+        // read path falls back to the default.
+        const next = { ...config };
+        if (Object.hasOwn(next, "defaultLeaseHours")) {
+          const hours = next.defaultLeaseHours;
+          if (typeof hours !== "number" || !Number.isFinite(hours) || hours <= 0) delete next.defaultLeaseHours;
+          else if (hours > MAX_LEASE_HOURS) next.defaultLeaseHours = MAX_LEASE_HOURS;
+        }
+        upsertConfig.run(roomId, JSON.stringify({ ...rawConfig(roomId), ...next }), now());
       }
       return roomWorkClaimConfig({ workClaims: rawConfig(roomId) });
     },

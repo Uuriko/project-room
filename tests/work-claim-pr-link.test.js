@@ -58,7 +58,7 @@ const claimEvents = store => store.db.prepare(
 test("linking a draft after claiming preserves the lease and reconciles exact duplicates", async t => {
   const { store, call } = await room(t);
   await call("create", null, { id: "later-pr", files: ["src/held.js"], repo: "Uuriko/project-room", branch: "draft" });
-  const claimed = (await call("claim", "later-pr", { leaseHours: 6 })).value;
+  const claimed = (await call("claim", "later-pr", { leaseHours: 1 })).value;
   const body = { appendPullRequest: URL_A + "/", expectedClaimedAt: claimed.claimedAt, expectedHistoryLength: claimed.history.length };
   const beforeEvents = claimEvents(store).length;
   const linked = (await call("update", "later-pr", body)).value;
@@ -137,7 +137,7 @@ test("a closing webhook releases the claim, and a second delivery does not settl
 test("a batch stays claimed until every linked pull is merged or closed", async t => {
   const { store, call } = await room(t);
   const second = "https://github.com/Uuriko/project-room/pull/9";
-  await call("create", null, { id: "batch", repo: "Uuriko/project-room", branch: "coord" });
+  await call("create", null, { id: "batch", repo: "Uuriko/project-room", branch: "coord", files: ["src/batch.mjs"] });
   let current = (await call("claim", "batch", {})).value;
   for (const appendPullRequest of [URL_A, second]) {
     current = (await call("update", "batch", { appendPullRequest, expectedClaimedAt: current.claimedAt, expectedHistoryLength: current.history.length })).value;
@@ -164,7 +164,7 @@ test("a batch stays claimed until every linked pull is merged or closed", async 
 
 test("an explicit release settles a batch while a linked pull is still open", async t => {
   const { store, call } = await room(t);
-  await call("create", null, { id: "open-batch", pullRequests: [URL_A, "https://github.com/Uuriko/project-room/pull/11"] });
+  await call("create", null, { id: "open-batch", files: ["src/open-batch.mjs"], pullRequests: [URL_A, "https://github.com/Uuriko/project-room/pull/11"] });
   await call("claim", "open-batch", {});
   const released = await call("release", "open-batch", { reason: "handed off" });
   assert.equal(released.value.state, "unclaimed");
@@ -173,7 +173,7 @@ test("an explicit release settles a batch while a linked pull is still open", as
 
 test("an open pull is not settled, and the next sweep waits instead of polling again", async t => {
   const { store, call } = await room(t);
-  await call("create", null, { id: "lane", pullRequest: URL_A });
+  await call("create", null, { id: "lane", pullRequest: URL_A, files: ["src/lane.mjs"] });
   await call("claim", "lane", {});
   const { fetchImpl, calls } = githubFetch({ merged: false, state: "open" });
   await call("sweep", null, {}, { fetchImpl });
@@ -186,7 +186,7 @@ test("an open pull is not settled, and the next sweep waits instead of polling a
 
 test("the cron poll completes a linked claim the same way a sweep does", async t => {
   const { store, call } = await room(t);
-  await call("create", null, { id: "cron-lane", pullRequest: "https://github.com/Uuriko/project-room/pull/8" });
+  await call("create", null, { id: "cron-lane", pullRequest: "https://github.com/Uuriko/project-room/pull/8", files: ["src/cron-lane.mjs"] });
   await call("claim", "cron-lane", {});
   const { fetchImpl } = githubFetch({ merged: true, state: "closed" });
   const result = await syncClaimPullRequests(store, { fetchImpl, token: null });
@@ -197,12 +197,12 @@ test("the cron poll completes a linked claim the same way a sweep does", async t
 
 test("a GitHub 403 backs off every open pull until the reset, and the next tick does not call again", async t => {
   const { store, call } = await room(t);
-  await call("create", null, { id: "quiet" });
+  await call("create", null, { id: "quiet", files: ["src/quiet.mjs"] });
   await call("claim", "quiet", {});
-  await call("create", null, { id: "waiting", pullRequest: "https://github.com/Uuriko/project-room/pull/11" });
-  await call("create", null, { id: "lane", pullRequest: URL_A });
+  await call("create", null, { id: "waiting", pullRequest: "https://github.com/Uuriko/project-room/pull/11", files: ["src/waiting.mjs"] });
+  await call("create", null, { id: "lane", pullRequest: URL_A, files: ["src/lane.mjs"] });
   await call("claim", "lane", {});
-  await call("create", null, { id: "other", pullRequest: "https://github.com/Uuriko/project-room/pull/9" });
+  await call("create", null, { id: "other", pullRequest: "https://github.com/Uuriko/project-room/pull/9", files: ["src/other.mjs"] });
   await call("claim", "other", {});
   const nowMs = Date.parse("2026-10-01T12:00:00Z");
   const resetMs = nowMs + 30 * 60_000;
@@ -237,7 +237,7 @@ test("a GitHub 403 backs off every open pull until the reset, and the next tick 
 
 test("an open pull sends If-None-Match, and a 304 keeps the claim", async t => {
   const { store, call } = await room(t);
-  await call("create", null, { id: "lane", pullRequest: URL_A });
+  await call("create", null, { id: "lane", pullRequest: URL_A, files: ["src/lane.mjs"] });
   await call("claim", "lane", {});
   const nowMs = Date.parse("2026-10-01T12:00:00Z");
   const calls = [];
@@ -268,9 +268,9 @@ test("an open pull sends If-None-Match, and a 304 keeps the claim", async t => {
 
 test("a cron deadline does not call GitHub and does not start a second lookup", async t => {
   const { store, call } = await room(t);
-  await call("create", null, { id: "lane", pullRequest: URL_A });
+  await call("create", null, { id: "lane", pullRequest: URL_A, files: ["src/lane.mjs"] });
   await call("claim", "lane", {});
-  await call("create", null, { id: "other", pullRequest: "https://github.com/Uuriko/project-room/pull/9" });
+  await call("create", null, { id: "other", pullRequest: "https://github.com/Uuriko/project-room/pull/9", files: ["src/other.mjs"] });
   await call("claim", "other", {});
   let calls = 0;
   const fetchImpl = async () => {
@@ -298,7 +298,7 @@ test("a cron deadline does not call GitHub and does not start a second lookup", 
 // writer must reconcile before adding its own URL. No link or event is lost.
 test("concurrent PR attachments serialize and invalid update alternatives cannot write", async t => {
   const { store, call } = await room(t);
-  await call("create", null, { id: "concurrent" });
+  await call("create", null, { id: "concurrent", files: ["src/concurrent.mjs"] });
   const claim = (await call("claim", "concurrent", {})).value;
   const basis = { expectedClaimedAt: claim.claimedAt, expectedHistoryLength: claim.history.length };
   const urls = [URL_A, "https://github.com/Uuriko/project-room/pull/12"];
@@ -320,8 +320,8 @@ test("PR link and event roll back together, and expiry or archived rooms cannot 
   const { store, call } = await room(t);
   const now = Date.parse("2026-10-03T13:00:00Z");
   store.now = () => now;
-  await call("create", null, { id: "atomic" });
-  await call("claim", "atomic", { leaseHours: 6 });
+  await call("create", null, { id: "atomic", files: ["src/atomic.mjs"] });
+  await call("claim", "atomic", { leaseHours: 1 });
   const claimed = store.workClaims.get("commons", "atomic");
   const input = { appendPullRequest: URL_A, expectedClaimedAt: claimed.claimedAt, expectedHistoryLength: claimed.history.length };
   const eventsBefore = claimEvents(store);
