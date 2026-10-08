@@ -20,7 +20,9 @@ export class HttpTestRoom extends ProjectRoom {
         command('message.posted', { messageId: 'private-before', body: 'hidden prejoin text' });
         // Non-chat writes avoid the real flood guard while testing a long
         // equal-timestamp import-shaped history and a large exclusion set.
-        for (let i = 0; i < 501; i++) command('channel.renamed', { channelId: 'general', name: `general-${i}` });
+        // (The main channel can't be renamed, so filler renames use a scratch channel.)
+        command('channel.created', { channelId: 'filler', name: 'filler' });
+        for (let i = 0; i < 501; i++) command('channel.renamed', { channelId: 'filler', name: `filler-${i}` });
         command('room.history_visibility_set', { historyVisibility: 'since_join' });
         command('member.added', { memberId: 'late', displayName: 'Late', kind: 'agent', permissions: [] });
         const readerKey = store.issueAccessKey(roomId, 'late');

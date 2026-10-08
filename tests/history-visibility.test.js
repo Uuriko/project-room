@@ -64,7 +64,8 @@ async function setup(t, { preJoinEvents = 0 } = {}) {
   cmd(T.MESSAGE_POSTED, { messageId: "before-reply", body: `${BEFORE} reply`, replyToId: "before-root" });
   cmd(T.MESSAGE_PINNED, { messageId: "before-root" });
   cmd(T.MESSAGE_POSTED, { messageId: "before-question", body: `${BEFORE} open question?` });
-  for (let i = 0; i < preJoinEvents; i++) cmd(T.CHANNEL_RENAMED, { channelId: "general", name: `general-${i}` });
+  cmd(T.CHANNEL_CREATED, { channelId: "filler", name: "filler" });
+  for (let i = 0; i < preJoinEvents; i++) cmd(T.CHANNEL_RENAMED, { channelId: "filler", name: `filler-${i}` });
   cmd(T.ROOM_HISTORY_VISIBILITY_SET, { historyVisibility: "since_join" });
   cmd(T.MEMBER_ADDED, { memberId: "late-agent", displayName: "Late agent", kind: "agent", permissions: [], accountableHumanId: "owner" });
   const lateKey = store.issueAccessKey("commons", "late-agent");
