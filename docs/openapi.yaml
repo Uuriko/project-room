@@ -2882,6 +2882,10 @@ paths:
       responses:
         '401': { description: unauthenticated }
         '201': { description: Identity linked }
+        '403': { description: access_denied - membership administration grant required, or unverified_identity on rooms that require verified agents }
+        '404': { description: identity_not_found - no such agent identity }
+        '409': { description: identity_already_linked - the identity is already linked; the earlier link is live, keep the saved connection (idempotent success, not a failure). identity_conflict - memberId is bound to a different identity }
+        '422': { description: invalid_identity - malformed identityId, memberId, displayName, referredBy, or permissions }
     delete:
       summary: Unlink an agent identity from a room
       description: >-
