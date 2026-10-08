@@ -215,6 +215,19 @@ test("buildTelegramDirectRequest rejects bad chat ids and oversize text", () => 
   assert.deepEqual(req, { method: "sendMessage", body: { chat_id: "-123", text: "hi" } });
 });
 
+test("buildTelegramDirectRequest rejects ids above 2^53 and keeps leading zeros (M-25)", () => {
+  // Number("9007199254740993") silently corrupts to 9007199254740992; the
+  // BigInt round-trip must refuse the id instead of sending the wrong chat.
+  assert.throws(() => buildTelegramDirectRequest({ to: "9007199254740993", text: "hi" }),
+    error => error.code === "invalid_direct_send");
+  // 2^53 itself is exactly representable and stays valid.
+  const maxSafe = buildTelegramDirectRequest({ to: "9007199254740991", text: "hi" });
+  assert.equal(maxSafe.body.chat_id, "9007199254740991");
+  // Leading zeros survive as the digit string (Number() would strip them).
+  const padded = buildTelegramDirectRequest({ to: "00123", text: "hi" });
+  assert.equal(padded.body.chat_id, "00123");
+});
+
 test("sendTelegramDirect without config reports telegram_not_connected", async t => {
   await assert.rejects(() => sendTelegramDirect({ config: telegramConfig({}), to: "123", text: "hi" }),
     error => error.code === "telegram_not_connected");

@@ -300,6 +300,44 @@ test("with under 10% of the event budget left only the owner and claim managers 
   assert.equal(status.value.eventsRemaining, PILOT_LIMITS.eventsPerRoom - f.store.room("commons").sequence);
 });
 
+// QA200-CH-2033 (4th probe against the #2033 ledger): the member-triggered
+// sweep settles PR links and records CI facts, which emit work_claim.updated
+// room events — it is a Board write, so the event-budget floor must refuse it
+// for non-privileged writers exactly like create/claim/update do.
+test("with under 10% of the event budget left a writer's sweep is refused and emits no events", async t => {
+  const f = roomFixture(t);
+  await held(f, "sweepy");
+  const read = await f.call("contrib", "read", { id: "sweepy" });
+  assert.equal(read.status, 200);
+  const linked = await f.call("contrib", "update", { id: "sweepy", body: {
+    appendPullRequest: "https://github.com/octo/repo/pull/7",
+    expectedClaimedAt: read.value.claimedAt,
+    expectedHistoryLength: read.value.history.length,
+  } });
+  assert.equal(linked.status, 200, `${linked.code} ${linked.message ?? ""}`);
+  const nearlyFull = Math.ceil(PILOT_LIMITS.eventsPerRoom * 0.9) + 1;
+  f.store.db.prepare("UPDATE rooms SET sequence=? WHERE id='commons'").run(nearlyFull);
+  // GitHub says the linked PR merged: without the gate the sweep settles the
+  // claim and emits a pr_merged room event past the floor.
+  const mergedDoc = { state: "closed", merged: true, merge_commit_sha: "b".repeat(40), head: { sha: "a".repeat(40) } };
+  const fetchPullRequest = async () => ({
+    ok: true, status: 200, headers: { get: () => null },
+    text: async () => JSON.stringify(mergedDoc), json: async () => mergedDoc,
+  });
+  const before = f.events();
+  const swept = await f.call("contrib", "sweep", { body: {}, fetchPullRequest });
+  assert.equal(swept.status, 409);
+  assert.equal(swept.code, "room_event_budget_low");
+  assert.equal(f.events(), before, "no room events past the floor");
+  const stored = f.store.workClaims.get("commons", "sweepy");
+  assert.equal(stored.state, "claimed", "the PR settlement did not land");
+  // Privileged writers can still sweep to wind the room down.
+  const ownerSweep = await f.call("owner", "sweep", { body: {}, fetchPullRequest });
+  assert.equal(ownerSweep.status, 200);
+  assert.equal(ownerSweep.value.pullRequests.updated, 1);
+  assert.equal(f.events(), before + 1);
+});
+
 test("deploy status is fetched at most once per 60 s, and only writers can refresh", async t => {
   const f = roomFixture(t);
   let fetches = 0;
