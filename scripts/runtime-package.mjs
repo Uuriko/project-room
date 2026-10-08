@@ -192,6 +192,7 @@ optional.push("server/work-claim-sqlite.mjs");
 optional.push("server/persisted-row.mjs"); // RC-2026-09-27-2730: replay-safe persisted-row envelope + move-tolerant kind codec (imported by server/work-claim-sqlite.mjs, server/dispatch-journal.mjs, server/bounty-escrow.mjs; pure, no imports)
 optional.push("server/claim-collisions.mjs");
 optional.push("server/work-claim-routes.mjs"); // RC-2026-09-18-041: work-claim HTTP routes (imported by server/http.mjs)
+optional.push("server/request-dedupe.mjs"); // crash-recovery guild system #1: requestId->result idempotency store (imported by server/http.mjs and server/work-claim-routes.mjs; stdlib only)
 optional.push("server/work-claim-events.mjs"); // work_claim.updated receipts (imported by server/work-claim-routes.mjs; imports src/events.js)
 optional.push("server/work-claim-integrity.mjs"); // SEC-2: Board input bounds, event budget and status cache (imported by server/work-claim-routes.mjs; imports src/display-name-guard.js via server/display-name-guard.mjs and server/store.mjs limits)
 optional.push("server/work-claim-mirror.mjs"); // projection claims mirrored onto the work-claims board (imported by server/store.mjs)
