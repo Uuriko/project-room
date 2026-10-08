@@ -7680,8 +7680,10 @@ paths:
         environment (GITHUB_TOKEN or GH_TOKEN). Public repositories answer
         without one. When a token is required and missing, or GitHub rejects
         the configured token, the response is 503 github_unconfigured and the
-        item stays queued. This does not merge the pull request. API keys
-        need rooms:write.
+        item stays queued. This does not merge the pull request. A land-queue
+        mirror consumes the claimant's open-claim slot just like a claim does:
+        naming a claimant who already holds the room's cap answers 409
+        too_many_open_claims. API keys need rooms:write.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -7703,7 +7705,7 @@ paths:
           description: The pull request was already queued (duplicate true)
         '401': { description: unauthenticated }
         '404': { description: pr_not_found when a token is set and GitHub has no such pull request }
-        '409': { description: land_queue_full }
+        '409': { description: land_queue_full, or too_many_open_claims when the named claimant already holds the room's open-claim cap }
         '422': { description: invalid_land_item }
         '503':
           description: >-
