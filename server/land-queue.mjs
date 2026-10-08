@@ -22,7 +22,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { ServiceError } from "./service-error.mjs";
 import { event, EVENT_TYPES, applyEvent, isRoomArchived, validId } from "../src/events.js";
-import { claimWork, createWork } from "./work-claims.mjs";
+import { claimWork, createWork, ACTIVE_CLAIM_STATES, roomWorkClaimConfig } from "./work-claims.mjs";
 
 export const LAND_CHECKS = Object.freeze(["pending", "green", "red"]);
 export const LAND_MERGEABLE = Object.freeze(["mergeable", "behind", "conflict", "unknown", "merged"]);
@@ -470,10 +470,27 @@ function mirrorLandClaim(store, row) {
     revision
   }, { now, agentId: row.added_by_member_id });
   if (row.claimant_member_id) {
+    assertClaimantCap(store, row);
     item = claimWork(item, row.claimant_member_id, { leaseHours: null, pullRequest: url, now });
   }
   store.workClaims.set(row.room_id, item);
   return true;
+}
+
+// A land-queue mirror consumes the claimant's slot just like claim,
+// create-with-assignee, and reassign do; otherwise naming an at-cap claimant
+// (including another member) bypasses the per-member open-claim cap.
+function assertClaimantCap(store, row) {
+  const registry = store.workClaims;
+  const config = typeof registry.configFor === "function"
+    ? registry.configFor(row.room_id)
+    : roomWorkClaimConfig({});
+  const held = registry.list(row.room_id).filter(entry =>
+    entry.owner === row.claimant_member_id && ACTIVE_CLAIM_STATES.includes(entry.state)).length;
+  if (held >= config.maxMemberOpenClaims) {
+    fail(409, "too_many_open_claims",
+      `${row.claimant_member_id} already holds ${config.maxMemberOpenClaims} open claims. Release or finish one before assigning another.`);
+  }
 }
 
 // One-time, idempotent copy of land_queue rows into kind:"land" claims.
@@ -489,7 +506,15 @@ export function migrateLandQueueClaims(store) {
   }
   let copied = 0;
   for (const row of rows) {
-    if (mirrorLandClaim(store, row)) copied += 1;
+    try {
+      if (mirrorLandClaim(store, row)) copied += 1;
+    } catch (error) {
+      // An at-cap claimant skips this pass instead of breaking the list read;
+      // a later list() retries the mirror once the member is under cap.
+      // Anything else still throws.
+      if (error?.code === "too_many_open_claims") continue;
+      throw error;
+    }
   }
   return { copied };
 }
