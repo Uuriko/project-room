@@ -443,16 +443,23 @@ export function createEvaluatorSeat(store, opts = {}) {
       };
       // Bond slices: valid reveal -> released; committed-but-silent or silent
       // altogether -> forfeited to the room pool (liveness, never slash).
+      // A fraud slash (slashBond / an upheld challenge) may have consumed the
+      // encumbered slice mid-assignment. Convert only what is still
+      // encumbered: re-adding an already-slashed slice to forfeited/released
+      // would double-count units and drive encumbered negative. The bond
+      // keeps its existing state — finalize must not resurrect a slashed
+      // bond to active.
       for (const e of panel) {
         const bond = q.bondByEvaluator.get(roomId, e);
         const slice = bond.assignment_slice_millis;
+        const convertible = Math.min(slice, Math.max(0, bond.encumbered_millis));
         const revealed = commits.has(e);
         q.bondMove.run(
-          bond.encumbered_millis - slice,
-          bond.forfeited_millis + (revealed ? 0 : slice),
+          bond.encumbered_millis - convertible,
+          bond.forfeited_millis + (revealed ? 0 : convertible),
           bond.slashed_millis,
-          bond.released_millis + (revealed ? slice : 0),
-          "active", t, bond.bond_id);
+          bond.released_millis + (revealed ? convertible : 0),
+          bond.state, t, bond.bond_id);
       }
       q.assignFinalize.run(state, verdict, JSON.stringify(settlement), t, roomId, jobId);
       return {
