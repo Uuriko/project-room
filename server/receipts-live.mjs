@@ -81,6 +81,16 @@ function hiddenReceiptIds(store, receiptIds) {
 
 const receiptIdOf = entry => String(entry.path).split("/").pop();
 
+// Secondary receipt surfaces (room pages, embeds) list receipts the toggle
+// wrapper never saw. Apply the same owner-toggle filter there: a receipt the
+// owner hid must not leak its title/href through /r/<slug>. Fail-closed on
+// unknown ids, matching hiddenReceiptIds.
+export function excludeHiddenReceipts(store, items) {
+  if (!items.length) return items;
+  const hidden = hiddenReceiptIds(store, items.map(item => item.id));
+  return items.filter(item => !hidden.has(item.id));
+}
+
 export function queryPublicReceipts(store, options) {
   const page = queryUnderlying(store, options);
   if (!page || page.error || !Array.isArray(page.receipts)) return page;
