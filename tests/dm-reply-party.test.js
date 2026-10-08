@@ -34,6 +34,19 @@ test("non-party cannot reply into a DM thread; parties and public threads still 
     assert.equal(refusal("dm-r1"), missing, "deeper thread messages are covered too");
     post("alice", { messageId: "dm-r2", body: "party ok", replyToId: "dm-r1" });
     post("mallory", { messageId: "pub-r", body: "public reply", replyToId: "pub" });
+    // A DM ancestor far up the chain must still gate the reply (no hop cap).
+    // The flood guard reads store.now, so advance the clock per post.
+    let clock = Date.now();
+    store.now = () => clock;
+    let tail = "dm-r2";
+    for (let i = 0; i < 70; i++) {
+      clock += 5000;
+      const id = `deep-${i}`;
+      post(i % 2 ? "alice" : "bob", { messageId: id, body: "chain", replyToId: tail });
+      tail = id;
+    }
+    assert.equal(refusal(tail), missing, "DM ancestor 70+ hops up still refuses a non-party");
+    post("bob", { messageId: "deep-party", body: "party deep", replyToId: tail });
   } finally {
     store.close();
     rmSync(dir, { recursive: true, force: true });

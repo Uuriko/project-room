@@ -4651,7 +4651,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // refusal reads like an unknown id so it confirms nothing.
       if (command.type === T.MESSAGE_POSTED && typeof command.data?.replyToId === "string") {
         const byId = new Map((room.state.messages || []).map(m => [m.id, m]));
-        for (let m = byId.get(command.data.replyToId), hops = 0; m && hops < 64; m = byId.get(m.replyToId), hops++) {
+        const seen = new Set();
+        for (let m = byId.get(command.data.replyToId); m && !seen.has(m.id); m = byId.get(m.replyToId)) {
+          seen.add(m.id);
           if (m.toMemberId && m.authorId !== auth.member.id && m.toMemberId !== auth.member.id) {
             fail(422, "command_rejected", "Reply must reference a message in this Room");
           }
