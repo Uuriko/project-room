@@ -5321,7 +5321,13 @@ paths:
       summary: Update claimed work or append a PR link
       description: |
         Owner-only state transitions and notes (`403 work_not_owner`
-        otherwise). The `done` transition accepts `deliveryMode` (how the
+        otherwise). A note/state update may carry the optional round
+        preconditions `expectedClaimedAt` + `expectedHistoryLength` (same
+        names and meaning as the appendPullRequest variant); when present
+        the write is refused `409 work_claim_conflict` unless the claim
+        still matches the client's last read, so a stale retry cannot
+        silently clobber newer state. Without them the update keeps its
+        legacy round-blind behavior. The `done` transition accepts `deliveryMode` (how the
         work was delivered: `result`, `merged`, or `production`),
         `reviewedBy` (the attesting member), `tags` (free-form receipt
         labels, no fixed taxonomy) and `blobs` (sha256 evidence pointers) —
@@ -5405,6 +5411,16 @@ paths:
                       items: { type: string, maxLength: 512 }
                       maxItems: 16
                       description: Documentary evidence pointers (sha256:<64 hex> or https:// URLs without credentials); may be set on any owner update including done, where they join the receipt
+                    expectedClaimedAt:
+                      type: string
+                      format: date-time
+                      maxLength: 100
+                      description: Optional round precondition (opt-in, same names and meaning as the appendPullRequest variant) - exact claimedAt from the item as the client last read it. When present, the update is refused 409 work_claim_conflict if the claim's round no longer matches; absent, the update stays round-blind for backward compatibility.
+                    expectedHistoryLength:
+                      type: integer
+                      minimum: 0
+                      description: Optional round precondition (opt-in, same names as the appendPullRequest variant) - exact history.length + (historyOmitted ?? 0) from the same read. Detects concurrent changes since the read; see expectedClaimedAt.
+                      example: 203
                 - type: object
                   additionalProperties: false
                   required: [appendPullRequest, expectedClaimedAt, expectedHistoryLength]
@@ -5435,7 +5451,7 @@ paths:
         '403': { description: work_not_owner, work_claims_not_permitted, work_review_rejected, insufficient_scope, or existing membership/autonomy refusal }
         '404': { description: work_claim_not_found }
         '409':
-          description: Append refused with work_claim_conflict for stale basis or inactive/superseded work, claim_lease_lapsed for an expired lease, or room_archived. Read the current item before deciding whether a fresh same-round request is appropriate
+          description: Append or preconditioned update refused with work_claim_conflict for stale basis or inactive/superseded work, claim_lease_lapsed for an expired lease, or room_archived. Read the current item before deciding whether a fresh same-round request is appropriate
         '422': { description: invalid_claim_input, including mixed append/state bodies, non-string PR input, malformed preconditions, or a seventeenth distinct URL }
   /api/rooms/{roomId}/work-claims/{claimId}/provenance:
     get:
