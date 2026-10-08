@@ -4667,6 +4667,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           fail(403, "work_claims_not_permitted", "Creating, claiming, renewing, or updating work claims needs a contribute, review, or collaborate profile.");
         }
       }
+      // A reaction on a DM is shown to its parties and the answer would
+      // confirm the private id, so a non-party is told "no such message".
+      // Live admission only; reactions already in a log keep replaying.
+      if (command.type === T.MESSAGE_REACTION_SET && typeof command.data?.messageId === "string") {
+        const target = (room.state.messages || []).find(m => m.id === command.data.messageId);
+        // Reply requests are directed but room-threaded: members may react to them.
+        if (target?.toMemberId && !Object.hasOwn(room.state.replyRequests ?? {}, target.id)
+            && target.authorId !== auth.member.id && target.toMemberId !== auth.member.id) {
+          fail(422, "command_rejected", "Reaction must reference a message in this Room");
+        }
+      }
       // A reply joins its parent's thread. A DM's thread belongs to its two
       // parties: a bystander replying to a DM id would thread into a private
       // conversation and learn from the answer that the id exists. Live
