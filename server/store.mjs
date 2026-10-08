@@ -4654,7 +4654,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const seen = new Set();
         for (let m = byId.get(command.data.replyToId); m && !seen.has(m.id); m = byId.get(m.replyToId)) {
           seen.add(m.id);
-          if (m.toMemberId && m.authorId !== auth.member.id && m.toMemberId !== auth.member.id) {
+          // Reply requests are directed but room-threaded by design: members may
+          // clarify or comment under them (tests/reply-requests.test.js).
+          if (m.toMemberId && !Object.hasOwn(room.state.replyRequests ?? {}, m.id)
+              && m.authorId !== auth.member.id && m.toMemberId !== auth.member.id) {
             fail(422, "command_rejected", "Reply must reference a message in this Room");
           }
           if (!m.replyToId) break;
