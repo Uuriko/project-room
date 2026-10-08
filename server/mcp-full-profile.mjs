@@ -246,6 +246,7 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
       const value = linkWorkClaimPullRequest({ store, roomId, auth, claimId: rest.claimId,
         data: { appendPullRequest: rest.pullRequest, expectedClaimedAt: rest.expectedClaimedAt,
           expectedHistoryLength: rest.expectedHistoryLength },
+        fast: rest.fast === true,
         reauthorize: () => {
           const current = store.authenticate(secret, roomId, auth.sessionBinding);
           enforceHostedStdioCallVisibility(store, secret, current.member.id, name);
@@ -263,6 +264,7 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
   if (name === "room_close_work_claim") {
     try {
       const value = closeWorkClaim({ store, roomId, auth, claimId: rest.claimId, verb: rest.verb ?? "close", reason: rest.reason,
+        fast: rest.fast === true,
         reauthorize: () => {
           const current = store.authenticate(secret, roomId, auth.sessionBinding);
           enforceHostedStdioCallVisibility(store, secret, current.member.id, name);

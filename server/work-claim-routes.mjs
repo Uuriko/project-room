@@ -499,7 +499,7 @@ function retire(reject, item, caller, verb, reason, authority, nowMs) {
 
 // MCP room_close_work_claim: the same close/cancel as the REST routes, in one
 // transaction, with the same access checks as room_link_work_claim_pr.
-export function closeWorkClaim({ store, roomId, auth, claimId, verb = "close", reason, registry = store.workClaims, reauthorize }) {
+export function closeWorkClaim({ store, roomId, auth, claimId, verb = "close", reason, registry = store.workClaims, reauthorize, fast = false }) {
   const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
   const run = () => {
     const current = reauthorize ? reauthorize() : auth;
@@ -516,7 +516,7 @@ export function closeWorkClaim({ store, roomId, auth, claimId, verb = "close", r
     enforceAutonomyTierForAction({ db: store.db, roomId, state: { room: { ownerId: access.ownerId } },
       actor: access.member, action: `POST work-claim ${verb}`, fail: reject });
     if (isRoomArchived(store.room(roomId).state)) reject(409, "room_archived", "This room is archived; nothing was closed");
-    assertBoardEventBudget(access.authority?.sequence, { privileged: mayManageAnyClaim(access) });
+    if (!fast) assertBoardEventBudget(access.authority?.sequence, { privileged: mayManageAnyClaim(access) });
     claimIdOf(reject, claimId);
     refuseRoomGuideOffStarter(registry, roomId, current, claimId, "POST", reject);
     const clean = boardText(reject, "reason", reason, { multiline: true });
@@ -525,14 +525,14 @@ export function closeWorkClaim({ store, roomId, auth, claimId, verb = "close", r
     const now = typeof store.now === "function" ? store.now() : Date.now();
     const closed = retire(reject, item, current.member.id, verb, clean, mayManageAnyClaim(access), now);
     registry.set(roomId, closed);
-    emitWorkClaimEvent(store, roomId, { actorId: current.member.id, item: closed, action: "closed",
+    if (!fast) emitWorkClaimEvent(store, roomId, { actorId: current.member.id, item: closed, action: "closed",
       reason: verb === "cancel" ? "cancelled" : "closed", atMs: now });
     return closed;
   };
   return registry.transaction ? registry.transaction(run) : run();
 }
 
-export function linkWorkClaimPullRequest({ store, roomId, auth, claimId, data, registry = store.workClaims, reauthorize }) {
+export function linkWorkClaimPullRequest({ store, roomId, auth, claimId, data, registry = store.workClaims, reauthorize, fast = false }) {
   const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
   const run = () => {
     const current = reauthorize ? reauthorize() : auth;
@@ -548,7 +548,7 @@ export function linkWorkClaimPullRequest({ store, roomId, auth, claimId, data, r
     enforceAutonomyTierForAction({ db: store.db, roomId, state: { room: { ownerId: access.ownerId } },
       actor: access.member, action: "POST work-claim update", fail: reject });
     if (isRoomArchived(store.room(roomId).state)) reject(409, "room_archived", "This room is archived; no PR link was recorded");
-    assertBoardEventBudget(access.authority?.sequence, { privileged: mayManageAnyClaim(access) });
+    if (!fast) assertBoardEventBudget(access.authority?.sequence, { privileged: mayManageAnyClaim(access) });
     claimIdOf(reject, claimId);
     refuseRoomGuideOffStarter(registry, roomId, current, claimId, "POST", reject);
     if (!shape(data, { required: ["appendPullRequest", "expectedClaimedAt", "expectedHistoryLength"] })) {
@@ -575,7 +575,7 @@ export function linkWorkClaimPullRequest({ store, roomId, auth, claimId, data, r
     }
     if (linked === item) return item;
     registry.set(roomId, linked);
-    emitWorkClaimEvent(store, roomId, { actorId: current.member.id, item: linked, action: "state_changed", atMs: now });
+    if (!fast) emitWorkClaimEvent(store, roomId, { actorId: current.member.id, item: linked, action: "state_changed", atMs: now });
     return linked;
   };
   return registry.transaction ? registry.transaction(run) : run();
@@ -588,12 +588,17 @@ export async function handleWorkClaims(options) {
   const { req, res, helpers, reauthorize } = options;
   const registry = options.registry ?? options.store.workClaims ?? defaultRegistry;
   const requestData = req.method === "POST" ? await helpers.body(req) : undefined;
+  // WAVE-300 data-plane fast path: ?fast=1 selects pure-state handling with
+  // zero room-log involvement (docs/WORK-CLAIMS-FAST-PATH.md). Side-effect
+  // selector only — auth, the pure state machine, caps and error semantics
+  // are identical.
+  const fast = options.url?.searchParams?.get("fast") === "1";
   // The append alternative has one shared transaction across both transports.
   if (options.workClaimRoute === "update" && req.method === "POST"
     && requestData && typeof requestData === "object" && Object.hasOwn(requestData, "appendPullRequest")) {
     try {
       const item = linkWorkClaimPullRequest({ store: options.store, roomId: options.roomId,
-        auth: options.auth, claimId: options.workClaimId, data: requestData, registry, reauthorize });
+        auth: options.auth, claimId: options.workClaimId, data: requestData, registry, reauthorize, fast });
       return helpers.json(res, 200, item);
     } catch (error) {
       if (Number.isInteger(error?.status) && error.body && error.code) return helpers.json(res, error.status, error.body);
@@ -642,7 +647,7 @@ export async function handleWorkClaims(options) {
       });
     }
   }
-  const run = () => handleWorkClaimsCore({ ...options, registry, pullBatch, deployStatus,
+  const run = () => handleWorkClaimsCore({ ...options, registry, pullBatch, deployStatus, fast,
     auth: reauthorize ? reauthorize() : options.auth,
     helpers: { ...helpers, body: () => requestData, json: (_res, status, value) => ({ status, value }) },
   });
@@ -684,7 +689,7 @@ function memoizeList(registry) {
   });
 }
 
-function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRoute, workClaimId, helpers, registry: sourceRegistry, pullBatch = { results: [], rateLimitedUntil: null, skipped: false }, deployStatus = null }) {
+function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRoute, workClaimId, helpers, registry: sourceRegistry, pullBatch = { results: [], rateLimitedUntil: null, skipped: false }, deployStatus = null, fast = false }) {
   const { json, reject, body } = helpers;
   const registry = memoizeList(sourceRegistry);
   if (req.method !== "GET" && req.method !== "HEAD") enforceAutonomyTierForAction({
@@ -694,8 +699,15 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   const nowMs = typeof store.now === "function" ? store.now() : Date.now();
   const caller = auth.member.id;
   // Every committed claim change appends one work_claim.updated room event
-  // inside this transaction (server/work-claim-events.mjs).
+  // inside this transaction (server/work-claim-events.mjs) — unless the
+  // fast path is selected (?fast=1): then the claim writes to the registry
+  // only. No room event, no wake, no ready-work note. The database is the
+  // truth; events are just notifications.
   const commit = (item, action, extra = {}) => {
+    if (fast) {
+      registry.set(roomId, item);
+      return item;
+    }
     // A release clears files on the item. Read the held paths first so the
     // receipt names the lane that opened, then write the claim and the event
     // in this same transaction. A pull request that closes does the same.
@@ -739,7 +751,12 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     }
     return closed;
   };
-  const sweptIds = sweepRoom(registry, roomId, nowMs, (item, before) => {
+  // Fast path: closeLiveClaims writes on read paths; skip it.
+  const closeLive = fast ? () => [] : closeLiveClaims;
+  // Fast path: reads never trigger sweeps. Expiry is owned by the
+  // server-side reaper tick or an explicit POST sweep; a fast reader sees
+  // stored lease state as-is.
+  const sweptIds = fast ? [] : sweepRoom(registry, roomId, nowMs, (item, before) => {
     const receipt = emitWorkClaimEvent(store, roomId, {
       actorId: before.owner, item, action: "lease_expired", previousOwnerId: before.owner,
       atMs: nowMs, paths: before.files ?? []
@@ -756,8 +773,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   const access = resolveWorkClaimAccess(store, roomId, auth);
   const requireWriter = () => { if (!mayWriteWorkClaims(access)) refuseWorkClaims(); };
   // Q3-A: with under 10% of the room's event budget left, Board writes from
-  // members without claim authority get 409 room_event_budget_low.
-  const requireEventBudget = () => assertBoardEventBudget(access.authority?.sequence, { privileged: mayManageAnyClaim(access) });
+  // members without claim authority get 409 room_event_budget_low. Fast path:
+  // no events are emitted, so the budget gate is meaningless — skip it.
+  const requireEventBudget = fast ? () => {}
+    : () => assertBoardEventBudget(access.authority?.sequence, { privileged: mayManageAnyClaim(access) });
   const text = (field, value, options) => boardText(reject, field, value, options);
   const assertLeaseChoice = data => {
     if (!data || !("leaseHours" in data) || data.leaseHours !== null || mayOptOutOfLease(access)) return;
@@ -797,14 +816,14 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   };
 
   if (workClaimRoute === "status" && req.method === "GET") {
-    closeLiveClaims();
+    closeLive();
     const status = deployStatus ?? { live: SOURCE_REVISION, main: null, behind: null, checkedAt: null };
     return json(res, 200, { live: status.live, main: status.main, behind: status.behind, checkedAt: status.checkedAt,
       stale: status.stale === true, ...(status.heldUntil ? { heldUntil: status.heldUntil } : {}),
       eventsRemaining: roomEventsRemaining(access.authority?.sequence) });
   }
   if (workClaimRoute === "list" && req.method === "GET") {
-    closeLiveClaims();
+    closeLive();
     return json(res, 200, { ...buildWorkClaimPage(registry.list(roomId), roomId, caller,
       url?.searchParams, nowMs), swept: sweptIds });
   }
@@ -964,7 +983,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     return json(res, 201, item);
   }
   if (workClaimRoute === "read" && req.method === "GET") {
-    closeLiveClaims();
+    closeLive();
     // SEC-2: member-authored text is marked untrusted for the reader.
     return json(res, 200, withContentTrust(stampClaim(load(claimIdOf(reject, workClaimId)), caller)));
   }
