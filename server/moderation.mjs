@@ -48,6 +48,12 @@ export function mutedMessage(state, viewerId, message) {
   return isMutedBy(state, viewerId, message?.authorId);
 }
 
+// Deletion-agnostic privacy test: a deleted DM stays private to its two
+// parties (and their history window). messageVisibleToViewer also rejects
+// deleted messages, which would hide public deleted ones from reports too.
+const readableBy = (message, viewerId, floor) =>
+  messageVisibleToViewer({ ...message, deletedAt: null, body: message.body ?? "" }, viewerId, floor);
+
 const receipt = row => ({ id: row.report_id, messageId: row.message_id, reason: row.reason, createdAt: row.created_at });
 
 export class Moderation {
@@ -97,7 +103,7 @@ export class Moderation {
       // A reporter can only report what they can read: a DM between two other
       // members (or history before a since_join reporter's join) answers
       // exactly like an unknown id, so the id does not confirm it exists.
-      if (!message.deletedAt && !messageVisibleToViewer(message, auth.member.id, summaryHistoryFloor(this.store, roomId, auth.member.id)))
+      if (!readableBy(message, auth.member.id, summaryHistoryFloor(this.store, roomId, auth.member.id)))
         fail(404, "message_not_found", "That message is not in this room");
       if (message.authorId === auth.member.id) fail(422, "invalid_report", "You cannot report your own message; delete it instead");
       const prior = this.db.prepare("SELECT * FROM message_reports WHERE room_id=? AND reporter_id=? AND message_id=?").get(roomId, auth.member.id, request.messageId);
@@ -131,8 +137,8 @@ export class Moderation {
           ...receipt(row), reporterId: row.reporter_id, authorId: row.author_id,
           message: message ? {
             authorId: message.authorId,
-            body: message.deletedAt || !messageVisibleToViewer(message, auth.member.id, ownerFloor) ? null : message.body,
-            ...(message.toMemberId && !message.deletedAt && !messageVisibleToViewer(message, auth.member.id, ownerFloor) ? { private: true } : {}),
+            body: message.deletedAt || !readableBy(message, auth.member.id, ownerFloor) ? null : message.body,
+            ...(message.toMemberId && !readableBy(message, auth.member.id, ownerFloor) ? { private: true } : {}),
             createdAt: message.createdAt, deletedAt: message.deletedAt ?? null
           } : null
         };

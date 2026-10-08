@@ -52,3 +52,24 @@ test("owner still reads a reported DM that was sent to the owner", t => {
   assert.equal(reports[0].message.body, "to the owner");
   assert.equal(reports[0].message.private, undefined);
 });
+
+test("a deleted DM stays private: non-parties get 404 on report and the owner's list keeps private:true", t => {
+  const f = fixture(t);
+  f.send("alice", T.MESSAGE_POSTED, { messageId: "dm-del", body: "PRIVATE deleted", toMemberId: "bob" });
+  f.store.moderation.report(f.keys.bob, "commons", { messageId: "dm-del", reason: "harassment" });
+  f.send("alice", T.MESSAGE_DELETED, { messageId: "dm-del", expectedMessageRevision: 0 });
+  assert.throws(() => f.store.moderation.report(f.keys.carol, "commons", { messageId: "dm-del", reason: "spam" }),
+    error => error.status === 404 && error.code === "message_not_found");
+  const dm = f.store.moderation.list(f.keys.owner, "commons").reports.find(r => r.messageId === "dm-del");
+  assert.equal(dm.message.body, null);
+  assert.equal(dm.message.private, true, "the deleted DM row keeps the private marker");
+  assert.equal(dm.message.deletedAt !== null, true);
+});
+
+test("a deleted public message can still be reported as before", t => {
+  const f = fixture(t);
+  f.send("alice", T.MESSAGE_POSTED, { messageId: "pub-del", body: "public" });
+  f.send("alice", T.MESSAGE_DELETED, { messageId: "pub-del", expectedMessageRevision: 0 });
+  f.store.moderation.report(f.keys.carol, "commons", { messageId: "pub-del", reason: "spam" });
+  assert.equal(f.store.moderation.list(f.keys.owner, "commons").reports[0].message.private, undefined);
+});
