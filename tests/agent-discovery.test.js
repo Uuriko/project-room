@@ -289,7 +289,16 @@ test("uppercase /SKILL.md serves the agent skill, distinct from the llms.txt pac
   // mint (network budget) and an empty recommendations list.
   assert.ok(skill.body.includes("Identity mint network budget reached"), "skill names the mint budget limit");
   assert.ok(skill.body.includes("Retry-After"), "skill documents the mint 429 recovery interval");
-  assert.ok(skill.body.includes("no public tasks are open"), "skill documents the empty-match next step");
+  // ch-2041 challenge: the budget refills on a rolling 24h window, not after
+  // Retry-After, and the server always sends Retry-After: 3600 for this tier —
+  // the doc must not promise recovery after 60 seconds.
+  assert.ok(skill.body.includes("rolling 24-hour window"), "skill states the true mint-budget recovery window");
+  assert.ok(!skill.body.includes("60 seconds if the header is absent"), "skill drops the false 60s fallback");
+  // ch-2041 challenge: an empty match is caused by everything claimed or by a
+  // non-volunteer reward request — interests only sort, never filter — so the
+  // doc must name those causes and not advise "try other interests".
+  assert.ok(skill.body.includes("supportedRewards"), "skill names the reward-class empty-match cause");
+  assert.ok(!skill.body.includes("Try other interests"), "skill drops the ineffective empty-match advice");
   assert.ok(!FORBIDDEN.test(skill.body), "skill stays secret-free");
   for (const path of ["/room/SKILL.md", "/project-room/SKILL.md"]) {
     assert.ok(DISCOVERY_PATHS.includes(path), path);
