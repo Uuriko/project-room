@@ -778,6 +778,14 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (mayManageAnyClaim(access)) return true;
     reject(403, "work_not_owner", `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
   };
+  // Crash-recovery guild system #1: requestId idempotency on the mutating
+  // routes. A client that retries a mutation after a crash or a lost
+  // response carries the same requestId; check() replays the stored 200
+  // with duplicate:true instead of double-applying the mutation. record()
+  // runs only after a successful mutation, so failed attempts (422/403/409)
+  // never poison the table. The store is installed on store.requestDedupe
+  // by server init; routes null-guard it for backward compatibility.
+  const dedupe = store.requestDedupe ?? null;
 
   if (workClaimRoute === "status" && req.method === "GET") {
     closeLiveClaims();
@@ -956,7 +964,12 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "claim" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { optional: ["note", "leaseHours", "files", "advisory", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch"] })) invalidInput(reject, "{note?, leaseHours?, files?, advisory?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?}");
+    if (!shape(data, { optional: ["note", "leaseHours", "files", "advisory", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch", "requestId"] })) invalidInput(reject, "{note?, leaseHours?, files?, advisory?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?, requestId?}");
+    const requestId = readRequestId(data);
+    if (requestId && dedupe) {
+      const prior = dedupe.check(requestId);
+      if (prior.duplicate) return json(res, 200, { ...prior.result, duplicate: true });
+    }
     if ("advisory" in data && typeof data.advisory !== "boolean") invalidInput(reject, "advisory true or false");
     const item = load(claimIdOf(reject, workClaimId));
     if (item.state !== "unclaimed") reject(409, "work_claim_conflict", `Work "${item.id}" is already ${item.state} — release it first`);
@@ -1007,8 +1020,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // W012 required reading: every enrollment response presents the reading
     // list for the claim's kind. Advisory only — enrollment never gates on
     // it, so there is no bypass to learn and no existing flow can break.
-    return json(res, 200, { ...acked, fileWarnings: data.advisory === true ? fileWarningsFor(registry.list(roomId), acked) : [],
-      requiredReading: requiredReadingFor(item.kind) });
+    const claimedResult = { ...acked, fileWarnings: data.advisory === true ? fileWarningsFor(registry.list(roomId), acked) : [],
+      requiredReading: requiredReadingFor(item.kind) };
+    if (requestId && dedupe) dedupe.record(requestId, claimedResult);
+    return json(res, 200, claimedResult);
   }
   if (workClaimRoute === "update" && req.method === "POST") {
     const data = body(req);
@@ -1107,9 +1122,14 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // holds contribute or review rights. The older {note} body stays an
     // caller-bound note; it does not satisfy reviewed completion.
     const data = body(req);
+    const requestId = readRequestId(data);
+    if (requestId && dedupe) {
+      const prior = dedupe.check(requestId);
+      if (prior.duplicate) return json(res, 200, { ...prior.result, duplicate: true });
+    }
     const verdictReview = data && typeof data === "object" && !Array.isArray(data) && ("verdict" in data || "summary" in data || "url" in data);
     if (verdictReview) {
-      if (!shape(data, { required: ["verdict", "summary"], optional: ["url"] })) invalidInput(reject, "{verdict, summary, url?}");
+      if (!shape(data, { required: ["verdict", "summary"], optional: ["url", "requestId"] })) invalidInput(reject, "{verdict, summary, url?, requestId?}");
       if (!mayReviewWorkClaims(access)) refuseWorkClaims();
       requireEventBudget();
       data.summary = text("summary", data.summary, { multiline: true });
@@ -1121,9 +1141,11 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       if (!duplicate && data.verdict === "changes_requested") {
         enqueueClaimWake(store, roomId, item.owner, `work-claim:${item.id}:review:${caller}:${nowMs}`, { reason: "review", actorId: caller });
       }
-      return json(res, 200, duplicate ? item : reviewed);
+      const verdictResult = duplicate ? item : reviewed;
+      if (requestId && dedupe) dedupe.record(requestId, verdictResult);
+      return json(res, 200, verdictResult);
     }
-    if (!shape(data, { optional: ["note"] })) invalidInput(reject, "{note?} or {verdict, summary, url?}");
+    if (!shape(data, { optional: ["note", "requestId"] })) invalidInput(reject, "{note?, requestId?} or {verdict, summary, url?, requestId?}");
     if (!mayAttestWorkClaims(access)) refuseAttest();
     requireEventBudget();
     const note = text("note", data.note, { multiline: true });
@@ -1133,13 +1155,15 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       // A new attestation: one history entry, and at most one room event per
       // claim per 60 s for review notes.
       commit(attested, "reviewed", { coalesce: true });
+      if (requestId && dedupe) dedupe.record(requestId, attested);
       return json(res, 200, attested);
     }
     const before = item.attestations.find(entry => entry.memberId === caller);
     const after = attested.attestations.find(entry => entry.memberId === caller);
     // SEC-2: a repeat note from this reviewer on the same claim round and
     // revision replaces the stored note without a history entry or event.
-    if (before?.note !== after?.note) { registry.set(roomId, attested); return json(res, 200, attested); }
+    if (before?.note !== after?.note) { registry.set(roomId, attested); if (requestId && dedupe) dedupe.record(requestId, attested); return json(res, 200, attested); }
+    if (requestId && dedupe) dedupe.record(requestId, item);
     return json(res, 200, item);
   }
   if ((workClaimRoute === "close" || workClaimRoute === "cancel") && req.method === "POST") {
@@ -1159,7 +1183,12 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "release" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { optional: ["note", "reason"] })) invalidInput(reject, "{reason?, note?}");
+    if (!shape(data, { optional: ["note", "reason", "requestId"] })) invalidInput(reject, "{reason?, note?, requestId?}");
+    const requestId = readRequestId(data);
+    if (requestId && dedupe) {
+      const prior = dedupe.check(requestId);
+      if (prior.duplicate) return json(res, 200, { ...prior.result, duplicate: true });
+    }
     let item = load(claimIdOf(reject, workClaimId));
     const authority = authorityOver(item);
     requireEventBudget();
@@ -1174,11 +1203,17 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     }
     const released = runPure(reject, () => updateWork(item, caller, { state: "unclaimed", note: reason, now: nowMs, authority }));
     commit(released, "released");
+    if (requestId && dedupe) dedupe.record(requestId, released);
     return json(res, 200, released);
   }
   if (workClaimRoute === "reassign" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { required: ["newOwner"], optional: ["note"] })) invalidInput(reject, "{newOwner, note?}");
+    if (!shape(data, { required: ["newOwner"], optional: ["note", "requestId"] })) invalidInput(reject, "{newOwner, note?, requestId?}");
+    const requestId = readRequestId(data);
+    if (requestId && dedupe) {
+      const prior = dedupe.check(requestId);
+      if (prior.duplicate) return json(res, 200, { ...prior.result, duplicate: true });
+    }
     const item = load(claimIdOf(reject, workClaimId));
     const authority = authorityOver(item);
     // W3 (QA 2026-09-28): /reassign used to accept any newOwner string, so a
@@ -1211,6 +1246,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       attention: "assigned", attentionMemberId: target,
       wakeMemberId: target, wakeReason: "assigned"
     });
+    if (requestId && dedupe) dedupe.record(requestId, reassigned);
     return json(res, 200, reassigned);
   }
   if (workClaimRoute === "renew" && req.method === "POST") {
@@ -1219,7 +1255,12 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // the current lease window began. Renewals are discussed in the channel —
     // a stale holder can't hold work indefinitely without showing progress.
     const data = body(req);
-    if (!shape(data, { optional: ["progressMessageId", "note", "leaseHours"] })) invalidInput(reject, "{progressMessageId?, note?, leaseHours?}");
+    if (!shape(data, { optional: ["progressMessageId", "note", "leaseHours", "requestId"] })) invalidInput(reject, "{progressMessageId?, note?, leaseHours?, requestId?}");
+    const requestId = readRequestId(data);
+    if (requestId && dedupe) {
+      const prior = dedupe.check(requestId);
+      if (prior.duplicate) return json(res, 200, { ...prior.result, duplicate: true });
+    }
     const item = load(claimIdOf(reject, workClaimId));
     // W4 (QA 2026-09-28): a lapsed lease auto-releases the claim (owner
     // cleared), so the ownership check below would misdiagnose it as an
@@ -1261,8 +1302,13 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       }
     }
     const renewed = runPure(reject, () => renewWork(item, caller,
-      { note: data.note, leaseHours: leaseHoursOfBody(data), room: roomLike, now: nowMs }));
+      // A cited progress message is the progress note when the caller gives
+      // no explicit note — the pure machine's "no progress note recorded"
+      // marker then fires only when there is genuinely no progress evidence.
+      { note: data.note ?? (progressId ? `progress: ${progressId}` : undefined),
+        leaseHours: leaseHoursOfBody(data), room: roomLike, now: nowMs }));
     commit(renewed, "renewed", { coalesce: true });
+    if (requestId && dedupe) dedupe.record(requestId, renewed);
     return json(res, 200, renewed);
   }
   if (workClaimRoute === "config" && (req.method === "GET" || req.method === "POST")) {

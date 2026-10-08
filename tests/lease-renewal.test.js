@@ -179,16 +179,16 @@ test("changeDescription labels a renewal 'Scope renewed'", () => {
 // ---------------------------------------------------------------------------
 // Part 2: the pure renewWork state machine
 // ---------------------------------------------------------------------------
-test("renewWork starts a fresh lease window from now", () => {
+test("renewWork starts a fresh lease window from now, preserving the prior duration", () => {
   const claimed = claimWork({ id: "w1" }, "quill", { leaseHours: 6, now: T0 });
   assert.equal(claimed.leaseStartAt, iso(T0));
   const renewed = renewWork(claimed, "quill", { now: T0 + 2 * H });
   assert.equal(renewed.leaseStartAt, iso(T0 + 2 * H));
-  assert.equal(renewed.leaseExpiresAt, iso(T0 + 26 * H)); // the room's default 24h
+  assert.equal(renewed.leaseExpiresAt, iso(T0 + 8 * H)); // the claim's own 6h window, not the 24h room default
   assert.equal(renewed.owner, "quill");
   assert.equal(renewed.state, "claimed");
   assert.equal(renewed.history.at(-1).action, "renewed");
-  assert.match(renewed.history.at(-1).note, /lease: 24h/);
+  assert.match(renewed.history.at(-1).note, /lease: 6h/);
 });
 
 test("renewWork records the caller's note in history", () => {
@@ -201,6 +201,30 @@ test("renewWork honors an explicit leaseHours", () => {
   const claimed = claimWork({ id: "w1" }, "quill", { leaseHours: 6, now: T0 });
   const renewed = renewWork(claimed, "quill", { leaseHours: 6, now: T0 + H });
   assert.equal(renewed.leaseExpiresAt, iso(T0 + 7 * H));
+});
+
+// Crash-recovery guild (2026-10-07): an empty renew used to silently reset
+// the claim to the room's 24h default, defeating the short leases (0.25h–1h)
+// crash-prone work depends on. The contract: preserve the existing window.
+test("renewWork without leaseHours preserves the existing short lease — never the 24h default", () => {
+  const claimed = claimWork({ id: "w-short" }, "quill", { leaseHours: 0.5, now: T0 });
+  assert.equal(claimed.leaseExpiresAt, iso(T0 + 0.5 * H));
+  const renewed = renewWork(claimed, "quill", { now: T0 + 0.25 * H });
+  assert.equal(renewed.leaseStartAt, iso(T0 + 0.25 * H));
+  assert.equal(renewed.leaseExpiresAt, iso(T0 + 0.75 * H)); // the same 0.5h window, fresh from now
+  assert.equal(Date.parse(renewed.leaseExpiresAt) - Date.parse(renewed.leaseStartAt), 0.5 * H);
+  assert.match(renewed.history.at(-1).note, /lease: 0.5h/);
+});
+
+// PHOENIX spec: renewal is gated on a progress note. The route already
+// requires the owner's own public check-in when one is cited; a renew that
+// carries neither a note nor a cited message must at least record that.
+test("renewWork without a note records the missing progress check-in in history", () => {
+  const claimed = claimWork({ id: "w-note" }, "quill", { leaseHours: 0.5, now: T0 });
+  const renewed = renewWork(claimed, "quill", { now: T0 + 0.25 * H });
+  assert.match(renewed.history.at(-1).note, /no progress note/);
+  const noted = renewWork(claimed, "quill", { note: "still digging", now: T0 + 0.25 * H });
+  assert.equal(noted.history.at(-1).note, "still digging");
 });
 
 test("renewWork refuses a foreign owner, a non-active claim, a leaseless claim, and a lapsed lease", () => {
@@ -268,7 +292,26 @@ test("handler: renew without a progress message id extends the lease", async () 
   const before = registry.get("room1", "w1").leaseExpiresAt;
   const { out, error } = await runRoute({ route: "renew", id: "w1", body: {}, registry });
   assert.equal(error, null);
-  assert.ok(Date.parse(out.value.leaseExpiresAt) > Date.parse(before));
+  // >= not >: since the footgun fix an empty renew preserves the existing
+  // window, so a claim and renew landing in the same millisecond have equal
+  // expiries. The footgun itself is locked by the short-lease test below.
+  assert.ok(Date.parse(out.value.leaseExpiresAt) >= Date.parse(before));
+  assert.match(out.value.history.at(-1).note, /no progress note/);
+});
+
+test("handler: renew without leaseHours preserves the short lease window", async () => {
+  const registry = await claimedRegistry({ leaseHours: 0.5 });
+  const { out, error } = await runRoute({ route: "renew", id: "w1", body: {}, registry });
+  assert.equal(error, null);
+  assert.equal(Date.parse(out.value.leaseExpiresAt) - Date.parse(out.value.leaseStartAt), 0.5 * H);
+});
+
+test("handler: a cited progress message counts as the renew's progress note", async () => {
+  const registry = await claimedRegistry();
+  const { out, error } = await runRoute({ route: "renew", id: "w1", body: { progressMessageId: "progress-1" },
+    storeMessages: [liveMessage()], registry });
+  assert.equal(error, null);
+  assert.equal(out.value.history.at(-1).note, "progress: progress-1");
 });
 
 test("handler: renew with a DM check-in is refused", async () => {
