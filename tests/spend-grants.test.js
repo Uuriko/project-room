@@ -450,6 +450,40 @@ test("tools/call: idempotent duplicate retry is not charged twice", async t => {
   assert.equal(settled.total, 5, "charged exactly once");
 });
 
+test("tools/call: priced tool that fails after charging is voided, not settled", async t => {
+  // The store only learns an attachment id is taken when it writes, so a
+  // 409 attachment_conflict fires AFTER the spend charge. The charge must
+  // be voided: the agent pays nothing for a call that never happened, and
+  // the grant cap is restored. Regression: wiring the dispatch failure to
+  // spend.settle() (or dropping the catch) would bill agents for failed
+  // tool calls.
+  const f = roomWithPeer(t);
+  issueSpendGrant(f.store.db, f.roomId, f.peerMemberId, {
+    grantedBy: f.ownerMemberId, capCents: "100", perTxCapCents: "10", nowMs: Date.now(),
+  });
+  const id = `conflict-${randomUUID()}`;
+  const b64 = text => Buffer.from(text).toString("base64");
+  const first = await callTool(f.call, f.peer.secret, "room_put_file", {
+    roomId: f.roomId, id, filename: "a.txt", mediaType: "text/plain", data: b64("hello"),
+  });
+  assert.equal(first.result?.isError, undefined, `first stage should succeed, got ${JSON.stringify(first).slice(0, 300)}`);
+  const failed = await callTool(f.call, f.peer.secret, "room_put_file", {
+    roomId: f.roomId, id, filename: "b.txt", mediaType: "text/plain", data: b64("world"),
+  });
+  const failure = errorOf(failed);
+  assert.equal(failure.status, 409);
+  assert.equal(failure.code, "attachment_conflict");
+  const rows = f.store.db.prepare(
+    `SELECT status, price_cents FROM spend_authorizations
+     WHERE room_id = ? AND agent_id = ? ORDER BY created_at`).all(f.roomId, f.peerMemberId);
+  assert.equal(rows.length, 2, "one authorization per attempt");
+  assert.equal(rows[0].status, "settled");
+  assert.equal(rows[0].price_cents, "5");
+  assert.equal(rows[1].status, "voided", "a priced call that failed after charging must be voided, never settled");
+  const summary = spendGrantSummary(f.store.db, f.roomId, f.peerMemberId);
+  assert.equal(summary.remainingCents, "95", "voided charges must not consume the grant cap");
+});
+
 // --- Visibility: withhold, never refuse ---
 
 test("readSpendGrantRoute: agents see their grant; guests and grant-less members see null", async t => {
