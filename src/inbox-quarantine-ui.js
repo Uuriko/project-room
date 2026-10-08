@@ -26,6 +26,17 @@
 // review surface itself stays the only view that shows held/dismissed rows.
 // Dismiss arms on the first click (two deliberate taps, like the
 // connection "Remove" flow) — a dismissal is a verdict, not a glance.
+// Relative-age copy for quarantine cards ("just now", "5m ago", ...).
+export function quarantineAge(at) {
+  const ms = Date.now() - at;
+  if (ms < 60000) return "just now";
+  const minutes = Math.floor(ms / 60000);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return days === 1 ? "1d ago" : `${days}d ago`;
+}
 export function installQuarantineReview({ api, ownerKey }) {
   const $ = selector => document.querySelector(selector);
   const text = (selector, value) => { $(selector).textContent = value; };
@@ -41,16 +52,6 @@ export function installQuarantineReview({ api, ownerKey }) {
   let epoch = 0, busy = new Set(), armed = new Set();
   // The card a verdict was given from, so refresh() can put focus back there.
   let focusAfterVerdict = -1;
-  const ageOf = at => {
-    const ms = Date.now() - at;
-    if (ms < 60000) return "just now";
-    const minutes = Math.floor(ms / 60000);
-    if (minutes < 60) return `${minutes}m ago`;
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    return days === 1 ? "1d ago" : `${days}d ago`;
-  };
   // Built once, like the search form: the section lives in the inbox
   // sidebar between the message list and the connections cards.
   function section() {
@@ -185,7 +186,7 @@ export function installQuarantineReview({ api, ownerKey }) {
     const head = document.createElement("div"); head.className = "inbox-quarantine-head";
     const sender = document.createElement("strong"); sender.textContent = item.sender ?? "(unknown sender)";
     const badge = document.createElement("span"); badge.className = "inbox-channel-badge"; badge.textContent = channelLabel[item.channel] ?? item.channel;
-    const age = document.createElement("span"); age.className = "form-hint"; age.textContent = ageOf(item.quarantinedAt);
+    const age = document.createElement("span"); age.className = "form-hint"; age.textContent = quarantineAge(item.quarantinedAt);
     head.append(sender, badge, scoreBadge(item.score), age);
     card.append(head);
     if (item.subject) { const subject = document.createElement("p"); subject.className = "inbox-quarantine-subject"; subject.textContent = item.subject; card.append(subject); }
@@ -216,8 +217,8 @@ export function installQuarantineReview({ api, ownerKey }) {
     card.append(shadowLine);
     const meta = document.createElement("p"); meta.className = "form-hint";
     const metaParts = [`Held ${new Date(item.quarantinedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}`];
-    if (item.split) metaParts.push(`Split off its thread ${ageOf(item.split.splitAt)} by ${item.split.reviewer}${item.split.reason ? ` — ${item.split.reason}` : ""}`);
-    if (item.status !== "held") metaParts.push(`${item.status === "released" ? "Confirmed" : "Dismissed"} by ${item.reviewedBy ?? "unknown"}${item.reviewedAt ? " · " + ageOf(item.reviewedAt) : ""}${item.note ? ` — ${item.note}` : ""}`);
+    if (item.split) metaParts.push(`Split off its thread ${quarantineAge(item.split.splitAt)} by ${item.split.reviewer}${item.split.reason ? ` — ${item.split.reason}` : ""}`);
+    if (item.status !== "held") metaParts.push(`${item.status === "released" ? "Confirmed" : "Dismissed"} by ${item.reviewedBy ?? "unknown"}${item.reviewedAt ? " · " + quarantineAge(item.reviewedAt) : ""}${item.note ? ` — ${item.note}` : ""}`);
     meta.textContent = metaParts.join(" · ");
     card.append(meta);
     if (item.status === "held") {
