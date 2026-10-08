@@ -35,7 +35,18 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
   const badge = document.createElement("span");
   badge.id = "updates-count";
   badge.className = "count-chip";
-  entry.append("Updates ", badge);
+  entry.title = "Updates";
+  const label = document.createElement("span");
+  label.className = "control-label";
+  label.textContent = "Updates ";
+  const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  icon.setAttribute("viewBox", "0 0 24 24");
+  icon.setAttribute("width", "20"); icon.setAttribute("height", "20");
+  icon.setAttribute("fill", "none"); icon.setAttribute("stroke", "currentColor");
+  icon.setAttribute("stroke-width", "1.7"); icon.setAttribute("stroke-linecap", "round");
+  icon.setAttribute("stroke-linejoin", "round"); icon.setAttribute("aria-hidden", "true");
+  icon.innerHTML = '<path d="M4 4h16v16H4zM4 14h4l2 3h4l2-3h4"/>';
+  entry.append(icon, label, badge);
   topbar?.prepend(entry);
 
   const dialog = document.createElement("dialog");

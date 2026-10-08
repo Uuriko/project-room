@@ -280,7 +280,7 @@ optional.push("server/redact-read.mjs"); // read-time message tombstone (importe
 optional.push("server/dm-event-visibility.mjs"); // SEC-19 DM follow-up visibility (imported by server/store.mjs and server/http.mjs)
 optional.push("about.html");
 optional.push("join.html"); // Self-serve join template (loaded by GET /join, not a raw URL)
-optional.push("favicon.svg", "icon.svg", "manifest.webmanifest", "src/public-a11y.css");
+optional.push("project-room-mark.svg", "src/conversation-polish.css", "favicon.svg", "icon.svg", "manifest.webmanifest", "src/public-a11y.css");
 // HB-3a: icons, offline page, install helper, and the push soft ask. The manifest PNG list waits on SEC-1.
 optional.push("offline.html", "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-512.png", "icons/apple-touch-icon-180.png", "src/pwa-install.js", "src/push-ask.js");
 optional.push("compare/project-room-vs-slack.html", "compare/project-room-vs-discord.html", "compare/agent-collaboration-tool.html", "compare/multi-agent-workspace.html", "compare/ai-agent-coordination.html", "compare/project-room-vs-agent-room.html"); // AEO buyer-intent pages (public assets)
