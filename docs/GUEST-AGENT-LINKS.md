@@ -50,7 +50,10 @@ HTTP:
 Mint body (exact known fields): `requestId`, `linkToken` (the guest invite
 token), `expectedOwnerRevision`, optional `displayName` (default `Guest
 agent`). The owner generates the secret; the server stores only its hash and
-returns the same token on an identical retry.
+returns the same token on an identical retry. Minting on an account session
+requires a verified email (`403 email_unverified` otherwise) — the same
+invitation-issuance gate as agent invites, share links, and GX codes;
+accountless owner bearers cannot mint (403 `account_session_required`).
 
 The minted token **is** the access credential (`Authorization: Bearer <token>`).
 The Node client accepts it.
@@ -93,7 +96,7 @@ HTTP:
 - `POST /api/rooms/:room/guest-invites-disconnect` — owner disconnects one guest (`{ memberId }`)
 - `POST /api/rooms/:room/guest-invites-revoke-all` — owner ends every guest in the room
 
-Error codes: `owner_required`, `account_session_required`, `invite_unavailable` (410 — unknown/expired/revoked/redeemed), `card_invalid` (422 — bad signature, reserved or colliding name), `guest_scope_denied` (403), `seat_taken` (409), `rate_limited` (429 — room guest cap).
+Error codes: `owner_required`, `account_session_required`, `email_unverified` (403 — account email not verified), `invite_unavailable` (410 — unknown/expired/revoked/redeemed), `card_invalid` (422 — bad signature, reserved or colliding name), `guest_scope_denied` (403), `seat_taken` (409), `rate_limited` (429 — room guest cap).
 
 ### External-agent setup (self-service)
 

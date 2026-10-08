@@ -258,6 +258,11 @@ export class GuestAgentLinks {
       // (guestAgentMemberId): an accountless owner — e.g. an agent identity
       // bearer — passes the owner gate but cannot mint without an account.
       if (!auth.account) fail(403, "account_session_required", "Minting a guest invite requires a signed-in account session");
+      // Invitation issuance carries the f520ca69 email-verification gate,
+      // same as agent-invites.create, share-link creation, and GX
+      // guest-invite mint. The mint is account-bound (accountless owners
+      // 403 above), so every issuer here has an account to verify.
+      if (auth.account) this.store.accountLogins.assertEmailVerified(auth.account.id);
       if (expectedOwnerRevision !== auth.member.revision) fail(409, "stale_member_revision", "Your room permissions changed; refresh before minting");
       this.sweepExpired(token, roomId, binding);
       const memberId = guestAgentMemberId(auth.account.id, requestId);

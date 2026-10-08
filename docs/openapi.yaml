@@ -13462,7 +13462,7 @@ paths:
         '401': { description: unauthenticated }
         '201': { description: Guest-agent member created }
         '200': { description: Exact retry of a journaled mint }
-        '403': { description: "owner_required, account_session_required or csrf_denied" }
+        '403': { description: "owner_required, account_session_required, email_unverified or csrf_denied" }
         '409': { description: "stale_member_revision, membership_ended or pilot_limit" }
         '422': { description: invalid_link }
         '429': { description: rate_limited }
