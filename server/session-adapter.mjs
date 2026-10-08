@@ -616,11 +616,20 @@ export class InMemorySessionAdapter extends BaseSessionAdapter {
    * Continuity is via the agent CLI's own session store: pass
    * `resumeSessionRef` + `resumeCommand` (e.g. ["claude", "--resume", id]) —
    * never transcript replay. Returns the occupant-pinned AgentHandle.
+   *
+   * opts.signal (AbortSignal, optional): abort propagation into pane
+   * creation. An abort before creation rejects with TimeoutError and creates
+   * nothing; an abort racing creation tears the half-built pane back down and
+   * rejects — the caller never observes a pane the aborter didn't ask for.
    */
   async spawnAgent(opts = {}) {
     this._requireConnected();
     if (!opts || typeof opts.command !== 'string' || opts.command.length === 0) {
       throw new Error('spawnAgent: opts.command (non-empty string) is required');
+    }
+    const { signal } = opts;
+    if (signal && signal.aborted) {
+      throw new TimeoutError('spawnAgent: aborted before pane creation', { backend: this._backend });
     }
     const resumeCommand = validateResumeCommand(opts.resumeCommand);
     const ws = this._ensureWorkspace(opts.workspace ?? 'default');
@@ -644,9 +653,27 @@ export class InMemorySessionAdapter extends BaseSessionAdapter {
     this._panes.set(paneId, pane);
     this._agents.set(agentId, agent);
     tab.paneIds.push(paneId);
-    this._emit('pane.created', { paneId, agentId, workspace: ws.name, tab: tab.name });
-    this._emit('agent.started', { paneId, agentId, kind: agent.kind, command: agent.command });
-    return { id: agentId, paneId, occupantId };
+    // A racing abort must not leave a half-built pane behind. The listener
+    // tears the pane down; the re-check below turns the race into a
+    // TimeoutError before any handle or event escapes.
+    const onAbort = () => { this._destroyPane(paneId); };
+    if (signal) signal.addEventListener('abort', onAbort, { once: true });
+    try {
+      // Yield so an interleaved abort runs the teardown before the handle is
+      // returned (pane creation suspends in real backends).
+      await Promise.resolve();
+      if (signal && signal.aborted) {
+        throw new TimeoutError('spawnAgent: aborted during pane creation', { backend: this._backend });
+      }
+      this._emit('pane.created', { paneId, agentId, workspace: ws.name, tab: tab.name });
+      this._emit('agent.started', { paneId, agentId, kind: agent.kind, command: agent.command });
+      return { id: agentId, paneId, occupantId };
+    } catch (err) {
+      this._destroyPane(paneId); // idempotent: no-op if the listener already ran
+      throw err;
+    } finally {
+      if (signal) signal.removeEventListener('abort', onAbort);
+    }
   }
 
   /** Inventory + state rollup for the sidebar/supervisor. */
@@ -668,6 +695,11 @@ export class InMemorySessionAdapter extends BaseSessionAdapter {
   /** Close a pane (agent teardown is the agent's own exit). Idempotent. */
   async closePane(paneId) {
     this._requireConnected();
+    this._destroyPane(paneId);
+  }
+
+  /** Synchronous pane teardown shared by closePane and the spawn abort path. */
+  _destroyPane(paneId) {
     const pane = this._panes.get(paneId);
     if (!pane) return;
     this._panes.delete(paneId);

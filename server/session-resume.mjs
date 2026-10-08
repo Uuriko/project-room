@@ -403,8 +403,11 @@ export function createIdempotencyStore({ now = Date.now, ttlMs = IDEMPOTENCY_TTL
 // Adapter surface (implemented by the B14 SessionAdapter / bridge):
 //   getOccupant(paneId) -> Promise<{ occupantId, agentId } | null>
 //       null = pane not in the snapshot (gone or never restored).
-//   spawnAgent({ kind, command, args, resumeSessionRef })
+//   spawnAgent({ kind, command, args, resumeSessionRef, signal })
 //       -> Promise<{ paneId, agentId, occupantId? }>
+//       signal is the reattach window's AbortSignal: the adapter aborts
+//       pane/process creation when it fires and never surfaces a half-spawn.
+//   closePane(paneId) -> Promise<void> (idempotent; cleans up a raced spawn)
 //   requestReportState?(paneId) -> Promise<void>  (best-effort handshake)
 // ---------------------------------------------------------------------------
 
@@ -518,7 +521,19 @@ export function createReattachManager({
         command: argv[0],
         args: argv.slice(1),
         resumeSessionRef: s.resumeRef.sessionRef,
+        signal, // the reattach window's controller: a raced timeout aborts the spawn at the adapter
       });
+      // A raced timeout (or any mid-flight abort) must neither attach the new
+      // pane to the session record nor leak it. An abort-aware adapter tears
+      // its own spawn down; a backend that resolved anyway leaves an orphan —
+      // close it here before surfacing the timeout.
+      if (signal.aborted) {
+        try {
+          await adapter.closePane(spawned.paneId);
+        } catch {
+          // Best effort: the timeout is the outcome; cleanup must not mask it.
+        }
+      }
       throwIfAborted();
       const prevOccupant = s.occupantId;
       const prevPane = s.paneId;

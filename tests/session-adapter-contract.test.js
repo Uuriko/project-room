@@ -149,6 +149,33 @@ function runContractSuite(backendName, makeAdapter) {
       assert.equal(pane.occupantId, h.occupantId);
     });
 
+    it('spawnAgent with an already-aborted signal rejects and creates nothing', async () => {
+      const c = new AbortController();
+      c.abort();
+      await assert.rejects(
+        () => adapter.spawnAgent({ command: 'claude', signal: c.signal }),
+        (e) => {
+          assert.ok(e instanceof TimeoutError, `expected TimeoutError, got ${e}`);
+          assert.match(e.message, /abort/i);
+          return true;
+        },
+      );
+      assert.deepEqual(await adapter.listAgents(), [], 'no agent was created');
+    });
+
+    it('spawnAgent: an abort racing the spawn rejects and leaves no leaked pane', async () => {
+      // The abort must propagate INTO pane creation: a backend that already
+      // built the pane tears it back down instead of surfacing a half-spawn.
+      const c = new AbortController();
+      const pending = adapter.spawnAgent({ command: 'claude', signal: c.signal });
+      c.abort();
+      await assert.rejects(pending, (e) => {
+        assert.ok(e instanceof TimeoutError, `expected TimeoutError, got ${e}`);
+        return true;
+      });
+      assert.deepEqual(await adapter.listAgents(), [], 'the raced pane was torn down');
+    });
+
     it('spawnAgent with native resume refs stores them (no transcript replay)', async () => {
       const h = await adapter.spawnAgent({
         command: 'claude',
