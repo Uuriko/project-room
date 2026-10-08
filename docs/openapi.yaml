@@ -4901,12 +4901,23 @@ paths:
         matches [A-Za-z0-9_-]{1,128}. `reviewPolicy` overrides the room's
         default review policy for this item. Duplicate ids get 409
         `work_claim_exists`. A room already at its open-claim cap (default
-        200; done claims do not count) gets 409 `work_board_full`. Creating
-        needs a contribute, review, or collaborate profile, the room owner,
-        or a human with contribute rights; otherwise 403
-        `work_claims_not_permitted`. API keys need `rooms:write`.
+        200; done, cancelled, and standby claims do not count) gets 409
+        `work_board_full`. With `standby: true` (or `?standby=true`) the
+        item is parked in the standby queue instead of taking a board slot,
+        even when the board is full; standby claims promote to unclaimed in
+        FIFO order when a slot frees, and have their own cap (default 1000)
+        with 409 `standby_full`. Creating needs a contribute, review, or
+        collaborate profile, the room owner, or a human with contribute
+        rights; otherwise 403 `work_claims_not_permitted`. API keys need
+        `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - name: standby
+          in: query
+          schema: { type: boolean }
+          description: |
+            Equivalent to the `standby` body field: park the created item in
+            the standby queue instead of taking a board slot.
       requestBody:
         required: true
         content:
@@ -4919,6 +4930,13 @@ paths:
                 title: { type: string }
                 reviewPolicy: { type: string, enum: [self_attested, distinct_member, independent_principal] }
                 note: { type: string }
+                standby:
+                  type: boolean
+                  description: |
+                    Park the item in the standby queue behind a full board
+                    instead of taking a 409. Standby claims do not count
+                    toward the open-claim cap and promote to unclaimed in
+                    FIFO enqueue order when a slot frees.
                 tags:
                   type: array
                   items: { type: string, pattern: '[A-Za-z0-9_-]{1,32}' }
@@ -4969,14 +4987,16 @@ paths:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
         '403': { description: work_claims_not_permitted }
-        '409': { description: work_claim_exists, work_board_full, or too_many_open_claims }
+        '409': { description: work_claim_exists, work_board_full, standby_full, or too_many_open_claims }
         '422': { description: invalid_claim_input or work_assignee_unknown_member }
   /api/rooms/{roomId}/work-claims/config:
     get:
       summary: Read the room's work-claim caps
       description: |
         Returns the room's open-claim caps. maxMemberOpenClaims defaults to
-        20. API keys need `rooms:read`.
+        20; maxStandbyClaims (the standby queue's own cap) defaults to 1000.
+        Cancelled and standby claims do not count toward maxOpenClaims.
+        API keys need `rooms:read`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
@@ -5231,7 +5251,10 @@ paths:
       summary: Claim work
       description: |
         Claims an unclaimed item for the calling member (the anti-collision
-        rule: an already-claimed item gets 409 `work_claim_conflict`).
+        rule: an already-claimed item gets 409 `work_claim_conflict`). A
+        standby-parked item cannot be claimed directly (409
+        `work_claim_standby`) — it promotes to unclaimed automatically when
+        a board slot frees.
         `leaseHours` sets the claim lease in hours (default: the room's
         configured default, else 24h; max 168h). `null` opts out of leases
         and is only accepted from the room owner or a member with
@@ -5373,7 +5396,7 @@ paths:
                     state:
                       type: string
                       enum: [claimed, in_progress, blocked, done, unclaimed]
-                      description: unclaimed = release the claim
+                      description: "unclaimed = release the claim. cancelled and standby are not reachable here (422) - use the /close route and standby create instead."
                     note: { type: string }
                     deliveryMode:
                       type: string
@@ -5618,14 +5641,18 @@ paths:
   /api/rooms/{roomId}/work-claims/{claimId}/close:
     post:
       x-room-permission: claim_owner|owner|manage_claims
-      summary: Close a work claim without delivery
+      summary: Close a work claim
       description: |
         The claim holder, the room owner, or a member with manage_claims
-        retires an open item (unclaimed, claimed, in_progress or blocked)
-        without delivering it. The item moves to the terminal `closed`
-        state with no owner and no lease, stops counting against the room's
-        open-claim cap, and the history entry `closed` records the caller
-        and `reason`. MCP: room_close_work_claim with verb close.
+        cancels the claim. Unlike release (which returns the item to
+        unclaimed and keeps it counted against the board cap), close is a
+        terminal transition to `cancelled`: the owner and the lease are
+        cleared, a `closed` history entry records who/when/reason, and the
+        board slot is freed — cancelled claims do not count toward
+        maxOpenClaims. A done claim cannot be closed (422). Closing an
+        already-cancelled claim is an idempotent no-op. When a standby
+        claim is waiting, the freed slot promotes the oldest one and the
+        response carries it under `promoted`. MCP: room_close_work_claim.
         API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
@@ -5641,10 +5668,10 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                reason: { type: string, maxLength: 4000, description: Why the item was retired. Recorded on the history entry. }
+                reason: { type: string, maxLength: 4000, description: Why the claim was closed. Recorded on the history entry. }
       responses:
         '200':
-          description: The closed item (state closed)
+          description: The closed item (state cancelled), with `promoted` when a standby claim took the freed slot
           content:
             application/json:
               schema:
@@ -5652,7 +5679,7 @@ paths:
         '401': { description: unauthenticated }
         '403': { description: work_not_owner }
         '404': { description: work_claim_not_found }
-        '409': { description: work_claim_terminal (already done or closed) }
+        '409': { description: work_claim_terminal (already done, closed or cancelled) }
         '422': { description: invalid_claim_input }
   /api/rooms/{roomId}/work-claims/{claimId}/cancel:
     post:
@@ -16982,8 +17009,13 @@ components:
       properties:
         id: { type: string }
         title: { type: string }
-        state: { type: string, enum: [unclaimed, claimed, in_progress, blocked, expired, done, closed] }
+        state: { type: string, enum: [unclaimed, claimed, in_progress, blocked, expired, standby, cancelled, done, closed] }
         owner: { type: [string, 'null'] }
+        queuePosition:
+          type: [integer, 'null']
+          description: |
+            FIFO position in the standby queue (1 = next to promote). Present
+            on standby claims in list responses; absent otherwise.
         claimedAt: { type: [string, 'null'], format: date-time }
         leaseStartAt: { type: [string, 'null'], format: date-time }
         leaseExpiresAt: { type: [string, 'null'], format: date-time }

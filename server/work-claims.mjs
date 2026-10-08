@@ -51,31 +51,40 @@
 // appendPullRequest path already maps unknown ClaimError codes to 409; the
 // update path's runPure currently maps every ClaimError to 422).
 import { parsePullRequestUrl } from "./claim-coordination.mjs";
-const STATES = ["unclaimed", "claimed", "in_progress", "blocked", "expired", "done", "closed"];
+const STATES = ["unclaimed", "claimed", "in_progress", "blocked", "expired", "standby", "cancelled", "done", "closed"];
 const CLAIM_KINDS = ["work", "land", "deploy"];
 const CI_STATES = ["pending", "success", "failure", "neutral"];
 const REVIEW_VERDICTS = ["approve", "changes_requested", "comment"];
 // Claim lifecycle: one explicit table, state x verb -> next state. Anything
-// not listed is refused. done and closed are terminal: done means the work
-// was delivered; closed means it was retired without delivery (close by the
-// room's claim managers, cancel by whoever opened or holds it). Only open
-// (non-terminal) items count against the room's open-claim cap.
+// not listed is refused. done, closed and cancelled are terminal: done means
+// the work was delivered; closed/cancelled mean it was retired without
+// delivery (close by the room's claim managers, cancel by whoever opened or
+// holds it). Only open (non-terminal) items count against the room's
+// open-claim cap.
 //
 // expired is the lease-grace window (lease-first): the claim is still owned
 // and counts as held; heartbeat/renew restore the pre-expiry state
 // (priorActiveState), the owner may release it, and the reaper resolves it to
 // claimed (succession) or unclaimed when grace ends.
+//
+// standby is create-only (never a target of updateWork): it enters via
+// create with standby:true and leaves via promotion (standby -> unclaimed)
+// or closeWork (standby -> cancelled). The cancelled state is terminal and
+// is reached only through closeWork, never through updateWork — the close
+// route owns the holder/owner/manage_claims auth shape for it.
 const CLAIM_LIFECYCLE = Object.freeze({
   unclaimed: Object.freeze({ claim: "claimed", close: "closed", cancel: "closed" }),
   claimed: Object.freeze({ start: "in_progress", block: "blocked", release: "unclaimed", expire: "expired", close: "closed", cancel: "closed" }),
   in_progress: Object.freeze({ block: "blocked", finish: "done", pause: "claimed", expire: "expired", close: "closed", cancel: "closed" }),
   blocked: Object.freeze({ start: "in_progress", pause: "claimed", expire: "expired", close: "closed", cancel: "closed" }),
   expired: Object.freeze({ recover: "claimed", start: "in_progress", block: "blocked", release: "unclaimed", close: "closed", cancel: "closed" }),
+  standby: Object.freeze({}),
+  cancelled: Object.freeze({}),
   done: Object.freeze({}),
   closed: Object.freeze({}),
 });
 const CLAIM_VERBS = Object.freeze(["claim", "start", "block", "release", "pause", "finish", "expire", "recover", "close", "cancel"]);
-const TERMINAL_CLAIM_STATES = Object.freeze(["done", "closed"]);
+const TERMINAL_CLAIM_STATES = Object.freeze(["done", "closed", "cancelled"]);
 const isTerminalClaimState = state => TERMINAL_CLAIM_STATES.includes(state);
 // The next state for a verb, or null when the table refuses it.
 function nextClaimState(state, verb) {
@@ -86,6 +95,14 @@ function nextClaimState(state, verb) {
 // their own routes so a retire always records who and why).
 const TRANSITIONS = Object.freeze(Object.fromEntries(Object.entries(CLAIM_LIFECYCLE).map(([state, row]) =>
   [state, Object.freeze(Object.entries(row).filter(([verb]) => verb !== "close" && verb !== "cancel").map(([, next]) => next))])));
+// Board-cap predicate: only states that still occupy a board slot count.
+// Cancelled, closed and standby claims (and done ones) are excluded —
+// closing or parking a claim must actually free a slot.
+export const countsTowardBoardCap = item => item.state !== "done" && item.state !== "closed" && item.state !== "cancelled" && item.state !== "standby";
+// FIFO position of a standby claim: the moment it entered standby. Items
+// carry no createdAt field, so the first (created) history stamp is the
+// enqueue instant; registry list order (rowid ASC) breaks same-ms ties.
+export const standbyEnqueuedAt = item => item?.history?.[0]?.at ?? "";
 const DELIVERY_MODES = ["result", "merged", "production"];
 const REVIEW_POLICIES = ["self_attested", "distinct_member", "independent_principal"];
 // Receipt tags (RC-2026-09-24-205): free-form labels recorded when work is
@@ -344,6 +361,7 @@ export const leaseMaxTotalMs = kind => {
 };
 export const DEFAULT_MAX_OPEN_CLAIMS = 200;
 export const DEFAULT_MAX_MEMBER_OPEN_CLAIMS = 20;
+export const DEFAULT_MAX_STANDBY_CLAIMS = 1000;
 const CONFIG_CAP_CEILING = 10000;
 const DEFAULT_REVIEW_POLICY = "self_attested";
 const ACTIVE_CLAIM_STATES = ["claimed", "in_progress", "blocked"];
@@ -621,6 +639,7 @@ export function roomWorkClaimConfig(room) {
     // the room explicitly opts out (then claims are marked filesDeclared:
     // false so the arbiter can see them).
     requireClaimFiles: raw.requireClaimFiles !== false,
+    maxStandbyClaims: positiveCap(raw.maxStandbyClaims, DEFAULT_MAX_STANDBY_CLAIMS),
   });
 }
 const leaseHoursOf = value => {
@@ -645,9 +664,13 @@ const pullList = (pullRequest, pullRequests) => {
 // `tags` may be supplied up front (free-form, recorded on the item); blobs
 // are evidence pointers and are only recorded on the done transition.
 export function createWork(input = {}, { now, agentId } = {}) {
-  const { id, title, reviewPolicy, note, tags, files, dependsOn, parentClaimId, evidenceRefs, pullRequest, pullRequests, repo, branch, fileBlocks, workItemId, kind, revision, squadId, filesDeclared } = input;
+  const { id, title, reviewPolicy, note, tags, files, dependsOn, parentClaimId, evidenceRefs, pullRequest, pullRequests, repo, branch, fileBlocks, workItemId, kind, revision, squadId, filesDeclared, state } = input;
   const atMs = nowMsOf(now);
   idOf(id, "work id", 256);
+  // Only creation-legal states: a claim enters as unclaimed, or parked in
+  // standby when the requester asked to queue behind a full board.
+  check(state === undefined || state === "unclaimed" || state === "standby",
+    `state must be unclaimed or standby on create`);
   if (title !== undefined) check(typeof title === "string" && title.length > 0 && title.length <= 512, "title must be 1..512 characters");
   // SEC2: the create note is stored on the "created" history stamp and served
   // on every board list — without a bound, a direct API caller can stash an
@@ -659,7 +682,7 @@ export function createWork(input = {}, { now, agentId } = {}) {
   if (claimKind === "deploy") check(claimRevision, "a deploy claim needs a revision");
   const declared = files === undefined || files === null ? { files: Object.freeze([]), fileBlocks: Object.freeze({}) } : claimedFilesOf(files);
   const links = pullList(pullRequest, pullRequests);
-  const item = { id, title: title ?? id, state: "unclaimed", owner: null, history: [],
+  const item = { id, title: title ?? id, state: state ?? "unclaimed", owner: null, history: [],
     epoch: 0, // epoch fencing (W8): no owner yet, the fence starts here
     claimedAt: null, leaseStartAt: null, leaseExpiresAt: null, deliveryMode: null,
     reviewPolicy: reviewPolicy ?? null, reviewedBy: null, attestations: Object.freeze([]),
@@ -682,7 +705,7 @@ export function createWork(input = {}, { now, agentId } = {}) {
     filesDeclared: filesDeclared === undefined ? true : filesDeclared === true,
     // Schema drift: unknown input fields pass through verbatim.
     ...Object.fromEntries(Object.entries(input).filter(([key]) =>
-      !["id", "title", "reviewPolicy", "note", "tags", "files", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch", "fileBlocks", "workItemId", "kind", "revision", "squadId", "filesDeclared"].includes(key))) };
+      !["id", "title", "reviewPolicy", "note", "tags", "files", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch", "fileBlocks", "workItemId", "kind", "revision", "squadId", "filesDeclared", "state"].includes(key))) };
   // The creating member when the route knows it; "system" for internal creates.
   return withHistory(item, atMs, agentId === undefined ? "system" : agentOf(agentId), "created", note);
 }
@@ -969,15 +992,28 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     ...withProvenance };
   return withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note);
 }
-// Retire open work without delivering it. close: the room's claim managers
-// (authority) or the current holder. cancel: whoever opened the item while
-// it is still unclaimed, or the current holder; authority may also cancel.
-// The item lands in the terminal closed state with no owner and no lease;
-// the history stamp ("closed" | "cancelled") names who retired it and why.
-export function closeWork(work, agentId, { verb = "close", reason, now, authority = false } = {}) {
+// Retire open work without delivering it.
+//
+// Two entry shapes (guild integration):
+// - verb = "close" | "cancel": the lifecycle table — close/cancel verbs move
+//   to the terminal `closed` state. close is for the room's claim managers
+//   (authority) or the current holder; cancel is also open to whoever opened
+//   the item while it is still unclaimed.
+// - verb omitted (the POST /close route): the terminal `cancelled` state —
+//   the unbrick fix; cancelled claims are cap-excluded. Auth: the holder,
+//   the room owner, or a manage_claims holder (resolved by the route).
+export function closeWork(work, agentId, { verb, reason, now, authority = false } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
-  check(verb === "close" || verb === "cancel", "verb must be close or cancel");
   if (reason !== undefined && reason !== null) check(typeof reason === "string" && reason.length <= 4000, "reason must be a string of at most 4000 characters");
+  if (verb === undefined || verb === null) {
+    check(authority === true || item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can close it`);
+    check(item.state !== "done", `work "${item.id}" is done and immutable`);
+    check(!isTerminalClaimState(item.state), `work "${item.id}" is already ${item.state}`);
+    const next = { ...item, state: "cancelled", owner: null,
+      leaseStartAt: null, leaseExpiresAt: null };
+    return withHistory(next, atMs, agent, "closed", reason ?? null);
+  }
+  check(verb === "close" || verb === "cancel", "verb must be close or cancel");
   const next = nextClaimState(item.state, verb);
   if (next === null) fail("work_claim_terminal", `Cannot ${verb} "${item.id}": it is already ${item.state}`);
   const holder = item.owner !== null && item.owner === agent;
@@ -997,6 +1033,15 @@ export function closeWork(work, agentId, { verb = "close", reason, now, authorit
 export function creatorOf(work) {
   const first = Array.isArray(work?.history) && !work.historyOmitted ? work.history[0] : null;
   return first && first.action === "created" && typeof first.agentId === "string" && first.agentId !== "system" ? first.agentId : null;
+}
+// FIFO promotion: the oldest standby claim takes a freed board slot,
+// standby -> unclaimed. The caller becomes the promoting actor on the
+// history entry; promotion does not assign an owner — the promoted claim
+// is plain ready work, claimable like any other unclaimed item.
+export function promoteWork(work, agentId, { now } = {}) {
+  const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  check(item.state === "standby", `work "${item.id}" is ${item.state} — only standby claims promote to the board`);
+  return withHistory({ ...item, state: "unclaimed" }, atMs, agent, "promoted", "board slot freed — promoted from standby");
 }
 // Record a note from the caller's own authenticated session. A new note
 // supersedes that member's active verdict but cannot approve reviewed completion.

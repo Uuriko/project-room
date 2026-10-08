@@ -3464,11 +3464,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const workClaimReceiptsMatch = /^\/api\/rooms\/([^/]{1,384})\/receipts$/.exec(url.pathname);
       const workClaimRenewMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/renew$/.exec(url.pathname);
       const workClaimHeartbeatMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/heartbeat$/.exec(url.pathname);
+      const workClaimCloseMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/close$/.exec(url.pathname);
       // Provenance walk + premise-invalid rollback (orch-provenance-rollback).
       // Literal segments are matched before the {id} template so they are
       // never mistaken for a claim id.
       const workClaimMatch = workClaimsMatch ?? workClaimsStatusMatch ?? workClaimsSweepMatch ?? workClaimsDuplicatesMatch ?? workClaimsConfigMatch ?? workClaimClaimMatch
-        ?? workClaimUpdateMatch ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch ?? workClaimHeartbeatMatch
+        ?? workClaimUpdateMatch ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch ?? workClaimHeartbeatMatch ?? workClaimCloseMatch
         ?? workClaimItemMatch
         ?? workClaimReceiptsMatch;
       // Agent /feedback endpoint (structured bug/feature reports): every
@@ -3752,9 +3753,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           : workClaimReviewMatch ? "review"
           : workClaimReleaseMatch ? "release"
           : workClaimRenewMatch ? "renew"
-          : workClaimHeartbeatMatch ? "heartbeat" : "reassign";
+          : workClaimHeartbeatMatch ? "heartbeat"
+          : workClaimCloseMatch ? "close" : "reassign";
         const workClaimIdMatch = workClaimItemMatch ?? workClaimClaimMatch ?? workClaimUpdateMatch
-          ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch ?? workClaimHeartbeatMatch
+          ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch ?? workClaimHeartbeatMatch ?? workClaimCloseMatch
           ;
         return await handleWorkClaims({ req, res, url, store, roomId, auth, workClaimRoute,
           workClaimId: workClaimIdMatch ? pathId(workClaimIdMatch[2]) : null, registry: store.workClaims,

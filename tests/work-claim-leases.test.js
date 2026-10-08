@@ -183,14 +183,16 @@ test("attestWork: caller-bound attestations, one per member, cleared on handoff"
 test("roomWorkClaimConfig: the documented config hook", () => {
   assert.equal(DEFAULT_LEASE_HOURS, 2);
   assert.deepEqual(roomWorkClaimConfig({ workClaims: { defaultLeaseHours: 1, reviewPolicy: "distinct_member" } }),
-    { defaultLeaseHours: 1, reviewPolicy: "distinct_member", maxOpenClaims: 200, maxMemberOpenClaims: 20, requireClaimFiles: true });
+    { defaultLeaseHours: 1, reviewPolicy: "distinct_member", maxOpenClaims: 200, maxMemberOpenClaims: 20, requireClaimFiles: true, maxStandbyClaims: 1000 });
   // a room default over the 2h hard cap falls back to the default, never throws
   assert.equal(roomWorkClaimConfig({ workClaims: { defaultLeaseHours: 48 } }).defaultLeaseHours, DEFAULT_LEASE_HOURS);
   // files are required at creation unless the room explicitly opts out
   assert.equal(roomWorkClaimConfig({ workClaims: { requireClaimFiles: false } }).requireClaimFiles, false);
+  // standby queue is capped (default 1000)
+  assert.equal(roomWorkClaimConfig({ workClaims: { maxStandbyClaims: 40 } }).maxStandbyClaims, 40);
   // invalid values fall back to defaults, never throw
-  assert.deepEqual(roomWorkClaimConfig({ workClaims: { defaultLeaseHours: -2, reviewPolicy: "nope", maxOpenClaims: 0, maxMemberOpenClaims: 10001 } }),
-    { defaultLeaseHours: DEFAULT_LEASE_HOURS, reviewPolicy: "self_attested", maxOpenClaims: 200, maxMemberOpenClaims: 20, requireClaimFiles: true });
+  assert.deepEqual(roomWorkClaimConfig({ workClaims: { defaultLeaseHours: -2, reviewPolicy: "nope", maxOpenClaims: 0, maxMemberOpenClaims: 10001, maxStandbyClaims: 10001 } }),
+    { defaultLeaseHours: DEFAULT_LEASE_HOURS, reviewPolicy: "self_attested", maxOpenClaims: 200, maxMemberOpenClaims: 20, requireClaimFiles: true, maxStandbyClaims: 1000 });
   assert.ok(Object.isFrozen(roomWorkClaimConfig({})));
 });
 
