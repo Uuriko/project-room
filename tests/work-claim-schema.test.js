@@ -32,7 +32,7 @@ function removeNewerClaimProfile(db) {
   assert.equal(db.prepare("SELECT enabled FROM public_work_claim_writer_permit").get().enabled, 0);
   db.exec(`DROP TABLE public_work_receipts; DROP TABLE public_work_requests;
     DROP TABLE public_work_tasks; DROP TABLE public_work_claim_writer_permit;
-    DROP TABLE work_claims; DROP TABLE work_claim_config;`);
+    DROP TABLE work_claims; DROP TABLE work_claim_config; DROP TABLE work_claim_idempotency;`);
   assert.equal(db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='trigger' AND name GLOB 'public_claim_guard_*'").get().n, 0);
   return allSchema(db);
 }
