@@ -1245,6 +1245,10 @@ paths:
         same id with the same input returns the original receipt (200);
         with different input returns 409 idempotency_conflict.
         201 on first commit, 200 on idempotent duplicate.
+        Under burst the route fails fast instead of queueing silently: when
+        more than COMMANDS_MAX_INFLIGHT (default 32) commands are in flight,
+        overflow is refused with 503 commands_saturated and a Retry-After
+        header. A refused command is never applied — retry with the same id.
         Hosted MCP `room_post_message` submits this same message.posted
         envelope `{ id, type, data: { messageId, body } }`. It does not
         open a second write path.
@@ -1304,6 +1308,15 @@ paths:
           $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/InvalidInput'
+        '503':
+          description: |
+            commands_saturated — too many commands in flight. The command was
+            not applied; retry after the Retry-After delay with the same
+            command id.
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying
+              schema: { type: integer }
   /api/rooms/{roomId}/events:
     get:
       summary: Read the event log

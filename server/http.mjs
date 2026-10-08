@@ -344,6 +344,20 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   if (typeof magicMailer.isConfigured !== "function" || typeof magicMailer.sendMagicLink !== "function") {
     throw new Error("magicLinkMailer must come from createMagicLinkMailer()");
   }
+  // WAVE-300 FIX-1: fail fast on POST /commands under burst. The command
+  // handler runs a synchronous better-sqlite3 transaction on the shared
+  // event loop; under burst the backlog turned into silent client timeouts
+  // (no definitive status, and a phantom-write hazard: did it apply or
+  // not?). Bound in-flight command executions; when saturated, the route
+  // answers 503 + Retry-After immediately instead of queueing. A refused
+  // command is never applied, so the client retries with the same command
+  // id — store.command() replays duplicate ids (200 duplicate:true) and
+  // 409s on a content mismatch, giving exactly-once retry. In-memory and
+  // per-process, like the rate() buckets below; counters reset on restart.
+  // Env-tunable for tests and operators.
+  const COMMANDS_MAX_INFLIGHT = Math.max(1, parseInt(process.env.COMMANDS_MAX_INFLIGHT ?? "32", 10) || 32);
+  const COMMANDS_SATURATED_RETRY_AFTER_S = Math.max(1, parseInt(process.env.COMMANDS_SATURATED_RETRY_AFTER_S ?? "2", 10) || 2);
+  let commandsInFlight = 0;
   // Per-email buckets (hourly) complement the per-address rate() limits below.
   const magicRequestEmailLimiter = createRateLimiter({ capacity: 3, refillPerSecond: 3 / 3600 });
   const resetRequestEmailLimiter = createRateLimiter({ capacity: 3, refillPerSecond: 3 / 3600 });
@@ -4848,6 +4862,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "stream" && req.method === "GET") return stream(req, res, selected.token, roomId, Number(req.headers["last-event-id"] ?? url.searchParams.get("after") ?? 0), auth, operationId);
       if (route === "commands" && req.method === "POST") {
+        // WAVE-300 FIX-1: fail fast under burst — the gate above bounds
+        // in-flight executions. Refuse before reading the body so the
+        // refusal is prompt and the command is definitely not applied.
+        if (commandsInFlight >= COMMANDS_MAX_INFLIGHT)
+          reject(503, "commands_saturated",
+            "The command queue is saturated; this command was not applied. " +
+            "Retry after the Retry-After delay with the same command id.",
+            { "Retry-After": String(COMMANDS_SATURATED_RETRY_AFTER_S) });
+        commandsInFlight++;
+        try {
         // RC-2026-09-23-100: per-guest message token bucket (chat spam
         // mitigation). The per-request scope gate in RoomStore#command is
         // the authority boundary; this is volume control.
@@ -4879,6 +4903,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           throw error;
         } finally {
           inboundSpan.end();
+        }
+        } finally {
+          commandsInFlight--;
         }
       }
       if (route === "return-brief" && req.method === "GET") {
@@ -5001,5 +5028,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   server.keepAliveTimeout = 5000;
   server.closeStreams = () => { for (const { res } of streams) res.end(); };
   server.rateLimitKeys = () => rates.size;
+  server.commandsInFlight = () => commandsInFlight; // WAVE-300 FIX-1 gate depth
   return server;
 }
