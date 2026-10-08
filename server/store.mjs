@@ -1606,8 +1606,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.exec(humanPushSchema);
       this.db.exec(humanPushPrefsSchema);
       // Rich push (sender/preview/deep link): converge existing databases.
-      // Old rows read preview as on and quiet hours as unset, preserving
-      // today's delivery exactly until the member touches the switches.
+      // Old rows read preview as off and quiet hours as unset, preserving
+      // today's counts-only delivery exactly until the member touches the switches.
       {
         const prefColumns = new Set(this.db.prepare("PRAGMA table_info(human_push_preferences)").all().map(c => c.name));
         if (!prefColumns.has("preview_enabled")) this.db.exec("ALTER TABLE human_push_preferences ADD COLUMN preview_enabled INTEGER NOT NULL DEFAULT 0");
@@ -4176,9 +4176,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           const haystack = `${w.title ?? ""} ${w.description ?? ""} ${w.definitionOfDone ?? ""}`.toLowerCase();
           if (haystack.includes(needle)) {
             result.total += 1;
-            if (result.workItems.length < limit) {
-              result.workItems.push({ id: w.id, title: w.title, state: w.state, accountableMemberId: w.accountableMemberId });
-            }
+            result.workItems.push({ id: w.id, title: w.title, state: w.state, accountableMemberId: w.accountableMemberId });
+            // Keep the newest `limit` matches (still chronological), like the
+            // messages loop above: the first ones leave every newer match
+            // unreachable — there is no offset, and limit tops out at 200.
+            if (result.workItems.length > limit) result.workItems.shift();
           }
         }
       }
