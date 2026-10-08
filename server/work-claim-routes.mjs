@@ -843,6 +843,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "sweep" && req.method === "POST") {
     if (!maySweepWorkClaims(access)) refuseSweep();
+    // QA200-CH-2033: a sweep settles PR links and records CI facts, which
+    // emit room events — it is a Board write, so the event-budget floor
+    // applies here exactly like the other Board write routes.
+    requireEventBudget();
     const data = body(req);
     if (!shape(data, {})) invalidInput(reject, "an empty JSON object");
     let updated = 0;
