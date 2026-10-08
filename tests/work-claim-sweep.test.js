@@ -23,8 +23,8 @@ const call = (registry, route, id, body) => handleWorkClaims({
 
 test("a live claim is not reported as swept; a lapsed one is", async () => {
   const registry = createWorkClaimRegistry();
-  await call(registry, "create", null, { id: "live" });
-  await call(registry, "claim", "live", { leaseHours: 6 });
+  await call(registry, "create", null, { id: "live", files: ["src/live.mjs"] });
+  await call(registry, "claim", "live", { leaseHours: 1 });
   const first = await call(registry, "list");
   assert.deepEqual(first.value.swept, []);
   assert.equal(first.value.claims[0].state, "claimed");

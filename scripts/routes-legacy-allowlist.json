@@ -2583,6 +2583,18 @@
     },
     {
       "method": "GET",
+      "path": "/api/rooms/{id}/work-claims/{id}/close"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/work-claims/{id}/close"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/work-claims/{id}/close"
+    },
+    {
+      "method": "GET",
       "path": "/api/rooms/{id}/work-claims/{id}/reassign"
     },
     {
@@ -6182,6 +6194,18 @@
     {
       "method": "POST",
       "path": "/api/rooms/{id}/work-claims/{id}/claim"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/work-claims/{id}/close"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/work-claims/{id}/close"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/work-claims/{id}/close"
     },
     {
       "method": "GET",

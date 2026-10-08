@@ -12,7 +12,7 @@ import { EVENT_TYPES as T, applyEvent, event } from '../src/events.js';
 import { changeDescription } from '../src/workflow.js';
 import { createWorkClaimRegistry, handleWorkClaims } from "../server/work-claim-routes.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
-import { claimWork, renewWork, updateWork, ClaimError } from "../server/work-claims.mjs";
+import { claimWork, createWork, renewWork, updateWork, ClaimError } from "../server/work-claims.mjs";
 
 const H = 3600 * 1000;
 const T0 = Date.parse("2026-09-24T07:00:00.000Z");
@@ -177,40 +177,70 @@ test("changeDescription labels a renewal 'Scope renewed'", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Part 2: the pure renewWork state machine
+// Part 2: the pure renewWork state machine (lease-first contract)
 // ---------------------------------------------------------------------------
 test("renewWork starts a fresh lease window from now", () => {
-  const claimed = claimWork({ id: "w1" }, "quill", { leaseHours: 6, now: T0 });
+  const claimed = claimWork({ id: "w1" }, "quill", { leaseHours: 1, now: T0 });
   assert.equal(claimed.leaseStartAt, iso(T0));
-  const renewed = renewWork(claimed, "quill", { now: T0 + 2 * H });
-  assert.equal(renewed.leaseStartAt, iso(T0 + 2 * H));
-  assert.equal(renewed.leaseExpiresAt, iso(T0 + 26 * H)); // the room's default 24h
+  // Renewing early does not bank the remainder: the window restarts at now.
+  // No explicit leaseHours → effective = current window (1h).
+  const renewed = renewWork(claimed, "quill", { now: T0 + 30 * 60 * 1000 });
+  assert.equal(renewed.leaseStartAt, iso(T0 + 30 * 60 * 1000));
+  assert.equal(renewed.leaseExpiresAt, iso(T0 + 90 * 60 * 1000));
   assert.equal(renewed.owner, "quill");
   assert.equal(renewed.state, "claimed");
   assert.equal(renewed.history.at(-1).action, "renewed");
-  assert.match(renewed.history.at(-1).note, /lease: 24h/);
+  assert.match(renewed.history.at(-1).note, /lease: 1h/);
+  assert.equal(renewed.consecutiveHeartbeats, 0);
 });
 
 test("renewWork records the caller's note in history", () => {
-  const claimed = claimWork({ id: "w1" }, "quill", { leaseHours: 6, now: T0 });
-  const renewed = renewWork(claimed, "quill", { note: "still digging", now: T0 + H });
+  const claimed = claimWork({ id: "w1" }, "quill", { leaseHours: 1, now: T0 });
+  const renewed = renewWork(claimed, "quill", { note: "still digging", now: T0 + 30 * 60 * 1000 });
   assert.equal(renewed.history.at(-1).note, "still digging");
 });
 
-test("renewWork honors an explicit leaseHours", () => {
-  const claimed = claimWork({ id: "w1" }, "quill", { leaseHours: 6, now: T0 });
-  const renewed = renewWork(claimed, "quill", { leaseHours: 6, now: T0 + H });
-  assert.equal(renewed.leaseExpiresAt, iso(T0 + 7 * H));
+test("renewWork honors an explicit leaseHours and the effective chain", () => {
+  const claimed = claimWork({ id: "w1" }, "quill", { leaseHours: 1, now: T0 });
+  const renewed = renewWork(claimed, "quill", { leaseHours: 2, now: T0 + 30 * 60 * 1000 });
+  assert.equal(renewed.leaseExpiresAt, iso(T0 + 150 * 60 * 1000));
+  // wanted ?? current ?? room default: omitting leaseHours keeps the
+  // claim's current 1h window (not the room default, not the old 24h).
+  const kept = renewWork(claimed, "quill", { now: T0 + 30 * 60 * 1000 });
+  assert.equal(kept.leaseExpiresAt, iso(T0 + 90 * 60 * 1000));
 });
 
 test("renewWork refuses a foreign owner, a non-active claim, a leaseless claim, and a lapsed lease", () => {
-  const claimed = claimWork({ id: "w1" }, "quill", { leaseHours: 6, now: T0 });
-  throwsCode(() => renewWork(claimed, "grok", { now: T0 + H }), "invalid_claim_input");
-  throwsCode(() => renewWork(updateWork(claimed, "quill", { state: "done", now: T0 + H }), "quill", { now: T0 + H }), "invalid_claim_input");
-  throwsCode(() => renewWork(claimWork({ id: "w2" }, "quill", { leaseHours: null, now: T0 }), "quill", { now: T0 + H }), "invalid_claim_input");
-  throwsCode(() => renewWork(claimWork({ id: "w3" }, "quill", { leaseHours: 1, now: T0 }), "quill", { now: T0 + 2 * H }), "invalid_claim_input");
-  assert.match(capture(() => renewWork(claimed, "grok", { now: T0 + H })).message, /only the owner/);
+  const claimed = claimWork({ id: "w1" }, "quill", { leaseHours: 1, now: T0 });
+  throwsCode(() => renewWork(claimed, "grok", { now: T0 + 30 * 60 * 1000 }), "invalid_claim_input");
+  throwsCode(() => renewWork(updateWork(claimed, "quill", { state: "done", now: T0 + 30 * 60 * 1000 }), "quill", { now: T0 + 30 * 60 * 1000 }), "invalid_claim_input");
+  const leaseless = { ...claimWork({ id: "w2" }, "quill", { leaseHours: 1, now: T0 }), leaseExpiresAt: null };
+  throwsCode(() => renewWork(leaseless, "quill", { now: T0 + 30 * 60 * 1000 }), "invalid_claim_input");
+  // Past 2x grace the round is over (410 claim_lease_lapsed).
+  throwsCode(() => renewWork(claimWork({ id: "w3" }, "quill", { leaseHours: 1, now: T0 }), "quill", { now: T0 + 2 * H }), "claim_lease_lapsed");
+  assert.match(capture(() => renewWork(claimed, "grok", { now: T0 + 30 * 60 * 1000 })).message, /only the owner/);
   assert.match(capture(() => renewWork(claimWork({ id: "w3" }, "quill", { leaseHours: 1, now: T0 }), "quill", { now: T0 + 2 * H })).message, /lease already lapsed/);
+});
+
+test("renewWork rejects null leases, over-cap windows, and deploy renewals", () => {
+  const claimed = claimWork({ id: "w1" }, "quill", { leaseHours: 1, now: T0 });
+  // The immortal null opt-out is retired.
+  throwsCode(() => renewWork(claimed, "quill", { leaseHours: null, now: T0 + 30 * 60 * 1000 }), "claim_lease_required");
+  throwsCode(() => renewWork(claimed, "quill", { leaseHours: 3, now: T0 + 30 * 60 * 1000 }), "claim_lease_too_long");
+  // Deploy claims are non-renewable — they escalate, never auto-reap.
+  const deploy = claimWork(createWork({ id: "d1", kind: "deploy", revision: "abc" }, { now: T0 }), "quill", { now: T0 });
+  throwsCode(() => renewWork(deploy, "quill", { now: T0 + 30 * 60 * 1000 }), "claim_renew_forbidden");
+});
+
+test("renewWork inside grace restores the pre-expiry state", () => {
+  const claimed = claimWork({ id: "w1" }, "quill", { leaseHours: 1, now: T0 });
+  const inProgress = updateWork(claimed, "quill", { state: "in_progress", now: T0 + 10 * 60 * 1000 });
+  // Simulate the reaper's grace entry: expired, priorActiveState kept.
+  const expired = { ...inProgress, state: "expired", priorActiveState: "in_progress" };
+  const renewed = renewWork(expired, "quill", { now: T0 + 65 * 60 * 1000 }); // 5min past expiry, inside 15min grace
+  assert.equal(renewed.state, "in_progress");
+  assert.equal(renewed.priorActiveState, null);
+  assert.ok(Date.parse(renewed.leaseExpiresAt) > T0 + 65 * 60 * 1000);
 });
 
 // ---------------------------------------------------------------------------
@@ -244,9 +274,9 @@ const runRoute = async ({ route, id, body = {}, memberId = "quill", registry, st
 };
 const liveMessage = (overrides = {}) => ({ id: "progress-1", authorId: "quill", body: "Half done.",
   createdAt: new Date(Date.now() + 60_000).toISOString(), revision: 0, ...overrides });
-const claimedRegistry = async (claimBody = { leaseHours: 6 }) => {
+const claimedRegistry = async (claimBody = { leaseHours: 1 }) => {
   const registry = createWorkClaimRegistry();
-  await runRoute({ route: "create", id: "w1", body: { id: "w1", title: "t" }, registry });
+  await runRoute({ route: "create", id: "w1", body: { id: "w1", title: "t", files: ["src/w1.mjs"] }, registry });
   const { error } = await runRoute({ route: "claim", id: "w1", body: claimBody, registry });
   assert.equal(error, null);
   return registry;
@@ -263,12 +293,33 @@ test("handler: renew extends the lease on a fresh public check-in", async () => 
   assert.equal(out.value.history.at(-1).action, "renewed");
 });
 
-test("handler: renew without a progress message id extends the lease", async () => {
+test("handler: empty renew is 400 renew_requires_progress and the lease is unchanged", async () => {
+  // The footgun this replaces: an empty body used to fall through to the
+  // 24h default and silently extend the lease.
+  const registry = await claimedRegistry();
+  const before = registry.get("room1", "w1");
+  const { error } = await runRoute({ route: "renew", id: "w1", body: {}, registry });
+  assert.equal(error.status, 400);
+  assert.equal(error.code, "renew_requires_progress");
+  const after = registry.get("room1", "w1");
+  assert.equal(after.leaseExpiresAt, before.leaseExpiresAt);
+  assert.equal(after.leaseStartAt, before.leaseStartAt);
+});
+
+test("handler: renew with a progress: note (no message id) extends the lease", async () => {
   const registry = await claimedRegistry();
   const before = registry.get("room1", "w1").leaseExpiresAt;
-  const { out, error } = await runRoute({ route: "renew", id: "w1", body: {}, registry });
+  const { out, error } = await runRoute({ route: "renew", id: "w1", body: { note: "progress: half done, tests green" }, registry });
   assert.equal(error, null);
   assert.ok(Date.parse(out.value.leaseExpiresAt) > Date.parse(before));
+  assert.equal(out.value.consecutiveHeartbeats, 0);
+});
+
+test("handler: renew with a note but no progress: is 400", async () => {
+  const registry = await claimedRegistry();
+  const { error } = await runRoute({ route: "renew", id: "w1", body: { note: "just checking in" }, registry });
+  assert.equal(error.status, 400);
+  assert.equal(error.code, "renew_requires_progress");
 });
 
 test("handler: renew with a DM check-in is refused", async () => {
@@ -304,14 +355,16 @@ test("handler: renew by a non-owner is refused", async () => {
   assert.equal(error.code, "work_not_owner");
 });
 
-test("handler: renew of a leaseless claim is refused", async () => {
-  // The HTTP claim route always takes a lease (null reads as "default"), so
-  // the leaseless item is planted through the pure machine — the refusal is
-  // what the renew route must enforce either way.
+test("handler: a leaseless claim is backfilled, then renews", async () => {
+  // The immortal opt-out is retired: an active claim with no lease gets the
+  // kind default on the next board request (silent backfill), so renew sees
+  // a lease instead of refusing.
   const registry = createWorkClaimRegistry();
-  registry.set("room1", claimWork({ id: "w1", title: "t" }, "quill", { leaseHours: null, now: Date.now() }));
-  const { error } = await runRoute({ route: "renew", id: "w1", body: { progressMessageId: "progress-1" },
+  const planted = claimWork({ id: "w1", title: "t" }, "quill", { leaseHours: 1, now: Date.now() });
+  registry.set("room1", { ...planted, leaseStartAt: null, leaseExpiresAt: null });
+  const { out, error } = await runRoute({ route: "renew", id: "w1", body: { progressMessageId: "progress-1" },
     storeMessages: [liveMessage()], registry });
-  assert.equal(error.status, 422);
-  assert.equal(error.code, "invalid_claim_input");
+  assert.equal(error, null);
+  assert.ok(out.value.leaseExpiresAt !== null);
+  assert.ok(registry.get("room1", "w1").history.some(entry => entry.action === "lease_backfilled"));
 });

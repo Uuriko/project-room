@@ -10,7 +10,7 @@ const T0 = Date.parse("2026-10-04T20:00:00.000Z");
 const mk = note => createWork({ id: "n1", title: "T", note }, { now: T0 });
 // A claimed item with a live lease, for the update/renew paths.
 const owned = id =>
-  claimWork(createWork({ id, title: "T" }, { now: T0 }), "quill", { leaseHours: 4, now: T0 });
+  claimWork(createWork({ id, title: "T" }, { now: T0 }), "quill", { leaseHours: 1, now: T0 });
 
 test("createWork accepts a short string note and stores it on the created stamp", () => {
   const item = mk("context for whoever picks this up");

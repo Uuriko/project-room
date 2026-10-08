@@ -24,8 +24,8 @@ const BIDI = TEXT_CHARACTER_CLASSES.bidiControls;
 const CONTROLS_ANY = /[\u0000-\u001F\u007F-\u009F]/u;
 const CONTROLS_MULTILINE = /[\u0000-\u0009\u000B-\u001F\u007F-\u009F]/u;
 
-export const BOARD_LEASE_HOURS_MIN = 0.25;
-export const BOARD_LEASE_HOURS_MAX = 168;
+export const BOARD_LEASE_HOURS_MIN = 1 / 60; // one minute — below the 300s work default is fine; sub-minute leases are meaningless against a 30s sweep
+export const BOARD_LEASE_HOURS_MAX = 2; // hard cap, all claim kinds (hierarchy A2)
 export const EVENT_BUDGET_RESERVE = 0.1;
 export const DEPLOY_STATUS_MAX_AGE_MS = 60_000;
 export const DONE_WINDOW_MS = 7 * 24 * 3600 * 1000;
@@ -60,11 +60,16 @@ export function boardTextFields(reject, data, fields) {
 }
 
 export function assertBoardLeaseHours(reject, data) {
-  if (!data || !Object.hasOwn(data, "leaseHours") || data.leaseHours === null) return;
+  if (!data || !Object.hasOwn(data, "leaseHours")) return;
   const value = data.leaseHours;
-  if (typeof value !== "number" || !Number.isFinite(value) || value < BOARD_LEASE_HOURS_MIN || value > BOARD_LEASE_HOURS_MAX) {
-    invalid(reject, "leaseHours", `must be a number from ${BOARD_LEASE_HOURS_MIN} to ${BOARD_LEASE_HOURS_MAX}, or null where allowed`);
+  // The immortal null opt-out is retired: null is rejected, not allowed.
+  if (value === null) reject(422, "claim_lease_required", "leaseHours: the null (immortal) opt-out is retired — omit leaseHours for the kind default");
+  if (typeof value !== "number" || !Number.isFinite(value) || value < BOARD_LEASE_HOURS_MIN) {
+    invalid(reject, "leaseHours", `must be a number from ${BOARD_LEASE_HOURS_MIN} to ${BOARD_LEASE_HOURS_MAX}`);
   }
+  // Over the hard cap uses the domain code so the route and the state
+  // machine agree (claim_lease_too_long, not a shape error).
+  if (value > BOARD_LEASE_HOURS_MAX) reject(422, "claim_lease_too_long", `leaseHours ${value} exceeds the 2h hard cap (all claim kinds)`);
 }
 
 export function assertDependsOnKnown(reject, data, { selfId, has }) {

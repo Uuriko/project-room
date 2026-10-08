@@ -36,7 +36,8 @@ const lease = value => {
   const hours = value === undefined ? 1 : value;
   // Name the real fault: a string like "6h" is a type error, not a range one (#1553).
   check(typeof hours === 'number' && Number.isFinite(hours), `leaseHours must be a JSON number of hours, like 6, not ${JSON.stringify(hours)}`);
-  check(hours > 0 && hours <= 24, 'leaseHours must be greater than zero and at most 24');
+  // Lease-first model: the hard cap is 2h for all claim kinds (B1 guild).
+  check(hours > 0 && hours <= 2, 'Lease must be greater than zero and at most 2 hours (the hard cap, all claim kinds)');
   return hours;
 };
 const filesOf = input => {

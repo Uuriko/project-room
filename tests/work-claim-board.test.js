@@ -84,6 +84,11 @@ async function fixture(t, { phase = { failure: false }, databasePath = ":memory:
   const origin = `http://127.0.0.1:${server.address().port}`;
   const client = token => new RoomAgentClient({ origin, roomId: "commons", token });
   const call = async (token, path, body) => {
+    // B4 integration: B1's lease-first model made files mandatory at
+    // creation. This suite predates that rule; the helper supplies a default
+    // file on creates that don't name one (unique per claim id to avoid
+    // file-lease conflicts between claims).
+    if (path === "/work-claims" && body !== undefined && !("files" in body)) body = { ...body, files: [`tasks/${body.id ?? "board"}.md`] };
     const response = await fetch(`${origin}/api/rooms/commons${path}`, {
       method: body === undefined ? "GET" : "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
@@ -95,7 +100,7 @@ async function fixture(t, { phase = { failure: false }, databasePath = ":memory:
 }
 
 async function startReviewedClaim(f, id, reviewPolicy, extra = {}) {
-  assert.equal((await f.call(f.ownerKey, "/work-claims", { id, reviewPolicy, ...extra })).status, 201);
+  assert.equal((await f.call(f.ownerKey, "/work-claims", { id, reviewPolicy, files: ["src/board.mjs"], ...extra })).status, 201);
   assert.equal((await f.call(f.ownerKey, `/work-claims/${id}/claim`, {})).status, 200);
   const started = await f.call(f.ownerKey, `/work-claims/${id}/update`, { state: "in_progress" });
   assert.equal(started.status, 200);
@@ -114,7 +119,7 @@ async function refusedCompletion(f, id, reviewedBy) {
 
 test("a contribute-profile agent creates, renews, and releases a claim without write_external", async t => {
   const { coord, call, coordKey } = await fixture(t);
-  const created = await coord.workClaimCreate({ id: "coord-1", title: "Coord lane" });
+  const created = await coord.workClaimCreate({ id: "coord-1", title: "Coord lane", files: ["src/coord-1.mjs"] });
   assert.equal(created.state, "unclaimed");
   assert.equal(created.owner, null);
   const claimed = await coord.claimWorkItem("coord-1", { leaseHours: 2 });
@@ -122,13 +127,13 @@ test("a contribute-profile agent creates, renews, and releases a claim without w
   assert.equal(claimed.owner, "coord");
   await new Promise(resolve => setTimeout(resolve, 5));
   const progress = (await coord.say("Coord lane is moving")).event.data.messageId;
-  const renewed = await coord.renewWorkItem("coord-1", { progressMessageId: progress, leaseHours: 3 });
+  const renewed = await coord.renewWorkItem("coord-1", { progressMessageId: progress, leaseHours: 2 });
   assert.equal(renewed.state, "claimed");
   assert.ok(Date.parse(renewed.leaseExpiresAt) > Date.parse(claimed.leaseExpiresAt));
   const released = await coord.releaseWorkItem("coord-1", { reason: "parked" });
   assert.equal(released.state, "unclaimed");
   assert.equal(released.owner, null);
-  const refused = await call(coordKey, "/work-claims", { id: "chat-cannot" });
+  const refused = await call(coordKey, "/work-claims", { id: "chat-cannot", files: ["src/chat-cannot.mjs"] });
   assert.equal(refused.status, 201);
   const chat = await fixture(t);
   const denied = await chat.call(chat.chatKey, "/work-claims", { id: "nope" });
@@ -144,9 +149,9 @@ test("the room owner sets the per-member claim cap and a second claim is refused
   const denied = await call(coordKey, "/work-claims/config", { maxMemberOpenClaims: 4 });
   assert.equal(denied.status, 403);
   assert.equal(denied.value.error.code, "work_claims_not_permitted");
-  await coord.workClaimCreate({ id: "cap-1", title: "First" });
+  await coord.workClaimCreate({ id: "cap-1", title: "First", files: ["src/cap-1.mjs"] });
   await coord.claimWorkItem("cap-1", {});
-  await coord.workClaimCreate({ id: "cap-2", title: "Second" });
+  await coord.workClaimCreate({ id: "cap-2", title: "Second", files: ["src/cap-2.mjs"] });
   const second = await call(coordKey, "/work-claims/cap-2/claim", {});
   assert.equal(second.status, 409);
   assert.equal(second.value.error.code, "too_many_open_claims");
@@ -181,7 +186,7 @@ test("an ownerless room refuses a non-member and a member without a claim profil
   assert.equal(stranger.status, 403);
   assert.equal(stranger.value.error.code, "work_claims_not_permitted");
   assert.equal(store.workClaims.get("commons", "stranger-no"), null);
-  const allowed = await call(coordKey, "/work-claims", { id: "coord-yes" });
+  const allowed = await call(coordKey, "/work-claims", { id: "coord-yes", files: ["src/coord-yes.mjs"] });
   assert.equal(allowed.status, 201);
   assert.equal(allowed.value.owner, null);
 });
@@ -189,7 +194,7 @@ test("an ownerless room refuses a non-member and a member without a claim profil
 test("CI state changes are stored, receipted, and wake the owner on failure", async t => {
   const phase = { failure: false };
   const { store, call, coordKey } = await fixture(t, { phase });
-  const created = await call(coordKey, "/work-claims", {
+  const created = await call(coordKey, "/work-claims", { files: ["src/coord.mjs"],
     id: "ci-1", pullRequest: "https://github.com/acme/demo/pull/7"
   });
   assert.equal(created.status, 201);
@@ -223,7 +228,7 @@ test("CI state changes are stored, receipted, and wake the owner on failure", as
 
 test("review records refuse the owner and a chat agent, and a changes request wakes the owner", async t => {
   const { call, ownerKey, coordKey, chatKey, store } = await fixture(t);
-  assert.equal((await call(ownerKey, "/work-claims", { id: "rev-1", title: "Review me" })).status, 201);
+  assert.equal((await call(ownerKey, "/work-claims", { id: "rev-1", title: "Review me", files: ["src/rev-1.mjs"] })).status, 201);
   assert.equal((await call(ownerKey, "/work-claims/rev-1/claim", {})).status, 200);
   const ownerReview = await call(ownerKey, "/work-claims/rev-1/review", { verdict: "approve", summary: "ship it" });
   assert.equal(ownerReview.status, 403);
@@ -308,7 +313,7 @@ test("manual completion uses the named reviewer's approval, not another member's
 test("human verify permits review without granting Board writes, and self-attested closure is unchanged", async t => {
   const f = await fixture(t);
   await startReviewedClaim(f, "human-review", "independent_principal");
-  assert.equal((await f.call(f.ownerKey, "/work-claims", { id: "open-for-claim" })).status, 201);
+  assert.equal((await f.call(f.ownerKey, "/work-claims", { id: "open-for-claim", files: ["src/open.mjs"] })).status, 201);
   for (const [path, body] of [
     ["/work-claims", { id: "verifier-cannot-create" }],
     ["/work-claims/open-for-claim/claim", {}],
@@ -437,7 +442,7 @@ test("a superseded claim cannot be manually completed with an otherwise valid ap
   const f = await fixture(t);
   await startReviewedClaim(f, "superseded-review", "distinct_member");
   assert.equal((await f.call(f.coordKey, "/work-claims/superseded-review/review", { verdict: "approve", summary: "Approved before replacement" })).status, 200);
-  assert.equal((await f.call(f.ownerKey, "/work-claims", { id: "replacement" })).status, 201);
+  assert.equal((await f.call(f.ownerKey, "/work-claims", { id: "replacement", files: ["src/replacement.mjs"] })).status, 201);
   const current = f.store.workClaims.get("commons", "superseded-review");
   f.store.workClaims.set("commons", { ...current, supersededBy: "replacement" });
   await refusedCompletion(f, "superseded-review", "coord");
@@ -445,7 +450,7 @@ test("a superseded claim cannot be manually completed with an otherwise valid ap
 
 test("a deploy claim closes when the live revision matches, and status reports main", async t => {
   const { call, coordKey } = await fixture(t);
-  const created = await call(coordKey, "/work-claims", { id: "ship", kind: "deploy", revision: SOURCE_REVISION, title: "Ship" });
+  const created = await call(coordKey, "/work-claims", { files: ["src/ship.mjs"], id: "ship", kind: "deploy", revision: SOURCE_REVISION, title: "Ship" });
   assert.equal(created.status, 201);
   assert.equal(created.value.kind, "deploy");
   const read = await call(coordKey, "/work-claims/ship");
@@ -458,7 +463,7 @@ test("a deploy claim closes when the live revision matches, and status reports m
   assert.equal(status.value.main, MAIN);
   assert.equal(status.value.behind, null);
   assert.equal(typeof status.value.checkedAt, "string");
-  const open = await call(coordKey, "/work-claims", { id: "later", kind: "deploy", revision: "not-live-yet" });
+  const open = await call(coordKey, "/work-claims", { id: "later", kind: "deploy", revision: "not-live-yet", files: ["src/later.mjs"] });
   assert.equal(open.status, 201);
   const still = await call(coordKey, "/work-claims/later");
   assert.equal(still.value.state, "unclaimed");

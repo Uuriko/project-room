@@ -1703,8 +1703,8 @@ function recordLandUpdate(state, incoming) {
   }
 }
 
-export const WORK_CLAIM_EVENT_ACTIONS = Object.freeze(["created", "claimed", "state_changed", "reviewed", "released", "reassigned", "renewed", "lease_expired", "pr_merged", "pr_closed", "ci_changed", "deleted", "premise_flagged", "premise_cleared", "closed"]);
-const WORK_CLAIM_EVENT_STATES = ["unclaimed", "claimed", "in_progress", "blocked", "done", "closed"];
+export const WORK_CLAIM_EVENT_ACTIONS = Object.freeze(["created", "claimed", "state_changed", "reviewed", "released", "reassigned", "renewed", "lease_expired", "pr_merged", "pr_closed", "ci_changed", "deleted", "premise_flagged", "premise_cleared", "closed", "standby_queued", "standby_promoted"]);
+const WORK_CLAIM_EVENT_STATES = ["unclaimed", "claimed", "in_progress", "blocked", "expired", "standby", "cancelled", "done", "closed"];
 
 // Thin receipt: validated, never copied into the projection.
 function recordStarterSeeded(state, incoming) {
@@ -1740,7 +1740,10 @@ function recordWorkClaimUpdate(state, incoming) {
     }
   }
   const closing = data.action === "closed";
-  if ((data.reason !== undefined || closing) && !(closing ? data.claimState === "closed" && ["closed", "cancelled"].includes(data.reason)
+  // The "closed" action covers both terminal retire states: "closed" (the
+  // verb-table retire path) and "cancelled" (POST /close). The reason names
+  // which one; claimState carries the item's terminal state.
+  if ((data.reason !== undefined || closing) && !(closing ? ["closed", "cancelled"].includes(data.claimState) && ["closed", "cancelled"].includes(data.reason)
     : ["ci_changed", "reviewed", "closed", "cancelled"].includes(data.reason))) throw new Error("Event data missing reason");
   if (data.attention !== undefined && !["assigned", "lease_expiring", "lease_expired", "ci_failed", "changes_requested"].includes(data.attention)) throw new Error("Event data missing attention");
   if (data.attentionMemberId !== undefined && (typeof data.attentionMemberId !== "string" || data.attentionMemberId.length === 0 || data.attentionMemberId.length > 128)) throw new Error("Event data missing attentionMemberId");

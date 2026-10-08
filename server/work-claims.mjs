@@ -14,7 +14,7 @@
 // without a lease behave exactly as before (never expire). Leases are
 // configurable per room: a room object carrying
 //   room.workClaims = { defaultLeaseHours, reviewPolicy }
-// overrides the defaults; see roomWorkClaimConfig. The lease cap is 168h
+// overrides the defaults; see roomWorkClaimConfig. The lease cap is 2h
 // (7 days). null opts out only when the route has already allowed it
 // (room owner or manage_claims).
 //
@@ -33,26 +33,58 @@
 // reviewer authority supplied by the HTTP layer. self_attested is unchanged.
 // Note-only attestations remain caller-bound records but cannot approve work.
 // This does not gate automatic PR/land/deploy settlement or bind artifact bytes.
+//
+// Epoch fencing (crash-recovery guild, W8): every claim carries a monotonic
+// `epoch` (default 0 for pre-existing claims — backward compatible). Every
+// ownership transition — claimWork, reassignWork, electClaimSuccessor, a
+// release via updateWork, and releaseExpired's auto-release — stamps
+// epoch+1. updateWork accepts an optional `expectedEpoch`: the epoch the
+// caller based its decision on. When presented and stale, the mutation is
+// rejected with ClaimError code "stale_epoch" rather than applied, so a
+// resurrected (previously dead) holder cannot clobber a successor's work.
+// The check runs before the owner check: a stale epoch is the accurate
+// refusal for a holder whose world moved on. expectedEpoch is optional in
+// the pure function for backward compatibility; callers that omit it get the
+// old behavior. ROUTE MIGRATION: the HTTP layer should read the claim,
+// hand its epoch to the client, accept `expectedEpoch` on the update body,
+// pass it through, and map ClaimError "stale_epoch" to HTTP 409 (the
+// appendPullRequest path already maps unknown ClaimError codes to 409; the
+// update path's runPure currently maps every ClaimError to 422).
 import { parsePullRequestUrl } from "./claim-coordination.mjs";
-const STATES = ["unclaimed", "claimed", "in_progress", "blocked", "done", "closed"];
+const STATES = ["unclaimed", "claimed", "in_progress", "blocked", "expired", "standby", "cancelled", "done", "closed"];
 const CLAIM_KINDS = ["work", "land", "deploy"];
 const CI_STATES = ["pending", "success", "failure", "neutral"];
 const REVIEW_VERDICTS = ["approve", "changes_requested", "comment"];
 // Claim lifecycle: one explicit table, state x verb -> next state. Anything
-// not listed is refused. done and closed are terminal: done means the work
-// was delivered; closed means it was retired without delivery (close by the
-// room's claim managers, cancel by whoever opened or holds it). Only open
-// (non-terminal) items count against the room's open-claim cap.
+// not listed is refused. done, closed and cancelled are terminal: done means
+// the work was delivered; closed/cancelled mean it was retired without
+// delivery (close by the room's claim managers, cancel by whoever opened or
+// holds it). Only open (non-terminal) items count against the room's
+// open-claim cap.
+//
+// expired is the lease-grace window (lease-first): the claim is still owned
+// and counts as held; heartbeat/renew restore the pre-expiry state
+// (priorActiveState), the owner may release it, and the reaper resolves it to
+// claimed (succession) or unclaimed when grace ends.
+//
+// standby is create-only (never a target of updateWork): it enters via
+// create with standby:true and leaves via promotion (standby -> unclaimed)
+// or closeWork (standby -> cancelled). The cancelled state is terminal and
+// is reached only through closeWork, never through updateWork — the close
+// route owns the holder/owner/manage_claims auth shape for it.
 const CLAIM_LIFECYCLE = Object.freeze({
   unclaimed: Object.freeze({ claim: "claimed", close: "closed", cancel: "closed" }),
-  claimed: Object.freeze({ start: "in_progress", block: "blocked", release: "unclaimed", close: "closed", cancel: "closed" }),
-  in_progress: Object.freeze({ block: "blocked", finish: "done", pause: "claimed", close: "closed", cancel: "closed" }),
-  blocked: Object.freeze({ start: "in_progress", pause: "claimed", close: "closed", cancel: "closed" }),
+  claimed: Object.freeze({ start: "in_progress", block: "blocked", release: "unclaimed", expire: "expired", close: "closed", cancel: "closed" }),
+  in_progress: Object.freeze({ block: "blocked", finish: "done", pause: "claimed", expire: "expired", close: "closed", cancel: "closed" }),
+  blocked: Object.freeze({ start: "in_progress", pause: "claimed", expire: "expired", close: "closed", cancel: "closed" }),
+  expired: Object.freeze({ recover: "claimed", start: "in_progress", block: "blocked", release: "unclaimed", close: "closed", cancel: "closed" }),
+  standby: Object.freeze({}),
+  cancelled: Object.freeze({}),
   done: Object.freeze({}),
   closed: Object.freeze({}),
 });
-const CLAIM_VERBS = Object.freeze(["claim", "start", "block", "release", "pause", "finish", "close", "cancel"]);
-const TERMINAL_CLAIM_STATES = Object.freeze(["done", "closed"]);
+const CLAIM_VERBS = Object.freeze(["claim", "start", "block", "release", "pause", "finish", "expire", "recover", "close", "cancel"]);
+const TERMINAL_CLAIM_STATES = Object.freeze(["done", "closed", "cancelled"]);
 const isTerminalClaimState = state => TERMINAL_CLAIM_STATES.includes(state);
 // The next state for a verb, or null when the table refuses it.
 function nextClaimState(state, verb) {
@@ -63,6 +95,14 @@ function nextClaimState(state, verb) {
 // their own routes so a retire always records who and why).
 const TRANSITIONS = Object.freeze(Object.fromEntries(Object.entries(CLAIM_LIFECYCLE).map(([state, row]) =>
   [state, Object.freeze(Object.entries(row).filter(([verb]) => verb !== "close" && verb !== "cancel").map(([, next]) => next))])));
+// Board-cap predicate: only states that still occupy a board slot count.
+// Cancelled, closed and standby claims (and done ones) are excluded —
+// closing or parking a claim must actually free a slot.
+export const countsTowardBoardCap = item => item.state !== "done" && item.state !== "closed" && item.state !== "cancelled" && item.state !== "standby";
+// FIFO position of a standby claim: the moment it entered standby. Items
+// carry no createdAt field, so the first (created) history stamp is the
+// enqueue instant; registry list order (rowid ASC) breaks same-ms ties.
+export const standbyEnqueuedAt = item => item?.history?.[0]?.at ?? "";
 const DELIVERY_MODES = ["result", "merged", "production"];
 const REVIEW_POLICIES = ["self_attested", "distinct_member", "independent_principal"];
 // Receipt tags (RC-2026-09-24-205): free-form labels recorded when work is
@@ -281,13 +321,54 @@ const blobsOf = value => {
 // Predicate for query-time tag filters (the route validates `tag=` params
 // against the same shape stored tags must have).
 export const isReceiptTag = value => typeof value === "string" && TAG_PATTERN.test(value);
-const DEFAULT_LEASE_HOURS = 24;
-const MAX_LEASE_HOURS = 168;
+const DEFAULT_LEASE_HOURS = 2;
+const MAX_LEASE_HOURS = 2; // hard cap, all claim kinds (hierarchy A2 verdict:
+// a 2h default orphans claims for ~2h regardless of sweep speed — 2h is the
+// ceiling, not the default; long leases only for human-timescale work via
+// per-room defaultLeaseHours, clamped here)
+// Lease-first model (guild-claims-board, 2026-10-07): two lease classes.
+// Coordination claims default short; the hard cap bounds every window.
+// Per-kind defaults in seconds: work 300s, land 30min, deploy 1h.
+export const LEASE_DEFAULT_SECONDS = Object.freeze({ work: 300, land: 1800, deploy: 3600 });
+// Max cumulative hold per kind in seconds across renewals. deploy is
+// non-renewable (null) — on expiry it escalates, never auto-reaps.
+export const LEASE_MAX_TOTAL_SECONDS = Object.freeze({ work: 12 * 3600, land: 4 * 3600, deploy: null });
+// Post-expiry grace in seconds before the reaper resolves: work 15min,
+// land 5min, deploy 0 (escalate). A 2x-grace forgiveness window restores
+// unreaped claims for workers that come back late.
+export const LEASE_GRACE_SECONDS = Object.freeze({ work: 900, land: 300, deploy: 0 });
+// Heartbeat protocol: a pure heartbeat extends the current window without
+// minting a new one and emits no room event (event-budget protection).
+// After this many consecutive heartbeats with no renew, heartbeats are
+// refused until a renew with progress (anti-squatting).
+export const MAX_HEARTBEATS_WITHOUT_RENEW = 3;
+// Heartbeat idempotency-key replay window (ms).
+export const HEARTBEAT_IDEMPOTENCY_MS = 10 * 60 * 1000;
+// Standby queue bound per claim (B3 succession surface).
+export const STANDBY_CAP = 8;
+// Resolve the default lease window (hours) for a kind: an explicit per-room
+// defaultLeaseHours (clamped to the hard cap) wins; otherwise the kind
+// default. The immortal null opt-out is retired — there is no third branch.
+export function leaseDefaultHours(room, kind) {
+  const raw = room?.workClaims?.defaultLeaseHours;
+  if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) return Math.min(raw, MAX_LEASE_HOURS);
+  return (LEASE_DEFAULT_SECONDS[kindOf(kind)] ?? LEASE_DEFAULT_SECONDS.work) / 3600;
+}
+export const leaseGraceMs = kind => (LEASE_GRACE_SECONDS[kindOf(kind)] ?? 0) * 1000;
+export const leaseMaxTotalMs = kind => {
+  const seconds = LEASE_MAX_TOTAL_SECONDS[kindOf(kind)];
+  return typeof seconds === "number" ? seconds * 1000 : null;
+};
 export const DEFAULT_MAX_OPEN_CLAIMS = 200;
 export const DEFAULT_MAX_MEMBER_OPEN_CLAIMS = 20;
+export const DEFAULT_MAX_STANDBY_CLAIMS = 1000;
 const CONFIG_CAP_CEILING = 10000;
 const DEFAULT_REVIEW_POLICY = "self_attested";
 const ACTIVE_CLAIM_STATES = ["claimed", "in_progress", "blocked"];
+// Held states count toward BOTH caps (maxOpenClaims, maxMemberOpenClaims):
+// an expired claim is still owned through its grace window — only unclaimed
+// and done free capacity (claim-channel R13).
+const HELD_CLAIM_STATES = ["claimed", "in_progress", "blocked", "expired"];
 class ClaimError extends Error { constructor(code, message) { super(message); this.name = "ClaimError"; this.code = code; } }
 const fail = (code, message) => { throw new ClaimError(code, message); };
 const check = (condition, message) => { if (!condition) fail("invalid_claim_input", message); };
@@ -313,6 +394,41 @@ const kindOf = value => {
 const revisionOf = value => {
   if (value === undefined || value === null) return null;
   check(typeof value === "string" && value.length > 0 && value.length <= 200, "revision must be 1..200 characters");
+  return value;
+};
+// Lease-first model fields. leaseSeq = the claim-round generation counter
+// (increments on claim / succession / reclaim; heartbeats and renews never
+// touch it). epoch = the reaper's fencing generation (the reaper bumps it
+// on reap; submissions carrying a stale epoch are rejected). Both are the
+// claim's version vector: a single-writer register needs no fuller clock.
+const leaseSeqOf = value => {
+  if (value === undefined || value === null) return 1;
+  check(Number.isSafeInteger(value) && value >= 1, "leaseSeq must be a positive integer");
+  return value;
+};
+const priorActiveStateOf = value => {
+  if (value === undefined || value === null) return null;
+  check(["claimed", "in_progress", "blocked"].includes(value), "priorActiveState must be claimed, in_progress or blocked");
+  return value;
+};
+const countOf = value => {
+  if (value === undefined || value === null) return 0;
+  check(Number.isSafeInteger(value) && value >= 0, "count must be a non-negative integer");
+  return value;
+};
+const standbyOf = value => {
+  if (value === undefined || value === null) return Object.freeze([]);
+  check(Array.isArray(value) && value.length <= STANDBY_CAP, `standby must hold at most ${STANDBY_CAP} entries`);
+  return Object.freeze(value.map(entry => idOf(entry, "standby member id", 128)));
+};
+const createdSeqOf = value => {
+  if (value === undefined || value === null) return null;
+  check(Number.isSafeInteger(value) && value >= 1, "createdSeq must be a positive integer");
+  return value;
+};
+const isoOrNull = (value, what) => {
+  if (value === undefined || value === null) return null;
+  check(typeof value === "string" && Number.isFinite(Date.parse(value)), `${what} must be an ISO timestamp`);
   return value;
 };
 const ciOf = value => {
@@ -424,7 +540,7 @@ const workOf = value => {
   if (kind === "deploy") check(revision, "a deploy claim needs a revision");
   const historyOmitted = historyOmittedOf(value.historyOmitted);
   const readingAcks = readingAcksOf(value.readingAcks);
-  return { id: value.id, title: value.title ?? value.id, state: value.state ?? "unclaimed",
+  const known = { id: value.id, title: value.title ?? value.id, state: value.state ?? "unclaimed",
     owner: value.owner ?? null, history: Array.isArray(value.history) ? value.history : [],
     readingAcks,
     ...(historyOmitted > 0 ? { historyOmitted } : {}),
@@ -436,8 +552,24 @@ const workOf = value => {
     repo: repoOf(value.repo), branch: branchOf(value.branch),
     chain: chainOf(value.chain), supersededBy: optionalId(value.supersededBy, "supersededBy"),
     workItemId: optionalId(value.workItemId, "workItemId"),
-    squadId: optionalId(value.squadId, "squadId"), // plan-squads: work offer targeted at a squad
-    kind, revision, ci: ciOf(value.ci), reviews: reviewsOf(value.reviews) };
+    kind, revision, ci: ciOf(value.ci), reviews: reviewsOf(value.reviews),
+    standby: standbyOf(value.standby), createdSeq: createdSeqOf(value.createdSeq),
+    leaseSeq: leaseSeqOf(value.leaseSeq), epoch: epochOf(value.epoch),
+    priorActiveState: priorActiveStateOf(value.priorActiveState),
+    lastHeartbeatAt: isoOrNull(value.lastHeartbeatAt, "lastHeartbeatAt"),
+    consecutiveHeartbeats: countOf(value.consecutiveHeartbeats),
+    filesDeclared: value.filesDeclared === undefined ? true : value.filesDeclared === true,
+    // Reaper succession input: worker-nominated successor, preserved through
+    // the machine so it survives round-trips (B2 guild-claimsboard).
+    successorHint: optionalId(value.successorHint, "successorHint") };
+  // Schema drift: production rows may carry fields added by other lanes or
+  // newer checkouts. Unknown fields pass through verbatim — never dropped,
+  // never interpreted. historyOmitted keeps its conditional (absent unless > 0).
+  for (const key of Object.keys(value)) {
+    if (key === "historyOmitted" || Object.hasOwn(known, key)) continue;
+    known[key] = value[key];
+  }
+  return known;
 };
 const agentOf = value => idOf(value, "agent id", 128);
 const stamp = (atMs, agentId, action, note) =>
@@ -448,6 +580,14 @@ const stamp = (atMs, agentId, action, note) =>
 // still changes on every write (the PR-link concurrency check reads it).
 export const MAX_CLAIM_HISTORY = 200;
 const historyOmittedOf = value => (Number.isSafeInteger(value) && value > 0 ? value : 0);
+// Epoch fencing (W8): the fencing epoch. Pre-existing claims (no epoch
+// stored) hydrate to 0 — backward compatible. Only ownership transitions
+// bump it; see withEpochBump.
+const epochOf = value => (Number.isSafeInteger(value) && value >= 0 ? value : 0);
+// Every ownership transition stamps epoch+1, fencing out resurrected former
+// holders. The caller's history stamp records the transition itself; the
+// bump rides along on the item.
+const withEpochBump = item => ({ ...item, epoch: epochOf(item.epoch) + 1 });
 export const claimHistoryLength = item =>
   (Array.isArray(item?.history) ? item.history.length : 0) + historyOmittedOf(item?.historyOmitted);
 const withHistory = (work, atMs, agentId, action, note) => {
@@ -487,8 +627,9 @@ const positiveCap = (value, fallback) =>
   Number.isSafeInteger(value) && value >= 1 && value <= CONFIG_CAP_CEILING ? value : fallback;
 // Room config hook: resolve per-room work-claim defaults from an optional
 // room object. Rooms opt in by carrying workClaims = { defaultLeaseHours,
-// reviewPolicy, maxOpenClaims, maxMemberOpenClaims }; anything missing or
-// invalid falls back to the defaults.
+// reviewPolicy, maxOpenClaims, maxMemberOpenClaims, requireClaimFiles };
+// anything missing or invalid falls back to the defaults. defaultLeaseHours
+// is clamped to the 2h hard cap (claim-channel R18 / hierarchy §3.2).
 export function roomWorkClaimConfig(room) {
   const raw = room?.workClaims ?? {};
   const defaultLeaseHours = typeof raw.defaultLeaseHours === "number" && raw.defaultLeaseHours > 0 && raw.defaultLeaseHours <= MAX_LEASE_HOURS
@@ -499,12 +640,20 @@ export function roomWorkClaimConfig(room) {
     reviewPolicy,
     maxOpenClaims: positiveCap(raw.maxOpenClaims, DEFAULT_MAX_OPEN_CLAIMS),
     maxMemberOpenClaims: positiveCap(raw.maxMemberOpenClaims, DEFAULT_MAX_MEMBER_OPEN_CLAIMS),
+    // Collide-guild addendum: files are required at claim creation unless
+    // the room explicitly opts out (then claims are marked filesDeclared:
+    // false so the arbiter can see them).
+    requireClaimFiles: raw.requireClaimFiles !== false,
+    maxStandbyClaims: positiveCap(raw.maxStandbyClaims, DEFAULT_MAX_STANDBY_CLAIMS),
   });
 }
 const leaseHoursOf = value => {
-  if (value === null || value === undefined) return value; // null = explicit opt-out of leases
-  check(typeof value === "number" && Number.isFinite(value) && value > 0 && value <= MAX_LEASE_HOURS,
-    `leaseHours must be > 0 and <= ${MAX_LEASE_HOURS}, or null for no lease`);
+  // The immortal null opt-out is retired (claim-channel R1, hierarchy §3.2):
+  // every claim carries a lease. No claim is immortal.
+  if (value === null) fail("claim_lease_required", "leaseHours is required — the null (immortal) opt-out is retired; omit leaseHours for the kind default");
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) fail("invalid_claim_input", `leaseHours must be > 0 and <= ${MAX_LEASE_HOURS}`);
+  if (value > MAX_LEASE_HOURS) fail("claim_lease_too_long", `leaseHours ${value} exceeds the ${MAX_LEASE_HOURS}h hard cap (all claim kinds)`);
   return value;
 };
 const pullList = (pullRequest, pullRequests) => {
@@ -519,9 +668,14 @@ const pullList = (pullRequest, pullRequests) => {
 // claiming an unknown id is refused so claims always reference real work.
 // `tags` may be supplied up front (free-form, recorded on the item); blobs
 // are evidence pointers and are only recorded on the done transition.
-export function createWork({ id, title, reviewPolicy, note, tags, files, dependsOn, parentClaimId, evidenceRefs, pullRequest, pullRequests, repo, branch, fileBlocks, workItemId, kind, revision, squadId } = {}, { now, agentId } = {}) {
+export function createWork(input = {}, { now, agentId } = {}) {
+  const { id, title, reviewPolicy, note, tags, files, dependsOn, parentClaimId, evidenceRefs, pullRequest, pullRequests, repo, branch, fileBlocks, workItemId, kind, revision, squadId, filesDeclared, state } = input;
   const atMs = nowMsOf(now);
   idOf(id, "work id", 256);
+  // Only creation-legal states: a claim enters as unclaimed, or parked in
+  // standby when the requester asked to queue behind a full board.
+  check(state === undefined || state === "unclaimed" || state === "standby",
+    `state must be unclaimed or standby on create`);
   if (title !== undefined) check(typeof title === "string" && title.length > 0 && title.length <= 512, "title must be 1..512 characters");
   // SEC2: the create note is stored on the "created" history stamp and served
   // on every board list — without a bound, a direct API caller can stash an
@@ -533,7 +687,8 @@ export function createWork({ id, title, reviewPolicy, note, tags, files, depends
   if (claimKind === "deploy") check(claimRevision, "a deploy claim needs a revision");
   const declared = files === undefined || files === null ? { files: Object.freeze([]), fileBlocks: Object.freeze({}) } : claimedFilesOf(files);
   const links = pullList(pullRequest, pullRequests);
-  const item = { id, title: title ?? id, state: "unclaimed", owner: null, history: [],
+  const item = { id, title: title ?? id, state: state ?? "unclaimed", owner: null, history: [],
+    epoch: 0, // epoch fencing (W8): no owner yet, the fence starts here
     claimedAt: null, leaseStartAt: null, leaseExpiresAt: null, deliveryMode: null,
     reviewPolicy: reviewPolicy ?? null, reviewedBy: null, attestations: Object.freeze([]),
     tags: tags === undefined || tags === null ? Object.freeze([]) : tagsOf(tags),
@@ -549,25 +704,38 @@ export function createWork({ id, title, reviewPolicy, note, tags, files, depends
     repo: repoOf(repo), branch: branchOf(branch),
     chain: Object.freeze([]), supersededBy: null, workItemId: optionalId(workItemId, "workItemId"),
     squadId: optionalId(squadId, "squadId"), // plan-squads: work offer targeted at a squad
-    kind: claimKind, revision: claimRevision, ci: null, reviews: Object.freeze([]) };
+    kind: claimKind, revision: claimRevision, ci: null, reviews: Object.freeze([]),
+    leaseSeq: 1, priorActiveState: null, lastHeartbeatAt: null,
+    consecutiveHeartbeats: 0, standby: Object.freeze([]), createdSeq: null,
+    filesDeclared: filesDeclared === undefined ? true : filesDeclared === true,
+    // Schema drift: unknown input fields pass through verbatim.
+    ...Object.fromEntries(Object.entries(input).filter(([key]) =>
+      !["id", "title", "reviewPolicy", "note", "tags", "files", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch", "fileBlocks", "workItemId", "kind", "revision", "squadId", "filesDeclared", "state"].includes(key))) };
   // The creating member when the route knows it; "system" for internal creates.
   return withHistory(item, atMs, agentId === undefined ? "system" : agentOf(agentId), "created", note);
 }
-// Claim unclaimed work. Refuses already-claimed work (the anti-collision rule).
-// leaseHours: hours until the claim lapses (default: the room's
-// defaultLeaseHours, else 24h); null opts out — the claim never expires.
+// Claim unclaimed work. Refuses already-claimed work (the anti-collision rule)
+// and grace-window work (claim_in_grace — grace is the holder's last chance,
+// not a buying opportunity). Leases are server-stamped (clock-skew immune):
+// leaseHours selects the window (explicit, else the room default, else the
+// kind default); null is rejected (claim_lease_required) and anything over
+// the 2h hard cap is rejected (claim_lease_too_long). Every claim mints a new
+// claim round: leaseSeq increments.
 export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, parentClaimId, evidenceRefs, pullRequest, pullRequests, repo, branch, fileBlocks, room, now } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  if (item.state === "expired") fail("claim_in_grace", `work "${item.id}" is in its grace window — the holder may still recover it; claim it after grace ends`);
   check(item.state === "unclaimed", `work "${item.id}" is already ${item.state} — release it first`);
   // QA D-1: the 4000-char bound applies to every note stored on a history
   // stamp, not just create — an unbounded claim note is the same
   // storage/amplification vector the SEC2 create cap closed.
   if (note !== undefined && note !== null) check(typeof note === "string" && note.length <= 4000, "note must be a string of at most 4000 characters");
+  const kind = item.kind;
   const wanted = leaseHoursOf(leaseHours);
-  const effective = wanted === null ? null : wanted ?? roomWorkClaimConfig(room).defaultLeaseHours;
+  const effective = wanted ?? leaseDefaultHours(room, kind);
   const declared = files === undefined || files === null ? null : claimedFilesOf(files);
   const links = pullRequest === undefined && pullRequests === undefined ? null : pullList(pullRequest, pullRequests);
-  const claimed = { ...item, state: "claimed", owner: agent, claimedAt: isoOf(atMs),
+  // Epoch fencing (W8): nobody -> agent is an ownership transition — bump.
+  const claimed = withEpochBump({ ...item, state: "claimed", owner: agent, claimedAt: isoOf(atMs),
     files: declared ? declared.files : item.files,
     fileBlocks: declared
       ? Object.freeze({ ...fileBlocksOf(fileBlocks), ...declared.fileBlocks })
@@ -579,37 +747,116 @@ export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, p
     pullRequest: links ? (links.find(pull => !pull.outcome) ?? links[links.length - 1] ?? null) : item.pullRequest,
     repo: repo === undefined ? item.repo : repoOf(repo),
     branch: branch === undefined ? item.branch : branchOf(branch),
-    leaseStartAt: effective === null ? null : isoOf(atMs),
-    leaseExpiresAt: effective === null ? null : isoOf(atMs + effective * 3600 * 1000) };
-  return withHistory(claimed, atMs, agent, "claimed",
-    effective === null ? note : note ?? `lease: ${effective}h`);
+    leaseStartAt: isoOf(atMs),
+    leaseExpiresAt: isoOf(atMs + effective * 3600 * 1000),
+    // A new claim round: the fencing generation increments — except the very
+    // first claim (claimedAt unset), which opens round 1. Heartbeats and
+    // renews never touch leaseSeq — only claim / succession / reclaim do.
+    leaseSeq: item.claimedAt == null ? 1 : (item.leaseSeq ?? 0) + 1,
+    epoch: item.epoch ?? 1,
+    priorActiveState: null, lastHeartbeatAt: null, consecutiveHeartbeats: 0 });
+  return withHistory(claimed, atMs, agent, "claimed", note ?? `lease: ${effective}h`);
 }
-// Renew a claim's lease: starts a fresh lease window from now, extending
-// leaseExpiresAt by the lease duration (explicit leaseHours, else the
-// room's default). Only the owner may renew, only while the claim is
-// active, and only when the claim carries a lease (claims that opted out
-// of leases have nothing to renew; lapsed leases must be claimed again).
-// The route layer requires the owner's public progress message — posted
-// in the room after the prior lease start — before calling this; the pure
-// machine records the renewal, never the message check.
+// The window (hours) the item's current lease was minted with — the middle
+// of renew's `effective = wanted ?? current ?? room default` chain.
+export function currentLeaseHoursOf(item) {
+  const start = item?.leaseStartAt, end = item?.leaseExpiresAt;
+  if (typeof start !== "string" || typeof end !== "string") return null;
+  const ms = Date.parse(end) - Date.parse(start);
+  return Number.isFinite(ms) && ms > 0 ? ms / 3600000 : null;
+}
+// Renew a claim's lease: starts a fresh lease window from NOW (renewing
+// early does not bank the remainder — the renewed window is now+duration),
+// extending leaseExpiresAt by the effective duration. Only the owner may
+// renew, only while the claim is active or inside its grace window.
+// The effective window resolves as `wanted ?? current ?? room default`
+// (kind-aware), capped at the 2h hard cap; deploy claims are non-renewable;
+// renewals stop at the kind's max total hold. A renew resets the heartbeat
+// anti-squatting counter. The route layer requires demonstrable progress
+// (the owner's public progress message, or a progress: note) before calling
+// this; the pure machine records the renewal. Renewing inside grace restores
+// the pre-expiry state (priorActiveState); past 2x grace the lease is gone
+// (claim_lease_lapsed — claim it again instead).
 export function renewWork(work, agentId, { note, leaseHours, room, now } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can renew it`);
-  check(ACTIVE_CLAIM_STATES.includes(item.state), `work "${item.id}" is ${item.state} — only active claims can be renewed`);
+  const kind = item.kind;
+  if (kind === "deploy") fail("claim_renew_forbidden", `work "${item.id}" is a deploy claim — deploy leases are not renewable; escalate to the room owner`);
+  const recoverable = item.state === "expired" || ACTIVE_CLAIM_STATES.includes(item.state);
+  check(recoverable, `work "${item.id}" is ${item.state} — only active claims can be renewed`);
   check(item.leaseExpiresAt !== null, `work "${item.id}" has no lease — nothing to renew`);
-  check(Date.parse(item.leaseExpiresAt) > atMs, `work "${item.id}" lease already lapsed — claim it again instead`);
+  const lapsedMs = atMs - Date.parse(item.leaseExpiresAt);
+  // Forgiveness: a worker that comes back late inside 2x grace is restored,
+  // not punished. Past that the round is over.
+  const graceMs = leaseGraceMs(kind);
+  if (lapsedMs > 2 * graceMs) fail("claim_lease_lapsed", `work "${item.id}" lease already lapsed — claim it again instead`);
   // QA D-1: same 4000-char bound as create — see claimWork.
   if (note !== undefined && note !== null) check(typeof note === "string" && note.length <= 4000, "note must be a string of at most 4000 characters");
   const wanted = leaseHoursOf(leaseHours);
-  // Explicit null opts out of leases, exactly like claimWork: the renewed
-  // claim carries no lease window (it previously fell through to the room
-  // default, contradicting claimWork's null handling).
-  const effective = wanted === null ? null : wanted ?? roomWorkClaimConfig(room).defaultLeaseHours;
-  const renewed = { ...item,
-    leaseStartAt: effective === null ? null : isoOf(atMs),
-    leaseExpiresAt: effective === null ? null : isoOf(atMs + effective * 3600 * 1000) };
-  return withHistory(renewed, atMs, agent, "renewed",
-    note ?? (effective === null ? "lease removed" : `lease: ${effective}h`));
+  const effective = wanted ?? currentLeaseHoursOf(item) ?? leaseDefaultHours(room, kind);
+  if (effective > MAX_LEASE_HOURS) fail("claim_lease_too_long", `leaseHours ${effective} exceeds the ${MAX_LEASE_HOURS}h hard cap (all claim kinds)`);
+  const maxTotalMs = leaseMaxTotalMs(kind);
+  if (maxTotalMs !== null) {
+    const firstStart = Date.parse(item.claimedAt ?? item.leaseStartAt ?? isoOf(atMs));
+    if (atMs - firstStart + effective * 3600 * 1000 > maxTotalMs) {
+      fail("claim_lease_max_total", `work "${item.id}" would exceed the ${kind} max total hold of ${maxTotalMs / 3600000}h — finish and re-claim instead`);
+    }
+  }
+  const restored = item.state === "expired" ? (item.priorActiveState ?? "claimed") : item.state;
+  const renewed = { ...item, state: restored, priorActiveState: null,
+    leaseStartAt: isoOf(atMs),
+    leaseExpiresAt: isoOf(atMs + effective * 3600 * 1000),
+    // A renew proves work: the anti-squatting counter resets.
+    consecutiveHeartbeats: 0 };
+  return withHistory(renewed, atMs, agent, "renewed", note ?? `lease: ${effective}h`);
+}
+// A heartbeat is the holder's proof of liveness. It extends the CURRENT
+// lease window (leaseStartAt=now, leaseExpiresAt=now+window — the window
+// length is unchanged) but never mints a new one, never touches leaseSeq,
+// and emits no room event (the route writes the row silently: heartbeats
+// must not consume the room's lifetime event budget). Inside grace it
+// restores the pre-expiry state. After MAX_HEARTBEATS_WITHOUT_RENEW
+// consecutive heartbeats with no renew, the heartbeat is refused
+// (claim_renewal_required) — heartbeats keep the light on, only renews
+// prove work. The server never trusts client time: `now` is server time.
+export function heartbeatWork(work, agentId, { leaseSeq, progressNote, now } = {}) {
+  const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  check(item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can heartbeat it`);
+  check(item.state === "expired" || ACTIVE_CLAIM_STATES.includes(item.state),
+    `work "${item.id}" is ${item.state} — only active claims can be heartbeated`);
+  check(Number.isSafeInteger(leaseSeq) && leaseSeq > 0, "leaseSeq must be a positive integer");
+  if (leaseSeq !== item.leaseSeq) fail("claim_lease_stale", `work "${item.id}" is at claim round ${item.leaseSeq} — the heartbeat's leaseSeq ${leaseSeq} is stale (the holder lost the round; re-read before writing)`);
+  check(item.leaseExpiresAt !== null && item.leaseStartAt !== null, `work "${item.id}" has no lease — nothing to heartbeat`);
+  const windowMs = Date.parse(item.leaseExpiresAt) - Date.parse(item.leaseStartAt);
+  check(Number.isFinite(windowMs) && windowMs > 0, `work "${item.id}" has a corrupt lease window`);
+  const graceMs = leaseGraceMs(item.kind);
+  if (atMs >= Date.parse(item.leaseExpiresAt) + graceMs) fail("claim_lease_lapsed", `work "${item.id}" lease lapsed past grace — the reaper has moved on; claim it again or join standby`);
+  if ((item.consecutiveHeartbeats ?? 0) >= MAX_HEARTBEATS_WITHOUT_RENEW) {
+    fail("claim_renewal_required", `work "${item.id}" has heartbeated ${item.consecutiveHeartbeats} times without a renew — post progress and renew to keep holding it`);
+  }
+  if (progressNote !== undefined && progressNote !== null) {
+    check(typeof progressNote === "string" && progressNote.length <= 512, "progressNote must be at most 512 characters");
+  }
+  const restored = item.state === "expired" ? (item.priorActiveState ?? "claimed") : item.state;
+  const beat = { ...item, state: restored, priorActiveState: null,
+    leaseStartAt: isoOf(atMs), leaseExpiresAt: isoOf(atMs + windowMs),
+    lastHeartbeatAt: isoOf(atMs), consecutiveHeartbeats: (item.consecutiveHeartbeats ?? 0) + 1 };
+  return withHistory(beat, atMs, agent, "heartbeat", progressNote ?? null);
+}
+// Null-lease backfill (the immortal opt-out is retired): an active claim
+// with no lease gets the kind default window starting now, stamped in
+// history. Returns null when there is nothing to backfill. Idempotent —
+// second call is a no-op. The route persists the result silently (no room
+// event: this is a server correction, not a member action).
+export function ensureLease(work, { room, now } = {}) {
+  const item = workOf(work), atMs = nowMsOf(now);
+  if (!ACTIVE_CLAIM_STATES.includes(item.state) || item.leaseExpiresAt !== null) return null;
+  const kind = item.kind;
+  const hours = leaseDefaultHours(room, kind);
+  const backfilled = { ...item,
+    leaseStartAt: isoOf(atMs), leaseExpiresAt: isoOf(atMs + hours * 3600 * 1000) };
+  return withHistory(backfilled, atMs, item.owner ?? "system", "lease_backfilled",
+    `null lease backfilled to the ${kind} default (${hours}h) — the immortal opt-out is retired`);
 }
 // Append one URL to the current claim round without replacing its lease or
 // evidence. A fresh duplicate in the same round is a byte-identical no-op;
@@ -680,8 +927,19 @@ export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClai
 // four are recorded on the item and then frozen with the done state. tags
 // and blobs are only meaningful on the done transition and are refused
 // anywhere else.
-export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, now, authority = false } = {}) {
+export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, expectedEpoch, now, authority = false } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  // Epoch fencing (W8): when the caller presents the epoch its decision was
+  // based on, it must match the claim's current epoch. A resurrected former
+  // holder presents a stale epoch after a claim/reassign/succession/release
+  // bumped it — reject rather than apply, before the owner check, so the
+  // refusal names the real problem. Optional for backward compatibility:
+  // callers that omit expectedEpoch get the old behavior.
+  if (expectedEpoch !== undefined && expectedEpoch !== null) {
+    check(Number.isSafeInteger(expectedEpoch) && expectedEpoch >= 0, "expectedEpoch must be a non-negative integer");
+    if (item.epoch !== expectedEpoch) fail("stale_epoch",
+      `work "${item.id}" is at epoch ${item.epoch} — the update was based on epoch ${expectedEpoch}; read the claim again`);
+  }
   check(authority === true || item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can update it`);
   check(!isTerminalClaimState(item.state), `work "${item.id}" is ${item.state} and immutable`);
   if (state !== undefined) {
@@ -719,6 +977,9 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
   };
   const next = state === undefined ? { ...item, ...withProvenance } : { ...item, state,
     owner: released ? null : item.owner,
+    // Epoch fencing (W8): a release is an ownership transition
+    // (owner -> nobody) — bump so the released holder is fenced out.
+    epoch: released ? item.epoch + 1 : item.epoch,
     leaseStartAt: released ? null : item.leaseStartAt, // a released claim holds no lease
     leaseExpiresAt: released ? null : item.leaseExpiresAt, // a released claim holds no lease
     // a released claim drops its reviews too — attestations belong to the
@@ -736,15 +997,28 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     ...withProvenance };
   return withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note);
 }
-// Retire open work without delivering it. close: the room's claim managers
-// (authority) or the current holder. cancel: whoever opened the item while
-// it is still unclaimed, or the current holder; authority may also cancel.
-// The item lands in the terminal closed state with no owner and no lease;
-// the history stamp ("closed" | "cancelled") names who retired it and why.
-export function closeWork(work, agentId, { verb = "close", reason, now, authority = false } = {}) {
+// Retire open work without delivering it.
+//
+// Two entry shapes (guild integration):
+// - verb = "close" | "cancel": the lifecycle table — close/cancel verbs move
+//   to the terminal `closed` state. close is for the room's claim managers
+//   (authority) or the current holder; cancel is also open to whoever opened
+//   the item while it is still unclaimed.
+// - verb omitted (the POST /close route): the terminal `cancelled` state —
+//   the unbrick fix; cancelled claims are cap-excluded. Auth: the holder,
+//   the room owner, or a manage_claims holder (resolved by the route).
+export function closeWork(work, agentId, { verb, reason, now, authority = false } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
-  check(verb === "close" || verb === "cancel", "verb must be close or cancel");
   if (reason !== undefined && reason !== null) check(typeof reason === "string" && reason.length <= 4000, "reason must be a string of at most 4000 characters");
+  if (verb === undefined || verb === null) {
+    check(authority === true || item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can close it`);
+    check(item.state !== "done", `work "${item.id}" is done and immutable`);
+    check(!isTerminalClaimState(item.state), `work "${item.id}" is already ${item.state}`);
+    const next = { ...item, state: "cancelled", owner: null,
+      leaseStartAt: null, leaseExpiresAt: null };
+    return withHistory(next, atMs, agent, "closed", reason ?? null);
+  }
+  check(verb === "close" || verb === "cancel", "verb must be close or cancel");
   const next = nextClaimState(item.state, verb);
   if (next === null) fail("work_claim_terminal", `Cannot ${verb} "${item.id}": it is already ${item.state}`);
   const holder = item.owner !== null && item.owner === agent;
@@ -764,6 +1038,15 @@ export function closeWork(work, agentId, { verb = "close", reason, now, authorit
 export function creatorOf(work) {
   const first = Array.isArray(work?.history) && !work.historyOmitted ? work.history[0] : null;
   return first && first.action === "created" && typeof first.agentId === "string" && first.agentId !== "system" ? first.agentId : null;
+}
+// FIFO promotion: the oldest standby claim takes a freed board slot,
+// standby -> unclaimed. The caller becomes the promoting actor on the
+// history entry; promotion does not assign an owner — the promoted claim
+// is plain ready work, claimable like any other unclaimed item.
+export function promoteWork(work, agentId, { now } = {}) {
+  const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  check(item.state === "standby", `work "${item.id}" is ${item.state} — only standby claims promote to the board`);
+  return withHistory({ ...item, state: "unclaimed" }, atMs, agent, "promoted", "board slot freed — promoted from standby");
 }
 // Record a note from the caller's own authenticated session. A new note
 // supersedes that member's active verdict but cannot approve reviewed completion.
@@ -874,7 +1157,9 @@ export function reassignWork(work, agentId, newOwner, { note, now, authority = f
   const claim = fresh ? { state: "claimed", claimedAt: isoOf(atMs),
     leaseStartAt: hours === null ? null : isoOf(atMs),
     leaseExpiresAt: hours === null ? null : isoOf(atMs + hours * 3600 * 1000) } : {};
-  return withHistory({ ...item, ...claim, owner: target, attestations: Object.freeze([]), reviews: Object.freeze([]) }, atMs, agent, `reassigned:${target}`, note);
+  // Epoch fencing (W8): owner -> new owner is an ownership transition — bump.
+  return withHistory(withEpochBump({ ...item, ...claim, owner: target, attestations: Object.freeze([]), reviews: Object.freeze([]) }),
+    atMs, agent, `reassigned:${target}`, note);
 }
 // True when the item holds an active claim whose lease has lapsed. Items
 // without a lease, and items not under claim, never expire.
@@ -897,11 +1182,48 @@ export function releaseExpired(items, now) {
     // 2026-09-30 (phase-2 gap audit L-P2-8): mirrors updateWork, where a
     // released claim drops its reviews too (attestations belong to the
     // lapsed owner's round of work, never to whoever claims next).
-    const released = { ...item, state: "unclaimed", owner: null, leaseStartAt: null, leaseExpiresAt: null,
-      files: Object.freeze([]), fileBlocks: Object.freeze({}), attestations: Object.freeze([]), reviews: Object.freeze([]) };
+    // Epoch fencing (W8): auto-release is an ownership transition
+    // (owner -> nobody) — bump so the lapsed holder is fenced out.
+    const released = withEpochBump({ ...item, state: "unclaimed", owner: null, leaseStartAt: null, leaseExpiresAt: null,
+      files: Object.freeze([]), fileBlocks: Object.freeze({}), attestations: Object.freeze([]), reviews: Object.freeze([]) });
     return withHistory(released, atMs, item.owner ?? "system", "lease_expired",
       `claim by ${item.owner ?? "nobody"} lapsed at ${item.leaseExpiresAt} — auto-released`);
   });
+}
+// Succession-election hook (crash-recovery guild: W-succession / W3).
+//
+// W-succession's unprivileged election decides the new holder after
+// lease+grace expiry. It must apply the decision through THIS function —
+// never by setting `owner` directly — because the ownership change has to
+// bump the epoch atomically with the handoff. The bump is what fences out
+// the resurrected former holder: their next updateWork presenting the
+// pre-election epoch fails closed with stale_epoch instead of clobbering
+// the successor's work.
+//
+// Precondition (the election's responsibility, not this function's): the
+// lease+grace window really has expired. This function only refuses
+// nonsense inputs — done and unclaimed items cannot be successed.
+//
+// The successor starts a clean round: state returns to claimed,
+// claimedAt and the lease restart from now, and the lapsed owner's
+// attestations, reviews, and file declarations are cleared (the same rule
+// as release — they belong to the dead round, never to the next holder).
+// The history stamp is `succession:<newOwner>`; the epoch bump rides along.
+export function electClaimSuccessor(work, newOwner, { note, leaseHours, room, now, agentId } = {}) {
+  const item = workOf(work), target = agentOf(newOwner), atMs = nowMsOf(now);
+  check(item.state !== "done", `work "${item.id}" is done and immutable`);
+  check(item.state !== "unclaimed", `work "${item.id}" is unclaimed — claim it instead of successing it`);
+  // QA D-1: the same 4000-char note bound as create/claim — see claimWork.
+  if (note !== undefined && note !== null) check(typeof note === "string" && note.length <= 4000, "note must be a string of at most 4000 characters");
+  const wanted = leaseHoursOf(leaseHours);
+  const effective = wanted === null ? null : wanted ?? roomWorkClaimConfig(room).defaultLeaseHours;
+  const elected = withEpochBump({ ...item, state: "claimed", owner: target, claimedAt: isoOf(atMs),
+    leaseStartAt: effective === null ? null : isoOf(atMs),
+    leaseExpiresAt: effective === null ? null : isoOf(atMs + effective * 3600 * 1000),
+    attestations: Object.freeze([]), reviews: Object.freeze([]),
+    files: Object.freeze([]), fileBlocks: Object.freeze({}) });
+  return withHistory(elected, atMs, agentId === undefined ? "system" : agentOf(agentId),
+    `succession:${target}`, note ?? `lease+grace expired — ownership elected to ${target}`);
 }
 // Review-policy gate for the done transition. policy resolves from the
 // explicit option, then the work item, then self_attested. verifyMembers is
@@ -1035,4 +1357,4 @@ export function clearPremiseFlag(work, { byMemberId, note, now } = {}) {
   const { premiseFlag: _dropped, ...rest } = item;
   return withHistory({ ...rest, premiseFlag: null }, atMs, agent, "premise_cleared", note ?? null);
 }
-export { ClaimError, STATES, TRANSITIONS, CLAIM_LIFECYCLE, CLAIM_VERBS, TERMINAL_CLAIM_STATES, isTerminalClaimState, nextClaimState, DELIVERY_MODES, REVIEW_POLICIES, REVIEW_VERDICTS, CLAIM_KINDS, CI_STATES, DEFAULT_LEASE_HOURS, MAX_LEASE_HOURS, ACTIVE_CLAIM_STATES };
+export { ClaimError, STATES, TRANSITIONS, CLAIM_LIFECYCLE, CLAIM_VERBS, TERMINAL_CLAIM_STATES, isTerminalClaimState, nextClaimState, DELIVERY_MODES, REVIEW_POLICIES, REVIEW_VERDICTS, CLAIM_KINDS, CI_STATES, DEFAULT_LEASE_HOURS, MAX_LEASE_HOURS, ACTIVE_CLAIM_STATES, HELD_CLAIM_STATES };

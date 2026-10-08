@@ -140,20 +140,20 @@ test("L-23: out-of-order typed signal does not regress the timeline", () => {
 // chains. (2) Regression: a recursive DFS throws RangeError past ~10k depth.
 // (3) Existing work-deps tests use 3-node graphs only.
 
-// ---- L-27: renew honors explicit leaseHours: null --------------------------
-// (1) Contract: renewing with leaseHours: null converts the claim to no-lease,
-// exactly like claimWork. (2) Regression: the null fell through to the room
+// ---- L-27: renew rejects leaseHours: null (the opt-out is retired) ---------
+// (1) Contract: renewing with leaseHours: null is 422 claim_lease_required —
+// the immortal opt-out is retired, there is no "remove the lease" path.
+// (2) Regression this replaces: the null used to fall through to the room
 // default, so a caller asking to drop the lease got a fresh 24h lease
-// instead. (3) Existing work-claims tests never renew with null.
-test("L-27: renewWork with leaseHours null converts the claim to no-lease", () => {
+// instead. Now the caller gets a loud refusal, not a silent default.
+// (3) Existing work-claims tests never renew with null.
+test("L-27: renewWork with leaseHours null is rejected, not converted", () => {
   const t = 1_000_000;
   const work = createWork({ id: "w27" }, { now: t });
-  const claimed = claimWork(work, "ada", { now: t }); // default 24h lease
+  const claimed = claimWork(work, "ada", { now: t }); // kind default (300s)
   assert.ok(claimed.leaseExpiresAt !== null);
-  const renewed = renewWork(claimed, "ada", { leaseHours: null, now: t + 1000 });
-  assert.equal(renewed.leaseStartAt, null);
-  assert.equal(renewed.leaseExpiresAt, null);
-  assert.match(renewed.history.at(-1).note, /lease removed/);
+  assert.throws(() => renewWork(claimed, "ada", { leaseHours: null, now: t + 1000 }),
+    error => error.code === "claim_lease_required");
   // A normal renew still refreshes the window.
   const refreshed = renewWork(claimed, "ada", { now: t + 1000 });
   assert.ok(refreshed.leaseExpiresAt !== null && refreshed.leaseExpiresAt > claimed.leaseExpiresAt);

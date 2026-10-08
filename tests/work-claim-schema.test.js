@@ -86,7 +86,7 @@ test("write startup creates both claim tables atomically and failed commit leave
   try {
     assert.equal(reopened.workClaims.verifySchema(), true);
     assert.deepEqual(schema(reopened.db).map(row => row.name), ["work_claim_config", "work_claims"]);
-    reopened.workClaims.configure("fixture-room", { defaultLeaseHours: 4 });
-    assert.equal(reopened.workClaims.configFor("fixture-room").defaultLeaseHours, 4);
+    reopened.workClaims.configure("fixture-room", { defaultLeaseHours: 1.5 });
+    assert.equal(reopened.workClaims.configFor("fixture-room").defaultLeaseHours, 1.5);
   } finally { reopened.close(); }
 });
