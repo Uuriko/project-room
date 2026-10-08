@@ -1,8 +1,8 @@
 // Test-only packaging of allowlisted working files. Never a release certificate.
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, cpSync } from 'node:fs';
+import { mkdirSync, readFileSync, cpSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { createRuntimePackage } from './runtime-package.mjs';
+import { createRuntimePackage, allowed } from './runtime-package.mjs';
 import { publicAssetPaths } from '../deploy/public-assets.mjs';
 
 export function candidateRuntimeFixture(repository, directory) {
@@ -192,6 +192,8 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/routes/agent-connect.mjs'); // GET /a/<code> (imported by server/http.mjs)
   paths.add('server/connect-snippets.mjs'); // DX-1a connect table (imported by deploy/public-search.mjs)
   for (const path of publicAssetPaths) paths.add(path);
+  // Include newly registered working modules even before they exist in HEAD.
+  for (const path of allowed) if (existsSync(join(repository,path))) paths.add(path);
   const candidate = join(directory, 'synthetic-source'); mkdirSync(candidate);
   // No private state, credentials, docs or real checkout Git metadata.
   for (const path of paths) {

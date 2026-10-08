@@ -51,6 +51,7 @@ export const KNOWN_CATEGORIES = Object.freeze({
   // account's room members must be revoked before memberships drop, because
   // member_accounts is the only link from the account to those member ids.
   member_issued_invites: { priority: 47, dependsOn: [] },
+  work_fit: { priority: 46, dependsOn: [] },
   media: { priority: 50, dependsOn: ["messages"] },
   activity: { priority: 60, dependsOn: [] },
   integrations: { priority: 70, dependsOn: [] },

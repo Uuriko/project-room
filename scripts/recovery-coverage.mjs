@@ -24,6 +24,7 @@ export async function seedRecoveryCoverage(f) {
   if (!source) throw new Error("Recovery fixture requires an authored public assistant source");
   const assistant = new RoomAssistant(f.store);
   const ownerAuth = () => f.store.authenticate(f.keys.owner, "commons");
+  f.store.workFit.apply("commons", { action: "update_self", requestId: "recovery-work-fit", expectedRevision: 0, preferences: { learn: ["backend_contracts"] } }, ownerAuth);
   assistant.apply("commons", { action: "configure", requestId: "recovery-assistant-config", expectedRevision: 0, name: "Room", coordinatorMemberId: agent.id }, ownerAuth);
   assistant.apply("commons", { action: "invoke", requestId: "recovery-assistant-invoke", runId: "recovery-shared-run", sourceMessageId: source.id }, ownerAuth);
   assistant.apply("commons", { action: "claim", requestId: "recovery-assistant-claim", runId: "recovery-shared-run", attemptId: "recovery-host-attempt", expectedRevision: 0 }, () => f.store.authenticate(f.keys.agent, "commons"));

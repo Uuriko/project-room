@@ -57,6 +57,7 @@ import { Reminders, reminderSchema } from "./reminders.mjs";
 import { Notifications } from "./notifications.mjs";
 import { Moderation, moderationSchema, mutedEvent } from "./moderation.mjs";
 import { accountTermsSchema, publicAbuseSchema, publicUnpublishSchema, recordSignupTerms } from "./legal-store.mjs"; // terms, public reports, unpublish (G-SEC-11, G-SEC-14)
+import { AgentWorkFit, workFitSchema } from "./agent-work-fit-store.mjs";
 import { roomAssistantSchema } from "./room-assistant.mjs";
 import { RequestRuns, requestRunSchema } from "./request-runs.mjs";
 import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema } from "./wake-queue.mjs";
@@ -1054,7 +1055,7 @@ function roomSchemaStamp() {
     bountyEscrowSchema, projectOffersSchema, demigodOffersSchema, demigodContractsSchema, buyerSignoffSchema, trialTaskSchema, publicWorkClaimsSchema,
     publicWorkClaimFenceSchema, publicWorkReviewsSchema, publicWorkSuccessorsSchema,
     accessRequestSchema, membershipDelegationSchema, membershipDelegationJournalSchema,
-    ownerDelegateSchema, agentRoomSchema, oauthPendingSchema, gmailSchema, requestRunSchema, roomAssistantSchema,
+    ownerDelegateSchema, agentRoomSchema, oauthPendingSchema, gmailSchema, requestRunSchema, roomAssistantSchema, workFitSchema,
     directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA,
     agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA, OPERATOR_ACTIONS_SCHEMA,
     INTEGRITY_JOB_CURSOR_SCHEMA, INTEGRITY_ROOM_STATE_SCHEMA, INTEGRITY_SWEEP_COLUMN,
@@ -1204,6 +1205,7 @@ export class RoomStore {
     this.webResearch = new WebResearch(this); // RC-2026-09-24-310: knowledge router (additive)
     this.replyRequests = new ReplyRequests(this);
     this.requestRuns = new RequestRuns(this);
+    this.workFit = new AgentWorkFit(this);
     this.dmConsents = new DmConsents(this);
     this.bonds = new Bonds(this);
     this.threadMutes = new ThreadMutes(this); // Per-thread mutes (private side table).
@@ -1263,6 +1265,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // file. Read-only never migrates, so verify them only when present.
         this.wakeQueue.verifySchema({ allowAbsent: true });
         this.requestRuns.verifySchema({ allowAbsent: true });
+        this.workFit.verify();
         this.wakeQueue.verifyPauseSchema({ allowAbsent: true });
         this.attention.verifySchema({ allowAbsent: true });
         this.workClaims.verifySchema({ allowAbsent: true });
@@ -1297,6 +1300,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.webResearch.verifySchema({ allowAbsent: true }); // RC-2026-09-24-310: research journal additive, read-only never migrates.
         this.quarantineSplits.verifySchema({ allowAbsent: true }); // Quarantine thread splits: additive, read-only never migrates.
         verifyRoomLifecycle(this);
+        this.workFit.verify();
         this.moderation.verifySchema({ allowAbsent: true }); // E4 message reports: additive at v27 as well.
         this.bountyEscrow.verifySchema({ allowAbsent: true }); // Escrowed bounties: additive, read-only never migrates.
         logColdStart(coldStart, this.db, false);
@@ -1728,6 +1732,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.exec(gmailSchema);
       this.db.exec(requestRunSchema);
       this.db.exec(roomAssistantSchema);
+      this.db.exec(workFitSchema);
       // Fresh recovery stores must include the same additive growth columns
       // as HTTP registration; otherwise NDJSON replay rejects existing rows.
       ensurePayoutColumns(this.db);
@@ -1800,6 +1805,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.channelUpdates.verify();
         this.quarantineSplits.verify();
         verifyRoomLifecycle(this);
+        this.workFit.verify();
         if (!this.readOnly) this.identities.expireInactive();
       }
       this.db.exec(LOOKUP_INDEXES);
@@ -1871,6 +1877,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       () => this.channelUpdates.verify(),
       () => this.quarantineSplits.verify(),
       () => verifyRoomLifecycle(this),
+      () => this.workFit.verify(),
       () => { if (!this.readOnly) this.identities.expireInactive(); },
       () => this.backfillReferralDepth(500),
       // MSG-2: replay message events here, one budgeted batch per visit,
@@ -4077,6 +4084,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (new Set(events.map(e => e.id)).size !== events.length) fail(422, "invalid_import", "Import has duplicate event ids");
       // Dependent rows reference event ids/sequences; a history replacement
       // drops them. Pending invitations are lost on restore (documented).
+      this.db.prepare("DELETE FROM agent_work_fit_events WHERE room_id=?").run(roomId);
+      this.db.prepare("DELETE FROM agent_work_fit_profiles WHERE room_id=?").run(roomId);
       this.db.prepare("DELETE FROM commands WHERE room_id=?").run(roomId);
       this.db.prepare("DELETE FROM membership_invitation_events WHERE invitation_id IN (SELECT id FROM membership_invitations WHERE room_id=?)").run(roomId);
       this.db.prepare("DELETE FROM membership_invitations WHERE room_id=?").run(roomId);

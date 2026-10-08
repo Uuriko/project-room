@@ -1,3 +1,4 @@
+import { installWorkFit } from "./agent-work-fit-ui.js";
 import { uiText } from "./strings.js";
 import { installOwnerProjectOffers } from "./owner-project-offers-ui.js";
 import { createMemberDisplayNames } from "./member-display-names.js";
@@ -492,6 +493,7 @@ const client = new RoomClient({
     workFormOpener = null; clearNotice();
     $("#main").hidden = true; $("#auth-panel").hidden = false; $("#signout-button").hidden = true;
     humanExperience?.sync();
+    workFit?.sync();
     $("#account-settings-button").hidden = true;
     syncSessionMenu();
     $("#auth-panel").setAttribute("aria-busy", pendingSignout ? "true" : "false");
@@ -2098,6 +2100,7 @@ function render() {
   setText("#decision-count", state.eventLog.filter(e => e.type === T.DECISION_RECORDED).length || "");
   renderRecordPanel();
   humanExperience?.sync();
+  workFit?.sync();
   revealAgentSigninLink();
 }
 function renderRecordPanel() {
@@ -3760,6 +3763,7 @@ $("#join-agent-copy")?.addEventListener("click", async () => {
 installRoomLayout();
 const humanExperience = installHumanExperience({ getState: () => state, getSession: () => session, client, notice,
   openWork: id => revealWork(id), openMessage: id => revealMessage(id), selectResult: (id, messageId) => openWorkAction(state.workItems[id], "complete", messageId), refreshTranscript: () => { if (state) renderMessages(); } });
+const workFit = installWorkFit({getState:()=>state,getSession:()=>session,client,openWork:id=>revealWork(id)});
 const sessionMenu = $("#session-menu");
 const sessionMenuButton = $("#session-menu-button");
 const setSessionMenuOpen = open => {

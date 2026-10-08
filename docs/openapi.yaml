@@ -13740,6 +13740,37 @@ paths:
         '401': { description: unauthenticated }
         '200': { description: "{ contractVersion, roomId, viewer*, evaluatedThrough, selection, requests, scope }" }
         '422': { description: invalid_reply_selection }
+  /api/rooms/{roomId}/work-fit:
+    get:
+      summary: Read advisory worker preferences and sourced work-fit evidence
+      description: Active room membership required. Supports memberId, detail summary or evidence, cursor, workItemId, caller-assessed comma-separated categories and optional role (producer by default). Room-visible attributed sources only; inaccessible evidence and its counts are omitted. No task admission, reputation, permission or read-marker effects. Evidence pages contain at most 20 observations.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: Advisory profile, source-qualified assessments and optional task explanation }
+        '409': { description: Evidence cursor changed; restart the read }
+    head:
+      summary: Check authenticated work-fit availability
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: Profile available }
+    post:
+      x-room-permission: member
+      summary: Update optional work-fit preferences, observations or assessments
+      description: Stable requestId required. Actions are update_self, record_observation, amend_observation, respond_observation and update_assessment. The server derives actor and time. Assessment of another member requires room management access. Corrections require original authorship and current observation revision. Retries return identifier-only receipts. Same ID with changed input conflicts. Source kinds, limits and action fields are documented in AGENT-WORK-FIT.md.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [action, requestId] }
+      responses:
+        '200': { description: Stable identifier-only mutation receipt }
+        '403': { description: Actor or evidence access denied }
+        '409': { description: Revision or retry conflict; reread before editing }
+        '422': { description: Invalid action or selection }
   /api/rooms/{roomId}/assistant:
     get:
       summary: Read the shared room assistant and public requests

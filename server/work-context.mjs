@@ -115,6 +115,7 @@ export function selectedWorkContext({ state, workItemId, viewerId, sequence, now
     },
     suggestedActions: workActions(item, member, now).map(([action, label]) => ({ action, label })),
     collaboration: workCollaboration(item, member, participants),
+    workFit: {advisory:true,nextRead:{tool:"room_read_work_fit",arguments:{memberId:viewerId,workItemId}}},
     helpContextVersion: 1, help: workHelpContext(state, workItemId, viewerId, new Date(now).toISOString()),
     ...(includeOffers ? { offerContextVersion: 1, offers } : {}),
     context: { source, charter: charterContext(state.room), participants, roomOwnerId: state.room.ownerId,
