@@ -66,9 +66,9 @@ function roomStub(overrides = {}) {
 test("every worker job has a heartbeat entry and its cadence", () => {
   assert.deepEqual(CRON_JOBS.map(job => job.name), [
     "gmail-sync", "channel-drain", "webhook-dispatch", "land-queue", "claim-prs",
-    "retention", "integrity", "public-read-model", "room-backup"
+    "retention", "integrity", "public-read-model", "room-backup", "claim-reaper"
   ]);
-  assert.deepEqual(CRON_JOBS.map(job => job.periodSeconds), [60, 60, 60, 60, 60, 3600, 3600, 60, 86400]);
+  assert.deepEqual(CRON_JOBS.map(job => job.periodSeconds), [60, 60, 60, 60, 60, 3600, 3600, 60, 86400, 30]);
 });
 
 test("runCronJobs runs one job at a time and yields between them", async () => {
@@ -135,9 +135,9 @@ test("jobHealthView marks stale beyond 3x period and failing on errors", () => {
   const view = jobHealthView(fresh, now + 181_000);
   assert.equal(view.status, "stale");
   for (const job of view.jobs) {
-    if (job.periodSeconds === 60) {
+    if (job.periodSeconds <= 60) {
       assert.equal(job.stale, true, job.name);
-      assert.equal(job.staleAfterSeconds, 180);
+      assert.equal(job.staleAfterSeconds, job.periodSeconds * 3);
     } else {
       assert.equal(job.stale, false, job.name);
       assert.ok(job.staleAfterSeconds > 180, job.name);
