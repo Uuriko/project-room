@@ -5627,6 +5627,11 @@ paths:
         The claim holder, the room owner, or a member with manage_claims
         returns the item to unclaimed and clears the owner and the lease.
         `reason` is stamped on the history entry, attributed to the caller.
+        The release binds the claim round the client read: `expectedClaimedAt`
+        and `expectedHistoryLength` must match the current item, so a stale
+        replay or a delayed duplicate cannot destroy a newer claim generation
+        (E5/D4). A stale round is refused with 409 `work_claim_conflict`
+        ("The claim changed since it was read") — re-read the claim and retry.
         API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
@@ -5640,7 +5645,18 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
+              required: [expectedClaimedAt, expectedHistoryLength]
               properties:
+                expectedClaimedAt:
+                  type: string
+                  format: date-time
+                  maxLength: 100
+                  description: Exact claimedAt from the current item; binds the ownership round
+                expectedHistoryLength:
+                  type: integer
+                  minimum: 0
+                  description: Exact history.length + (historyOmitted ?? 0) from the same read; absent historyOmitted counts as zero. Detects concurrent changes and same-millisecond reclaim
                 reason: { type: string, description: Why the claim was released. Recorded on the history entry. }
                 note: { type: string, description: Older alias for reason. reason wins when both are sent. }
       responses:
@@ -5653,6 +5669,7 @@ paths:
         '401': { description: unauthenticated }
         '403': { description: work_not_owner }
         '404': { description: work_claim_not_found }
+        '409': { description: work_claim_conflict (stale expectedClaimedAt/expectedHistoryLength — re-read and retry) }
         '422': { description: invalid_claim_input }
   /api/rooms/{roomId}/work-claims/{claimId}/close:
     post:

@@ -191,8 +191,9 @@ test("work-claim pages are ordered, stable, and do not overlap", async () => {
 test("the room owner releasing another member's claim is recorded as the actor", async () => {
   const registry = createWorkClaimRegistry();
   await call(registry, "owner", "create", null, { id: "lane" });
-  await call(registry, "holder", "claim", "lane", {});
-  const released = await call(registry, "owner", "release", "lane", { reason: "stale lane" });
+  const claimed = await call(registry, "holder", "claim", "lane", {});
+  const round = { expectedClaimedAt: claimed.value.claimedAt, expectedHistoryLength: claimed.value.history.length };
+  const released = await call(registry, "owner", "release", "lane", { ...round, reason: "stale lane" });
   assert.equal(released.status, 200);
   assert.equal(released.value.state, "unclaimed");
   assert.equal(released.value.owner, null);
@@ -218,17 +219,56 @@ test("a non-owner cannot release another member's claim (QA200-MUT-03A)", async 
 test("releasing an already-unclaimed claim is refused (QA200-MUT-03B)", async () => {
   const registry = createWorkClaimRegistry();
   await call(registry, "owner", "create", null, { id: "lane" });
-  await call(registry, "holder", "claim", "lane", {});
-  const released = await call(registry, "owner", "release", "lane", { reason: "done for now" });
+  const claimed = await call(registry, "holder", "claim", "lane", {});
+  // E5/D4: release now binds the claim round — send the round that was read.
+  const round = { expectedClaimedAt: claimed.value.claimedAt, expectedHistoryLength: claimed.value.history.length };
+  const released = await call(registry, "owner", "release", "lane", { ...round, reason: "done for now" });
   assert.equal(released.status, 200);
   assert.equal(released.value.state, "unclaimed");
   const historyLength = registry.get("room1", "lane").history.length;
-  await assert.rejects(call(registry, "owner", "release", "lane", { reason: "again" }), error => {
+  // the round is stale after the release (history grew on release): the
+  // replay is refused with 409 work_claim_conflict, not 422.
+  await assert.rejects(call(registry, "owner", "release", "lane", { ...round, reason: "again" }), error => {
+    assert.equal(error.status, 409);
+    assert.equal(error.code, "work_claim_conflict");
+    return true;
+  });
+  assert.equal(registry.get("room1", "lane").history.length, historyLength);
+});
+
+test("release binds the claim round at the HTTP boundary", async () => {
+  const registry = createWorkClaimRegistry();
+  await call(registry, "owner", "create", null, { id: "lane" });
+  const claimed = await call(registry, "holder", "claim", "lane", {});
+  const round = { expectedClaimedAt: claimed.value.claimedAt, expectedHistoryLength: claimed.value.history.length };
+  // missing round fields are rejected
+  await assert.rejects(call(registry, "holder", "release", "lane", { reason: "no round" }), error => {
     assert.equal(error.status, 422);
     assert.equal(error.code, "invalid_claim_input");
     return true;
   });
-  assert.equal(registry.get("room1", "lane").history.length, historyLength);
+  // a stale round is refused instead of destroying the claim
+  const stale = { ...round, expectedClaimedAt: new Date(Date.parse(round.expectedClaimedAt) - 1000).toISOString() };
+  await assert.rejects(call(registry, "holder", "release", "lane", { ...stale, reason: "stale" }), error => {
+    assert.equal(error.status, 409);
+    assert.equal(error.code, "work_claim_conflict");
+    assert.match(error.message, /changed since it was read/);
+    assert.match(error.message, /re-read the claim/);
+    return true;
+  });
+  assert.equal(registry.get("room1", "lane").state, "claimed");
+  assert.equal(registry.get("room1", "lane").owner, "holder");
+  // a non-holder is refused with 403 work_not_owner even with a malformed
+  // body — ownership is checked before the body shape (abuse-guards C2)
+  await assert.rejects(call(registry, "guest", "release", "lane", { reason: "x" }), error => {
+    assert.equal(error.status, 403);
+    assert.equal(error.code, "work_not_owner");
+    return true;
+  });
+  // the current round releases cleanly
+  const released = await call(registry, "holder", "release", "lane", { ...round, reason: "done" });
+  assert.equal(released.status, 200);
+  assert.equal(released.value.state, "unclaimed");
 });
 
 test("an illegal transition names the states that are allowed", async () => {

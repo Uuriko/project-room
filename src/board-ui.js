@@ -570,7 +570,16 @@ export function installWorkBoard({ client, getState, getSession }) {
     }
     const path = client.path(`/work-claims/${encodeURIComponent(id)}`);
     if (action === "claim") void act(() => client.request(`${path}/claim`, { method: "POST", data: {} }), focus);
-    else if (action === "release") void act(() => client.request(`${path}/release`, { method: "POST", data: {} }), focus);
+    else if (action === "release") {
+      // E5/D4 (QA-200 2026-10-08): the release binds the claim round the
+      // board read (claimedAt + lifetime history length), so a stale card
+      // cannot destroy a newer claim generation. A 422 conflict surfaces
+      // the server's "The claim changed since it was read" message.
+      const item = items.find(entry => entry.id === id);
+      const data = item ? { expectedClaimedAt: item.claimedAt,
+        expectedHistoryLength: (item.history?.length ?? 0) + (Number(item.historyOmitted) || 0) } : {};
+      void act(() => client.request(`${path}/release`, { method: "POST", data }), focus);
+    }
     else if (action === "close" || action === "cancel") void act(() => client.request([path, action].join("/"), { method: "POST", data: {} }), focus);
     else if (action === "progress") void act(() => client.request(`${path}/update`, { method: "POST", data: { state: "in_progress" } }), focus);
     else if (action === "done") void act(() => client.request(`${path}/update`, { method: "POST", data: { state: "done" } }), focus);
