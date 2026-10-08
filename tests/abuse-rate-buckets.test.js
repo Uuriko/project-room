@@ -37,7 +37,12 @@ async function listen(t, store) {
     headers: { Origin: origin, "Content-Type": "application/json", "X-Test-Address": address },
     body: JSON.stringify({ accessKey: "not-a-real-key" })
   });
-  return { server, login, close };
+  const postJson = (address, path, body) => fetch(`${origin}${path}`, {
+    method: "POST",
+    headers: { Origin: origin, "Content-Type": "application/json", "X-Test-Address": address },
+    body: JSON.stringify(body)
+  });
+  return { server, login, postJson, close };
 }
 
 test("a login limit survives a restart over the same database", async t => {
@@ -76,4 +81,40 @@ test("an expired bucket is ignored and a bounded prune removes it", async t => {
   assert.ok(pruneAbuseRateBuckets(store.db, { now: Date.now(), limit: 100 }).pruned >= 1);
   assert.equal(store.db.prepare("SELECT count(*) AS n FROM abuse_rate_buckets WHERE until_ms <= ?").get(Date.now()).n, 0);
   assert.equal(store.db.prepare("SELECT count(*) AS n FROM abuse_rate_buckets WHERE id='login:10.4.4.5'").get().n, 1);
+});
+
+test("an identity-create limit survives a restart over the same database", { timeout: 60000 }, async t => {
+  // 30 identity-create requests per address per minute. Without the
+  // ABUSE_RATE_FAMILIES entry the in-memory bucket is wiped by a restart
+  // and the 31st request is answered by the inner anonymous limiter (or
+  // succeeds) instead of 429 rate_limited.
+  const store = openStore(t);
+  const first = await listen(t, store);
+  for (let i = 0; i < 30; i++) await first.postJson("10.8.8.8", "/api/identity-create", { displayName: `Bucket Probe ${i}` });
+  assert.equal((await first.postJson("10.8.8.8", "/api/identity-create", { displayName: "Bucket Probe 31" })).status, 429,
+    "31st request in the same process is rate limited");
+  await first.close();
+
+  const second = await listen(t, store);
+  const limited = await second.postJson("10.8.8.8", "/api/identity-create", { displayName: "Bucket Probe 32" });
+  assert.equal(limited.status, 429, "the bucket survives the restart");
+  assert.equal((await limited.json()).error.code, "rate_limited");
+  const fresh = await second.postJson("10.8.8.9", "/api/identity-create", { displayName: "Fresh Address" });
+  assert.notEqual(fresh.status, 429, "a different address keeps its own allowance");
+});
+
+test("an invite-redeem limit survives a restart over the same database", { timeout: 60000 }, async t => {
+  // 20 invite-redeem attempts per address per minute. The outer HTTP
+  // limiter runs before body validation, so a garbage body still counts.
+  const store = openStore(t);
+  const first = await listen(t, store);
+  for (let i = 0; i < 20; i++) await first.postJson("10.7.7.7", "/api/agent-invites/redeem", { code: "nope", displayName: "x" });
+  assert.equal((await first.postJson("10.7.7.7", "/api/agent-invites/redeem", { code: "nope", displayName: "x" })).status, 429,
+    "21st request in the same process is rate limited");
+  await first.close();
+
+  const second = await listen(t, store);
+  const limited = await second.postJson("10.7.7.7", "/api/agent-invites/redeem", { code: "nope", displayName: "x" });
+  assert.equal(limited.status, 429, "the bucket survives the restart");
+  assert.equal((await limited.json()).error.code, "rate_limited");
 });

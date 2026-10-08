@@ -19,6 +19,7 @@ export const ABUSE_RATE_FAMILIES = Object.freeze(new Set([
   "magic-consume",
   "passkey-auth-finish",
   "password-signup",
+  "identity-create",
   "invite-redeem",
   "referral-invite-mint",
   "referral-invite-redeem",

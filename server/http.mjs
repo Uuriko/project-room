@@ -2661,7 +2661,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           reject(422, "invalid_join", "proof is invalid");
         }
         if (typeof data.inviteCode === "string" && data.inviteCode.trim()) {
-          const redeemed = store.invites.redeem(data.inviteCode, { displayName: name });
+          // The invite branch shares the redeem path's anonymous mint
+          // limiter: a fresh mint here spends the same budgets as
+          // /api/agent-invites/redeem (429 identity_mint_limited / 428
+          // proof_required), so the one-URL door is not a cheaper faucet.
+          const redeemed = store.invites.redeem(data.inviteCode, { displayName: name,
+            address: String(remoteAddress ?? ""), proof: data.proof });
           // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md):
           // score the join, journal the would-be decision, admit anyway.
           jevShadowAdmission("join:invite", { roomId: redeemed.roomId, identityId: redeemed.identityId,
@@ -2939,7 +2944,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // diagnoseArguments pattern so the 422 names the offending field.
         const diagnosis = diagnoseArguments({
           required: ["code", "displayName"],
-          properties: { code: { type: "string" }, displayName: { type: "string" } },
+          properties: { code: { type: "string" }, displayName: { type: "string" }, proof: { type: "string" } },
           additionalProperties: false,
         }, data);
         if (diagnosis) {
@@ -2947,9 +2952,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (diagnosis.missing.length) parts.push(`missing required field${diagnosis.missing.length > 1 ? "s" : ""}: ${diagnosis.missing.join(", ")}`);
           if (diagnosis.unexpected.length) parts.push(`unexpected field${diagnosis.unexpected.length > 1 ? "s" : ""}: ${diagnosis.unexpected.join(", ")}`);
           for (const [field, reason] of Object.entries(diagnosis.invalid)) parts.push(`${field}: ${reason}`);
-          reject(422, "invalid_invite", `Invalid invite redeem (${parts.join("; ")}). Send exactly {code, displayName}.`);
+          reject(422, "invalid_invite", `Invalid invite redeem (${parts.join("; ")}). Send {code, displayName} with an optional proof.`);
         }
-        const redeemedInvite = store.invites.redeem(data.code, { displayName: data.displayName, identitySecret: bearer(req) });
+        // A fresh mint spends the shared anonymous identity-mint budgets
+        // (same limiter as /api/identity-create and referral-redeem): 429
+        // identity_mint_limited when the address/network/day budgets are
+        // spent, 428 proof_required when the proof-of-work gate bites.
+        // Attaching an existing identity (Authorization Bearer <redacted>) mints
+        // nothing and spends nothing.
+        const redeemedInvite = store.invites.redeem(data.code, { displayName: data.displayName, identitySecret: bearer(req),
+          address: String(remoteAddress ?? ""), proof: data.proof });
         // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md):
         // score the join, journal the would-be decision, admit anyway.
         jevShadowAdmission("agent-invite:redeem", { roomId: redeemedInvite.roomId, identityId: redeemedInvite.identityId,

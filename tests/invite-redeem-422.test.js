@@ -63,3 +63,22 @@ test("redeem with the documented body shape passes validation to the store", { t
   const body = await res.json();
   assert.equal(body.error?.code, "invite_unavailable");
 });
+
+test("redeem with an optional proof passes validation to the store", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  // {code, displayName, proof}: proof is an accepted field for the anonymous
+  // mint limiter, so an unknown code still answers 404 — never 422.
+  const res = await post(origin, "/api/agent-invites/redeem", { code: "nope", displayName: "probe", proof: "abc123" });
+  assert.equal(res.status, 404);
+  const body = await res.json();
+  assert.equal(body.error?.code, "invite_unavailable");
+});
+
+test("redeem 422 rejects a non-string proof", { timeout: 30000 }, async t => {
+  const { origin } = await serve(t);
+  const res = await post(origin, "/api/agent-invites/redeem", { code: "nope", displayName: "probe", proof: 42 });
+  assert.equal(res.status, 422);
+  const body = await res.json();
+  assert.equal(body.error?.code, "invalid_invite");
+  assert.match(body.error?.message ?? "", /proof/);
+});

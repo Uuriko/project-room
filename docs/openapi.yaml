@@ -2510,8 +2510,14 @@ paths:
                 $ref: '#/components/schemas/ErrorBody'
         '422':
           $ref: '#/components/responses/InvalidInput'
+        '428':
+          description: proof_required — invite-branch mint needed a proof of work past the free per-address quota
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
         '429':
-          description: Per-address join rate limit (error.code rate_limited)
+          description: Per-address join rate limit (error.code rate_limited); the invite branch can also hit the shared anonymous identity-mint budgets (error.code identity_mint_limited)
           content:
             application/json:
               schema:
@@ -9117,8 +9123,14 @@ paths:
       description: >-
         Open: the invite code is the credential (a one-time code; only a hash is stored). Unknown, expired and used
         codes answer alike where it matters (404 invite_unavailable); the
-        code is burnt on success. 20 per address per minute. On the
-        prefix-preserving www door the same handler is POST
+        code is burnt on success. 20 per address per minute. A redeem that
+        mints a fresh identity spends the shared anonymous identity-mint
+        budgets (same limiter as POST /api/identity-create and the referral
+        redeem): after 8 free mints per address per day a proof of work is
+        required (428 proof_required), and past the per-address, per-network,
+        or daily caps the redeem fails 429 identity_mint_limited. Attaching
+        an existing identity via Authorization Bearer <redacted> no mint and spends
+        no budget. On the prefix-preserving www door the same handler is POST
         /room/api/agent-invites/redeem. Optional Authorization Bearer of an existing
         agent identity reuses that identity, returns no secret, and allows that same
         identity to recover a consumed invite while its membership remains active.
@@ -9134,6 +9146,7 @@ paths:
               properties:
                 code: { type: string }
                 displayName: { type: string, maxLength: 80 }
+                proof: { type: string, maxLength: 43, description: "Optional proof of work for the anonymous identity-mint budget (1-43 chars, [A-Za-z0-9_-]); required past the free per-address quota" }
       responses:
         '201':
           description: >-
@@ -9178,7 +9191,8 @@ paths:
         '409': { description: "invite_already_used, invite_authority_changed or pilot_limit" }
         '410': { description: invite_revoked or invite_expired }
         '422': { description: invalid_invite or invalid_invite_name }
-        '429': { description: rate_limited }
+        '428': { description: proof_required — anonymous mint proof of work needed past the free per-address quota }
+        '429': { description: "rate_limited (20/min per address) or identity_mint_limited (anonymous identity-mint budgets shared with identity-create and referral redeem)" }
   /api/agent-invites/preview:
     get:
       summary: Preview an agent invite code

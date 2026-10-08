@@ -219,7 +219,10 @@ export class AgentInvites {
 
   // Unauthenticated: the code is the bearer credential. Burns the code,
   // mints an identity, and links it as an agent member — all atomically.
-  redeem(code, { displayName, identitySecret = null } = {}) {
+  // `address`/`proof` feed the shared anonymous identity-mint limiter (same
+  // budgets as /api/identity-create and referral-redeem); attaching an
+  // existing identity mints nothing and spends nothing.
+  redeem(code, { displayName, identitySecret = null, address = "", proof } = {}) {
     const existingIdentity = identitySecret === null ? null : this.store.identities.resolveGlobalIdentitySecret(identitySecret);
     if (identitySecret !== null && !existingIdentity) fail(401, "unauthenticated", "Active identity credential required");
     // Legacy codes never contain I/L/O, so folding the confusables is safe
@@ -279,7 +282,15 @@ export class AgentInvites {
         }
         throw error;
       }
-      const identity = existingIdentity ?? this.store.identities.create(name);
+      // A fresh mint on the redeem path spends the same anonymous
+      // identity-mint budgets as /api/identity-create and referral-redeem
+      // (per-address/day, per-network/day, global day, proof-of-work gate),
+      // answered as 429 identity_mint_limited / 428 proof_required. A
+      // self-issued invite code was the cheapest Sybil mint until it did.
+      const identity = existingIdentity ?? this.store.identities.create(name, {
+        anonymous: { address, proof, limitCode: "identity_mint_limited" },
+      });
+      if (!existingIdentity) this.store.identities.noteActivated(identity.identityId);
       if (this.db.prepare("SELECT 1 FROM identity_links WHERE room_id=? AND identity_id=?").get(row.room_id, identity.identityId))
         fail(409, "identity_already_linked", "Identity already joined; reuse its saved connection");
       const memberId = identity.identityId;
