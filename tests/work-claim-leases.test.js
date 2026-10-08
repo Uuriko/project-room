@@ -260,9 +260,11 @@ test("handler: create → claim → complete with delivery mode → release cycl
   assert.equal(claimed.value.owner, "quill");
   assert.equal(claimed.value.state, "claimed");
   assert.ok(claimed.value.leaseExpiresAt);
-  // foreign claim conflicts
-  const dup = await runRoute({ route: "claim", id: "h1", memberId: "grok", registry }).catch(error => error);
-  assert.equal(dup.code, "work_claim_conflict");
+  // foreign claim conflicts (enriched 409 returned via JSON, not thrown)
+  const dup = await runRoute({ route: "claim", id: "h1", memberId: "grok", registry });
+  const dup409 = dup.calls.find(c => c.status === 409);
+  assert.ok(dup409, "expected a 409 for the foreign claim");
+  assert.equal(dup409.value.error?.code ?? dup409.value.code, "work_claim_conflict");
   // foreign update refused
   const foreign = await runRoute({ route: "update", id: "h1", memberId: "grok", body: { state: "in_progress" }, registry }).catch(error => error);
   assert.equal(foreign.code, "work_not_owner");
