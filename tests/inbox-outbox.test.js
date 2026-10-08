@@ -234,3 +234,20 @@ test("optional loopback simulation endpoint uses the existing intent and never a
   response = await call({ ...dispatch, action: "reconcile" }); assert.equal(response.status, 200); assert.equal((await response.json()).send.status, "accepted");
   assert.equal(f.provider.submits, 1);
 });
+
+test("a second send.dispatch for the same outbox entry is refused, never re-applied", t => {
+  // Exactly-once pin on the outbox apply path (qa200-mut-16 Probe A): dispatch
+  // moves queued -> unknown and a repeat dispatch — even with a fresh request
+  // id and the current revision — must fail 409 inbox_send_started instead of
+  // re-running the transition. The driver-level status check is the caller's
+  // guard; this is the apply path's own dedupe.
+  const f = setup(t), request = f.reserve(); f.apply(request);
+  f.transport(f.command("send.dispatch", f.read()[0]));
+  assert.equal(f.read()[0].status, "unknown");
+  assert.equal(f.read()[0].revision, 1);
+  assert.throws(() => f.transport(f.command("send.dispatch", f.read()[0])), { code: "inbox_send_started" });
+  assert.equal(f.read()[0].status, "unknown");
+  assert.equal(f.read()[0].revision, 1);
+  assert.equal(f.provider.submits, 0);
+  assert.doesNotThrow(() => auditRecovery(f.store));
+});
