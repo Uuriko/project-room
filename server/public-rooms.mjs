@@ -11,6 +11,7 @@ import { PUBLIC_PAGE_LASTMOD } from "../deploy/public-search.mjs";
 import { listRoomTemplates, getRoomTemplate } from "./templates.mjs";
 import { LEGAL_FOOTER_LINKS, reportHref } from "./legal-pages.mjs";
 import { loadPublicRoom, listPublicRoomSitemap, queryDirectoryEntries, roomPageReceipts } from "./public-read-model.mjs";
+import { excludeHiddenReceipts } from "./receipts-live.mjs";
 
 export { RECEIPTS_PAGE_CSP as PUBLIC_PAGE_CSP };
 
@@ -75,7 +76,7 @@ export function publicRoomView(store, slug, { ref = "" } = {}) {
   const join = room.joinMode === "link" && room.joinToken
     ? { mode: "link", href: withRef(`/#join/${room.joinToken}`, clean) }
     : { mode: "request", href: requestHref(slug, clean) };
-  const receipts = roomPageReceipts(store, slug, room.receiptsEnabled).map(item => ({
+  const receipts = excludeHiddenReceipts(store, roomPageReceipts(store, slug, room.receiptsEnabled)).map(item => ({
     id: item.id,
     title: item.title,
     href: `/receipts/${item.id}`,
