@@ -34,8 +34,8 @@ function controllableClock(startMs = 1_000_000) {
   return { now: () => t, advance: ms => { t += ms; } };
 }
 
-function fakeMonitor(p99) {
-  return { percentile: () => p99, resetCalls: 0, disabled: false,
+function fakeMonitor(p99ns, count = 1) {
+  return { percentile: () => p99ns, count, resetCalls: 0, disabled: false,
     reset() { this.resetCalls++; }, disable() { this.disabled = true; } };
 }
 
@@ -189,7 +189,7 @@ test("commands silent-timeout gauge transitions ok -> warn -> critical", () => {
 
 test("event loop p99 gauge samples then resets the monitor each tick", () => {
   const clock = controllableClock();
-  const monitor = fakeMonitor(250);
+  const monitor = fakeMonitor(250_000_000); // percentile() returns nanoseconds
   const tw = createTripwires({ now: clock.now, limits: LIMITS, eventLoopMonitor: monitor });
   try {
     tw.collect(fakeStore([]));
@@ -200,6 +200,23 @@ test("event loop p99 gauge samples then resets the monitor each tick", () => {
   } finally { tw.stop(); }
   assert.equal(monitor.disabled, true, "stop() disables the monitor");
 });
+
+test("event loop p99 gauge ignores empty-histogram ticks (no false critical)", () => {
+  const clock = controllableClock();
+  // Empty histogram: real monitorEventLoopDelay reports a constant 511ns
+  // with count 0. Must not be stored (511 as ms would false-trip critical);
+  // the gauge keeps its neutral default instead.
+  const monitor = fakeMonitor(511, 0);
+  const tw = createTripwires({ now: clock.now, limits: LIMITS, eventLoopMonitor: monitor });
+  try {
+    tw.collect(fakeStore([]));
+    const g = tw.gauge("event_loop_delay_ms_p99");
+    assert.equal(g.value, 0, "neutral default kept, 511ns constant not stored");
+    assert.equal(g.status, "ok");
+    assert.equal(monitor.resetCalls, 0, "no samples: nothing to reset or record");
+  } finally { tw.stop(); }
+});
+
 
 test("event loop gauge: null monitor degrades to the neutral default, no throw", () => {
   const clock = controllableClock();

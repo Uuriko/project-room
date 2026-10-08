@@ -221,9 +221,18 @@ export function createTripwires({ now = () => Date.now(), limits = null, eventLo
       }
       if (monitor) {
         try {
-          const p99 = monitor.percentile(99);
-          monitor.reset();
-          setGauge("event_loop_delay_ms_p99", p99, atMs);
+          // percentile() returns NANOSECONDS; convert to ms. An empty
+          // histogram reports a constant 511ns — treat no-sample ticks as
+          // unknown rather than a (false) reading.
+          const samples = typeof monitor.count === "number" ? monitor.count : -1;
+          if (samples === 0) {
+            // No samples this window: leave the gauge untouched so it keeps
+            // reporting "unknown" instead of the histogram's constant 511ns.
+          } else {
+            const p99ns = monitor.percentile(99);
+            monitor.reset();
+            setGauge("event_loop_delay_ms_p99", p99ns / 1e6, atMs);
+          }
         } catch { /* keep last value; retry next tick */ }
       }
       pruneWindows(atMs);
