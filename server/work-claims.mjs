@@ -612,8 +612,14 @@ export function renewWork(work, agentId, { note, leaseHours, room, now } = {}) {
     note ?? (effective === null ? "lease removed" : `lease: ${effective}h`));
 }
 // Append one URL to the current claim round without replacing its lease or
-// evidence. A fresh duplicate is a byte-identical no-op; stale replay must
-// read back before deciding whether the link was already recorded.
+// evidence. A fresh duplicate in the same round is a byte-identical no-op;
+// stale replay must read back before deciding whether the link was already
+// recorded. A link whose recorded outcome provably predates the current
+// claim round (syncedAt older than claimedAt) belongs to a previous round:
+// re-linking it re-asserts the PR for the current round, so the link is
+// reset (outcome cleared) and the poller re-reads it — without the reset
+// the stale outcome would veto every future poll of the reopened PR.
+// A same-round duplicate stays a byte-identical no-op.
 export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClaimedAt, expectedHistoryLength, now } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(typeof pullRequest === "string" && pullRequest.length <= 300, "pullRequest must be a URL string of at most 300 characters");
@@ -629,13 +635,30 @@ export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClai
   if (item.claimedAt !== expectedClaimedAt || claimHistoryLength(item) !== expectedHistoryLength) {
     fail("work_claim_conflict", "The claim changed since it was read");
   }
-  if (item.pullRequests.some(pull => pull.url === parsed.url)) return work;
+  const settledLink = item.pullRequests.find(pull => pull.url === parsed.url) ?? null;
+  // A recorded outcome is stale only when it provably predates the current
+  // claim round (recorded before this round's claimedAt — the poller always
+  // stamps syncedAt when it records). A same-round duplicate stays a
+  // byte-identical no-op: the link's observations are current-round truth.
+  // When the round is not provable either way, the no-op wins.
+  const outcomeMs = typeof settledLink?.syncedAt === "string" ? Date.parse(settledLink.syncedAt) : NaN;
+  const roundStartMs = typeof item.claimedAt === "string" ? Date.parse(item.claimedAt) : NaN;
+  const staleOutcome = Boolean(settledLink?.outcome)
+    && Number.isFinite(outcomeMs) && Number.isFinite(roundStartMs) && outcomeMs < roundStartMs;
+  if (settledLink && !staleOutcome) return work;
   check(item.pullRequests.length < MAX_PULLS, `pullRequests must list at most ${MAX_PULLS} pull requests`);
   // Keep the existing observations verbatim; only the server's poller may
   // fill in the new link's outcome, polling metadata, or CI.
   const prior = Array.isArray(work.pullRequests) && work.pullRequests.length ? work.pullRequests
     : (work.pullRequest ? [work.pullRequest] : []);
-  const links = Object.freeze([...prior, pullRequestOf(parsed.url)]);
+  const canonicalUrl = entry => {
+    const raw = typeof entry === "string" ? entry : entry?.url;
+    return typeof raw === "string" ? parsePullRequestUrl(raw)?.url ?? null : null;
+  };
+  const fresh = pullRequestOf(parsed.url);
+  const links = settledLink
+    ? Object.freeze(prior.map(entry => (canonicalUrl(entry) === parsed.url ? fresh : entry)))
+    : Object.freeze([...prior, fresh]);
   return withHistory({ ...work, pullRequests: links,
     pullRequest: links.find(pull => !pull.outcome) ?? links[links.length - 1],
     ci: null, attestations: Object.freeze([]) }, atMs, agent, "pr_linked", `Linked pull request ${parsed.url}`);
@@ -864,7 +887,7 @@ export function releaseExpired(items, now) {
     // 2026-09-30 (phase-2 gap audit L-P2-8): mirrors updateWork, where a
     // released claim drops its reviews too (attestations belong to the
     // lapsed owner's round of work, never to whoever claims next).
-    const released = { ...item, state: "unclaimed", owner: null, leaseExpiresAt: null,
+    const released = { ...item, state: "unclaimed", owner: null, leaseStartAt: null, leaseExpiresAt: null,
       files: Object.freeze([]), fileBlocks: Object.freeze({}), attestations: Object.freeze([]), reviews: Object.freeze([]) };
     return withHistory(released, atMs, item.owner ?? "system", "lease_expired",
       `claim by ${item.owner ?? "nobody"} lapsed at ${item.leaseExpiresAt} — auto-released`);

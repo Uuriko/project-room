@@ -787,7 +787,10 @@ export class BountyEscrow {
         "bounty escrow requires a membership source (store.roomAuthority)");
       return lane;
     }
-    const member = members[rawId] ?? members[lane];
+    // #1019: own-key lookup only — members[rawId] on a plain projection
+    // object resolves inherited names (constructor, toString, ...) to
+    // truthy prototype values. _memberOf is own-key-only.
+    const member = this._memberOf(roomId, rawId) ?? this._memberOf(roomId, lane);
     if (!member || member.active === false)
       fail("not_authorized", `${role}: "${lane}" is not a current member of this room`);
     return lane;
@@ -817,7 +820,8 @@ export class BountyEscrow {
     const lane = this._requireLane(roomId, rawId, role);
     const members = this._members(roomId);
     if (members !== null) {
-      const member = members[rawId] ?? members[lane];
+      // #1019: own-key lookup only (see _requireLane).
+      const member = this._memberOf(roomId, rawId) ?? this._memberOf(roomId, lane);
       if (!member || member.kind !== "agent")
         fail("invalid_input", `${role} must be an agent member of this room`);
     }
@@ -842,7 +846,9 @@ export class BountyEscrow {
       check(recipient.length >= 1 && recipient.length <= 256, "invalid_input", "recipient must be 1..256 characters");
       return recipient;
     }
-    const member = members[rawTo] ?? members[recipient];
+    // #1019: own-key lookup only (see _requireLane) — an inherited name
+    // must not mint a journal account.
+    const member = this._memberOf(roomId, rawTo) ?? this._memberOf(roomId, recipient);
     if (!member || member.active === false)
       fail("not_authorized", `transfer recipient "${recipient}" is not a current member of this room`);
     return recipient;

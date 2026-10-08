@@ -68,6 +68,20 @@ test("on: large bodies leave the row, every reader still sees the full message",
   assert.equal(room.store.checkMessagesParity().checked, 1);
 });
 
+test("on: mid-size bodies (>= BODY_AT_REST_MIN_CHARS) leave the row too; short ones stay inline", t => {
+  const room = open(t, { bodiesAtRest: true });
+  const mid = "m".repeat(BODY_AT_REST_MIN_CHARS + 44);
+  const short = "s".repeat(BODY_AT_REST_MIN_CHARS - 1);
+  room.post("mid", mid);
+  room.post("short", short);
+  const stored = JSON.parse(room.raw());
+  assert.match(stored.messages.find(m => m.id === "mid").bodyRef, /^[0-9a-f]{64}$/);
+  assert.equal(stored.messages.find(m => m.id === "short").body, short);
+  assert.ok(BODY_AT_REST_MIN_CHARS <= 256, "most real room posts (256-511 chars) must leave the row");
+  room.reopen();
+  assert.equal(room.store.room("commons").state.messages.find(m => m.id === "mid").body, mid);
+});
+
 test("edits and deletes release the old text at rest", t => {
   const room = open(t, { bodiesAtRest: true });
   const first = big("first"), second = big("second");
@@ -210,4 +224,26 @@ test("incident 2026-10-07: the 4 MiB guard refuses growth and bodies-at-rest res
     "all retained messages remain readable after slimming and restart");
   assert.equal(recovered.find(m => m.id === "recovery").body, big("recovery", bodyBytes));
   auditRecovery(fat.store);
+});
+
+test("the projection-cap rejection names the recovery (ask the owner, or retry later)", t => {
+  // 2026-10-07 muse-room incident: every state-changing write 409'd with
+  // "Room projection limit reached; no data was changed" — a dead end that
+  // named no recovery. The message must tell the user what to do.
+  const clock = () => { let at = Date.parse("2026-10-06T00:00:00Z"); return () => (at += 120000); };
+  const room = open(t, { bodiesAtRest: false, now: clock() });
+  const bodyChars = 59000;
+  const postedBytes = Buffer.byteLength(big("p0", bodyChars));
+  const headroomPosts = 1;
+  const store = room.store;
+  const boundRoom = store.room.bind(store);
+  store.room = id => { const result = boundRoom(id); return { sequence: result.sequence,
+    state: { ...result.state, capacityFixture: "x".repeat(PILOT_LIMITS.projectionBytes - headroomPosts * postedBytes) } }; };
+  let failure = null;
+  try { room.post("p0", big("p0", bodyChars)); } catch (error) { failure = error; }
+  assert.ok(failure, "the projection cap refuses the write");
+  assert.equal(failure.code, "pilot_limit");
+  assert.match(failure.message, /no data was changed/, "keeps the no-write guarantee");
+  assert.match(failure.message, /room owner/i, "names asking the room owner as the recovery");
+  assert.match(failure.message, /try again later/i, "names retrying later as the recovery");
 });

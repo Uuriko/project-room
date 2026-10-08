@@ -1,11 +1,13 @@
 // PRIV-2: history visibility.
 //
 // A member under "since_join" reads messages and events from their own join
-// onward. The join point is the first member.added or
-// member.joined_via_invitation event for that member id: its sequence bounds
-// event-log reads, and its timestamp bounds reads over the message
-// projection, which carries createdAt but no sequence. Members who read
-// everything get a null floor, so their reads take no extra work.
+// onward. The join point is the LATEST member.added or
+// member.joined_via_invitation event for that member id (#1523): a guest who
+// is removed and later reactivated must not read messages posted during the
+// removal gap. The event's sequence bounds event-log reads, and its timestamp
+// bounds reads over the message projection, which carries createdAt but no
+// sequence. Members who read everything get a null floor, so their reads take
+// no extra work.
 
 import { randomUUID } from "node:crypto";
 import { EVENT_TYPES as T, memberHistoryVisibility, isRoomArchived } from "../src/events.js";
@@ -23,7 +25,7 @@ export function historyFloor(db, state, roomId, memberId, headSequence = null) {
     `SELECT sequence, json_extract(body,'$.at') AS at FROM events
      WHERE room_id=? AND json_extract(body,'$.type') IN (${JOIN_TYPES.map(() => "?").join(",")})
        AND json_extract(body,'$.data.memberId')=?
-     ORDER BY sequence LIMIT 1`
+     ORDER BY sequence DESC LIMIT 1`
   ).get(roomId, ...JOIN_TYPES, memberId);
   if (!row || !Number.isSafeInteger(row.sequence) || typeof row.at !== "string") {
     const head = Number.isSafeInteger(headSequence) ? headSequence : 0;

@@ -150,7 +150,7 @@ import { LandQueue, landQueueSchema, migrateLandQueueColumns } from "./land-queu
 import { MembersDirectory, membersDirectorySchema } from "./members-directory.mjs"; // RC-2026-09-24-202: members directory + skill cards.
 import {
   MENTION_TIMEOUT_MS_DEFAULT, MENTION_TIMEOUT_MS_MIN, MENTION_TIMEOUT_MS_MAX,
-  assertTransitionMention, resolveMentionTargetsInText, mentionStateSchema,
+  assertTransitionMention, identityNamesForRoom, resolveMentionTargetsInText, mentionStateSchema,
   mentionTargetWarnings,
 } from "./mention-lifecycle.mjs"; // #658: mention lifecycle state machine + schema.
 import { activitySchema, recordActivityEvents } from "./activity.mjs"; // Attention: activity feed, read horizons, saved messages, thread mutes.
@@ -981,14 +981,16 @@ const workSessionsNext = (roomId, sessions) => {
 };
 
 // Agent members a message.posted would wake: @mentions resolved the same way
-// as wake-on-mention (member id and display name, not identity aliases) plus
-// a DM addressed to an agent. Order is first appearance. The sender is never a target.
+// as mention tracking (member id, display name, and linked identity names)
+// plus a DM addressed to an agent. Order is first appearance. The sender is
+// never a target.
 // plan-squads: @squad/<name> also wakes agent members of the squad when db is passed.
 function agentWakeTargets(state, senderMemberId, data, db = null, roomId = "") {
   const members = state?.members ?? {};
   const targets = new Map();
   const body = typeof data?.body === "string" ? data.body : "";
-  for (const memberId of resolveMentionTargetsInText(members, {}, body, senderMemberId)) {
+  const identityNames = db ? identityNamesForRoom(db, roomId) : {};
+  for (const memberId of resolveMentionTargetsInText(members, identityNames, body, senderMemberId)) {
     if (members[memberId]?.kind !== "agent") continue;
     if (data?.toMemberId && data.toMemberId !== memberId) continue;
     if (!targets.has(memberId)) targets.set(memberId, "mention");
@@ -3421,7 +3423,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       try { state = compact(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
       catch (error) { fail(409, "invitation_rejected", error.message); }
       const projection = this.storedProjection(row.room_id, state);
-      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
+      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
       const sequence = room.sequence + 1;
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, incoming.id, JSON.stringify(incoming));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
@@ -3639,7 +3641,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (!member || member.active === false) fail(403, "access_denied", "Room member required");
       if (member.kind !== "agent") fail(403, "access_denied", "Join sessions are for agent joins");
       const expiresAt = this.now() + 8 * 3600000;
-      const token = this.insertCredential(roomId, memberId, "session", null, expiresAt);
+      // #1522: bind the session to the identity's current secret hash when
+      // the member is identity-linked, so rotating or revoking the secret
+      // invalidates the session — the same binding createAgentSession uses
+      // (RC-2026-09-23-106). Members with no identity link keep the legacy
+      // null binding.
+      const linkRow = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?").get(roomId, memberId);
+      const secretRow = linkRow
+        ? this.db.prepare("SELECT secret_hash AS secretHash FROM agent_identities WHERE identity_id=?").get(linkRow.identityId)
+        : null;
+      const token = this.insertCredential(roomId, memberId, "session", null, expiresAt, secretRow?.secretHash ?? null);
       return { token, expiresAt };
     });
   }
@@ -4129,14 +4140,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // order like the other kinds. Backlog 11: messages by an author the caller
   // muted (E4) are excluded for every kind, server-side (mutedEvent), so
   // agents and other API readers match the UI.
-  search(token, roomId, query, kind = "all", expectedSessionBinding = null) {
+  search(token, roomId, query, kind = "all", expectedSessionBinding = null, { limit = 50 } = {}) {
     if (typeof query !== "string" || !query.trim() || query.length > 80) fail(422, "invalid_search", "Search is 1 to 80 characters");
     if (!["all", "messages", "work", "pinned"].includes(kind)) fail(422, "invalid_search", "kind is all, messages, work, or pinned");
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) fail(422, "invalid_search", "limit is 1 to 200");
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const room = this.room(roomId);
       const needle = query.trim().toLowerCase();
-      const result = { roomId, query: query.trim(), messages: [], workItems: [] };
+      const result = { roomId, query: query.trim(), messages: [], workItems: [], total: 0 };
       const floor = this.historyFloor(roomId, auth.member.id); // PRIV-2
       if (kind === "all" || kind === "messages" || kind === "pinned") {
         for (const m of room.state.messages ?? []) {
@@ -4144,8 +4156,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           if (!messageInHistory(m, floor)) continue; // PRIV-2: before the reader joined
           if (kind === "pinned" && !isPinned(room.state, m.id)) continue;
           if (mutedEvent(room.state, auth.member?.id, { actorId: m.authorId })) continue; // muted author (E4), every kind
+          // RC-2026-09-19-070: targeted DMs are private to sender and
+          // recipient. Filtered here, before matching, so neither the hits
+          // nor the match count (result.total, #1812) can reveal their
+          // existence, count, or bodies to a third party.
+          if (m.toMemberId && m.authorId !== auth.member?.id && m.toMemberId !== auth.member?.id) continue;
           if (m.body.toLowerCase().includes(needle)) {
-            result.messages.push({ id: m.id, authorId: m.authorId, body: m.body, createdAt: m.createdAt, workItemId: m.workItemId });
+            result.total += 1;
+            if (result.messages.length < limit) {
+              result.messages.push({ id: m.id, authorId: m.authorId, body: m.body, createdAt: m.createdAt, workItemId: m.workItemId });
+            }
           }
         }
       }
@@ -4153,7 +4173,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         for (const w of Object.values(room.state.workItems ?? {})) {
           const haystack = `${w.title ?? ""} ${w.description ?? ""} ${w.definitionOfDone ?? ""}`.toLowerCase();
           if (haystack.includes(needle)) {
-            result.workItems.push({ id: w.id, title: w.title, state: w.state, accountableMemberId: w.accountableMemberId });
+            result.total += 1;
+            if (result.workItems.length < limit) {
+              result.workItems.push({ id: w.id, title: w.title, state: w.state, accountableMemberId: w.accountableMemberId });
+            }
           }
         }
       }
@@ -4721,7 +4744,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (conflict) fail(409, "claim_conflict", `Scope is reserved by work ${conflict.id}. Coordinate or release that reservation first; no new claim was saved.`);
       }
       const projection = this.storedProjection(roomId, state);
-      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes && !cleanup) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
+      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes && !cleanup) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
       const sequence = room.sequence + 1;
       // R1 delivery-path tracing (RC-2026-09-26-966): delivery.log spans the
       // event-log persist. getTracer() is read per command (never at module
@@ -4913,7 +4936,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // skipped; the post still stands. The room event cap is unchanged.
   resumeRoundLimitPauses(roomId, state, senderMemberId, messageEvent, sequence) {
     const body = typeof messageEvent?.data?.body === "string" ? messageEvent.data.body : "";
-    const mentioned = new Set(resolveMentionTargetsInText(state.members ?? {}, {}, body, senderMemberId));
+    const mentioned = new Set(resolveMentionTargetsInText(state.members ?? {}, identityNamesForRoom(this.db, roomId), body, senderMemberId));
     const dmId = typeof messageEvent?.data?.toMemberId === "string" ? messageEvent.data.toMemberId : "";
     let next = state;
     let seq = sequence;
@@ -5007,14 +5030,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const body = typeof data.body === "string" ? data.body : "";
     if (!body.includes("@")) return [];
     const members = state?.members ?? {};
-    let identityNames = {};
-    try {
-      const links = this.db.prepare(
-        `SELECT l.member_id AS memberId, i.display_name AS displayName FROM identity_links l
-         JOIN agent_identities i ON i.identity_id=l.identity_id
-         WHERE l.room_id=? AND i.revoked_at IS NULL`).all(roomId);
-      for (const row of links) identityNames[row.memberId] = row.displayName;
-    } catch { identityNames = {}; }
+    const identityNames = identityNamesForRoom(this.db, roomId);
     const timeoutMs = this.mentionTimeoutMsFor(roomId);
     const insert = this.db.prepare(
       `INSERT OR IGNORE INTO mention_states

@@ -268,3 +268,17 @@ test("HTTP public doors redirect HTML, preserve query, and retain plain packets 
   const mutation = await fetch(origin+"/room",{method:"POST"});
   assert.equal(mutation.status,405);
 });
+
+test("stale www card paths redirect to the signed canonical agent card (#956)", async () => {
+  for (const path of ["/room/.well-known/agent-card.json", "/project-room/.well-known/agent-card.json"]) {
+    const response = roomEntry(new Request(`https://www.trydemigod.com${path}`));
+    assert.equal(response.status, 308, `${path} redirects permanently`);
+    assert.equal(response.headers.get("Location"), `${ROOM_ORIGIN}/.well-known/agent-card.json`);
+    assert.equal(await response.text(), "", "redirect carries no stale card bytes");
+    const head = roomEntry(new Request(`https://www.trydemigod.com${path}`, { method: "HEAD" }));
+    assert.equal(head.status, 308);
+    assert.equal(head.headers.get("Location"), `${ROOM_ORIGIN}/.well-known/agent-card.json`);
+  }
+  // Other hosts keep their own routing: no redirect leaks off the www door.
+  assert.equal(roomEntry(new Request("https://www.getdasha.com/room/.well-known/agent-card.json")), null);
+});

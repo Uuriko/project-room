@@ -9,10 +9,11 @@
 // Push, schedule, and workflow_dispatch are not pull requests: both suites
 // stay enabled so the main tip still runs the full test matrix.
 //
-// Outputs (GITHUB_OUTPUT): browser=true|false and eval=true|false.
+// Outputs (GITHUB_OUTPUT): browser=true|false, eval=true|false, and
+// coverage=true|false.
 import { execFileSync } from "node:child_process";
 import { appendFileSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, resolve, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -83,7 +84,41 @@ function browserSuitePaths() {
 export function classifyChanges(files, suite = browserSuitePaths()) {
   const browser = files.some(file => BROWSER_EXACT.has(file) || file.startsWith("src/") || file.startsWith("og/") || file.startsWith("client/") || suite.includes(file));
   const evalSuite = files.some(file => matchesAny(file, EVAL_PATTERNS));
-  return { browser, eval: evalSuite };
+  return { browser, eval: evalSuite, coverage: coverageRelevant(files) };
+}
+
+// The per-module coverage ratchet (test.yml `coverage` job) measures line
+// coverage of server/, src/, machine/ from the root `node --test` suite.
+// A pull request whose merge-base diff touches none of these can not move
+// the verdict, so the suite re-run is skipped (the `test` merge gate treats
+// the intentional skip as success, mirroring the browser skip). Anything
+// that can move the verdict forces a run: measured source, the tests that
+// execute it, new test-discoverable scripts (node --test picks up
+// **/{test,test/**/*,test-*,*[._-]test}), and the gate's own config, script,
+// classifier, and workflow.
+const COVERAGE_EXACT = new Set([
+  "coverage-thresholds.json",
+  "scripts/coverage-thresholds.mjs",
+  "scripts/ci-changes.mjs",
+  ".github/workflows/test.yml",
+]);
+
+function isTestDiscoverableScript(file) {
+  if (!file.startsWith("scripts/")) return false;
+  const base = basename(file);
+  return base.startsWith("test-") || /[._-]test\.(js|mjs|cjs)$/.test(base);
+}
+
+function coverageRelevant(files) {
+  return files.some(
+    file =>
+      file.startsWith("server/") ||
+      file.startsWith("src/") ||
+      file.startsWith("machine/") ||
+      file.startsWith("tests/") ||
+      COVERAGE_EXACT.has(file) ||
+      isTestDiscoverableScript(file)
+  );
 }
 
 function diffNames(base, head) {
@@ -123,6 +158,7 @@ function main() {
   if (process.env.EVENT_NAME !== "pull_request") {
     setOutput("browser", "true");
     setOutput("eval", "true");
+    setOutput("coverage", "true");
     console.log(`ci-changes: event ${process.env.EVENT_NAME || "(unset)"} runs the full suites`);
     return;
   }
@@ -133,6 +169,7 @@ function main() {
   if (files.length > 40) console.log(`  … ${files.length - 40} more`);
   setOutput("browser", result.browser ? "true" : "false");
   setOutput("eval", result.eval ? "true" : "false");
+  setOutput("coverage", result.coverage ? "true" : "false");
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();

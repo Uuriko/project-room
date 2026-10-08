@@ -290,14 +290,22 @@ function mentionHorizon(store, roomId, memberId, after, through) {
   }
 }
 
+// One read of the claim board, shared by a room's work sections. Each used
+// to list (and JSON-decode) the whole board separately — 80-175ms per read
+// at 400 claims on muse-room scale. Returns null when the list fails, which
+// each section treats as "no data".
+function claimBoardOf(store, roomId) {
+  try { return store.workClaims?.list(roomId) ?? []; } catch { return null; }
+}
+
 // The cursor acknowledges discovery, not completion. Only advance through
 // sequence groups returned in full; multiple attention kinds may share an event.
-export function openWorkOf(store, roomId, memberId, authority, nowMs = Date.now()) {
+export function openWorkOf(store, roomId, memberId, authority, claims = null, nowMs = Date.now()) {
   const member = authority?.members?.[memberId];
   const ownerId = typeof authority?.ownerId === "string" && authority.ownerId ? authority.ownerId : null;
   if (!member || !mayWriteWorkClaims({ member: { ...member, id: memberId }, ownerId })) return null;
-  let list;
-  try { list = store.workClaims?.list(roomId) ?? []; } catch { return null; }
+  const list = claims ?? claimBoardOf(store, roomId);
+  if (!list) return null;
   const done = new Set(list.filter(item => item?.state === "done").map(item => item.id));
   const updatedMs = item => {
     const ms = Date.parse(claimUpdatedAt(item));
@@ -341,9 +349,9 @@ export function openWorkOf(store, roomId, memberId, authority, nowMs = Date.now(
 // linked PR). Standing state like openWork: it never moves the cursor, it
 // retires when the member records a review on the current basis, and it
 // returns when the head moves.
-export function reviewAsksOf(store, roomId, memberId, authority) {
-  let list;
-  try { list = store.workClaims?.list(roomId) ?? []; } catch { return null; }
+export function reviewAsksOf(store, roomId, memberId, authority, claims = null) {
+  const list = claims ?? claimBoardOf(store, roomId);
+  if (!list) return null;
   const asks = list.filter(item => item && item.state !== "done" && !item.supersededBy && item.owner && item.owner !== memberId
       && resolveNamedReviewers(item, authority?.members).includes(memberId)
       && (item.state === "in_progress" || item.pullRequest || (item.pullRequests ?? []).length)
@@ -370,9 +378,9 @@ export function reviewAsksOf(store, roomId, memberId, authority) {
 // (agent-fleet claimIdle). Reviews owed are reviewAsks (rev-<memberId>,
 // hw-h2-needs-me-review-asks), not repeated here. Standing state like
 // openWork: never moves the cursor.
-export function myWorkOf(store, roomId, memberId, nowMs = Date.now()) {
-  let list;
-  try { list = store.workClaims?.list(roomId) ?? []; } catch { return null; }
+export function myWorkOf(store, roomId, memberId, claims = null, nowMs = Date.now()) {
+  const list = claims ?? claimBoardOf(store, roomId);
+  if (!list) return null;
   const title = item => String(item.title ?? item.id).slice(0, OPEN_WORK_TITLE);
   const rows = [];
   for (const item of list) {
@@ -433,11 +441,14 @@ export function collectNeedsMe(store, secret, { since } = {}) {
     const member = authority.members?.[link.memberId];
     if (!member || member.active === false) { roomAfter = link.roomId; continue; }
     // One summary per room this page walks (at most MAX_ROOMS), none dropped.
-    const open = openWorkOf(store, link.roomId, link.memberId, authority);
+    // One claim-board read for the three work sections below; they used to
+    // each re-list and re-decode the whole board (see claimBoardOf).
+    const claims = claimBoardOf(store, link.roomId);
+    const open = openWorkOf(store, link.roomId, link.memberId, authority, claims);
     if (open) openWork.push(open);
-    const asks = reviewAsksOf(store, link.roomId, link.memberId, authority);
+    const asks = reviewAsksOf(store, link.roomId, link.memberId, authority, claims);
     if (asks) reviewAsks.push(asks);
-    const mine = myWorkOf(store, link.roomId, link.memberId);
+    const mine = myWorkOf(store, link.roomId, link.memberId, claims);
     if (mine) myWork.push(mine);
     const after = roomWatermark(parsed, link.roomId);
     const landAfter = landWatermark(parsed, link.roomId);

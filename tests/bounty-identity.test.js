@@ -60,12 +60,12 @@ function makeEscrow() {
   return { escrow, members };
 }
 
-const expectCode = (fn, code) => {
+const expectCode = (fn, code, label = "") => {
   try { fn(); } catch (error) {
-    assert.equal(error.code, code, `expected ${code}, got ${error.code}: ${error.message}`);
+    assert.equal(error.code, code, `${label}expected ${code}, got ${error.code}: ${error.message}`);
     return error;
   }
-  assert.fail(`expected EscrowError ${code}, no error thrown`);
+  assert.fail(`${label}expected EscrowError ${code}, no error thrown`);
 };
 
 const post = (escrow, overrides = {}) => escrow.postBounty(ROOM,
@@ -314,4 +314,27 @@ test("dispute settlement moves value only through escrow finalization, bound to 
   const journalAfter = escrow.history(ROOM, GROK).length + escrow.history(ROOM, CODEX).length;
   assert.equal(journalAfter, journalBefore);
   assert.equal(escrow.verifyConservation(ROOM).ok, true);
+});
+
+test("inherited object names are not members: recipient, sender, verifier (#1019)", () => {
+  const { escrow } = makeEscrow();
+  // Object.prototype members resolve truthy on a plain projection object;
+  // the membership gates must use own-key checks only.
+  const inherited = ["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__"];
+  for (const name of inherited) {
+    expectCode(() => escrow.transfer(ROOM, { from: OWNER, to: name, amount: 1 }),
+      "not_authorized", `recipient "${name}"`);
+    expectCode(() => escrow.transfer(ROOM, { from: name, to: GROK, amount: 1 }),
+      "not_authorized", `sender "${name}"`);
+    expectCode(() => post(escrow, { verifierId: name }),
+      "not_authorized", `verifier "${name}"`);
+  }
+  // No journal account was minted for any inherited name.
+  for (const name of inherited) {
+    assert.equal(escrow.balances(ROOM, name).total, 0, `no ledger account for "${name}"`);
+  }
+  // Ordinary members still pass all three gates.
+  const ok = escrow.transfer(ROOM, { from: OWNER, to: GROK, amount: 1 });
+  assert.equal(ok.to, GROK);
+  post(escrow, { verifierId: INSTINCT });
 });
