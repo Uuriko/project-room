@@ -50,9 +50,9 @@ function claimBoard(store, roomId, actorId, id, data, nowMs) {
     const config = typeof registry.configFor === "function"
       ? registry.configFor(roomId)
       : roomWorkClaimConfig(roomLike(registry, roomId));
-    const open = registry.list(roomId).filter(entry => entry.state !== "done").length;
+    const open = registry.list(roomId).filter(entry => entry.state !== "done" && entry.state !== "closed").length;
     if (open >= config.maxOpenClaims) {
-      const error = new Error(`This room already has ${config.maxOpenClaims} open claims. Close stale claims before opening another.`);
+      const error = new Error(`This room already has ${config.maxOpenClaims} open claims. Close stale claims (close or cancel) before opening another.`);
       error.status = 409;
       error.code = "work_board_full";
       throw error;
@@ -103,7 +103,7 @@ export function mirrorProjectionClaim(store, roomId, actorId, incoming) {
   }
   if (incoming.type === "claim.released") {
     let item = registry.get(roomId, id);
-    if (!item || item.state === "unclaimed" || item.state === "done") return item;
+    if (!item || item.state === "unclaimed" || item.state === "done" || item.state === "closed") return item;
     if (item.state === "in_progress" || item.state === "blocked") {
       item = updateWork(item, actorId, { state: "claimed", note: "paused for release", now: nowMs, authority: item.owner !== actorId });
       registry.set(roomId, item);

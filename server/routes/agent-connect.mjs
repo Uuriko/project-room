@@ -44,7 +44,7 @@ function claimList(store, roomId) {
 
 export function starterFor(store, roomId, memberId) {
   const match = claimList(store, roomId).find(item => {
-    if (!item || item.state === "done") return false;
+    if (!item || item.state === "done" || item.state === "closed") return false;
     const tags = Array.isArray(item.tags) ? item.tags : [];
     return tags.includes("starter") || (memberId && item.owner === memberId);
   });

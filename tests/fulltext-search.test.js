@@ -240,3 +240,17 @@ test("search never surfaces targeted DMs the viewer is not a party to", async t 
   assert.equal(res.status, 200);
   assert.deepEqual((await res.json()).messages.map(m => m.id), [pub]);
 });
+
+// Round 29: #1812 kept the FIRST `limit` matches. With no offset and a
+// 200 ceiling, every match after the 200 oldest was unreachable, and in a
+// busy room those are the ones an agent is looking for.
+test("a capped search page keeps the newest matches, oldest first", async t => {
+ const { store, ownerKey, get, post } = await serve(t);
+ let at = Date.now();
+ store.now = () => at;
+ const ids = [];
+ for (let i = 0; i < 12; i++) { at += 2000; ids.push(post(`gamma message ${i}`)); }
+ const page = await (await get("/api/rooms/commons/search?q=gamma&kind=messages&limit=5", ownerKey)).json();
+ assert.equal(page.total, 12);
+ assert.deepEqual(page.messages.map(m => m.id), ids.slice(-5));
+});

@@ -592,3 +592,89 @@ test("property P6: task-id reuse is always refused; invalid claim blocks never c
     },
   ), { numRuns: 25, seed });
 });
+
+// ---------------------------------------------------------------------------
+// P7 server claim lifecycle (server/work-claims.mjs CLAIM_LIFECYCLE).
+// The Board's stored claims use one explicit table, state x verb -> next state;
+// every other pair is refused; done and closed are terminal. fast-check drives
+// random verb traces through the REAL pure functions (claimWork, updateWork,
+// closeWork) and checks every step against the table, so table and
+// implementation cannot drift. Also pins who may close and cancel.
+import {
+  CLAIM_LIFECYCLE, CLAIM_VERBS, STATES, TERMINAL_CLAIM_STATES, TRANSITIONS, nextClaimState,
+  createWork, claimWork, updateWork, closeWork, creatorOf, isTerminalClaimState, ClaimError
+} from "../server/work-claims.mjs";
+
+const NOW = Date.parse("2026-10-07T00:00:00Z");
+const OPENER = "ai_opener", HOLDER = "ai_holder", OTHER = "ai_other";
+const VERB_STATE = { start: "in_progress", block: "blocked", release: "unclaimed", pause: "claimed", finish: "done" };
+
+function apply(item, verb, actor, { authority = false, t }) {
+  if (verb === "claim") return claimWork(item, actor, { now: t });
+  if (verb === "close" || verb === "cancel") return closeWork(item, actor, { verb, authority, now: t });
+  return updateWork(item, actor, { state: VERB_STATE[verb], now: t, authority });
+}
+
+test("the table covers every stored state and only names known states", () => {
+  assert.deepEqual(Object.keys(CLAIM_LIFECYCLE).sort(), [...STATES].sort());
+  for (const [state, row] of Object.entries(CLAIM_LIFECYCLE)) {
+    for (const [verb, next] of Object.entries(row)) {
+      assert.ok(CLAIM_VERBS.includes(verb), `${state}.${verb}`);
+      assert.ok(STATES.includes(next), `${state}.${verb} -> ${next}`);
+    }
+  }
+  for (const state of TERMINAL_CLAIM_STATES) assert.deepEqual(Object.keys(CLAIM_LIFECYCLE[state]), []);
+  for (const state of STATES.filter(s => !isTerminalClaimState(s))) {
+    assert.equal(nextClaimState(state, "close"), "closed");
+    assert.equal(nextClaimState(state, "cancel"), "closed");
+  }
+  // /update moves are the table minus close/cancel, so nothing reaches closed via /update.
+  for (const nexts of Object.values(TRANSITIONS)) assert.ok(!nexts.includes("closed"));
+});
+
+test("random verb traces follow the table exactly (holder acting; a manager retires)", () => {
+  fc.assert(fc.property(fc.array(fc.constantFrom(...CLAIM_VERBS), { maxLength: 25 }), verbs => {
+    let item = createWork({ id: "w1", title: "t" }, { now: NOW, agentId: OPENER });
+    verbs.forEach((verb, i) => {
+      const t = NOW + (i + 1) * 1000;
+      const expected = nextClaimState(item.state, verb);
+      let next;
+      try { next = apply(item, verb, HOLDER, { t, authority: verb === "close" || verb === "cancel" }); } catch (error) {
+        assert.ok(error instanceof ClaimError, String(error));
+        assert.equal(expected, null, `${item.state} --${verb}--> refused but table says ${expected}`);
+        return;
+      }
+      assert.notEqual(expected, null, `${item.state} --${verb}--> accepted but table refuses it`);
+      assert.equal(next.state, expected);
+      if (isTerminalClaimState(next.state) || next.state === "unclaimed") {
+        if (next.state !== "done") { assert.equal(next.owner, null); assert.equal(next.leaseExpiresAt, null); }
+      }
+      item = next;
+    });
+    if (isTerminalClaimState(item.state)) {
+      for (const verb of CLAIM_VERBS) assert.throws(() => apply(item, verb, HOLDER, { t: NOW + 1e9, authority: true }), ClaimError);
+    }
+  }), { numRuns: 300 });
+});
+
+test("close and cancel permissions", () => {
+  const open = createWork({ id: "w2", title: "t" }, { now: NOW, agentId: OPENER });
+  assert.equal(creatorOf(open), OPENER);
+  // cancel: the opener while unclaimed; a stranger cannot.
+  const cancelled = closeWork(open, OPENER, { verb: "cancel", reason: "duplicate", now: NOW + 1 });
+  assert.equal(cancelled.state, "closed");
+  assert.deepEqual([cancelled.history.at(-1).action, cancelled.history.at(-1).agentId, cancelled.history.at(-1).note], ["cancelled", OPENER, "duplicate"]);
+  assert.throws(() => closeWork(open, OTHER, { verb: "cancel", now: NOW + 1 }), error => error.code === "work_not_owner");
+  // close: the opener alone cannot close (that is a manager decision); authority can.
+  assert.throws(() => closeWork(open, OPENER, { verb: "close", now: NOW + 1 }), error => error.code === "work_not_owner");
+  assert.equal(closeWork(open, OTHER, { verb: "close", authority: true, now: NOW + 1 }).state, "closed");
+  // once claimed, the opener loses cancel; the holder can close or cancel.
+  const held = claimWork(open, HOLDER, { now: NOW + 2 });
+  assert.throws(() => closeWork(held, OPENER, { verb: "cancel", now: NOW + 3 }), error => error.code === "work_not_owner");
+  const closed = closeWork(held, HOLDER, { verb: "close", now: NOW + 3 });
+  assert.deepEqual([closed.state, closed.owner, closed.leaseExpiresAt, closed.files.length], ["closed", null, null, 0]);
+  // terminal: a second close is a conflict, and /update refuses.
+  assert.throws(() => closeWork(closed, HOLDER, { verb: "close", authority: true, now: NOW + 4 }), error => error.code === "work_claim_terminal");
+  assert.throws(() => updateWork(closed, HOLDER, { state: "claimed", authority: true, now: NOW + 4 }), ClaimError);
+  assert.throws(() => claimWork(closed, HOLDER, { now: NOW + 4 }), ClaimError);
+});

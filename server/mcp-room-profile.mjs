@@ -263,7 +263,7 @@ function validHostId(value) {
 }
 
 function validCadence(value) {
-  return typeof value === "number" && Number.isFinite(value) && value > 0;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 && value <= 604800;
 }
 
 function validUrlString(value) {

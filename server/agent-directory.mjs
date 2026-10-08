@@ -70,7 +70,7 @@ const freezeDeep = node => {
 // seen, verification tier) — it is never self-asserted by the card publisher.
 const validateTrust = record => {
   if (record === null || record === undefined) return null;
-  check(record !== null && typeof record === "object", "trust() must return an object or null");
+  check(record !== null && typeof record === "object" && !Array.isArray(record), "trust() must return an object or null");
   const {
     approvedBy = null,
     approvedAt = null,
@@ -117,7 +117,7 @@ const WAKE_MODES = ["wakeable", "pull-only", "none"];
 const BOND_STATUSES = ["active", "pending", "none"];
 const validateReach = record => {
   if (record === null || record === undefined) return null;
-  check(record !== null && typeof record === "object", "reach() must return an object or null");
+  check(record !== null && typeof record === "object" && !Array.isArray(record), "reach() must return an object or null");
   const {
     wakeMode = null,
     lastPollAt = null,
@@ -157,7 +157,7 @@ const validateOwns = value => {
 const PRESENCE_STATUSES = ["online", "offline", "unregistered"];
 const validatePresence = record => {
   if (record === null || record === undefined) return null;
-  check(record !== null && typeof record === "object", "presence() must return an object or null");
+  check(record !== null && typeof record === "object" && !Array.isArray(record), "presence() must return an object or null");
   const {
     status = "unregistered",
     lastSeenAt = null,

@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { MAX_INCOMING_PROPOSALS } from "../server/bonds.mjs";
+import { MAX_INCOMING_PROPOSALS, BOND_TTL_MS } from "../server/bonds.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 
 async function startServer(t, f) {
@@ -112,4 +112,34 @@ test("incoming pending proposals are capped per recipient", async t => {
     if (res.status !== 201) assert.equal(res.body.error.code, "bond_rate_limited");
   }
   assert.equal(lastStatus, 429);
+});
+
+test("expired proposals stop counting toward the incoming cap (they can no longer be declined or revoked)", async t => {
+ const { origin, roomId, owner, command, fixture } = await setup(t);
+ let at = Date.now();
+ fixture.store.now = () => at;
+ const target = fixture.store.identities.create("m3 expiry target");
+ await admit(origin, roomId, owner.secret, target, "Expiry target");
+ const proposer = i => {
+ const identity = fixture.store.identities.create(`m3 expiry proposer ${i}`);
+ const linked = fixture.store.identities.link(owner.secret, roomId, {
+ identityId: identity.identityId, displayName: `E${i}`, permissions: ["accept_work"]
+ });
+ setTier(fixture.store.db, roomId, linked.memberId, "t2_standard", { updatedBy: "owner", nowMs: fixture.store.now() });
+ return identity;
+ };
+ const bondIds = [];
+ for (let i = 0; i < MAX_INCOMING_PROPOSALS; i++) {
+ const res = await jsonOf(await command(proposer(i).secret, "bond.propose", { to: target.identityId }));
+ assert.equal(res.status, 201, `proposal ${i}`);
+ bondIds.push(res.body.event.data.bondId);
+ }
+ assert.equal((await command(proposer("full").secret, "bond.propose", { to: target.identityId })).status, 429);
+ at += BOND_TTL_MS + 1000;
+ // The target cannot clear an expired proposal itself...
+ const decline = await jsonOf(await command(target.secret, "bond.decline", { bondId: bondIds[0] }));
+ assert.equal(decline.status, 403);
+ // ...so the expired ones must not keep the inbox full.
+ const fresh = await jsonOf(await command(proposer("after").secret, "bond.propose", { to: target.identityId }));
+ assert.equal(fresh.status, 201, JSON.stringify(fresh.body).slice(0, 300));
 });
