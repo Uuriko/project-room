@@ -494,6 +494,10 @@ details[open] > .section-summary::before { transform: rotate(45deg); }
   .session-menu-panel { display: none; position: absolute; right: 0; top: calc(100% + .4rem); z-index: 30; min-width: 10rem; padding: .5rem; border: 1px solid var(--line); border-radius: .6rem; background: var(--panel-raised, #131922); box-shadow: 0 10px 30px rgb(0 0 0 / 45%); }
   .session-menu.open .session-menu-panel { display: flex; flex-direction: column; gap: .25rem; }
   .session-menu-panel .button { width: 100%; justify-content: center; }
+  /* PWA install (hardwork-mobile-1): the iOS Share-sheet hint mounted by
+     pwa-install.js into the account menu. */
+  #ios-install-sheet { padding: .35rem .25rem; font-size: .8rem; color: var(--muted); }
+  #ios-install-sheet p { margin: 0 0 .5rem; }
 }
 
 @media (max-width: 500px) {
