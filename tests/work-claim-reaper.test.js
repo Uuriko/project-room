@@ -257,19 +257,10 @@ test("reaper: already-escalated deploy is not re-escalated", async t => {
   assert.equal(store.workClaims.get("room1", "d1").history.filter(h => h.action === "escalated").length, 1);
 });
 
-test("reaper: null-lease legacy reaped iff untouched for 24h", async t => {
-  const store = makeStore(t, { members: live3(), heartbeats: beatsFresh() });
-  nowMs = T0 - 25 * HOUR;
-  const old = claimWork({ id: "old1" }, "m1", { leaseHours: null, now: nowMs });
-  store.workClaims.set("room1", old);
-  nowMs = T0 - 23 * HOUR;
-  const young = claimWork({ id: "young1" }, "m1", { leaseHours: null, now: nowMs });
-  store.workClaims.set("room1", young);
-  nowMs = T0;
-  const out = reapTick(store, { now: () => nowMs, holderId: "r1" });
-  assert.ok(out.released.includes("old1") || out.succeeded.includes("old1"), "25h-untouched legacy reaped");
-  assert.equal(store.workClaims.get("room1", "young1").state, "claimed", "23h-untouched legacy skipped");
-});
+// RETIRED (B4 integration): the null-lease legacy path is gone. B1's lease
+// model rejects null leases at creation (claim_lease_required) — every claim
+// carries a lease, so there are no legacy null-lease claims to reap. The
+// reaper's null-tolerant branches were removed as dead code with it.
 
 test("reaper: grace — work expired 5m ago is not reaped, 35m ago is", async t => {
   nowMs = T0;
@@ -311,7 +302,7 @@ test("reaper: two reapers -> single actor; stale lock expires after 90s", async 
 test("reaper: quiet tick -> zero writes", async t => {
   nowMs = T0;
   const store = makeStore(t, { members: live3(), heartbeats: beatsFresh() });
-  const item = claimWork({ id: "c1" }, "m1", { leaseHours: 24, now: nowMs });
+  const item = claimWork({ id: "c1" }, "m1", { leaseHours: 2, now: nowMs });
   store.workClaims.set("room1", item);
   const before = store.db.prepare("SELECT room_id, claim_id, item_json FROM work_claims").all();
   const out = reapTick(store, { now: () => nowMs, holderId: "r1" });

@@ -22,6 +22,10 @@ function fixture() {
 }
 
 async function call(store, { route, id = null, method = "POST", body = {}, member = "owner", search = "" }) {
+  // B4 integration: B1's lease-first model made files mandatory at creation
+  // (claim-channel addendum). These B3 tests predate that rule, so the
+  // fixture supplies a default file on creates that don't name one.
+  if (route === "create" && !("files" in body)) body = { ...body, files: [`tasks/${body.id ?? "claim"}.md`] };
   let out = null;
   const helpers = {
     body: async () => body,

@@ -1269,21 +1269,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (before?.note !== after?.note) { registry.set(roomId, attested); return json(res, 200, attested); }
     return json(res, 200, item);
   }
-  if ((workClaimRoute === "close" || workClaimRoute === "cancel") && req.method === "POST") {
-    // Claim lifecycle: retire open work without delivering it. close is for
-    // the holder or claim managers; cancel is also open to whoever created
-    // the item while it is still unclaimed. Same pure path as MCP
-    // room_close_work_claim (server/work-claims.mjs closeWork).
-    const data = body(req);
-    if (!shape(data, { optional: ["reason"] })) invalidInput(reject, "{reason?}");
-    requireWriter();
-    const item = load(claimIdOf(reject, workClaimId));
-    requireEventBudget();
-    const reason = text("reason", data.reason, { multiline: true });
-    const closed = retire(reject, item, caller, workClaimRoute, reason, mayManageAnyClaim(access), nowMs);
-    commit(closed, "closed", { reason: workClaimRoute === "cancel" ? "cancelled" : "closed" });
-    return json(res, 200, closed);
-  }
+  // POST .../work-claims/{id}/close is handled below (B3: terminal cancelled
+  // with standby promotion). The verb-table retire path (closed) is
+  // reachable via MCP room_close_work_claim with an explicit verb.
   if (workClaimRoute === "release" && req.method === "POST") {
     const data = body(req);
     if (!shape(data, { optional: ["note", "reason", "leaseSeq", "epoch"] })) invalidInput(reject, "{reason?, note?, leaseSeq?, epoch?}");
@@ -1472,9 +1460,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const reason = Object.hasOwn(data, "reason") ? text("reason", data.reason, { multiline: true }) : null;
     const previousOwner = item.owner;
     const closed = runPure(reject, () => closeWork(item, caller, { reason, now: nowMs, authority }));
-    // The reason rides the history stamp (closeWork); the event envelope's
-    // reason field is a closed enum, so it is not passed here.
-    commit(closed, "closed", { previousOwnerId: previousOwner });
+    // The event envelope's reason is a closed enum: "cancelled" for the
+    // close route (the item's terminal state), "closed" for the verb path.
+    commit(closed, "closed", { previousOwnerId: previousOwner, reason: "cancelled" });
     // The freed slot goes to the oldest waiting standby claim, if any.
     const promoted = promoteNextStandby();
     return json(res, 200, promoted ? { ...closed, promoted } : closed);

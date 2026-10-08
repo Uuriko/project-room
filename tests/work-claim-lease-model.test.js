@@ -76,15 +76,18 @@ test("epoch fencing: a mutation carrying a stale epoch is 409 stale_epoch", asyn
 test("unknown fields pass through the route verbatim (schema drift)", async t => {
   const { call } = roomFixture(t);
   const out = await call("owner", "create", {
-    body: { id: "drift1", files: ["src/drift1.mjs"], squadId: "squad-7", parentClaimId: "p1", readingAcks: ["m1"] },
+    // B4: squadId became a known, validated field on the base after B1's
+    // branch point, so the drift probe uses a field this checkout truly
+    // does not know.
+    body: { id: "drift1", files: ["src/drift1.mjs"], futureField: "future-1", parentClaimId: "p1", readingAcks: ["m1"] },
   });
   assert.equal(out.status, 201);
   const read = await call("owner", "read", { id: "drift1" });
-  assert.equal(read.value.squadId, "squad-7");
+  assert.equal(read.value.futureField, "future-1");
   assert.equal(read.value.parentClaimId, "p1");
   assert.deepEqual(read.value.readingAcks, ["m1"]);
   // Unknown fields survive a claim round too.
   await call("holder", "claim", { id: "drift1", body: {} });
   const reread = await call("owner", "read", { id: "drift1" });
-  assert.equal(reread.value.squadId, "squad-7");
+  assert.equal(reread.value.futureField, "future-1");
 });
