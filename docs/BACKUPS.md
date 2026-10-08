@@ -64,11 +64,24 @@ The script checks each part's sha256 and the whole file's sha256 against the man
 
 Putting a restore back into the production Durable Object is a separate, deliberate operation and is not scripted here.
 
+### Drill without waiting for the nightly copy
+
+The nightly job is due 24 hours after its last run, so there is no way to force a KV copy early. For an on-demand drill, pull the same NDJSON from `GET /api/operator/export`: set a random `ROOM_BACKUP_TOKEN` (16+ characters) on `project-room` with `wrangler secret put ROOM_BACKUP_TOKEN --env production`, keep it in a 0600 file, send it as `authorization: Bearer ...` (curl `-H @file`, so it never lands in shell history or output), then `wrangler secret delete ROOM_BACKUP_TOKEN --env production` and confirm the route answers 404 again. Both secret commands publish a new Worker version with the same code; smoke `/api/version` afterwards. Restore with `--from`, then check:
+
+1. the restore exits 0 with `verified: true` and the backup's total event count;
+2. `--room <id>` message count and `messagesSha256` equal the live digest from `GET /api/rooms/<id>/events` up to the room's `lastSequence`;
+3. every `room_attachments` row in state `committed` or `staged` has bytes whose length and sha256 equal its `byte_length` and `sha256` columns (`deleted`, `discarded` and `expired` rows have no bytes by design), and a few live downloads (`room_get_file`) hash-equal the restored bytes;
+4. `skippedTables` names only the known set above.
+
+Delete the export, the restored store and any saved NDJSON when done: they hold every room.
+
+Results of each drill are recorded in `ops/STATE.md`.
+
 ## Byte equality (REL-14)
 
 - `backupRoom` writes content digests into the watermark (`digests.events`, `digests.attachments`): a sha256 over every event row and every `room_attachments` row, including a hash of each file's bytes. `scripts/backup-verify.mjs` recomputes them on the restored copy, so a same-count edit or a flipped file byte fails verification. Watermarks written before this carry counts only and still verify (the check says so).
 - The NDJSON export (the nightly backup's format) writes BLOB cells as `{"$base64": "..."}` and replay decodes them. Before this, any room holding a room file produced an export that replay refused.
-- On the Durable Object, SQL returns BLOB cells as `ArrayBuffer`, which `JSON.stringify` turns into `{}`. Until 2026-10-08 the export only encoded `Uint8Array` (what Node returns), so the first production backup carried every `room_attachments.bytes` cell as `{}` and replay refused it. The export now encodes `ArrayBuffer` and typed views too, and the KV manifest is version 2. A version 1 manifest for the current day is rewritten on the next tick instead of being kept.
-- Replay skips tables a fresh Node store never creates and reports their row counts as `skippedTables`: the Durable Object writer-fence markers (`room_runtime_version`, `room_writer_permit`) and the retired Emissary tables. The NDJSON still holds those rows. Any other unknown table still fails the replay.
+- On the Durable Object, SQL returns BLOB cells as `ArrayBuffer`, which `JSON.stringify` turns into `{}`. Until 2026-10-08 the export only encoded `Uint8Array` (what Node returns), so the first production backup carried every `room_attachments.bytes` cell as `{}` and replay refused it. The export now encodes `ArrayBuffer` and typed views too, and the KV manifest is version 2. A version 1 manifest is not trusted as that day's backup: if the job runs again on the same UTC day it rewrites it. The job itself is due 24 hours after its last run, so in practice the first version 2 copy is the next day's key, and the version 1 copy simply expires.
+- Replay skips tables a fresh Node store never creates and reports their row counts as `skippedTables`: the Durable Object writer-fence markers (`room_runtime_version`, `room_writer_permit`), the retired Emissary tables, and `abuse_rate_buckets` (rate-limit state the Durable Object creates on first use; a restored store starts with fresh budgets). The NDJSON still holds those rows. Any other unknown table still fails the replay.
 - The NDJSON export still scrubs token-shaped text in every cell, so an event whose body contains a token-shaped string does not restore byte-equal from NDJSON. The sqlite backup is byte-equal.
 - `node scripts/backup-drill.mjs` exercises this on a local room: messages, a work item, and a 512-byte room file holding every byte value.
