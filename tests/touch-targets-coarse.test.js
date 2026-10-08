@@ -32,7 +32,15 @@ function coarseCss(cssText) {
 const coarse = coarseCss(css);
 assert.ok(coarse.length > 0, "expected at least one pointer:coarse block in styles.css");
 
-for (const selector of [".button", ".topbar-button", ".people-actions .button", ".search-row .button"]) {
+// HD-04 (QA-200 2026-10-08, stranger-mobile): .text-button (back/"more"
+// navigation links, ~11px font, padding:0) and .link-button had no
+// coarse-pointer floor at all — untappable on phones. Same 44px contract.
+// QA-200 challenger ch-2034 (follow-up to PR #2034): the per-message "⋯"
+// overflow trigger (.message-more > summary, ~20px) is not a <button>, so the
+// global button floor misses it — and on touch it's the only path to the
+// message overflow actions. Same 44px contract.
+for (const selector of [".button", ".topbar-button", ".people-actions .button", ".search-row .button", ".text-button", ".link-button",
+".message-more > summary"]) {
   test(`coarse pointers: ${selector} reaches the 44px touch minimum`, () => {
     const rules = [...coarse.matchAll(/([^{}]+)\{([^{}]*)\}/g)];
     const covered = rules.some(([, selectors, declarations]) =>
