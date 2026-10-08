@@ -1,6 +1,7 @@
 import { publicJoinInviteHref } from "./room-deep-link.js";
 import { parseShareInviteCode } from "./share-invite-code.js";
 import { canInviteMembers } from "./events.js";
+import { uiText } from "./strings.js";
 
 // Kept in this module so the browser asset list does not need a new file.
 export function inviteMessage(title) {
@@ -306,7 +307,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       setShareLinkStatus($("#growth-kit-status"), "");
       renderKit(data);
     } catch {
-      if (current()) setShareLinkStatus($("#growth-kit-status"), "Couldn't load the invitation. Close and try again.");
+      if (current()) setShareLinkStatus($("#growth-kit-status"), uiText("invite.loadFailed"));
     }
   }
   async function copyGrowth(field, done) {
@@ -328,7 +329,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     } catch {
       if (!current()) return;
       field.focus(); field.select();
-      if (kitStatus) setShareLinkStatus(kitStatus, "Ready to copy manually.");
+      if (kitStatus) setShareLinkStatus(kitStatus, uiText("invite.manualCopyReady"));
     } finally { clearTimeout(timer); }
   }
   function ensureGrowthChrome() {
@@ -620,7 +621,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       $("#join-account-choices").hidden = Boolean(account.authenticated) || Boolean(resume);
       $("#join-guest-note").hidden = Boolean(account.authenticated);
       const elevatedLink = preview.link.access && preview.link.access !== "guest";
-      $("#join-link-submit").textContent = returning ? "Open room" : account.authenticated || elevatedLink ? "Join room" : "Continue as guest";
+      $("#join-link-submit").textContent = returning ? "Open room" : account.authenticated || elevatedLink ? "Join room" : uiText("invite.continueAsGuest");
       const accessSummary = $("#join-access-details").querySelector?.("summary");
       if (accessSummary) accessSummary.textContent = elevatedLink ? (preview.link.access === "co_admin" ? "Co-admin access" : "Member access") : "Guest access";
       $("#join-link-form").hidden = false; $("#join-link-name").focus();
@@ -778,7 +779,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       const lostGuest = error.code === "join_session_lost" && accountClient.session?.authenticated === false;
       $("#join-link-signout").hidden = error.code !== "guest_session_ended" && !lostGuest;
       $("#join-link-signout").textContent = lostGuest ? "Start a new guest (uses another place)" : "Sign out of expired guest session";
-      if (joined) $("#join-link-submit").textContent = "Open joined room";
+      if (joined) $("#join-link-submit").textContent = uiText("invite.openJoinedRoom");
     } finally {
       joinBusy(false);
       if (failed && version === joinVersion && joinDialog.open) $(needsSessionReview ? "#join-link-retry" : "#join-link-submit").focus();
