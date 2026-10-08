@@ -476,6 +476,10 @@ export function event(overrides) {
     roomId: overrides.roomId,
     type: overrides.type,
     actorId: overrides.actorId,
+    // Attribution primitive: the authenticated identityId, stamped server-side
+    // at admission (store.command). Missing (legacy events) reads as unknown;
+    // never a displayName.
+    identityId: overrides.identityId ?? null,
     at: overrides.at || new Date().toISOString(),
     causationId: overrides.causationId || null,
     data: overrides.data || {}
@@ -616,6 +620,9 @@ function validateEnvelope(incoming) {
   for (const key of ["id", "idempotencyKey", "roomId", "actorId"]) {
     if (!validId(incoming[key])) throw new Error(`Invalid ${key}`);
   }
+  // identityId is optional: legacy events omit it (unknown). When present it
+  // is server-stamped at admission, so it must be a well-formed id.
+  if (incoming.identityId !== undefined && incoming.identityId !== null && !validId(incoming.identityId)) throw new Error("Invalid identityId");
   if (!incoming.data || Array.isArray(incoming.data) || typeof incoming.data !== "object") throw new Error("Event data must be an object");
   for (const [key, value] of Object.entries(incoming.data)) {
     if (value === null) continue;

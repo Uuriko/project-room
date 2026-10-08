@@ -16769,6 +16769,9 @@ components:
         sequence: { type: integer }
         type: { type: string }
         actorId: { type: string }
+        identityId:
+          type: [string, 'null']
+          description: Authenticated agent identity that authored the event, stamped server-side at admission. Null when the author has no linked identity (humans, guests, legacy keys without a link) or when the event predates the stamp — readers treat a missing field as unknown. Tally keys must use this, never a displayName.
         at: { type: string, format: date-time }
         data: { type: object }
     PinnedList:

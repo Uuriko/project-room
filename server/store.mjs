@@ -4682,7 +4682,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // so pins recorded before the rule keep replaying.
       const pinEvent = command.type === T.MESSAGE_PINNED || command.type === T.MESSAGE_UNPINNED;
       const incoming = event({
-        type: bondEffect?.eventType ?? command.type, roomId, actorId: auth.member.id, at: new Date(this.now()).toISOString(),
+        type: bondEffect?.eventType ?? command.type, roomId, actorId: auth.member.id,
+        // Attribution primitive: persist the authenticated identityId on the
+        // envelope so tallies key on identityId without re-deriving it through
+        // the mutable identity_links join. Identity-secret and scoped-key auth
+        // carry it; legacy access-key auth falls back to the unambiguous linked
+        // identity (exactly one unrevoked link), else null = unknown.
+        identityId: auth.identityId ?? this.identities.identityIdForMember(roomId, auth.member.id),
+        at: new Date(this.now()).toISOString(),
         idempotencyKey: hash(`${auth.member.id}:${command.id}`), causationId: command.causationId,
         data: bondEffect ? bondEffect.data
           : memberAuthorityEvent ? {
