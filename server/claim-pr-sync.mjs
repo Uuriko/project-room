@@ -283,12 +283,20 @@ function ciReadDue(item, nowMs) {
 // Write one lookup onto the current claim row. Returns true when the claim
 // was settled (completed or released). A rate limit is not written here;
 // the caller holds every due claim until the reset.
+//
+// Retry-safety: the lookup is committed against the freshest registered row,
+// not the item the caller read. A caller retrying after a lost response may
+// hand us the pre-settle item again; settling that stale copy would apply a
+// second pr_merged/pr_closed (duplicate room events and history stamps).
+// Reading the current row first makes the retry a no-op: the links are
+// already stamped, so `linked` misses and the function returns false.
 export function commitPullRequestLookup(store, registry, roomId, item, result, nowMs) {
-  const linked = pullLinks(item).find(pull => pull.url === result.url && !pull.outcome);
+  const current = registry?.get?.(roomId, item?.id) ?? item;
+  const linked = pullLinks(current).find(pull => pull.url === result.url && !pull.outcome);
   if (!linked) return false;
-  if (item.pullRequest?.url !== result.url) item = { ...item, pullRequest: linked };
+  const fresh = current.pullRequest?.url !== result.url ? { ...current, pullRequest: linked } : current;
   if (result.kind === "merged" || result.kind === "closed") {
-    const recorded = recordPullOutcome(item, result.url, result.kind, nowMs);
+    const recorded = recordPullOutcome(fresh, result.url, result.kind, nowMs);
     if (!pullsReadyToSettle(recorded)) {
       registry.set(roomId, recorded);
       return false;
@@ -303,18 +311,18 @@ export function commitPullRequestLookup(store, registry, roomId, item, result, n
     if (!settled) return false;
     registry.set(roomId, settled.item);
     emitWorkClaimEvent(store, roomId, {
-      actorId: settled.previousOwnerId ?? settled.item.owner ?? item.owner,
+      actorId: settled.previousOwnerId ?? settled.item.owner ?? fresh.owner,
       item: settled.item,
       action: settled.action,
       previousOwnerId: settled.previousOwnerId,
       atMs: nowMs,
       paths: settled.paths,
-      pullRequest: { url: item.pullRequest.url, outcome: result.kind }
+      pullRequest: { url: fresh.pullRequest.url, outcome: result.kind }
     });
     return true;
   }
   if (result.kind === "open" || result.kind === "notModified" || result.kind === "missing" || result.kind === "error" || result.kind === "unconfigured") {
-    let next = item;
+    let next = fresh;
     let changed = false;
     if (result.ci) {
       const recorded = recordCi(next, { ...result.ci, checkedAt: new Date(nowMs).toISOString() }, nowMs);
@@ -326,12 +334,12 @@ export function commitPullRequestLookup(store, registry, roomId, item, result, n
     }
     const delay = result.ciCursor && result.ciCursor !== "done"
       ? 0
-      : (result.kind === "missing" ? PULL_MISSING_BACKOFF_MS : (result.delayMs ?? nextPullBackoff(item.pullRequest.pollBackoffMs, false)));
+      : (result.kind === "missing" ? PULL_MISSING_BACKOFF_MS : (result.delayMs ?? nextPullBackoff(fresh.pullRequest.pollBackoffMs, false)));
     const stored = rememberPoll(next, nowMs, delay, { etag: result.etag });
     registry.set(roomId, stored);
     if (changed) {
       emitWorkClaimEvent(store, roomId, {
-        actorId: item.owner ?? "system",
+        actorId: fresh.owner ?? "system",
         item: stored,
         action: "ci_changed",
         atMs: nowMs,
@@ -339,7 +347,7 @@ export function commitPullRequestLookup(store, registry, roomId, item, result, n
         ciState: result.ci.state
       });
       if (result.ci.state === "success" || result.ci.state === "failure") {
-        enqueueClaimWake(store, roomId, item.owner, `work-claim:${item.id}:ci:${result.ci.state}:${result.ci.headSha ?? "none"}`);
+        enqueueClaimWake(store, roomId, fresh.owner, `work-claim:${fresh.id}:ci:${result.ci.state}:${result.ci.headSha ?? "none"}`);
       }
       wakeNamedReviewers(store, roomId, stored);
     }

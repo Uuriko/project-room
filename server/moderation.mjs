@@ -18,6 +18,7 @@ import { validId, isMutedBy } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
+import { messageVisibleToViewer, summaryHistoryFloor } from "./history-visibility.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
@@ -46,6 +47,12 @@ export function mutedEvent(state, viewerId, event) {
 export function mutedMessage(state, viewerId, message) {
   return isMutedBy(state, viewerId, message?.authorId);
 }
+
+// Deletion-agnostic privacy test: a deleted DM stays private to its two
+// parties (and their history window). messageVisibleToViewer also rejects
+// deleted messages, which would hide public deleted ones from reports too.
+const readableBy = (message, viewerId, floor) =>
+  messageVisibleToViewer({ ...message, deletedAt: null, body: message.body ?? "" }, viewerId, floor);
 
 const receipt = row => ({ id: row.report_id, messageId: row.message_id, reason: row.reason, createdAt: row.created_at });
 
@@ -93,6 +100,11 @@ export class Moderation {
       const room = this.store.room(roomId);
       const message = room.state.messages.find(m => m.id === request.messageId);
       if (!message) fail(404, "message_not_found", "That message is not in this room");
+      // A reporter can only report what they can read: a DM between two other
+      // members (or history before a since_join reporter's join) answers
+      // exactly like an unknown id, so the id does not confirm it exists.
+      if (!readableBy(message, auth.member.id, summaryHistoryFloor(this.store, roomId, auth.member.id)))
+        fail(404, "message_not_found", "That message is not in this room");
       if (message.authorId === auth.member.id) fail(422, "invalid_report", "You cannot report your own message; delete it instead");
       const prior = this.db.prepare("SELECT * FROM message_reports WHERE room_id=? AND reporter_id=? AND message_id=?").get(roomId, auth.member.id, request.messageId);
       if (prior) return { ...this.viewer(auth, roomId), report: receipt(prior), duplicate: true };
@@ -116,11 +128,19 @@ export class Moderation {
       // not the member kind; an agent owner may review reports. Owner-only.
       if (auth.member.id !== room.state.room.ownerId) fail(403, "owner_required", "Only the room owner can read reports");
       const messages = new Map(room.state.messages.map(m => [m.id, m]));
+      // The owner is not exempt from DM privacy: a reported DM's body is shown
+      // only when the owner is one of its two parties (and in their history).
+      const ownerFloor = summaryHistoryFloor(this.store, roomId, auth.member.id);
       const reports = this.db.prepare("SELECT * FROM message_reports WHERE room_id=? ORDER BY created_at DESC, report_id").all(roomId).map(row => {
         const message = messages.get(row.message_id);
         return {
           ...receipt(row), reporterId: row.reporter_id, authorId: row.author_id,
-          message: message ? { authorId: message.authorId, body: message.deletedAt ? null : message.body, createdAt: message.createdAt, deletedAt: message.deletedAt ?? null } : null
+          message: message ? {
+            authorId: message.authorId,
+            body: message.deletedAt || !readableBy(message, auth.member.id, ownerFloor) ? null : message.body,
+            ...(message.toMemberId && !readableBy(message, auth.member.id, ownerFloor) ? { private: true } : {}),
+            createdAt: message.createdAt, deletedAt: message.deletedAt ?? null
+          } : null
         };
       });
       return { ...this.viewer(auth, roomId), reports };

@@ -73,3 +73,119 @@ Notes:
   only the message. Uniformity of failure codes is now pinned for both.
 - Out of scope per brief (not probed): OAuth code reuse, spend void-after-settle,
   writer-fence tamper, permission-upgrade `review()`.
+
+## Probes recorded by #2035
+
+Living ledger for QA200 mutation-testing workers probing the work-claim
+renew path (`server/work-claims.mjs`, `server/work-claim-routes.mjs`).
+Append rows; never re-probe a row marked CAUGHT.
+
+| Probe | Worker | Date (PDT) | Mutation | Existing tests catch? | Verdict |
+|---|---|---|---|---|---|
+| MUT-04-A | qa200-mut-04 | 2026-10-08 | renew w/o progressMessageId force-upgrades lease to 24h room default instead of keeping original duration | No — `tests/lease-renewal.test.js` pins the behavior ("the room's default 24h") | **UNCAUGHT — footgun LIVE**. Hardening test `tests/work-claim-renew-probes.test.js` MUT-04-A (kept `test.skip`; fails on current code). |
+| MUT-04-B | qa200-mut-04 | 2026-10-08 | renew extends from now instead of old expiry (15-min lease renewed at +6min with 1h → now+1h, stealing ~9min) | No — `tests/lease-renewal.test.js` pins it ("starts a fresh lease window from now") | **UNCAUGHT — footgun LIVE**. Hardening test MUT-04-B (kept `test.skip`; fails on current code). |
+| MUT-04-C | qa200-mut-04 | 2026-10-08 | allow renew of an indefinite (null-lease) claim | Yes — pure test "renewWork refuses a foreign owner, a non-active claim, a leaseless claim, and a lapsed lease" + route test "handler: renew of a leaseless claim is refused" both fail (422 `invalid_claim_input`) | **CAUGHT** |
+
+## Notes
+
+- Probe A/B footguns are **already the shipped behavior**, not seeded bugs:
+  `renewWork` computes `leaseStartAt = now`, `leaseExpiresAt = now + (leaseHours ?? 24h)`.
+  The hardening tests document the probe-semantics (playbook §4d) and are
+  red-on-current by design; they are `test.skip`ped so CI stays green.
+  Deciding the intended renew semantics (fresh window from now w/ default
+  vs. keep original duration / extend from old expiry) is a design call for
+  the coordinator — the tests here are the fail-first record, not the fix.
+- Fail-first verification for MUT-04-A/B: probe tests fail on current code
+  (red), pass under a probe-semantics patch (green-without), patch reverted.
+- Probe C detail: removing only the null-lease guard does NOT create the
+  footgun — the lapsed-lease check (`Date.parse(null) > now` → false) still
+  blocks it, just with the wrong message. The faithful "allow it" mutation
+  also skips the lapse check for null leases; then 2 existing tests fail.
+- Skipped by brief: OAuth code reuse, spend void-after-settle,
+  writer-fence tamper, permission-upgrade review().
+
+## Probes recorded by #2036
+
+Mutation-testing ledger for John's 200-agent QA wave (2026-10-08). One row per
+probe: the mutant applied, whether the existing suite caught it, and any
+hardening test added (verified red-with-break / green-without before the
+mutant was reverted).
+
+| Date (PDT) | Worker | Probe | Target | Mutant | Existing suite | Hardening test | Verdict |
+|---|---|---|---|---|---|---|---|
+| 2026-10-08 | qa200-mut-17 | A: double release (double-pay) | server/bounty-escrow.mjs `_approvedMillis` (double-entry netting backstop) | gross-only netting (`AND amount > 0`) — a re-sweep would find 500 millis "approved" and pay again | 38/38 green — **UNCAUGHT** | tests/bounty-escrow-release-probes.test.js: "double-pay backstop: swept lots net to zero" — red with mutant, green without | Behavior safe via layered guards (paid state transition + netting); netting layer now pinned. Also pinned: second closeEpoch is a payout no-op. |
+| 2026-10-08 | qa200-mut-17 | B: release to wrong recipient | server/bounty-escrow.mjs `_sweep` payout credit | payout credited to `bounty.poster` instead of `bounty.claimant` | 3 failures in tests/bounty-escrow.test.js — **CAUGHT** | — (worker-balance assertions + paid-event earner already pin recipient identity) | CAUGHT. Probe pinned recipient identity in new test file ("payout credits the claimant's ledger account") as documentation. |
+| 2026-10-08 | qa200-mut-17 | C: release for disputed bounty | server/bounty-escrow.mjs `_requireFinalityMove` (finality_frozen gate) | freeze gate removed | tests/bounty-tracks.test.js "illegal transitions are rejected on both tracks" fails — **CAUGHT** | — (integration behavior pinned in new test file; "a disputed bounty cannot be swept or paid while the dispute is open") | CAUGHT. Note: integration behavior is redundantly blocked by `missing_verdict` (payout requires state "approved") even with the gate removed — defense-in-depth holds. |
+
+Probe notes (qa200-mut-17, 2026-10-08):
+- Probe A layering: re-release is blocked first by the `approved -> paid` state transition (pinned by the existing sweep test's `state === "paid"` assertion) and second by double-entry netting. The netting was the unpinned layer; the new white-box test pins it.
+- Probe B: recipient identity is pinned three ways — worker balance (existing), journal credit account (new), paid-event `earner` (new).
+- Probe C: `finality_frozen` is unit-pinned; the keeper path needs no extra guard because `_keeperPass` on a disputed bounty never reaches `_sweep` (only "approved" bounties sweep in `closeEpoch`).
+
+## Probes recorded by #2045
+
+Fail-first mutation probes against Project Room: deliberately break the server,
+run the relevant tests, and record whether the suite caught the break.
+
+## Already probed by other workers (do NOT re-probe)
+
+| seq | date | target file | mutation applied | test file(s) | CAUGHT/UNCAUGHT | notes |
+|---|---|---|---|---|---|---|
+| MUT-00-001 | 2026-10-08 | auth/oauth (code reuse) | OAuth code reuse allowed | — | SKIPPED | already probed by another worker |
+| MUT-00-002 | 2026-10-08 | spend settle | spend void-after-settle | — | SKIPPED | already probed by another worker |
+| MUT-00-003 | 2026-10-08 | server/writer-fence.mjs | writer-fence tamper | — | SKIPPED | already probed by another worker |
+| MUT-00-004 | 2026-10-08 | permissions review() | permission-upgrade review() check | — | SKIPPED | already probed by another worker |
+
+## QA200-MUT-01 probes (work-claim routes: create idempotency + per-identity cap)
+
+Coordinator-reported rows (2026-10-08; workers safety-paused before full reports; mutations reverted by coordinator; trees verified clean; claims released):
+
+| seq | date | target file | mutation applied | test file(s) | CAUGHT/UNCAUGHT | notes |
+|---|---|---|---|---|---|---|
+| MUT-06 | 2026-10-08 | server/bounty-receipts.mjs | MUTATION-B: `.filter(k => k !== "payload")` in canonicalJson's object branch — payload excluded from signed bytes (signature-forgery-class weakening) | — | outcome UNCONFIRMED | worker's tool use paused before pass/fail reported; coordinator reverted mutation, worktree clean |
+| MUT-03 | 2026-10-08 | server/work-claim-routes.mjs | probe A: replaced `const authority = authorityOver(item);` with `const authority = true;` in the /release handler (non-owner release allowed) | — | outcome UNCONFIRMED | worker's tool use paused before outcome reported; coordinator reverted mutation, worktree clean |
+| MUT-04 | 2026-10-08 | claim RENEW | (probe completed) | — | outcome UNCONFIRMED | coordinator sweep found no leftover mutation; worktree clean |
+| MUT-07 | 2026-10-08 | bounty receipts | (probe completed) | — | all CAUGHT (per worker's final preview) | reported "no PR (all caught)"; worktree clean |
+
+Claims released by coordinator: qa200-mut-03-claim-release, qa200-mut-04-claim-renew, qa200-mut-06-receipt-verify, qa200-mut-07-bounty-receipts.
+
+| seq | date | target file | mutation applied | test file(s) | CAUGHT/UNCAUGHT | notes |
+|---|---|---|---|---|---|---|
+| MUT-01-001 | 2026-10-08 | server/work-claim-routes.mjs (create route) | duplicate CREATE returned 200 with the existing claim instead of 409 work_claim_exists | tests/work-claim-*.test.js, tests/claim-*.test.js, tests/public-work-claim*.test.js (existing) + tests/work-claim-idempotency.test.js (new) | UNCAUGHT | 331 existing tests stayed green with the break (incl. board/guards/duplicates/claims/client); only the env-broken yaml import in work-claim-client failed pre-node_modules-symlink. Hardening test "duplicate CREATE returns 409 work_claim_exists and leaves the claim unchanged" verified RED with break (200 !== 409), GREEN after revert. |
+| MUT-01-002 | 2026-10-08 | server/work-claim-routes.mjs (create route, assignee branch) | per-identity cap check weakened to `held >= config.maxMemberOpenClaims + 1000` (cap never refuses on CREATE-with-assignee) | tests/work-claim-board.test.js, tests/work-claim-guards.test.js, tests/work-claims.test.js, tests/work-claim-duplicates.test.js, tests/work-claim-reassign-unclaimed.test.js, tests/work-claim-client.test.js (existing) + tests/work-claim-idempotency.test.js (new) | UNCAUGHT | 67 existing tests stayed green with the break. Existing cap coverage (board.test.js:140, guards.test.js:107) only pins the claim-route cap, not the CREATE-with-assignee cap. Hardening test "CREATE with assignee refuses 409 too_many_open_claims when the assignee is at cap" verified RED with break (201 accepted), GREEN after revert. |
+
+## Probes recorded by #2052
+
+Ledger of mutation-testing probes against Project Room. Workers append rows;
+never re-probe a row already recorded CAUGHT. Skipped classes (per wave
+brief): OAuth code reuse, spend void-after-settle, writer-fence tamper,
+permission-upgrade review().
+
+Columns: date · worker · target · mutant · result · hardening.
+
+| date | worker | target | mutant | result | hardening |
+|---|---|---|---|---|---|
+| 2026-10-08 | qa200-mut-18 | server/webhook-dispatch.mjs `classifyHttpStatus` | 409 → "retry" (terminal 4xx retried blindly) | UNCAUGHT — existing test pinned 400/404/422 → dead but not 409 | tests/webhook-dispatch.test.js: "classifyHttpStatus never retries terminal 4xx: 409 is dead, not retried" (red-with-break ✓, green-without ✓) |
+| 2026-10-08 | qa200-mut-18 | server/webhook-dispatch.mjs `postDelivery` | validate target once up front, follow redirects without per-hop re-validation (retry without re-reading state) | CAUGHT — existing test "postDelivery does not follow redirects to private targets" failed on the mutant | none needed |
+| 2026-10-08 | qa200-mut-18 | server/agent-plugin-store.mjs `attemptStoredDelivery` retry scheduling | `next_attempt_at = now` (no backoff on retryable 429/5xx — retry hammer) | UNCAUGHT — only backoffDelayMs arithmetic was tested, never its presence on the retry path | tests/webhook-retry-backoff.test.js: "a 429 retry reschedules with backoff, never immediately" (red-with-break ✓, green-without ✓) |
+
+## Probes recorded by #2055
+
+Fail-first mutation probes against backup/restore parity. One row per probe.
+Never re-probe a row recorded CAUGHT — the mutation is pinned by the named test.
+
+Columns: ID · Worker · Date · Target · Mutation · Existing tests run · Verdict ·
+Hardening test · Notes
+
+| ID | Worker | Date | Target | Mutation | Existing tests run | Verdict | Hardening test | Notes |
+|----|--------|------|--------|----------|--------------------|---------|----------------|-------|
+| QA200-MUT-22-A | qa200-mut-22-backup-restore | 2026-10-08 | server/backup.mjs `backupRoom` | destination backup silently `DELETE FROM messages` (all rows of one non-watermark-pinned table) | tests/backup-verify.test.js, tests/room-backup-export.test.js, tests/rel14-backup-bytes.test.js — 31/31 pass with the mutation | UNCAUGHT | tests/backup-table-parity.test.js — red-with-break ("messages (source 3 rows -> backup 0 rows)"), green-without; kept | Watermark pins only `events` count + `rooms` id/sequence; REL-14 digests cover events + attachment bytes only. PR #2055 adds the parity test. |
+| QA200-MUT-22-B | qa200-mut-22-backup-restore | 2026-10-08 | scripts/backup-verify.mjs `verifyRestoredBackup` | neutered `attachment-bytes-intact` check (always true) | tests/rel14-backup-bytes.test.js — "verification fails when room file bytes change at the same length" goes red | CAUGHT | — (already pinned by tests/rel14-backup-bytes.test.js) | REL-14 (Fo 3742) already ships `backupDigests` + per-attachment sha256 refusal. Probe harness also confirmed end-to-end: same-length byte corruption in the backup copy → `verifyRestoredBackup ok=false`, `FAIL attachment-bytes-intact`. |
+| QA200-MUT-22-C | qa200-mut-22-backup-restore | 2026-10-08 | server/store.mjs `importEvents` (NDJSON history restore over existing data) | owner gate removed (`owner_required` 403 deleted) — non-owner silently overwrites room history | tests/room-export.test.js — "room import round-trips an export (round-2 #107)" goes red (asserts non-owner → 403) | CAUGHT | — (already pinned by tests/room-export.test.js) | Import is owner-only + transactional + validates before writing; pending invitations loss on restore is documented in code. No confirm-flag exists, but the owner gate is the explicitness mechanism and it is pinned. |
+
+## Out of scope for this worker (per brief)
+
+- OAuth code reuse
+- spend void-after-settle
+- writer-fence tamper
+- permission-upgrade review()
