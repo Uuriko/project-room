@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Swarm Telemetry Bus</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #30363d;
+    --fg: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+    --high: #3fb950; --medium: #d29922; --low: #f85149;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--fg); font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 24px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  .cards { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px 18px; min-width: 160px; }
+  .card .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+  .card .value { font-size: 28px; font-weight: 700; margin-top: 4px; }
+  .filters { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; align-items: end; }
+  .filters label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+  select, input[type="search"] { background: var(--panel); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; font-size: 13px; }
+  input[type="search"] { min-width: 260px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; padding: 10px; border-bottom: 1px solid var(--border); }
+  td { padding: 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr.main { cursor: pointer; }
+  tr.main:hover { background: #1c2128; }
+  tr.detail { display: none; background: #0f141a; }
+  tr.detail.open { display: table-row; }
+  .pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; border: 1px solid var(--border); }
+  .pill.high { color: var(--high); border-color: var(--high); }
+  .pill.medium { color: var(--medium); border-color: var(--medium); }
+  .pill.low { color: var(--low); border-color: var(--low); }
+  .chip { display: inline-block; background: #1c2128; border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; margin: 2px 4px 2px 0; font-family: monospace; font-size: 12px; }
+  .chip b { color: var(--accent); font-weight: 600; }
+  .evidence { color: var(--muted); margin-bottom: 8px; line-height: 1.5; max-width: 900px; }
+  .meta { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  .count-note { color: var(--muted); font-size: 12px; margin-top: 12px; }
+</style>
+</head>
+<body>
+<h1>Swarm Telemetry Bus</h1>
+<div class="sub">Aggregated findings across guilds &middot; <span id="src">loading&hellip;</span></div>
+
+<div class="cards">
+  <div class="card"><div class="label">Total findings</div><div class="value" id="card-total">–</div></div>
+  <div class="card"><div class="label">Guilds represented</div><div class="value" id="card-guilds">–</div></div>
+  <div class="card"><div class="label">High-confidence</div><div class="value" id="card-high">–</div></div>
+</div>
+
+<div class="filters">
+  <label>Guild
+    <select id="f-guild"><option value="">All guilds</option></select>
+  </label>
+  <label>Category
+    <select id="f-category"><option value="">All categories</option></select>
+  </label>
+  <label>Confidence
+    <select id="f-confidence">
+      <option value="">All levels</option>
+      <option value="high">high</option>
+      <option value="medium">medium</option>
+      <option value="low">low</option>
+    </select>
+  </label>
+  <label>Search claim / evidence
+    <input type="search" id="f-search" placeholder="e.g. collision, latency, idempotency&hellip;">
+  </label>
+</div>
+
+<table>
+  <thead>
+    <tr><th>ID</th><th>Guild</th><th>Claim</th><th>Category</th><th>Confidence</th><th>Timestamp</th></tr>
+  </thead>
+  <tbody id="rows"></tbody>
+</table>
+<div class="count-note" id="count-note"></div>
+
+<script>
+// To view: serve the telemetry/ directory, e.g. `python3 -m http.server 8123`
+// from telemetry/, then open http://localhost:8123/dashboard.html
+const $ = (id) => document.getElementById(id);
+let findings = [];
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function fmtTs(ts) {
+  try { return new Date(ts).toISOString().replace('T', ' ').replace('Z', ' UTC'); }
+  catch { return ts; }
+}
+
+function numbersChips(numbers) {
+  if (!numbers || typeof numbers !== 'object') return '<span class="meta">none</span>';
+  return Object.entries(numbers).map(([k, v]) => `<span class="chip"><b>${esc(k)}</b> = ${esc(v)}</span>`).join('');
+}
+
+function applyFilters() {
+  const g = $('f-guild').value, c = $('f-category').value, cf = $('f-confidence').value;
+  const q = $('f-search').value.trim().toLowerCase();
+  let shown = 0;
+  document.querySelectorAll('#rows tr.main').forEach((tr) => {
+    const matchText = q === '' || tr.dataset.search.includes(q);
+    const ok = (g === '' || tr.dataset.guild === g)
+            && (c === '' || tr.dataset.category === c)
+            && (cf === '' || tr.dataset.confidence === cf)
+            && matchText;
+    tr.style.display = ok ? '' : 'none';
+    const detail = tr.nextElementSibling;
+    if (detail && detail.classList.contains('detail')) detail.style.display = ok ? detail.style.display : 'none';
+    if (ok) shown++;
+  });
+  $('count-note').textContent = `showing ${shown} of ${findings.length} findings`;
+}
+
+function buildDropdowns() {
+  const guilds = [...new Set(findings.map((f) => f.guild))].sort();
+  const cats = [...new Set(findings.map((f) => f.category).filter(Boolean))].sort();
+  guilds.forEach((g) => $('f-guild').insertAdjacentHTML('beforeend', `<option value="${esc(g)}">${esc(g)}</option>`));
+  cats.forEach((c) => $('f-category').insertAdjacentHTML('beforeend', `<option value="${esc(c)}">${esc(c)}</option>`));
+}
+
+function render() {
+  const tbody = $('rows');
+  tbody.innerHTML = '';
+  findings.forEach((f) => {
+    const tr = document.createElement('tr');
+    tr.className = 'main';
+    tr.dataset.guild = f.guild || '';
+    tr.dataset.category = f.category || '';
+    tr.dataset.confidence = f.confidence || '';
+    tr.dataset.search = `${f.claim || ''} ${f.evidence || ''}`.toLowerCase();
+    tr.innerHTML = `
+      <td><code>${esc(f.id)}</code></td>
+      <td>${esc(f.guild)}</td>
+      <td>${esc(f.claim)}</td>
+      <td>${esc(f.category || '—')}</td>
+      <td><span class="pill ${(f.confidence || '').toLowerCase()}">${esc(f.confidence || '—')}</span></td>
+      <td style="white-space:nowrap">${esc(fmtTs(f.timestamp))}</td>`;
+    const detail = document.createElement('tr');
+    detail.className = 'detail';
+    const bits = [
+      f.agent ? `agent <b>${esc(f.agent)}</b>` : null,
+      (f.roomSeq != null) ? `roomSeq <b>${esc(f.roomSeq)}</b>` : null,
+    ].filter(Boolean);
+    detail.innerHTML = `<td colspan="6">
+      <div class="evidence">${esc(f.evidence || '—')}</div>
+      <div>${numbersChips(f.numbers)}</div>
+      ${bits.length ? `<div class="meta">${bits.join(' · ')}</div>` : ''}
+    </td>`;
+    tr.addEventListener('click', () => detail.classList.toggle('open'));
+    tbody.appendChild(tr);
+    tbody.appendChild(detail);
+  });
+  $('card-total').textContent = findings.length;
+  $('card-guilds').textContent = new Set(findings.map((f) => f.guild)).size;
+  $('card-high').textContent = findings.filter((f) => (f.confidence || '').toLowerCase() === 'high').length;
+  buildDropdowns();
+  applyFilters();
+}
+
+fetch('findings.json')
+  .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+  .then((data) => {
+    findings = Array.isArray(data) ? data : [];
+    $('src').textContent = `source: findings.json (${findings.length} records)`;
+    render();
+  })
+  .catch((e) => { $('src').textContent = `failed to load findings.json: ${e.message}`; });
+
+['f-guild', 'f-category', 'f-confidence'].forEach((id) => $(id).addEventListener('change', applyFilters));
+$('f-search').addEventListener('input', applyFilters);
+</script>
+</body>
+</html>
