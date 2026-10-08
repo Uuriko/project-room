@@ -250,6 +250,21 @@ const JSON_RPC_STATUSES = Object.freeze({
   "/room/mcp": new Set(["400", "401"]),
 });
 
+// REL-21: body-reading routes refuse a non-JSON Content-Type with 415
+// (json_required) before any handler runs. Schemathesis saw it on 29
+// operations where the spec did not list it. These POSTs read no body and
+// never return 415; the JSON-RPC doors answer with their own parse error.
+const NO_JSON_BODY_ROUTES = new Set([
+  "/api/agent-webhooks/deliveries/{deliveryId}/redrive",
+  "/api/oauth/sessions/revoke-all",
+]);
+
+export function readsJsonBody(entry, method) {
+  if (JSON_RPC_STATUSES[entry.path] || NO_JSON_BODY_ROUTES.has(entry.path)) return false;
+  if (["POST", "PUT", "PATCH"].includes(method)) return true;
+  return Boolean(entry.requestBodies?.[method]);
+}
+
 function errorComponents() {
   const responses = {};
   for (const name of ERROR_RESPONSES) {
@@ -258,6 +273,10 @@ function errorComponents() {
       content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorEnvelope" } } },
     };
   }
+  responses.UnsupportedMediaType = {
+    description: "Content-Type is not application/json (error.code json_required). Resend the body as JSON.",
+    content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorEnvelope" } } },
+  };
   return responses;
 }
 
@@ -285,6 +304,7 @@ function operationResponses(entry, method) {
       ? jsonRpcErrorResponse(status)
       : { $ref: `#/components/responses/${name}` };
   }
+  if (readsJsonBody(entry, method)) errors["415"] = { $ref: "#/components/responses/UnsupportedMediaType" };
   return { ...success, ...errors };
 }
 
