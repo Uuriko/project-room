@@ -263,6 +263,96 @@ const rateHash = value => createHash("sha256").update(String(value)).digest("hex
 // A lagging stream that still has not drained its final event by now is dropped.
 const STREAM_DRAIN_GRACE_MS = 5000;
 
+// --- Honest backpressure: probing-intent admission (wave300, work item 3). ---
+// Agents declare probing intent BEFORE probing (see docs/HONEST-BACKPRESSURE.md
+// and the probing-intent convention); the server admits or refuses FAST.
+// The decision below reads only in-memory gauges — never the store, never the
+// network — so the refuse path does no async I/O and the endpoint can never
+// queue behind the work it describes. Admitted intents live in a bounded
+// in-memory registry (per server instance; advisory, not a reservation).
+const INTENT_ADMISSION_KINDS = Object.freeze(["read", "write", "flood", "mint", "join", "claim-update"]);
+const INTENT_ADMISSION_PER_CLIENT_CAP = 3;  // concurrent active intents per credential (or per address when anonymous)
+const INTENT_ADMISSION_MAX_ROWS = 1024;     // bounded registry: oldest-inserted row evicted past this
+const INTENT_ADMISSION_NOTES_MAX = 2000;
+const intentAdmissionFields = notes => notes
+  ? ["kind", "target", "rate_rps", "expected_total", "window_seconds", "notes"]
+  : ["kind", "target", "rate_rps", "expected_total", "window_seconds"];
+const intentAdmissionRegistry = new Map(); // intentId -> { clientKey, expiresAt, kind, target, rate_rps, expected_total }
+const intentAdmissionCounters = { admits: 0, refusedOverBudget: 0, refusedShedLoad: 0 };
+// Global shed flag. The live load gauges (command in-flight shed counter,
+// event-loop lag estimate — coordinator 4/10's gauges) set this when the
+// server is shedding load. It defaults to false: with no live signal the
+// endpoint refuses only on per-client budget (429); 503 activates when a
+// real shed signal lands.
+// TODO (coordinator 4/10): drive setIntentAdmissionShed from the live load
+// gauges (recent shed/429 counters, event-loop lag estimate, load-calendar
+// thresholds) so shed_load refusals reflect real server load.
+let intentAdmissionShed = false;
+export function setIntentAdmissionShed(active) { intentAdmissionShed = Boolean(active); }
+export function intentAdmissionStats() {
+  return { ...intentAdmissionCounters, shedding: intentAdmissionShed, activeIntents: intentAdmissionRegistry.size };
+}
+// Synchronous admission decision: prune expired intents, count this client's
+// active intents against the per-client cap, then consult the global shed
+// flag. Gauge reads only — no awaits, no store, no network. Returns a plain
+// object (never a promise): { admitted: true } or
+// { admitted: false, status, code, retryAfterMs, reason }.
+export function decideIntentAdmission(clientKey, windowSeconds, now = Date.now()) {
+  for (const [id, rec] of intentAdmissionRegistry) if (rec.expiresAt <= now) intentAdmissionRegistry.delete(id);
+  let active = 0, earliestExpiry = Infinity;
+  for (const rec of intentAdmissionRegistry.values()) {
+    if (rec.clientKey !== clientKey) continue;
+    active++;
+    if (rec.expiresAt < earliestExpiry) earliestExpiry = rec.expiresAt;
+  }
+  if (active >= INTENT_ADMISSION_PER_CLIENT_CAP) {
+    return { admitted: false, status: 429, code: "over_budget",
+      retryAfterMs: Math.max(1000, earliestExpiry - now),
+      reason: `Per-client probing-intent budget is ${INTENT_ADMISSION_PER_CLIENT_CAP} concurrent active intents; retry when the earliest window expires.` };
+  }
+  if (intentAdmissionShed) {
+    return { admitted: false, status: 503, code: "shed_load", retryAfterMs: 5000,
+      reason: "The server is shedding load, so the intent is not admitted. Retry after the Retry-After delay." };
+  }
+  return { admitted: true };
+}
+// Strict intent validation. Malformed intents reject with 400 invalid_intent.
+// Exported shape note for docs/openapi.yaml and server/discoverability.mjs.
+const validateIntentAdmission = data => {
+  const allowed = intentAdmissionFields(data && Object.hasOwn(data, "notes"));
+  if (!data || !exact(data, allowed)) reject(400, "invalid_intent",
+    `Intent must be exactly { ${intentAdmissionFields(false).join(", ")} } with an optional notes string`);
+  if (!INTENT_ADMISSION_KINDS.includes(data.kind)) reject(400, "invalid_intent",
+    `kind must be one of ${INTENT_ADMISSION_KINDS.join(" | ")}`);
+  const target = typeof data.target === "string" ? data.target.trim() : "";
+  if (!target || target.length > 384 || target.toLowerCase() === "production") reject(400, "invalid_intent",
+    'target must name the exact room or route ("production" alone is not a target)');
+  if (target.startsWith("api:") && target.length <= 4) reject(400, "invalid_intent",
+    "api: target must name a route path, e.g. api:/api/rooms/{roomId}/commands");
+  if (target.startsWith("scratch:") && target.length <= 8) reject(400, "invalid_intent",
+    "scratch: target must name a room id, e.g. scratch:abc123");
+  if (typeof data.rate_rps !== "number" || !Number.isFinite(data.rate_rps) || data.rate_rps <= 0)
+    reject(400, "invalid_intent", "rate_rps must be a finite number > 0");
+  if (!Number.isInteger(data.expected_total) || data.expected_total <= 0)
+    reject(400, "invalid_intent", "expected_total must be a positive integer");
+  if (!Number.isInteger(data.window_seconds) || data.window_seconds <= 0 || data.window_seconds > 3600)
+    reject(400, "invalid_intent", "window_seconds must be a positive integer of at most 3600");
+  if (Object.hasOwn(data, "notes") && (typeof data.notes !== "string" || data.notes.length > INTENT_ADMISSION_NOTES_MAX))
+    reject(400, "invalid_intent", `notes must be a string of at most ${INTENT_ADMISSION_NOTES_MAX} characters`);
+  return { kind: data.kind, target, rate_rps: data.rate_rps, expected_total: data.expected_total, window_seconds: data.window_seconds };
+};
+// Client identity for the per-client budget: the bearer credential's hash when
+// present (never the raw secret), otherwise the remote address. A malformed
+// Authorization header is NOT a 401 here — this endpoint is unauthenticated by
+// design, so garbage auth falls back to the address bucket.
+const intentAdmissionClientKey = (req, remoteAddress) => {
+  const header = req.headers.authorization;
+  const match = typeof header === "string"
+    ? /^[Bb][Ee][Aa][Rr][Ee][Rr] ([A-Za-z0-9_-]{43}|ga1\.[A-Za-z0-9_-]{43}|pri_[A-Za-z0-9_-]{43,128}|rak_[A-Za-z0-9_-]{16,128})$/.exec(header)
+    : null;
+  return match ? `intent-credential:${rateHash(match[1])}` : `intent-ip:${rateHash(String(remoteAddress ?? ""))}`;
+};
+
 // Least-recently-used bookkeeping for small internal caches (channel senders).
 // Returns the cached value for key, marking it most-recently-used; when key is
 // absent, makeValue() builds it, the least-recently-used entry is evicted at
@@ -2942,6 +3032,37 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // POST-only mint. GET must not look like a missing route (404) or an
       // auth challenge (401): there is nothing to authenticate.
       if ((url.pathname === "/api/agent-identities" || url.pathname === "/api/identity-create") && req.method !== "POST") {
+        reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
+      }
+      // Probing-intent admission (wave300, work item 3 — honest backpressure).
+      // This is the FAST PATH: it is deliberately NOT wrapped in rate() and
+      // sits outside the command admission gate, because a client asking "may
+      // I probe?" must never queue behind the work it describes. Validation
+      // is strict (400 invalid_intent); the decision is synchronous gauge
+      // reads only (decideIntentAdmission — no awaits on the refuse path).
+      // An admit records one bounded in-memory row; a refusal writes nothing.
+      if (url.pathname === "/api/admission/intent" && req.method === "POST") {
+        const data = await body(req);
+        const intent = validateIntentAdmission(data);
+        const clientKey = intentAdmissionClientKey(req, remoteAddress);
+        const decision = decideIntentAdmission(clientKey, intent.window_seconds);
+        if (!decision.admitted) {
+          intentAdmissionCounters[decision.code === "shed_load" ? "refusedShedLoad" : "refusedOverBudget"]++;
+          // Retry-After is seconds (ceil), matching the rate() convention.
+          res.setHeader("Retry-After", String(Math.ceil(decision.retryAfterMs / 1000)));
+          return json(res, decision.status, { admitted: false, code: decision.code, retryAfterMs: decision.retryAfterMs, reason: decision.reason });
+        }
+        const intentId = randomUUID();
+        if (intentAdmissionRegistry.size >= INTENT_ADMISSION_MAX_ROWS) {
+          // Bounded registry: evict the oldest-inserted row (Map insertion order).
+          intentAdmissionRegistry.delete(intentAdmissionRegistry.keys().next().value);
+        }
+        intentAdmissionRegistry.set(intentId, { clientKey, expiresAt: Date.now() + intent.window_seconds * 1000,
+          kind: intent.kind, target: intent.target, rate_rps: intent.rate_rps, expected_total: intent.expected_total });
+        intentAdmissionCounters.admits++;
+        return json(res, 200, { admitted: true, intentId, budget: { rate_rps: intent.rate_rps, expected_total: intent.expected_total } });
+      }
+      if (url.pathname === "/api/admission/intent") {
         reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
       }
       // Agent invite codes: redemption is unauthenticated (the code is the
