@@ -179,16 +179,16 @@ test("changeDescription labels a renewal 'Scope renewed'", () => {
 // ---------------------------------------------------------------------------
 // Part 2: the pure renewWork state machine
 // ---------------------------------------------------------------------------
-test("renewWork starts a fresh lease window from now", () => {
+test("renewWork starts a fresh lease window from now, preserving the prior duration", () => {
   const claimed = claimWork({ id: "w1" }, "quill", { leaseHours: 6, now: T0 });
   assert.equal(claimed.leaseStartAt, iso(T0));
   const renewed = renewWork(claimed, "quill", { now: T0 + 2 * H });
   assert.equal(renewed.leaseStartAt, iso(T0 + 2 * H));
-  assert.equal(renewed.leaseExpiresAt, iso(T0 + 26 * H)); // the room's default 24h
+  assert.equal(renewed.leaseExpiresAt, iso(T0 + 8 * H)); // the claim's own 6h window, not the 24h room default
   assert.equal(renewed.owner, "quill");
   assert.equal(renewed.state, "claimed");
   assert.equal(renewed.history.at(-1).action, "renewed");
-  assert.match(renewed.history.at(-1).note, /lease: 24h/);
+  assert.match(renewed.history.at(-1).note, /lease: 6h/);
 });
 
 test("renewWork records the caller's note in history", () => {

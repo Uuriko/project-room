@@ -486,12 +486,15 @@ export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, p
 }
 // Renew a claim's lease: starts a fresh lease window from now, extending
 // leaseExpiresAt by the lease duration (explicit leaseHours, else the
-// room's default). Only the owner may renew, only while the claim is
-// active, and only when the claim carries a lease (claims that opted out
-// of leases have nothing to renew; lapsed leases must be claimed again).
+// claim's existing window — never the room's 24h default, which silently
+// "upgraded" short crash-recovery leases). Only the owner may renew, only
+// while the claim is active, and only when the claim carries a lease (claims
+// that opted out of leases have nothing to renew; lapsed leases must be
+// claimed again).
 // The route layer requires the owner's public progress message — posted
 // in the room after the prior lease start — before calling this; the pure
-// machine records the renewal, never the message check.
+// machine records the renewal, never the message check. A renew with no
+// note is recorded as such in history so the missing check-in is visible.
 export function renewWork(work, agentId, { note, leaseHours, room, now } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can renew it`);
@@ -504,12 +507,20 @@ export function renewWork(work, agentId, { note, leaseHours, room, now } = {}) {
   // Explicit null opts out of leases, exactly like claimWork: the renewed
   // claim carries no lease window (it previously fell through to the room
   // default, contradicting claimWork's null handling).
-  const effective = wanted === null ? null : wanted ?? roomWorkClaimConfig(room).defaultLeaseHours;
+  // Crash-recovery guild (2026-10-07): an empty renew preserves the claim's
+  // existing lease window instead of the room default. Falling through to
+  // the 24h default defeated the short leases (0.25h–1h) crash-prone work
+  // depends on. Only a claim with no window on record uses the room default.
+  const current = item.leaseStartAt !== null
+    ? Math.max(0, (Date.parse(item.leaseExpiresAt) - Date.parse(item.leaseStartAt)) / 3600000)
+    : null;
+  const effective = wanted === null ? null : wanted ?? current ?? roomWorkClaimConfig(room).defaultLeaseHours;
+  const label = hours => `${Math.round(hours * 100) / 100}h`;
   const renewed = { ...item,
     leaseStartAt: effective === null ? null : isoOf(atMs),
     leaseExpiresAt: effective === null ? null : isoOf(atMs + effective * 3600 * 1000) };
   return withHistory(renewed, atMs, agent, "renewed",
-    note ?? (effective === null ? "lease removed" : `lease: ${effective}h`));
+    note ?? (effective === null ? "lease removed" : `lease: ${label(effective)} (no progress note recorded)`));
 }
 // Append one URL to the current claim round without replacing its lease or
 // evidence. A fresh duplicate is a byte-identical no-op; stale replay must

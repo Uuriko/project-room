@@ -1139,7 +1139,11 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       }
     }
     const renewed = runPure(reject, () => renewWork(item, caller,
-      { note: data.note, leaseHours: leaseHoursOfBody(data), room: roomLike, now: nowMs }));
+      // A cited progress message is the progress note when the caller gives
+      // no explicit note — the pure machine's "no progress note recorded"
+      // marker then fires only when there is genuinely no progress evidence.
+      { note: data.note ?? (progressId ? `progress: ${progressId}` : undefined),
+        leaseHours: leaseHoursOfBody(data), room: roomLike, now: nowMs }));
     commit(renewed, "renewed", { coalesce: true });
     return json(res, 200, renewed);
   }
