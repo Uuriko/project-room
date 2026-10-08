@@ -326,3 +326,23 @@ test("a session cookie without a bearer secret gets the anonymous MCP catalog", 
   const names = (await withBearer.json()).result.tools.map(tool => tool.name);
   assert.equal(names.includes("wake_register"), true);
 });
+
+test("wake.register and heartbeat.set reject cadenceSeconds above the 7-day bound", async t => {
+  // Round 29 regression (server/agent-heartbeats.mjs caps cadence at 7 days):
+  // the hosted MCP layer must reject an absurd cadence before it reaches the
+  // store — otherwise one heartbeat could read "online" indefinitely and the
+  // land queue would never wake the claimant.
+  const { origin, store, rooms } = await serve(t);
+  const owner = store.identities.create("Cadence owner");
+  roomFor(store, rooms, owner);
+  const over = await call(origin, "wake.register", { hostId: "host-1", wakeUrl: WAKE_URL, cadenceSeconds: 604801 }, owner.secret);
+  assert.equal(over.body.error.code, -32602);
+  assert.equal(over.body.error.data.reason, "invalid_arguments");
+  const absurd = await call(origin, "heartbeat.set", { hostId: "host-1", mode: "wakeable", wakeUrl: WAKE_URL, cadenceSeconds: 1e300 }, owner.secret);
+  assert.equal(absurd.body.error.code, -32602);
+  assert.equal(absurd.body.error.data.reason, "invalid_arguments");
+  const max = await call(origin, "wake.register", { hostId: "host-1", wakeUrl: WAKE_URL, cadenceSeconds: 604800 }, owner.secret);
+  assert.equal(max.body.error, undefined);
+  assert.equal(max.value.host.cadenceSeconds, 604800);
+  assert.equal(store.db.prepare("SELECT count(*) AS n FROM agent_hosts").get().n, 1, "only the in-bound registration landed");
+});
