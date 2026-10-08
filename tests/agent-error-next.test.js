@@ -117,6 +117,32 @@ test("shared mapper keeps error.code/message and adds status/reason/hint/next", 
   assert.match(wrongMethod.hint, /does not accept that HTTP method/);
   assert.match(wrongMethod.hint, /Allow header/);
   assert.doesNotMatch(wrongMethod.hint, /Unknown error/);
+  // QA 2026-10-07: identity_already_linked is idempotent success (the link is
+  // live), not a failure — the hint must say so instead of "check access",
+  // or agents mint duplicate identities retrying the link create.
+  const alreadyLinked = agentErrorAx({ httpStatus: 409, code: "identity_already_linked", message: "This identity is already linked to this room" });
+  assert.equal(alreadyLinked.reason, "identity_already_linked");
+  assert.match(alreadyLinked.hint, /earlier link is live/);
+  assert.match(alreadyLinked.hint, /do not mint another identity/);
+  assert.ok(alreadyLinked.next.some(step => step.tool === "room_check_access"));
+});
+
+test("challenge ch-2031: 405 hint does not promise an Allow header that usually isn't there", () => {
+  // QA challenge 2026-10-08 vs #2031: the merged hint asserted "the 405
+  // response carries an Allow header naming them". But 60 of 106 server 405
+  // reject() sites omit Allow (verified live 2026-10-08: POST
+  // /api/public/rooms/directory and POST /api/opportunities.json both 405
+  // with no Allow header). Sending the agent to read a header that usually
+  // doesn't exist is a new flavor of misleading hint — the same class of bug
+  // #2031 fixed. The hint must hedge: point at the header only as a
+  // possibility, and always name the route docs fallback.
+  const ax = agentErrorAx({ httpStatus: 405, code: "method_not_allowed", message: "Method not allowed" });
+  assertAx(ax, { reason: "method_not_allowed" });
+  assert.doesNotMatch(ax.hint, /carries an Allow header/,
+    "hint must not assert the Allow header is always present");
+  assert.match(ax.hint, /Allow header/); // still a valid lead when present
+  assert.match(ax.hint, /route docs/);   // always-available fallback
+  assert.doesNotMatch(JSON.stringify(ax.next), /carries an Allow header/);
 });
 
 test("public-work 409s teach: conflict names holder+lease expiry, stale says changed-vs-expired", () => {
