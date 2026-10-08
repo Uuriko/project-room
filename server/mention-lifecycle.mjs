@@ -126,6 +126,23 @@ export const mentionStateSchema = `
   );
 `;
 
+// Member id -> linked agent-identity display name. Mention detection and
+// mention delivery must resolve the same names: every @-resolution path
+// shares this map, or a mention the tracker records as delivered never wakes
+// its agent. Never throws: a database without the identity tables simply has
+// no identity aliases.
+export function identityNamesForRoom(db, roomId) {
+  try {
+    const links = db.prepare(
+      `SELECT l.member_id AS memberId, i.display_name AS displayName FROM identity_links l
+       JOIN agent_identities i ON i.identity_id=l.identity_id
+       WHERE l.room_id=? AND i.revoked_at IS NULL`).all(roomId);
+    return Object.fromEntries(links.map(row => [row.memberId, row.displayName]));
+  } catch {
+    return {};
+  }
+}
+
 // Resolve explicit @mentions using the longest complete label first, then
 // exact-id/name precedence and uniqueness. Never fall back from an ambiguous
 // longer label to a shorter recipient. Silent @_mentions, email addresses,

@@ -150,7 +150,7 @@ import { LandQueue, landQueueSchema, migrateLandQueueColumns } from "./land-queu
 import { MembersDirectory, membersDirectorySchema } from "./members-directory.mjs"; // RC-2026-09-24-202: members directory + skill cards.
 import {
   MENTION_TIMEOUT_MS_DEFAULT, MENTION_TIMEOUT_MS_MIN, MENTION_TIMEOUT_MS_MAX,
-  assertTransitionMention, resolveMentionTargetsInText, mentionStateSchema,
+  assertTransitionMention, identityNamesForRoom, resolveMentionTargetsInText, mentionStateSchema,
   mentionTargetWarnings,
 } from "./mention-lifecycle.mjs"; // #658: mention lifecycle state machine + schema.
 import { activitySchema, recordActivityEvents } from "./activity.mjs"; // Attention: activity feed, read horizons, saved messages, thread mutes.
@@ -981,14 +981,16 @@ const workSessionsNext = (roomId, sessions) => {
 };
 
 // Agent members a message.posted would wake: @mentions resolved the same way
-// as wake-on-mention (member id and display name, not identity aliases) plus
-// a DM addressed to an agent. Order is first appearance. The sender is never a target.
+// as mention tracking (member id, display name, and linked identity names)
+// plus a DM addressed to an agent. Order is first appearance. The sender is
+// never a target.
 // plan-squads: @squad/<name> also wakes agent members of the squad when db is passed.
 function agentWakeTargets(state, senderMemberId, data, db = null, roomId = "") {
   const members = state?.members ?? {};
   const targets = new Map();
   const body = typeof data?.body === "string" ? data.body : "";
-  for (const memberId of resolveMentionTargetsInText(members, {}, body, senderMemberId)) {
+  const identityNames = db ? identityNamesForRoom(db, roomId) : {};
+  for (const memberId of resolveMentionTargetsInText(members, identityNames, body, senderMemberId)) {
     if (members[memberId]?.kind !== "agent") continue;
     if (data?.toMemberId && data.toMemberId !== memberId) continue;
     if (!targets.has(memberId)) targets.set(memberId, "mention");
@@ -4920,7 +4922,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // skipped; the post still stands. The room event cap is unchanged.
   resumeRoundLimitPauses(roomId, state, senderMemberId, messageEvent, sequence) {
     const body = typeof messageEvent?.data?.body === "string" ? messageEvent.data.body : "";
-    const mentioned = new Set(resolveMentionTargetsInText(state.members ?? {}, {}, body, senderMemberId));
+    const mentioned = new Set(resolveMentionTargetsInText(state.members ?? {}, identityNamesForRoom(this.db, roomId), body, senderMemberId));
     const dmId = typeof messageEvent?.data?.toMemberId === "string" ? messageEvent.data.toMemberId : "";
     let next = state;
     let seq = sequence;
@@ -5014,14 +5016,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const body = typeof data.body === "string" ? data.body : "";
     if (!body.includes("@")) return [];
     const members = state?.members ?? {};
-    let identityNames = {};
-    try {
-      const links = this.db.prepare(
-        `SELECT l.member_id AS memberId, i.display_name AS displayName FROM identity_links l
-         JOIN agent_identities i ON i.identity_id=l.identity_id
-         WHERE l.room_id=? AND i.revoked_at IS NULL`).all(roomId);
-      for (const row of links) identityNames[row.memberId] = row.displayName;
-    } catch { identityNames = {}; }
+    const identityNames = identityNamesForRoom(this.db, roomId);
     const timeoutMs = this.mentionTimeoutMsFor(roomId);
     const insert = this.db.prepare(
       `INSERT OR IGNORE INTO mention_states
