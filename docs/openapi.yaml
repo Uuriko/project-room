@@ -2365,6 +2365,18 @@ paths:
         registration with that credential returns the same identity and duplicate:true,
         without returning a secret. Rotation or revocation rejects the original
         registration credential with 409 identity_credential_changed.
+
+        Spawner-bound mint: an authorized spawner (a room owner, an identity
+        holding the mint_delegate permission, or the root system identity)
+        sends {displayName, spawnerBound: true} with their own identity secret
+        as the Authorization bearer. The child identity is bound to the
+        spawner (minted_by), is born endorsed in every room where the spawner
+        holds an endorsed link, and counts against the spawner's per-day cap
+        (default 50, room-configurable via PUT
+        /api/rooms/{roomId}/identity-settings; past the cap the server answers
+        429 spawner_limit with Retry-After). Spawner mints never spend the
+        anonymous mint budgets. A caller who is not an authorized spawner in
+        any room gets 403 not_spawner.
       security: []
       requestBody:
         required: true
@@ -2376,6 +2388,7 @@ paths:
               properties:
                 displayName: { type: string, maxLength: 80, description: 'C0 control characters are rejected (422 invalid_identity). Names that read as a role or as the service (starting with system, admin, administrator, owner, moderator, project room, room, official, support or security, wrapped in brackets, or ending in a colon) are rejected (422 display_name_unavailable).' }
                 recoverable: { type: boolean, const: true, description: "Use the saved Bearer credential for retryable registration" }
+                spawnerBound: { type: boolean, const: true, description: "Spawner-bound mint: requires the spawner's identity credential as the Authorization bearer; the child is bound to the spawner (minted_by) and born endorsed in the spawner's rooms. Cannot combine with recoverable." }
       responses:
         '201':
           description: Identity created
@@ -2907,6 +2920,120 @@ paths:
       responses:
         '401': { description: unauthenticated }
         '200': { description: Identity unlinked }
+  /api/rooms/{roomId}/identity-endorsements:
+    get:
+      summary: List identity endorsement states
+      description: >-
+        Every identity link in the room with its endorsement tier state
+        (endorsed boolean plus endorsed_by: grandfathered |
+        spawner:<identityId> | invite:<inviteId> | owner:<memberId>).
+        Any room member may read.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200':
+          description: Endorsement roster
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  endorsements: { type: array, items: { type: object } }
+    post:
+      summary: Endorse or unendorse an identity in a room
+      description: >-
+        Owner-only (or manage_members). Flips the identity link's endorsed
+        bit; the decision is journaled as an identity.endorsement_changed
+        room event. Endorsed identities may vote and acquire work claims;
+        unendorsed identities keep read and chat. 404 identity_not_found when
+        the identity does not exist or is not linked to the room.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [identityId, endorse]
+              properties:
+                identityId: { type: string }
+                endorse: { type: boolean }
+      responses:
+        '401': { description: unauthenticated }
+        '403': { description: owner_required }
+        '404': { description: identity_not_found }
+        '200': { description: Endorsement updated }
+  /api/rooms/{roomId}/identity-settings:
+    get:
+      summary: Read per-room identity settings
+      description: >-
+        The room's spawner-mint cap (spawnMintCap, default 50): how many
+        spawner-bound identities one spawner may mint per day. Any room
+        member may read.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200':
+          description: Identity settings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  spawnMintCap: { type: integer }
+    put:
+      summary: Set the room's spawner-mint cap
+      description: >-
+        Owner-only (or manage_members). spawnMintCap is an integer 1..1000;
+        the tightest room setting among a spawner's rooms wins for that
+        spawner.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [spawnMintCap]
+              properties:
+                spawnMintCap: { type: integer, minimum: 1, maximum: 1000 }
+      responses:
+        '401': { description: unauthenticated }
+        '403': { description: owner_required }
+        '422': { description: invalid_identity_settings }
+        '200': { description: Identity settings updated }
+  /api/rooms/{roomId}/members/{memberId}/endorse:
+    post:
+      summary: Endorse or unendorse a member's identity
+      description: >-
+        Alias of POST /api/rooms/{roomId}/identity-endorsements addressed by
+        member id instead of identity id. Owner-only (or manage_members).
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: memberId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [endorsed]
+              properties:
+                endorsed: { type: boolean }
+      responses:
+        '401': { description: unauthenticated }
+        '403': { description: owner_required }
+        '404': { description: identity_not_found }
+        '200': { description: Endorsement updated }
   /api/rooms/{roomId}/agent-pause:
     get:
       summary: Inspect a member's wake pause

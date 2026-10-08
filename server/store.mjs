@@ -30,6 +30,8 @@ import {
   MAX_MESSAGE_BODY_CHARS, MAX_MESSAGE_COMMAND_BYTES
 } from "../src/events.js";
 import { PIN_COMMAND_SHAPES, isPinned } from "../src/events.js";
+import { pollOptionEmojis } from "../src/polls.js";
+import { canonicalReaction } from "../src/emoji.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { buildReturnBrief, resolveHistoryWindow, RETURN_BRIEF_DEFAULT_LIMIT } from "./return-brief.mjs";
 import { enforceSpendAllowance } from "./spend-allowance.mjs";
@@ -96,7 +98,7 @@ import { GuestAgentLinks, isRoomAccessToken, isGuestAgentMemberId } from "./gues
 import { GuestInvites, guestInviteSchema, guestSelfServeSchema } from "./guest-invites.mjs";
 import { WebFetch, webFetchSchema, migrateWebFetchLogColumns } from "./web-fetch.mjs";
 import { WebResearch, webResearchSchema } from "./web-research.mjs"; // RC-2026-09-24-310: knowledge router (additive)
-import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensureIdentityCapacitySchema, ensureIdentityLinkCodeSchema, identityLinkCodeSchema, isIdentitySecret } from "./agent-identities.mjs";
+import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensureIdentityCapacitySchema, ensureIdentityLinkCodeSchema, ensureIdentityDisciplineSchema, identityLinkCodeSchema, identitySettingsSchema, isIdentitySecret } from "./agent-identities.mjs";
 import { AgentKeyRegistry, agentKeyRegistrySchema } from "./agent-key-registry.mjs"; // Integration map slice 9: agent public-key registry.
 import { AttestedVotes, attestedVoteSchema } from "./attested-votes.mjs"; // Identity-sybil guild W6: attested-ballot protocol (additive).
 // Board v2 is retired. These tables stay so existing databases and the
@@ -704,11 +706,13 @@ const shapes = {
   // --- end GR2 ---
   [T.ROOM_ARCHIVED]: "reason",
   [T.OWNERSHIP_TRANSFERRED]: "toMemberId reason",
-  [T.MEMBER_ADDED]: "memberId displayName kind permissions accountableHumanId identityId agentType referredBy",
+  [T.MEMBER_ADDED]: "memberId displayName kind permissions accountableHumanId identityId agentType referredBy spawnedBy",
   [T.MEMBER_ACCESS_CHANGED]: "memberId expectedMemberRevision permissions active",
   [T.MEMBER_STATUS_UPDATED]: "memberId message",
   [T.NOTIFICATION_PREFERENCES_SET]: "preferences",
   [T.MEMBER_MUTE_SET]: "memberId muted",
+  // Identity discipline: endorsement flips are journaled, never projected.
+  [T.IDENTITY_ENDORSEMENT_CHANGED]: "identityId memberId endorsed endorsedBy",
   [T.MESSAGE_POSTED]: `messageId body channelId workItemId replyToId toMemberId packetId basisRevision allowOlderBasis alsoSendToChannel kind poll ${REPLY_FIELDS.join(" ")}`,
   [T.MESSAGE_EDITED]: "messageId body expectedMessageRevision",
   [T.MESSAGE_DELETED]: "messageId expectedMessageRevision reason",
@@ -795,7 +799,7 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "scopes", "pullRequests", "blocks"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence", "poll"].includes(name) ? "object" : "string";
+    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", "endorsed", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "scopes", "pullRequests", "blocks"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence", "poll"].includes(name) ? "object" : "string";
     if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : type === "outputs" ? !(typeof value === "string" || (Array.isArray(value) && value.every(v => typeof v === "string"))) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (command.type === T.MESSAGE_POSTED && (typeof command.data.body !== "string" || !command.data.body.trim())) fail(422, "invalid_command", messageBody);
@@ -1026,6 +1030,7 @@ export const ADDITIVE_SCHEMA_ENSURES = [
   [ensureIdentitySecretSchema, "ensureIdentitySecretSchema@1"],
   [ensureIdentityCapacitySchema, "ensureIdentityCapacitySchema@1"],
   [ensureIdentityLinkCodeSchema, "ensureIdentityLinkCodeSchema@1"],
+  [ensureIdentityDisciplineSchema, "ensureIdentityDisciplineSchema@1"],
   [ensureAutonomyTiersSchema, "ensureAutonomyTiersSchema@1"],
   [ensureOperatorActionsSchema, "ensureOperatorActionsSchema@1"],
   [ensureGrantsSchema, "ensureGrantsSchema@1"],
@@ -1067,7 +1072,8 @@ function roomSchemaStamp() {
     // stamp matches skips the whole schema pass, so any DDL the pass applies
     // must be hashed here or a room stamped by an older deploy never gets it
     // (the priced-tool 500: spend_authorizations missing on muse-room).
-    updatesSchema, GRANTS_SCHEMA, SPEND_GRANTS_SCHEMA, AUTONOMY_TIERS_SCHEMA, identityLinkCodeSchema
+    updatesSchema, GRANTS_SCHEMA, SPEND_GRANTS_SCHEMA, AUTONOMY_TIERS_SCHEMA, identityLinkCodeSchema,
+    identitySettingsSchema
   ];
   for (const part of parts) hash.update("\0").update(part ?? "");
   for (const [, label] of ADDITIVE_SCHEMA_ENSURES) hash.update("\0").update(label);
@@ -1181,6 +1187,14 @@ export class RoomStore {
     this.storagePlatform = storagePlatform;
     this.shareLinks = new ShareLinks(this);
     this.identities = new AgentIdentities(this, { hashKey: identityHashKey });
+    // Identity discipline (identity-sybil guild §§2-4): the attested-ballot
+    // protocol (§7, server/attested-votes.mjs) gates ballots through this
+    // seam. The endorsement-tier worker provides the real per-room tier:
+    // endorsed-only, and an identity with no link in the room is not
+    // endorsed. Overridable per store (tests pin it).
+    this.endorsementTiers = {
+      isEndorsed: (roomId, identityId) => this.identities.endorsementOf(roomId, identityId)?.endorsed === true,
+    };
     this.delegation = new MembershipDelegation(this);
     this.delegationJournal = new MembershipDelegationJournal(this);
     this.ownerDelegates = new OwnerDelegates(this);
@@ -1410,6 +1424,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // as "not revoked". Follows the spam-quarantine column pattern (PR #562).
       ensureIdentitySecretSchema(this.db);
       ensureIdentityCapacitySchema(this.db);
+      // Identity discipline (identity-sybil guild spec §§2-4): endorsement
+      // tier columns + grandfathering, minted_by, room_identity_settings.
+      ensureIdentityDisciplineSchema(this.db);
       // RC-2026-09-24-210: identity link codes (proof-of-possession for
       // identityId enrollment) converge the same additive way — IF NOT
       // EXISTS is idempotent, no schema version bump, intentionally
@@ -1441,6 +1458,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // so store-only fixtures and the recovery audit see it.
       this.db.exec(agentKeyRegistrySchema);
       // Identity-sybil guild W6: attested-ballot tables (vote_rooms,
+      // voter_allowlist, voter_registrations, vote_challenges,
+      // attested_ballots) are purely additive — IF NOT EXISTS is idempotent,
+      // no schema version bump, intentionally outside the writer fence (see
+      // unfencedAdditiveTables). Applied here so upgrades, store-only
+      // fixtures, and the recovery audit see the tables.
       this.db.exec(attestedVoteSchema);
       // PR #1144: board-v2 durable registry (claims/events/mirror/idempotency)
       // is purely additive — IF NOT EXISTS is idempotent, no schema version
@@ -4581,6 +4603,18 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
       const room = this.room(roomId);
       refuseArchivedWrite(room.state);
+      // Identity discipline (identity-sybil guild spec §2.2): poll votes are
+      // endorsed-only. A reaction that sets a poll option emoji is a ballot;
+      // reactions on ordinary messages stay on the read/chat tier. The room
+      // owner is exempt (admission authority); humans and non-identity
+      // members have no tier. Live path only — replay never reaches here.
+      if (command.type === T.MESSAGE_REACTION_SET && command.data?.active === true) {
+        const target = room.state.messages.find(message => message.id === command.data.messageId);
+        const voteKey = canonicalReaction(command.data.reaction);
+        if (target?.kind === "poll" && voteKey && pollOptionEmojis(target).includes(voteKey)) {
+          this.identities.requireEndorsed(roomId, auth, { ownerId: room.state.room?.ownerId });
+        }
+      }
       if (command.type === T.MESSAGE_POSTED && typeof command.data.toMemberId === "string" && command.data.toMemberId) {
         // DMs are open by default: only an explicit denial (blocked /
         // rejected / revoked) refuses. Runs before the event is built, so a

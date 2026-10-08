@@ -1,5 +1,5 @@
 import { WORK_HELP_UPDATED, helpFromEvent, validateHelp } from "../src/work-help.js";
-import { PERMISSIONS, validId, WORK_REVISION_TYPES } from "../src/events.js";
+import { PERMISSIONS, OWNER_PERMISSIONS, validId, WORK_REVISION_TYPES } from "../src/events.js";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, helpOfferFromEvent } from "../src/help-offers.js";
 
 const own = (value, key) => value != null && Object.hasOwn(value, key);
@@ -67,7 +67,7 @@ export function auditWorkHelp(state, history, checkpoint = null) {
       // participant, so all of it has to be replayed or none of it matches.
       const incomingOwner = projected.members[d.toMemberId];
       const outgoingOwner = projected.members[projected.room.ownerId];
-      incomingOwner.permissions = [...PERMISSIONS];
+      incomingOwner.permissions = [...OWNER_PERMISSIONS];
       incomingOwner.revision += 1;
       if (outgoingOwner && outgoingOwner.kind === "agent") {
         outgoingOwner.permissions = outgoingOwner.permissions.filter(name => !["manage_members", "decide"].includes(name));

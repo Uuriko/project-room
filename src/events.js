@@ -108,7 +108,13 @@ export const EVENT_TYPES = Object.freeze({
   WORK_CLAIM_UPDATED: "work_claim.updated",
   // ACT-1a: a room's starter task and Room Guide were seeded once.
   // ACT-1b (/start, landing, receipt UI) waits on S1, RT, and GR2 deployed.
-  ROOM_STARTER_SEEDED: "room.starter_seeded"
+  ROOM_STARTER_SEEDED: "room.starter_seeded",
+  // Identity discipline (identity-sybil guild): the room owner (or a
+  // manage_members holder) flipped an identity link's endorsement bit.
+  // The identity_links table is the source of truth; this event is the
+  // timeline-visible, notification-driving audit record. The handler
+  // validates the envelope and records nothing in the projection.
+  IDENTITY_ENDORSEMENT_CHANGED: "identity.endorsement_changed"
 });
 
 // Room channels (Phase 2 of the Discord/Slack-like redesign): every room has
@@ -362,7 +368,17 @@ function setSpendAllowance(state, incoming) {
   };
 }
 
-export const PERMISSIONS = Object.freeze(["steer", "decide", "manage_members", "manage_claims", "accept_work", "complete_work", "verify", "write_external", "invite_member"]);
+export const PERMISSIONS = Object.freeze(["steer", "decide", "manage_members", "manage_claims", "accept_work", "complete_work", "verify", "write_external", "invite_member", "mint_delegate"]);
+// The owner grant: every permission except mint_delegate. Room owners are
+// authorized spawners by identity (not by holding the bit), so omitting it
+// changes nothing for owners — and it keeps owner-grant events replayable by
+// older runtimes, which reject unknown permission vocabulary.
+export const OWNER_PERMISSIONS = Object.freeze(PERMISSIONS.filter(p => p !== "mint_delegate"));
+// Identity discipline (identity-sybil guild): "mint_delegate" lets a room
+// member mint spawner-bound child identities (server/agent-identities.mjs
+// spawnChild). It is an admin-adjacent grant — only the room owner (or a
+// member holding manage_members) may confer it, and it never appears in
+// the agent-safe invite set or auto-approve rules.
 
 // Spend-pricing kill switch: the owner can disable the priced-tool gate for
 // the room (room.spend_pricing_set). Event-sourced and carried on the
@@ -398,7 +414,10 @@ export const AGENT_AUTONOMY_PERMISSIONS = Object.freeze(["steer", "accept_work",
 // invite_member holders may mint these without holding them; they cannot
 // grant manage_members/decide/invite_member via invite-code.
 export const AGENT_INVITE_SAFE_PERMISSIONS = AGENT_AUTONOMY_PERMISSIONS;
-export const AGENT_ADMIN_PERMISSIONS = Object.freeze(["manage_members", "decide"]);
+export const AGENT_ADMIN_PERMISSIONS = Object.freeze(["manage_members", "decide", "mint_delegate"]);
+// "mint_delegate" is admin-adjacent: only the room owner (or an explicit
+// owner grant) may confer it on an agent member, and it never rides the
+// agent-safe invite path.
 
 // Owner, manage_members, or invite_member (agents may hold invite_member
 // without manage_members/decide). Used by invite-code mint/redeem.
@@ -587,7 +606,8 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.DM_POSTED]: recordPeerDm,
     [EVENT_TYPES.LAND_UPDATED]: recordLandUpdate,
     [EVENT_TYPES.WORK_CLAIM_UPDATED]: recordWorkClaimUpdate,
-    [EVENT_TYPES.ROOM_STARTER_SEEDED]: recordStarterSeeded
+    [EVENT_TYPES.ROOM_STARTER_SEEDED]: recordStarterSeeded,
+    [EVENT_TYPES.IDENTITY_ENDORSEMENT_CHANGED]: recordIdentityEndorsement
   };
   const handler = handlers[incoming.type];
   if (!Object.hasOwn(handlers, incoming.type)) throw new Error(`Unsupported event type: ${incoming.type}`);
@@ -854,7 +874,7 @@ function transferOwnership(state, incoming) {
   }
   const previous = state.room.ownerId;
   const previousOwner = state.members[previous];
-  target.permissions = [...PERMISSIONS];
+  target.permissions = [...OWNER_PERMISSIONS];
   target.revision += 1;
   // Ownership supersedes delegation: the new owner is authoritative in its
   // own right, never a delegated admin.
@@ -873,16 +893,34 @@ function transferOwnership(state, incoming) {
 
 function addMember(state, incoming) {
   requireFields(incoming.data, ["memberId", "displayName", "kind", "permissions"]);
+  let spawnerAdd = false;
   const memberId = incoming.data.memberId;
   if (Object.hasOwn(state.members, memberId)) throw new Error("Member already exists");
   const isBootstrapOwner = Object.keys(state.members).length === 0 && memberId === state.room.ownerId;
   if (isBootstrapOwner && incoming.actorId !== memberId) throw new Error("Only the owner may bootstrap membership");
   if (!isBootstrapOwner) {
+    // Identity discipline: a spawner-bound mint (server/agent-identities.mjs
+    // spawnChild) links the child with the default autonomy profile. The
+    // actor must hold mint_delegate in this room; the spawnedBy marker is
+    // the audit trail (replay sees the same grant state, so the decision
+    // is stable). The authorityPolicyVersion stamp is omitted on this
+    // path — mint_delegate is the authority, not membership administration.
+    const spawnedBy = incoming.data.spawnedBy;
+    // NOTE: assigned to the function-scoped `spawnerAdd` declared above;
+    // the spawner path also bypasses requireScopedMemberAdministration
+    // below (a mint_delegate holder authorizes the mint without holding the
+    // autonomy permissions being granted; the profile is fixed to the
+    // autonomy set here, so there is no privilege-escalation vector).
+    spawnerAdd = incoming.data.kind === "agent"
+      && typeof spawnedBy === "string" && spawnedBy.length > 0
+      && Array.isArray(incoming.data.permissions)
+      && incoming.data.permissions.every(p => AGENT_AUTONOMY_PERMISSIONS.includes(p))
+      && memberCan(state, incoming.actorId, "mint_delegate");
     const agentSafeInvite = incoming.data.kind === "agent"
       && Array.isArray(incoming.data.permissions)
       && !incoming.data.permissions.some(p => AGENT_ADMIN_PERMISSIONS.includes(p));
     if (agentSafeInvite) {
-      if (!canInviteMembers(state, incoming.actorId)) throw new Error(`${incoming.actorId} lacks invite_member`);
+      if (!spawnerAdd && !canInviteMembers(state, incoming.actorId)) throw new Error(`${incoming.actorId} lacks invite_member`);
     } else {
       requirePermission(state, incoming.actorId, "manage_members");
     }
@@ -894,9 +932,9 @@ function addMember(state, incoming) {
   // marked on the event + projection via delegatedAdmin below.
   const isOwnerGrant = !isBootstrapOwner && incoming.actorId === state.room.ownerId;
   validatePermissions(incoming.data.permissions, incoming.data.kind, isBootstrapOwner, isOwnerGrant);
-  if (!isBootstrapOwner && incoming.data.authorityPolicyVersion === MEMBERSHIP_AUTHORITY_POLICY_VERSION) {
+  if (!isBootstrapOwner && !spawnerAdd && incoming.data.authorityPolicyVersion === MEMBERSHIP_AUTHORITY_POLICY_VERSION) {
     requireScopedMemberAdministration(state, incoming.actorId, memberId, null, incoming.data.permissions);
-  } else if (incoming.data.authorityPolicyVersion != null && incoming.data.authorityPolicyVersion !== 1) {
+  } else if (!spawnerAdd && incoming.data.authorityPolicyVersion != null && incoming.data.authorityPolicyVersion !== 1) {
     throw new Error("Unsupported membership authority policy");
   }
   if (incoming.data.accountableHumanId && (!isBootstrapOwner || incoming.data.accountableHumanId !== memberId)) {
@@ -1754,6 +1792,27 @@ function recordWorkClaimUpdate(state, incoming) {
   if (data.ciState !== undefined && !["pending", "success", "failure", "neutral"].includes(data.ciState)) throw new Error("Event data missing ciState");
   if (data.verdict !== undefined && !["approve", "changes_requested", "comment"].includes(data.verdict)) throw new Error("Event data missing verdict");
   if (data.action === "ci_changed" && (data.reason !== "ci_changed" || !data.ciState)) throw new Error("Event data missing ciState");
+}
+
+// Identity discipline: journal record of an endorsement flip. The
+// identity_links table stays the source of truth; this validates the
+// envelope and records nothing in the projection, so a projection copy
+// can never go stale.
+function recordIdentityEndorsement(state, incoming) {
+  requireFields(incoming.data, ["identityId", "memberId", "endorsed", "endorsedBy"]);
+  const { identityId, memberId, endorsed, endorsedBy } = incoming.data;
+  if (typeof identityId !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(identityId)) throw new Error("endorsement identityId must be valid");
+  if (typeof memberId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(memberId)) throw new Error("endorsement memberId must be valid");
+  if (typeof endorsed !== "boolean") throw new Error("endorsement endorsed must be a boolean");
+  if (typeof endorsedBy !== "string" || !endorsedBy.startsWith("owner:")) throw new Error("endorsement endorsedBy must name the deciding member");
+  requireMember(state, memberId);
+  // The decider must hold membership administration at journal time.
+  const decider = String(endorsedBy.slice("owner:".length));
+  const authority = state.members[decider];
+  if (!authority || authority.active === false) throw new Error("endorsement decider must be an active member");
+  if (decider !== state.room.ownerId && !(authority.permissions ?? []).includes("manage_members")) {
+    throw new Error("endorsement requires the room owner or manage_members");
+  }
 }
 
 function recordReferral(state, incoming) {

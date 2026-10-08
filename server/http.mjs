@@ -56,7 +56,7 @@ import { mcpAttachmentBodyBytes } from "./room-attachment-bytes.mjs";
 import { createHostedRoomMcp } from "./mcp-room-profile.mjs";
 import { diagnoseArguments } from "./mcp-arg-errors.mjs";
 import { collectNeedsMe } from "./needs-me.mjs";
-import { isIdentitySecret } from "./agent-identities.mjs";
+import { isIdentitySecret, identityClusterKey } from "./agent-identities.mjs";
 import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomAppUrl } from "../deploy/room-entry.mjs";
 import { guestAgentLinkContract, GUEST_AGENT_TOKEN_PREFIX, isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { isWebFetchGuest, WebFetchError } from "./web-fetch.mjs";
@@ -698,6 +698,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     }
     if (entry.n > maximum) throw new ServiceError(429, "rate_limited", "Too many requests; retry after a minute",
       { "X-RateLimit-Limit": maximum, "X-RateLimit-Remaining": 0, "X-RateLimit-Reset": Math.ceil(entry.until / 1000) });
+  }
+  // Cluster-pooled write budget (AQ-HI-09 / AQ-MD-11): identities in one
+  // mint cluster share a single 60/min write bucket instead of 60N/min for
+  // N identities. The cluster key derives from the minted_by tree and the
+  // growth-loop mint columns (first observation sticks). Solo identities —
+  // no shared mint signals, not spawner-descended — keep their
+  // credential-keyed bucket, so single-identity users see zero change.
+  function writeBucketId(auth) {
+    const key = auth?.identityId ? identityClusterKey(store.db, auth.identityId) : null;
+    return key ? `write:cluster:${key}` : `write:${auth.credentialHash}`;
   }
   function cookie(req, name) {
     const scoped = scopedCookieName(name);
@@ -2897,6 +2907,24 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if ((url.pathname === "/api/agent-identities" || url.pathname === "/api/identity-create") && req.method === "POST") {
         rate(`identity-create:${remoteAddress}`, 30);
         const data = await body(req);
+        // Spawner-bound mint (identity-sybil guild spec §3): the Authorization
+        // bearer is the spawner's identity secret; the child is bound to the
+        // spawner (minted_by), born endorsed in the spawner's rooms, and
+        // counts against the spawner's per-day cap — never the anonymous
+        // budgets. 403 unless the caller is an authorized spawner; 429
+        // spawner_limit with Retry-After past the cap.
+        if (data?.spawnerBound === true) {
+          if (!exact(data, ["displayName", "spawnerBound"]) || typeof data.displayName !== "string"
+            || data.spawnerBound !== true) reject(422, "invalid_identity", "Send exactly {displayName, spawnerBound: true}");
+          const spawnerSecret = bearer(req);
+          if (!spawnerSecret || !isIdentitySecret(spawnerSecret))
+            reject(401, "unauthenticated", "Spawner identity secret required. Mint with no Authorization header for an anonymous identity.");
+          const spawnerSlot = cookie(req, accountCookieName);
+          const spawned = store.identities.spawnChild({ displayName: data.displayName, spawnerSecret,
+            address: String(remoteAddress ?? ""), session: spawnerSlot || null });
+          noteIdentityMint(store, spawned.identityId, { address: String(remoteAddress ?? ""), session: spawnerSlot || null });
+          return json(res, 201, spawned);
+        }
         const hasProof = Boolean(data) && Object.hasOwn(data, "proof");
         const recoverable = data?.recoverable === true;
         const fields = ["displayName", ...(recoverable ? ["recoverable"] : []), ...(hasProof ? ["proof"] : [])];
@@ -3202,7 +3230,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
         protectWrite(req, auth, selected.bearer);
-        rate(`write:${auth.credentialHash}`, 60);
+        rate(writeBucketId(auth), 60);
         const data = await body(req);
         // JDOT-COH-UPDATES-BASIS begin
         // Missing expectedBasis can reach only an authenticated legacy receipt;
@@ -3273,7 +3301,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
         protectWrite(req, auth, selected.bearer);
-        rate(`write:${auth.credentialHash}`, 60);
+        rate(writeBucketId(auth), 60);
         const data = await body(req);
         try {
           if (action === "add_land_item") {
@@ -3340,7 +3368,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: fileId ? "POST" : "GET, POST" });
         protectWrite(req, auth, selected.bearer);
-        rate(`write:${auth.credentialHash}`, 60);
+        rate(writeBucketId(auth), 60);
         if (fileId) {
           const data = await body(req);
           if (!exact(data, ["messageId"]) || typeof data.messageId !== "string") reject(422, "invalid_message", "messageId is required");
@@ -3366,7 +3394,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const projectOfferWithdrawMatch = /^\/api\/rooms\/([^/]{1,384})\/project-offers\/([^/]{1,128})\/withdraw$/.exec(url.pathname);
       const projectOfferClaimsMatch = /^\/api\/rooms\/([^/]{1,384})\/project-offers\/([^/]{1,128})\/claims$/.exec(url.pathname);
       const projectOfferActionMatch = projectOfferPublishMatch ?? projectOfferWithdrawMatch ?? projectOfferClaimsMatch;
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|conversation|stream|cursor|project-offers|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|outside-agents|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|orient|verification-policy|dm-consents|bonds|peer-dms|directory|opportunities|public-face|needs-attention|jev-shadow|mentions|open-questions|human-push|thread-mutes|referrals|referral-invites|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|conversation|stream|cursor|project-offers|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|outside-agents|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|identity-endorsements|identity-settings|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|orient|verification-policy|dm-consents|bonds|peer-dms|directory|opportunities|public-face|needs-attention|jev-shadow|mentions|open-questions|human-push|thread-mutes|referrals|referral-invites|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -3414,6 +3442,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // plan-dir-card: a member's directory card (owns[] + reach{}) for
       // the member chip, and the owner-only directory seed.
       const memberCardMatch = /^\/api\/rooms\/([^/]{1,384})\/members\/([^/]{1,64})\/card$/.exec(url.pathname);
+      // Identity discipline: owner/manage_members flips one member's identity
+      // endorsement bit (spec §4.3; alias of POST identity-endorsements).
+      const memberEndorseMatch = /^\/api\/rooms\/([^/]{1,384})\/members\/([^/]{1,64})\/endorse$/.exec(url.pathname);
       const dirSeedMatch = /^\/api\/rooms\/([^/]{1,384})\/directory\/seed$/.exec(url.pathname);
       // Public-face controls (owner only): status/toggle at the funnel root, rotate below.
       const publicFaceRotateMatch = /^\/api\/rooms\/([^/]{1,384})\/public-face\/rotate$/.exec(url.pathname);
@@ -3570,7 +3601,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         && !dmConsentDecideMatch && !dmConsentBlockMatch && !dmConsentRevokeMatch && !dmConsentUnblockMatch && !publicFaceRotateMatch
         && !peerDmThreadMatch && !operatorAgentMatch
         && !mentionAckMatch && !mentionSettingsMatch && !savedDeleteMatch && !memberDeactivateMatch
-        && !memberCardMatch && !dirSeedMatch
+        && !memberCardMatch && !memberEndorseMatch && !dirSeedMatch
         && !agentGrantsMatch && !agentGrantDeleteMatch && !agentCapabilitiesMatch
         && !matchmakingMatch) reject(404, "not_found", "Not found");
       const roomId = pathId((publicWorkRoomReviewMatch ?? projectOfferActionMatch ?? match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? delegationGrantMatch ?? delegationRevokeMatch ?? delegationListMatch ?? ownerDelegateGrantMatch ?? ownerDelegateRevokeMatch ?? ownerDelegateListMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch
@@ -3578,7 +3609,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         ?? dmConsentDecideMatch ?? dmConsentBlockMatch ?? dmConsentRevokeMatch ?? dmConsentUnblockMatch ?? publicFaceRotateMatch
         ?? peerDmThreadMatch ?? operatorAgentMatch
         ?? mentionAckMatch ?? mentionSettingsMatch ?? savedDeleteMatch ?? memberDeactivateMatch
-        ?? memberCardMatch ?? dirSeedMatch
+        ?? memberCardMatch ?? memberEndorseMatch ?? dirSeedMatch
         ?? agentGrantsMatch ?? agentGrantDeleteMatch ?? agentCapabilitiesMatch ?? matchmakingMatch)[1]);
       // NOTE: matchmakingMatch must stay in the roomId chain above — it was
       // added to the 404 guard but forgotten here, so every matchmaking
@@ -3600,6 +3631,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         : agentCapabilitiesMatch ? "agent-capabilities"
         : mentionAckMatch ? "mention-ack" : mentionSettingsMatch ? "mention-settings" : savedDeleteMatch ? "saved-delete"
         : memberDeactivateMatch ? "member-deactivate"
+        : memberEndorseMatch ? "member-endorse"
         : memberCardMatch ? "member-card" : dirSeedMatch ? "directory-seed"
         : "ownership-transfer";      const selected = roomCredentials(req, url);
       const fence = selected.mode === "account" ? accountBinding(req, route === "stream" ? url : null) : expectedBinding(req);
@@ -3607,7 +3639,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (selected.bearer && auth.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
       if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
       rate(`read:${auth.credentialHash}`, 600);
-      if (!["GET", "HEAD"].includes(req.method)) { protectWrite(req, auth, selected.bearer); rate(`write:${auth.credentialHash}`, 60); }
+      if (!["GET", "HEAD"].includes(req.method)) { protectWrite(req, auth, selected.bearer); rate(writeBucketId(auth), 60); }
       // RC-2026-09-18-012: API-key callers are confined to their stored
       // scopes on every room route — reads need rooms:read, writes need
       // rooms:write. Owner identity secrets and room credentials are
@@ -4136,6 +4168,46 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return json(res, 200, store.identities.unlink(selected.token, roomId, data.identityId, fence));
         }
         reject(405, "method_not_allowed", "Method not allowed");
+      }
+      if (route === "identity-endorsements") {
+        // Identity discipline: the per-room endorsement tier (spec §§2,4).
+        // GET lists every link with its tier state; POST flips one link's
+        // bit (owner or manage_members; journaled as identity.endorsement_changed).
+        if (req.method === "GET") {
+          return json(res, 200, { roomId, endorsements: store.identities.listEndorsements(selected.token, roomId, fence) });
+        }
+        if (req.method === "POST") {
+          const data = await body(req);
+          if (!data || !exact(data, ["identityId", "endorse"]) || typeof data.identityId !== "string"
+            || typeof data.endorse !== "boolean") reject(422, "invalid_endorsement", "Send exactly {identityId, endorse: boolean}");
+          return json(res, 200, store.identities.setEndorsement(selected.token, roomId,
+            { identityId: data.identityId, endorsed: data.endorse }, fence));
+        }
+        reject(405, "method_not_allowed", "Method not allowed");
+      }
+      if (route === "identity-settings") {
+        // Identity discipline: per-room spawner-mint settings (spec §3.3).
+        if (req.method === "GET") {
+          return json(res, 200, { roomId, spawnMintCap: store.identities.getSpawnMintCap(roomId) });
+        }
+        if (req.method === "PUT") {
+          const data = await body(req);
+          if (!data || !exact(data, ["spawnMintCap"])) reject(422, "invalid_identity_settings", "Send exactly {spawnMintCap}");
+          return json(res, 200, store.identities.setSpawnMintCap(selected.token, roomId, data.spawnMintCap, fence));
+        }
+        reject(405, "method_not_allowed", "Method not allowed");
+      }
+      if (route === "member-endorse") {
+        // Alias of POST identity-endorsements addressed by member id.
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+        const data = await body(req);
+        if (!data || !exact(data, ["endorsed"]) || typeof data.endorsed !== "boolean")
+          reject(422, "invalid_endorsement", "Send exactly {endorsed: boolean}");
+        const targetMemberId = pathId(memberEndorseMatch[2]);
+        const targetIdentityId = store.identities.identityIdForMember(roomId, targetMemberId);
+        if (!targetIdentityId) reject(404, "identity_not_found", "No agent identity is linked to that member");
+        return json(res, 200, store.identities.setEndorsement(selected.token, roomId,
+          { identityId: targetIdentityId, endorsed: data.endorsed }, fence));
       }
       if (route === "agent-invites") {
         // One-time agent invite codes: owner-only issuance, audit, revocation.

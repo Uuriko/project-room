@@ -15,7 +15,7 @@
 // for the pilot bound. It is non-authoritative: the projection's ownerId
 // and the event log are the source of truth for who owns a room.
 import { randomBytes, randomUUID } from "node:crypto";
-import { EVENT_TYPES as T, PERMISSIONS, event, validId, ROOM_KINDS, HISTORY_DEFAULTS_VERSION } from "../src/events.js";
+import { EVENT_TYPES as T, PERMISSIONS, OWNER_PERMISSIONS, event, validId, ROOM_KINDS, HISTORY_DEFAULTS_VERSION } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
 import { nextActionsForRoomCreate } from "./discoverability.mjs";
@@ -213,11 +213,13 @@ export class AgentRooms {
       // full owner permission set (bootstrap owner path in addMember).
       this.store.initialize([
         event({ type: T.ROOM_CREATED, actorId: memberId, roomId, at, data: { roomId, ownerId: memberId, title, purpose, kind, historyDefaultsVersion: HISTORY_DEFAULTS_VERSION } }), // PRIV-2
-        event({ type: T.MEMBER_ADDED, actorId: memberId, roomId, at, data: { memberId, displayName, kind: "agent", permissions: [...PERMISSIONS], identityId: identity.identityId } })
+        event({ type: T.MEMBER_ADDED, actorId: memberId, roomId, at, data: { memberId, displayName, kind: "agent", permissions: [...OWNER_PERMISSIONS], identityId: identity.identityId } })
       ]);
       // Link the identity so its pri_ secret authenticates to the new room.
-      this.store.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
-        .run(roomId, identity.identityId, memberId, this.store.now());
+      // Identity discipline: the founding owner is endorsed in their own
+      // room (they are the admission authority).
+      this.store.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at,endorsed,endorsed_by) VALUES(?,?,?,?,1,?)")
+        .run(roomId, identity.identityId, memberId, this.store.now(), `owner:${memberId}`);
       this.store.db.prepare("INSERT INTO agent_room_ownership(identity_id,room_id,created_at) VALUES(?,?,?)")
         .run(identity.identityId, roomId, this.store.now());
       if (fundedByGrowth) {

@@ -64,7 +64,10 @@ function claimBoard(store, roomId, actorId, id, data, nowMs) {
     registry.set(roomId, item);
   }
   if (item.state !== "unclaimed") return item;
-  const held = registry.list(roomId).filter(entry => entry.owner === actorId && ACTIVE.has(entry.state)).length;
+  // Seats are cluster-pooled like the REST routes (AQ-HI-09): the actor's
+  // whole mint cluster counts against maxMemberOpenClaims.
+  const seats = store.identities.clusterMemberIds(roomId, { member: { id: actorId } });
+  const held = registry.list(roomId).filter(entry => seats.has(entry.owner) && ACTIVE.has(entry.state)).length;
   const config = typeof registry.configFor === "function"
     ? registry.configFor(roomId)
     : roomWorkClaimConfig(roomLike(registry, roomId));

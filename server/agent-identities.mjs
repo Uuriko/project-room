@@ -12,7 +12,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { fastIdentityHashCandidates, forgetIdentityVerifier, isV2IdentityHash, legacyIdentityHash, scryptIdentityHash } from "./identity-secret-hash.mjs";
 import { ServiceError } from "./store.mjs";
 import { generateKeyPair as generateEd25519KeyPair } from "./agent-card-signing.mjs";
-import { memberCan } from "../src/events.js";
+import { memberCan, EVENT_TYPES as T, AGENT_AUTONOMY_PERMISSIONS } from "../src/events.js";
 import { nextActionsForIdentityMint } from "./discoverability.mjs";
 import { checkAgentDisplayName, assertNotReservedRoleName } from "./display-name-guard.mjs";
 import { refreshDirectoryIdentity } from "./public-read-model.mjs";
@@ -29,17 +29,34 @@ export const agentIdentitySchema = `
     secret_hash TEXT NOT NULL UNIQUE,
     display_name TEXT NOT NULL,
     created_at INTEGER NOT NULL,
-    revoked_at INTEGER
+    revoked_at INTEGER,
+    minted_by TEXT
   );
   CREATE TABLE IF NOT EXISTS identity_links (
     room_id TEXT NOT NULL REFERENCES rooms(id),
     identity_id TEXT NOT NULL REFERENCES agent_identities(identity_id),
     member_id TEXT NOT NULL,
     linked_at INTEGER NOT NULL,
+    endorsed INTEGER NOT NULL DEFAULT 0,
+    endorsed_by TEXT,
     PRIMARY KEY (room_id, identity_id)
   );
   CREATE INDEX IF NOT EXISTS identity_links_member ON identity_links(room_id, member_id);
 `;
+
+// Per-room spawner-mint settings (identity-sybil guild spec §3.3). The
+// room owner may set spawn_mint_cap 1..1000 (default 50); the tightest
+// room setting among a spawner's rooms wins.
+export const identitySettingsSchema = `
+  CREATE TABLE IF NOT EXISTS room_identity_settings (
+    room_id TEXT PRIMARY KEY,
+    spawn_mint_cap INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+`;
+
+export const SPAWNER_MINT_DAILY_CAP_DEFAULT = 50;
+export const SPAWNER_MINT_DAILY_CAP_MAX = 1000;
 
 // Idempotent additive migration for the revoked_at column (RC-2026-09-19-055:
 // identity-secret rotate/revoke). Existing rows backfill NULL, which reads
@@ -97,6 +114,41 @@ export const identityLinkCodeSchema = `
   );
   CREATE INDEX IF NOT EXISTS identity_link_codes_identity ON identity_link_codes(identity_id, expires_at);
 `;
+
+// Identity discipline (identity-sybil guild spec §§2-4): the endorsement
+// tier and spawner-bound minting. Additive and idempotent, following the
+// spam-quarantine column pattern: called from the writer boot path and from
+// create(), never from the module constructor.
+//
+// - agent_identities.minted_by: the spawner identity that minted this row
+//   (NULL = anonymous mint).
+// - identity_links.endorsed / endorsed_by: the per-room endorsement tier.
+//   Grandfathering: every link that predates the tier is endorsed where it
+//   already stands (blanket, mechanical, no adjudication) — so no existing
+//   member loses any right on upgrade.
+// - room_identity_settings: per-room spawn_mint_cap (spec §3.3).
+export function ensureIdentityDisciplineSchema(db) {
+  const identitiesExist = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_identities'").get();
+  if (identitiesExist) {
+    const columns = new Set(db.prepare("PRAGMA table_info(agent_identities)").all().map(column => column.name));
+    if (!columns.has("minted_by")) db.exec("ALTER TABLE agent_identities ADD COLUMN minted_by TEXT");
+  }
+  db.exec("CREATE INDEX IF NOT EXISTS agent_identities_minted_by ON agent_identities(minted_by, created_at)");
+  const linksExist = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='identity_links'").get();
+  if (linksExist) {
+    const linkColumns = new Set(db.prepare("PRAGMA table_info(identity_links)").all().map(column => column.name));
+    const addedEndorsed = !linkColumns.has("endorsed");
+    if (addedEndorsed) db.exec("ALTER TABLE identity_links ADD COLUMN endorsed INTEGER NOT NULL DEFAULT 0");
+    if (!linkColumns.has("endorsed_by")) db.exec("ALTER TABLE identity_links ADD COLUMN endorsed_by TEXT");
+    if (addedEndorsed) {
+      // Grandfathering runs exactly once: only rows that predate the
+      // endorsed column are marked. Later unendorsed links (endorsed=0 with
+      // endorsed_by NULL from a fresh mint) are never touched by re-runs.
+      db.exec("UPDATE identity_links SET endorsed=1, endorsed_by='grandfathered'");
+    }
+  }
+  db.exec(identitySettingsSchema);
+}
 
 // Purely additive — IF NOT EXISTS is idempotent, no schema version bump,
 // and the table is intentionally outside the writer fence (see
@@ -191,6 +243,65 @@ export function anonymousMintBuckets(address) {
     address: hashMintKey(`addr:${normalized}`),
     network: hashMintKey(`net:${mintNetworkPrefix(normalized)}`),
   });
+}
+
+// Mint-cluster key for quota pooling (AQ-HI-09 / AQ-MD-10 / AQ-MD-11).
+// One operator with N identities gets one quota, not N: identities that
+// share a mint operator resolve to the same key, and every per-identity
+// budget pooled by cluster bites only when the cluster's aggregate exceeds
+// the per-identity quota.
+//
+// Cluster signals, in precedence order:
+//  1. the minted_by tree: a spawner-minted child belongs to its spawner
+//     root's cluster (walked to the root, cycle-guarded);
+//  2. the growth-loop mint columns (first observation sticks): account,
+//     then browser session, then client address digest;
+//  3. a spawner root with no growth signals clusters by root identity id.
+// Returns null for a standalone identity (no shared signals, not
+// spawner-descended): callers treat null as "no pooling", which keeps
+// single-identity users on exactly the old per-member behavior.
+const CLUSTER_WALK_LIMIT = 16;
+
+export function identityClusterKey(db, identityId) {
+  if (typeof identityId !== "string" || !identityId) return null;
+  let table;
+  try {
+    table = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_identities'").get();
+  } catch { return null; }
+  if (!table) return null;
+  const columns = new Set(db.prepare("PRAGMA table_info(agent_identities)").all().map(column => column.name));
+  const hasMintedBy = columns.has("minted_by");
+  // Explicit aliases: growth_mint_account → mintAccount, etc.
+  const growthAliases = [
+    ["growth_mint_account", "mintAccount"],
+    ["growth_mint_session", "mintSession"],
+    ["growth_mint_address", "mintAddress"],
+  ].filter(([name]) => columns.has(name));
+  if (!hasMintedBy && growthAliases.length === 0) return null;
+  const selectCols = [
+    ...(hasMintedBy ? ["minted_by AS mintedBy"] : []),
+    ...growthAliases.map(([name, alias]) => `${name} AS ${alias}`),
+  ].join(", ");
+  let current = identityId;
+  let rootRow = null;
+  const seen = new Set();
+  for (let hop = 0; hop < CLUSTER_WALK_LIMIT; hop++) {
+    if (seen.has(current)) break;
+    seen.add(current);
+    let row;
+    try { row = db.prepare(`SELECT ${selectCols} FROM agent_identities WHERE identity_id=?`).get(current); }
+    catch { return null; }
+    if (!row) break;
+    rootRow = row;
+    if (!hasMintedBy || !row.mintedBy) break;
+    current = row.mintedBy;
+  }
+  if (!rootRow) return null;
+  if (rootRow.mintAccount) return `ga:${rootRow.mintAccount}`;
+  if (rootRow.mintSession) return `gs:${rootRow.mintSession}`;
+  if (rootRow.mintAddress) return `gx:${rootRow.mintAddress}`;
+  if (hasMintedBy && current !== identityId) return `sp:${current}`;
+  return null;
 }
 
 export function verifyIdentityMintProof(displayName, proof, now = Date.now(), bits = IDENTITY_POW_BITS) {
@@ -322,9 +433,18 @@ export class AgentIdentities {
   // `anonymous` marks an unauthenticated HTTP mint. Those rows spend the
   // address, network, and daily budgets and stay inactive until the holder
   // authenticates, posts, or is linked. Invite and in-process mints omit it.
-  create(displayName, { secret: suppliedSecret, anonymous } = {}) {
+  //
+  // `mintedBy` marks a spawner-bound mint (identity-sybil guild spec §3):
+  // the identity id of the authorized spawner. Spawner mints never combine
+  // with `anonymous` — the spawner's authorization replaces the anonymous
+  // budgets, it does not stack on them.
+  create(displayName, { secret: suppliedSecret, anonymous, mintedBy } = {}) {
     const name = typeof displayName === "string" ? displayName.trim() : "";
     if (!name || name.length > 80) fail(422, "invalid_identity", "displayName must be 1-80 characters");
+    if (mintedBy !== undefined && (typeof mintedBy !== "string" || !IDENTITY_ID_PATTERN.test(mintedBy)))
+      fail(422, "invalid_identity", "mintedBy must be a valid identity id");
+    if (mintedBy !== undefined && anonymous !== undefined)
+      fail(422, "invalid_identity", "Spawner-bound mints do not spend anonymous mint budgets");
     // RC-2026-09-19-086: reject C0 control chars like share-link join does
     // (422 there) — storing them raw corrupts logs, exports, and renders.
     if (/[\u0000-\u001f\u007f]/.test(name)) fail(422, "invalid_identity", "displayName must not contain control characters");
@@ -334,6 +454,7 @@ export class AgentIdentities {
     return this.store.transaction(() => {
       ensureIdentitySecretSchema(this.db);
       ensureIdentityCapacitySchema(this.db);
+      ensureIdentityDisciplineSchema(this.db);
       this.capacitySchemaReady = true;
       this.expireInactive();
       const recoveredId = suppliedSecret === undefined ? null : `ai_${legacyHash(suppliedSecret).slice(0, 40)}`;
@@ -395,8 +516,8 @@ export class AgentIdentities {
       const secret = suppliedSecret ?? `${IDENTITY_SECRET_PREFIX}${base64url(randomBytes(32))}`;
       ensureIdentitySecretSchema(this.db);
       const verifier = this.verifierColumns(secret);
-      this.db.prepare("INSERT INTO agent_identities(identity_id,secret_hash,fallback_secret_hash,display_name,created_at,activated_at,mint_address,mint_network) VALUES(?,?,?,?,?,?,?,?)")
-        .run(identityId, verifier.secretHash, verifier.fallbackHash, name, now, activatedAt, mintAddress, mintNetwork);
+      this.db.prepare("INSERT INTO agent_identities(identity_id,secret_hash,fallback_secret_hash,display_name,created_at,activated_at,mint_address,mint_network,minted_by) VALUES(?,?,?,?,?,?,?,?,?)")
+        .run(identityId, verifier.secretHash, verifier.fallbackHash, name, now, activatedAt, mintAddress, mintNetwork, mintedBy ?? null);
       // Bind the identity's Ed25519 claim-signing key at issuance: the
       // public key is registered in the agent-key registry (the
       // operator-attested binding — see server/agent-key-registry.mjs) and
@@ -603,11 +724,16 @@ export class AgentIdentities {
   // RC-2026-09-18-038: a membership-administration delegate may also link,
   // because decide() drives link() with the approver's token — approving an
   // access request is exactly what the delegation exists for.
-  link(token, roomId, { identityId, memberId, displayName, permissions, referredBy, settleAccessRequests = true }, expectedSessionBinding = null) {
+  link(token, roomId, { identityId, memberId, displayName, permissions, referredBy, endorsed = false, endorsedBy = null, settleAccessRequests = true }, expectedSessionBinding = null) {
     const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
     const authority = this.store.roomAuthority(roomId);
     if (!this.store.delegation.canAdministerMembership(authority, auth, roomId)) fail(403, "access_denied", "Membership administration grant required");
     if (typeof identityId !== "string" || !IDENTITY_ID_PATTERN.test(identityId)) fail(422, "invalid_identity", "identityId is not a valid agent identity");
+    // Identity discipline: a fresh link is unendorsed unless the caller says
+    // otherwise (owner flows endorse through the manual endpoint instead).
+    if (typeof endorsed !== "boolean") fail(422, "invalid_identity", "endorsed must be a boolean");
+    if (endorsedBy !== null && (typeof endorsedBy !== "string" || !endorsedBy || endorsedBy.length > 128))
+      fail(422, "invalid_identity", "endorsedBy must be a short audit string");
     const identity = this.get(identityId);
     if (!identity) fail(404, "identity_not_found", "No such agent identity");
     // RC-2026-09-18-049: rooms that require verified agents deny linking an
@@ -662,8 +788,8 @@ export class AgentIdentities {
           this.store.command(token, roomId, { id: randomUUID(), type: "member.access_changed",
             data: { memberId: resolvedMemberId, expectedMemberRevision: roomMember.revision, permissions, active: true } }, expectedSessionBinding);
         }
-        this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
-          .run(roomId, identityId, resolvedMemberId, this.store.now());
+        this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at,endorsed,endorsed_by) VALUES(?,?,?,?,?,?)")
+          .run(roomId, identityId, resolvedMemberId, this.store.now(), endorsed ? 1 : 0, endorsedBy);
         if (settleAccessRequests) this.closePendingAccessRequests(roomId, identityId, auth.member.id);
         this.noteActivated(identityId);
         refreshDirectoryIdentity(this.store, identityId);
@@ -686,8 +812,8 @@ export class AgentIdentities {
       this.store.command(token, roomId, { id: randomUUID(), type: "member.added",
         data: { memberId: resolvedMemberId, displayName: memberName, kind: "agent", permissions, identityId,
           ...(referredBy ? { referredBy } : {}) } }, expectedSessionBinding);
-      this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
-        .run(roomId, identityId, resolvedMemberId, this.store.now());
+      this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at,endorsed,endorsed_by) VALUES(?,?,?,?,?,?)")
+        .run(roomId, identityId, resolvedMemberId, this.store.now(), endorsed ? 1 : 0, endorsedBy);
       if (settleAccessRequests) this.closePendingAccessRequests(roomId, identityId, auth.member.id);
       this.noteActivated(identityId);
       refreshDirectoryIdentity(this.store, identityId);
@@ -727,6 +853,212 @@ export class AgentIdentities {
       refreshDirectoryIdentity(this.store, identityId);
       return { roomId, identityId, memberId: link.memberId, unlinked: true };
     });
+  }
+
+  // ---- Identity discipline: endorsement tier (spec §§2,4) ----
+
+  // The endorsement state of one identity link, or null when the identity
+  // is not linked to the room.
+  endorsementOf(roomId, identityId) {
+    const row = this.db.prepare(
+      "SELECT endorsed AS endorsed, endorsed_by AS endorsedBy FROM identity_links WHERE room_id=? AND identity_id=?")
+      .get(roomId, identityId);
+    if (!row) return null;
+    return { endorsed: row.endorsed === 1, endorsedBy: row.endorsedBy ?? null };
+  }
+
+  // Tier gate for the action choke points (spec §2.2): ballots and
+  // work-claim acquisition need endorsed=true in the room. Read and chat
+  // are unaffected. The room owner is the admission authority and is never
+  // gated; humans and non-identity members have no tier.
+  requireEndorsed(roomId, auth, { ownerId } = {}) {
+    const memberId = auth?.member?.id;
+    if (!memberId) return;
+    if (ownerId && memberId === ownerId) return;
+    const identityId = auth?.identityId ?? this.identityIdForMember(roomId, memberId);
+    if (!identityId) return;
+    const link = this.endorsementOf(roomId, identityId);
+    if (!link) return;
+    if (link.endorsed) return;
+    fail(403, "unendorsed_identity",
+      "This identity is not endorsed in this room. Voting and work claims need an endorsed identity — ask the room owner to endorse it.");
+  }
+
+  // Room owner (or manage_members holder) flips one link's endorsement bit.
+  // The decision is journaled as an identity.endorsement_changed room event;
+  // the identity_links table stays the source of truth.
+  setEndorsement(token, roomId, { identityId, endorsed }, expectedSessionBinding = null) {
+    const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
+    const authority = this.store.roomAuthority(roomId);
+    const isOwner = auth.member.id === authority.ownerId;
+    if (!isOwner && !memberCan(authority, auth.member.id, "manage_members"))
+      fail(403, "owner_required", "Endorsing an identity requires the room owner or manage_members");
+    if (typeof identityId !== "string" || !IDENTITY_ID_PATTERN.test(identityId))
+      fail(422, "invalid_identity", "identityId is not a valid agent identity");
+    if (typeof endorsed !== "boolean") fail(422, "invalid_endorsement", "endorsed must be a boolean");
+    const identity = this.get(identityId);
+    if (!identity) fail(404, "identity_not_found", "No such agent identity");
+    return this.store.transaction(() => {
+      ensureIdentityDisciplineSchema(this.db);
+      const link = this.db.prepare("SELECT member_id AS memberId, endorsed AS endorsed FROM identity_links WHERE room_id=? AND identity_id=?")
+        .get(roomId, identityId);
+      if (!link) fail(404, "identity_not_found", "This identity is not linked to this room");
+      const endorsedBy = `owner:${auth.member.id}`;
+      if ((link.endorsed === 1) === endorsed) {
+        return { roomId, identityId, memberId: link.memberId, endorsed, endorsedBy, unchanged: true };
+      }
+      this.db.prepare("UPDATE identity_links SET endorsed=?, endorsed_by=? WHERE room_id=? AND identity_id=?")
+        .run(endorsed ? 1 : 0, endorsedBy, roomId, identityId);
+      this.store.command(token, roomId, { id: randomUUID(), type: T.IDENTITY_ENDORSEMENT_CHANGED,
+        data: { identityId, memberId: link.memberId, endorsed, endorsedBy } }, expectedSessionBinding);
+      return { roomId, identityId, memberId: link.memberId, endorsed, endorsedBy };
+    });
+  }
+
+  // Room-visible endorsement roster (spec §9.1): every link with its tier
+  // state and who vouched (endorsed_by).
+  listEndorsements(token, roomId, expectedSessionBinding = null) {
+    this.store.authenticate(token, roomId, expectedSessionBinding);
+    return this.db.prepare(`SELECT l.identity_id AS identityId, l.member_id AS memberId, l.linked_at AS linkedAt,
+        l.endorsed AS endorsed, l.endorsed_by AS endorsedBy, i.display_name AS identityDisplayName
+      FROM identity_links l JOIN agent_identities i ON i.identity_id=l.identity_id
+      WHERE l.room_id=? ORDER BY l.linked_at`).all(roomId)
+      .map(row => ({ ...row, endorsed: row.endorsed === 1 }));
+  }
+
+  // ---- Identity discipline: mint clusters (AQ-HI-09 / AQ-MD-10 / AQ-MD-11) ----
+
+  // The per-room spawner mint cap (spec §3.3): room-configurable 1..1000,
+  // default 50. Invalid stored values fail open to the default.
+  getSpawnMintCap(roomId) {
+    try {
+      const row = this.db.prepare("SELECT spawn_mint_cap AS cap FROM room_identity_settings WHERE room_id=?").get(roomId);
+      if (row && Number.isInteger(row.cap) && row.cap >= 1 && row.cap <= SPAWNER_MINT_DAILY_CAP_MAX) return row.cap;
+    } catch { /* table predates this deploy: default */ }
+    return SPAWNER_MINT_DAILY_CAP_DEFAULT;
+  }
+
+  setSpawnMintCap(token, roomId, cap, expectedSessionBinding = null) {
+    const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
+    const authority = this.store.roomAuthority(roomId);
+    const isOwner = auth.member.id === authority.ownerId;
+    if (!isOwner && !memberCan(authority, auth.member.id, "manage_members"))
+      fail(403, "owner_required", "Changing identity settings requires the room owner or manage_members");
+    if (!Number.isInteger(cap) || cap < 1 || cap > SPAWNER_MINT_DAILY_CAP_MAX)
+      fail(422, "invalid_identity_settings", `spawnMintCap must be an integer 1-${SPAWNER_MINT_DAILY_CAP_MAX}`);
+    ensureIdentityDisciplineSchema(this.db);
+    this.db.prepare(`INSERT INTO room_identity_settings(room_id, spawn_mint_cap, updated_at) VALUES(?,?,?)
+      ON CONFLICT(room_id) DO UPDATE SET spawn_mint_cap=excluded.spawn_mint_cap, updated_at=excluded.updated_at`)
+      .run(roomId, cap, this.store.now());
+    return { roomId, spawnMintCap: cap };
+  }
+
+  // Spawner-bound mint (spec §3). An authorized spawner — a room owner, an
+  // identity holding mint_delegate in the room, or the root system identity
+  // (server-side only) — mints a child bound to themselves:
+  // agent_identities.minted_by records the lineage, the child is born
+  // endorsed in every room where the spawner holds an endorsed link, and the
+  // spawner's per-day cap (tightest room setting wins) is enforced with a
+  // 429 spawner_limit + Retry-After. Spawner mints never spend the anonymous
+  // mint budgets.
+  spawnChild({ displayName, secret: suppliedSecret, spawnerSecret, address = "", session = null } = {}) {
+    if (!isIdentitySecret(spawnerSecret)) fail(401, "unauthenticated", "Spawner identity secret required");
+    return this.store.transaction(() => {
+      ensureIdentityDisciplineSchema(this.db);
+      const spawner = this.rowForSecret(spawnerSecret);
+      if (!spawner) fail(401, "unauthenticated", "Unknown spawner identity");
+      const spawnerId = spawner.identityId;
+      // Authorized spawner rooms: the spawner is the room owner or holds
+      // mint_delegate, AND holds an endorsed link (the child is born
+      // endorsed only where the spawner is endorsed).
+      const rooms = [];
+      for (const link of this.db.prepare(
+        "SELECT room_id AS roomId, member_id AS memberId, endorsed AS endorsed FROM identity_links WHERE identity_id=?")
+        .all(spawnerId)) {
+        let authority;
+        try { authority = this.store.roomAuthority(link.roomId); } catch { continue; }
+        const member = memberOf(authority.members ?? {}, link.memberId);
+        if (!member || member.active === false) continue;
+        const authorized = link.memberId === authority.ownerId || memberCan(authority, link.memberId, "mint_delegate");
+        if (authorized && link.endorsed === 1) rooms.push({ roomId: link.roomId, memberId: link.memberId });
+      }
+      if (!rooms.length) fail(403, "not_spawner",
+        "This identity is not an authorized spawner in any room (room owner or mint_delegate holder with an endorsed link)");
+      const cap = Math.min(...rooms.map(room => this.getSpawnMintCap(room.roomId)));
+      const now = this.store.now();
+      const windowStart = now - IDENTITY_MINT_WINDOW_MS;
+      const recent = this.db.prepare(
+        "SELECT created_at AS createdAt FROM agent_identities WHERE minted_by=? AND created_at>=? ORDER BY created_at ASC")
+        .all(spawnerId, windowStart);
+      if (recent.length >= cap) {
+        const retryAfter = Math.max(1, Math.ceil((recent[0].createdAt + IDENTITY_MINT_WINDOW_MS - now) / 1000));
+        fail(429, "spawner_limit", `Spawner mint budget reached (${cap} spawner-bound mints per day)`,
+          { "Retry-After": String(retryAfter) });
+      }
+      const created = this.create(displayName, { secret: suppliedSecret, mintedBy: spawnerId });
+      this.noteActivated(created.identityId);
+      const joined = [];
+      for (const { roomId } of rooms) {
+        joined.push(this.linkSpawnedChild(roomId, created.identityId, created.displayName, spawnerSecret, spawnerId));
+      }
+      return { ...created, mintedBy: spawnerId, rooms: joined };
+    });
+  }
+
+  // Internal: link a spawner-minted child into one of the spawner's rooms.
+  // The spawner's mint_delegate authority (checked by spawnChild and by the
+  // member.added event's spawner path) replaces the membership-administration
+  // grant that link() requires. The child is born endorsed, vouched by the
+  // spawner, with the default autonomy profile.
+  linkSpawnedChild(roomId, childIdentityId, displayName, spawnerSecret, spawnerId, expectedSessionBinding = null) {
+    this.store.authenticate(spawnerSecret, roomId, expectedSessionBinding);
+    const name = typeof displayName === "string" ? displayName.trim() : "";
+    if (!name || name.length > 80) fail(422, "invalid_identity", "displayName must be 1-80 characters");
+    if (/[\u0000-\u001f\u007f]/.test(name)) fail(422, "invalid_identity", "displayName must not contain control characters");
+    assertNotReservedRoleName(name);
+    if (!MEMBER_ID_PATTERN.test(childIdentityId)) fail(500, "spawn_failed", "Generated member id is invalid");
+    return this.store.transaction(() => {
+      const existing = this.db.prepare("SELECT 1 FROM identity_links WHERE room_id=? AND identity_id=?").get(roomId, childIdentityId);
+      if (existing) fail(409, "identity_already_linked", "This identity is already linked to this room");
+      const roomMembers = this.store.roomAuthority(roomId).members ?? {};
+      if (!Object.hasOwn(roomMembers, childIdentityId) && childIdentityId in roomMembers)
+        fail(422, "invalid_identity", "memberId is a reserved name");
+      if (memberOf(roomMembers, childIdentityId)) fail(409, "identity_conflict", "Member id is already taken");
+      const canonical = value => value.trim().replace(/\p{White_Space}+/gu, " ").toLowerCase();
+      const activeNames = Object.values(this.store.room(roomId).state.members)
+        .filter(member => member.active !== false && canonical(member.displayName) !== canonical(name))
+        .map(member => ({ memberId: member.id, displayName: member.displayName }));
+      const checked = checkAgentDisplayName(name, { activeNames });
+      if (!checked.safe) fail(422, "invalid_identity", "displayName is unsafe or already used in this room");
+      this.store.command(spawnerSecret, roomId, { id: randomUUID(), type: T.MEMBER_ADDED,
+        data: { memberId: childIdentityId, displayName: name, kind: "agent",
+          permissions: [...AGENT_AUTONOMY_PERMISSIONS], identityId: childIdentityId, spawnedBy: spawnerId } },
+        expectedSessionBinding);
+      this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at,endorsed,endorsed_by) VALUES(?,?,?,?,1,?)")
+        .run(roomId, childIdentityId, childIdentityId, this.store.now(), `spawner:${spawnerId}`);
+      this.noteActivated(childIdentityId);
+      refreshDirectoryIdentity(this.store, childIdentityId);
+      return { roomId, identityId: childIdentityId, memberId: childIdentityId };
+    });
+  }
+
+  // Member ids in this room that belong to the same mint cluster as the
+  // caller's identity (AQ-HI-09 quota stacking). Falls back to the caller's
+  // own member id when the caller has no identity or stands alone — pooled
+  // enforcement then degrades exactly to the old per-member behavior, so
+  // single-identity users see zero change.
+  clusterMemberIds(roomId, auth) {
+    const memberId = auth?.member?.id;
+    const solo = () => new Set(memberId ? [memberId] : []);
+    const identityId = auth?.identityId ?? (memberId ? this.identityIdForMember(roomId, memberId) : null);
+    if (!identityId) return solo();
+    const key = identityClusterKey(this.db, identityId);
+    if (!key) return solo();
+    const out = new Set();
+    for (const row of this.db.prepare("SELECT member_id AS memberId, identity_id AS identityId FROM identity_links WHERE room_id=?").all(roomId)) {
+      if (row.memberId === memberId || identityClusterKey(this.db, row.identityId) === key) out.add(row.memberId);
+    }
+    return out.size ? out : solo();
   }
 
   // Active HMAC plus the built-in fallback when a Worker/Node key is set.

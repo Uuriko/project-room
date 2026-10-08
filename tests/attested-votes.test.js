@@ -6,7 +6,7 @@
 // existed. Run: TMPDIR=<worktree>/.tmp node --test tests/attested-votes.test.js
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { canonicalBallotBytes } from "../server/attested-votes.mjs";
@@ -45,11 +45,23 @@ const errorOf = async res => {
   return { status: res.status, code: parsed?.error?.code, detail: parsed?.error?.detail, body: parsed };
 };
 
+// Endorsement tier (identity-sybil §§2-4): ballots are endorsed-only, so
+// fixture voters are linked as endorsed members of the room.
+const endorseVoter = (f, voter) => {
+  f.store.command(f.keys.owner, ROOM, { id: randomUUID(), type: "member.added",
+    data: { memberId: voter.identityId, displayName: voter.displayName, kind: "agent",
+            permissions: ["accept_work", "complete_work"], identityId: voter.identityId,
+            accountableHumanId: "owner" } });
+  f.store.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at,endorsed,endorsed_by) VALUES(?,?,?,?,1,?)")
+    .run(ROOM, voter.identityId, voter.identityId, Date.now(), "owner:owner");
+};
+
 // Per-test world: fresh fixture, server, and one allowlist vote room.
 const world = async (t, { proofMode = "signature", mode = "allowlist", voters = 2, title = "Convention vote" } = {}) => {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);
   const identities = Array.from({ length: voters }, (_, i) => f.store.identities.create(`Voter ${i}`));
+  for (const voter of identities) endorseVoter(f, voter);
   const created = await jsonFetch(origin, `/api/rooms/${ROOM}/vote-rooms`, {
     method: "POST", bearer: f.keys.owner,
     body: { title, mode, proofMode, options: OPTIONS, identityIds: identities.map(i => i.identityId) },
@@ -146,6 +158,7 @@ test("issues a single-use challenge to an admitted identity", async t => {
 test("refuses a challenge for a non-allowlisted identity", async t => {
   const { f, origin, voteRoomId } = await world(t);
   const outsider = f.store.identities.create("Outsider");
+  endorseVoter(f, outsider); // endorsed but not allowlisted: isolates the admission check
   const res = await jsonFetch(origin, `/api/rooms/${ROOM}/vote-rooms/${voteRoomId}/challenge`, {
     method: "POST", bearer: f.keys.owner, identitySecret: outsider.secret, body: { identityId: outsider.identityId },
   });
@@ -469,6 +482,7 @@ test("open room: one registration per identity", async t => {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);
   const voter = f.store.identities.create("Open voter");
+  endorseVoter(f, voter);
   const created = await jsonFetch(origin, `/api/rooms/${ROOM}/vote-rooms`, {
     method: "POST", bearer: f.keys.owner, body: { title: "Open", mode: "open", options: OPTIONS },
   });
@@ -596,6 +610,7 @@ test("a closed vote room refuses new ballots with vote_closed", async t => {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);
   const voter = f.store.identities.create("Late voter");
+  endorseVoter(f, voter);
   const created = await jsonFetch(origin, `/api/rooms/${ROOM}/vote-rooms`, {
     method: "POST", bearer: f.keys.owner,
     body: { title: "Closed", mode: "allowlist", proofMode: "server", options: OPTIONS,

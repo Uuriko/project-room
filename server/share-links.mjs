@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { validId, event, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES, PERMISSIONS, canInviteMembers } from "../src/events.js";
+import { validId, event, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES, PERMISSIONS, OWNER_PERMISSIONS, canInviteMembers } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { invitationJoinedEvent } from "./invitation-evidence.mjs";
 import { canonicalInvitationData } from "./invitation-journal.mjs";
@@ -89,7 +89,7 @@ function roleMatchesLink(record, access) {
   return record?.intended_role === role && record.intended_permissions_json === JSON.stringify(INVITATION_ROLES[role]);
 }
 export function linkPermissions(access) {
-  return access === "co_admin" ? [...PERMISSIONS] : access === "member" ? [...INVITATION_ROLES.member] : [];
+  return access === "co_admin" ? [...OWNER_PERMISSIONS] : access === "member" ? [...INVITATION_ROLES.member] : [];
 }
 const ACCESS_TEXT = Object.freeze({
   guest: "Read the room and its history, post messages, and react. No membership administration or work approvals.",

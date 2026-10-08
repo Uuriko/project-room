@@ -58,7 +58,7 @@ const fail = (status, code, message) => { throw new ServiceError(status, code, m
 // teaches the vocabulary, instead of pending and failing opaquely later.
 // tests/access-requests.test.js asserts this stays in sync with PERMISSIONS.
 export const ACCESS_REQUEST_PERMISSIONS = Object.freeze(
-  ["steer", "decide", "manage_members", "manage_claims", "accept_work", "complete_work", "verify", "write_external", "invite_member"]);
+  ["steer", "decide", "manage_members", "manage_claims", "accept_work", "complete_work", "verify", "write_external", "invite_member", "mint_delegate"]);
 
 export const accessRequestSchema = `
   CREATE TABLE IF NOT EXISTS access_requests (
@@ -145,7 +145,9 @@ const countActiveMembers = members =>
 // Kill criterion from the safety review — rejected with a teaching 422 at
 // config time.
 const AUTO_APPROVE_FORBIDDEN_PERMISSIONS = Object.freeze(
-  ["manage_members", "decide", "manage_claims", "write_external", "invite_member"]);
+  ["manage_members", "decide", "manage_claims", "write_external", "invite_member", "mint_delegate"]);
+// "mint_delegate" mints new identities — transitive trust that must never
+// ride a standing auto-approve rule; only an explicit owner decision confers it.
 
 export class AccessRequests {
   constructor(store, { rateLimiter } = {}) {

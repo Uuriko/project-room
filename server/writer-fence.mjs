@@ -38,6 +38,11 @@ export const unfencedAdditiveTables = Object.freeze([
   "request_runs", // Permanent host reservations; older writers have no execution route.
   "private_inbox_reads",
   "access_requests",
+  // room_identity_settings (per-room spawner-mint cap, identity-sybil guild
+  // spec §3.3): purely additive and intentionally NOT fenced — older writers
+  // have no code path to it, and the owner/manage_members-only write rule
+  // plus the 1..1000 range validation are the integrity gate.
+  "room_identity_settings",
   // room_access_auto_approve (standing auto-approve rule, RC-2026-09-29-3603):
   // purely additive and intentionally NOT fenced — older writers have no code
   // path to it, and the manage_members-only config rule plus the

@@ -270,6 +270,20 @@ function refuseCap(code, message, hint) {
   throw error;
 }
 
+// Cluster-pooled claim seats (AQ-HI-09 / AQ-MD-10): the members of the
+// caller's mint cluster share one maxMemberOpenClaims seat quota per room,
+// so N identities from one operator hold maxMemberOpenClaims open claims
+// total instead of 20N — ten linked identities can no longer fill the
+// room's 200-open-claim ceiling and lock out legitimate members with 409
+// work_board_full. Solo callers (no shared mint signals) count only their
+// own claims — exactly the old behavior. `auth` may be a full auth object
+// or { member: { id } } for assignee/target member ids.
+function clusterSeatCount(store, registry, roomId, auth) {
+  const seats = store.identities.clusterMemberIds(roomId, auth);
+  const held = registry.list(roomId).filter(entry => seats.has(entry.owner) && ACTIVE_CLAIM_STATES.includes(entry.state)).length;
+  return { held, pooled: seats.size > 1 };
+}
+
 const boardLimitOf = (reject, raw) => {
   if (raw === null || raw === undefined) return BOARD_LIMIT_DEFAULT;
   if (!/^[1-9]\d*$/.test(raw) || Number(raw) > BOARD_LIMIT_MAX) {
@@ -912,10 +926,12 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const reviewPolicy = data.reviewPolicy ?? (isHardWork({ tags: data.tags }) ? "distinct_member" : undefined);
     let item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy, note: data.note, tags: data.tags, files: data.files, dependsOn: data.dependsOn, parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs, pullRequest: data.pullRequest, pullRequests: data.pullRequests, repo: data.repo, branch: data.branch, kind: data.kind, revision: data.revision, squadId: data.squadId }, { now: nowMs, agentId: caller }));
     if (assignee) {
-      const held = registry.list(roomId).filter(entry => entry.owner === assignee && ACTIVE_CLAIM_STATES.includes(entry.state)).length;
-      if (held >= config.maxMemberOpenClaims) {
+      const seats = clusterSeatCount(store, registry, roomId, { member: { id: assignee } });
+      if (seats.held >= config.maxMemberOpenClaims) {
         refuseCap("too_many_open_claims",
-          `${assignee} already holds ${config.maxMemberOpenClaims} open claims. Release or finish one before assigning another.`,
+          seats.pooled
+            ? `${assignee}'s identity cluster already holds ${config.maxMemberOpenClaims} open claims. Release or finish one before assigning another.`
+            : `${assignee} already holds ${config.maxMemberOpenClaims} open claims. Release or finish one before assigning another.`,
           "Release or finish an open claim before assigning another.");
       }
       item = runPure(reject, () => claimWork(item, assignee, {
@@ -947,16 +963,21 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if ("advisory" in data && typeof data.advisory !== "boolean") invalidInput(reject, "advisory true or false");
     const item = load(claimIdOf(reject, workClaimId));
     if (item.state !== "unclaimed") reject(409, "work_claim_conflict", `Work "${item.id}" is already ${item.state} — release it first`);
+    // Identity discipline: acquiring a work claim needs an endorsed identity
+    // in this room (spec §2.2). Reads and chat are unaffected.
+    store.identities.requireEndorsed(roomId, auth, { ownerId: access.ownerId });
     requireWriter();
     requireEventBudget();
     assertLeaseChoice(data);
     assertBoardLeaseHours(reject, data);
     assertDependsOnKnown(reject, data, { selfId: item.id, has: other => registry.has(roomId, other) });
     Object.assign(data, clientPullRequestInput(reject, boardTextFields(reject, data, { note: { multiline: true } })));
-    const held = registry.list(roomId).filter(entry => entry.owner === caller && ACTIVE_CLAIM_STATES.includes(entry.state)).length;
-    if (held >= config.maxMemberOpenClaims) {
+    const seats = clusterSeatCount(store, registry, roomId, auth);
+    if (seats.held >= config.maxMemberOpenClaims) {
       refuseCap("too_many_open_claims",
-        `You already hold ${config.maxMemberOpenClaims} open claims. Release or finish one before claiming another.`,
+        seats.pooled
+          ? `Your identity cluster already holds ${config.maxMemberOpenClaims} open claims in this room. Release or finish one before claiming another.`
+          : `You already hold ${config.maxMemberOpenClaims} open claims. Release or finish one before claiming another.`,
         "Release or finish an open claim before claiming another.");
     }
     const claimed = runPure(reject, () => claimWork(item, caller, {
@@ -1171,11 +1192,15 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     }
     // A handoff consumes the new owner's slot just like claim and
     // create-with-assignee do; otherwise reassign bypasses the per-member cap.
+    // Seats are cluster-pooled (AQ-HI-09): the target's whole mint cluster
+    // counts, not just the target member.
     if (target !== item.owner) {
-      const held = registry.list(roomId).filter(entry => entry.owner === target && ACTIVE_CLAIM_STATES.includes(entry.state)).length;
-      if (held >= config.maxMemberOpenClaims) {
+      const seats = clusterSeatCount(store, registry, roomId, { member: { id: target } });
+      if (seats.held >= config.maxMemberOpenClaims) {
         refuseCap("too_many_open_claims",
-          `${target} already holds ${config.maxMemberOpenClaims} open claims. Release or finish one before assigning another.`,
+          seats.pooled
+            ? `${target}'s identity cluster already holds ${config.maxMemberOpenClaims} open claims. Release or finish one before assigning another.`
+            : `${target} already holds ${config.maxMemberOpenClaims} open claims. Release or finish one before assigning another.`,
           "Release or finish an open claim before assigning another.");
       }
     }

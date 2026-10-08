@@ -324,8 +324,10 @@ export class AgentInvites {
       const sequence = room.sequence + 1;
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, incoming.id, JSON.stringify(incoming));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
-      this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
-        .run(row.room_id, identity.identityId, memberId, now);
+      // Identity discipline: an identity admitted by invite redeem is endorsed
+      // in that room — the inviter vouched for the holder (spec §4.2).
+      this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at,endorsed,endorsed_by) VALUES(?,?,?,?,1,?)")
+        .run(row.room_id, identity.identityId, memberId, now, `invite:${inviteId(row.code_hash)}`);
       // Compare-and-swap burn: exactly one redemption wins under concurrency.
       const burned = this.db.prepare(`UPDATE agent_invite_codes SET redeemed_at=?,redeemed_identity_id=?
         WHERE code_hash=? AND redeemed_at IS NULL AND revoked_at IS NULL`).run(now, identity.identityId, row.code_hash);
