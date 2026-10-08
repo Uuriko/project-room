@@ -52,6 +52,7 @@ test('actual producer credit, repeated reviews, supported advice and changed ass
  let p=await api('producer',null,'?detail=evidence');assert.equal(p.caseCount,1);assert.equal(p.observations.length,2);
  const assessment={action:'update_assessment',subjectMemberId:'producer',expectedRevision:0,configurationId:null,category:'browser_native_qa',role:'producer',tendency:'good_fit',advice:'Useful at source-bound browser checks',caseIds:[first.eventId]};
  await api('owner',assessment);
+ assert.equal((await api('producer',null,'?workItemId=case-a&categories=')).fit.status,'unknown');
  p=await api('producer',null,'?workItemId=case-a&categories=browser_native_qa');assert.equal(p.fit.status,'unknown');assert.equal(p.fit.advisory,true);
  await api('reviewer',assessment,'',403);
  await api('producer',{...observation(s),subjectMemberId:'owner'},'',403);
