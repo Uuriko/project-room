@@ -1,3 +1,4 @@
+import { isWorkFitTool } from "../client/work-fit-tools.mjs";
 import { RoomAssistant } from "./room-assistant.mjs";
 import { isAssistantTool } from "../client/assistant-tools.mjs";
 import { OutsideAgents } from "./outside-agents.mjs";
@@ -47,7 +48,8 @@ function withRoomId(entry) {
       properties: { roomId: roomIdField, ...entry.inputSchema.properties },
       required: ["roomId", ...(entry.inputSchema.required ?? [])],
       additionalProperties: false,
-      ...(entry.inputSchema.allOf ? { allOf: entry.inputSchema.allOf } : {})
+      ...(entry.inputSchema.allOf ? { allOf: entry.inputSchema.allOf } : {}),
+      ...(entry.inputSchema.oneOf ? {oneOf:entry.inputSchema.oneOf.map(branch=>({...branch,properties:{roomId:roomIdField,...branch.properties},required:['roomId',...branch.required]}))}: {})
     },
     annotations: entry.annotations
   };
@@ -195,6 +197,10 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
   const auth = store.authenticate(secret, roomId);
   enforceHostedStdioCallVisibility(store, secret, auth.member.id, name);
   const identity = { roomId, memberId: auth.member.id };
+  if (isWorkFitTool(name)) {
+    const authorize=()=>store.authenticate(secret,roomId);
+    return {value:name==='room_read_work_fit'?store.workFit.read(roomId,rest,authorize):store.workFit.apply(roomId,rest,authorize),isError:false};
+  }
   if (isAssistantTool(name)) {
     const assistant = new RoomAssistant(store);
     const authorize = () => store.authenticate(secret, roomId);

@@ -28,6 +28,7 @@ export function auditRecovery(store) {
     const allowed = new Set([...required, ...lazyAdditiveTables]);
     requireState(tables.every(name => allowed.has(name)));
     requireState(required.every(name => tables.includes(name)));
+    store.workFit.verify();
     const rooms = new Map();
     let eventCount = 0, checkpointCount = 0, checkpointEvents = 0;
     for (const row of store.db.prepare("SELECT id,sequence FROM rooms ORDER BY id").all()) {

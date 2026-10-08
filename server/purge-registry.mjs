@@ -25,7 +25,7 @@ const ROWS = [
 
   ...["room_trial_tasks", "room_trial_requests", "room_vetting_keys", "room_vetting_receipts", "demigod_offer_profiles", "demigod_offer_requests", "demigod_contracts", "demigod_contract_requests", "buyer_signoff_loops", "buyer_signoff_requests"].map(table => ({ table, key: "room_id", action: "delete", optional: true, match: {room:["room_id"]} })),
   { table: "projection_bodies", key: "room_id", action: "delete", match: { room: ["room_id"] } },
-  ...["room_assistant_config", "room_assistant_runs", "room_assistant_ops"].map(table => ({ table, key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } })),
+  ...["agent_work_fit_events", "agent_work_fit_profiles", "room_assistant_config", "room_assistant_runs", "room_assistant_ops"].map(table => ({ table, key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } })),
   // Retired schemas remain in upgraded databases but are never created on a
   // fresh store. Their room-owned rows still belong in confirmed room purge.
   ...[

@@ -177,6 +177,7 @@ export function buildActivationPack(store, roomSlug, viewerId = null) {
     generatedAt: now
   });
   if (typeof viewerId === "string" && viewerId && state.members?.[viewerId]) {
+    if (store.workFit) pack.workFit = store.workFit.read(roomSlug, {}, () => ({member:state.members[viewerId]}));
     pack.orient = buildOrient(store, roomSlug, viewerId, { text: false });
   }
   return pack;

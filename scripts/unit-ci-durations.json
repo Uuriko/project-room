@@ -1008,7 +1008,9 @@
   "tests/work-claim-renew-probes.test.js": 120,
   "tests/work-claim-settle-retry.test.js": 502,
   "tests/work-claim-update-precondition.test.js": 359,
-  "tests/work-history-floor.test.js": 465
+  "tests/work-history-floor.test.js": 465,
+  "tests/agent-work-fit.test.js": 809,
+  "tests/mcp-work-fit.test.js": 391
  },
  "_note": "Per-file wall-clock ms of `node --test <file>` measured 2026-10-06 on a 2-CPU host with 16-way parallelism (values are contention-inflated; used only as relative weights for shard balancing, never for membership). Files hitting the 300s measurement timeout are capped at 300000.",
  "releaseRecordMeasurement": "Eight record-rail files measured on macOS Node26, four concurrent real Node processes, 2026-10-06; all eight passed. Timing allocates files only.",
@@ -1044,5 +1046,6 @@
   "method": "Median of five solo node --test wall-clock runs; all passed.",
   "purpose": "Measured allocation only; test discovery remains authoritative."
  },
- "qa8UnmeasuredRefreshMeasurement": "43 unmeasured files (42 on main 4c11f4b9 plus tests/work-claim-conflict-hint.test.js): solo wall-clock ms of `node --test <file>` on Linux Node v24.21.0, 2026-10-08, one file at a time; all passed. Brings the unmeasured set back under UNMEASURED_CAP. Timing allocates files only, not membership."
+ "qa8UnmeasuredRefreshMeasurement": "43 unmeasured files (42 on main 4c11f4b9 plus tests/work-claim-conflict-hint.test.js): solo wall-clock ms of `node --test <file>` on Linux Node v24.21.0, 2026-10-08, one file at a time; all passed. Brings the unmeasured set back under UNMEASURED_CAP. Timing allocates files only, not membership.",
+ "note": " Work-fit owners measured locally on macOS 2026-10-07: tests/agent-work-fit.test.js 809ms, tests/mcp-work-fit.test.js 391ms. Remeasure on hosted Ubuntu CI; estimates do not select test membership."
 }
