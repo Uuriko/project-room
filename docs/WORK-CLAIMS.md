@@ -80,6 +80,28 @@ stamped with the caller, and `reason` is the note. `in_progress` and
 `POST .../reassign` with `{ "newOwner", "note"? }` keeps the state and names a
 current active member. The new owner is woken with reason `assigned`.
 
+## Succession (unprivileged fast path)
+
+`POST .../succeed` with `{ "note"? }` lets a peer take over a dead holder's
+claim in minutes instead of waiting out the full lease. It succeeds only when
+the holder's server-observed heartbeat is stale: every host beyond its own
+reachability window and silent longer than the succession threshold
+(**5 minutes**, server clock only — no client timestamp is ever read).
+Silence inside the threshold, or no heartbeat record at all, is **409**
+`succession_not_eligible`, so a live-but-partitioned holder keeps its claim;
+heartbeats are hints, never authority. A lapsed lease never reaches this
+route — the per-request sweep already released it, so claim it directly.
+Deploy claims are **409** `succession_deploy_escalate`: the room owner
+reassigns those after arbitration, never blind adoption.
+
+The transfer commits in the same serialized transaction as the eligibility
+check, so exactly one holder exists at every instant. State, lease, files and
+notes are preserved (the successor resumes the round); attestations and
+reviews are cleared like `reassign`. The previous holder is woken with reason
+`succeeded`; its later writes are rejected — `update`/`renew`/`release` go
+**403** `work_not_owner`, `claim` goes **409** `work_claim_conflict`. The
+history entry is stamped `succeeded`. Privileged `reassign` is unchanged.
+
 ## Renew
 
 `POST .../renew` with `{ "progressMessageId"?, "note"?, "leaseHours"? }`.

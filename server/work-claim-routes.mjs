@@ -34,7 +34,7 @@
 // 409; unknown ids as 404. Unknown errors are rethrown for the generic 500
 // path — never wrapped, so no internal detail leaks.
 import {
-  createWork, claimWork, updateWork, appendWorkPullRequest, attestWork, recordReview, reassignWork, releaseExpired, canCloseWork,
+  createWork, claimWork, updateWork, appendWorkPullRequest, attestWork, recordReview, reassignWork, succeedWork, releaseExpired, canCloseWork,
   renewWork, roomWorkClaimConfig, closeWhenLive, isReceiptTag, ClaimError, REVIEW_POLICIES, CLAIM_KINDS,
   claimUpdatedAt, ACTIVE_CLAIM_STATES, MAX_LEASE_HOURS, STATES, summarizeClaimHistory, isHardWork,
   walkProvenance, flagPremiseInvalid, clearPremiseFlag, closeWork, isTerminalClaimState,
@@ -410,6 +410,16 @@ const verifiersOf = (store, roomId) => {
     .map(member => member.id);
 };
 
+// FIX-12 (WAVE-300): unprivileged succession fast path. A peer may take over
+// a dead holder's claim once the holder has been silent this long — minutes,
+// not the full lease. The threshold sits well beyond the host presence
+// window (180s default, HEARTBEAT_STALE_AFTER_MS) so ordinary jitter, GC
+// pauses and transient partitions never trip it. Heartbeats are hints, never
+// authority: only sustained, server-observed silence authorizes succession.
+// Server clock only: the stamp comes from heartbeat receipt, the comparison
+// from the store clock — no client timestamp is ever read.
+export const SUCCESSION_STALENESS_MS = 5 * 60 * 1000;
+
 const runPure = (reject, fn) => {
   try { return fn(); }
   catch (error) {
@@ -768,6 +778,26 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const item = registry.get(roomId, id);
     if (!item) reject(404, "work_claim_not_found", `No work claim "${id}" in this room`);
     return item;
+  };
+  // FIX-12: server-observed liveness of a claim holder for the succession
+  // check. Resolves the member to its linked agent identity (the heartbeat
+  // key), then reads the durable host table — both stamped by this server,
+  // never by the client. { known: false } when the holder never
+  // heartbeated: liveness unknown is never stale, so a claim whose holder
+  // cannot be observed stays with its holder until the lease lapses.
+  const holderLiveness = (holderId, atMs) => {
+    try {
+      const identityId = store.bonds?.identityForMember?.(roomId, holderId);
+      const heartbeats = store.agentHeartbeats;
+      if (typeof identityId !== "string" || identityId.length === 0 || !heartbeats) return { known: false, stale: false };
+      const status = heartbeats.statusOf(identityId);
+      const lastSeenAt = status?.lastSeenAt;
+      if (status?.status === "unregistered" || typeof lastSeenAt !== "number") return { known: false, stale: false };
+      const stale = status.status === "offline" && atMs - lastSeenAt > SUCCESSION_STALENESS_MS;
+      return { known: true, stale, lastSeenAt };
+    } catch {
+      return { known: false, stale: false };
+    }
   };
   // Returns true when the caller is the room owner or holds manage_claims
   // and is acting on someone else's claim. The claim holder takes the
@@ -1221,6 +1251,65 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     });
     return json(res, 200, reassigned);
   }
+  if (workClaimRoute === "succeed" && req.method === "POST") {
+    // FIX-12 (WAVE-300): unprivileged succession fast path. A peer takes over
+    // a dead holder's claim in minutes instead of waiting out the full lease.
+    // Eligibility is evaluated here, inside this request's serialized claim
+    // transaction, on server state only: the holder's server-stamped
+    // heartbeat must be stale (every host beyond its own reachability window
+    // AND silent longer than SUCCESSION_STALENESS_MS). A lapsed work lease
+    // never reaches this route — the sweep at the top of every work-claims
+    // request already released it (claim it directly). Silence inside the
+    // threshold, or no heartbeat record at all, is 409: a live-but-
+    // partitioned holder keeps its claim. Deploy claims are refused — a
+    // half-applied deploy must never be blindly adopted; the room owner
+    // reassigns those after arbitration.
+    const data = body(req);
+    if (!shape(data, { optional: ["note"] })) invalidInput(reject, "{note?}");
+    const item = load(claimIdOf(reject, workClaimId));
+    if (!ACTIVE_CLAIM_STATES.includes(item.state) || !item.owner) {
+      reject(409, "succession_not_held",
+        `Work "${item.id}" is ${item.state} — there is no holder to succeed; claim it directly`);
+    }
+    if (item.owner === caller) {
+      reject(409, "succession_self", `Work "${item.id}" is yours — renew or release it instead of succeeding it`);
+    }
+    if (item.kind === "deploy") {
+      reject(409, "succession_deploy_escalate",
+        `Work "${item.id}" is a deploy claim — succession is refused; ask the room owner to reassign it after arbitration`);
+    }
+    requireWriter();
+    requireEventBudget();
+    const note = data.note === undefined ? null : text("note", data.note, { multiline: true });
+    const live = holderLiveness(item.owner, nowMs);
+    if (!live.stale) {
+      reject(409, "succession_not_eligible", live.known
+        ? `Holder "${item.owner}" was last seen ${Math.max(0, Math.round((nowMs - live.lastSeenAt) / 1000))}s ago — succession needs ${Math.round(SUCCESSION_STALENESS_MS / 1000)}s of silence`
+        : `No heartbeat record for holder "${item.owner}" — succession needs ${Math.round(SUCCESSION_STALENESS_MS / 1000)}s of observed silence or a lapsed lease`);
+    }
+    // A succession consumes the caller's slot just like claim and reassign;
+    // otherwise it bypasses the per-member cap.
+    const held = registry.list(roomId).filter(entry => entry.owner === caller && ACTIVE_CLAIM_STATES.includes(entry.state)).length;
+    if (held >= config.maxMemberOpenClaims) {
+      refuseCap("too_many_open_claims",
+        `You already hold ${config.maxMemberOpenClaims} open claims. Release or finish one before succeeding another.`,
+        "Release or finish an open claim before succeeding another.");
+    }
+    const previousOwnerId = item.owner;
+    const succeeded = runPure(reject, () => succeedWork(item, caller, { via: "holder_stale", note, now: nowMs }));
+    // Succession is an acquire path like claim and reassign: refuse an
+    // overlapping file lease with the same 409 body.
+    refuseFileLeaseConflict(succeeded);
+    // One transaction, one event: the eligibility check above and this
+    // ownership transfer commit together, so exactly one holder exists at
+    // every instant. The previous holder is woken with the succession
+    // receipt; its later writes are rejected (it is no longer the owner).
+    commit(succeeded, "succeeded", {
+      previousOwnerId,
+      wakeMemberId: previousOwnerId, wakeReason: "succeeded",
+    });
+    return json(res, 200, succeeded);
+  }
   if (workClaimRoute === "renew" && req.method === "POST") {
     // Lease-renewal check-ins: the owner extends their claim's lease only by
     // citing their own public progress message, posted in this room after
@@ -1347,7 +1436,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   const WORK_CLAIM_METHODS = {
     list: "GET", receipts: "GET", sweep: "POST", duplicates: "GET", status: "GET", config: "GET, POST", create: "POST",
     read: "GET", claim: "POST", update: "POST", review: "POST", release: "POST",
-    reassign: "POST", renew: "POST", provenance: "GET", "premise-invalid": "POST",
+    reassign: "POST", succeed: "POST", renew: "POST", provenance: "GET", "premise-invalid": "POST",
   };
   const allowedMethod = WORK_CLAIM_METHODS[workClaimRoute];
   reject(405, "method_not_allowed", "Method not allowed",

@@ -5731,6 +5731,55 @@ paths:
         '403': { description: work_not_owner }
         '404': { description: work_claim_not_found }
         '422': { description: invalid_claim_input }
+  /api/rooms/{roomId}/work-claims/{claimId}/succeed:
+    post:
+      summary: Succeed a dead holder's work claim
+      description: |
+        Unprivileged succession fast path: a peer takes over a claim whose
+        holder is gone, without waiting out the full lease. Succeeds only
+        when the holder's server-observed heartbeat is stale — every host
+        beyond its own reachability window and silent longer than the
+        succession threshold (5 minutes). Silence inside the threshold, or
+        no heartbeat record at all, is 409 succession_not_eligible, so a
+        live-but-partitioned holder keeps its claim. A lapsed lease never
+        reaches this route: the per-request sweep already released it
+        (claim it directly). Deploy claims are 409: the room owner
+        reassigns those after arbitration. State, lease, files and notes
+        are preserved; attestations and reviews are cleared like reassign.
+        The previous holder is woken with reason succeeded, and its later
+        writes are rejected (it is no longer the owner). API keys need
+        `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: claimId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: { type: string }
+      responses:
+        '200':
+          description: The succeeded item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkClaim'
+        '401': { description: unauthenticated }
+        '403': { description: work_not_owner }
+        '404': { description: work_claim_not_found }
+        '409':
+          description: |
+            succession_not_held when the item has no holder to succeed.
+            succession_self when the caller is the holder.
+            succession_not_eligible when the holder is not heartbeat-stale.
+            succession_deploy_escalate for deploy claims.
+        '422': { description: invalid_claim_input }
   /api/rooms/{roomId}/board/v2/claims:
     get:
       summary: List board claims

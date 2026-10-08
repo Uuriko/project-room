@@ -891,6 +891,26 @@ export function reassignWork(work, agentId, newOwner, { note, now, authority = f
     leaseExpiresAt: hours === null ? null : isoOf(atMs + hours * 3600 * 1000) } : {};
   return withHistory({ ...item, ...claim, owner: target, attestations: Object.freeze([]), reviews: Object.freeze([]) }, atMs, agent, `reassigned:${target}`, note);
 }
+// Succession (FIX-12, WAVE-300): an unprivileged peer takes over a claim
+// whose holder is gone. The route layer establishes eligibility — the
+// holder's server-observed heartbeat is stale beyond the succession
+// threshold ("holder_stale"), or the work lease already lapsed
+// ("lease_lapsed"; in practice the per-request sweep releases those first)
+// — so the pure machine only moves ownership. State, lease, claimedAt,
+// files and notes survive: the successor resumes the round, it does not
+// restart it. Attestations and reviews are cleared, exactly like reassign:
+// they belong to the previous owner's round, never to the next holder's.
+export function succeedWork(work, agentId, { via, note, now } = {}) {
+  const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  check(ACTIVE_CLAIM_STATES.includes(item.state), `work "${item.id}" is ${item.state} — only a held claim can be succeeded`);
+  check(item.owner !== null && item.owner !== undefined, `work "${item.id}" has no holder — claim it instead`);
+  check(item.owner !== agent, `work "${item.id}" is yours — renew or release it instead of succeeding it`);
+  check(via === "holder_stale" || via === "lease_lapsed", `via must be "holder_stale" or "lease_lapsed"`);
+  if (note !== undefined && note !== null) check(typeof note === "string" && note.length <= 4000, "note must be a string of at most 4000 characters");
+  const succeeded = { ...item, owner: agent, attestations: Object.freeze([]), reviews: Object.freeze([]) };
+  return withHistory(succeeded, atMs, agent, "succeeded",
+    `unprivileged succession (${via}): previous holder ${item.owner}${note ? ` — ${note}` : ""}`);
+}
 // True when the item holds an active claim whose lease has lapsed. Items
 // without a lease, and items not under claim, never expire.
 export function isLeaseExpired(work, now) {

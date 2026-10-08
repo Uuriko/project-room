@@ -3461,6 +3461,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const workClaimReviewMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/review$/.exec(url.pathname);
       const workClaimReleaseMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/release$/.exec(url.pathname);
       const workClaimReassignMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/reassign$/.exec(url.pathname);
+      const workClaimSucceedMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/succeed$/.exec(url.pathname);
       const workClaimReceiptsMatch = /^\/api\/rooms\/([^/]{1,384})\/receipts$/.exec(url.pathname);
       const workClaimRenewMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/renew$/.exec(url.pathname);
       // Provenance walk + premise-invalid rollback (orch-provenance-rollback).
@@ -3468,6 +3469,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // never mistaken for a claim id.
       const workClaimMatch = workClaimsMatch ?? workClaimsStatusMatch ?? workClaimsSweepMatch ?? workClaimsDuplicatesMatch ?? workClaimsConfigMatch ?? workClaimClaimMatch
         ?? workClaimUpdateMatch ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch
+        ?? workClaimSucceedMatch
         ?? workClaimItemMatch
         ?? workClaimReceiptsMatch;
       // Agent /feedback endpoint (structured bug/feature reports): every
@@ -3757,9 +3759,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           : workClaimReviewMatch ? "review"
           : workClaimReleaseMatch ? "release"
           : workClaimRenewMatch ? "renew"
+          : workClaimSucceedMatch ? "succeed"
           : "reassign";
         const workClaimIdMatch = workClaimItemMatch ?? workClaimClaimMatch ?? workClaimUpdateMatch
           ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch
+          ?? workClaimSucceedMatch
          ;
         return await handleWorkClaims({ req, res, url, store, roomId, auth, workClaimRoute,
           workClaimId: workClaimIdMatch ? pathId(workClaimIdMatch[2]) : null, registry: store.workClaims,
