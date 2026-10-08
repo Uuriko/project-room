@@ -59,7 +59,7 @@ function roomFixture(t) {
 }
 
 const created = async (f, id, by = "owner", extra = {}) => {
-  const out = await f.call(by, "create", { body: { id, title: id, ...extra } });
+  const out = await f.call(by, "create", { body: { id, title: id, files: [`src/${id}.mjs`], ...extra } });
   assert.equal(out.status, 201, `${id}: ${out.code} ${out.message ?? ""}`);
   return out.value;
 };
@@ -169,7 +169,7 @@ test("pull request outcome, CI and head facts are refused from clients", async t
 test("claim history keeps 200 entries and the PR link precondition counts the dropped ones", async t => {
   const f = roomFixture(t);
   let item = createWork({ id: "long" }, { agentId: "owner" });
-  item = claimWork(item, "contrib", { leaseHours: 24 });
+  item = claimWork(item, "contrib", { leaseHours: 2 });
   for (let i = 0; i < 260; i++) item = updateWork(item, "contrib", { note: `n${i}` });
   f.store.workClaims.set("commons", item);
   const stored = f.store.workClaims.get("commons", "long");
@@ -275,7 +275,7 @@ test("with under 10% of the event budget left only the owner and claim managers 
   assert.equal(refused.value.eventsRemaining, PILOT_LIMITS.eventsPerRoom - nearlyFull);
   const note = await f.call("contrib", "update", { id: "budget", body: { note: "still here" } });
   assert.equal(note.status, 409);
-  assert.equal((await f.call("owner", "create", { body: { id: "owner-late" } })).status, 201);
+  assert.equal((await f.call("owner", "create", { body: { id: "owner-late", files: ["src/owner-late.mjs"] } })).status, 201);
   assert.equal((await f.call("manager", "release", { id: "budget", body: { reason: "winding down" } })).status, 200);
   const status = await f.call("chatter", "status");
   assert.equal(status.value.eventsRemaining, PILOT_LIMITS.eventsPerRoom - f.store.room("commons").sequence);
@@ -317,11 +317,11 @@ test("titles and notes are normalized and refuse control, bidi, unpaired and inv
     assert.match(out.message, /^title:/);
   }
   for (const [index, title] of ["修复登录流程", "Ship it 🚀👩‍💻", "Crème brûlée café", "Ελληνικά", "עברית"].entries()) {
-    const out = await f.call("contrib", "create", { body: { id: `ok-${index}`, title } });
+    const out = await f.call("contrib", "create", { body: { id: `ok-${index}`, title, files: [`src/ok-${index}.mjs`] } });
     assert.equal(out.status, 201, title);
     assert.equal(out.value.title, title.normalize("NFC"));
   }
-  const decomposed = await f.call("contrib", "create", { body: { id: "nfc", title: "Cafe\u0301" } });
+  const decomposed = await f.call("contrib", "create", { body: { id: "nfc", title: "Cafe\u0301", files: ["src/nfc.mjs"] } });
   assert.equal(decomposed.value.title, "Caf\u00E9");
   await f.call("contrib", "claim", { id: "nfc", body: { leaseHours: 1 } });
   const multi = await f.call("contrib", "update", { id: "nfc", body: { note: "line one\r\nline two" } });
@@ -337,14 +337,14 @@ test("titles and notes are normalized and refuse control, bidi, unpaired and inv
   assert.equal((await f.call("reviewer", "review", { id: "nfc", body: {} })).status, 200, "a review note stays optional");
 });
 
-test("dependsOn must name claims in this room and leaseHours is 0.25 to 168", async t => {
+test("dependsOn must name claims in this room and leaseHours is 1 minute to 2h", async t => {
   const f = roomFixture(t);
   await created(f, "base");
   const dangling = await f.call("contrib", "create", { body: { id: "child", dependsOn: ["base", "ghost"] } });
   assert.equal(dangling.status, 422);
   assert.match(dangling.message, /^dependsOn:.*ghost/);
-  assert.equal((await f.call("contrib", "create", { body: { id: "child", dependsOn: ["base"] } })).status, 201);
-  for (const leaseHours of [0.0001, 0.2, 169, "2"]) {
+  assert.equal((await f.call("contrib", "create", { body: { id: "child", dependsOn: ["base"], files: ["src/child.mjs"] } })).status, 201);
+  for (const leaseHours of [0.0001, 0.01, 3, "2"]) {
     const out = await f.call("contrib", "claim", { id: "base", body: { leaseHours } });
     assert.equal(out.status, 422, String(leaseHours));
     assert.match(out.message, /leaseHours/);
@@ -375,7 +375,7 @@ test("over real HTTP a guest's review note and sweep are refused and the list is
     });
     return { status: response.status, value: await response.json() };
   };
-  assert.equal((await call(ownerKey, "/work-claims", { id: "http-claim", title: "HTTP claim" })).status, 201);
+  assert.equal((await call(ownerKey, "/work-claims", { id: "http-claim", title: "HTTP claim", files: ["src/http-claim.mjs"] })).status, 201);
   assert.equal((await call(ownerKey, "/work-claims/http-claim/claim", { leaseHours: 1 })).status, 200);
   const note = await call(guestKey, "/work-claims/http-claim/review", { note: "guest note" });
   assert.equal(note.status, 403);
@@ -408,8 +408,9 @@ test("board input rules: text normalization, client PR facts, lease bounds, depe
   assert.deepEqual(clientPullRequestInput(reject, { pullRequests: [{ url: "o/r#3" }] }), { pullRequests: [{ url: "https://github.com/o/r/pull/3" }] });
   assert.throws(() => clientPullRequestInput(reject, { pullRequest: { url: "o/r#3", merged: true } }), /pullRequest\.merged: is recorded by the server/);
   assert.doesNotThrow(() => assertBoardLeaseHours(reject, { leaseHours: BOARD_LEASE_HOURS_MAX }));
-  assert.doesNotThrow(() => assertBoardLeaseHours(reject, { leaseHours: null }));
-  assert.throws(() => assertBoardLeaseHours(reject, { leaseHours: BOARD_LEASE_HOURS_MAX + 1 }), { code: "invalid_claim_input" });
+  // The immortal null opt-out is retired: null is rejected, not allowed.
+  assert.throws(() => assertBoardLeaseHours(reject, { leaseHours: null }), { code: "claim_lease_required" });
+  assert.throws(() => assertBoardLeaseHours(reject, { leaseHours: BOARD_LEASE_HOURS_MAX + 1 }), { code: "claim_lease_too_long" });
   assert.throws(() => assertBoardLeaseHours(reject, { leaseHours: "4" }), { code: "invalid_claim_input" });
   const known = new Set(["a"]);
   assert.doesNotThrow(() => assertDependsOnKnown(reject, { dependsOn: ["a"] }, { selfId: "b", has: id => known.has(id) }));
