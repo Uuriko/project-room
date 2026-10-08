@@ -101,7 +101,7 @@ test("fast path: while no room is private, nothing hides", async t => {
 });
 
 test("a private room's own receipts drop out of the feed, detail, sitemap, and collect", async t => {
-  const { store, keys, wcrOf } = serve(t);
+  const { store, wcrOf } = serve(t);
   store.roomDirectory.setReceiptsVisibility("beta", "owner", false);
   const betaWcr = new Set(wcrOf("beta"));
   assert.ok(betaWcr.size > 0, "beta has room receipts in the fixture");
@@ -118,7 +118,7 @@ test("a private room's own receipts drop out of the feed, detail, sitemap, and c
 });
 
 test("pwr_ receipts hide by their task's room, never by the namespace origin", async t => {
-  const { store, keys } = serve(t);
+  const { store } = serve(t);
   const alphaPwr = `pwr_${"aa".repeat(32)}`;
   const betaPwr = `pwr_${"cc".repeat(32)}`;
   // Sanity: the pwr_ origin really is a namespace, not a room id.
@@ -134,7 +134,7 @@ test("pwr_ receipts hide by their task's room, never by the namespace origin", a
 });
 
 test("a room with no directory settings row stays public", async t => {
-  const { store, keys, wcrOf } = serve(t);
+  const { store, wcrOf } = serve(t);
   assert.equal(
     store.db.prepare("SELECT COUNT(*) AS n FROM room_directory_settings WHERE room_id='gamma'").get().n,
     0, "gamma has no settings row in this fixture");
@@ -147,7 +147,7 @@ test("a room with no directory settings row stays public", async t => {
 });
 
 test("flipping the toggle back on restores visibility immediately", async t => {
-  const { store, keys, wcrOf } = serve(t);
+  const { store, wcrOf } = serve(t);
   const betaPwr = `pwr_${"cc".repeat(32)}`;
   store.roomDirectory.setReceiptsVisibility("beta", "owner", false);
   assert.equal(publicReceiptById(store, betaPwr), null);
@@ -159,7 +159,7 @@ test("flipping the toggle back on restores visibility immediately", async t => {
 });
 
 test("the wrapper never reads rooms or rooms.projection on the public path", async t => {
-  const { store, keys } = serve(t);
+  const { store } = serve(t);
   store.roomDirectory.setReceiptsVisibility("beta", "owner", false);
   const seen = [];
   const original = store.db.prepare.bind(store.db);
