@@ -43,7 +43,8 @@ async function serve(t) {
 }
 
 function mintBody(extras = {}) {
-  return { requestId: randomUUID(), linkToken: guestToken(), expectedOwnerRevision: 0, ...extras };
+  // GA-1 (issue #941): the server issues the token; callers never supply linkToken.
+  return { requestId: randomUUID(), expectedOwnerRevision: 0, ...extras };
 }
 
 test("guest-agent tokens are a different shape from human share tokens", () => {
@@ -88,7 +89,10 @@ test("owner mint issues an ephemeral agent member and ga1. credential", async t 
   const minted = await request("/api/rooms/commons/guest-agent-links", { method: "POST", token: ownerKey, data: body });
   assert.equal(minted.status, 201);
   const value = await minted.json();
-  assert.equal(value.token, body.linkToken);
+  // GA-1 (issue #941): the token is always server-issued — a CSPRNG ga1. token,
+  // never the caller's bytes.
+  assert.match(value.token, /^ga1\.[A-Za-z0-9_-]{43}$/);
+  const token = value.token;
   assert.equal(value.member.kind, GUEST_AGENT_KIND);
   assert.deepEqual(value.member.permissions, []);
   assert.ok(value.member.id.startsWith("guest-agent-"));
@@ -101,7 +105,7 @@ test("owner mint issues an ephemeral agent member and ga1. credential", async t 
   // #953: new agent members default to t1_readonly; the guest agent needs write access to chat
   setTier(store.db, "commons", value.member.id, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
 
-  const preview = await request("/api/guest-agent-links/preview", { method: "POST", data: { linkToken: body.linkToken } });
+  const preview = await request("/api/guest-agent-links/preview", { method: "POST", data: { linkToken: token } });
   assert.equal(preview.status, 200);
   const shown = await preview.json();
   assert.equal(shown.room.id, "commons");
@@ -110,13 +114,17 @@ test("owner mint issues an ephemeral agent member and ga1. credential", async t 
   assert.equal(Object.hasOwn(shown, "memberId"), false);
   assert.doesNotMatch(JSON.stringify(shown), PEOPLE);
 
-  const joined = await request("/api/guest-agent-links/join", { method: "POST", data: { linkToken: body.linkToken } });
+  const joined = await request("/api/guest-agent-links/join", { method: "POST", data: { linkToken: token } });
   assert.equal(joined.status, 200);
   const session = await joined.json();
   assert.equal(session.memberId, value.member.id);
   assert.doesNotMatch(JSON.stringify(session), PEOPLE);
+  // GA-2 (issue #941): join consumed the link and issued a separate session
+  // credential — the client continues on the exchanged token, not the link.
+  assert.equal(session.exchanged, true);
+  assert.ok(session.token && session.token !== body.linkToken);
 
-  const client = new RoomAgentClient({ origin, roomId: "commons", token: body.linkToken, memberId: value.member.id });
+  const client = new RoomAgentClient({ origin, roomId: "commons", token: session.token, memberId: value.member.id });
   const orientation = await client.orient();
   assert.equal(orientation.member.id, value.member.id);
   assert.equal(orientation.member.kind, "agent");
@@ -128,12 +136,60 @@ test("owner mint issues an ephemeral agent member and ga1. credential", async t 
 
   const retry = await request("/api/rooms/commons/guest-agent-links", { method: "POST", token: ownerKey, data: body });
   assert.equal(retry.status, 200);
-  assert.equal((await retry.json()).duplicate, true);
+  const retried = await retry.json();
+  assert.equal(retried.duplicate, true);
+  // A retry never discloses the bearer again — the owner already holds it.
+  assert.equal(Object.hasOwn(retried, "token"), false);
 
-  const other = { ...body, linkToken: guestToken() };
+  // Same requestId with different settings is an idempotency conflict
+  // (GA-1: the token is server-issued, so the conflict probe is the name).
+  const other = { ...body, displayName: "A different guest" };
   const conflict = await request("/api/rooms/commons/guest-agent-links", { method: "POST", token: ownerKey, data: other });
   assert.equal(conflict.status, 409);
   assert.equal((await conflict.json()).error.code, "idempotency_conflict");
+});
+
+test("GA-1 (issue #941): mint rejects a caller-provided linkToken", async t => {
+  const { request, ownerKey } = await serve(t);
+  const minted = await request("/api/rooms/commons/guest-agent-links", {
+    method: "POST", token: ownerKey, data: { ...mintBody(), linkToken: guestToken() }
+  });
+  assert.equal(minted.status, 422);
+  assert.equal((await minted.json()).error.code, "client_token_rejected");
+});
+
+test("GA-2 (issue #941): join is single-use — the link is consumed and a separate session credential is issued", async t => {
+  const { store, request, ownerKey } = await serve(t);
+  const minted = await (await request("/api/rooms/commons/guest-agent-links", { method: "POST", token: ownerKey, data: mintBody() })).json();
+  const link = minted.token;
+  // First join: consumes the link, issues a separate session credential.
+  const joined = await request("/api/guest-agent-links/join", { method: "POST", data: { linkToken: link } });
+  assert.equal(joined.status, 200);
+  const session = await joined.json();
+  assert.equal(session.memberId, minted.member.id);
+  assert.match(session.token, /^ga1\.[A-Za-z0-9_-]{43}$/);
+  assert.notEqual(session.token, link);
+  assert.equal(session.exchanged, true);
+  // The link is dead everywhere: authenticate, preview, and a second join
+  // (a forwarded copy of the link grants nothing after redemption).
+  assert.throws(() => store.authenticate(link, "commons"), { status: 401, code: "unauthenticated" });
+  assert.equal((await request("/api/guest-agent-links/preview", { method: "POST", data: { linkToken: link } })).status, 410);
+  assert.equal((await request("/api/guest-agent-links/join", { method: "POST", data: { linkToken: link } })).status, 410);
+  // The session credential is the seat's bearer, with the link's expiry.
+  const auth = store.authenticate(session.token, "commons");
+  assert.equal(auth.member.id, minted.member.id);
+  assert.equal(session.expiresAt, minted.expiresAt);
+  assert.equal((await request("/api/guest-agent-links/preview", { method: "POST", data: { linkToken: session.token } })).status, 200);
+  // Exactly one live credential for the seat.
+  assert.equal(store.db.prepare(
+    "SELECT count(*) n FROM credentials WHERE room_id='commons' AND member_id=? AND kind='access' AND revoked=0"
+  ).get(minted.member.id).n, 1);
+  // Re-joining with the session credential is idempotent — no rotation.
+  const again = await (await request("/api/guest-agent-links/join", { method: "POST", data: { linkToken: session.token } })).json();
+  assert.equal(again.memberId, minted.member.id);
+  assert.equal(again.exchanged, false);
+  assert.equal(Object.hasOwn(again, "token"), false);
+  assert.ok(store.authenticate(session.token, "commons"), "the session credential still works after the idempotent re-join");
 });
 
 test("strangers and non-owners cannot mint; human join tokens stay wrong_link_kind", async t => {
@@ -172,8 +228,8 @@ test("expiry stops the credential; next owner mint ends the member", async t => 
   const body = mintBody();
   const minted = await (await request("/api/rooms/commons/guest-agent-links", { method: "POST", token: ownerKey, data: body })).json();
   advance(GUEST_AGENT_TTL_MS + 1);
-  assert.throws(() => store.authenticate(body.linkToken, "commons"), { status: 401, code: "unauthenticated" });
-  assert.equal((await request("/api/guest-agent-links/preview", { method: "POST", data: { linkToken: body.linkToken } })).status, 410);
+  assert.throws(() => store.authenticate(minted.token, "commons"), { status: 401, code: "unauthenticated" });
+  assert.equal((await request("/api/guest-agent-links/preview", { method: "POST", data: { linkToken: minted.token } })).status, 410);
   const next = mintBody();
   const again = await request("/api/rooms/commons/guest-agent-links", { method: "POST", token: ownerKey, data: next });
   assert.equal(again.status, 201);

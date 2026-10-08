@@ -239,6 +239,7 @@
   "tests/dispute-arbiters.test.js": 6408,
   "tests/dm-consent-ui.test.js": 7682,
   "tests/dm-consents-autonomy-tier.test.js": 35449,
+  "tests/dm-reply-party.test.js": 798,
   "tests/dm-consents.test.js": 19080,
   "tests/dm-privacy.test.js": 99409,
   "tests/docs-architecture.test.js": 6824,
@@ -498,7 +499,6 @@
   "tests/next-actions.test.js": 50788,
   "tests/notification-feed.test.js": 149110,
   "tests/notification-preferences.test.js": 16790,
-  "tests/notify-classifier.test.js": 1200,
   "tests/notify-policy.test.js": 15274,
   "tests/notify-preferences.test.js": 3573,
   "tests/notify-quiet-hours.test.js": 4478,
@@ -841,7 +841,6 @@
   "tests/work-session-budget.test.js": 30381,
   "tests/work-snapshot.test.js": 40108,
   "tests/work-templates.test.js": 6784,
-  "tests/work-history-floor.test.js": 439,
   "tests/workflow.test.js": 5073,
   "tests/writer-fence-property.test.js": 300000,
   "tests/writer-fence-unfenced.test.js": 58675,
@@ -957,7 +956,11 @@
   "tests/error-leak-shapes.test.js": 272,
   "tests/guest-invites-agent-api-docs.test.mjs": 1026,
   "tests/herdr-bridge-adapter.test.js": 6100,
-  "tests/rebuild-determinism.test.js": 9500
+  "tests/rebuild-determinism.test.js": 9500,
+  "tests/saved-history-floor.test.js": 464,
+  "tests/rebuild-stale-checkpoint.test.js": 2200,
+  "tests/notify-classifier.test.js": 1200,
+  "tests/work-history-floor.test.js": 439
  },
  "_note": "Per-file wall-clock ms of `node --test <file>` measured 2026-10-06 on a 2-CPU host with 16-way parallelism (values are contention-inflated; used only as relative weights for shard balancing, never for membership). Files hitting the 300s measurement timeout are capped at 300000.",
  "releaseRecordMeasurement": "Eight record-rail files measured on macOS Node26, four concurrent real Node processes, 2026-10-06; all eight passed. Timing allocates files only.",
@@ -976,6 +979,15 @@
   "milliseconds": 70,
   "purpose": "Measured allocation only; test discovery remains authoritative."
  },
+ "dmReplyPartyMeasurement": {
+  "date": "2026-10-07",
+  "runtime": "Node v22.23.3 Linux local",
+  "file": "tests/dm-reply-party.test.js",
+  "milliseconds": 798,
+  "method": "Median of five solo node --test wall-clock runs after the 70-deep-chain regression; all passed.",
+  "purpose": "Measured allocation only; test discovery remains authoritative."
+ },
+ "releaseStaleCheckpointMeasurement": "tests/rebuild-stale-checkpoint.test.js: 2200 wall-clock ms (solo runs 2212/1407/6380 on Linux Node v24.20.0, 2026-10-08; both tests passed). Timing allocates files only, not membership.",
  "workHistoryFloorMeasurement": {
   "date": "2026-10-07",
   "runtime": "Node v22.23.3 Linux local",

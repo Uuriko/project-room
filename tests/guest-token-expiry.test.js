@@ -24,16 +24,15 @@
 // re-mint (test 3).
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { GUEST_AGENT_TOKEN_PREFIX, GUEST_AGENT_TTL_MS } from "../server/guest-agent-links.mjs";
+import { GUEST_AGENT_TTL_MS } from "../server/guest-agent-links.mjs";
 
-const guestToken = () => GUEST_AGENT_TOKEN_PREFIX + randomBytes(32).toString("base64url");
 const sha256 = value => createHash("sha256").update(value).digest("hex");
 
 async function serve(t) {
@@ -68,7 +67,7 @@ const joinLink = (request, linkToken) =>
 
 test("guest token dies exactly at its expiry instant: no grace, no skew", async t => {
   const { store, request, ownerKey, advance, now } = await serve(t);
-  const mintedRes = await mint(request, ownerKey, { linkToken: guestToken() });
+  const mintedRes = await mint(request, ownerKey);
   assert.equal(mintedRes.status, 201);
   const minted = await mintedRes.json();
   const token = minted.token;
@@ -80,25 +79,31 @@ test("guest token dies exactly at its expiry instant: no grace, no skew", async 
   advance(expiresAt - now() - 1);
   assert.equal(now(), expiresAt - 1);
   assert.equal((await preview(request, token)).status, 200);
-  assert.equal((await joinLink(request, token)).status, 200);
-  assert.equal(store.authenticate(token, "commons", null).member.id, minted.member.id);
-  assert.equal((await request("/api/rooms/commons", { token })).status, 200);
+  // GA-2 (issue #941): join() is single-use — it consumes the link and
+  // issues the session credential, which carries the same expiry. The
+  // remaining pre-expiry assertions run against the session credential.
+  const joined = await joinLink(request, token);
+  assert.equal(joined.status, 200);
+  const session = (await joined.json()).token;
+  assert.ok(session && session !== token);
+  assert.equal(store.authenticate(session, "commons", null).member.id, minted.member.id);
+  assert.equal((await request("/api/rooms/commons", { token: session })).status, 200);
 
   // Exactly at the instant: the strict expires_at > now() boundary rejects.
   advance(1);
   assert.equal(now(), expiresAt);
-  const expiredPreview = await preview(request, token);
+  const expiredPreview = await preview(request, session);
   assert.equal(expiredPreview.status, 410);
   assert.equal((await expiredPreview.json()).error.code, "link_unavailable");
-  const expiredJoin = await joinLink(request, token);
+  const expiredJoin = await joinLink(request, session);
   assert.equal(expiredJoin.status, 410);
   assert.equal((await expiredJoin.json()).error.code, "link_unavailable");
-  assert.throws(() => store.authenticate(token, "commons", null), { status: 401, code: "unauthenticated" });
+  assert.throws(() => store.authenticate(session, "commons", null), { status: 401, code: "unauthenticated" });
 
   // One millisecond past the instant: still dead. No leeway anywhere.
   advance(1);
-  assert.throws(() => store.authenticate(token, "commons", null), { status: 401, code: "unauthenticated" });
-  assert.equal((await preview(request, token)).status, 410);
+  assert.throws(() => store.authenticate(session, "commons", null), { status: 401, code: "unauthenticated" });
+  assert.equal((await preview(request, session)).status, 410);
 });
 
 test("a bearer in active use over HTTP is cut off at expiry with 401", async t => {
@@ -126,7 +131,7 @@ test("a bearer in active use over HTTP is cut off at expiry with 401", async t =
 test("an expired token is never revived: re-mint on the same requestId is rejected, the old bearer stays dead", async t => {
   const { store, request, ownerKey, advance } = await serve(t);
   const requestId = randomUUID();
-  const first = await mint(request, ownerKey, { requestId, linkToken: guestToken() });
+  const first = await mint(request, ownerKey, { requestId });
   assert.equal(first.status, 201);
   const minted = await first.json();
   const token = minted.token;
