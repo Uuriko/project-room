@@ -15,7 +15,7 @@
 //     the in-flight request at the sooner of 5s and the time remaining
 // The token (GITHUB_TOKEN or GH_TOKEN) is never logged or stored. Public
 // repositories still answer when it is absent.
-import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
+import { emitWorkClaimEventRouted, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
 import { ACTIVE_CLAIM_STATES, closeWhenLive, notePullMerged, recordCi, releaseExpired } from "./work-claims.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
 import {
@@ -302,7 +302,7 @@ export function commitPullRequestLookup(store, registry, roomId, item, result, n
     const settled = settlePullRequest(recorded, batchPullOutcome(recorded), nowMs);
     if (!settled) return false;
     registry.set(roomId, settled.item);
-    emitWorkClaimEvent(store, roomId, {
+    emitWorkClaimEventRouted(store, roomId, {
       actorId: settled.previousOwnerId ?? settled.item.owner ?? item.owner,
       item: settled.item,
       action: settled.action,
@@ -330,7 +330,7 @@ export function commitPullRequestLookup(store, registry, roomId, item, result, n
     const stored = rememberPoll(next, nowMs, delay, { etag: result.etag });
     registry.set(roomId, stored);
     if (changed) {
-      emitWorkClaimEvent(store, roomId, {
+      emitWorkClaimEventRouted(store, roomId, {
         actorId: item.owner ?? "system",
         item: stored,
         action: "ci_changed",
@@ -484,7 +484,7 @@ function closeDeployedClaims(store, nowMs) {
       const closed = closeWhenLive(item, SOURCE_REVISION, nowMs);
       if (!closed) continue;
       store.workClaims.set(roomId, closed);
-      emitWorkClaimEvent(store, roomId, {
+      emitWorkClaimEventRouted(store, roomId, {
         actorId: item.owner ?? "system", item: closed, action: "state_changed", atMs: nowMs
       });
     }
@@ -518,7 +518,7 @@ function sweepExpiredClaimLeases(store, nowMs) {
         const [item] = releaseExpired([before], nowMs);
         if (!item || item.state !== "unclaimed" || before.state === "unclaimed") continue;
         store.workClaims.set(roomId, item);
-        const receipt = emitWorkClaimEvent(store, roomId, {
+        const receipt = emitWorkClaimEventRouted(store, roomId, {
           actorId: before.owner, item, action: "lease_expired", previousOwnerId: before.owner,
           atMs: nowMs, paths: before.files ?? []
         });

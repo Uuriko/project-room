@@ -1,10 +1,16 @@
 // Work-claim room events. A claim, renewal, handoff or release used to change
 // only the work_claims table: nobody saw it in the room, the event tail, the
 // digest or an agent's wake feed, so agents re-announced every claim in chat.
-// Each committed claim change now appends one thin `work_claim.updated` room
-// event, attributed to the member who made it. The work_claims table stays the
-// source of truth; the event carries a pointer and the state a reader needs.
-// (claimState, not state: the envelope reserves data.state for land.updated.)
+//
+// FIX-69 (event-light claim writes): the room event log has a lifetime
+// budget of 10,000 events, and one event per claim write (~6.5 per claim
+// lifecycle) gated the whole room in ~3h at 200-agent load. Committed claim
+// writes now batch into one work_claim.digest event per room per 5-minute
+// window (server/work-claim-digest.mjs) instead of one work_claim.updated
+// event per transition. Only decision-grade signals — writes carrying
+// attention, or a review verdict — still emit a per-transition
+// work_claim.updated event, because the Updates needs-me feed keys on them.
+// The work_claims table stays the source of truth; events are visibility.
 //
 // Same append path as the land queue (server/land-queue.mjs #emit): the event
 // row and the projection update run inside the caller's claim transaction, so
@@ -14,6 +20,7 @@ import { EVENT_TYPES, WORK_CLAIM_EVENT_ACTIONS, applyEvent, event, firstBlockedW
 import { getTier } from "./autonomy-tiers.mjs";
 import { postReceiptCard } from "./receipt-cards.mjs";
 import { resolveNamedReviewers, hasCurrentReview } from "./work-claims.mjs";
+import { accumulateClaimDigest, claimDigestDue, takeClaimDigest, claimDigestEventData } from "./work-claim-digest.mjs";
 
 export const WORK_CLAIM_ACTIONS = WORK_CLAIM_EVENT_ACTIONS;
 
@@ -136,37 +143,16 @@ export function wakeNamedReviewers(store, roomId, item, { actorId } = {}) {
       { reason: "review", actorId: actorId ?? item.owner }));
 }
 
-// SEC-2 / Q3-A event budget: note-only writes (a note on a held claim, a
-// review note, a lease renewal) coalesce into at most one room event per
-// claim and action per 60 s. The claim row still records every write and the
-// next event carries the latest state. Transitions, assignments, verdicts
-// and PR facts are never coalesced. Memory only, per store: a restart allows
-// one extra event per claim, which keeps the bound.
-export const CLAIM_EVENT_COALESCE_MS = 60_000;
-const CLAIM_EVENT_MEMORY = 10_000;
-const lastClaimEvent = new WeakMap();
-
-function noteClaimEvent(store, key, atMs) {
-  let seen = lastClaimEvent.get(store);
-  if (!seen) { seen = new Map(); lastClaimEvent.set(store, seen); }
-  seen.delete(key);
-  seen.set(key, atMs);
-  if (seen.size > CLAIM_EVENT_MEMORY) seen.delete(seen.keys().next().value);
-}
-
-const coalesceKey = (roomId, claimId, action) => `${roomId}\u0000${claimId}\u0000${action}`;
-
-export function claimEventCoalesced(store, roomId, claimId, action, atMs) {
-  const at = store && typeof store === "object" ? lastClaimEvent.get(store)?.get(coalesceKey(roomId, claimId, action)) : undefined;
-  return Number.isFinite(at) && atMs - at >= 0 && atMs - at < CLAIM_EVENT_COALESCE_MS;
-}
+// FIX-69: the 60s per-claim coalesce map is retired — routine transitions
+// batch into the per-room digest instead (server/work-claim-digest.mjs).
+// Decision-grade writes (attention, review verdicts) still emit immediately
+// via emitWorkClaimEvent; everything else routes through the digest.
 
 // Handler unit tests drive the routes with a registry-only store; events need
 // the real event log, so a store without one records nothing here.
-export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previousOwnerId = null, atMs = null, paths = undefined, pullRequest = undefined, reason = undefined, ciState = undefined, verdict = undefined, attention = undefined, attentionMemberId = undefined, coalesce = false }) {
+export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previousOwnerId = null, atMs = null, paths = undefined, pullRequest = undefined, reason = undefined, ciState = undefined, verdict = undefined, attention = undefined, attentionMemberId = undefined }) {
   if (!store?.db || typeof store.room !== "function") return null;
   const stamp = Number.isFinite(atMs) ? atMs : (typeof store.now === "function" ? store.now() : Date.now());
-  if (coalesce && claimEventCoalesced(store, roomId, item.id, action, stamp)) return null;
   const room = store.room(roomId);
   // The event log refuses anything after archive (applyEvent throws). Skip
   // the receipt so the claim write still commits; an archived room has no
@@ -188,18 +174,72 @@ export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previ
   store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
   const compact = { ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
   store.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, store.storedProjection(roomId, compact), roomId);
-  if (coalesce) noteClaimEvent(store, coalesceKey(roomId, item.id, action), stamp);
   try {
     if (store.agentPlugin) store.agentPlugin.fanoutRoomEvent({ roomId, event: incoming });
   } catch (error) {
     console.error("work claim fan-out failed:", error?.message ?? error);
   }
-  // ACT-1a: in-room receipt for every done claim (result, merged, production).
-  // Posted here, not in the Board done branch, while BF is open on work-claim-routes.
-  // A receipt failure must not roll back the claim.
-  if (action === "state_changed" && item.state === "done") {
-    try { postReceiptCard(store, roomId, item, stamp); }
-    catch (error) { console.error("work claim receipt card failed:", error?.message ?? error); }
+  return { sequence, event: incoming };
+}
+
+// FIX-69: append one work_claim.digest room event for a flushed window.
+// Same append path as emitWorkClaimEvent above.
+export function emitClaimDigestEvent(store, roomId, { actorId = null, digest, atMs = null }) {
+  if (!store?.db || typeof store.room !== "function") return null;
+  const stamp = Number.isFinite(atMs) ? atMs : (typeof store.now === "function" ? store.now() : Date.now());
+  const room = store.room(roomId);
+  if (isRoomArchived(room.state)) return null;
+  const actor = actorId && room.state.members?.[actorId];
+  const incoming = event({
+    id: randomUUID(),
+    idempotencyKey: randomUUID(),
+    type: EVENT_TYPES.WORK_CLAIM_DIGEST,
+    actorId: actor && actor.active !== false ? actorId : room.state.room.ownerId,
+    roomId,
+    at: new Date(stamp).toISOString(),
+    data: claimDigestEventData(digest)
+  });
+  if (actor?.system === true) incoming.data.actorKind = "system";
+  const state = applyEvent(room.state, incoming);
+  const sequence = room.sequence + 1;
+  store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
+  const compact = { ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
+  store.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, store.storedProjection(roomId, compact), roomId);
+  try {
+    if (store.agentPlugin) store.agentPlugin.fanoutRoomEvent({ roomId, event: incoming });
+  } catch (error) {
+    console.error("work claim digest fan-out failed:", error?.message ?? error);
   }
   return { sequence, event: incoming };
+}
+
+// FIX-69: flush one due digest window: append the digest event, then post
+// the batched in-room receipt cards (ACT-1a) for claims the window completed.
+// A receipt failure must not roll back the digest.
+function flushClaimDigest(store, roomId, nowMs) {
+  const digest = takeClaimDigest(store, roomId, nowMs);
+  if (!digest) return null;
+  const receipt = emitClaimDigestEvent(store, roomId, { actorId: digest.actorId, digest, atMs: nowMs });
+  for (const entry of digest.claims) {
+    if (entry.item?.state !== "done") continue;
+    try { postReceiptCard(store, roomId, entry.item, entry.atMs); }
+    catch (error) { console.error("work claim receipt card failed:", error?.message ?? error); }
+  }
+  return receipt;
+}
+
+// FIX-69: the single choke point for claim-write visibility. Writes carrying
+// attention or a review verdict are decision-grade and stay immediate (the
+// Updates needs-me feed keys on them); every other routine lifecycle
+// transition batches into the per-room digest, flushed at most once per
+// window. Returns the immediate receipt, or { digested: true }.
+export function emitWorkClaimEventRouted(store, roomId, { actorId, item, action, previousOwnerId = null, atMs = null, paths = undefined, pullRequest = undefined, reason = undefined, ciState = undefined, verdict = undefined, attention = undefined, attentionMemberId = undefined }) {
+  const params = { actorId, item, action, previousOwnerId, atMs, paths, pullRequest, reason, ciState, verdict, attention, attentionMemberId };
+  if (attention != null || verdict != null) return emitWorkClaimEvent(store, roomId, params);
+  const stamp = Number.isFinite(atMs) ? atMs : (typeof store.now === "function" ? store.now() : Date.now());
+  // Flush a lapsed window before accumulating: each digest covers exactly
+  // one window, and the write that crosses the boundary starts the next.
+  if (claimDigestDue(store, roomId, stamp)) flushClaimDigest(store, roomId, stamp);
+  accumulateClaimDigest(store, roomId, { action, item, actorId, atMs: stamp, paths, previousOwnerId });
+  return { digested: true, sequence: null };
 }

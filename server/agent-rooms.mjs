@@ -22,7 +22,7 @@ import { nextActionsForRoomCreate } from "./discoverability.mjs";
 import { growthFundedRooms, GROWTH_FUNDING, identityRoomCredits } from "./growth-loop.mjs";
 import { claimWork, createWork } from "./work-claims.mjs";
 import { isFirstContribution, retentionAck } from "./retention-response.mjs";
-import { emitWorkClaimEvent } from "./work-claim-events.mjs";
+import { emitWorkClaimEventRouted } from "./work-claim-events.mjs";
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 
 // Invite joins hand out a room-scoped rak_ token (POST /join returns it as
@@ -89,7 +89,7 @@ function ensureAgentStarter(store, roomId, memberId) {
   const now = store.now();
   let item = createWork({ id: AGENT_STARTER_ID, title: AGENT_STARTER_TITLE, tags: ["starter"] }, { now, agentId: memberId });
   store.workClaims.set(roomId, item);
-  emitWorkClaimEvent(store, roomId, { actorId: memberId, item, action: "created", atMs: now });
+  emitWorkClaimEventRouted(store, roomId, { actorId: memberId, item, action: "created", atMs: now });
   item = claimWork(item, memberId, { leaseHours: 2, now });
   // Retention ack (research brief 2026-09-28, mechanic #2): the starter is
   // the member's first contribution, so it carries the bot's immediate
@@ -101,7 +101,7 @@ function ensureAgentStarter(store, roomId, memberId) {
     store.workClaims.list(roomId).filter(entry => entry.id !== AGENT_STARTER_ID), memberId);
   item = retentionAck(item, { now, first, agentId: memberId });
   store.workClaims.set(roomId, item);
-  emitWorkClaimEvent(store, roomId, { actorId: memberId, item, action: "claimed", atMs: now });
+  emitWorkClaimEventRouted(store, roomId, { actorId: memberId, item, action: "claimed", atMs: now });
   return { claimId: AGENT_STARTER_ID, state: item.state };
 }
 function slugFromTitle(title) {

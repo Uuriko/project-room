@@ -2,7 +2,7 @@
 // work-claims board the REST routes use. A handoff or supersede leaves a
 // successor card that depends on the source, so the chain is visible there.
 import { createWork, claimWork, renewWork, updateWork, roomWorkClaimConfig } from "./work-claims.mjs";
-import { emitWorkClaimEvent } from "./work-claim-events.mjs";
+import { emitWorkClaimEventRouted } from "./work-claim-events.mjs";
 
 const BOARD_ID = /^[A-Za-z0-9_-]{1,128}$/;
 const ACTIVE = new Set(["claimed", "in_progress", "blocked"]);
@@ -32,7 +32,7 @@ function roomLike(registry, roomId) {
 
 function commit(store, roomId, actorId, item, action, nowMs) {
   store.workClaims.set(roomId, item);
-  emitWorkClaimEvent(store, roomId, { actorId, item, action, atMs: nowMs });
+  emitWorkClaimEventRouted(store, roomId, { actorId, item, action, atMs: nowMs });
   return item;
 }
 

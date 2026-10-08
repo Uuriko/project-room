@@ -6,7 +6,7 @@
 // ACT-1b waits on S1, RT, and GR2 deployed. ACT-3b humanClaimUrl waits on S1 and C.
 import { EVENT_TYPES, isRoomArchived } from "../src/events.js";
 import { claimWork, updateWork } from "./work-claims.mjs";
-import { emitWorkClaimEvent, enqueueClaimWake } from "./work-claim-events.mjs";
+import { emitWorkClaimEventRouted, enqueueClaimWake } from "./work-claim-events.mjs";
 import { ROOM_GUIDE_ID, appendRoomEvent, stableEventId } from "./receipt-cards.mjs";
 
 export { ROOM_GUIDE_ID };
@@ -95,7 +95,7 @@ function firstJoinedAgent(state) {
 
 function commitClaim(store, roomId, item, action, actorId, atMs) {
   store.workClaims.set(roomId, item);
-  emitWorkClaimEvent(store, roomId, { actorId, item, action, atMs });
+  emitWorkClaimEventRouted(store, roomId, { actorId, item, action, atMs });
   return item;
 }
 

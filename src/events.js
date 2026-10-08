@@ -106,6 +106,10 @@ export const EVENT_TYPES = Object.freeze({
   // event is the thin room record of who claimed, renewed, handed off or
   // released which claim (server/work-claim-events.mjs).
   WORK_CLAIM_UPDATED: "work_claim.updated",
+  // FIX-69: batched claim-lifecycle visibility. Routine claim transitions
+  // accumulate into one digest per room per 5-minute window instead of one
+  // work_claim.updated event each (server/work-claim-digest.mjs).
+  WORK_CLAIM_DIGEST: "work_claim.digest",
   // ACT-1a: a room's starter task and Room Guide were seeded once.
   // ACT-1b (/start, landing, receipt UI) waits on S1, RT, and GR2 deployed.
   ROOM_STARTER_SEEDED: "room.starter_seeded"
@@ -583,6 +587,7 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.DM_POSTED]: recordPeerDm,
     [EVENT_TYPES.LAND_UPDATED]: recordLandUpdate,
     [EVENT_TYPES.WORK_CLAIM_UPDATED]: recordWorkClaimUpdate,
+    [EVENT_TYPES.WORK_CLAIM_DIGEST]: recordWorkClaimDigest,
     [EVENT_TYPES.ROOM_STARTER_SEEDED]: recordStarterSeeded
   };
   const handler = handlers[incoming.type];
@@ -667,7 +672,7 @@ function validateEnvelope(incoming) {
     // Polls (missing-features #5): a kind "poll" message carries a poll
     // payload { question, options, allowMultiple }. The envelope guard admits
     // the object key; the applier runs the full option validation.
-    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "scopes", "acceptedScopes", "changed", "state", "pullRequest", "pullRequests", "blocks", "actions", "dependents", "poll"].includes(key)) throw new Error(`Invalid ${key}`);
+    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "scopes", "acceptedScopes", "changed", "state", "pullRequest", "pullRequests", "blocks", "actions", "dependents", "poll", "digestCounts", "digestClaims"].includes(key)) throw new Error(`Invalid ${key}`);
   }
 }
 
@@ -1747,6 +1752,37 @@ function recordWorkClaimUpdate(state, incoming) {
   if (data.ciState !== undefined && !["pending", "success", "failure", "neutral"].includes(data.ciState)) throw new Error("Event data missing ciState");
   if (data.verdict !== undefined && !["approve", "changes_requested", "comment"].includes(data.verdict)) throw new Error("Event data missing verdict");
   if (data.action === "ci_changed" && (data.reason !== "ci_changed" || !data.ciState)) throw new Error("Event data missing ciState");
+}
+
+// FIX-69: thin receipt for a work_claim.digest batch. Validated, never
+// copied into the projection — like recordWorkClaimUpdate, the work_claims
+// table stays the source of truth.
+function recordWorkClaimDigest(state, incoming) {
+  requireMember(state, incoming.actorId);
+  const data = incoming.data ?? {};
+  for (const key of ["windowStart", "windowEnd"]) {
+    if (typeof data[key] !== "string" || Number.isNaN(Date.parse(data[key]))) throw new Error(`Event data missing ${key}`);
+  }
+  if (Date.parse(data.windowEnd) < Date.parse(data.windowStart)) throw new Error("Event data windowEnd before windowStart");
+  const counts = data.digestCounts;
+  if (!counts || typeof counts !== "object" || Array.isArray(counts)) throw new Error("Event data missing digestCounts");
+  for (const [action, count] of Object.entries(counts)) {
+    if (!WORK_CLAIM_EVENT_ACTIONS.includes(action)) throw new Error(`Event data unknown digest action ${action}`);
+    if (!Number.isSafeInteger(count) || count < 0) throw new Error("Event data digestCounts must be non-negative integers");
+  }
+  const claims = data.digestClaims;
+  if (!Array.isArray(claims) || claims.length > 64) throw new Error("Event data missing digestClaims");
+  for (const entry of claims) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error("Event data digest claim must be an object");
+    if (typeof entry.workClaim !== "string" || !entry.workClaim.trim() || entry.workClaim.length > 256) throw new Error("Event data missing digest workClaim");
+    if (!WORK_CLAIM_EVENT_ACTIONS.includes(entry.action)) throw new Error("Event data missing digest action");
+    if (!WORK_CLAIM_EVENT_STATES.includes(entry.claimState)) throw new Error("Event data missing digest claimState");
+    if (!(entry.ownerId === null || typeof entry.ownerId === "string")) throw new Error("Event data missing digest ownerId");
+    if (entry.previousOwnerId !== undefined && typeof entry.previousOwnerId !== "string") throw new Error("Event data invalid digest previousOwnerId");
+    if (typeof entry.title !== "string" || !entry.title.trim() || entry.title.length > 4096) throw new Error("Event data missing digest title");
+    if (typeof entry.at !== "string" || Number.isNaN(Date.parse(entry.at))) throw new Error("Event data missing digest at");
+    if (!Array.isArray(entry.paths) || entry.paths.length > 64 || entry.paths.some(v => typeof v !== "string" || !v.trim() || v.length > 512)) throw new Error("Event data missing digest paths");
+  }
 }
 
 function recordReferral(state, incoming) {

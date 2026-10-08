@@ -10,7 +10,7 @@ import { EVENT_TYPES } from "../src/events.js";
 import { ServiceError } from "./service-error.mjs";
 import { getRoomTemplate } from "./templates.mjs";
 import { createWork } from "./work-claims.mjs";
-import { emitWorkClaimEvent } from "./work-claim-events.mjs";
+import { emitWorkClaimEventRouted } from "./work-claim-events.mjs";
 import { checkAgentDisplayName } from "./display-name-guard.mjs";
 import { appendRoomEvent } from "./receipt-cards.mjs";
 import { ROOM_GUIDE_ID, STARTER_CLAIM_ID, installGuideCommandHook, runGuideStep } from "./room-guide.mjs";
@@ -57,7 +57,7 @@ function putClaim(store, roomId, actorId, spec, now) {
   if (store.workClaims.has(roomId, spec.id)) return store.workClaims.get(roomId, spec.id);
   const item = createWork({ id: spec.id, title: spec.title, tags: spec.tags }, { now, agentId: actorId });
   store.workClaims.set(roomId, item);
-  emitWorkClaimEvent(store, roomId, { actorId, item, action: "created", atMs: now });
+  emitWorkClaimEventRouted(store, roomId, { actorId, item, action: "created", atMs: now });
   return item;
 }
 

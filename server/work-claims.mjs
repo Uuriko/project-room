@@ -403,6 +403,12 @@ const workOf = value => {
   if (value.claimedAt !== undefined && value.claimedAt !== null) check(typeof value.claimedAt === "string" && Number.isFinite(Date.parse(value.claimedAt)), "claimedAt must be an ISO timestamp");
   if (value.leaseStartAt !== undefined && value.leaseStartAt !== null) check(typeof value.leaseStartAt === "string" && Number.isFinite(Date.parse(value.leaseStartAt)), "leaseStartAt must be an ISO timestamp");
   if (value.leaseExpiresAt !== undefined && value.leaseExpiresAt !== null) check(typeof value.leaseExpiresAt === "string" && Number.isFinite(Date.parse(value.leaseExpiresAt)), "leaseExpiresAt must be an ISO timestamp");
+  // FIX-69: near-zero-cost heartbeat stamp. Written by POST .../touch with no
+  // room event; records liveness without extending the lease.
+  if (value.leaseHeartbeatAt !== undefined && value.leaseHeartbeatAt !== null) check(typeof value.leaseHeartbeatAt === "string" && Number.isFinite(Date.parse(value.leaseHeartbeatAt)), "leaseHeartbeatAt must be an ISO timestamp");
+  // FIX-69: set by releaseExpired when a lease lapses, so the read model can
+  // tell an expired claim apart from one that was never claimed.
+  if (value.lastLeaseExpiredAt !== undefined && value.lastLeaseExpiredAt !== null) check(typeof value.lastLeaseExpiredAt === "string" && Number.isFinite(Date.parse(value.lastLeaseExpiredAt)), "lastLeaseExpiredAt must be an ISO timestamp");
   if (value.deliveryMode !== undefined && value.deliveryMode !== null) check(DELIVERY_MODES.includes(value.deliveryMode), `deliveryMode must be one of ${DELIVERY_MODES.join(", ")}`);
   if (value.reviewPolicy !== undefined && value.reviewPolicy !== null) check(REVIEW_POLICIES.includes(value.reviewPolicy), `reviewPolicy must be one of ${REVIEW_POLICIES.join(", ")}`);
   if (value.reviewedBy !== undefined && value.reviewedBy !== null) check(typeof value.reviewedBy === "string" && value.reviewedBy.length > 0 && value.reviewedBy.length <= 128, "reviewedBy must be 1..128 characters");
@@ -433,6 +439,7 @@ const workOf = value => {
     readingAcks,
     ...(historyOmitted > 0 ? { historyOmitted } : {}),
     claimedAt: value.claimedAt ?? null, leaseStartAt: value.leaseStartAt ?? null, leaseExpiresAt: value.leaseExpiresAt ?? null,
+    leaseHeartbeatAt: value.leaseHeartbeatAt ?? null, lastLeaseExpiredAt: value.lastLeaseExpiredAt ?? null,
     deliveryMode: value.deliveryMode ?? null, reviewPolicy: value.reviewPolicy ?? null,
     reviewedBy: value.reviewedBy ?? null, attestations: Object.freeze(attestations),
     tags, files, fileBlocks, blobs, dependsOn, pullRequest, pullRequests: listedPulls,
@@ -614,6 +621,18 @@ export function renewWork(work, agentId, { note, leaseHours, room, now } = {}) {
     leaseExpiresAt: effective === null ? null : isoOf(atMs + effective * 3600 * 1000) };
   return withHistory(renewed, atMs, agent, "renewed",
     note ?? (effective === null ? "lease removed" : `lease: ${effective}h`));
+}
+// FIX-69: near-zero-cost heartbeat. The owner records liveness on a held
+// claim without extending the lease and without a room event — the route
+// writes leaseHeartbeatAt and returns, so a 200-agent room's keepalives cost
+// nothing against the 10,000-event lifetime budget. Only renews (with
+// progress evidence) extend the lease; a lapsed lease still auto-releases.
+export function touchWorkClaim(work, agentId, { now } = {}) {
+  const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  check(item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can touch it`);
+  check(ACTIVE_CLAIM_STATES.includes(item.state), `work "${item.id}" is ${item.state} — only active claims can be touched`);
+  return withHistory({ ...item, leaseHeartbeatAt: isoOf(atMs) }, atMs, agent, "heartbeat",
+    `heartbeat by ${agent}`);
 }
 // Append one URL to the current claim round without replacing its lease or
 // evidence. A fresh duplicate in the same round is a byte-identical no-op;
@@ -912,7 +931,10 @@ export function releaseExpired(items, now) {
     // 2026-09-30 (phase-2 gap audit L-P2-8): mirrors updateWork, where a
     // released claim drops its reviews too (attestations belong to the
     // lapsed owner's round of work, never to whoever claims next).
+    // FIX-69: stamp the lapsed lease so the read model keeps expired claims
+    // distinct from never-claimed ones (state=expired filter).
     const released = { ...item, state: "unclaimed", owner: null, leaseStartAt: null, leaseExpiresAt: null,
+      lastLeaseExpiredAt: item.leaseExpiresAt,
       files: Object.freeze([]), fileBlocks: Object.freeze({}), attestations: Object.freeze([]), reviews: Object.freeze([]) };
     return withHistory(released, atMs, item.owner ?? "system", "lease_expired",
       `claim by ${item.owner ?? "nobody"} lapsed at ${item.leaseExpiresAt} — auto-released`);

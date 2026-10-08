@@ -24,7 +24,7 @@
 // leaves the process; only its env var NAME is documented (ops__STATE.md).
 import { parsePullRequestUrl, pullLinks, rateLimitUntil } from "./claim-coordination.mjs";
 import { applyPullRequestWebhook, readClaimPullBudget, writeClaimPullBudget } from "./claim-pr-sync.mjs";
-import { emitWorkClaimEvent } from "./work-claim-events.mjs";
+import { emitWorkClaimEventRouted } from "./work-claim-events.mjs";
 import { MAX_CLAIM_HISTORY } from "./work-claims.mjs";
 import { parseEvent, verifyWebhook, WEBHOOK_BODY_LIMIT } from "./github-app/verify.mjs";
 
@@ -187,7 +187,7 @@ export function autoLinkPullRequest(store, roomId, claimId, { url, source = "unk
   store.workClaims.set(roomId, next);
   // No reason: the event projection (src/events.js) only accepts ci_changed /
   // reviewed as reasons; the history entry below carries the detail.
-  emitWorkClaimEvent(store, roomId, {
+  emitWorkClaimEventRouted(store, roomId, {
     actorId: item.owner ?? "system", item: next, action: "state_changed",
     atMs: nowMs,
   });
@@ -419,7 +419,7 @@ export function linkDeployToSettledClaims(store, { revision, nowMs = Date.now() 
           updatedAt: isoOf(nowMs),
         });
         store.workClaims.set(roomId, next);
-        emitWorkClaimEvent(store, roomId, {
+        emitWorkClaimEventRouted(store, roomId, {
           actorId: item.owner ?? "system", item: next, action: "state_changed",
           atMs: nowMs,
         });

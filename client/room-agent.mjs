@@ -847,6 +847,12 @@ export class RoomAgentClient {
       { ...(progressMessageId === undefined ? {} : { progressMessageId }), ...(note === undefined ? {} : { note }),
         ...(leaseHours === undefined ? {} : { leaseHours }) }, signal);
   }
+  // FIX-69: near-zero-cost heartbeat — stamps leaseHeartbeatAt with no room
+  // event. Owner-only; never extends the lease.
+  touchWorkItem(id, { clientTime, signal } = {}) {
+    return this.#request(`/work-claims/${encodeURIComponent(id)}/touch`,
+      { ...(clientTime === undefined ? {} : { clientTime }) }, signal);
+  }
   workClaimConfig({ maxMemberOpenClaims, signal } = {}) {
     if (maxMemberOpenClaims === undefined) return this.#request("/work-claims/config", undefined, signal);
     return this.#request("/work-claims/config", { maxMemberOpenClaims }, signal);

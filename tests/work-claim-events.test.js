@@ -1,8 +1,15 @@
 // Work-claim changes become room events: before this, claims lived only in the
 // work_claims table, so the room, the event tail and agents' wake feeds never
 // saw a claim, a renewal, a handoff or a release, and agents re-announced every
-// claim in chat. Each committed change now appends one work_claim.updated event
-// attributed to the member who made it, and a refused change appends nothing.
+// claim in chat.
+//
+// FIX-69 (event-light claim writes): routine lifecycle transitions now batch
+// into one work_claim.digest event per room per 5-minute window instead of one
+// work_claim.updated event per transition — the 10,000-event lifetime budget
+// gated the whole room in ~3h at 200-agent load. Only decision-grade writes
+// (attention, review verdicts) still emit a per-transition work_claim.updated
+// event, attributed to the member who made it; a refused change appends
+// nothing. The work_claims table stays the source of truth.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { RoomAgentClient } from '../client/room-agent.mjs';
@@ -36,38 +43,54 @@ const claimEvents = async client => (await client.changes(0, 100)).events
   .filter(row => row.event.type === 'work_claim.updated')
   .map(row => ({ seq: row.sequence, actor: row.event.actorId, at: row.event.at, ...row.event.data }));
 
-test('each claim change appends one event naming the member, the action, the owner and the files', async t => {
-  const { owner, peer } = await fixture(t);
+const digestEvents = async client => (await client.changes(0, 100)).events
+  .filter(row => row.event.type === 'work_claim.digest')
+  .map(row => ({ seq: row.sequence, ...row.event.data }));
+
+const DIGEST_WINDOW_MS = 5 * 60 * 1000;
+
+test('routine claim changes batch into the digest; decision-grade writes stay immediate', async t => {
+  const { store, owner, peer } = await fixture(t);
+  let now = Date.now();
+  store.now = () => now;
   const created = await owner.workClaimCreate({ id: 'lane-a', title: 'Lane A', files: ['server/a.mjs'] });
   assert.equal(created.history[0].agentId, 'owner', 'creation is attributed to the creating member');
   const claimed = await owner.claimWorkItem('lane-a', { leaseHours: 2 });
   await owner.updateWorkItem('lane-a', { state: 'in_progress' });
   await peer.reviewWorkItem('lane-a', { note: 'looks right' });
   // Renewals cite a public progress message posted after the lease started.
-  await new Promise(resolve => setTimeout(resolve, 2));
+  now += 1000;
   const progress = (await owner.say('Lane A is moving')).event.data.messageId;
+  now += 1000;
   await owner.renewWorkItem('lane-a', { progressMessageId: progress, leaseHours: 3 });
+  // Reassign carries attention=assigned: decision-grade, still immediate.
   await owner.reassignWorkItem('lane-a', { newOwner: 'reviewer', note: 'handoff' });
   await peer.releaseWorkItem('lane-a', { note: 'parked' });
 
   const events = await claimEvents(owner);
   assert.deepEqual(events.map(e => [e.actor, e.action, e.claimState, e.ownerId]), [
-    ['owner', 'created', 'unclaimed', null],
-    ['owner', 'claimed', 'claimed', 'owner'],
-    ['owner', 'state_changed', 'in_progress', 'owner'],
-    ['reviewer', 'reviewed', 'in_progress', 'owner'],
-    ['owner', 'renewed', 'in_progress', 'owner'],
     ['owner', 'reassigned', 'in_progress', 'reviewer'],
-    ['reviewer', 'released', 'unclaimed', null]
   ]);
-  assert.ok(events.every(e => e.workClaim === 'lane-a' && e.title === 'Lane A'));
-  assert.ok(events.every(e => e.paths.length === 1 && e.paths[0] === 'server/a.mjs'),
+  assert.equal(events[0].attention, 'assigned');
+  assert.equal(events[0].previousOwnerId, 'owner');
+  assert.deepEqual(await digestEvents(owner), [], 'no digest flushes inside the window');
+
+  // The write that crosses the window boundary flushes the whole window.
+  now += DIGEST_WINDOW_MS + 1000;
+  await owner.workClaimCreate({ id: 'lane-b', title: 'Lane B' });
+  const [digest] = await digestEvents(owner);
+  assert.ok(digest, 'one digest event covers the window');
+  assert.deepEqual(digest.digestCounts, {
+    created: 1, claimed: 1, state_changed: 1, reviewed: 1, renewed: 1, released: 1,
+  }, 'routine transitions batch; the immediate reassign is not double-counted');
+  const byId = Object.fromEntries(digest.digestClaims.map(entry => [entry.workClaim, entry]));
+  assert.equal(byId['lane-a'].action, 'released');
+  assert.equal(byId['lane-a'].claimState, 'unclaimed');
+  assert.deepEqual(byId['lane-a'].paths, ['server/a.mjs'],
     'release still names the files that were held, which the item itself clears');
-  assert.equal(events[1].leaseExpiresAt, claimed.leaseExpiresAt);
-  assert.equal(events[0].at, created.history[0].at, 'the receipt uses the same clock as the claim history');
-  assert.equal(events[5].previousOwnerId, 'owner');
-  assert.equal(events[6].previousOwnerId, undefined);
-  assert.ok(events.every((e, i) => i === 0 || e.seq > events[i - 1].seq), 'events land in commit order');
+  assert.ok(byId['lane-a'].title === 'Lane A');
+  assert.equal(digest.digestClaims.length, 1, 'one entry per claim: the latest action wins');
+  void claimed;
 });
 
 test('a refused claim change appends no event', async t => {
@@ -82,27 +105,42 @@ test('a refused claim change appends no event', async t => {
 
 test('a lapsed lease is swept once, naming the previous owner and the files that were freed', async t => {
   const { store, owner } = await fixture(t);
+  let now = Date.now();
+  store.now = () => now;
   await owner.workClaim('short', { files: ['docs/held.md'], leaseHours: 1 });
   const row = store.workClaims.get('commons', 'short');
-  store.workClaims.set('commons', { ...row, leaseExpiresAt: new Date(Date.now() - 1000).toISOString() });
+  store.workClaims.set('commons', { ...row, leaseExpiresAt: new Date(now - 1000).toISOString() });
   await owner.workClaims();
   await owner.workClaims();
-  const expired = (await claimEvents(owner)).filter(e => e.action === 'lease_expired');
+  // The expiry rides the digest now, not a per-transition event.
+  assert.equal((await claimEvents(owner)).filter(e => e.action === 'lease_expired').length, 0);
+  assert.deepEqual(await digestEvents(owner), [], 'no digest flushes inside the window');
+  now += DIGEST_WINDOW_MS + 1000;
+  await owner.workClaim('after', {});
+  const [digest] = await digestEvents(owner);
+  assert.ok(digest, 'the sweep surfaces in the next digest window');
+  const expired = digest.digestClaims.filter(e => e.action === 'lease_expired');
   assert.equal(expired.length, 1, 'a later read of the board does not emit the expiry again');
-  assert.deepEqual([expired[0].actor, expired[0].claimState, expired[0].ownerId, expired[0].previousOwnerId], ['owner', 'unclaimed', null, 'owner']);
+  assert.deepEqual([expired[0].claimState, expired[0].ownerId, expired[0].previousOwnerId],
+    ['unclaimed', null, 'owner']);
   assert.deepEqual(expired[0].paths, ['docs/held.md']);
   assert.deepEqual(store.workClaims.get('commons', 'short').files, []);
 });
 
 test('the full event log, claim events included, replays from an empty room', async t => {
   const { store, owner } = await fixture(t);
+  let now = Date.now();
+  store.now = () => now;
   await owner.workClaim('replayed', { files: ['src/r.js'], leaseHours: 1 });
   await owner.releaseWorkItem('replayed', { note: 'parked' });
+  now += DIGEST_WINDOW_MS + 1000;
+  await owner.workClaim('flush', {});
   const rows = store.db.prepare('SELECT body FROM events WHERE room_id=? ORDER BY sequence').all('commons');
   let state = emptyRoomState();
   for (const { body } of rows) state = applyEvent(state, JSON.parse(body));
   assert.equal(state.room.id, 'commons');
-  assert.ok(rows.some(({ body }) => JSON.parse(body).type === 'work_claim.updated'));
+  assert.ok(rows.some(({ body }) => JSON.parse(body).type === 'work_claim.digest'),
+    'routine transitions replay as digest events');
   const projection = JSON.parse(store.db.prepare('SELECT projection FROM rooms WHERE id=?').get('commons').projection);
   assert.deepEqual(projection.eventLog, []);
   assert.equal(projection.workClaims, undefined, 'the claim stays in the work_claims table, not the room projection');
