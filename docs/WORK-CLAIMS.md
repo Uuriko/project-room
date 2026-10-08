@@ -70,12 +70,24 @@ labels on the same path do not conflict. The same label does. Overlap is
 `files`, and `leaseExpiresAt`. `advisory: true` still claims and returns
 `fileWarnings`.
 
-`POST .../release` with `{ "reason"? }` (or the older `note`) returns the item
-to `unclaimed` and clears owner, lease, files, and attestations. The holder
-can release their own claim. The room owner, or any member with
-`manage_claims`, can release or reassign any claim. The history entry is
-stamped with the caller, and `reason` is the note. `in_progress` and
-`blocked` pause to `claimed` first, then release. Both steps are in history.
+`POST .../release` with `{ "reason"?, "expectedClaimedAt"?, "expectedHistoryLength"? }`
+(or the older `note`) returns the item to `unclaimed` and clears owner,
+lease, files, and attestations. The holder can release their own claim.
+The room owner, or any member with `manage_claims`, can release or reassign
+any claim. The history entry is stamped with the caller, and `reason` is the
+note. `in_progress` and `blocked` pause to `claimed` first, then release.
+Both steps are in history.
+
+The optional compare-and-release preconditions guard against a stale
+duplicate release destroying a fresh re-claim: `expectedClaimedAt` pins the
+claim-round timestamp and `expectedHistoryLength` pins the lifetime history
+count (`history.length + (historyOmitted ?? 0)`), exactly like the PR-link
+compare on `.../update`. Each is independently optional; a malformed value is
+**422** `invalid_claim_input`. When a provided precondition no longer matches
+the live claim, the release is refused with **409** `work_claim_conflict`
+("The claim changed since it was read") before any mutation — including the
+`in_progress`/`blocked` pause step — so the live claim survives untouched.
+Omitting both keeps the historical behavior.
 
 `POST .../reassign` with `{ "newOwner", "note"? }` keeps the state and names a
 current active member. The new owner is woken with reason `assigned`.

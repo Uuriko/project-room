@@ -5588,7 +5588,12 @@ paths:
         The claim holder, the room owner, or a member with manage_claims
         returns the item to unclaimed and clears the owner and the lease.
         `reason` is stamped on the history entry, attributed to the caller.
-        API keys need `rooms:write`.
+        The optional compare-and-release preconditions `expectedClaimedAt`
+        and `expectedHistoryLength` pin the claim round and history length
+        the caller read; a provided precondition that no longer matches the
+        live claim refuses the release with 409 work_claim_conflict instead
+        of releasing, so a stale duplicate release cannot destroy a fresh
+        re-claim. API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: claimId
@@ -5604,6 +5609,8 @@ paths:
               properties:
                 reason: { type: string, description: Why the claim was released. Recorded on the history entry. }
                 note: { type: string, description: Older alias for reason. reason wins when both are sent. }
+                expectedClaimedAt: { type: string, format: date-time, description: Optional compare-and-release precondition — the claim-round timestamp from a fresh read. Mismatch with the live claim is 409 work_claim_conflict. }
+                expectedHistoryLength: { type: integer, minimum: 0, description: Optional compare-and-release precondition — the lifetime history count (history.length + historyOmitted) from a fresh read. Mismatch with the live claim is 409 work_claim_conflict. }
       responses:
         '200':
           description: The released item
@@ -5614,6 +5621,7 @@ paths:
         '401': { description: unauthenticated }
         '403': { description: work_not_owner }
         '404': { description: work_claim_not_found }
+        '409': { description: work_claim_conflict — a provided expectedClaimedAt/expectedHistoryLength no longer matches the live claim }
         '422': { description: invalid_claim_input }
   /api/rooms/{roomId}/work-claims/{claimId}/close:
     post:

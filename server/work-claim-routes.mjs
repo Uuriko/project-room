@@ -37,7 +37,7 @@ import {
   createWork, claimWork, updateWork, appendWorkPullRequest, attestWork, recordReview, reassignWork, releaseExpired, canCloseWork,
   renewWork, roomWorkClaimConfig, closeWhenLive, isReceiptTag, ClaimError, REVIEW_POLICIES, CLAIM_KINDS,
   claimUpdatedAt, ACTIVE_CLAIM_STATES, MAX_LEASE_HOURS, STATES, summarizeClaimHistory, isHardWork,
-  walkProvenance, flagPremiseInvalid, clearPremiseFlag, closeWork, isTerminalClaimState,
+  walkProvenance, flagPremiseInvalid, clearPremiseFlag, closeWork, isTerminalClaimState, claimHistoryLength,
 } from "./work-claims.mjs";
 import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
@@ -685,6 +685,29 @@ function memoizeList(registry) {
   });
 }
 
+// FIX-5 compare-and-release: optional stale-basis guard for the release
+// route. Validates exactly like the appendPullRequest compare on the update
+// path (422 invalid_claim_input on malformed params), then refuses with 409
+// work_claim_conflict when a provided precondition no longer matches the
+// live claim ("The claim changed since it was read"). Each param is
+// independently optional; the caller pins only what it read.
+const checkReleaseBasis = (reject, item, data) => {
+  const expectedClaimedAt = data.expectedClaimedAt;
+  const expectedHistoryLength = data.expectedHistoryLength;
+  if (expectedClaimedAt !== undefined
+    && (typeof expectedClaimedAt !== "string" || expectedClaimedAt.length > 100 || !Number.isFinite(Date.parse(expectedClaimedAt)))) {
+    invalidInput(reject, "expectedClaimedAt must be the current claim timestamp");
+  }
+  if (expectedHistoryLength !== undefined
+    && !(Number.isSafeInteger(expectedHistoryLength) && expectedHistoryLength >= 0)) {
+    invalidInput(reject, "expectedHistoryLength must be a non-negative integer");
+  }
+  if ((expectedClaimedAt !== undefined && item.claimedAt !== expectedClaimedAt)
+    || (expectedHistoryLength !== undefined && claimHistoryLength(item) !== expectedHistoryLength)) {
+    reject(409, "work_claim_conflict", "The claim changed since it was read");
+  }
+};
+
 function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRoute, workClaimId, helpers, registry: sourceRegistry, pullBatch = { results: [], rateLimitedUntil: null, skipped: false }, deployStatus = null }) {
   const { json, reject, body } = helpers;
   const registry = memoizeList(sourceRegistry);
@@ -1183,13 +1206,19 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "release" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { optional: ["note", "reason", "requestId"] })) invalidInput(reject, "{reason?, note?, requestId?}");
+    if (!shape(data, { optional: ["note", "reason", "requestId", "expectedClaimedAt", "expectedHistoryLength"] })) invalidInput(reject, "{reason?, note?, requestId?, expectedClaimedAt?, expectedHistoryLength?}");
     const requestId = readRequestId(data);
     if (requestId && dedupe) {
       const prior = dedupe.check(requestId);
       if (prior.duplicate) return json(res, 200, { ...prior.result, duplicate: true });
     }
     let item = load(claimIdOf(reject, workClaimId));
+    // FIX-5: when the caller pins its read basis, enforce it BEFORE any
+    // mutation (including the in_progress pause below) — a stale duplicate
+    // release must 409 instead of destroying a fresh re-claim.
+    if (Object.hasOwn(data, "expectedClaimedAt") || Object.hasOwn(data, "expectedHistoryLength")) {
+      checkReleaseBasis(reject, item, data);
+    }
     const authority = authorityOver(item);
     requireEventBudget();
     const reason = text(Object.hasOwn(data, "reason") ? "reason" : "note", data.reason ?? data.note, { multiline: true });
