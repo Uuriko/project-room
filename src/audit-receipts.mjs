@@ -128,8 +128,20 @@ export function verifyReceipt(receipt, prevHash, key) {
 // vacuously. The first receipt must be a genesis receipt (seq 0 with a
 // prevHash of 64 zeros); every later receipt must continue the seq and link
 // onto the previous receipt's hash.
-export function verifyChain(receipts, key) {
+//
+// Optional head anchors (issue #1847, red-team attack A6): without them, any
+// authentic prefix of a chain verifies -1, so truncation is undetectable
+// in-module. Pass { expectedLength } to require an exact receipt count, and/or
+// { expectedHeadHash } to require the final receipt's hash to match a known
+// checkpoint. A length mismatch returns the first missing/unexpected index:
+// min(receipts.length, expectedLength). A head-hash mismatch returns the head
+// index (receipts.length - 1), or 0 for an empty chain.
+export function verifyChain(receipts, key, opts) {
   if (!Array.isArray(receipts)) return 0;
+  const expectedLength =
+    opts != null && typeof opts.expectedLength === "number" ? opts.expectedLength : undefined;
+  const expectedHeadHash =
+    opts != null && typeof opts.expectedHeadHash === "string" ? opts.expectedHeadHash : undefined;
   for (let i = 0; i < receipts.length; i++) {
     const receipt = receipts[i];
     if (receipt === null || typeof receipt !== "object") return i;
@@ -141,6 +153,14 @@ export function verifyChain(receipts, key) {
       if (receipt.seq !== prev.seq + 1) return i;
       if (!verifyReceipt(receipt, prev.hash, key)) return i;
     }
+  }
+  if (expectedLength !== undefined && receipts.length !== expectedLength) {
+    return Math.min(receipts.length, expectedLength);
+  }
+  if (expectedHeadHash !== undefined) {
+    if (receipts.length === 0) return 0;
+    const head = receipts[receipts.length - 1];
+    if (!safeEqualHex(head.hash, expectedHeadHash)) return receipts.length - 1;
   }
   return -1;
 }
