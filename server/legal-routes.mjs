@@ -7,6 +7,7 @@ import {
   LEGAL_CACHE_CONTROL, LEGAL_PAGE_CSP, LEGAL_SITEMAP_PATHS, REPORT_PAGE_CSP, legalPageHtml, reportPageHtml,
 } from "./legal-pages.mjs";
 import { ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
+import { nodeJobHealth } from "./jobs.mjs";
 
 const PAGE_PATHS = new Set(LEGAL_SITEMAP_PATHS);
 const REPORT_FIELDS = ["kind", "target", "body", "bucket", "nonce"];
@@ -72,7 +73,9 @@ export async function handleLegalRequest({ req, res, url, store, rate, remoteAdd
   }
   if (pathname === "/api/health/jobs") {
     if (!read) reject(405, "method_not_allowed", "Method not allowed");
-    json(res, 200, { schema: "room.job-health/1", publicReports: countOpenPublicReports(store), servedBy: "node" }, head);
+    const jobs = nodeJobHealth();
+    json(res, 200, { schema: "room.job-health/1", publicReports: countOpenPublicReports(store), servedBy: "node",
+      ...(jobs ? { generatedAt: new Date(store.now()).toISOString(), jobs } : {}) }, head);
     return true;
   }
   if (pathname === "/api/reports/public") {
