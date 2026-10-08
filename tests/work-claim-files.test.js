@@ -48,6 +48,79 @@ test("claiming a file another active claim holds is refused with the holder, the
   assert.deepEqual(registry.get("room1", "a").files, ["docs/x.md", "scripts/room"]);
 });
 
+// QA200 ch-2037 challenge: create-with-assignee is an acquire path that never
+// touched the claim route — it landed overlapping file leases silently (201).
+// The exclusivity check must run there too; the request is one transaction,
+// so a conflict fails atomically and the item is never created.
+test("create with assignee refuses overlapping file leases (409 file_lease_conflict)", async () => {
+  const registry = createWorkClaimRegistry();
+  await call(registry, "jill", "create", null, { id: "a", files: ["server/a.mjs"] });
+  await call(registry, "jill", "claim", "a", {});
+  const out = await call(registry, "claude", "create", null, { id: "b", files: ["server/a.mjs"], assignee: "ada" });
+
+  assert.equal(out.status, 409);
+  assert.equal(out.value.error.code, "file_lease_conflict");
+  assert.deepEqual(out.value.holder, { claimId: "a", owner: "jill" });
+  assert.deepEqual(out.value.files, ["server/a.mjs"]);
+  assert.equal(registry.has("room1", "b"), false);
+  assert.deepEqual(registry.get("room1", "a").files, ["server/a.mjs"]);
+});
+
+test("create with assignee and disjoint files still claims (201)", async () => {
+  const registry = createWorkClaimRegistry();
+  await call(registry, "jill", "create", null, { id: "a", files: ["server/a.mjs"] });
+  await call(registry, "jill", "claim", "a", {});
+  const out = await call(registry, "claude", "create", null, { id: "b", files: ["server/b.mjs"], assignee: "ada" });
+
+  assert.equal(out.status, 201);
+  assert.equal(out.value.state, "claimed");
+  assert.equal(out.value.owner, "ada");
+  assert.deepEqual(out.value.files, ["server/b.mjs"]);
+});
+
+// QA200 ch-2037 challenge: reassign is an acquire path too — a fresh
+// unclaimed item with declared files lands claimed, and an active claim
+// changes hands, both without touching the claim route. Overlap must 409.
+test("reassign of an unclaimed file-declared item refuses on overlap (409)", async () => {
+  const registry = createWorkClaimRegistry();
+  await call(registry, "jill", "create", null, { id: "a", files: ["server/a.mjs"] });
+  await call(registry, "jill", "claim", "a", {});
+  await call(registry, "claude", "create", null, { id: "b", files: ["server/a.mjs"] });
+  const out = await call(registry, "claude", "reassign", "b", { newOwner: "ada" });
+
+  assert.equal(out.status, 409);
+  assert.equal(out.value.error.code, "file_lease_conflict");
+  assert.deepEqual(out.value.holder, { claimId: "a", owner: "jill" });
+  assert.equal(registry.get("room1", "b").state, "unclaimed");
+  assert.equal(registry.get("room1", "b").owner, null);
+});
+
+test("reassign of an active claim to a holder of overlapping files refuses (409)", async () => {
+  const registry = createWorkClaimRegistry();
+  await call(registry, "jill", "create", null, { id: "a", files: ["server/a.mjs"] });
+  await call(registry, "jill", "claim", "a", {});
+  // ada deliberately holds the overlap via advisory warn-and-proceed
+  await call(registry, "claude", "create", null, { id: "b" });
+  await call(registry, "ada", "claim", "b", { files: ["server/a.mjs"], advisory: true });
+  const out = await call(registry, "jill", "reassign", "a", { newOwner: "ada" });
+
+  assert.equal(out.status, 409);
+  assert.equal(out.value.error.code, "file_lease_conflict");
+  assert.equal(registry.get("room1", "a").owner, "jill");
+});
+
+test("reassign with no file overlap still transfers (200)", async () => {
+  const registry = createWorkClaimRegistry();
+  await call(registry, "jill", "create", null, { id: "a", files: ["server/a.mjs"] });
+  await call(registry, "jill", "claim", "a", {});
+  const out = await call(registry, "jill", "reassign", "a", { newOwner: "ada" });
+
+  assert.equal(out.status, 200);
+  assert.equal(out.value.owner, "ada");
+  assert.equal(out.value.state, "claimed");
+  assert.deepEqual(out.value.files, ["server/a.mjs"]);
+});
+
 test("advisory true still claims and names the other holder in fileWarnings", async () => {
   const registry = createWorkClaimRegistry();
   await call(registry, "jill", "create", null, { id: "a", files: ["scripts/room"] });

@@ -123,3 +123,21 @@ test("buildDocument attaches the A2A projection per agent", () => {
   assert.ok(Array.isArray(a2a.skills) && a2a.skills.length > 0);
   assert.ok(!("signatures" in a2a));
 });
+
+test("toA2ACard dedupes slug-colliding skill names to unique ids", () => {
+  // plan-dir-card projection: capabilities/skills/owns that slugify to the
+  // same id must collapse to one skill object — a duplicate skill id would
+  // be an invalid A2A card. Pin the dedup so a projection refactor cannot
+  // regress it.
+  const doc = publishSigned(createAgentDirectory(), {
+    agentId: "slug-lane",
+    card: { ...CARD, capabilities: ["Foo Bar", "foo-bar", "FOO_BAR"], skills: ["foo bar"] },
+  });
+  const a2a = toA2ACard(doc, null);
+  const ids = a2a.skills.map(s => s.id);
+  assert.equal(ids.filter(id => id === "capability-foo-bar").length, 1,
+    "one capability-foo-bar survives the collision");
+  assert.equal(ids.filter(id => id === "skill-foo-bar").length, 1,
+    "the skills namespace keeps its own foo-bar");
+  assert.equal(new Set(ids).size, ids.length, "all skill ids unique");
+});
