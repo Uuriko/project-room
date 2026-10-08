@@ -16,7 +16,7 @@ import {
   landTransition, tipTransition, landWakePayload, rollupChecks, normalizePull, githubAccessToken,
   nextPollBackoff, POLL_BACKOFF_STEPS_MS, migrateLandQueueClaims
 } from "../server/land-queue.mjs";
-import { createWork } from "../server/work-claims.mjs";
+import { createWork, claimWork } from "../server/work-claims.mjs";
 import { landCardHtml, shortSha } from "../src/land-queue-board.js";
 
 const SHA = "a".repeat(40);
@@ -728,4 +728,53 @@ test("pr_not_found during refresh emits a claim-deleted room event with dependen
   assert.equal(events[0].data.action, "deleted");
   assert.equal(events[0].data.workClaim, itemId);
   assert.deepEqual(events[0].data.dependents, ["work-dep-refresh"]);
+});
+
+test("add refuses a claimant already at the per-member open-claim cap", async t => {
+  const { store, ownerKey } = fixture(t);
+  const { memberId } = linkOffline(store, ownerKey);
+  const github = mockGitHub(() => snapshot({ checks: "green" }));
+  store.landQueue.configure({ token: TOKEN, fetchImpl: github.fetchImpl });
+  store.workClaims.configure("commons", { maxMemberOpenClaims: 1 });
+  // The claimant holds their one slot.
+  const held = claimWork(
+    createWork({ id: "cap-held", title: "held" }, { now: store.now(), agentId: memberId }),
+    memberId, { leaseHours: null, now: store.now() });
+  store.workClaims.set("commons", held);
+  // Another member naming them as claimant is refused: the queue row rolls
+  // back and no mirrored claim is minted.
+  await assert.rejects(
+    () => store.landQueue.add("commons", "owner", { repo: "acme/demo", prNumber: 969, claimantMemberId: memberId }),
+    error => error.code === "too_many_open_claims" && error.status === 409);
+  assert.equal(store.db.prepare("SELECT count(*) AS n FROM land_queue").get().n, 0, "refused add rolls back the queue row");
+  const over = store.workClaims.list("commons")
+    .filter(entry => entry.owner === memberId && ["claimed", "in_progress", "blocked"].includes(entry.state));
+  assert.equal(over.length, 1, "no over-cap claim is minted");
+  // Under cap the same add still lands.
+  store.workClaims.configure("commons", { maxMemberOpenClaims: 2 });
+  const added = await store.landQueue.add("commons", "owner", { repo: "acme/demo", prNumber: 969, claimantMemberId: memberId });
+  assert.equal(added.duplicate, false);
+  assert.equal(store.workClaims.get("commons", added.item.itemId).owner, memberId);
+});
+
+test("migrateLandQueueClaims skips at-cap claimants without breaking the list read", async t => {
+  const { store, ownerKey } = fixture(t);
+  const { memberId } = linkOffline(store, ownerKey);
+  store.workClaims.configure("commons", { maxMemberOpenClaims: 1 });
+  const held = claimWork(
+    createWork({ id: "cap-held-2", title: "held" }, { now: store.now(), agentId: memberId }),
+    memberId, { leaseHours: null, now: store.now() });
+  store.workClaims.set("commons", held);
+  const itemId = "lq_atcap_1";
+  store.db.prepare(`INSERT INTO land_queue
+    (room_id, item_id, repo, pr_number, claimant_member_id, added_by_member_id, mergeable, behind, checks_state, observed, created_at, updated_at)
+    VALUES ('commons', ?, 'acme/demo', 11, ?, 'owner', 'unknown', 0, 'pending', 1, 1, 1)`).run(itemId, memberId);
+  assert.deepEqual(migrateLandQueueClaims(store), { copied: 0 });
+  assert.equal(store.workClaims.get("commons", itemId), null, "no claim is mirrored over cap");
+  // The list read that triggers the migration still works.
+  assert.ok(Array.isArray(store.landQueue.list("commons", "owner").items));
+  // Once the member is under cap, a later pass mirrors the claim.
+  store.workClaims.configure("commons", { maxMemberOpenClaims: 2 });
+  assert.deepEqual(migrateLandQueueClaims(store), { copied: 1 });
+  assert.equal(store.workClaims.get("commons", itemId).owner, memberId);
 });

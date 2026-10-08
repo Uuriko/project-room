@@ -92,7 +92,7 @@ import { workItemChanges, mayWriteBoardClaims } from "../src/workflow.js";
 import { mirrorProjectionClaim } from "./work-claim-mirror.mjs";
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
-import { GuestAgentLinks, isRoomAccessToken, isGuestAgentMemberId } from "./guest-agent-links.mjs";
+import { GuestAgentLinks, guestLinkExchangeSchema, isRoomAccessToken, isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { GuestInvites, guestInviteSchema, guestSelfServeSchema } from "./guest-invites.mjs";
 import { WebFetch, webFetchSchema, migrateWebFetchLogColumns } from "./web-fetch.mjs";
 import { WebResearch, webResearchSchema } from "./web-research.mjs"; // RC-2026-09-24-310: knowledge router (additive)
@@ -1066,7 +1066,8 @@ function roomSchemaStamp() {
     // stamp matches skips the whole schema pass, so any DDL the pass applies
     // must be hashed here or a room stamped by an older deploy never gets it
     // (the priced-tool 500: spend_authorizations missing on muse-room).
-    updatesSchema, GRANTS_SCHEMA, SPEND_GRANTS_SCHEMA, AUTONOMY_TIERS_SCHEMA, identityLinkCodeSchema
+    updatesSchema, GRANTS_SCHEMA, SPEND_GRANTS_SCHEMA, AUTONOMY_TIERS_SCHEMA, identityLinkCodeSchema,
+    guestLinkExchangeSchema
   ];
   for (const part of parts) hash.update("\0").update(part ?? "");
   for (const [, label] of ADDITIVE_SCHEMA_ENSURES) hash.update("\0").update(label);
@@ -1564,6 +1565,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // RC-2026-09-23-100: guest invites (GX-… public handoff) — purely
       // additive side tables (no events, no projection impact), same pattern.
       this.db.exec(guestInviteSchema);
+      // GA-2 (issue #941): single-use link redemption records — purely
+      // additive side table (no events, no projection impact), same pattern.
+      this.db.exec(guestLinkExchangeSchema);
       // RC-2026-09-25-912: self-serve guest seats + request-ID idempotency
       // records — purely additive side tables (no events, no projection
       // impact), same pattern.
