@@ -11,6 +11,7 @@ import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { BountyEscrow } from "../server/bounty-escrow.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
+import { ensureSpendGrantsSchema, issueSpendGrant } from "../server/spend-grants.mjs";
 
 async function startServer(t) {
   const fixture = createAcceptanceFixture();
@@ -26,6 +27,12 @@ async function startServer(t) {
         memo: "test seeding: 100 credits", actor: { kind: "rule", id: "test" } });
     }
   });
+  // bounty_post is a priced tool (10 credits); the REST route charges like MCP,
+  // so agent posters in these tests need a spend grant.
+  ensureSpendGrantsSchema(fixture.store.db);
+  for (const memberId of ["producer", "reviewer", "guest"]) {
+    try { issueSpendGrant(fixture.store.db, ROOM, memberId, { grantedBy: "owner", capCents: "100000", perTxCapCents: "1000", nowMs: Date.now() }); } catch { /* member kind not eligible */ }
+  }
   const server = createRoomServer({ store: fixture.store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => {

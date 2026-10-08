@@ -39,7 +39,7 @@ async function fixture(t) {
   const origin = `http://127.0.0.1:${server.address().port}`;
   t.after(() => { server.closeStreams(); server.closeAllConnections(); server.close(); store.close(); rmSync(directory, { recursive: true, force: true }); });
   const rest = (path, data) => fetch(`${origin}${path}`, { method: "POST", headers: { Authorization: `Bearer ${peer.secret}`, "Content-Type": "application/json" }, body: JSON.stringify(data) });
-  return { store, roomId, ownerMemberId, peerMemberId, call, rest };
+  return { store, roomId, ownerMemberId, peerMemberId, call, rest, origin, secret: peer.secret };
 }
 
 const file = id => ({ id, filename: "a.txt", mediaType: "text/plain", data: Buffer.from("hello").toString("base64") });
@@ -64,4 +64,29 @@ test("granted agent is charged once on REST file staging; replay is not double-c
   assert.equal(spent(), 5);
   assert.equal((await f.rest(`/api/rooms/${f.roomId}/files`, file("file-1"))).status, 200, "idempotent replay");
   assert.equal(spent(), 5, "replay voids its reservation instead of charging again");
+});
+
+const bounty = (title = "Fix the thing") => ({ title, criteria: "Cover every breaking change with a before/after example.", amount: 100, deadline: new Date(Date.now() + 86400000).toISOString() });
+
+test("REST bounty post is refused 402 for an ungranted agent, like MCP bounty_post", async t => {
+  const f = await fixture(t);
+  const res = await f.rest(`/api/rooms/${f.roomId}/bounties`, bounty());
+  assert.equal(res.status, 402, await res.clone().text());
+  assert.equal((await res.json()).error.code, "payment_required");
+});
+
+test("REST bounty post charges once for a granted agent; an idempotent replay is voided", async t => {
+  const f = await fixture(t);
+  issueSpendGrant(f.store.db, f.roomId, f.peerMemberId, { grantedBy: f.ownerMemberId, capCents: "100", perTxCapCents: "20", nowMs: Date.now() });
+  const spent = () => f.store.db.prepare("SELECT COALESCE(SUM(CAST(price_cents AS INTEGER)),0) AS n FROM spend_authorizations WHERE room_id=? AND status='settled'").get(f.roomId).n;
+  const sameBody = bounty();
+  const post = () => fetch(`${f.origin}/api/rooms/${f.roomId}/bounties`, { method: "POST", headers: { Authorization: `Bearer ${f.secret}`, "Content-Type": "application/json", "Idempotency-Key": "bounty-idem-1" }, body: JSON.stringify(sameBody) });
+  const first = await post();
+  assert.equal(first.status, 201, await first.clone().text());
+  assert.equal(spent(), 10);
+  const replay = await post();
+  assert.ok([200, 201].includes(replay.status), `replay ${replay.status} ${await replay.clone().text()}`);
+  assert.equal(spent(), 10, "replay must not charge again");
+  const open = f.store.db.prepare("SELECT COUNT(*) AS n FROM spend_authorizations WHERE room_id=? AND status='reserved'").get(f.roomId).n;
+  assert.equal(open, 0, "no reservation left dangling");
 });

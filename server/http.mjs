@@ -3885,7 +3885,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           ?? bountyDisputeDecideMatch ?? bountyDisputeMatch ?? bountyFinalizeMatch ?? bountyRubricMatch;
         const identityMatch = creditsBalancesMatch ?? creditsHistoryMatch;
         const sybilFlagIdMatch = bountySybilDismissMatch ?? bountySybilConfirmMatch;
-        return await handleBountyEscrow({ req, res, url, store, roomId, auth, escrowRoute,
+        return await handleBountyEscrow({ req, res, url, store, roomId, auth, escrowRoute, token: selected.token,
           bountyId: bountyIdMatch ? pathId(bountyIdMatch[2]) : null,
           sybilFlagId: sybilFlagIdMatch ? pathId(sybilFlagIdMatch[2]) : null,
           identity: identityMatch ? identityMatch[2] : null,
