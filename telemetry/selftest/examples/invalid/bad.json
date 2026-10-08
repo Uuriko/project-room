@@ -1,0 +1,1 @@
+{"claim":"the harness rejects a finding whose numbers field is a string","evidence":"telemetry/selftest/examples/invalid/bad.json violates the numbers-is-object rule","guild":"verification","id":"selftest-finding-bad","numbers":"not an object","timestamp":"2026-10-07T21:30:00Z"}
