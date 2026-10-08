@@ -340,3 +340,27 @@ test("the public feed still returns bounties for 100 listed rooms when SQL rejec
   assert.equal(JSON.stringify(body).includes("b-secret"), false);
   assert.equal(JSON.stringify(body).includes("poster-member"), false);
 });
+
+test("feed never serves a stale parsed projection, even when the row is rewritten without a sequence bump (#932)", async t => {
+  const fixture = serve(t);
+  const { get } = await started(t, fixture);
+  const { store, ownerKey } = fixture;
+  store.roomDirectory.set(ROOM, "owner", true);
+  propose(store, ownerKey, ROOM, "w-memo");
+  openHelp(store, ownerKey, ROOM, "w-memo", new Date(fixture.now() + 3600e3).toISOString());
+  const first = await (await get("/api/opportunities.json")).json();
+  assert.equal(first.opportunities.length, 1);
+  assert.equal(first.opportunities[0].workItemId, "w-memo");
+  // Rewrite the projection bytes directly (like the repair paths do),
+  // without touching the room sequence: the feed must still pick it up —
+  // a sequence-keyed cache would serve the stale parse here.
+  const row = store.db.prepare("SELECT projection, sequence FROM rooms WHERE id=?").get(ROOM);
+  const projection = JSON.parse(row.projection);
+  projection.workItems["w-memo"].title = "Retitled by repair";
+  store.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(JSON.stringify(projection), ROOM);
+  const after = store.db.prepare("SELECT sequence FROM rooms WHERE id=?").get(ROOM);
+  assert.equal(after.sequence, row.sequence, "sequence untouched by the direct rewrite");
+  const second = await (await get("/api/opportunities.json")).json();
+  assert.equal(second.opportunities.length, 1);
+  assert.equal(second.opportunities[0].title, "Retitled by repair", "no stale cached projection");
+});

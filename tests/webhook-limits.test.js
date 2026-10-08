@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { request as httpRequest } from "node:http";
+import net from "node:net";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { telegramContractFixture } from "../scripts/telegram-contract-fixture.mjs";
 import { ChannelWebhookInbox, channelSyncLimits, syncTelegramConnection } from "../server/channel-import.mjs";
@@ -141,4 +142,35 @@ test("declared oversize returns 413 before a stalled client sends or ends its bo
   });
   assert.equal(status, 413);
   assert.equal(f.pending(0), 0);
+});
+
+test("a slow-but-alive oversized upload drains to a readable 413, never a reset (#976)", async t => {
+  const f = fixture(t), { origin } = await f.serve();
+  const port = Number(new URL(origin).port);
+  // Raw socket so a server RST is observable (fetch would surface it as
+  // "fetch failed"). Declared 70000 > 64 KB webhook cap, trickled 1 KB per
+  // 50 ms (~3.5 s): the upload is alive the whole time, just slow.
+  const total = 70000, chunk = 1000, everyMs = 50;
+  const outcome = await new Promise(resolve => {
+    const sock = net.connect(port, "127.0.0.1", () => {
+      sock.write(`POST /api/inbox/webhooks/${f.connections[0].id} HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\n` +
+        "Content-Type: application/json\r\n" +
+        `Content-Length: ${total}\r\nX-Telegram-Bot-Api-Secret-Token: ${secrets[0]}\r\n\r\n`);
+      let sent = 0, raw = "", settled = false;
+      const done = result => { if (!settled) { settled = true; clearInterval(timer); sock.destroy(); resolve(result); } };
+      const timer = setInterval(() => {
+        if (sent >= total) { clearInterval(timer); return; }
+        sock.write("x".repeat(chunk)); sent += chunk;
+      }, everyMs);
+      sock.on("data", data => { raw += data.toString(); });
+      // Graceful FIN: the server drained the whole upload, then half-closed.
+      sock.on("end", () => done({ end: true, sent, raw }));
+      sock.on("error", error => done({ error: error.code || error.message, sent, raw }));
+      setTimeout(() => done({ timeout: true, sent, raw }), 15000).unref();
+    });
+  });
+  assert.ok(outcome.raw.includes("413"), "the slow upload gets the 413 status line");
+  assert.ok(outcome.raw.includes('"too_large"'), "the 413 names the too_large code");
+  assert.ok(!outcome.error, `no connection reset mid-upload (got ${outcome.error} after ${outcome.sent}/${total} bytes)`);
+  assert.equal(outcome.sent, total, "the server drained the whole slow upload before half-closing");
 });

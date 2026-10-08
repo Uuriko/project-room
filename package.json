@@ -11,6 +11,7 @@
     "start": "node server.mjs",
     "pretest": "node scripts/check-deps.mjs",
     "test": "node --test",
+    "verify:affected": "node scripts/verify-affected.mjs",
     "test:quarantined": "node scripts/run-quarantined-tests.mjs",
     "test:relay": "npm --prefix relay test",
     "test:refine": "node --test scripts/refine-draft-browser-check.mjs",

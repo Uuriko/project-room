@@ -95,3 +95,33 @@ test("round-2 merged PR settles as pr_merged even with a stale round-1 closed PR
   assert.equal(final.pullRequest.outcome, "merged",
     "settled record must not contradict itself (action pr_closed with pullRequest.outcome merged)");
 });
+
+test("settlePullRequest: the settled record names the PR that actually merged (merged-first, closed-last)", () => {
+  // Audit B1: PR1 merges first, PR2 closes after. The batch settles merged,
+  // so the stored singular pullRequest must be the merged link — not the
+  // later closed one — and the history note must name it. A reader of
+  // claim.pullRequest.outcome must not conclude the PR was closed unmerged
+  // on a claim that settled pr_merged.
+  let item = {
+    id: "batch-claim-2", state: "in_progress", owner: "alice", files: [], history: [],
+    pullRequest: { url: PR1, repo: "Uuriko/project-room", number: 1500 },
+    pullRequests: [
+      Object.freeze({ url: PR1, repo: "Uuriko/project-room", number: 1500 }),
+      Object.freeze({ url: PR2, repo: "Uuriko/project-room", number: 1501 }),
+    ],
+  };
+  item = recordPullOutcome(item, PR1, "merged", NOW);
+  item = recordPullOutcome(item, PR2, "closed", NOW + 1000);
+  assert.equal(pullsReadyToSettle(item), true);
+  assert.equal(batchPullOutcome(item), "merged");
+  const settled = settlePullRequest(item, batchPullOutcome(item), NOW + 2000);
+  assert.equal(settled.action, "pr_merged");
+  assert.equal(settled.item.state, "done");
+  assert.equal(settled.item.deliveryMode, "merged");
+  assert.equal(settled.item.pullRequest.url, PR1,
+    "the settled record must point at the PR that merged, not the later closed one");
+  assert.equal(settled.item.pullRequest.outcome, "merged",
+    "the settled record must not contradict its own pr_merged settlement");
+  assert.match(settled.item.history.at(-1).note, /pull\/1500/,
+    "the settlement note must name the merged PR");
+});

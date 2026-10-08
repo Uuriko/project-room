@@ -20,7 +20,7 @@
 // never recorded without its triggering message/reaction. Fan-out never
 // throws for unparseable input — like the webhook fan-out, it must not fail
 // the command that triggered it.
-import { resolveMentionTargetsInText } from "./mention-lifecycle.mjs";
+import { identityNamesForRoom, resolveMentionTargetsInText } from "./mention-lifecycle.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
 
@@ -101,15 +101,7 @@ function threadParticipants(messages, rootId) {
 }
 
 function identityNamesFor(store, roomId) {
-  try {
-    const links = store.db.prepare(
-      `SELECT l.member_id AS memberId, i.display_name AS displayName FROM identity_links l
-       JOIN agent_identities i ON i.identity_id=l.identity_id
-       WHERE l.room_id=? AND i.revoked_at IS NULL`).all(roomId);
-    return Object.fromEntries(links.map(row => [row.memberId, row.displayName]));
-  } catch {
-    return {};
-  }
+  return identityNamesForRoom(store.db, roomId);
 }
 
 // Write-time fan-out. Called inside the command transaction after the event

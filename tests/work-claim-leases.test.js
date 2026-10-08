@@ -359,3 +359,24 @@ test("handler: sweep releases expired claims", async () => {
   assert.equal(read.value.owner, null);
   assert.equal(read.value.history.at(-1).action, "lease_expired");
 });
+
+test("releaseExpired clears the whole lease (leaseStartAt) like updateWork", () => {
+  // Audit B1: the sweep's auto-release documented "owner cleared, lease
+  // cleared", and both the manual release path (updateWork -> unclaimed)
+  // and settlePullRequest's pr_closed clear leaseStartAt AND
+  // leaseExpiresAt. releaseExpired left a stale leaseStartAt on the
+  // unclaimed item — no lease remnants may survive a release, whichever
+  // path performed it.
+  const claimed = claimWork({ id: "e3" }, "quill", { leaseHours: 1, now: T0 });
+  assert.ok(claimed.leaseStartAt, "precondition: the claim holds a lease");
+  const [released] = releaseExpired([claimed], T0 + 2 * H);
+  assert.equal(released.state, "unclaimed");
+  assert.equal(released.owner, null);
+  assert.equal(released.leaseExpiresAt, null);
+  assert.equal(released.leaseStartAt, null,
+    "sweep release must clear leaseStartAt exactly like the manual release path");
+  const manual = updateWork(claimWork({ id: "e4" }, "quill", { leaseHours: 1, now: T0 }),
+    "quill", { state: "unclaimed", now: T0 });
+  assert.equal(manual.leaseStartAt, null);
+  assert.equal(manual.leaseExpiresAt, null);
+});

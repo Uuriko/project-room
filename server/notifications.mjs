@@ -187,6 +187,39 @@ export function deriveNotifications({ events, state, member, mutedThreadIds = nu
   return [...items.values()].sort((a, b) => b.sequence - a.sequence);
 }
 
+// Two-trigger discipline (lane B8): the consumption seam for lane B19's
+// canonical predicate. server/notify-classifier.mjs exports
+// shouldNotify(event, prefs) — a pure function returning true only for the
+// two triggers (question/blocked addressed to you; finish/done on something
+// you own or verify). It is injected, never imported, so this module cannot
+// fork the predicate: when B19 lands, callers pass the real implementation
+// against this exact (event, prefs) signature. `prefs` is opaque here —
+// B19's classifier defines its shape; callers forward the member's
+// notification preferences and context. Switch off: the item is returned
+// untouched (bit-for-bit legacy, the predicate is never consulted). Switch
+// on without a classifier: fail-closed to ambient — an interrupt is never
+// assumed. Pure; the returned item is frozen.
+export function classifyTwoTrigger({ item, event, prefs, shouldNotify, twoTrigger = false } = {}) {
+  if (!twoTrigger) return item;
+  const interrupt = typeof shouldNotify === "function" && Boolean(shouldNotify(event, prefs));
+  return Object.freeze({ ...item, class: interrupt ? "interrupt" : "ambient" });
+}
+
+// Two-trigger discipline (lane B8): the push gate. It lives here, next to
+// the feed classifier, rather than in the delivery-half modules
+// (server/push-subscriptions.mjs / server/human-push.mjs), which the
+// rich-push lane owns — the delivery half consumes the class stamped above
+// and applies this gate. With the switch off the gate stays permissive —
+// the legacy path had no per-arrival gate, so behavior is unchanged. With
+// the switch on (derived from the ROOM_HERDR_SESSIONS worker flag), only
+// interrupt-class items push; everything else is ambient. Pure; the
+// content-free payload rule (room + count, never bodies) is untouched.
+export function twoTriggerPushGate({ notification = null, twoTrigger = false } = {}) {
+  if (!twoTrigger) return Object.freeze({ push: true, reason: "two-trigger discipline off: legacy push path unchanged" });
+  if (notification?.class === "interrupt") return Object.freeze({ push: true, reason: "interrupt-class notification" });
+  return Object.freeze({ push: false, reason: "ambient under the two-trigger discipline: no push" });
+}
+
 export class Notifications {
   constructor(store) { this.store = store; this.db = store.db; }
   // `tail` is an internal bound for tests; the HTTP route never passes it.

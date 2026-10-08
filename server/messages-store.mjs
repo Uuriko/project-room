@@ -156,11 +156,23 @@ function currentRecord(message) {
 export function syncMessageRows(db, { roomId, sequence, event, state }) {
   if (!MESSAGE_ROW_TYPE_SET.has(event?.type)) return 0;
   const messages = state?.messages ?? [];
-  const byId = new Map(messages.map(message => [message.id, message]));
+  const affected = affectedMessageIds(event);
+  if (affected.length === 0) return 0;
+  // Index only what this write touches. The full id map cost ~90ms per
+  // write on a 3.8k-message room; the ancestor walk for thread roots needs
+  // it only when an affected message is itself a reply.
+  const touched = new Map();
+  for (const id of affected) {
+    const message = messages.find(entry => entry?.id === id);
+    if (message) touched.set(id, message);
+  }
+  const byId = [...touched.values()].some(message => message?.replyToId)
+    ? new Map(messages.map(message => [message.id, message]))
+    : touched;
   const pinned = new Set((state?.pins ?? []).map(pin => pin.messageId));
   const upsert = statementFor(db);
   let written = 0;
-  for (const messageId of affectedMessageIds(event)) {
+  for (const messageId of affected) {
     const message = byId.get(messageId);
     if (!message || typeof message.authorId !== "string" || typeof message.createdAt !== "string") continue;
     const reactions = message.reactions && typeof message.reactions === "object" && Object.keys(message.reactions).length
