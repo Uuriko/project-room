@@ -91,6 +91,10 @@ test("online capture preserves all application tables, identity boundaries and e
       assert.equal(table.rows, 0, "per-room integrity state is written by the cron, not on open");
       continue;
     }
+    if (table.table === "guest_link_exchanges") {
+      assert.equal(table.rows, 0, "link exchange records exist only after a guest joins via a single-use link (GA-2)");
+      continue;
+    }
     assert.ok(table.rows > 0, `${table.table} has substantive fixture data`);
   }
   assert.equal(before.legacyCheckpoints, 1); assert.equal(before.replay.checkpointEvents, 2);
