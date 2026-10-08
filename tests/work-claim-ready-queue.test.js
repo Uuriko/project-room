@@ -5,6 +5,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createWorkClaimRegistry, handleWorkClaims } from "../server/work-claim-routes.mjs";
+import { readyClaims } from "../server/claim-coordination.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
@@ -79,4 +80,32 @@ test("dependencies survive the durable claim registry", async t => {
   });
   assert.equal(out.status, 201);
   assert.deepEqual(store.workClaims.get("commons", "child").dependsOn, ["parent"]);
+});
+
+test("#1527: deleting a claim waives it from dependents' dependsOn so they can return to the ready queue", async t => {
+  const store = new RoomStore(":memory:");
+  store.initialize(initialRoom("commons"));
+  t.after(() => store.close());
+  const create = body => handleWorkClaims({
+    req: { method: "POST", body },
+    res: {},
+    url: new URL("https://room.example/api/rooms/commons/work-claims"),
+    store, roomId: "commons",
+    auth: { member: { id: "owner", kind: "human", permissions: [] } },
+    workClaimRoute: "create", helpers, registry: store.workClaims,
+  });
+  assert.equal((await create({ id: "doomed" })).status, 201);
+  assert.equal((await create({ id: "waiter", dependsOn: ["doomed"] })).status, 201);
+  assert.equal((await create({ id: "free" })).status, 201);
+  // Before the delete, the waiter is stranded: its dependency is neither done
+  // nor deletable-away, so it never appears in queue=ready.
+  assert.deepEqual(readyClaims(store.workClaims.list("commons")).map(item => item.id).sort(), ["doomed", "free"]);
+  store.workClaims.delete("commons", "doomed");
+  assert.equal(store.workClaims.get("commons", "doomed"), null);
+  assert.deepEqual(store.workClaims.get("commons", "waiter").dependsOn, [], "the deleted dependency is waived");
+  assert.deepEqual(readyClaims(store.workClaims.list("commons")).map(item => item.id).sort(), ["free", "waiter"],
+    "the stranded dependent returns to the ready queue");
+  // Unrelated dependents keep their other dependencies.
+  await assert.rejects(create({ id: "second", dependsOn: ["doomed"] }),
+    error => error.status === 422, "dependsOn must still name an existing claim");
 });
