@@ -54,6 +54,7 @@
   "tests/agent-inbox.test.js": 22234,
   "tests/agent-invite-ui.test.js": 4101,
   "tests/agent-invites.test.js": 219516,
+  "tests/agent-invites-mail-unconfigured.test.js": 13579,
   "tests/agent-key-registry.test.js": 19454,
   "tests/agent-lanes.test.js": 2109,
   "tests/agent-mentions-inbox.test.js": 45663,
