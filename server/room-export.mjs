@@ -44,6 +44,11 @@ export function sanitizeCell(column, value) {
   // bytes left production backups as an empty object until this was handled.
   if (value instanceof Uint8Array) return { $base64: Buffer.from(value).toString("base64") };
   if (value instanceof ArrayBuffer) return { $base64: Buffer.from(new Uint8Array(value)).toString("base64") };
+  // A bare SharedArrayBuffer is neither an ArrayBuffer nor a view, but
+  // JSON.stringify turns it into {} just the same. Encode it like one.
+  // (Views over shared memory are already caught by the isView branch.)
+  if (typeof SharedArrayBuffer !== "undefined" && value instanceof SharedArrayBuffer)
+    return { $base64: Buffer.from(new Uint8Array(value)).toString("base64") };
   if (ArrayBuffer.isView(value)) return { $base64: Buffer.from(value.buffer, value.byteOffset, value.byteLength).toString("base64") };
   if (typeof value !== "string") return value;
   return scrubTokens(value);

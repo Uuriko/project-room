@@ -360,3 +360,14 @@ test("an untorn export carries a verified trailer; older trailer-less exports st
   assert.equal(legacy.verified, true);
   assert.equal(legacy.trailer, "absent");
 });
+
+test("Durable Object BLOB cells (bare SharedArrayBuffer) export as base64, not {}", () => {
+  // JSON.stringify(new SharedArrayBuffer(n)) is '{}' -- the same trap PR #2029
+  // closed for ArrayBuffer. A bare SAB is neither an ArrayBuffer nor a view.
+  const bytes = Uint8Array.from({ length: 64 }, (_, i) => i);
+  const sab = new SharedArrayBuffer(64);
+  new Uint8Array(sab).set(bytes);
+  const expected = { $base64: Buffer.from(bytes).toString("base64") };
+  assert.deepEqual(sanitizeCell("bytes", sab), expected);
+  assert.notEqual(JSON.stringify(sanitizeCell("bytes", sab)), "{}");
+});
