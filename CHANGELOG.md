@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Read-path perf (lane C2 audit, extends #1857/#1865/#1872/#1895):
+  `historyFloor` accepts a pre-fetched room authority so an `eventsAfter` page
+  no longer re-parses the projection for it (3 authority reads down to 2;
+  page ~135ms to ~15ms on a 10k-event room); `projectRoom` resolves
+  reply-request context titles through a lazy lookup that indexes only
+  referenced ids instead of building a full message id map (~22ms saved per
+  poll on a 10k-message room with no reply requests). The needs-me DM poll's
+  full event-log scan (42-86ms per room per poll on the same room) is covered
+  by #1969's partial `events_dm_to_member` index instead — C2 measured it and
+  stood down its own duplicate. All additive and backward compatible;
+  fail-first tests in `tests/history-floor-authority.test.js`,
+  `tests/project-room-lazy-index.test.js`.
 - Human browser push, mentions and direct messages only. One button asks the
   browser for permission. No notification-level picker and no quiet hours.
   Thread mutes and member mutes still suppress delivery. The push carries a
