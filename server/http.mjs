@@ -690,14 +690,23 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       rateFamilies.set(family, (rateFamilies.get(family) ?? 0) + 1);
       if (!entry) entry = { n: 0, until: now + 60000 };
     }
+    // No-rearm penalty box (wave-300 work item 1): check BEFORE incrementing, so
+    // a refused request consumes no budget, extends no window, and writes no
+    // durable state. The entry is re-inserted (recency order) without mutation.
+    if (entry.n >= maximum) {
+      rates.set(id, entry);
+      throw new ServiceError(429, "rate_limited", "Too many requests; retry after a minute",
+        { "X-RateLimit-Limit": maximum, "X-RateLimit-Remaining": 0, "X-RateLimit-Reset": Math.ceil(entry.until / 1000),
+          "Retry-After": String(Math.max(1, Math.ceil((entry.until - now) / 1000))) });
+    }
     entry.n++;
     rates.set(id, entry);
     if (durable) {
       const stride = Math.max(1, Math.floor(maximum / 4));
-      if (entry.n >= maximum || entry.n % stride === 0) saveAbuseRateBucket(store.db, id, entry);
+      // Save at the stride points and when the allowance is exhausted; never
+      // on a refusal, so retry storms cause no write amplification.
+      if (entry.n === maximum || entry.n % stride === 0) saveAbuseRateBucket(store.db, id, entry);
     }
-    if (entry.n > maximum) throw new ServiceError(429, "rate_limited", "Too many requests; retry after a minute",
-      { "X-RateLimit-Limit": maximum, "X-RateLimit-Remaining": 0, "X-RateLimit-Reset": Math.ceil(entry.until / 1000) });
   }
   function cookie(req, name) {
     const scoped = scopedCookieName(name);
