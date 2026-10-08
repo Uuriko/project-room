@@ -332,6 +332,8 @@ document.addEventListener("keydown", event => {
 let recovery;
 let leavingPage = false;
 let composerFiles = [];
+const composerFileSources = new Map(); // Memory only; never persisted with drafts.
+let composerReselectId = null;
 let roomFilesByMessage = new Map();
 const messageFileDownloads = new Map();
 try { recovery = new DraftRecovery(navigator.userAgent.includes("ProjectRoomMac/") ? window.localStorage : window.sessionStorage); } catch { recovery = new DraftRecovery(null); }
@@ -342,7 +344,9 @@ const client = new RoomClient({
     const firstSnapshot = !state;
     const presenceBoundary = firstSnapshot || state.room?.id !== snapshot.state.room?.id || roomGeneration !== client.generation;
     if (presenceBoundary) stopPresencePoll();
+    if (presenceBoundary) { composerFileSources.clear(); composerReselectId = null; }
     state = snapshot.state; session = identity;
+    syncComposerHint();
     displayNames = createMemberDisplayNames(state.members);
     void refreshRequestRuns();
     offerContextVersion = snapshot.offerContextVersion === 1 ? 1 : null;
@@ -511,6 +515,7 @@ const client = new RoomClient({
     agentSigninUI?.clear();
     clearStoredPasswords();
     composerFiles = [];
+    composerFileSources.clear(); composerReselectId = null;
     roomFilesByMessage = new Map();
     messageFileDownloads.clear();
     renderComposerFiles();
@@ -2525,13 +2530,26 @@ function renderComposerFiles() {
     const name = fileChipLabel(file.filename);
     const label = document.createElement("span");
     label.textContent = file.status === "uploading" ? `Uploading ${name}…` : file.status === "error" ? `${name} failed` : name;
+    if (file.status === 'error') {
+      const retry = document.createElement('button');
+      const canRetry = file.commitMessageId || composerFileSources.has(file.id);
+      retry.type = 'button'; retry.textContent = canRetry ? uiText('composer.file.retry') : uiText('composer.file.choose');
+      retry.setAttribute('aria-label', canRetry ? uiText('composer.file.retryLabel', { name }) : uiText('composer.file.chooseLabel', { name }));
+      retry.addEventListener('click', () => {
+        if (canRetry) void retryComposerFile(file);
+        else { composerReselectId = file.id; $('#composer-file').click(); }
+      });
+      chip.append(retry);
+    }
     const remove = document.createElement("button");
     remove.type = "button";
     remove.setAttribute("aria-label", `Remove ${name}`);
     remove.textContent = "×";
     remove.addEventListener("click", () => {
       composerFiles = composerFiles.filter(entry => entry.id !== file.id);
+      composerFileSources.delete(file.id);
       renderComposerFiles();
+      saveComposer();
     });
     chip.append(label, remove);
     host.append(chip);
@@ -2557,7 +2575,10 @@ async function refreshRoomFiles() {
 }
 async function attachComposerFiles(fileList) {
   if (!state || !client.session || isRoomArchived(state)) return;
+  const generation = client.generation, key = composerKey();
   for (const file of [...(fileList ?? [])]) {
+    if (generation !== client.generation || !state || composerKey() !== key) return;
+    if (composerFiles.length >= 20) { setComposerError(uiText('composer.file.countLimit')); break; }
     if (file.size > COMPOSER_FILE_BYTES) {
       setComposerError("That file is larger than 1 MB.");
       continue;
@@ -2565,29 +2586,56 @@ async function attachComposerFiles(fileList) {
     const id = crypto.randomUUID();
     const entry = { id, filename: file.name || "file", mediaType: file.type || "application/octet-stream", status: "uploading" };
     composerFiles = [...composerFiles, entry];
-    renderComposerFiles();
-    try {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const payload = attachmentFromBytes({ id, filename: entry.filename, mediaType: entry.mediaType, bytes });
-      await client.request(client.path("/files"), { method: "POST", data: payload });
-      const current = composerFiles.find(item => item.id === id);
-      if (current) current.status = "staged";
-    } catch (error) {
-      const current = composerFiles.find(item => item.id === id);
-      if (current) current.status = "error";
-      setComposerError(error?.code === "file_too_large" ? "That file is larger than 1 MB." : (error?.message || "Couldn’t attach that file."));
-    }
-    renderComposerFiles();
+    composerFileSources.set(id, file);
+    await retryComposerFile(entry);
   }
+}
+async function retryComposerFile(file) {
+  if (!state || !client.session || isRoomArchived(state) || !composerFiles.includes(file)) return;
+  const generation = client.generation;
+  const key = composerKey();
+  const owns = () => generation === client.generation && state && composerKey() === key && composerFiles.includes(file);
+  file.status = 'uploading'; renderComposerFiles(); saveComposer();
+  try {
+    if (file.commitMessageId) {
+      await client.request(client.path(`/files/${encodeURIComponent(file.id)}/commit`), { method: 'POST', data: { messageId: file.commitMessageId } });
+      if (!owns()) return;
+      composerFiles = composerFiles.filter(entry => entry.id !== file.id);
+      composerFileSources.delete(file.id);
+      await refreshRoomFiles();
+    } else {
+      const source = composerFileSources.get(file.id);
+      if (!source) throw new Error(uiText('composer.file.reselect'));
+      const bytes = new Uint8Array(await source.arrayBuffer());
+      if (!owns()) return;
+      const payload = attachmentFromBytes({ id: file.id, filename: file.filename, mediaType: file.mediaType, bytes });
+      await client.request(client.path('/files'), { method: 'POST', data: payload });
+      if (!owns()) return;
+      file.status = 'staged';
+    }
+  } catch (error) {
+    if (!owns()) return;
+    file.status = 'error';
+    setComposerError(error?.message || uiText('composer.file.retryError'));
+  }
+  if (generation === client.generation && state && composerKey() === key) { renderComposerFiles(); saveComposer(); }
 }
 async function commitComposerFiles(messageId) {
   const pending = composerFiles.filter(file => file.status === "staged");
   if (!pending.length || !messageId) return;
   for (const file of pending) {
+    const generation = client.generation;
+    const key = composerKey();
+    file.commitMessageId = messageId;
+    file.status = 'uploading';
+    saveComposer();
     try {
       await client.request(client.path(`/files/${encodeURIComponent(file.id)}/commit`), { method: "POST", data: { messageId } });
+      if (generation !== client.generation || !state || composerKey() !== key) return;
       composerFiles = composerFiles.filter(entry => entry.id !== file.id);
+      composerFileSources.delete(file.id);
     } catch (error) {
+      if (generation !== client.generation || !state || composerKey() !== key) return;
       file.status = "error";
       setComposerError(error?.message || "Couldn’t attach that file to the message.");
     }
@@ -2648,7 +2696,9 @@ function saveComposer() {
   persistDrafts();
 }
 function restoreComposer(draft) {
-  composerFiles = draft.files ?? []; renderComposerFiles();
+  composerFiles = draft.files ?? [];
+  for (const file of composerFiles) if (file.status === 'uploading') file.status = 'error';
+  renderComposerFiles();
   $("#message-input").value = draft.body;
   const select = $("#message-to-select");
   if (draft.toMemberId && ![...select.options].some(option => option.value === draft.toMemberId)) {
@@ -3906,11 +3956,15 @@ $("#message-form").addEventListener("submit", e => {
   if (isRoomArchived(state)) { setComposerError("This room is archived and read only."); return; }
   if (activeChannel()?.archivedAt) { setComposerError("This channel is archived."); return; }
   if (composerOverLimit()) { renderComposerLength(); return; }
-  if (requestMode) { submitRequest(e.currentTarget); return; }
+  if (requestMode) {
+    if (composerFiles.length) { setComposerError(uiText('composer.file.requestMode')); return; }
+    submitRequest(e.currentTarget); return;
+  }
   const content = { body: $("#message-input").value.trim(), toMemberId: $("#message-to-select").value || null, replyToId, channelId: activeChannelId };
   const askRoom = humanExperience.intent(content);
   if (!content.body) return;
   if (composerFiles.some(file => file.status === "uploading")) { setComposerError("Wait for the file to finish attaching."); return; }
+  if (composerFiles.some(file => file.status === 'error' || file.commitMessageId)) { setComposerError(uiText('composer.file.unresolved')); return; }
   // "Also send to channel": a public thread reply also lands as a top-level
   // message in the channel (server-side, same event). Only offered for
   // public thread replies — never for DMs or top-level messages.
@@ -3940,14 +3994,21 @@ $("#message-form").addEventListener("submit", e => {
     drafts.clear(draftKey);
     $("#message-input").value = ""; pendingMessage = null; clearReply();
     $("#also-send-to-channel").checked = false;
+    if (composerFiles.length) saveComposer();
     persistDrafts();
     await humanExperience.posted(data.messageId, askRoom);
     maybeShowGuestUpgradeHint();
   }, { failureHint: "Draft kept. Send again to retry." });
 });
-$("#composer-attach")?.addEventListener("click", () => $("#composer-file")?.click());
+$("#composer-attach")?.addEventListener("click", () => { composerReselectId = null; $("#composer-file")?.click(); });
+$('#composer-file')?.addEventListener('cancel', () => { composerReselectId = null; });
 $("#composer-file")?.addEventListener("change", event => {
   const input = event.currentTarget;
+  if (composerReselectId && input.files?.length) {
+    composerFiles = composerFiles.filter(file => file.id !== composerReselectId);
+    composerFileSources.delete(composerReselectId);
+  }
+  composerReselectId = null;
   void attachComposerFiles(input.files);
   input.value = "";
 });
@@ -4301,14 +4362,36 @@ function applyMentionMember(member) {
 $("#message-input").addEventListener("input", () => { lastComposerSelection = null; saveComposer(); renderMentions(); renderEmoji(); updateReply(); syncRequestComposer(); void client.sendTyping({ toMemberId: $("#message-to-select").value }); });
 $("#message-to-select").addEventListener("change", () => { saveComposer(); syncRequestComposer(); syncComposerChrome(); });
 const touchKeyboard = matchMedia("(hover: none) and (pointer: coarse)");
+const composerEnterModes = new Map();
+function composerPreferenceKey() {
+  return session?.member ? `project-room:enter-mode:${JSON.stringify(session.account?.id || [state?.room?.id, session.member.id])}` : null;
+}
+function composerNewlineMode() {
+  const key = composerPreferenceKey();
+  if (!key) return false;
+  try { if (!composerEnterModes.has(key)) composerEnterModes.set(key, localStorage.getItem(key) === 'newline'); } catch { /* memory fallback */ }
+  return composerEnterModes.get(key) === true;
+}
+$('#composer-enter-mode').addEventListener('change', event => {
+  const key = composerPreferenceKey();
+  if (!key) return;
+  const newline = event.target.value === 'newline';
+  composerEnterModes.set(key, newline);
+  try { localStorage.setItem(key, newline ? 'newline' : 'send'); } catch { /* memory fallback */ }
+  syncComposerHint();
+});
 function syncComposerHint() {
-  const hint = touchKeyboard.matches ? "Return for a new line · ↑ to send" : "Enter to send · Shift + Enter for a new line";
+  const newline = composerNewlineMode();
+  $('#composer-enter-mode').value = newline ? 'newline' : 'send';
+  const hint = touchKeyboard.matches ? "Return for a new line · ↑ to send" : newline
+    ? uiText('composer.key.newlineHint', { modifier: /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl' })
+    : "Enter to send · Shift + Enter for a new line";
   const input = $("#message-input");
   input.title = hint;
   input.setAttribute("aria-description", hint);
   const caption = $("#composer-hint");
   if (caption) caption.textContent = hint;
-  input.enterKeyHint = touchKeyboard.matches ? "enter" : "send";
+  input.enterKeyHint = touchKeyboard.matches || newline ? "enter" : "send";
 }
 touchKeyboard.addEventListener("change", syncComposerHint);
 syncComposerHint();
@@ -4336,7 +4419,7 @@ $("#message-input").addEventListener("keydown", e => {
   }
   // Some IME confirmation keys arrive after compositionend; keyCode 229 is the
   // legacy UI Events signal. Neither confirmation nor key repeat sends a message.
-  if (sendsOnEnter(e, touchKeyboard.matches)) {
+  if (sendsOnEnter(e, touchKeyboard.matches, composerNewlineMode())) {
     e.preventDefault();
     if (!busy && $("#message-input").value.trim()) $("#message-form").requestSubmit();
   }

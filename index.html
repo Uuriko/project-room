@@ -425,7 +425,7 @@
 
                 </div>
               </details>
-              <button id="composer-attach" class="icon-button composer-attach" type="button" aria-label="Attach a file" title="Attach a file"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
+              <button id="composer-attach" class="icon-button composer-attach" type="button" aria-label="Attach a file" title="Attach a file · up to 1 MB"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
               <textarea id="message-input" rows="2" aria-describedby="message-length-status composer-hint" placeholder="Message #general" title="Enter to send · Shift + Enter for a new line" aria-description="Enter to send · Shift + Enter for a new line" aria-controls="mention-list" aria-autocomplete="list" aria-haspopup="listbox" required></textarea>
               <input id="composer-file" type="file" hidden multiple tabindex="-1">
               <button class="button primary icon-button" type="submit" aria-label="Send" title="Send"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button>
@@ -542,6 +542,8 @@
         </dialog>
         <dialog id="settings-dialog" aria-labelledby="settings-title">
           <div class="dialog-head"><h2 id="settings-title">Settings</h2><button id="settings-close" class="button ghost" type="button">Close</button></div>
+          <label for="composer-enter-mode">Enter key</label>
+          <select id="composer-enter-mode"><option value="send">Send message</option><option value="newline">Start a new line</option></select>
           <details id="create-room-details" class="create-room-details">
             <summary>Create Room</summary>
             <p>Start your own room, then invite people to join it. Use Rooms in your account workspace to create a room, or start from a template there. Sign in to your account to create a room.</p>

@@ -10,7 +10,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
-import { openSearch } from "./room-chrome.mjs";
+import { openSearch, openSettings, closeSettings } from "./room-chrome.mjs";
 
 for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["narrow", { width: 320, height: 780 }]]) {
   test(`composer ${label}: keyboard recovery, discussion errors, composition, and access cleanup`, { timeout: 60000 }, async t => {
@@ -114,6 +114,9 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await chooser.setFiles({ name: "options-note.txt", mimeType: "text/plain", buffer: Buffer.from("Disposable attachment") });
     await page.locator("#composer-attachments .file-chip").getByText("options-note.txt", { exact: true }).waitFor();
     await input.fill("Keep this attached draft");
+    await page.reload(); await page.locator('#main').waitFor({ state: 'visible' });
+    assert.equal(await input.inputValue(), 'Keep this attached draft');
+    await page.locator('#composer-attachments .file-chip').getByText('options-note.txt', { exact: true }).waitFor();
     await page.locator("#composer-options > summary").click();
     await page.locator("#conversation-title").click();
     assert.equal(await optionsDisclosure.evaluate(node => node.open), false);
@@ -121,6 +124,46 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     assert.equal(await page.locator("#composer-attachments .file-chip").isVisible(), true);
     await page.getByRole("button", { name: "Remove options-note.txt", exact: true }).click();
     await input.fill("");
+
+    // A failed file must not disappear from a successful text-only send.
+    await page.route("**/api/rooms/commons/files", route => route.request().method() === "POST"
+      ? route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { code: "storage_unavailable", message: "Try later" } }) }) : route.continue());
+    await page.locator('#composer-file').setInputFiles({ name: 'retry-note.txt', mimeType: 'text/plain', buffer: Buffer.from('Retry these exact bytes') });
+    await page.getByText('retry-note.txt failed', { exact: true }).waitFor();
+    await input.fill('A message with a recovered file');
+    const beforeFailedFile = store.room('commons').sequence;
+    await input.press('Enter');
+    assert.equal(await input.inputValue(), 'A message with a recovered file', 'unresolved attachment keeps the text draft');
+    assert.equal(store.room('commons').sequence, beforeFailedFile, 'no text-only message is posted behind a failed file');
+    await page.unroute('**/api/rooms/commons/files');
+    await page.getByRole('button', { name: 'Retry retry-note.txt', exact: true }).click({ timeout: 2000 });
+    await page.locator('#composer-attachments .file-chip').getByText('retry-note.txt', { exact: true }).waitFor();
+    await page.route('**/api/rooms/commons/files/*/commit', route => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'storage_unavailable', message: 'Try later' } }) }));
+    await input.press('Enter');
+    await page.waitForFunction(() => document.querySelector('#message-input').value === '');
+    assert.equal(store.room('commons').state.messages.filter(m => m.body === 'A message with a recovered file').length, 1);
+    await page.getByText('retry-note.txt failed', { exact: true }).waitFor();
+    await page.unroute('**/api/rooms/commons/files/*/commit');
+    await page.reload(); await page.locator('#main').waitFor({ state: 'visible' });
+    await page.getByText('retry-note.txt failed', { exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Retry retry-note.txt', exact: true }).click();
+    await page.locator('#composer-attachments').waitFor({ state: 'hidden' });
+    const recoveredMessage = store.room('commons').state.messages.find(m => m.body === 'A message with a recovered file');
+    assert.equal(store.roomAttachments.list(owner, 'commons').files.filter(f => f.messageId === recoveredMessage.id).length, 1, 'retry commits onto the original message');
+    assert.equal(store.room('commons').state.messages.filter(m => m.body === recoveredMessage.body).length, 1);
+
+    await openSettings(page);
+    await page.getByLabel('Enter key').selectOption('newline');
+    await closeSettings(page);
+    await input.fill('First line'); await input.press('End'); await input.press('Enter');
+    assert.equal(await input.inputValue(), 'First line\n');
+    assert.match(await page.locator('#composer-hint').innerText(), /new line.*Enter to send/);
+    await input.fill('Send using the modifier');
+    await input.press(process.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter');
+    await page.waitForFunction(() => document.querySelector('#message-input').value === '');
+    await page.reload(); await page.locator('#main').waitFor({ state: 'visible' });
+    await openSettings(page); assert.equal(await page.getByLabel('Enter key').inputValue(), 'newline');
+    await page.getByLabel('Enter key').selectOption('send'); await closeSettings(page);
 
     // An explicit agent request stays discoverable without making ordinary Send a request.
     const recipient = page.locator("#message-to-select"), requestButton = page.locator("#request-reply");

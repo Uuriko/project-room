@@ -44,9 +44,10 @@ test("corrupted request retry is dropped, never converted to a fresh send", () =
 });
 test("unsent request without a recipient survives recovery, while old ordinary v2 remains readable", () => {
   const f = recoveryFixture(), key = replyDraftKey({ kind: "request" });
-  f.drafts.save(key, { body: "Who can help?", toMemberId: "", replyToId: null, threadId: null, mode: { kind: "request" } });
+  f.drafts.save(key, { body: "Who can help?", files: [{ id: "request-file", filename: "note.txt", mediaType: "text/plain", status: "uploading" }], toMemberId: "", replyToId: null, threadId: null, mode: { kind: "request" } });
   f.recovery.write("scope", f.drafts, null, key);
   assert.equal(f.recovery.read("scope", state()).drafts.get(key).body, "Who can help?");
+  assert.deepEqual(f.recovery.read("scope", state()).drafts.get(key).files, [{ id: "request-file", filename: "note.txt", mediaType: "text/plain", status: "error" }]);
   f.memory.clear(); f.memory.set("project-room:drafts:v2", JSON.stringify({ scope: "scope", expires: 2000, threadId: "question",
     entries: [["question", { body: "Legacy draft", toMemberId: "", replyToId: "question", pending: null }]] }));
   assert.equal(f.recovery.read("scope", state()).drafts.get("question").body, "Legacy draft");

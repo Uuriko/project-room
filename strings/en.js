@@ -133,5 +133,15 @@ export default {
   "human.decisionReceiptUnknown": "Save receipt could not be confirmed",
   "human.decisionRationaleChanged": "Your reason was posted. Review the changed result before deciding.",
   "human.cancelDeleted": "<button type=\"button\" class=\"text-button\" data-pause-run=\"{runId}\" data-cancel=\"true\" data-revision=\"{revision}\">Cancel</button>",
-  "human.deletedRequest": "Deleted request"
+  "human.deletedRequest": "Deleted request",
+  "composer.file.choose": "Choose file again",
+  "composer.file.chooseLabel": "Choose {name} again",
+  "composer.file.retry": "Retry",
+  "composer.file.retryLabel": "Retry {name}",
+  "composer.file.countLimit": "Attach up to 20 files at a time. Remove a file to add another.",
+  "composer.file.reselect": "Choose the file again to finish attaching it.",
+  "composer.file.retryError": "Couldn’t attach that file. Retry or remove it.",
+  "composer.file.requestMode": "Send attachments in chat before requesting a reply. Your draft is kept.",
+  "composer.file.unresolved": "Retry or remove the failed attachment before sending. Your draft is kept.",
+  "composer.key.newlineHint": "Enter for a new line · {modifier} + Enter to send"
 };

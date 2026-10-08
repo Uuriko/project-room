@@ -51,12 +51,14 @@ test("draft recovery isolates account, epoch, room, member and session without s
   const memory = new Map();
   const storage = { getItem: k => memory.get(k), setItem: (k, v) => memory.set(k, v), removeItem: k => memory.delete(k) };
   const recovery = new DraftRecovery(storage);
-  const drafts = new ConversationDrafts(); drafts.save(null, { body: "Unsent thought" });
+  const drafts = new ConversationDrafts(); drafts.save(null, { body: "Unsent thought", files: [{ id: 'staged-file', filename: 'note.txt', mediaType: 'text/plain', status: 'staged', data: 'PRIVATE-FILE-BYTES' }] });
   const state = { messages: [], members: { person: { active: true } } };
   const scope = draftRecoveryScope(identity);
   assert.ok(scope);
   assert.equal(recovery.write(scope, drafts, null), true);
   assert.equal(recovery.read(scope, state).drafts.get(null).body, "Unsent thought");
+  assert.deepEqual(recovery.read(scope, state).drafts.get(null).files, [{ id: 'staged-file', filename: 'note.txt', mediaType: 'text/plain', status: 'staged' }]);
+  assert.ok(!storage.getItem(recovery.key).includes('PRIVATE-FILE-BYTES'));
   assert.ok(!storage.getItem(recovery.key).includes(identity.csrf));
   for (const change of [
     i => { i.account.id = "replacement"; }, i => { i.account.authEpoch++; },
