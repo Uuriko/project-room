@@ -77,6 +77,12 @@ test('HTTP isolates owner results, review methods and strict query parameters', 
   assert.equal((await f.call(root + '/results?limit=1&limit=2')).status, 422);
   assert.equal((await f.call(root + '/results?auth=room')).status, 200);
   assert.equal((await f.call(root + '/results?auth=account&auth=room')).status, 422);
+  // FO-DRIFT-1/2: a malformed auth selector must be rejected per the spec
+  // enum (room|account), even when bearer auth is used and the selector is
+  // otherwise ignored by credential selection.
+  assert.equal((await f.call(root + '/results?auth=bogus')).status, 422);
+  assert.equal((await f.call(root + '/results?auth=')).status, 422);
+  assert.equal((await f.call(root + '/results?auth=bogus', undefined, f.ownerKey, 'HEAD')).status, 422);
   assert.equal((await f.call(path + '?after=x')).status, 422);
   assert.equal(await (await f.call(root + '/results', undefined, f.ownerKey, 'HEAD')).text(), '');
 });

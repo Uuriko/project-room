@@ -113,13 +113,9 @@ Replay a saved export into a new file:
 node scripts/replay-room-export.mjs --from room-export.ndjson --to /var/lib/project-room/restore/room.sqlite
 ```
 
-The production cron writes `room-backups/YYYY-MM-DD.ndjson` to R2 when the owning script has a binding named `ROOM_BACKUPS`. Without that binding the tick skips and the cron still succeeds. The binding is not in the checked-in config. Add it only after the bucket exists, under `env.production` in `cloudflare/wrangler.jsonc`:
+The production cron writes one nightly backup of the whole Durable Object store to `room-backups/YYYY-MM-DD.ndjson`. It uses an R2 binding named `ROOM_BACKUPS` when one exists, and otherwise the Workers KV binding `ROOM_BACKUPS_KV`. Production uses KV today: `cloudflare/wrangler.jsonc` binds `ROOM_BACKUPS_KV` under `env.production` to the KV namespace `project-room-backups`, stored as 16 MiB parts plus a manifest written last, with a 35-day expiry. R2 is not enabled on the Cloudflare account yet. A failed write is logged as `[room-backup]` and does not fail the rest of the cron. See [BACKUPS.md](BACKUPS.md) for the KV layout, the R2 switch-over steps, and the tested restore.
 
-```json
-"r2_buckets": [{ "binding": "ROOM_BACKUPS", "bucket_name": "project-room-backups" }]
-```
-
-Then deploy the canonical Worker with `--keep-vars`. A binding that exists only in the dashboard is dropped on the next deploy. Create the bucket `project-room-backups` first.
+Bindings must live in the checked-in config: a binding that exists only in the dashboard is dropped on the next deploy.
 
 The on-disk Node server still uses `scripts/backup-room.mjs`, which copies a sqlite file. That path is not the hosted Durable Object.
 
