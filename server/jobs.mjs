@@ -115,7 +115,9 @@ function gmailOn(env) {
 
 function backupConfigured(env) {
   const bucket = env?.ROOM_BACKUPS;
-  return Boolean(bucket && typeof bucket.put === "function" && typeof bucket.head === "function");
+  if (bucket && typeof bucket.put === "function" && typeof bucket.head === "function") return true;
+  const kv = env?.ROOM_BACKUPS_KV;
+  return Boolean(kv && typeof kv.put === "function" && typeof kv.get === "function");
 }
 
 function logIntegrity(integrity) {
@@ -289,9 +291,9 @@ export const JOBS = Object.freeze([
     cadenceMs: DAY_MS,
     slow: true,
     runtimes: Object.freeze(["worker"]),
-    singleRuntimeReason: "Daily backup writes the ROOM_BACKUPS R2 bucket. A Node process has no R2 binding.",
+    singleRuntimeReason: "Daily backup writes the ROOM_BACKUPS R2 bucket or the ROOM_BACKUPS_KV namespace. A Node process has neither binding.",
     enabled: env => backupConfigured(env),
-    disabledReason: () => "ROOM_BACKUPS is not configured",
+    disabledReason: () => "Neither ROOM_BACKUPS (R2) nor ROOM_BACKUPS_KV is configured",
     async run(_store, ctx) {
       if (!ctx.room) return { skipped: 1 };
       try { return await writeDailyBackup(ctx.env, ctx.room); }
