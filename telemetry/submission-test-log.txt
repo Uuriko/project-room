@@ -1,0 +1,12 @@
+=== run 1: submit.mjs (valid) ===
+tb-20261008042807-facc
+=== run 2: submit.mjs (invalid: short claim) ===
+telemetry/submit: --claim is required and must be >= 10 chars
+exit=1
+=== run 3: submit.mjs (invalid: numbers array) ===
+telemetry/submit: --numbers must parse to a JSON object (got array)
+exit=1
+=== run 4: collect.mjs --events (first pass) ===
+collected 2 new, skipped 0 dupes, rejected 2 invalid
+=== run 5: collect.mjs --events (second pass) ===
+collected 0 new, skipped 2 dupes, rejected 2 invalid

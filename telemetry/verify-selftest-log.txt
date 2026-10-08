@@ -1,0 +1,7 @@
+telemetry-bus acceptance harness — TELEM_DIR=telemetry/selftest
+(self-test mode: A+B only — sibling components not present)
+---
+PASS  A: finding-schema.json is the canonical spec
+PASS  B: examples pass spec; invalid examples are rejected
+---
+VERIFY: 2/2 checks passed

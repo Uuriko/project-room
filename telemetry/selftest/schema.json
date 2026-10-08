@@ -1,0 +1,1 @@
+{"properties":{"claim":{"type":"string"},"evidence":{"type":"string"},"guild":{"type":"string"},"id":{"type":"string"},"numbers":{"type":"object"},"timestamp":{"type":"string"}},"required":["id","guild","claim","evidence","numbers","timestamp"],"title":"Telemetry Bus Finding Record (selftest stub)","type":"object"}

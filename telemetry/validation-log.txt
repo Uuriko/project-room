@@ -1,0 +1,7 @@
+PASS telemetry/examples/tb-ex-idempotency.json
+PASS telemetry/examples/tb-ex-batch-dispatch.json
+PASS telemetry/examples/tb-ex-identity.json
+FAIL telemetry/examples/invalid/tb-ex-invalid-missing-claim.json:
+  - missing or empty required string field: "claim"
+FAIL telemetry/examples/invalid/tb-ex-invalid-numbers-string.json:
+  - "numbers" must be an object (got string)
