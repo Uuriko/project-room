@@ -14,8 +14,8 @@ import { initializeResult, parseRpc, requireToolName, rpcError, rpcResult, toolE
 import { redact } from "./redact.mjs";
 import { assertFreshControlSignature } from "./replay-guard.mjs";
 import {
-  CALL_TIMEOUT_MS, HEARTBEAT_MS, HMAC_SKEW_SEC, MAX_CALL_BYTES, MAX_RESULT_BYTES, MAX_SMALL_BYTES, PROTOCOL_VERSION,
-  isResourceId, isSlot, listedTools, toolAllowed,
+  CALL_TIMEOUT_MS, HEARTBEAT_MS, HMAC_SKEW_SEC, MAX_CALL_BYTES, MAX_PAUSE_MINUTES, MAX_RESULT_BYTES, MAX_SMALL_BYTES, PROTOCOL_VERSION,
+  isPauseMinutes, isResourceId, isSlot, listedTools, toolAllowed,
 } from "./protocol.mjs";
 
 // L4: no wildcard CORS with Authorization allowed. The request origin is
@@ -496,8 +496,8 @@ export class MachineLink extends DurableObject {
       if (!this.state) throw relayError(404, "machine_unknown", "No such machine");
       await verifyLinkSignature(this.env.RELAY_LINK_SECRET, request, raw, Math.floor(Date.now() / 1000));
       this.rejectReplayedControl(request, Math.floor(Date.now() / 1000));
-      if (!Number.isSafeInteger(value.minutes) || value.minutes < 0 || value.minutes > 10_080) {
-        throw relayError(422, "invalid_pause", "minutes must be an integer from 0 to 10080");
+      if (!isPauseMinutes(value.minutes)) {
+        throw relayError(422, "invalid_pause", `minutes must be an integer from 1 to ${MAX_PAUSE_MINUTES}`);
       }
       this.state.pausedUntil = Date.now() + value.minutes * 60 * 1000;
       this.dirty = true;

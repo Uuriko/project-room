@@ -65,6 +65,15 @@ export function lockCacheMs(env) {
   return Math.min(LOCK_CACHE_MAX_MS, value);
 }
 
+// A pause holds for a real duration only. The daemon ignores 0, negative and
+// non-finite minutes (machine/lib/protocol.mjs pauseUntilFromMinutes), so the
+// relay refuses them too rather than answering paused:true for a no-op.
+export const MAX_PAUSE_MINUTES = 10_080;
+
+export function isPauseMinutes(value) {
+  return Number.isSafeInteger(value) && value >= 1 && value <= MAX_PAUSE_MINUTES;
+}
+
 export function isMachineId(value) {
   return typeof value === "string" && MACHINE_ID.test(value);
 }

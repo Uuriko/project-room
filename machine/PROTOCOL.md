@@ -52,7 +52,7 @@ The relay sends:
 
 - `{ "type": "heartbeat" }` — marks the link healthy and clears a dead-man refusal.
 - `{ "type": "halt", "epoch": 1 }` — the daemon stops every guest and refuses later calls with `halted`.
-- `{ "type": "pause", "minutes": 30 }` — suspends guests and refuses calls with `paused` until the window ends.
+- `{ "type": "pause", "minutes": 30 }` — suspends guests and refuses calls with `paused` until the window ends. `minutes` is a whole number from 1 to 10080; the relay refuses 0, and the daemon ignores a pause with no real duration.
 - `{ "type": "resume" }` — clears halt and pause.
 - `{ "type": "bye" }` — the daemon keeps the process up and reconnects if the socket drops.
 - `{ "type": "call", "id": "c1", "tool": "machine.status", "args": {}, "caller": { "identityId": "ai_...", "claimId": "lease1", "slot": "desk", "verified": true } }`
