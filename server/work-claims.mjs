@@ -283,6 +283,9 @@ const blobsOf = value => {
 export const isReceiptTag = value => typeof value === "string" && TAG_PATTERN.test(value);
 const DEFAULT_LEASE_HOURS = 24;
 const MAX_LEASE_HOURS = 168;
+// FR-HIST-303 (W7): cap on file paths quoted in the lease_expired stamp note
+// — the expiry event records the dropped checkpoint fields, not an unbounded list.
+const MAX_EXPIRY_NOTE_FILES = 16;
 export const DEFAULT_MAX_OPEN_CLAIMS = 200;
 export const DEFAULT_MAX_MEMBER_OPEN_CLAIMS = 20;
 const CONFIG_CAP_CEILING = 10000;
@@ -910,8 +913,21 @@ export function releaseExpired(items, now) {
     // lapsed owner's round of work, never to whoever claims next).
     const released = { ...item, state: "unclaimed", owner: null, leaseStartAt: null, leaseExpiresAt: null,
       files: Object.freeze([]), fileBlocks: Object.freeze({}), attestations: Object.freeze([]), reviews: Object.freeze([]) };
+    // FR-HIST-303 (W7): expiry drops checkpoint-relevant fields — the owner,
+    // the lease window, the declared files, and the attestations/reviews of
+    // the lapsed round. The lease_expired stamp is the durable record of that
+    // round, so the dropped fields are recorded into its note: a resumed
+    // claim (or a checkpoint/audit read) can reconstruct what the lapsed
+    // round held. File paths are capped so the note stays bounded;
+    // attestations/reviews are counted, not quoted.
+    const listedFiles = item.files.slice(0, MAX_EXPIRY_NOTE_FILES);
+    const fileNote = item.files.length === 0 ? "none"
+      : listedFiles.join(", ") + (item.files.length > listedFiles.length
+        ? ` (+${item.files.length - listedFiles.length} more)` : "");
     return withHistory(released, atMs, item.owner ?? "system", "lease_expired",
-      `claim by ${item.owner ?? "nobody"} lapsed at ${item.leaseExpiresAt} — auto-released`);
+      `claim by ${item.owner ?? "nobody"} lapsed at ${item.leaseExpiresAt} — auto-released ` +
+      `(was ${item.state}; lease ${item.leaseStartAt ?? "none"}→${item.leaseExpiresAt}; ` +
+      `files: ${fileNote}; attestations: ${item.attestations.length}; reviews: ${item.reviews.length})`);
   });
 }
 // Review-policy gate for the done transition. policy resolves from the

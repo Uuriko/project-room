@@ -140,7 +140,7 @@ const WORK_CLAIM_PROFILES = Object.freeze({
 });
 const BOARD_LIMIT_DEFAULT = 50;
 const BOARD_LIMIT_MAX = 200;
-const BOARD_QUERY = new Set(["queue", "auth", "limit", "cursor", "state", "view"]);
+const BOARD_QUERY = new Set(["queue", "auth", "limit", "cursor", "state", "view", "history"]);
 
 // QA7-13: compact per-claim projection for ?view=summary — the fields a
 // board overview needs (id, title, state, owner, lease expiry) without the
@@ -344,18 +344,25 @@ export function buildWorkClaimPage(items, roomId, viewerId, query = new URLSearc
   const params = query ?? new URLSearchParams();
   for (const key of params.keys()) {
     if (!BOARD_QUERY.has(key) || params.getAll(key).length !== 1) {
-      invalidInput(reject, "a single queue, state, limit, cursor, or view query parameter");
+      invalidInput(reject, "a single queue, state, limit, cursor, view, or history query parameter");
     }
   }
   const limit = boardLimitOf(reject, params.get("limit"));
   const cursor = params.has("cursor") ? boardCursorOf(reject, params.get("cursor")) : null;
   const view = params.get("view");
   if (view !== null && view !== "summary") invalidInput(reject, "view=summary");
+  // FR-HIST-303 (W7): ?history=full returns each claim's full stored history
+  // instead of the newest LIST_HISTORY_ENTRIES entries. The default (truncated
+  // summaries with the rest counted in historyOmitted) is unchanged, so this
+  // is backward compatible; view=summary still drops history by design.
+  const history = params.get("history");
+  if (history !== null && history !== "full") invalidInput(reject, "history=full");
+  const historyFull = history === "full";
   const metadata = { roomId, source: "work-claims", evaluatedAt: new Date(nowMs).toISOString(),
-    consistency: "live", limit, historyLimit: LIST_HISTORY_ENTRIES };
+    consistency: "live", limit, historyLimit: historyFull ? null : LIST_HISTORY_ENTRIES };
   const present = page => {
     const stamped = stampClaimPage({ ...metadata, ...page,
-      claims: page.claims.map(item => summarizeClaimHistory(item, LIST_HISTORY_ENTRIES)) }, viewerId);
+      claims: page.claims.map(item => historyFull ? item : summarizeClaimHistory(item, LIST_HISTORY_ENTRIES)) }, viewerId);
     return view === "summary" ? withContentTrust({ ...stamped, claims: stamped.claims.map(summarizeBoardClaim) }) : stamped;
   };
   if (params.has("queue")) {
