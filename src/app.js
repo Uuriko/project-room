@@ -102,6 +102,7 @@ $("#skip-link").addEventListener("click", event => {
   event.preventDefault();
   const target = !$("#inbox-panel").hidden ? "#inbox-heading"
     : !$("#main").hidden ? "#conversation-title"
+    : !$("#account-rooms-panel").hidden ? "#account-rooms-title"
     : $("#auth-panel").hidden ? "#connection-status"
     : "#auth-title";
   $(target).focus();
