@@ -116,12 +116,14 @@ test('a blank title is refused before any claim or event is recorded', async t =
   assert.equal((await claimEvents(owner)).length, 0);
 });
 
-test('an archived room still records a claim and appends no event', async t => {
+test('an archived room refuses claim writes with 409 room_archived (H4 lifecycle)', async t => {
   const { owner } = await fixture(t);
   // Archive with the owner's own key. Issuing a second key would revoke it.
   await owner.command({ id: 'archive-room', type: 'room.archived', data: { reason: 'pilot over' } });
-  const created = await owner.workClaimCreate({ id: 'after-archive', title: 'Still recorded' });
-  assert.equal(created.id, 'after-archive');
+  // Archive closes every write to the room: the board is part of the room,
+  // so member-facing claim mutations are refused like event-log commands.
+  await assert.rejects(owner.workClaimCreate({ id: 'after-archive', title: 'Not recorded' }),
+    error => error.status === 409 && error.code === 'room_archived');
   assert.equal((await claimEvents(owner)).length, 0);
 });
 

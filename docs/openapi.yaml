@@ -4973,7 +4973,7 @@ paths:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
         '403': { description: work_claims_not_permitted }
-        '409': { description: work_claim_exists, work_board_full, or too_many_open_claims }
+        '409': { description: work_claim_exists, work_board_full, too_many_open_claims, or room_archived }
         '422': { description: invalid_claim_input or work_assignee_unknown_member }
   /api/rooms/{roomId}/work-claims/config:
     get:
@@ -5314,6 +5314,7 @@ paths:
           description: |
             work_claim_conflict when the item is already claimed.
             file_lease_conflict when declared files overlap a live lease.
+            room_archived when the room is archived (board writes are refused).
             The body names holder { claimId, owner }, files, and leaseExpiresAt.
         '422': { description: invalid_claim_input }
   /api/rooms/{roomId}/work-claims/{claimId}/update:

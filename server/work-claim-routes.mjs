@@ -691,6 +691,19 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     db: store.db, roomId, state: { room: { ownerId: store.roomAuthority?.(roomId)?.ownerId } },
     actor: auth.member, action: `${req.method} work-claim ${workClaimRoute}`, fail: reject });
   refuseRoomGuideOffStarter(registry, roomId, auth, workClaimId, req.method, reject);
+  // H4 room-lifecycle: archive closes every write to the room, and the board
+  // is part of the room — member-facing claim mutations on an archived room
+  // are refused with the same 409 room_archived the event-log commands use
+  // (store.command -> refuseArchivedWrite). Reads stay available, and the
+  // read-triggered lease sweeps / deploy closures below do not mutate the
+  // frozen board. System automation (PR-merge close, autolink, land queue)
+  // writes through the registry directly and is unaffected, so in-flight
+  // work is not stranded by an archive. A store double without .room (unit
+  // tests) is treated as an active room.
+  const boardArchived = typeof store.room === "function" && isRoomArchived(store.room(roomId)?.state);
+  if (boardArchived && req.method !== "GET" && req.method !== "HEAD") {
+    reject(409, "room_archived", "This room is archived: reading and export stay available, nothing new is recorded");
+  }
   const nowMs = typeof store.now === "function" ? store.now() : Date.now();
   const caller = auth.member.id;
   // Every committed claim change appends one work_claim.updated room event
@@ -739,7 +752,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     }
     return closed;
   };
-  const sweptIds = sweepRoom(registry, roomId, nowMs, (item, before) => {
+  // H4: on an archived room the board is frozen — a read must not release
+  // lapsed leases (that would record something new on a read-only room).
+  const sweptIds = boardArchived ? [] : sweepRoom(registry, roomId, nowMs, (item, before) => {
     const receipt = emitWorkClaimEvent(store, roomId, {
       actorId: before.owner, item, action: "lease_expired", previousOwnerId: before.owner,
       atMs: nowMs, paths: before.files ?? []
@@ -779,14 +794,14 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   };
 
   if (workClaimRoute === "status" && req.method === "GET") {
-    closeLiveClaims();
+    if (!boardArchived) closeLiveClaims();
     const status = deployStatus ?? { live: SOURCE_REVISION, main: null, behind: null, checkedAt: null };
     return json(res, 200, { live: status.live, main: status.main, behind: status.behind, checkedAt: status.checkedAt,
       stale: status.stale === true, ...(status.heldUntil ? { heldUntil: status.heldUntil } : {}),
       eventsRemaining: roomEventsRemaining(access.authority?.sequence) });
   }
   if (workClaimRoute === "list" && req.method === "GET") {
-    closeLiveClaims();
+    if (!boardArchived) closeLiveClaims();
     return json(res, 200, { ...buildWorkClaimPage(registry.list(roomId), roomId, caller,
       url?.searchParams, nowMs), swept: sweptIds });
   }
@@ -937,7 +952,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     return json(res, 201, item);
   }
   if (workClaimRoute === "read" && req.method === "GET") {
-    closeLiveClaims();
+    if (!boardArchived) closeLiveClaims();
     // SEC-2: member-authored text is marked untrusted for the reader.
     return json(res, 200, withContentTrust(stampClaim(load(claimIdOf(reject, workClaimId)), caller)));
   }
