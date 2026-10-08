@@ -200,6 +200,9 @@ open link. One merge does not settle a claim that still has another open
 link. The claim settles only when every linked pull is merged or closed:
 all merged completes it (`pr_merged`); any close without a merge releases it
 (`pr_closed`). An explicit release still releases it while links are open.
+The settled record's `pullRequest` is the link the outcome was decided on —
+the merged link when the batch settled merged — so a later closed link never
+stands in for the PR that actually merged.
 Either settlement appends one `work_claim.updated` event.
 `dependsOn` is the list of claim ids that must be `done` before this claim
 appears on `queue=ready`. A claim cannot depend on itself.
@@ -257,6 +260,15 @@ Only the current owner with current Board write permissions can append.
 already-authorized non-expiring lease. Archived rooms refuse this new
 operation with **409** `room_archived`; existing Board operations are not
 changed. The append does not sweep, settle or reacquire any claim.
+
+Re-linking a URL that already carries a recorded outcome is a no-op within
+the same claim round. When the outcome provably predates the current round
+(recorded before this round's `claimedAt` — e.g. a PR closed under a
+previous owner), the re-link resets that link: the stale outcome is cleared
+so the poller re-reads the PR, and the claim can settle on its new state.
+A swept (auto-released) claim also clears the whole lease window —
+`leaseStartAt` as well as `leaseExpiresAt` — so no lease remnants survive a
+release on any path.
 
 The input is a URL string of at most 300 characters: canonical HTTPS GitHub
 owner/repository/pull/positive-number, without credentials, non-default

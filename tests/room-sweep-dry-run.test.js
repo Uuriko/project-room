@@ -134,6 +134,27 @@ test("claim --lane with a space dies before any board read", () => {
   rmSync(res.dir, { recursive: true, force: true });
 });
 
+test("dry-run PLAN labels exactly match the live run's posted actions", () => {
+  // Task-87 fidelity: sweep_emit prints "PLAN: <label>" in dry-run and
+  // "room: posting: <label>" + post_comment live. The label sets must be
+  // identical for the same fixture, or dry-run is lying about live.
+  const dry = run(["sweep", "--dry-run"]);
+  assert.equal(dry.status, 0, dry.stderr);
+  const planLabels = dry.stdout.split("\n")
+    .filter(l => l.startsWith("PLAN: "))
+    .map(l => l.slice("PLAN: ".length));
+  assert.ok(planLabels.length > 0, "dry-run emitted at least one PLAN");
+  const live = run(["sweep"]);
+  assert.equal(live.status, 0, live.stderr);
+  const postedLabels = live.stdout.split("\n")
+    .filter(l => l.startsWith("room: posting: "))
+    .map(l => l.slice("room: posting: ".length));
+  assert.deepEqual(postedLabels.sort(), planLabels.sort(),
+    "live posted exactly the actions dry-run planned");
+  rmSync(dry.dir, { recursive: true, force: true });
+  rmSync(live.dir, { recursive: true, force: true });
+});
+
 test("claim --lane quill-s2 still passes the charset check", () => {
   const res = run([
     "claim", "--task-id", "RC-2026-09-24-001", "--lane", "quill-s2",

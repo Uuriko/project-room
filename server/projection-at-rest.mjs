@@ -16,7 +16,11 @@
 // needs before a rollback. Take a backup first, as for any rollback.
 import { createHash } from "node:crypto";
 
-export const BODY_AT_REST_MIN_CHARS = 512;
+// 256, not 512 (2026-10-07): with bodies at rest on, muse-room's projection
+// still grew ~350 B/event because 38% of recent bodies are 256-511 chars and
+// stayed inline. At 256 those move to projection_bodies too: ~317 KB freed on
+// the next write and inline body growth per message roughly halved.
+export const BODY_AT_REST_MIN_CHARS = 256;
 
 export const PROJECTION_BODIES_SCHEMA = `
 CREATE TABLE IF NOT EXISTS projection_bodies (

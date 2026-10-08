@@ -11,12 +11,13 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { RoomStore, PILOT_LIMITS } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { auditRecovery } from "../server/recovery.mjs";
 import { readConversation } from "../server/conversation-sync.mjs";
-import { BODY_AT_REST_MIN_CHARS } from "../server/projection-at-rest.mjs";
+import { BODY_AT_REST_MIN_CHARS, hydrateRecordText } from "../server/projection-at-rest.mjs";
 
 function open(t, options = {}) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-at-rest-"));
@@ -66,6 +67,20 @@ test("on: large bodies leave the row, every reader still sees the full message",
   // A parity audit must compare their full public records after slimming.
   for (let page = 0; page < 20; page++) if (room.store.backfillMessages({ limit: 400 }).done) break;
   assert.equal(room.store.checkMessagesParity().checked, 1);
+});
+
+test("on: mid-size bodies (>= BODY_AT_REST_MIN_CHARS) leave the row too; short ones stay inline", t => {
+  const room = open(t, { bodiesAtRest: true });
+  const mid = "m".repeat(BODY_AT_REST_MIN_CHARS + 44);
+  const short = "s".repeat(BODY_AT_REST_MIN_CHARS - 1);
+  room.post("mid", mid);
+  room.post("short", short);
+  const stored = JSON.parse(room.raw());
+  assert.match(stored.messages.find(m => m.id === "mid").bodyRef, /^[0-9a-f]{64}$/);
+  assert.equal(stored.messages.find(m => m.id === "short").body, short);
+  assert.ok(BODY_AT_REST_MIN_CHARS <= 256, "most real room posts (256-511 chars) must leave the row");
+  room.reopen();
+  assert.equal(room.store.room("commons").state.messages.find(m => m.id === "mid").body, mid);
 });
 
 test("edits and deletes release the old text at rest", t => {
@@ -162,6 +177,26 @@ test("turning it off writes full bodies back on the next write", t => {
   assert.equal(room.bodies().length, 0, "rows are released once nothing references them");
 });
 
+test("every PILOT_LIMITS.projectionBytes 409 names a recovery (no dead-end cap message)", () => {
+  // 2026-10-07 muse-room incident follow-up: PR #1810 fixed the 6
+  // "Room projection limit reached" sites but left 7 sibling
+  // PILOT_LIMITS.projectionBytes checks (guest-invites.mjs, guest-agent-links.mjs,
+  // share-links.mjs) rejecting with "Room storage limit reached" and no recovery.
+  // Every projection-cap rejection must tell the user what to do, so a new site
+  // added without recovery text fails this test.
+  const serverDir = fileURLToPath(new URL("../server/", import.meta.url));
+  const offenders = [];
+  for (const name of readdirSync(serverDir).filter(file => file.endsWith(".mjs"))) {
+    const source = readFileSync(join(serverDir, name), "utf8");
+    source.split("\n").forEach((line, index) => {
+      if (!line.includes("PILOT_LIMITS.projectionBytes") || !line.includes('fail(409, "pilot_limit"')) return;
+      if (!/room owner|ask its owner|try again later/i.test(line)) offenders.push(`${name}:${index + 1}`);
+    });
+  }
+  assert.deepEqual(offenders, [],
+    `projection-cap 409 without a named recovery: ${offenders.join(", ")}`);
+});
+
 test("every rooms.projection write goes through the serializer", () => {
   const files = [];
   const walk = dir => { for (const name of readdirSync(dir)) { const path = join(dir, name); if (statSync(path).isDirectory()) walk(path); else if (path.endsWith(".mjs")) files.push(path); } };
@@ -210,4 +245,75 @@ test("incident 2026-10-07: the 4 MiB guard refuses growth and bodies-at-rest res
     "all retained messages remain readable after slimming and restart");
   assert.equal(recovered.find(m => m.id === "recovery").body, big("recovery", bodyBytes));
   auditRecovery(fat.store);
+});
+
+test("the projection-cap rejection names the recovery (ask the owner, or retry later)", t => {
+  // 2026-10-07 muse-room incident: every state-changing write 409'd with
+  // "Room projection limit reached; no data was changed" — a dead end that
+  // named no recovery. The message must tell the user what to do.
+  const clock = () => { let at = Date.parse("2026-10-06T00:00:00Z"); return () => (at += 120000); };
+  const room = open(t, { bodiesAtRest: false, now: clock() });
+  const bodyChars = 59000;
+  const postedBytes = Buffer.byteLength(big("p0", bodyChars));
+  const headroomPosts = 1;
+  const store = room.store;
+  const boundRoom = store.room.bind(store);
+  store.room = id => { const result = boundRoom(id); return { sequence: result.sequence,
+    state: { ...result.state, capacityFixture: "x".repeat(PILOT_LIMITS.projectionBytes - headroomPosts * postedBytes) } }; };
+  let failure = null;
+  try { room.post("p0", big("p0", bodyChars)); } catch (error) { failure = error; }
+  assert.ok(failure, "the projection cap refuses the write");
+  assert.equal(failure.code, "pilot_limit");
+  assert.match(failure.message, /no data was changed/, "keeps the no-write guarantee");
+  assert.match(failure.message, /room owner/i, "names asking the room owner as the recovery");
+  assert.match(failure.message, /try again later/i, "names retrying later as the recovery");
+});
+
+test("certified indexed reads return full bodies while the stored row stays slim", t => {
+  // Phase 1a x certified index interaction: the indexed path skips
+  // hydrateRecordText by design, so the messages table must always carry
+  // complete records even when rooms.projection is slimmed. If a future
+  // change slims the indexed records too, readers would see bodyRef.
+  const room = open(t, { bodiesAtRest: true });
+  const text = big("indexed");
+  room.post("m", text);
+  room.post("short", "hello");
+  const stored = JSON.parse(room.raw());
+  assert.match(stored.messages.find(m => m.id === "m").bodyRef, /^[0-9a-f]{64}$/,
+    "precondition: the stored projection row is slimmed");
+  for (let page = 0; page < 20; page++) if (room.store.backfillMessages({ limit: 400 }).done) break;
+  assert.equal(room.store.checkMessagesParity().checked, 1, "precondition: the certified index covers the head");
+  const page = readConversation(room.store, room.owner(), "commons", { limit: 10 });
+  assert.equal(page.messages.find(m => m.id === "m")?.body, text);
+  assert.equal(page.messages.some(m => "bodyRef" in m), false, "indexed records must never leak bodyRef to readers");
+});
+
+test("the unindexed conversation read recovers a tampered body row from the log", t => {
+  // Out-of-band corruption, not just a missing row: the body row exists but
+  // its content no longer matches the sha the projection references. The
+  // recover fallback (8956bc3b2) must serve the true body from the event log.
+  const room = open(t, { bodiesAtRest: true });
+  const text = big("tampered");
+  room.post("m", text);
+  const sha = JSON.parse(room.raw()).messages.find(m => m.id === "m").bodyRef;
+  assert.match(sha, /^[0-9a-f]{64}$/, "precondition: the stored record is slimmed");
+  room.store.db.prepare("UPDATE projection_bodies SET body=? WHERE room_id='commons' AND sha=?")
+    .run("x".repeat(6000), sha);
+  const page = readConversation(room.store, room.owner(), "commons", { limit: 10 });
+  assert.equal(page.messages.find(m => m.id === "m")?.body, text);
+});
+
+test("hydrateRecordText without a recovery source fails closed on a missing body", t => {
+  // Fail-closed contract: with no recover function a missing body row is a
+  // hard error, never an empty body or a leaked bodyRef.
+  const room = open(t, { bodiesAtRest: true });
+  room.post("m", big("gone"));
+  const record = JSON.parse(room.raw()).messages.find(m => m.id === "m");
+  assert.ok(typeof record.bodyRef === "string", "precondition: the stored record is slimmed");
+  room.store.db.prepare("DELETE FROM projection_bodies").run();
+  assert.throws(() => hydrateRecordText(room.store.db, "commons", JSON.stringify(record)),
+    /projection_corrupt/, "a missing body with no recovery source throws");
+  const inline = JSON.stringify({ id: "s", body: "hi" });
+  assert.equal(hydrateRecordText(room.store.db, "commons", inline), inline,
+    "records without a bodyRef pass through untouched");
 });

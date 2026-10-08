@@ -104,6 +104,20 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
     list(roomId) { return selectRoom.all(roomId).map(row => decodeItem(row.item_json)); },
     has(roomId, id) { return selectOne.get(roomId, id) != null; },
     delete(roomId, id) {
+      // #1527: readyClaims treats a missing dependency as "not done", so a
+      // claim depending on a deleted claim could never return to
+      // queue=ready -- stranded, ownerless, invisible. Waive the deleted id
+      // from every dependent's dependsOn: the unsatisfiable dependency is
+      // dropped and survivors re-evaluate on their remaining dependencies.
+      // The land-queue delete paths already emit a deletion receipt naming
+      // the dependents, so the waiving is visible, not silent.
+      const dependents = selectRoom.all(roomId)
+        .map(row => decodeItem(row.item_json))
+        .filter(item => item && item.id !== id && Array.isArray(item.dependsOn) && item.dependsOn.includes(id));
+      for (const item of dependents) {
+        const waived = { ...item, dependsOn: item.dependsOn.filter(dep => dep !== id) };
+        upsert.run(roomId, item.id, JSON.stringify(encodeRow(WORK_CLAIM_ROW_KIND, waived)), now());
+      }
       db.prepare("DELETE FROM work_claims WHERE room_id=? AND claim_id=?").run(roomId, id);
       if (typeof onChange === "function") onChange(roomId);
     },

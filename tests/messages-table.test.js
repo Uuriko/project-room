@@ -190,3 +190,36 @@ test("a seeded command sequence keeps one row aligned with each projection messa
     assertRowsMatchProjection(f.store, createdAt);
   }
 });
+
+test("syncMessageRows resolves touched messages without indexing a large state", t => {
+  const f = fixture(t);
+  // Synthetic large projection: the row writer must resolve the event's
+  // messages (and reply ancestors for thread roots) without building an
+  // id map over the whole room per write.
+  const messages = [];
+  for (let i = 0; i < 4000; i++) {
+    messages.push({ id: `bulk-${i}`, authorId: "human", body: `bulk ${i}`, channelId: "general",
+      workItemId: null, replyToId: null, toMemberId: null, createdAt: "2026-10-07T00:00:00.000Z" });
+  }
+  messages.push({ id: "root-1", authorId: "human", body: "root", channelId: "general", workItemId: null,
+    replyToId: null, toMemberId: null, createdAt: "2026-10-07T00:00:01.000Z" });
+  messages.push({ id: "reply-1", authorId: "agent", body: "reply", channelId: "general", workItemId: null,
+    replyToId: "root-1", toMemberId: null, createdAt: "2026-10-07T00:00:02.000Z" });
+  const state = { messages, pins: [] };
+  const posted = messageId => ({ type: T.MESSAGE_POSTED, id: `evt-${messageId}`, data: { messageId } });
+  const rowOf = messageId => f.store.db.prepare(
+    "SELECT message_id, thread_root_id, reply_to_id, body FROM messages WHERE room_id=? AND message_id=?")
+    .get("commons", messageId);
+  // Plain post: one row, no thread root.
+  assert.equal(syncMessageRows(f.store.db, { roomId: "commons", sequence: 9001, event: posted("bulk-3999"), state }), 1);
+  const plain = rowOf("bulk-3999");
+  assert.equal(plain.body, "bulk 3999");
+  assert.equal(plain.thread_root_id, null);
+  // Reply: the thread root resolves through the ancestor chain.
+  assert.equal(syncMessageRows(f.store.db, { roomId: "commons", sequence: 9002, event: posted("reply-1"), state }), 1);
+  const reply = rowOf("reply-1");
+  assert.equal(reply.reply_to_id, "root-1");
+  assert.equal(reply.thread_root_id, "root-1");
+  // Unknown message id writes nothing.
+  assert.equal(syncMessageRows(f.store.db, { roomId: "commons", sequence: 9003, event: posted("nope"), state }), 0);
+});

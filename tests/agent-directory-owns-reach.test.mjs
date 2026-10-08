@@ -72,6 +72,8 @@ test("reach validation rejects bad shapes; owns validation rejects bad arrays", 
     { wakeMode: "wakeable", lastPollAt: null, pendingUnacked: 0, bondStatus: "married", host: null },
     { wakeMode: "wakeable", lastPollAt: null, pendingUnacked: 0, bondStatus: "none", host: 42 },
     "not-an-object",
+    [],                // arrays are not records — must throw, not normalize
+    ["wakeable"],
   ]) {
     const dir = badReach(record);
     assert.throws(() => publishSigned(dir, { agentId: "bad-reach" }), DirectoryError, JSON.stringify(record));

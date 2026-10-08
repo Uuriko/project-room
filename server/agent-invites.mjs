@@ -150,11 +150,18 @@ export class AgentInvites {
   // permissions list or a standing profile name
   // (chat/contribute/review/collaborate); the profile maps server-side to
   // a fixed set, so editing the request cannot widen authority.
-  create(token, roomId, { permissions, profile, expiresInMinutes = DEFAULT_TTL_MINUTES, displayName } = {}, expectedSessionBinding = null) {
+  create(token, roomId, { permissions, profile, expiresInMinutes = DEFAULT_TTL_MINUTES, displayName } = {}, expectedSessionBinding = null,
+    { emailVerificationUnachievable = false } = {}) {
     // Owner delegates (server/owner-delegates.mjs) arrive via
     // store.authenticate with the delegate flag stamped on the member copy.
     const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
-    if (auth.account) this.store.accountLogins.assertEmailVerified(auth.account.id);
+    // The email gate bites only when verification is achievable. A deployment
+    // whose mailer is unconfigured can never verify an account (the sign-in UI
+    // says so honestly: "this account stays unverified"), so blocking invite
+    // mint on it would deadlock the onboarding funnel permanently instead of
+    // nudging the owner to verify. The HTTP route passes
+    // emailVerificationUnachievable from the deployment mailer's isConfigured().
+    if (auth.account && !emailVerificationUnachievable) this.store.accountLogins.assertEmailVerified(auth.account.id);
     const authority = this.store.roomAuthority(roomId);
     if (!auth.delegate && !canInviteMembers(authority, auth.member.id)) fail(403, "access_denied", "Invite grant required");
     // Minting invites is a membership write: the read-only autonomy tier
@@ -302,7 +309,7 @@ export class AgentInvites {
       try { state = compactState(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
       catch (error) { fail(409, "invite_rejected", error.message); }
       const projection = this.store.storedProjection(row.room_id, state);
-      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
+      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
       const sequence = room.sequence + 1;
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, incoming.id, JSON.stringify(incoming));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);

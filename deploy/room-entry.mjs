@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { discoveryDoc, ROOM_ORIGIN, COMPUTE_DOOR, joinPrompt, JOIN_HOSTS } from "./agent-discovery.mjs";
+import { discoveryDoc, ROOM_ORIGIN, COMPUTE_DOOR, joinPrompt, JOIN_HOSTS, AGENT_CARD_A2A_PATH } from "./agent-discovery.mjs";
 import { MCP_SERVER_CARD_PATH, MCP_DISCOVERY_CACHE_CONTROL, MCP_SERVER_CARD_CORS } from "../src/mcp-server-card.mjs";
 import "../server/mcp-discovery.mjs";
 import { ROOM_MCP_PUBLIC_URL, roomMcpSnippets } from "../src/room-mcp-join.js";
@@ -163,6 +163,15 @@ export function connectMcpPathHtml() {
 export function roomEntry(request) {
   const url = new URL(request.url);
   if (url.hostname !== "www.trydemigod.com") return null;
+  // #956: this door once served a stale unsigned v1 agent card at the
+  // prefix-preserving card paths. Redirect them to the signed canonical
+  // card on the origin so the door can never serve stale card bytes again.
+  if (url.pathname === "/room/.well-known/agent-card.json" || url.pathname === "/project-room/.well-known/agent-card.json") {
+    return new Response(null, { status: 308, headers: {
+      Location: `${ROOM_ORIGIN}${AGENT_CARD_A2A_PATH}`,
+      "Cache-Control": "public, max-age=3600",
+      "X-Robots-Tag": "all", "Referrer-Policy": "no-referrer" } });
+  }
   const mcp = roomMcpFetchResponse(request);
   if (mcp) return mcp;
   if (isRoomMcpPath(url.pathname)) {

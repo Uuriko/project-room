@@ -3,6 +3,7 @@
 // This module does not open its own stream and does not poll.
 
 import { needsMeHtml } from "./board-mine.js";
+import { uiText } from "./strings.js";
 
 const TEN_MINUTES = 10 * 60 * 1000;
 const WEEK = 7 * 24 * 60 * 60 * 1000;
@@ -321,6 +322,14 @@ function cardHtml(item, viewer, members, now, workItems, byId) {
       .map(member => `<option value="${escapeHtml(member.id)}">${escapeHtml(memberName(members, member.id))}</option>`).join("");
     if (options) actions.push(`<form data-claim-reassign="${escapeHtml(item.id)}"><label>Reassign <select name="newOwner" aria-label="Reassign ${escapeHtml(item.title)}">${options}</select></label><button type="submit" class="button secondary">Move</button></form>`);
   }
+  // Claim lifecycle: close (holder or claim manager) and cancel (creator of
+  // an unclaimed item, or its holder) retire open work without delivery.
+  if (viewer.write && item.state !== "done" && item.state !== "closed") {
+    const opener = item.state === "unclaimed" && !item.owner && !item.historyOmitted
+      && item.history?.[0]?.action === "created" && item.history[0].agentId === viewer.id;
+    if (viewer.manage || mine) actions.push(button("close", "Close", "secondary"));
+    else if (opener) actions.push(button("cancel", "Cancel", "secondary"));
+  }
   const title = workLink(item, workItems, `claim-work:${item.id}`, item.title || item.id);
   return `<article class="claim-card" data-claim-id="${escapeHtml(item.id)}"><h4 tabindex="-1">${title}</h4><p class="claim-owner">${ownerId ? `<span class="member-avatar" aria-hidden="true">${escapeHtml(initials(owner))}</span> ` : ""}<span>${escapeHtml(owner)}</span></p>${place}${fileBlock}${lease ? `<p class="claim-lease">${escapeHtml(lease)}</p>` : ""}${pr}${reviews}${reason}${deps ? `<ul class="claim-deps">${deps}</ul>` : ""}${links ? `<ul class="claim-chain">${links}</ul>` : ""}<div class="claim-actions">${actions.join("")}</div></article>`;
 }
@@ -460,6 +469,7 @@ export function installWorkBoard({ client, getState, getSession }) {
     if (action === "progress") return `Marked '${title}' in progress`;
     if (action === "done") return `Done '${title}'`;
     if (action === "release") return `Released '${title}'`;
+    if (action === "close" || action === "cancel") return uiText(action === "close" ? "board.claim.closed" : "board.claim.cancelled", { title });
     if (action === "reassign") return `Reassigned '${title}'`;
     if (action === "create") return `Opened '${title}'`;
     return "Closed stale claims";
@@ -561,6 +571,7 @@ export function installWorkBoard({ client, getState, getSession }) {
     const path = client.path(`/work-claims/${encodeURIComponent(id)}`);
     if (action === "claim") void act(() => client.request(`${path}/claim`, { method: "POST", data: {} }), focus);
     else if (action === "release") void act(() => client.request(`${path}/release`, { method: "POST", data: {} }), focus);
+    else if (action === "close" || action === "cancel") void act(() => client.request([path, action].join("/"), { method: "POST", data: {} }), focus);
     else if (action === "progress") void act(() => client.request(`${path}/update`, { method: "POST", data: { state: "in_progress" } }), focus);
     else if (action === "done") void act(() => client.request(`${path}/update`, { method: "POST", data: { state: "done" } }), focus);
     else if (action === "renew") {

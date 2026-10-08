@@ -2,7 +2,7 @@
 // Pure state-machine tests (no store) plus a handler smoke test with fakes.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createWork, claimWork, updateWork, attestWork, recordReview, reassignWork, isLeaseExpired, releaseExpired,
+import { createWork, claimWork, updateWork, renewWork, attestWork, recordReview, reassignWork, isLeaseExpired, releaseExpired,
   canCloseWork, roomWorkClaimConfig, workOwnedBy, unclaimedWork, ClaimError,
   DELIVERY_MODES, REVIEW_POLICIES, DEFAULT_LEASE_HOURS } from "../server/work-claims.mjs";
 import { createWorkClaimRegistry, handleWorkClaims } from "../server/work-claim-routes.mjs";
@@ -358,4 +358,70 @@ test("handler: sweep releases expired claims", async () => {
   assert.equal(read.value.state, "unclaimed");
   assert.equal(read.value.owner, null);
   assert.equal(read.value.history.at(-1).action, "lease_expired");
+});
+
+test("releaseExpired clears the whole lease (leaseStartAt) like updateWork", () => {
+  // Audit B1: the sweep's auto-release documented "owner cleared, lease
+  // cleared", and both the manual release path (updateWork -> unclaimed)
+  // and settlePullRequest's pr_closed clear leaseStartAt AND
+  // leaseExpiresAt. releaseExpired left a stale leaseStartAt on the
+  // unclaimed item — no lease remnants may survive a release, whichever
+  // path performed it.
+  const claimed = claimWork({ id: "e3" }, "quill", { leaseHours: 1, now: T0 });
+  assert.ok(claimed.leaseStartAt, "precondition: the claim holds a lease");
+  const [released] = releaseExpired([claimed], T0 + 2 * H);
+  assert.equal(released.state, "unclaimed");
+  assert.equal(released.owner, null);
+  assert.equal(released.leaseExpiresAt, null);
+  assert.equal(released.leaseStartAt, null,
+    "sweep release must clear leaseStartAt exactly like the manual release path");
+  const manual = updateWork(claimWork({ id: "e4" }, "quill", { leaseHours: 1, now: T0 }),
+    "quill", { state: "unclaimed", now: T0 });
+  assert.equal(manual.leaseStartAt, null);
+  assert.equal(manual.leaseExpiresAt, null);
+});
+
+// QA200 regression sweep: renewWork refuses a claim that holds no lease
+// ("has no lease — nothing to renew"). The lapsed-lease refusal is pinned in
+// tests/lease-renewal.test.js, but no test ever exercised the lease-less
+// claim (leaseHours: null) path — a renew there must not mint a fresh lease
+// out of thin air or silently no-op.
+test("renewWork: a lease-less claim refuses renewal (nothing to renew)", () => {
+  const claimed = claimWork({ id: "r-nolease" }, "quill", { leaseHours: null, now: T0 });
+  assert.equal(claimed.leaseExpiresAt, null, "precondition: the claim holds no lease");
+  const before = JSON.stringify(claimed);
+  // The refusal must be the lease-less branch, not the lapsed branch:
+  // Date.parse(null) is NaN, so without the explicit null check the error
+  // would misreport as "lease already lapsed".
+  assert.throws(() => renewWork(claimed, "quill", { now: T0 + H }),
+    error => error instanceof ClaimError && error.code === "invalid_claim_input" && /nothing to renew/.test(error.message));
+  assert.equal(JSON.stringify(claimed), before, "the refused renew must not change the claim");
+  // An explicit null on renew is the escape hatch out of a lease, not a way
+  // to renew a lease-less claim: a held lease renews to no lease cleanly.
+  const leased = claimWork({ id: "r-leased" }, "quill", { leaseHours: 1, now: T0 });
+  const cleared = renewWork(leased, "quill", { leaseHours: null, now: T0 });
+  assert.equal(cleared.leaseStartAt, null);
+  assert.equal(cleared.leaseExpiresAt, null);
+  assert.match(cleared.history.at(-1).note, /lease removed/);
+  throwsCode(() => renewWork(cleared, "quill", { now: T0 + H }), "invalid_claim_input");
+});
+
+// QA200 regression sweep: releaseExpired resets fileBlocks, not just files.
+// L-P2-8 pinned attestations, L-28 pinned declared files on both the manual
+// and auto release paths, but no test asserted fileBlocks — the block map
+// belongs to the lapsed owner's round like everything else it guards.
+test("releaseExpired clears fileBlocks alongside files, attestations and reviews", () => {
+  const claimed = claimWork({ id: "e5" }, "quill",
+    { files: ["src/a.js"], fileBlocks: { "src/a.js": "owned" }, leaseHours: 1, now: T0 });
+  assert.deepEqual(claimed.fileBlocks, { "src/a.js": "owned" }, "precondition: the claim holds file blocks");
+  const [released] = releaseExpired([claimed], T0 + 2 * H);
+  assert.equal(released.state, "unclaimed");
+  assert.deepEqual(released.files, []);
+  assert.deepEqual(released.fileBlocks, {},
+    "sweep release must drop the lapsed owner's file blocks like the manual release path");
+  assert.ok(Object.isFrozen(released.fileBlocks));
+  assert.deepEqual(released.attestations, []);
+  // Parity with the manual release path, which clears the same fields.
+  const manual = updateWork(claimed, "quill", { state: "unclaimed", now: T0 });
+  assert.deepEqual(manual.fileBlocks, {});
 });
