@@ -16,6 +16,10 @@ export const BACKUP_PREFIX = "room-backups/";
 export const BACKUP_KV_PART_BYTES = 16 * 1024 * 1024;
 // 35 days: a month of nightly copies, and storage stays bounded without a sweep.
 export const BACKUP_KV_TTL_SECONDS = 35 * 24 * 60 * 60;
+// Version 2: BLOB cells (room file bytes) are base64 on the Durable Object
+// too. A version 1 manifest for today was written by the export that dropped
+// them, so the next tick rewrites that day instead of skipping it.
+export const BACKUP_MANIFEST_VERSION = 2;
 
 export function backupObjectKey(now = new Date()) {
   const date = now instanceof Date ? now : new Date(now);
@@ -99,9 +103,17 @@ export async function writeKvBackup(kv, key, body, { partBytes = BACKUP_KV_PART_
     }
   }
   if (pendingBytes || !parts.length) await flush();
-  const manifest = { kind: "room-backup-manifest", version: 1, key, createdAt: new Date(now).toISOString(), bytes: total, sha256: whole.digest("hex"), parts };
+  const manifest = { kind: "room-backup-manifest", version: BACKUP_MANIFEST_VERSION, key, createdAt: new Date(now).toISOString(), bytes: total, sha256: whole.digest("hex"), parts };
   await kv.put(key, JSON.stringify(manifest), { ...options, metadata: { parts: parts.length, bytes: total } });
   return manifest;
+}
+
+function currentManifest(stored) {
+  if (stored == null) return false;
+  try {
+    const text = typeof stored === "string" ? stored : new TextDecoder().decode(stored);
+    return Number(JSON.parse(text)?.version) >= BACKUP_MANIFEST_VERSION;
+  } catch { return false; }
 }
 
 export async function writeDailyBackup(env, room, now = new Date()) {
@@ -115,7 +127,7 @@ export async function writeDailyBackup(env, room, now = new Date()) {
     await bucket.put(key, body, { httpMetadata: { contentType: "application/x-ndjson" } });
     return { wrote: key };
   }
-  if (await kv.get(key)) return { skipped: "exists", key, target: "kv" };
+  if (currentManifest(await kv.get(key))) return { skipped: "exists", key, target: "kv" };
   const body = await room.exportRoomNdjson();
   const manifest = await writeKvBackup(kv, key, body, { now: new Date(now).getTime() });
   return { wrote: key, target: "kv", parts: manifest.parts.length, bytes: manifest.bytes };
