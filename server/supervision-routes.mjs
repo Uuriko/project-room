@@ -286,6 +286,19 @@ export async function handleSupervisionRoutes({
         return reject(422, "confirmation_required", "confirm-class actions need {confirm:true}");
       }
       const card = load(cardId);
+      // Idempotent replay: if the first /confirm response was lost, the card
+      // is already approved (pending_undo, confirm-gated, not yet fired). A
+      // retry must hand back the same approved write instead of 409ing,
+      // otherwise the action stays approved but is never fired.
+      if (card.state === "pending_undo" && card.pickedSuggestion?.gate === "confirm") {
+        return json(res, 200, {
+          confirmed: true,
+          replayed: true,
+          card: withSuggestions(card),
+          write: card.pickedSuggestion?.api ?? null,
+          apiNote: card.pickedSuggestion?.apiNote ?? null,
+        });
+      }
       const next = runTransition(card, { type: "confirm", confirmed: true });
       store.upsertCard(roomId, memberId, next);
       journaled(next, card.state, "confirm", next.pickedSuggestion?.kind ?? null);

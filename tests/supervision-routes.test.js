@@ -274,6 +274,25 @@ test("pick on a confirm-gated suggestion returns a challenge; confirm requires {
   assert.equal(confirmed.sent.at(-1).obj.confirmed, true);
   assert.equal(confirmed.sent.at(-1).obj.card.state, "pending_undo");
   assert.equal(confirmed.sent.at(-1).obj.card.undoDeadlineMs, NOW); // zero-second window
+  // Lost response: a retried /confirm replays the same approved write (no
+  // second journal entry), so the client can still fire it.
+  const journalBefore = store.history(ROOM, OP, card.id).length;
+  const rejectedBefore = h.rejected.length;
+  const replay = await h.call({
+    method: "POST", route: "confirm", cardId: card.id, bodyData: { confirm: true },
+  });
+  assert.equal(replay.rejected.length, rejectedBefore);
+  assert.equal(replay.sent.at(-1).obj.confirmed, true);
+  assert.equal(replay.sent.at(-1).obj.replayed, true);
+  assert.deepEqual(replay.sent.at(-1).obj.write, confirmSuggestion.api);
+  assert.equal(replay.sent.at(-1).obj.card.state, "pending_undo");
+  assert.equal(store.history(ROOM, OP, card.id).length, journalBefore);
+  // Once fired, a late retry no longer replays.
+  await h.call({ method: "POST", route: "refetch", cardId: card.id, bodyData: { fired: true } });
+  const late = await h.call({
+    method: "POST", route: "confirm", cardId: card.id, bodyData: { confirm: true },
+  });
+  assert.equal(late.rejected.at(-1)?.code, "illegal_transition");
 });
 
 // ---------------------------------------------------------------------------
