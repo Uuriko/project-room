@@ -19,7 +19,17 @@ async function startServer(t, f) {
     await new Promise(resolve => server.close(resolve));
     f.store.close(); rmSync(f.directory, { recursive: true, force: true });
   });
-  return `http://127.0.0.1:${server.address().port}`;
+  return { origin: `http://127.0.0.1:${server.address().port}`, server };
+}
+
+// Wait until the server's in-flight gate reaches the expected depth, so
+// saturation tests are deterministic instead of timing-dependent.
+async function waitForDepth(server, depth, timeoutMs = 10000) {
+  const t0 = Date.now();
+  while (server.commandsInFlight() < depth) {
+    if (Date.now() - t0 > timeoutMs) throw new Error(`gate depth never reached ${depth}`);
+    await sleep(25);
+  }
 }
 
 const cmd = (id, n) => ({ id, type: "message.posted", data: { messageId: `sat-${n}`, body: `saturation probe ${n}` } });
@@ -61,10 +71,10 @@ test("saturated /commands fails fast with 503 + Retry-After instead of hanging",
   process.env.COMMANDS_SATURATED_RETRY_AFTER_S = "1";
   try {
     const f = createAcceptanceFixture();
-    const origin = await startServer(t, f);
+    const { origin, server } = await startServer(t, f);
     // A holds the single in-flight slot with a trickling body (~1s).
     const aPromise = tricklePostCmd(origin, f.keys.owner, cmd(randomUUID(), 1));
-    await sleep(200); // let A's handler enter the gate
+    await waitForDepth(server, 1); // A's handler is deterministically inside the gate
     const t0 = Date.now();
     const b = await postCmd(origin, f.keys.owner, cmd(randomUUID(), 2));
     const bMs = Date.now() - t0;
@@ -83,40 +93,37 @@ test("saturated /commands fails fast with 503 + Retry-After instead of hanging",
   }
 });
 
-test("concurrent burst gets definitive statuses with no silent timeouts", async t => {
+test("concurrent burst against a saturated gate: prompt 503s, no silent timeouts", async t => {
   process.env.COMMANDS_MAX_INFLIGHT = "4";
   try {
     const f = createAcceptanceFixture();
-    const origin = await startServer(t, f);
+    const { origin, server } = await startServer(t, f);
+    // Saturate the gate deterministically: 4 parked requests hold it with
+    // slow bodies while the burst arrives behind them.
+    const parked = [0, 1, 2, 3].map(i =>
+      tricklePostCmd(origin, f.keys.owner, cmd(randomUUID(), 500 + i), { chunks: 20, gapMs: 100 }));
+    await waitForDepth(server, 4);
+    // The LOAD-guild burst shape: many concurrent POSTs to /commands.
     const N = 24;
     const t0 = Date.now();
-    const latencies = [];
-    // Trickle every body so the handlers genuinely overlap in flight, the
-    // way a real burst overlaps on the wire.
-    const results = await Promise.all(Array.from({ length: N }, async (_, i) => {
-      const start = Date.now();
-      try {
-        const res = await tricklePostCmd(origin, f.keys.owner, cmd(randomUUID(), 100 + i),
-          { chunks: 4, gapMs: 100 });
-        latencies.push(Date.now() - start);
-        return res;
-      } catch (error) {
-        latencies.push(Date.now() - start);
-        throw error;
-      }
-    }));
-    const maxMs = Math.max(...latencies);
-    const statuses = {};
+    const results = await Promise.all(Array.from({ length: N }, (_, i) =>
+      postCmd(origin, f.keys.owner, cmd(randomUUID(), 100 + i))));
+    const burstMs = Date.now() - t0;
     for (const res of results) {
-      statuses[res.status] = (statuses[res.status] ?? 0) + 1;
-      assert.ok([201, 503].includes(res.status), `definitive status, got ${res.status}`);
-      if (res.status === 503) assert.ok(res.headers.get("retry-after"), "every 503 carries Retry-After");
-      await res.text(); // drain
+      assert.equal(res.status, 503, "every burst arrival past the gate is refused, not queued");
+      assert.ok(res.headers.get("retry-after"), "every 503 carries Retry-After");
+      const body = await res.json();
+      assert.equal(body.error.code, "commands_saturated");
+      assert.match(body.error.message, /not applied/i, "refusal is definitive: not applied");
     }
-    assert.ok((statuses[201] ?? 0) >= 1, "some commands admitted");
-    assert.ok((statuses[503] ?? 0) >= 1, `gate engaged under burst: ${JSON.stringify(statuses)}`);
-    assert.ok(maxMs < 10000, `no hangs: max latency ${maxMs}ms for ${N} concurrent commands`);
-    t.diagnostic(`burst: ${JSON.stringify(statuses)}, max latency ${maxMs}ms, total ${Date.now() - t0}ms`);
+    assert.ok(burstMs < 5000, `prompt refusals for ${N} concurrent: ${burstMs}ms total`);
+    t.diagnostic(`burst: ${N}x503 in ${burstMs}ms while gate saturated`);
+    // The parked requests that held the gate still apply normally.
+    for (const p of parked) {
+      const res = await p;
+      assert.equal(res.status, 201, "admitted request applies despite the burst");
+      await res.json();
+    }
   } finally {
     delete process.env.COMMANDS_MAX_INFLIGHT;
   }
@@ -124,7 +131,7 @@ test("concurrent burst gets definitive statuses with no silent timeouts", async 
 
 test("a timed-out command retries safely with the same id: exactly-once", async t => {
   const f = createAcceptanceFixture();
-  const origin = await startServer(t, f);
+  const { origin } = await startServer(t, f);
   const id = randomUUID();
   const first = await postCmd(origin, f.keys.owner, cmd(id, 201));
   assert.equal(first.status, 201);
@@ -152,7 +159,7 @@ test("a timed-out command retries safely with the same id: exactly-once", async 
 
 test("low-concurrency commands keep normal latency (no regression)", async t => {
   const f = createAcceptanceFixture();
-  const origin = await startServer(t, f);
+  const { origin } = await startServer(t, f);
   for (let i = 0; i < 3; i++) {
     const t0 = Date.now();
     const res = await postCmd(origin, f.keys.owner, cmd(randomUUID(), 300 + i));
