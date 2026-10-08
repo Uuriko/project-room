@@ -4858,6 +4858,7 @@ paths:
         `rooms:read`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/WorkClaimFast'
         - name: queue
           in: query
           schema: { type: string, enum: [ready] }
@@ -4911,6 +4912,7 @@ paths:
         `work_claims_not_permitted`. API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/WorkClaimFast'
       requestBody:
         required: true
         content:
@@ -4983,6 +4985,7 @@ paths:
         20. API keys need `rooms:read`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/WorkClaimFast'
       responses:
         '200': { description: Caps for this room }
         '401': { description: unauthenticated }
@@ -4994,6 +4997,7 @@ paths:
         gets 403 work_claims_not_permitted. API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/WorkClaimFast'
       requestBody:
         required: true
         content:
@@ -5020,6 +5024,7 @@ paths:
         API keys need `rooms:read`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/WorkClaimFast'
       responses:
         '200':
           description: Live and main
@@ -5048,6 +5053,7 @@ paths:
         the poll. API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/WorkClaimFast'
       requestBody:
         required: true
         content:
@@ -5090,6 +5096,7 @@ paths:
         keys need `rooms:read`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/WorkClaimFast'
         - name: q
           in: query
           required: true
@@ -5217,6 +5224,7 @@ paths:
       description: Any room member may read; API keys need `rooms:read`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/WorkClaimFast'
         - name: claimId
           in: path
           required: true
@@ -5246,6 +5254,7 @@ paths:
         returns `fileWarnings`. API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/WorkClaimFast'
         - name: claimId
           in: path
           required: true
@@ -5358,6 +5367,7 @@ paths:
         Automatic all-linked-PR settlement remains separate from manual review.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/WorkClaimFast'
         - name: claimId
           in: path
           required: true
@@ -5449,6 +5459,7 @@ paths:
         `room_work_claim_provenance`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/WorkClaimFast'
         - name: claimId
           in: path
           required: true
@@ -5494,6 +5505,7 @@ paths:
         manage_claims may declare or clear. API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/WorkClaimFast'
         - name: claimId
           in: path
           required: true
@@ -5559,6 +5571,7 @@ paths:
         API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/WorkClaimFast'
         - name: claimId
           in: path
           required: true
@@ -5595,6 +5608,7 @@ paths:
         API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/WorkClaimFast'
         - name: claimId
           in: path
           required: true
@@ -5633,6 +5647,7 @@ paths:
         API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/WorkClaimFast'
         - name: claimId
           in: path
           required: true
@@ -5670,6 +5685,7 @@ paths:
         API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/WorkClaimFast'
         - name: claimId
           in: path
           required: true
@@ -5706,6 +5722,7 @@ paths:
         need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/WorkClaimFast'
         - name: claimId
           in: path
           required: true
@@ -6389,6 +6406,7 @@ paths:
         API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/WorkClaimFast'
         - name: claimId
           in: path
           required: true
@@ -15982,6 +16000,17 @@ components:
       in: path
       required: true
       schema: { type: string }
+    WorkClaimFast:
+      name: fast
+      in: query
+      required: false
+      schema: { type: string, enum: ["1"] }
+      description: |
+        `1` selects the pure-state fast path (docs/WORK-CLAIMS-FAST-PATH.md):
+        reads skip the lease sweep and closeLiveClaims; mutations persist via
+        the registry with zero room events, zero wakes, and no event-budget
+        gate. Auth, the state machine, caps and error semantics are identical.
+        Response shapes are unchanged (`swept` is `[]`). Default: off.
   schemas:
     # JDOT-MEMBER-PERMS begin: public request schemas, not storage envelopes.
     RequestedRoomPermission:
