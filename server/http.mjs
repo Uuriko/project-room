@@ -4055,7 +4055,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // Round-2 #113: full-text search over messages and work items.
         const q = url.searchParams.get("q");
         const kind = url.searchParams.get("kind") ?? "all";
-        const result = store.search(selected.token, roomId, q, kind, fence);
+        const limitRaw = url.searchParams.get("limit");
+        if (limitRaw !== null && (!/^[1-9]\d*$/.test(limitRaw) || Number(limitRaw) > 200)) {
+          reject(422, "invalid_search", "limit is 1 to 200");
+        }
+        const result = store.search(selected.token, roomId, q, kind, fence, { limit: limitRaw === null ? 50 : Number(limitRaw) });
         // RC-2026-09-19-070: search hits carry bodies but not toMemberId, so
         // re-resolve each hit against the projection and drop targeted DMs
         // the viewer is not a party to. Fail closed when a hit cannot be resolved.
