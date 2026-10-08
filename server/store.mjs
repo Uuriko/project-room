@@ -4644,6 +4644,20 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           fail(403, "work_claims_not_permitted", "Creating, claiming, renewing, or updating work claims needs a contribute, review, or collaborate profile.");
         }
       }
+      // A reply joins its parent's thread. A DM's thread belongs to its two
+      // parties: a bystander replying to a DM id would thread into a private
+      // conversation and learn from the answer that the id exists. Live
+      // admission only, so replies already in a log keep replaying; the
+      // refusal reads like an unknown id so it confirms nothing.
+      if (command.type === T.MESSAGE_POSTED && typeof command.data?.replyToId === "string") {
+        const byId = new Map((room.state.messages || []).map(m => [m.id, m]));
+        for (let m = byId.get(command.data.replyToId), hops = 0; m && hops < 64; m = byId.get(m.replyToId), hops++) {
+          if (m.toMemberId && m.authorId !== auth.member.id && m.toMemberId !== auth.member.id) {
+            fail(422, "command_rejected", "Reply must reference a message in this Room");
+          }
+          if (!m.replyToId) break;
+        }
+      }
       // Bond / peer DM. Room chat (message.posted) is unchanged and still
       // requires room membership plus DM consent when toMemberId is set.
       // Peer DMs are a separate command, gated by an active bond with peer.dm.
