@@ -38,6 +38,7 @@ import {
   renewWork, roomWorkClaimConfig, closeWhenLive, isReceiptTag, ClaimError, REVIEW_POLICIES, CLAIM_KINDS,
   claimUpdatedAt, ACTIVE_CLAIM_STATES, MAX_LEASE_HOURS, STATES, summarizeClaimHistory, isHardWork,
   walkProvenance, flagPremiseInvalid, clearPremiseFlag, closeWork, isTerminalClaimState,
+  countsTowardBoardCap, retireStaleClaims,
 } from "./work-claims.mjs";
 import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
@@ -382,9 +383,10 @@ export function buildWorkClaimPage(items, roomId, viewerId, query = new URLSearc
     ...(olderDone > 0 ? { olderDone, olderDoneQuery: "state=done" } : {}) });
 }
 
-// Evaluate lease expiry across the room's items; expired claims auto-release
-// (owner cleared, history stamped by releaseExpired). Returns the ids that
-// were released by this sweep.
+// Evaluate lease expiry across the room's items; lapsed claims auto-release
+// into the expired state (owner cleared, history stamped lease_expired by
+// releaseExpired) — out of the open-claim count, still re-claimable, never
+// dropped. Returns the ids that expired in this sweep.
 function sweepRoom(registry, roomId, nowMs, onRelease = () => {}) {
   // SEC-2: only claims whose lease has already lapsed go through the state
   // machine; reading a large Board must not re-validate every done claim.
@@ -396,11 +398,27 @@ function sweepRoom(registry, roomId, nowMs, onRelease = () => {}) {
   // releaseExpired returns a normalized copy of every item, expired or not,
   // so compare states: only a claim that actually lapsed counts as swept.
   swept.forEach((item, index) => {
-    if (item.state === "unclaimed" && entry[index].state !== "unclaimed") {
+    if (item.state === "expired" && entry[index].state !== "expired") {
       registry.set(roomId, item); released.push(item.id); onRelease(item, entry[index]);
     }
   });
   return released;
+}
+// Stale-claim auto-retirement, opt-in per room via staleClaimTtlMs (null =
+// disabled). Retires unclaimed/expired items with no activity past the TTL
+// into closed (history stamped stale_retired) — retired, never deleted.
+// Returns the ids retired by this sweep.
+function retireStaleRoom(registry, roomId, nowMs, staleAfterMs, onRetire = () => {}) {
+  if (staleAfterMs === null || staleAfterMs === undefined) return [];
+  const before = registry.list(roomId);
+  const after = retireStaleClaims(before, { now: nowMs, staleAfterMs });
+  const retired = [];
+  after.forEach((item, index) => {
+    if (item.state === "closed" && before[index].state !== "closed") {
+      registry.set(roomId, item); retired.push(item.id); onRetire(item, before[index]);
+    }
+  });
+  return retired;
 }
 
 const verifiersOf = (store, roomId) => {
@@ -752,6 +770,15 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       { reason: "lease_expired", actorId: before.owner });
   });
   const config = registry.configFor(roomId);
+  // Stale-claim auto-retirement: opt-in via the room's staleClaimTtlMs
+  // (default null = disabled). Retired items are closed with a
+  // stale_retired stamp — never deleted.
+  const retiredIds = retireStaleRoom(registry, roomId, nowMs, config.staleClaimTtlMs ?? null, (item, before) => {
+    emitWorkClaimEvent(store, roomId, {
+      actorId: "system", item, action: "stale_retired", previousOwnerId: before.owner ?? null,
+      atMs: nowMs, paths: before.files ?? []
+    });
+  });
   const roomLike = { workClaims: registry.rawConfig(roomId) };
   const access = resolveWorkClaimAccess(store, roomId, auth);
   const requireWriter = () => { if (!mayWriteWorkClaims(access)) refuseWorkClaims(); };
@@ -806,7 +833,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   if (workClaimRoute === "list" && req.method === "GET") {
     closeLiveClaims();
     return json(res, 200, { ...buildWorkClaimPage(registry.list(roomId), roomId, caller,
-      url?.searchParams, nowMs), swept: sweptIds });
+      url?.searchParams, nowMs), swept: sweptIds, retired: retiredIds });
   }
   if (workClaimRoute === "receipts" && req.method === "GET") {
     // RC-2026-09-24-205: receipts search. The room block already rejected
@@ -867,7 +894,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       writeClaimPullBudget(store, pullBatch.rateLimitedUntil, nowMs);
     }
     return json(res, 200, {
-      roomId, released: sweptIds, sweptAt: new Date(nowMs).toISOString(),
+      roomId, released: sweptIds, retired: retiredIds, sweptAt: new Date(nowMs).toISOString(),
       pullRequests: { checked, updated, ...(rateLimited ? { rateLimited: true } : {}) }
     });
   }
@@ -908,7 +935,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const data = clientPullRequestInput(reject, boardTextFields(reject, raw, { title: {}, note: { multiline: true } }));
     assertDependsOnKnown(reject, data, { selfId: id, has: other => registry.has(roomId, other) });
     if (registry.has(roomId, id)) reject(409, "work_claim_exists", `Work claim "${id}" already exists in this room`);
-    const open = registry.list(roomId).filter(item => !isTerminalClaimState(item.state)).length;
+    // The cap counts open items only: done, closed, and expired (lapsed
+    // orphans awaiting re-claim) never occupy a slot.
+    const open = registry.list(roomId).filter(countsTowardBoardCap).length;
     if (open >= config.maxOpenClaims) {
       refuseCap("work_board_full",
         `This room already has ${config.maxOpenClaims} open claims. Close stale claims (POST …/work-claims/{id}/close or /cancel) before opening another.`,
@@ -973,7 +1002,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (!shape(data, { optional: ["note", "leaseHours", "files", "advisory", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch"] })) invalidInput(reject, "{note?, leaseHours?, files?, advisory?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?}");
     if ("advisory" in data && typeof data.advisory !== "boolean") invalidInput(reject, "advisory true or false");
     const item = load(claimIdOf(reject, workClaimId));
-    if (item.state !== "unclaimed") reject(409, "work_claim_conflict", `Work "${item.id}" is already ${item.state} — release it first`);
+    // expired items are re-claimable: a lapsed orphan is revived, never dropped.
+    if (item.state !== "unclaimed" && item.state !== "expired") reject(409, "work_claim_conflict", `Work "${item.id}" is already ${item.state} — release it first`);
     requireWriter();
     requireEventBudget();
     assertLeaseChoice(data);
@@ -1276,14 +1306,24 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   if (workClaimRoute === "config" && (req.method === "GET" || req.method === "POST")) {
     if (req.method === "GET") return json(res, 200, { roomId, ...config });
     const data = body(req);
-    if (!shape(data, { required: ["maxMemberOpenClaims"] })) invalidInput(reject, "{maxMemberOpenClaims}");
+    if (!shape(data, { required: ["maxMemberOpenClaims"], optional: ["staleClaimTtlMs"] })) invalidInput(reject, "{maxMemberOpenClaims, staleClaimTtlMs?}");
     const ownerId = typeof access.authority?.ownerId === "string" && access.authority.ownerId.length > 0
       ? access.authority.ownerId : null;
-    if (ownerId !== caller) reject(403, "work_claims_not_permitted", "Only the room owner can set the per-member claim cap.");
+    if (ownerId !== caller) reject(403, "work_claims_not_permitted", "Only the room owner can set the claim caps.");
     if (!Number.isSafeInteger(data.maxMemberOpenClaims) || data.maxMemberOpenClaims < 1 || data.maxMemberOpenClaims > 10000) {
       invalidInput(reject, "maxMemberOpenClaims as an integer 1..10000");
     }
-    const saved = registry.configure(roomId, { maxMemberOpenClaims: data.maxMemberOpenClaims });
+    // staleClaimTtlMs opts the room into stale-claim auto-retirement: null
+    // (or omitted) disables; otherwise whole ms, at least an hour.
+    const patch = { maxMemberOpenClaims: data.maxMemberOpenClaims };
+    if (data.staleClaimTtlMs !== undefined) {
+      if (data.staleClaimTtlMs !== null
+        && (!Number.isSafeInteger(data.staleClaimTtlMs) || data.staleClaimTtlMs < 3_600_000)) {
+        invalidInput(reject, "staleClaimTtlMs as null or an integer number of ms >= 3600000 (1h)");
+      }
+      patch.staleClaimTtlMs = data.staleClaimTtlMs;
+    }
+    const saved = registry.configure(roomId, patch);
     return json(res, 200, { roomId, ...saved });
   }
   if (workClaimRoute === "provenance" && (req.method === "GET" || req.method === "HEAD")) {

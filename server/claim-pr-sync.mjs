@@ -495,7 +495,8 @@ function closeDeployedClaims(store, nowMs) {
 // request (sweepRoom in server/work-claim-routes.mjs); the per-minute cron
 // never did, so a lapsed round could be settled pr_merged by the tick while
 // the same facts on the HTTP path released it first (claim_flaked). Sweep
-// here with the same semantics — auto-release, lease_expired event, one
+// here with the same semantics — auto-expire to the expired state
+// (cap-excluded, re-claimable, never dropped), lease_expired event, one
 // wake per expiry — so both settlement paths read the same world.
 function sweepExpiredClaimLeases(store, nowMs) {
   let roomIds = [];
@@ -516,7 +517,7 @@ function sweepExpiredClaimLeases(store, nowMs) {
     store.workClaims.transaction(() => {
       for (const before of expired) {
         const [item] = releaseExpired([before], nowMs);
-        if (!item || item.state !== "unclaimed" || before.state === "unclaimed") continue;
+        if (!item || item.state !== "expired" || before.state === "expired") continue;
         store.workClaims.set(roomId, item);
         const receipt = emitWorkClaimEvent(store, roomId, {
           actorId: before.owner, item, action: "lease_expired", previousOwnerId: before.owner,

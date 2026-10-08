@@ -1,7 +1,7 @@
 // Projection claim commands (MCP and the work-item form) write the same
 // work-claims board the REST routes use. A handoff or supersede leaves a
 // successor card that depends on the source, so the chain is visible there.
-import { createWork, claimWork, renewWork, updateWork, roomWorkClaimConfig } from "./work-claims.mjs";
+import { createWork, claimWork, renewWork, updateWork, roomWorkClaimConfig, countsTowardBoardCap } from "./work-claims.mjs";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
 
 const BOARD_ID = /^[A-Za-z0-9_-]{1,128}$/;
@@ -50,7 +50,7 @@ function claimBoard(store, roomId, actorId, id, data, nowMs) {
     const config = typeof registry.configFor === "function"
       ? registry.configFor(roomId)
       : roomWorkClaimConfig(roomLike(registry, roomId));
-    const open = registry.list(roomId).filter(entry => entry.state !== "done" && entry.state !== "closed").length;
+    const open = registry.list(roomId).filter(countsTowardBoardCap).length;
     if (open >= config.maxOpenClaims) {
       const error = new Error(`This room already has ${config.maxOpenClaims} open claims. Close stale claims (close or cancel) before opening another.`);
       error.status = 409;
@@ -63,7 +63,8 @@ function claimBoard(store, roomId, actorId, id, data, nowMs) {
     }, { now: nowMs, agentId: actorId });
     registry.set(roomId, item);
   }
-  if (item.state !== "unclaimed") return item;
+  // expired items are re-claimable: a lapsed orphan is revived, never dropped.
+  if (item.state !== "unclaimed" && item.state !== "expired") return item;
   const held = registry.list(roomId).filter(entry => entry.owner === actorId && ACTIVE.has(entry.state)).length;
   const config = typeof registry.configFor === "function"
     ? registry.configFor(roomId)
@@ -103,7 +104,8 @@ export function mirrorProjectionClaim(store, roomId, actorId, incoming) {
   }
   if (incoming.type === "claim.released") {
     let item = registry.get(roomId, id);
-    if (!item || item.state === "unclaimed" || item.state === "done" || item.state === "closed") return item;
+    // expired is already ownerless: releasing it again is a no-op.
+    if (!item || item.state === "unclaimed" || item.state === "expired" || item.state === "done" || item.state === "closed") return item;
     if (item.state === "in_progress" || item.state === "blocked") {
       item = updateWork(item, actorId, { state: "claimed", note: "paused for release", now: nowMs, authority: item.owner !== actorId });
       registry.set(roomId, item);

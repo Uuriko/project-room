@@ -34,23 +34,39 @@
 // Note-only attestations remain caller-bound records but cannot approve work.
 // This does not gate automatic PR/land/deploy settlement or bind artifact bytes.
 import { parsePullRequestUrl } from "./claim-coordination.mjs";
-const STATES = ["unclaimed", "claimed", "in_progress", "blocked", "done", "closed"];
+const STATES = ["unclaimed", "claimed", "in_progress", "blocked", "expired", "done", "closed"];
 const CLAIM_KINDS = ["work", "land", "deploy"];
 const CI_STATES = ["pending", "success", "failure", "neutral"];
 const REVIEW_VERDICTS = ["approve", "changes_requested", "comment"];
 // Claim lifecycle: one explicit table, state x verb -> next state. Anything
 // not listed is refused. done and closed are terminal: done means the work
 // was delivered; closed means it was retired without delivery (close by the
-// room's claim managers, cancel by whoever opened or holds it). Only open
-// (non-terminal) items count against the room's open-claim cap.
+// room's claim managers, cancel by whoever opened or holds it). expired is
+// NOT terminal: a lapsed lease auto-releases the item into expired (owner
+// and lease cleared, history kept) so it leaves the open-claim count while
+// staying re-claimable — the orphan is never dropped. Only non-terminal,
+// non-expired items count against the room's open-claim cap
+// (countsTowardBoardCap); expired items are revived with claim or retired
+// with close/cancel.
 const CLAIM_LIFECYCLE = Object.freeze({
   unclaimed: Object.freeze({ claim: "claimed", close: "closed", cancel: "closed" }),
   claimed: Object.freeze({ start: "in_progress", block: "blocked", release: "unclaimed", close: "closed", cancel: "closed" }),
   in_progress: Object.freeze({ block: "blocked", finish: "done", pause: "claimed", close: "closed", cancel: "closed" }),
   blocked: Object.freeze({ start: "in_progress", pause: "claimed", close: "closed", cancel: "closed" }),
+  expired: Object.freeze({ claim: "claimed", close: "closed", cancel: "closed" }),
   done: Object.freeze({}),
   closed: Object.freeze({}),
 });
+// States that occupy a slot of the room's open-claim cap. done and closed
+// are terminal; expired is live-but-unheld (cap-excluded so a board of
+// lapsed orphans never bricks the room, still claimable so nothing is lost).
+export const countsTowardBoardCap = item => {
+  const state = item?.state;
+  return state !== "done" && state !== "closed" && state !== "expired";
+};
+// States eligible for stale-claim auto-retirement: held or delivered work is
+// never retired; only unheld backlog goes quiet enough to close.
+const STALE_RETIRE_ELIGIBLE_STATES = Object.freeze(["unclaimed", "expired"]);
 const CLAIM_VERBS = Object.freeze(["claim", "start", "block", "release", "pause", "finish", "close", "cancel"]);
 const TERMINAL_CLAIM_STATES = Object.freeze(["done", "closed"]);
 const isTerminalClaimState = state => TERMINAL_CLAIM_STATES.includes(state);
@@ -489,10 +505,19 @@ export function claimUpdatedAt(item) {
 }
 const positiveCap = (value, fallback) =>
   Number.isSafeInteger(value) && value >= 1 && value <= CONFIG_CAP_CEILING ? value : fallback;
+// Stale-claim auto-retirement TTL: null/undefined disables; otherwise a whole
+// number of ms, at least an hour (shorter windows retire live backlog by
+// accident). Anything else falls back to null = disabled.
+const MIN_STALE_TTL_MS = 3_600_000;
+const staleTtlMsOf = value =>
+  value === null || value === undefined ? null
+  : (Number.isSafeInteger(value) && value >= MIN_STALE_TTL_MS ? value : null);
 // Room config hook: resolve per-room work-claim defaults from an optional
 // room object. Rooms opt in by carrying workClaims = { defaultLeaseHours,
-// reviewPolicy, maxOpenClaims, maxMemberOpenClaims }; anything missing or
-// invalid falls back to the defaults.
+// reviewPolicy, maxOpenClaims, maxMemberOpenClaims, staleClaimTtlMs };
+// anything missing or invalid falls back to the defaults. staleClaimTtlMs
+// (default null = disabled) opts the room into stale-claim auto-retirement:
+// unclaimed/expired items with no activity for that long are closed.
 export function roomWorkClaimConfig(room) {
   const raw = room?.workClaims ?? {};
   const defaultLeaseHours = typeof raw.defaultLeaseHours === "number" && raw.defaultLeaseHours > 0 && raw.defaultLeaseHours <= MAX_LEASE_HOURS
@@ -503,6 +528,7 @@ export function roomWorkClaimConfig(room) {
     reviewPolicy,
     maxOpenClaims: positiveCap(raw.maxOpenClaims, DEFAULT_MAX_OPEN_CLAIMS),
     maxMemberOpenClaims: positiveCap(raw.maxMemberOpenClaims, DEFAULT_MAX_MEMBER_OPEN_CLAIMS),
+    staleClaimTtlMs: staleTtlMsOf(raw.staleClaimTtlMs),
   });
 }
 const leaseHoursOf = value => {
@@ -562,7 +588,8 @@ export function createWork({ id, title, reviewPolicy, note, tags, files, depends
 // defaultLeaseHours, else 24h); null opts out — the claim never expires.
 export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, parentClaimId, evidenceRefs, pullRequest, pullRequests, repo, branch, fileBlocks, room, now } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
-  check(item.state === "unclaimed", `work "${item.id}" is already ${item.state} — release it first`);
+  // expired is claimable too: a lapsed orphan is revived, never dropped.
+  check(item.state === "unclaimed" || item.state === "expired", `work "${item.id}" is already ${item.state} — release it first`);
   // QA D-1: the 4000-char bound applies to every note stored on a history
   // stamp, not just create — an unbounded claim note is the same
   // storage/amplification vector the SEC2 create cap closed.
@@ -763,7 +790,9 @@ export function closeWork(work, agentId, { verb = "close", reason, now, authorit
   const next = nextClaimState(item.state, verb);
   if (next === null) fail("work_claim_terminal", `Cannot ${verb} "${item.id}": it is already ${item.state}`);
   const holder = item.owner !== null && item.owner === agent;
-  const opener = item.state === "unclaimed" && item.owner === null && creatorOf(item) === agent;
+  // an expired orphan is ownerless like an unclaimed item: whoever opened it
+  // may still cancel it, and claim managers may close it.
+  const opener = (item.state === "unclaimed" || item.state === "expired") && item.owner === null && creatorOf(item) === agent;
   const allowed = authority === true || holder || (verb === "cancel" && opener);
   if (!allowed) {
     fail("work_not_owner", verb === "cancel"
@@ -880,6 +909,10 @@ export function reassignWork(work, agentId, newOwner, { note, now, authority = f
   const item = workOf(work), agent = agentOf(agentId), target = agentOf(newOwner), atMs = nowMsOf(now);
   check(authority === true || item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can reassign it`);
   check(!isTerminalClaimState(item.state), `work "${item.id}" is ${item.state} and immutable`);
+  // An expired item is ownerless by construction; handing it to a new owner
+  // while it stays expired would strand a held-but-cap-excluded phantom.
+  // Claim it first, then reassign.
+  check(item.state !== "expired", `work "${item.id}" expired unclaimed — claim it before reassigning`);
   // Assigning an unclaimed item hands it over as a claim: state claimed with
   // a fresh lease (room default), the same shape create-with-assignee gives.
   // Before this, the owner was set but the state stayed "unclaimed" with no
@@ -898,8 +931,11 @@ export function isLeaseExpired(work, now) {
   if (!ACTIVE_CLAIM_STATES.includes(item.state) || item.leaseExpiresAt === null) return false;
   return Date.parse(item.leaseExpiresAt) <= nowMsOf(now);
 }
-// Sweep a list: expired claims are auto-released to unclaimed (owner
-// cleared, lease cleared, history stamped). Everything else passes through
+// Sweep a list: claims whose lease lapsed are auto-released into the expired
+// state (owner cleared, lease cleared, history stamped lease_expired).
+// Expired items leave the open-claim count (countsTowardBoardCap) so a board
+// of lapsed orphans never bricks the room, but they are NOT terminal: they
+// stay re-claimable and are never dropped. Everything else passes through
 // untouched. Returns a new list; inputs are never mutated.
 export function releaseExpired(items, now) {
   check(Array.isArray(items), "items must be a list");
@@ -912,10 +948,46 @@ export function releaseExpired(items, now) {
     // 2026-09-30 (phase-2 gap audit L-P2-8): mirrors updateWork, where a
     // released claim drops its reviews too (attestations belong to the
     // lapsed owner's round of work, never to whoever claims next).
-    const released = { ...item, state: "unclaimed", owner: null, leaseStartAt: null, leaseExpiresAt: null,
+    const released = { ...item, state: "expired", owner: null, leaseStartAt: null, leaseExpiresAt: null,
       files: Object.freeze([]), fileBlocks: Object.freeze({}), attestations: Object.freeze([]), reviews: Object.freeze([]) };
     return withHistory(released, atMs, item.owner ?? "system", "lease_expired",
-      `claim by ${item.owner ?? "nobody"} lapsed at ${item.leaseExpiresAt} — auto-released`);
+      `claim by ${item.owner ?? "nobody"} lapsed at ${item.leaseExpiresAt} — auto-released to expired`);
+  });
+}
+// Latest activity of an item: the newest history stamp, or null when the
+// history cannot be read (staleness must be provable — an unreadable
+// history is never retired).
+const lastActivityMsOf = item => {
+  const stamps = Array.isArray(item?.history) ? item.history : [];
+  let last = null;
+  for (const stamp of stamps) {
+    const ms = Date.parse(stamp?.at);
+    if (Number.isFinite(ms) && (last === null || ms > last)) last = ms;
+  }
+  return last;
+};
+// Stale-claim auto-retirement (opt-in per room via staleClaimTtlMs; null
+// disables). Items in unclaimed/expired whose last history activity is older
+// than staleAfterMs move to closed with a stale_retired stamp naming the
+// cutoff — retired, never deleted: the item, its history and its id survive
+// for audit and re-opening. Held, delivered, or recently active items pass
+// through untouched. Returns a new list; inputs are never mutated.
+export function retireStaleClaims(items, { now, staleAfterMs } = {}) {
+  check(Array.isArray(items), "items must be a list");
+  if (staleAfterMs === null || staleAfterMs === undefined) return items;
+  check(Number.isSafeInteger(staleAfterMs) && staleAfterMs >= 1, "staleAfterMs must be a positive integer number of ms");
+  const atMs = nowMsOf(now);
+  const cutoff = atMs - staleAfterMs;
+  return items.map(entry => {
+    const item = workOf(entry);
+    if (!STALE_RETIRE_ELIGIBLE_STATES.includes(item.state)) return item;
+    const lastAt = lastActivityMsOf(item);
+    if (lastAt === null || lastAt > cutoff) return item;
+    const retired = { ...item, state: "closed", owner: null, leaseStartAt: null, leaseExpiresAt: null,
+      attestations: Object.freeze([]), reviews: Object.freeze([]),
+      files: Object.freeze([]), fileBlocks: Object.freeze({}) };
+    return withHistory(retired, atMs, "system", "stale_retired",
+      `no activity since ${isoOf(lastAt)} — auto-retired after ${staleAfterMs}ms without activity`);
   });
 }
 // Review-policy gate for the done transition. policy resolves from the

@@ -167,6 +167,37 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
         : "Claim the work item first (POST …/work-claims/{id}/claim).")]
     };
   }
+  // Board-cap refusals: name the real recovery (close/cancel stale claims;
+  // release or finish a held claim; wait for release on a conflict) instead
+  // of the generic unknown-error text. Clients branch on error.code, not on
+  // the HTTP status: work_board_full, too_many_open_claims and
+  // work_claim_conflict are all 409 with different recoveries.
+  if (reasonCode === "work_board_full") {
+    return {
+      status: "action_required", reason: "work_board_full",
+      hint: roomId
+        ? `This room is at its open-claim cap. Close stale claims (POST /api/rooms/${roomId}/work-claims/{claimId}/close or /cancel) before opening another.`
+        : "This room is at its open-claim cap. Close stale claims (POST …/work-claims/{claimId}/close or /cancel) before opening another.",
+      next: [tool("room_list_work"), command(roomId
+        ? `Close stale claims (POST /api/rooms/${roomId}/work-claims/{claimId}/close or /cancel), then retry the create.`
+        : "Close stale claims (POST …/work-claims/{claimId}/close or /cancel), then retry the create.")]
+    };
+  }
+  if (reasonCode === "too_many_open_claims") {
+    return {
+      status: "action_required", reason: "too_many_open_claims",
+      hint: "The member already holds the maximum open claims. Release or finish one before claiming or assigning another.",
+      next: [tool("room_list_work"), command("Release or finish an open claim, then retry.")]
+    };
+  }
+  if (reasonCode === "work_claim_conflict") {
+    const claimPath = roomId && workItemId ? `/api/rooms/${roomId}/work-claims/${workItemId}` : listPath;
+    return {
+      status: "action_required", reason: "work_claim_conflict",
+      hint: "This work is already held or is not in a claimable state — nothing was changed. Read the item; claim it after it is released, or close it if you manage claims.",
+      next: [path(claimPath), command("Read the current item first; retry the claim only after it is unclaimed or expired.")]
+    };
+  }
   // Recovery requires an actual current review, never an implied approval
   // from a note or a suggested automatic verdict.
   if (reasonCode === "work_review_rejected") {
