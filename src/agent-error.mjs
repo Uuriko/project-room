@@ -651,13 +651,101 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   // Re-check access..." sends a stranger down an access wild-goose chase for
   // a code problem. The 404 message already names the recovery (check the
   // format for typos, or ask the inviter for a fresh code); the hint must
-  // match it. Covers agent invites (format + not-issued) and guest invites
-  // (410) — all terminal code problems, never access problems.
+  // match it.
+  //
+  // 2026-10-08 ch-2064 (adversarial challenge of the above): the same
+  // invite_unavailable code is emitted by five other families with different
+  // formats and recoveries — guest invites (GX- + 32 chars, 410),
+  // guest credentials (ga1. bearer tokens, 410), the v1 guest-credential
+  // refresh flow ("refresh through a fresh owner code, not this endpoint",
+  // 410), referral invites (signed tokens, 404), and the owner invite-revoke
+  // handle (an inviteId hash prefix, not a code, 404). The unscoped hint told
+  // all of them to "check it for typos against the format (two letters, a
+  // dash, then 16 characters)" and "ask the inviter for a fresh code" —
+  // actively wrong for every one of those families. Scope by server message
+  // (the established invalid_invitation/agent-invites pattern above); the
+  // agent-invite redeem branch stays the fallback.
   if (reasonCode === "invite_unavailable") {
+    const inviteMsg = String(message || "");
+    // v1 guest-credential refresh: the server message names the only recovery
+    // (a fresh owner code), and "not this endpoint" rules out redeeming.
+    if (/owner code/i.test(inviteMsg)) {
+      return {
+        status: "action_required", reason: "invite_unavailable",
+        hint: "This endpoint cannot refresh that credential: refresh it through a fresh owner code instead. Ask the room owner for one.",
+        next: [command("Ask the room owner for a fresh owner code and refresh through it; do not retry this endpoint")]
+      };
+    }
+    // Guest invites (410 "This guest invite is not valid.") and guest
+    // credentials (410 "This guest credential is not valid."): guest codes are
+    // GX- + 32 characters (GUEST_INVITE_CODE_PATTERN); credentials are ga1.
+    // bearer tokens (GUEST_AGENT_TOKEN_PATTERN). Neither is an RM- code.
+    if (/guest[- ]invite|guest credential/i.test(inviteMsg)) {
+      return {
+        status: "action_required", reason: "invite_unavailable",
+        hint: "This guest invite or credential is not valid: guest codes are GX- plus 32 characters. Check for typos, or ask the room owner for a fresh guest invite.",
+        next: [command("Check the guest code for typos (GX- plus 32 characters); if it matches, ask the room owner for a fresh guest invite")]
+      };
+    }
+    // Referral invites (404 "That invite is not available"): signed tokens —
+    // invalid signature, already claimed, or minted against a rotated key.
+    if (/That invite is not available/.test(inviteMsg)) {
+      return {
+        status: "action_required", reason: "invite_unavailable",
+        hint: "This referral invite is not available: the token is invalid, already claimed, or minted against a rotated key. Ask the chain member for a fresh referral link.",
+        next: [command("Ask the chain member for a fresh referral link; do not retry this token")]
+      };
+    }
+    // Owner invite revoke (404 "Invite code not found, already used, or
+    // already revoked"): the handle is an inviteId hash prefix, and the caller
+    // IS the owner — "ask the inviter" is nonsense.
+    if (/already used, or already revoked/.test(inviteMsg)) {
+      return {
+        status: "action_required", reason: "invite_unavailable",
+        hint: "No active invite matches this handle: it was already revoked, already used, or never existed. Re-list the invites for the current handles.",
+        next: [command("Re-list the invites and use a current handle; do not retry this one")]
+      };
+    }
+    // Agent invites (404 format / not-issued): the RM- code family.
     return {
       status: "action_required", reason: "invite_unavailable",
       hint: "This invite code is not usable: check it for typos against the format (two letters, a dash, then 16 characters), or ask the inviter for a fresh code.",
       next: [command("Check the code for typos (format: two letters, a dash, then 16 characters — no I, L, O, or U); if it matches, ask the inviter for a fresh code")]
+    };
+  }
+  // 2026-10-08 ch-2064 (adversarial challenge of #2064): the invite
+  // redeem/preview path emits four more terminal codes that fell through to
+  // the unmapped branch — "Unknown error 'invite_expired'. Re-check access
+  // ..." — the same access wild-goose chase, and the expired invite is the
+  // most common stranger failure of all. join.js's joinErrorMessage already
+  // maps these for the UI path; these branches cover the API path, with
+  // recoveries consistent with the UI ones.
+  if (reasonCode === "invite_expired") {
+    return {
+      status: "action_required", reason: "invite_expired",
+      hint: "This invite code expired — expired codes never come back. Ask the inviter for a fresh code; do not retry this one.",
+      next: [command("Ask the inviter for a fresh invite code; do not retry the expired one")]
+    };
+  }
+  if (reasonCode === "invite_revoked") {
+    return {
+      status: "action_required", reason: "invite_revoked",
+      hint: "This invite code was revoked by the room — revoked codes never come back. Ask the inviter for a new code.",
+      next: [command("Ask the inviter for a new invite code; do not retry the revoked one")]
+    };
+  }
+  if (reasonCode === "invite_already_used") {
+    return {
+      status: "action_required", reason: "invite_already_used",
+      hint: "This invite code was already used — each code works once. If you redeemed it, act with your saved identity; otherwise ask the inviter for a fresh code.",
+      next: [command("Act with your saved identity credential if you redeemed this code; otherwise ask the inviter for a fresh code")]
+    };
+  }
+  if (reasonCode === "invite_authority_changed") {
+    return {
+      status: "action_required", reason: "invite_authority_changed",
+      hint: "The inviter's permissions changed, so this code stopped working. Ask them for a new invite code.",
+      next: [command("Ask the inviter for a new invite code; this code will not work again")]
     };
   }
   // Unmapped code: name the code and the recovery (report code + message
