@@ -135,9 +135,9 @@ The exact live inventory is served verbatim by the service itself at
 source if this policy and the code ever disagree.
 
 **Backups.** The service runs on Cloudflare (Workers + Durable Objects) and
-writes daily exports to object storage (R2, `room-backups/YYYY-MM-DD.ndjson`
-in UTC). Data deleted from the live database ages out of backups as the
-backup cycle turns over; it is not purged from already-written backup
+writes daily exports to Cloudflare storage (Workers KV, kept 35 days, or R2,
+`room-backups/YYYY-MM-DD.ndjson` in UTC). Data deleted from the live database
+ages out of backups as the backup cycle turns over; it is not purged from already-written backup
 objects.
 
 ## 9. Your choices and rights

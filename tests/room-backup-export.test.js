@@ -9,7 +9,8 @@ import { fileURLToPath } from "node:url";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { exportNdjsonStream, exportNdjsonText, operatorExportResponse, replayNdjson } from "../server/room-export.mjs";
-import { writeDailyBackup } from "../cloudflare/room-backup.mjs";
+import { KV_RETENTION_SECONDS, writeDailyBackup } from "../cloudflare/room-backup.mjs";
+import { fetchKvBackup, restoreDrill, summarizeEvents } from "../scripts/restore-room-backup.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
 const sha = value => createHash("sha256").update(value).digest("hex");
@@ -134,6 +135,7 @@ test("the daily backup writes one object when R2 is bound and skips otherwise", 
   const when = new Date(Date.UTC(2026, 9, 2));
   assert.deepEqual(await writeDailyBackup({}, room, when), { skipped: "unconfigured" });
   await assert.rejects(() => writeDailyBackup({ ROOM_BACKUPS: {} }, room, when), /put or head/);
+  await assert.rejects(() => writeDailyBackup({ ROOM_BACKUPS_KV: {} }, room, when), /put or get/);
   let puts = 0;
   const existing = r2({
     head: async () => ({ key: "room-backups/2026-10-02.ndjson" }),
@@ -152,4 +154,41 @@ test("the daily backup writes one object when R2 is bound and skips otherwise", 
   assert.equal(seen[0].type, "application/x-ndjson");
   assert.equal(seen[0].text.includes(HOOK), false);
   assert.equal(seen[0].text.includes(sha(HOOK)), true);
+});
+
+test("without R2 the daily backup writes KV parts and a manifest that the restore drill replays into a new room", async t => {
+  const { store } = openFixture(t);
+  for (let i = 0; i < 5; i += 1) {
+    const key = store.issueAccessKey("commons", "owner");
+    store.command(key, "commons", { id: crypto.randomUUID(), type: T.MESSAGE_POSTED, data: { body: `kv backup message ${i} ${"x".repeat(3000)}` } });
+  }
+  const room = { exportRoomNdjson: () => exportNdjsonStream(store.db) };
+  const when = new Date(Date.UTC(2026, 9, 8));
+  const values = new Map();
+  const kv = r2({
+    get: async key => values.has(key) ? new TextDecoder().decode(values.get(key).value) : null,
+    put: async (key, value, options) => { values.set(key, { value: typeof value === "string" ? new TextEncoder().encode(value) : new Uint8Array(value), options }); }
+  });
+  const result = await writeDailyBackup({ ROOM_BACKUPS_KV: kv }, room, when, { partBytes: 4096 });
+  assert.equal(result.wrote, "room-backups/2026-10-08/manifest");
+  assert.ok(result.parts > 1, "small part size splits the export");
+  assert.equal(values.get("room-backups/2026-10-08/manifest").options.expirationTtl, KV_RETENTION_SECONDS);
+  assert.deepEqual(await writeDailyBackup({ ROOM_BACKUPS_KV: kv }, room, when), { skipped: "exists", key: "room-backups/2026-10-08/manifest" });
+  for (const { value } of values.values()) assert.equal(new TextDecoder().decode(value).includes(HOOK), false);
+
+  const get = key => Buffer.from(values.get(key).value);
+  const { manifest, ndjson } = fetchKvBackup("2026-10-08", get);
+  assert.equal(manifest.events, store.db.prepare("SELECT count(*) AS n FROM events").get().n);
+  const directory = mkdtempSync(join(tmpdir(), "room-restore-drill-test-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const drill = restoreDrill(ndjson, directory);
+  assert.equal(drill.match, true);
+  assert.equal(drill.restored.events, manifest.events);
+  assert.ok(drill.restored.messages >= 6);
+  assert.equal(drill.restored.digest, summarizeEvents(store.db.prepare("SELECT room_id, sequence, id, body FROM events").all()).digest, "restored rows equal the live rows");
+  assert.throws(() => restoreDrill(ndjson, directory), /existing store/, "never overwrites a room");
+
+  const part = manifest.parts[1].key;
+  const flipped = new Uint8Array(values.get(part).value); flipped[10] ^= 1;
+  assert.throws(() => fetchKvBackup("2026-10-08", key => key === part ? Buffer.from(flipped) : get(key)), /does not match its manifest/);
 });

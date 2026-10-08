@@ -27,25 +27,28 @@ node scripts/replay-room-export.mjs --from room-export.ndjson --to /var/lib/proj
 
 A failed replay prints one line and leaves the destination unpromoted. The script does not print row contents.
 
-## Daily copy in R2
+## Daily copy (KV now, R2 when enabled)
 
-The production cron writes one object a day when the owning script has an R2 binding named `ROOM_BACKUPS`. The key is `room-backups/YYYY-MM-DD.ndjson` in UTC. If that object is already there, the tick does nothing. If the binding is absent, the tick skips. A failed write is logged as `[room-backup]` and does not fail the rest of the cron.
+The production cron (every 30 minutes, the backup job itself runs once a day) writes one copy a day of the whole Durable Object export. It writes to whichever binding the owning script `project-room` has:
 
-The binding is not in the checked-in config. Adding it only in the dashboard does not stick: the next deploy drops bindings the config does not list.
+- **`ROOM_BACKUPS_KV` (live).** KV namespace `project-room-backups` (`ee73a90c4e6749bb92ebe16fc57c117d`), bound under `env.production` in `cloudflare/wrangler.jsonc`. Each day is `room-backups/YYYY-MM-DD/part-NNNN` (whole NDJSON lines, at most 8 MiB per part, under the 25 MiB KV value limit) plus `room-backups/YYYY-MM-DD/manifest`, written last, with byte counts, the event count and a sha256 per part. A day without a manifest is incomplete and the next tick writes it again. Copies expire after 35 days.
+- **`ROOM_BACKUPS` (R2, off).** When bound it wins over KV and writes `room-backups/YYYY-MM-DD.ndjson`. R2 is not enabled on the Cloudflare account yet (`wrangler r2 bucket list` answers code 10042, "enable R2 through the Cloudflare Dashboard"). Once it is: create the bucket `project-room-backups` and add `"r2_buckets": [{ "binding": "ROOM_BACKUPS", "bucket_name": "project-room-backups" }]` under `env.production`. A binding added only in the dashboard is dropped on the next deploy.
 
-To turn it on:
+If a copy for today already exists, the tick does nothing. With neither binding the job is disabled. A failed write is logged as `[room-backup]`, shows on `GET /api/health/jobs` as the `room-backup` job's `lastError`, and does not fail the rest of the cron. `lastSummary` on that endpoint shows the key, part count, bytes and event count of the last copy.
 
-1. Create an R2 bucket named `project-room-backups`.
-2. Add this binding under `env.production` in `cloudflare/wrangler.jsonc` (the script that owns the Durable Object and the cron):
+The daily job calls the Durable Object directly and does not need `ROOM_BACKUP_TOKEN`. Isolated staging has no cron, so it writes no daily copy.
 
-```json
-"r2_buckets": [{ "binding": "ROOM_BACKUPS", "bucket_name": "project-room-backups" }]
+## Restore drill (never into a live room)
+
+[scripts/restore-room-backup.mjs](../scripts/restore-room-backup.mjs) is the restore path. It reads one daily copy, checks every part against its manifest, replays it into a **new** sqlite room in a fresh private temp directory (replay refuses an existing file), and compares the backup with the restored room: rooms, events, `message.posted` count and one sha256 over every event row. It prints counts and digests, never row contents, exits 1 on any mismatch, and deletes the restored room unless `--keep` is given. Run it from a checkout with wrangler signed in to the account (`cd cloudflare && npx wrangler whoami`):
+
+```bash
+node scripts/restore-room-backup.mjs                    # latest daily copy
+node scripts/restore-room-backup.mjs --date 2026-10-08  # one day
+node scripts/restore-room-backup.mjs --from room-export.ndjson --keep  # an HTTP export
 ```
 
-3. Deploy that script with `npx wrangler deploy --env production --keep-vars` from `cloudflare/`.
-4. Set `ROOM_BACKUP_TOKEN` on that same script if operators will also pull the export over HTTP. The daily job calls the Durable Object directly and does not need the token.
-
-Isolated staging has no cron, so it does not write this daily object. Its own export route works once `ROOM_BACKUP_TOKEN` is set on `project-room-stage`.
+A kept restore is an ordinary room database. To bring a room back, point a Node server at it (docs/SELF-HOSTING.md) or load it into a fresh Durable Object; do not copy it over the live one. Secret columns and token-shaped text are sha256 in the export, so restored sessions, access keys and webhook secrets do not work and members sign in again.
 
 ## Byte equality (REL-14)
 

@@ -16,7 +16,7 @@ import { ChannelDrainer, channelDrainLimits } from "./channel-drain.mjs";
 import { createWatcher } from "../src/growth-watch.js";
 import { defaultOnAlert, defaultGrowthRules, DEFAULT_INTERVAL_MS } from "../src/growth-scheduler.js";
 import { growthCollector } from "../src/growth-emit.js";
-import { writeDailyBackup } from "../cloudflare/room-backup.mjs";
+import { backupConfigured, writeDailyBackup } from "../cloudflare/room-backup.mjs";
 
 export const JOB_BUDGET_MS = 5000;
 export const MINUTE_MS = 60 * 1000;
@@ -111,11 +111,6 @@ function backfillPending(store) {
 
 function gmailOn(env) {
   return env?.ROOM_GMAIL_ENABLED === "1";
-}
-
-function backupConfigured(env) {
-  const bucket = env?.ROOM_BACKUPS;
-  return Boolean(bucket && typeof bucket.put === "function" && typeof bucket.head === "function");
 }
 
 function logIntegrity(integrity) {
@@ -289,9 +284,9 @@ export const JOBS = Object.freeze([
     cadenceMs: DAY_MS,
     slow: true,
     runtimes: Object.freeze(["worker"]),
-    singleRuntimeReason: "Daily backup writes the ROOM_BACKUPS R2 bucket. A Node process has no R2 binding.",
+    singleRuntimeReason: "Daily backup writes the ROOM_BACKUPS R2 bucket or the ROOM_BACKUPS_KV namespace. A Node process has neither binding.",
     enabled: env => backupConfigured(env),
-    disabledReason: () => "ROOM_BACKUPS is not configured",
+    disabledReason: () => "ROOM_BACKUPS and ROOM_BACKUPS_KV are not configured",
     async run(_store, ctx) {
       if (!ctx.room) return { skipped: 1 };
       try { return await writeDailyBackup(ctx.env, ctx.room); }
