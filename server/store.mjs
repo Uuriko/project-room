@@ -799,6 +799,19 @@ export function validateCommand(command) {
   }
   if (command.type === T.MESSAGE_POSTED && (typeof command.data.body !== "string" || !command.data.body.trim())) fail(422, "invalid_command", messageBody);
   const messageBodyCommand = command.type === T.MESSAGE_POSTED || command.type === T.MESSAGE_EDITED;
+  // QA8 (2026-10-08, gap-hunt D-M2): message bodies accepted NUL and bidi
+  // override characters verbatim, so "\u202Eexe.txt" rendered as "txt.exe"
+  // in the room UI and in agent transcripts, and NUL broke downstream C-string
+  // and CSV consumers. The Board already refuses both (work-claim-integrity);
+  // message bodies now refuse NUL, unpaired surrogates and the embedding,
+  // override and isolate controls (U+202A-202E, U+2066-2069). LRM/RLM marks,
+  // tabs, line breaks, ANSI escapes and emoji joiners stay allowed.
+  if ((messageBodyCommand || command.type === T.DM_POSTED) && typeof command.data.body === "string") {
+    const body = command.data.body;
+    if (body.includes("\u0000")) fail(422, "invalid_command", "body must not contain NUL (U+0000) characters");
+    if (!body.isWellFormed()) fail(422, "invalid_command", "body must not contain unpaired surrogate characters");
+    if (/[\u202A-\u202E\u2066-\u2069]/u.test(body)) fail(422, "invalid_command", "body must not contain bidirectional embedding, override or isolate characters (U+202A-202E, U+2066-2069)");
+  }
   if (messageBodyCommand && typeof command.data.body === "string" && command.data.body.length > MAX_MESSAGE_BODY_CHARS)
     fail(422, "invalid_command", `body must be at most ${MAX_MESSAGE_BODY_CHARS} characters`);
   // Message commands carry a long body. Every other command stays at 16 KiB.
