@@ -1108,6 +1108,16 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       reject(422, "work_reassign_unknown_member",
         `newOwner "${typeof target === "string" ? target : "?"}" is not an active member of this room — reassign names a current memberId`);
     }
+    // A handoff consumes the new owner's slot just like claim and
+    // create-with-assignee do; otherwise reassign bypasses the per-member cap.
+    if (target !== item.owner) {
+      const held = registry.list(roomId).filter(entry => entry.owner === target && ACTIVE_CLAIM_STATES.includes(entry.state)).length;
+      if (held >= config.maxMemberOpenClaims) {
+        refuseCap("too_many_open_claims",
+          `${target} already holds ${config.maxMemberOpenClaims} open claims. Release or finish one before assigning another.`,
+          "Release or finish an open claim before assigning another.");
+      }
+    }
     requireEventBudget();
     const previousOwnerId = item.owner;
     const note = text("note", data.note, { multiline: true });
