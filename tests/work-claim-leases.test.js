@@ -102,6 +102,24 @@ test("releaseExpired clears attestations like updateWork (L-P2-8)", () => {
   assert.ok(Object.isFrozen(released.attestations));
 });
 
+test("releaseExpired records the dropped checkpoint fields in the expiry event (FR-HIST-303)", () => {
+  // Expiry clears owner, lease, declared files, attestations and reviews.
+  // The lease_expired stamp is the durable record of that round, so it names
+  // the pre-expiry state and what was dropped — a resumed claim (or a
+  // checkpoint/audit read) can reconstruct what the lapsed round held.
+  const claimed = claimWork({ id: "e3" }, "quill", { leaseHours: 1, files: ["server/a.mjs", "server/b.mjs"], now: T0 });
+  const started = updateWork(claimed, "quill", { state: "in_progress", now: T0 });
+  const reviewed = attestWork(started, "jill", { note: "looks good", now: T0 });
+  const [released] = releaseExpired([reviewed], T0 + 2 * H);
+  assert.equal(released.state, "unclaimed");
+  const note = released.history.at(-1).note;
+  assert.match(note, /claim by quill lapsed/); // existing prefix kept
+  assert.match(note, /in_progress/);           // pre-expiry state
+  assert.match(note, /server\/a\.mjs/);        // dropped files recorded
+  assert.match(note, /attestations: 1/);       // dropped review records counted
+  assert.match(note, /reviews: 0/);
+});
+
 test("delivery modes: done transition persists the mode, others reject it", () => {
   for (const mode of DELIVERY_MODES) {
     const claimed = claimWork({ id: `m-${mode}` }, "quill", { now: T0 });
