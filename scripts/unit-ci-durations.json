@@ -756,6 +756,7 @@
   "tests/typing.test.js": 3764,
   "tests/unification.test.js": 4798,
   "tests/unit-shards.test.js": 24147,
+  "tests/verify-affected.test.js": 2000,
   "tests/untested-modules-lint.test.js": 4521,
   "tests/updates-http.test.js": 68135,
   "tests/usage.test.js": 43483,

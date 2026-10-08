@@ -1,5 +1,13 @@
 # Project Room agent instructions
 
+## Check commands (run before you push)
+
+```sh
+npm run verify:affected   # tests related to your diff vs origin/main, ~30s; --list to preview
+npm run lint              # eslint, design tokens, reachability, i18n, UI strings
+npm test                  # full unit suite (CI runs it sharded, plus browser/cloudflare)
+```
+
 Build and maintain `Uuriko/project-room`. Read task-relevant code and docs;
 start with [docs/INDEX.md](docs/INDEX.md) when you need a map.
 
