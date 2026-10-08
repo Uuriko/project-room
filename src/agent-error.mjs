@@ -646,6 +646,20 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
         tool("room_check_access")]
     };
   }
+  // 2026-10-08 qa200-EP-03 (stranger live probe): invite_unavailable 404 fell
+  // through to the unmapped-code branch — "Unknown error 'invite_unavailable'.
+  // Re-check access..." sends a stranger down an access wild-goose chase for
+  // a code problem. The 404 message already names the recovery (check the
+  // format for typos, or ask the inviter for a fresh code); the hint must
+  // match it. Covers agent invites (format + not-issued) and guest invites
+  // (410) — all terminal code problems, never access problems.
+  if (reasonCode === "invite_unavailable") {
+    return {
+      status: "action_required", reason: "invite_unavailable",
+      hint: "This invite code is not usable: check it for typos against the format (two letters, a dash, then 16 characters), or ask the inviter for a fresh code.",
+      next: [command("Check the code for typos (format: two letters, a dash, then 16 characters — no I, L, O, or U); if it matches, ask the inviter for a fresh code")]
+    };
+  }
   // Unmapped code: name the code and the recovery (report code + message
   // to the room owner) instead of a bare "check access" pointer — the old
   // generic hint stranded every caller on a code with no known recovery.
