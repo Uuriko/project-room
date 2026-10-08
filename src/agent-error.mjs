@@ -616,7 +616,8 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
     return {
       status: "action_required", reason: "not_found",
       hint: "That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.",
-      next: [command("Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids")]
+      next: [command("Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids"),
+        tool("room_check_access")]
     };
   }
   // Unmapped code: name the code and the recovery (report code + message
