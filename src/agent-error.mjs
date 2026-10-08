@@ -596,6 +596,21 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [command("Read the 405 response's Allow header (or the route docs) for the accepted methods, then resend with an allowed method; do not retry the same method")]
     };
   }
+  // 2026-10-08 QA-200 stranger test AO-04 (live): a 404 with code not_found
+  // (stale or mistyped task id on the onboarding surface) fell through to
+  // the unmapped-code branch — "Unknown error 'not_found'... report to the
+  // room owner" strands a caller who simply used a wrong id. A 404 names the
+  // fix itself: re-list, use a current id, never guess one. Branch on the
+  // sanitized reasonCode (not raw httpStatus) so malformed codes still map
+  // to request_failed, and keep the specific work_not_found /
+  // work_claim_not_found branches above untouched.
+  if (reasonCode === "not_found") {
+    return {
+      status: "action_required", reason: "not_found",
+      hint: "That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.",
+      next: [command("Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids")]
+    };
+  }
   // Unmapped code: name the code and the recovery (report code + message
   // to the room owner) instead of a bare "check access" pointer — the old
   // generic hint stranded every caller on a code with no known recovery.

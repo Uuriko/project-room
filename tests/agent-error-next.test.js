@@ -117,6 +117,18 @@ test("shared mapper keeps error.code/message and adds status/reason/hint/next", 
   assert.match(wrongMethod.hint, /does not accept that HTTP method/);
   assert.match(wrongMethod.hint, /Allow header/);
   assert.doesNotMatch(wrongMethod.hint, /Unknown error/);
+  // QA 2026-10-08 (stranger test AO-04, live): a 404 with code not_found
+  // (stale or mistyped task id on the onboarding surface) fell through to
+  // the unmapped-code branch — "Unknown error 'not_found' ... report to the
+  // room owner" strands a caller who simply used a wrong id. A 404 names
+  // the fix itself: re-list, use a current id, never guess one.
+  const unknownId = agentErrorAx({ httpStatus: 404, code: "not_found", message: "Not found" });
+  assertAx(unknownId, { reason: "not_found" });
+  assert.match(unknownId.hint, /does not exist/);
+  assert.match(unknownId.hint, /re-list/i);
+  assert.match(unknownId.hint, /do not guess/i);
+  assert.doesNotMatch(unknownId.hint, /Unknown error/);
+  assert.ok(unknownId.next.some(step => step.command?.includes("/api/public-work/tasks")));
 });
 
 test("public-work 409s teach: conflict names holder+lease expiry, stale says changed-vs-expired", () => {
