@@ -239,6 +239,7 @@
   "tests/dispute-arbiters.test.js": 6408,
   "tests/dm-consent-ui.test.js": 7682,
   "tests/dm-consents-autonomy-tier.test.js": 35449,
+  "tests/dm-reply-party.test.js": 798,
   "tests/dm-consents.test.js": 19080,
   "tests/dm-privacy.test.js": 99409,
   "tests/docs-architecture.test.js": 6824,
@@ -972,6 +973,14 @@
   "runtime": "macOS solo real node --test",
   "file": "tests/landing-facts.test.js",
   "milliseconds": 70,
+  "purpose": "Measured allocation only; test discovery remains authoritative."
+ },
+ "dmReplyPartyMeasurement": {
+  "date": "2026-10-07",
+  "runtime": "Node v22.23.3 Linux local",
+  "file": "tests/dm-reply-party.test.js",
+  "milliseconds": 798,
+  "method": "Median of five solo node --test wall-clock runs after the 70-deep-chain regression; all passed.",
   "purpose": "Measured allocation only; test discovery remains authoritative."
  }
 }
