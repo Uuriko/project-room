@@ -114,28 +114,28 @@ test('renewal of a missing claim fails before a progress line is posted', async 
 
 test('done closes a claimed or blocked item by moving it through in progress', async t => {
   const { owner } = await fixture(t);
-  await claimAndVerify(owner, 'finish-claimed', { memberId: 'owner', leaseHours: 1 });
+  await claimAndVerify(owner, 'finish-claimed', { memberId: 'owner', files: ['src/finish-claimed.mjs'], leaseHours: 1 });
   const claimed = await run(['done', 'finish-claimed', '--note', 'shipped'], { client: owner, memberId: 'owner' });
   assert.equal(claimed.state, 'done');
   assert.equal(claimed.history.at(-1).note, 'shipped');
   assert.equal(claimed.history.at(-2).note, 'started to close');
   assert.deepEqual(claimed.history.map(entry => entry.action).slice(-3), ['retention_ack', 'state:in_progress', 'state:done']);
 
-  await claimAndVerify(owner, 'finish-blocked', { memberId: 'owner', leaseHours: 1 });
+  await claimAndVerify(owner, 'finish-blocked', { memberId: 'owner', files: ['src/finish-blocked.mjs'], leaseHours: 1 });
   await owner.updateWorkItem('finish-blocked', { state: 'blocked' });
   const blocked = await closeClaim(owner, 'finish-blocked', { memberId: 'owner', note: 'unblocked and shipped' });
   assert.equal(blocked.state, 'done');
   assert.equal(blocked.history.at(-1).action, 'state:done');
   assert.equal(blocked.history.at(-2).action, 'state:in_progress');
 
-  await claimAndVerify(owner, 'finish-started', { memberId: 'owner', leaseHours: 1 });
+  await claimAndVerify(owner, 'finish-started', { memberId: 'owner', files: ['src/finish-started.mjs'], leaseHours: 1 });
   await owner.updateWorkItem('finish-started', { state: 'in_progress' });
   const started = await closeClaim(owner, 'finish-started', { memberId: 'owner', note: 'shipped' });
   assert.equal(started.state, 'done');
   assert.equal(started.history.some(entry => entry.note === 'started to close'), false);
 
-  await owner.workClaimCreate({ id: 'needs-review', reviewPolicy: 'distinct_member' });
-  await claimAndVerify(owner, 'needs-review', { memberId: 'owner', leaseHours: 1 });
+  await owner.workClaimCreate({ id: 'needs-review', reviewPolicy: 'distinct_member', files: ['src/needs-review.mjs'] });
+  await claimAndVerify(owner, 'needs-review', { memberId: 'owner', files: ['src/needs-review.mjs'], leaseHours: 1 });
   await assert.rejects(closeClaim(owner, 'needs-review', { memberId: 'owner', note: 'shipped' }),
     error => error instanceof CoordError && error.code === 'work_review_rejected');
   assert.equal((await owner.workClaimGet('needs-review')).state, 'in_progress');
@@ -162,9 +162,9 @@ test('a record that is not a live lease held by the caller is never treated as a
 
 test('renewal posts a public progress line and extends the lease against that message', async t => {
   const { owner } = await fixture(t);
-  const first = await claimAndVerify(owner, 'renew-me', { memberId: 'owner', leaseHours: 1 });
+  const first = await claimAndVerify(owner, 'renew-me', { memberId: 'owner', files: ['src/renew-me.mjs'], leaseHours: 1 });
   await tick();
-  const { messageId, claim } = await renewWithProgress(owner, 'renew-me', 'guard wired into CI', { memberId: 'owner', leaseHours: 3 });
+  const { messageId, claim } = await renewWithProgress(owner, 'renew-me', 'guard wired into CI', { memberId: 'owner', leaseHours: 2 });
   assert.ok(Date.parse(claim.leaseExpiresAt) > Date.parse(first.leaseExpiresAt));
   assert.equal(claim.history.at(-1).action, 'renewed');
   assert.deepEqual(await postedBodies(owner, messageId), ['[renew-me] guard wired into CI']);
@@ -172,7 +172,7 @@ test('renewal posts a public progress line and extends the lease against that me
 
 test('handoff moves the lease to the receiver and leaves an actionable handoff post', async t => {
   const { owner, peer } = await fixture(t);
-  await claimAndVerify(owner, 'baton', { memberId: 'owner', files: ['client/room-coord.mjs'], leaseHours: 4 });
+  await claimAndVerify(owner, 'baton', { memberId: 'owner', files: ['client/room-coord.mjs'], leaseHours: 1 });
   const { messageId, claim } = await handoff(owner, 'baton', { to: 'reviewer', toHandle: 'Reviewer',
     summary: 'client verbs merged', next: 'wire the guard into CI' });
   assert.equal(claim.owner, 'reviewer');
@@ -194,8 +194,8 @@ test('status shows live, mine, expiring and overlapping claims plus the land que
       : url.endsWith('/status') ? { state: 'pending' }
         : { title: 'Room coordination verbs', merged: false, merge_commit_sha: null, mergeable: true, mergeable_state: 'clean', head: { sha: PR_SHA } }) }) });
   await claimAndVerify(owner, 'short', { memberId: 'owner', files: ['server'], leaseHours: 1 });
-  await claimAndVerify(peer, 'long', { memberId: 'reviewer', files: ['server/x.mjs'], leaseHours: 8, allowOverlap: true });
-  await owner.workClaimCreate({ id: 'waiting' });
+  await claimAndVerify(peer, 'long', { memberId: 'reviewer', files: ['server/x.mjs'], leaseHours: 2, allowOverlap: true });
+  await owner.workClaimCreate({ id: 'waiting', files: ['src/waiting.mjs'] });
   const queued = await land(lander, { repo: 'acme/demo', prNumber: 7 });
   assert.deepEqual([queued.item.repo, queued.item.prNumber, queued.duplicate], ['acme/demo', 7, false]);
 

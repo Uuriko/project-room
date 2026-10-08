@@ -388,7 +388,7 @@ async function claimLinkFixture(t) {
   store.identities.link(owner.secret, roomId, { identityId: writer.identityId, displayName: "Claim writer", permissions: ["accept_work", "complete_work"] });
   setTier(store.db, roomId, writer.identityId, "t2_standard", { updatedBy: owner.identityId, nowMs: Date.now() });
   const client = new RoomAgentClient({ origin, roomId, token: writer.secret });
-  await client.workClaim("hosted-pr", { leaseHours: 6 });
+  await client.workClaim("hosted-pr", { leaseHours: 1, files: ["src/hosted-pr.mjs"] });
   // HTTP reads carry the Board content-trust stamp; saved records do not.
   const claimed = stripTrust(await client.workClaimGet("hosted-pr"));
   const args = { roomId, claimId: claimed.id, pullRequest: "https://github.com/Uuriko/project-room/pull/19",

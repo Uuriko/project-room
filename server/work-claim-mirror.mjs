@@ -86,16 +86,17 @@ function claimBoardInner(store, roomId, actorId, id, data, nowMs) {
     }
     // Files are required at creation (collide-guild addendum) unless the
     // room opted out — then the claim is marked filesDeclared:false.
+    // The legacy work-item bridge can't invent scope: when the incoming
+    // event declares no paths, mirror it honestly as filesDeclared:false
+    // rather than refusing the sync (the POST /work-claims path still
+    // enforces files_required).
     if (config.requireClaimFiles && !fields.files) {
-      const error = new Error(`Work "${id}" declares no files — claim creation requires a non-empty files array (the room may set workClaims.requireClaimFiles:false)`);
-      error.status = 422;
-      error.code = "files_required";
-      throw error;
+      fields.filesDeclared = false;
     }
     item = createWork({
       id, title: data.workItemId, workItemId: data.workItemId,
       files: fields.files, pullRequests: fields.pullRequests, repo: fields.repo, branch: fields.branch,
-      filesDeclared: Boolean(fields.files)
+      filesDeclared: fields.filesDeclared ?? Boolean(fields.files)
     }, { now: nowMs, agentId: actorId });
     registry.set(roomId, item);
   }
