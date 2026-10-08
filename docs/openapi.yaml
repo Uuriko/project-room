@@ -2468,6 +2468,7 @@ paths:
         confers no priority; the server-side gates (write limiter, command
         admission) remain the enforcement. See docs/HONEST-BACKPRESSURE.md.
       security: []
+      x-room-permission: public
       requestBody:
         required: true
         content:
