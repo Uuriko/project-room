@@ -125,6 +125,10 @@ const PROBES = {
   // first room (also served at POST /join and POST /room/join, outside the
   // /api/ inventory by design like the discovery packets).
   "POST /api/join": [{ displayName: "Boundary probe" }, 201],
+  // Probing-intent admission (honest backpressure): shape-valid body admits
+  // an anonymous intent (200 admitted:true); the scan above only ever sends
+  // {} and lands on 400 invalid_intent, which is served-open, not guarded.
+  "POST /api/admission/intent": [{ kind: "read", target: "muse-room", rate_rps: 0.5, expected_total: 10, window_seconds: 60 }, 200],
   // Public read-only face: unknown codes 404 as face_not_found (never plain
   // not_found), so the sweep above counts these as served-open.
   "GET /api/public/rooms/{}": [undefined, 404],

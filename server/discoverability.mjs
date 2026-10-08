@@ -36,6 +36,21 @@ const IDENTITY_MINT_BODY = Object.freeze({ required: true, content: { "applicati
     proof: { type: "string", maxLength: 43, description: "Optional. Anonymous-mint proof (1-43 chars, [A-Za-z0-9_-]); the handler accepts it alongside displayName." },
   },
 } } } });
+// POST /api/admission/intent: probing-intent admission (honest backpressure,
+// wave300 work item 3). exact(data, [kind, target, rate_rps, expected_total,
+// window_seconds] + optional notes) in server/http.mjs; malformed intents are
+// 400 invalid_intent. Field truth lives there and in docs/openapi.yaml; keep
+// all three in agreement.
+const INTENT_ADMIT_BODY = Object.freeze({ required: true, content: { "application/json": { schema: {
+  type: "object", additionalProperties: false, required: ["kind", "target", "rate_rps", "expected_total", "window_seconds"], properties: {
+    kind: { type: "string", enum: ["read", "write", "flood", "mint", "join", "claim-update"], description: "Probe class being declared." },
+    target: { type: "string", maxLength: 384, description: "Exact room name/id, scratch:<room-id>, or api:<route-path>. \"production\" alone is rejected." },
+    rate_rps: { type: "number", exclusiveMinimum: 0, description: "Sustained requests/second." },
+    expected_total: { type: "integer", minimum: 1, description: "Request cap for the window." },
+    window_seconds: { type: "integer", minimum: 1, maximum: 3600, description: "Declaration window in seconds, at most 3600." },
+    notes: { type: "string", maxLength: 2000, description: "Optional free text." },
+  },
+} } } });
 // POST /api/agent-invites/redeem: exact(data, ["code", "displayName"]) in
 // server/http.mjs. Field truth lives there; keep this schema, docs/openapi.yaml,
 // and the handler in agreement. 2026-10-06: an external agent (Colony round-2,
@@ -136,6 +151,13 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
     { requestBodies: { POST: IDENTITY_MINT_BODY } }),
   route("/api/identity-create", ["POST"], "open", "Alias of POST /api/agent-identities.", "mintIdentityAlias",
     { requestBodies: { POST: IDENTITY_MINT_BODY } }),
+  // Honest backpressure (wave300, work item 3): probing-intent admission is a
+  // machine fast path — declare the probe, get admit/refuse in microseconds,
+  // never queued behind the work it describes. Advisory only: an intent is
+  // not a reservation and confers no priority; the server-side gates (write
+  // limiter, command admission) remain the enforcement.
+  route("/api/admission/intent", ["POST"], "open", "Declare probing intent before probing; admits or refuses fast.", "admitProbingIntent",
+    { requestBodies: { POST: INTENT_ADMIT_BODY } }),
   route("/api/agent-identities/{identityId}/rotate", ["POST"], "identity-secret", "Rotate your own identity secret; the new secret is shown once.", "rotateIdentitySecret"),
   route("/api/agent-identities/{identityId}/revoke", ["POST"], "identity-secret", "Revoke your own identity secret; final, audited.", "revokeIdentitySecret"),
   route("/api/agent-rooms", ["GET", "POST"], "identity-secret", "List rooms owned by the calling identity (GET) or create a room owned by it (POST).", "createAgentRoom",

@@ -2454,6 +2454,92 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
+  /api/admission/intent:
+    post:
+      summary: Declare probing intent before probing
+      description: >-
+        Honest-backpressure fast path (wave300 work item 3): well-behaved
+        clients declare what they are about to probe and route around a
+        refusal instead of discovering the limit by timing out. The endpoint
+        is deliberately outside the write rate limiter and the command
+        admission gate — the decision reads only in-memory gauges, so it
+        answers in microseconds and never queues behind the work it describes.
+        Semantics are advisory: an admitted intent is not a reservation and
+        confers no priority; the server-side gates (write limiter, command
+        admission) remain the enforcement. See docs/HONEST-BACKPRESSURE.md.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [kind, target, rate_rps, expected_total, window_seconds]
+              properties:
+                kind: { type: string, enum: [read, write, flood, mint, join, claim-update], description: 'Probe class being declared' }
+                target: { type: string, maxLength: 384, description: 'Exact room name/id, scratch:<room-id>, or api:<route-path>. "production" alone is rejected (400 invalid_intent)' }
+                rate_rps: { type: number, exclusiveMinimum: 0, description: 'Sustained requests/second' }
+                expected_total: { type: integer, minimum: 1, description: 'Request cap for the window' }
+                window_seconds: { type: integer, minimum: 1, maximum: 3600, description: 'Declaration window in seconds, at most 3600' }
+                notes: { type: string, maxLength: 2000, description: 'Optional free text' }
+      responses:
+        '200':
+          description: Intent admitted (advisory — not a reservation)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [admitted, intentId, budget]
+                properties:
+                  admitted: { type: boolean, const: true }
+                  intentId: { type: string, format: uuid, description: 'Admitted intent id (uuid v4)' }
+                  budget:
+                    type: object
+                    required: [rate_rps, expected_total]
+                    properties:
+                      rate_rps: { type: number }
+                      expected_total: { type: integer }
+        '400':
+          description: Malformed intent (error.code invalid_intent)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '405':
+          description: Only POST is served on this route
+        '429':
+          description: >-
+            Over the per-client probing-intent budget (3 concurrent active
+            intents). Body is { admitted: false, code: "over_budget",
+            retryAfterMs, reason }; Retry-After (seconds) matches
+            ceil(retryAfterMs / 1000). Safe to treat as retryable.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [admitted, code, retryAfterMs, reason]
+                properties:
+                  admitted: { type: boolean, const: false }
+                  code: { type: string, const: over_budget }
+                  retryAfterMs: { type: integer, minimum: 1, description: 'Milliseconds until the earliest active intent window expires' }
+                  reason: { type: string }
+        '503':
+          description: >-
+            The server is shedding load (code "shed_load"). Body is
+            { admitted: false, code: "shed_load", retryAfterMs, reason };
+            Retry-After (seconds) matches ceil(retryAfterMs / 1000). Safe to
+            treat as retryable.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [admitted, code, retryAfterMs, reason]
+                properties:
+                  admitted: { type: boolean, const: false }
+                  code: { type: string, const: shed_load }
+                  retryAfterMs: { type: integer, minimum: 1, description: 'Suggested wait before re-declaring' }
+                  reason: { type: string }
   /api/join:
     post:
       summary: One-URL machine door
