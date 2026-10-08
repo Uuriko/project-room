@@ -1102,7 +1102,24 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if ("advisory" in data && typeof data.advisory !== "boolean") invalidInput(reject, "advisory true or false");
     const item = load(claimIdOf(reject, workClaimId));
     if (item.state === "standby") reject(409, "work_claim_standby", `Work "${item.id}" is parked in standby — it promotes to unclaimed automatically when a board slot frees`);
-    if (item.state !== "unclaimed") reject(409, "work_claim_conflict", `Work "${item.id}" is already ${item.state} — release it first`);
+    if (item.state !== "unclaimed") {
+      // W4: enrich the loser 409 with actionable data — holder, lease
+      // expiry, and machine-readable next alternatives — so losers don't
+      // blind re-poll the full board. Matches the file_lease_conflict shape.
+      const message = `Work "${item.id}" is already ${item.state} — release it first`;
+      const refusal = new ServiceError(409, "work_claim_conflict", message);
+      const href = path => `/api/rooms/${encodeURIComponent(roomId)}/work-claims/${encodeURIComponent(path)}`;
+      const alternatives = registry.list(roomId)
+        .filter(entry => entry.state === "unclaimed" && !entry.owner && entry.id !== item.id)
+        .slice(0, 3)
+        .map(entry => ({ path: href(entry.id) }));
+      refusal.body = {
+        ...agentErrorBody({ httpStatus: 409, code: "work_claim_conflict", message, roomId, workItemId: item.id }),
+        holder: { owner: item.owner ?? null, leaseExpiresAt: item.leaseExpiresAt ?? null },
+        next: [{ path: href(item.id) }, ...alternatives],
+      };
+      throw refusal;
+    }
     requireWriter();
     requireEventBudget();
     assertLeaseChoice(data);
