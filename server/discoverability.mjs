@@ -271,10 +271,15 @@ function jsonRpcErrorResponse(status) {
   };
 }
 
+// POST routes that answer 200, not 201: they create nothing. The served spec
+// must match the live status (schemathesis drift FO-DRIFT-3: claims/validate
+// answered 200 while the generated spec documented only 201).
+const POST_NON_CREATE_PATHS = new Set(["/api/needs-me", "/api/claims/validate"]);
+
 function operationResponses(entry, method) {
   const success = entry.path === "/demo"
     ? { "200": { description: entry.summary, content: { "text/html": { schema: { type: "string" } } } } }
-    : method === "POST" && entry.path !== "/api/needs-me"
+    : method === "POST" && !POST_NON_CREATE_PATHS.has(entry.path)
     ? { "201": { description: "Created. Success bodies carry next[] guidance toward the next step." } }
     : { "200": { description: "OK. Success bodies carry next[] guidance toward the next step." } };
   const errors = {};
