@@ -8,9 +8,11 @@
 // --kv reads the KV manifest and its parts with `wrangler kv key get --remote`
 // (the caller's wrangler login), checks every part's sha256 and the whole
 // file's sha256, then replays. --save writes the reassembled NDJSON (mode 0600).
+// --audit report restores even when the recovery audit flags drift between a
+// stored projection and the current reducer, and prints the audit result.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { parseArgs } from "node:util";
 import { replayNdjson } from "../server/room-export.mjs";
@@ -38,18 +40,26 @@ export function assembleKvBackup(manifestBytes, get) {
 }
 
 // Per-room summary of a restored store. Messages are room messages that are
-// not DMs, so a member's reader can compute the same digest from the live API.
+// not DMs, with edits applied, so a member's reader can compute the same
+// digest from the live events API.
 export function summarizeRoom(filename, roomId) {
   const db = new DatabaseSync(filename, { readOnly: true });
   try {
     const rows = db.prepare("SELECT sequence, body FROM events WHERE room_id=? ORDER BY sequence").all(roomId);
+    const parsed = rows.map(row => ({ sequence: row.sequence, event: JSON.parse(row.body) }));
+    // The live events API shows an edited message's current text on its
+    // message.posted event, so the digest applies message.edited (last wins).
+    const edited = new Map();
+    for (const { event } of parsed) {
+      if (event?.type === "message.edited" && typeof event.data?.body === "string") edited.set(event.data.messageId, event.data.body);
+    }
     const digest = createHash("sha256");
     let messages = 0;
-    for (const row of rows) {
-      const event = JSON.parse(row.body);
+    for (const { sequence, event } of parsed) {
       if (event?.type !== "message.posted" || event.data?.toMemberId) continue;
       messages += 1;
-      digest.update(messageDigestLine(row.sequence, event));
+      const current = edited.has(event.data?.messageId) ? { ...event, data: { ...event.data, body: edited.get(event.data.messageId) } } : event;
+      digest.update(messageDigestLine(sequence, current));
     }
     const room = db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId);
     return { roomId, found: Boolean(room), sequence: room?.sequence ?? null, events: rows.length, firstSequence: rows[0]?.sequence ?? null, lastSequence: rows.at(-1)?.sequence ?? null, messages, messagesSha256: digest.digest("hex") };
@@ -63,7 +73,7 @@ export function messageDigestLine(sequence, event) {
 async function main() {
   const { values } = parseArgs({ options: {
     from: { type: "string" }, kv: { type: "string" }, "namespace-id": { type: "string" },
-    to: { type: "string" }, room: { type: "string", multiple: true }, save: { type: "string" }
+    to: { type: "string" }, room: { type: "string", multiple: true }, save: { type: "string" }, audit: { type: "string" }
   } });
   process.umask(0o077);
   if (!values.to) throw new Error("Pass --to <new sqlite path>");
@@ -78,10 +88,16 @@ async function main() {
   }
   if (values.save) writeFileSync(values.save, ndjson, { mode: 0o600, flag: "wx" });
   const watermark = JSON.parse(ndjson.slice(0, ndjson.indexOf("\n")));
-  const result = replayNdjson(ndjson, values.to);
+  let result;
+  try { result = replayNdjson(ndjson, values.to, { audit: values.audit ?? "strict" }); }
+  catch (error) {
+    // The destination did not exist before this run; do not leave a half-built store behind.
+    for (const suffix of ["", "-wal", "-shm"]) rmSync(`${values.to}${suffix}`, { force: true });
+    throw error;
+  }
   const rooms = (values.room ?? []).map(roomId => summarizeRoom(values.to, roomId));
   process.stdout.write(`${JSON.stringify({
-    verified: result.verified, events: result.events, roomsInBackup: watermark.rooms?.length ?? null,
+    verified: result.verified, events: result.events, trailer: result.trailer, audit: result.audit, skippedTables: result.skippedTables, roomsInBackup: watermark.rooms?.length ?? null,
     backedUpAt: watermark.backedUpAt ? new Date(watermark.backedUpAt).toISOString() : null,
     manifest: manifest && { key: manifest.key, bytes: manifest.bytes, parts: manifest.parts.length, sha256: manifest.sha256 },
     rooms

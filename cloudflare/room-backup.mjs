@@ -16,6 +16,10 @@ export const BACKUP_PREFIX = "room-backups/";
 export const BACKUP_KV_PART_BYTES = 16 * 1024 * 1024;
 // 35 days: a month of nightly copies, and storage stays bounded without a sweep.
 export const BACKUP_KV_TTL_SECONDS = 35 * 24 * 60 * 60;
+// Version 2: BLOB cells (room file bytes) are base64 on the Durable Object
+// too. A version 1 manifest for today was written by the export that dropped
+// them, so the next tick rewrites that day instead of skipping it.
+export const BACKUP_MANIFEST_VERSION = 2;
 
 export function backupObjectKey(now = new Date()) {
   const date = now instanceof Date ? now : new Date(now);
@@ -69,6 +73,30 @@ async function* byteChunks(body) {
   } finally { reader.releaseLock?.(); }
 }
 
+// Write-time torn-export detection. The stream's first line is the watermark
+// (event count before the first table) and its last line is the trailer
+// (event count after the last table). If both parse and the counts differ, a
+// write landed mid-export: refuse the manifest, so no manifest ever claims a
+// torn backup is the day's good copy. Parts already written have no manifest
+// and expire on their own; the job logs the failure. The count is the cheap
+// check here; replayNdjson re-verifies the trailer hash, which also catches
+// same-count tears. An absent or unparseable trailer (older exports) skips
+// this check; restore time is the backstop.
+const HEAD_LINE_CAP = 1024 * 1024;
+const TAIL_KEEP = 8192;
+
+function tornReason(headLine, tailBytes) {
+  try {
+    const first = JSON.parse(new TextDecoder().decode(headLine));
+    const lines = new TextDecoder().decode(tailBytes).split("\n").filter(line => line.trim());
+    const last = JSON.parse(lines.at(-1));
+    if (first?.kind !== "watermark" || last?.kind !== "trailer") return null;
+    if (!Number.isSafeInteger(first.events) || !Number.isSafeInteger(last.events)) return null;
+    if (first.events !== last.events) return `event count moved ${first.events} -> ${last.events} mid-export`;
+    return null;
+  } catch { return null; }
+}
+
 // Streams the export into parts so at most one part sits in memory.
 export async function writeKvBackup(kv, key, body, { partBytes = BACKUP_KV_PART_BYTES, ttlSeconds = BACKUP_KV_TTL_SECONDS, now = Date.now() } = {}) {
   const whole = createHash("sha256");
@@ -77,6 +105,24 @@ export async function writeKvBackup(kv, key, body, { partBytes = BACKUP_KV_PART_
   let pendingBytes = 0;
   let total = 0;
   const options = { expirationTtl: ttlSeconds };
+  let headLine = null;
+  let headAcc = [];
+  let headBytes = 0;
+  let tail = new Uint8Array(0);
+  const noteHeadTail = chunk => {
+    if (headLine === null) {
+      headAcc.push(chunk);
+      headBytes += chunk.byteLength;
+      const joined = concatBytes(headAcc, headBytes);
+      const nl = joined.indexOf(10);
+      if (nl !== -1) { headLine = joined.subarray(0, nl); headAcc = []; }
+      else if (headBytes > HEAD_LINE_CAP) { headLine = new Uint8Array(0); headAcc = []; }
+    }
+    const combined = new Uint8Array(tail.byteLength + chunk.byteLength);
+    combined.set(tail, 0);
+    combined.set(chunk, tail.byteLength);
+    tail = combined.byteLength > TAIL_KEEP ? combined.subarray(combined.byteLength - TAIL_KEEP) : combined;
+  };
   const flush = async () => {
     if (!pendingBytes && parts.length) return;
     const bytes = concatBytes(pending, pendingBytes);
@@ -87,6 +133,7 @@ export async function writeKvBackup(kv, key, body, { partBytes = BACKUP_KV_PART_
     pendingBytes = 0;
   };
   for await (let chunk of byteChunks(body)) {
+    noteHeadTail(chunk);
     whole.update(chunk);
     total += chunk.byteLength;
     while (chunk.byteLength) {
@@ -98,10 +145,22 @@ export async function writeKvBackup(kv, key, body, { partBytes = BACKUP_KV_PART_
       if (pendingBytes >= partBytes) await flush();
     }
   }
+  if (headLine !== null) {
+    const reason = tornReason(headLine, tail);
+    if (reason) throw new Error(`room-backup: refusing manifest, export torn (${reason})`);
+  }
   if (pendingBytes || !parts.length) await flush();
-  const manifest = { kind: "room-backup-manifest", version: 1, key, createdAt: new Date(now).toISOString(), bytes: total, sha256: whole.digest("hex"), parts };
+  const manifest = { kind: "room-backup-manifest", version: BACKUP_MANIFEST_VERSION, key, createdAt: new Date(now).toISOString(), bytes: total, sha256: whole.digest("hex"), parts };
   await kv.put(key, JSON.stringify(manifest), { ...options, metadata: { parts: parts.length, bytes: total } });
   return manifest;
+}
+
+function currentManifest(stored) {
+  if (stored == null) return false;
+  try {
+    const text = typeof stored === "string" ? stored : new TextDecoder().decode(stored);
+    return Number(JSON.parse(text)?.version) >= BACKUP_MANIFEST_VERSION;
+  } catch { return false; }
 }
 
 export async function writeDailyBackup(env, room, now = new Date()) {
@@ -115,7 +174,7 @@ export async function writeDailyBackup(env, room, now = new Date()) {
     await bucket.put(key, body, { httpMetadata: { contentType: "application/x-ndjson" } });
     return { wrote: key };
   }
-  if (await kv.get(key)) return { skipped: "exists", key, target: "kv" };
+  if (currentManifest(await kv.get(key))) return { skipped: "exists", key, target: "kv" };
   const body = await room.exportRoomNdjson();
   const manifest = await writeKvBackup(kv, key, body, { now: new Date(now).getTime() });
   return { wrote: key, target: "kv", parts: manifest.parts.length, bytes: manifest.bytes };

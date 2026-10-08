@@ -2326,6 +2326,13 @@ function pinMessage(state, incoming) {
 function unpinMessage(state, incoming) {
   requireMember(state, incoming.actorId);
   const messageId = pinTarget(incoming);
+  // A DM's pin can only be removed by one of its parties. Same stamp rule as
+  // pinMessage: unpin events recorded before the stamp keep replaying.
+  const message = state.messages.find(m => m.id === messageId);
+  if (message?.toMemberId && message.authorId !== incoming.actorId && message.toMemberId !== incoming.actorId
+      && incoming.data?.pinDmPartyPolicyVersion === PIN_DM_PARTY_POLICY_VERSION) {
+    throw new Error("Cannot unpin a direct message you are not a party to");
+  }
   if (!state.pins?.length) return; // idempotent
   state.pins = state.pins.filter(pin => pin.messageId !== messageId);
 }
