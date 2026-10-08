@@ -454,9 +454,13 @@ export class Bonds {
     if (existing && existing.state === "active") {
       fail(409, "bond_active", "This pair already has an active bond. Revoke it before proposing a new one.");
     }
+    // Only live proposals count toward the caps. An expired proposal can no
+    // longer be accepted, declined or revoked (all refuse it), so counting it
+    // would hold the slot forever.
+    const liveSince = now - BOND_TTL_MS;
     const pending = this.db.prepare(
-      "SELECT count(*) AS n FROM agent_bonds WHERE proposed_by=? AND state='proposed' AND NOT (agent_a=? AND agent_b=?)"
-    ).get(identityId, agentA, agentB).n;
+      "SELECT count(*) AS n FROM agent_bonds WHERE proposed_by=? AND state='proposed' AND proposed_at>=? AND NOT (agent_a=? AND agent_b=?)"
+    ).get(identityId, liveSince, agentA, agentB).n;
     if (pending >= MAX_PENDING_PROPOSALS) {
       fail(429, "bond_rate_limited", "Too many pending bond proposals. Wait for a reply or revoke one.");
     }
@@ -464,8 +468,8 @@ export class Bonds {
     // bounds one proposer; a target could still be flooded by many distinct
     // proposers. Refuse once the recipient's pending inbox is full.
     const incoming = this.db.prepare(
-      "SELECT count(*) AS n FROM agent_bonds WHERE (agent_a=? OR agent_b=?) AND state='proposed' AND proposed_by<>?"
-    ).get(peerId, peerId, identityId).n;
+      "SELECT count(*) AS n FROM agent_bonds WHERE (agent_a=? OR agent_b=?) AND state='proposed' AND proposed_at>=? AND proposed_by<>?"
+    ).get(peerId, peerId, liveSince, identityId).n;
     if (incoming >= MAX_INCOMING_PROPOSALS) {
       fail(429, "bond_rate_limited", "That agent already has too many pending bond proposals. Try again later.");
     }
