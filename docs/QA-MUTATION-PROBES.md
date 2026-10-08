@@ -153,3 +153,18 @@ Claims released by coordinator: qa200-mut-03-claim-release, qa200-mut-04-claim-r
 |---|---|---|---|---|---|---|
 | MUT-01-001 | 2026-10-08 | server/work-claim-routes.mjs (create route) | duplicate CREATE returned 200 with the existing claim instead of 409 work_claim_exists | tests/work-claim-*.test.js, tests/claim-*.test.js, tests/public-work-claim*.test.js (existing) + tests/work-claim-idempotency.test.js (new) | UNCAUGHT | 331 existing tests stayed green with the break (incl. board/guards/duplicates/claims/client); only the env-broken yaml import in work-claim-client failed pre-node_modules-symlink. Hardening test "duplicate CREATE returns 409 work_claim_exists and leaves the claim unchanged" verified RED with break (200 !== 409), GREEN after revert. |
 | MUT-01-002 | 2026-10-08 | server/work-claim-routes.mjs (create route, assignee branch) | per-identity cap check weakened to `held >= config.maxMemberOpenClaims + 1000` (cap never refuses on CREATE-with-assignee) | tests/work-claim-board.test.js, tests/work-claim-guards.test.js, tests/work-claims.test.js, tests/work-claim-duplicates.test.js, tests/work-claim-reassign-unclaimed.test.js, tests/work-claim-client.test.js (existing) + tests/work-claim-idempotency.test.js (new) | UNCAUGHT | 67 existing tests stayed green with the break. Existing cap coverage (board.test.js:140, guards.test.js:107) only pins the claim-route cap, not the CREATE-with-assignee cap. Hardening test "CREATE with assignee refuses 409 too_many_open_claims when the assignee is at cap" verified RED with break (201 accepted), GREEN after revert. |
+
+## Probes recorded by #2052
+
+Ledger of mutation-testing probes against Project Room. Workers append rows;
+never re-probe a row already recorded CAUGHT. Skipped classes (per wave
+brief): OAuth code reuse, spend void-after-settle, writer-fence tamper,
+permission-upgrade review().
+
+Columns: date · worker · target · mutant · result · hardening.
+
+| date | worker | target | mutant | result | hardening |
+|---|---|---|---|---|---|
+| 2026-10-08 | qa200-mut-18 | server/webhook-dispatch.mjs `classifyHttpStatus` | 409 → "retry" (terminal 4xx retried blindly) | UNCAUGHT — existing test pinned 400/404/422 → dead but not 409 | tests/webhook-dispatch.test.js: "classifyHttpStatus never retries terminal 4xx: 409 is dead, not retried" (red-with-break ✓, green-without ✓) |
+| 2026-10-08 | qa200-mut-18 | server/webhook-dispatch.mjs `postDelivery` | validate target once up front, follow redirects without per-hop re-validation (retry without re-reading state) | CAUGHT — existing test "postDelivery does not follow redirects to private targets" failed on the mutant | none needed |
+| 2026-10-08 | qa200-mut-18 | server/agent-plugin-store.mjs `attemptStoredDelivery` retry scheduling | `next_attempt_at = now` (no backoff on retryable 429/5xx — retry hammer) | UNCAUGHT — only backoffDelayMs arithmetic was tested, never its presence on the retry path | tests/webhook-retry-backoff.test.js: "a 429 retry reschedules with backoff, never immediately" (red-with-break ✓, green-without ✓) |
