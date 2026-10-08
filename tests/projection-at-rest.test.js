@@ -68,6 +68,20 @@ test("on: large bodies leave the row, every reader still sees the full message",
   assert.equal(room.store.checkMessagesParity().checked, 1);
 });
 
+test("on: mid-size bodies (>= BODY_AT_REST_MIN_CHARS) leave the row too; short ones stay inline", t => {
+  const room = open(t, { bodiesAtRest: true });
+  const mid = "m".repeat(BODY_AT_REST_MIN_CHARS + 44);
+  const short = "s".repeat(BODY_AT_REST_MIN_CHARS - 1);
+  room.post("mid", mid);
+  room.post("short", short);
+  const stored = JSON.parse(room.raw());
+  assert.match(stored.messages.find(m => m.id === "mid").bodyRef, /^[0-9a-f]{64}$/);
+  assert.equal(stored.messages.find(m => m.id === "short").body, short);
+  assert.ok(BODY_AT_REST_MIN_CHARS <= 256, "most real room posts (256-511 chars) must leave the row");
+  room.reopen();
+  assert.equal(room.store.room("commons").state.messages.find(m => m.id === "mid").body, mid);
+});
+
 test("edits and deletes release the old text at rest", t => {
   const room = open(t, { bodiesAtRest: true });
   const first = big("first"), second = big("second");
