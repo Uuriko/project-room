@@ -288,6 +288,10 @@ export const DEFAULT_MAX_MEMBER_OPEN_CLAIMS = 20;
 const CONFIG_CAP_CEILING = 10000;
 const DEFAULT_REVIEW_POLICY = "self_attested";
 const ACTIVE_CLAIM_STATES = ["claimed", "in_progress", "blocked"];
+// History actions that end a claim round (the item can be claimed again after
+// each of these). Used by appendWorkPullRequest to prove a previous round
+// existed when an outcome timestamp ties the current round's claimedAt.
+const ROUND_ENDED_ACTIONS = new Set(["pr_closed", "pr_merged", "state:unclaimed", "lease_expired"]);
 class ClaimError extends Error { constructor(code, message) { super(message); this.name = "ClaimError"; this.code = code; } }
 const fail = (code, message) => { throw new ClaimError(code, message); };
 const check = (condition, message) => { if (!condition) fail("invalid_claim_input", message); };
@@ -649,9 +653,20 @@ export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClai
   const roundStartMs = typeof item.claimedAt === "string" ? Date.parse(item.claimedAt) : NaN;
   // At the exact same millisecond the timestamps cannot order the outcome
   // against the round start. Equality counts as stale only when the claim's
-  // own history shows an earlier round (a second "claimed" stamp); a link
-  // settled in the same tick as the first claim is current-round truth.
-  const priorRoundRecorded = (item.history ?? []).filter(entry => entry?.action === "claimed").length >= 2;
+  // own history shows an earlier round; a link settled in the same tick as
+  // the first claim is current-round truth.
+  //
+  // A previous round provably ended when the history carries a round-ending
+  // stamp: pr_closed/pr_merged (the auto-settler), state:unclaimed (a manual
+  // release), or lease_expired (the sweep). Counting "claimed" stamps alone
+  // undercounts: a round that began via reassign stamps "reassigned:<target>"
+  // instead of "claimed", and history trimming (MAX_CLAIM_HISTORY) can drop
+  // early "claimed" stamps. Either gap misreads the tie as first-round
+  // truth, and the stale outcome then vetoes every future poll of the
+  // reopened PR. The two-"claimed"-stamps check stays as a backstop.
+  const history = item.history ?? [];
+  const priorRoundRecorded = history.some(entry => ROUND_ENDED_ACTIONS.has(entry?.action))
+    || history.filter(entry => entry?.action === "claimed").length >= 2;
   const staleOutcome = Boolean(settledLink?.outcome)
     && Number.isFinite(outcomeMs) && Number.isFinite(roundStartMs)
     && (outcomeMs < roundStartMs || (outcomeMs === roundStartMs && priorRoundRecorded));

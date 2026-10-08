@@ -32,6 +32,21 @@ export const GUEST_REFRESH_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 export const GUEST_AGENT_MEMBER_PREFIX = "guest-agent-";
 export const GUEST_AGENT_STATUS = "live";
 export const GUEST_AGENT_DEFAULT_NAME = "Guest agent";
+// GA-2 (issue #941): single-use link redemptions. join() consumes the link
+// and issues a separate session credential for the seat; this table records
+// the exchange so a later join() with the session credential is idempotent
+// (no rotation) instead of minting yet another credential. Purely additive
+// side table: no events, no projection impact.
+export const guestLinkExchangeSchema = `
+  CREATE TABLE IF NOT EXISTS guest_link_exchanges (
+    link_hash TEXT PRIMARY KEY,
+    room_id TEXT NOT NULL,
+    member_id TEXT NOT NULL,
+    session_hash TEXT NOT NULL,
+    exchanged_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS guest_link_exchanges_seat ON guest_link_exchanges(room_id, member_id);
+`;
 const ACCESS = "Read the room and its history, post messages, and react. No membership administration or work approvals.";
 
 export function isRoomAccessToken(token) {
@@ -148,19 +163,12 @@ export class GuestAgentLinks {
     };
   }
 
-  conflict(tokenHash) {
-    for (const [table, column] of [["credentials", "hash"], ["account_credentials", "hash"], ["account_session_slots", "hash"],
-      ["membership_invitations", "token_hash"], ["share_links", "token_hash"]]) {
-      if (this.db.prepare(`SELECT 1 FROM ${table} WHERE ${column}=?`).get(tokenHash)) fail(409, "token_conflict", "Generate a new guest invite token");
-    }
-  }
-
   liveCount(roomId) {
     const members = this.store.room(roomId).state.members;
     let n = 0;
     for (const member of Object.values(members)) {
       if (!isGuestAgentMemberId(member.id) || member.kind !== GUEST_AGENT_KIND || member.active === false) continue;
-      const row = this.db.prepare("SELECT revoked,expires_at FROM credentials WHERE room_id=? AND member_id=? AND kind='access'").get(roomId, member.id);
+      const row = this.db.prepare("SELECT revoked,expires_at FROM credentials WHERE room_id=? AND member_id=? AND kind='access' AND revoked=0").get(roomId, member.id);
       if (row && row.revoked === 0 && row.expires_at > this.store.now()) n++;
     }
     return n;
@@ -178,7 +186,7 @@ export class GuestAgentLinks {
     const members = this.store.room(roomId).state.members;
     for (const member of Object.values(members)) {
       if (!isGuestAgentMemberId(member.id) || member.kind !== GUEST_AGENT_KIND || member.active === false) continue;
-      const row = this.db.prepare("SELECT hash,revoked,expires_at FROM credentials WHERE room_id=? AND member_id=? AND kind='access'").get(roomId, member.id);
+      const row = this.db.prepare("SELECT hash,revoked,expires_at FROM credentials WHERE room_id=? AND member_id=? AND kind='access' AND revoked=0").get(roomId, member.id);
       if (row && row.revoked === 0 && row.expires_at > this.store.now()) continue;
       this.store.command(token, roomId, {
         id: `guest-agent-end-${hash(`${member.id}:${row?.hash || "none"}`).slice(0, 40)}`,
@@ -204,7 +212,7 @@ export class GuestAgentLinks {
     let state = room.state, sequence = room.sequence, swept = 0;
     for (const member of Object.values(room.state.members)) {
       if (!isGuestAgentMemberId(member.id) || member.kind !== GUEST_AGENT_KIND || member.active === false) continue;
-      const row = this.db.prepare("SELECT hash,revoked,expires_at FROM credentials WHERE room_id=? AND member_id=? AND kind='access'").get(roomId, member.id);
+      const row = this.db.prepare("SELECT hash,revoked,expires_at FROM credentials WHERE room_id=? AND member_id=? AND kind='access' AND revoked=0").get(roomId, member.id);
       if (row && row.revoked === 0 && row.expires_at > this.store.now()) continue;
       const eventId = `guest-agent-end-${hash(`${member.id}:${row?.hash || "none"}`).slice(0, 40)}`;
       const incoming = event({
@@ -244,10 +252,9 @@ export class GuestAgentLinks {
     if (!details || Array.isArray(details) || typeof details !== "object") fail(422, "invalid_link", "Supply the guest invite mint fields");
     const allowed = ["requestId", "linkToken", "expectedOwnerRevision", "displayName", "roomId"];
     if (Object.keys(details).some(key => !allowed.includes(key))) fail(422, "invalid_link", "Supply the guest invite mint fields");
-    const { requestId, linkToken, expectedOwnerRevision } = details;
-    if (!validId(requestId) || (linkToken !== undefined && classifyJoinToken(linkToken) !== "guest-agent")
-      || !Number.isSafeInteger(expectedOwnerRevision) || expectedOwnerRevision < 0) {
-      fail(422, "invalid_link", "Supply a requestId and current owner revision; a guest token is optional");
+    const { requestId, expectedOwnerRevision } = details;
+    if (!validId(requestId) || !Number.isSafeInteger(expectedOwnerRevision) || expectedOwnerRevision < 0) {
+      fail(422, "invalid_link", "Supply a requestId and current owner revision");
     }
     if (details.roomId !== undefined && details.roomId !== roomId) fail(422, "invalid_link", "Room does not match this mint");
     const callerSuppliedName = details.displayName !== undefined;
@@ -258,39 +265,35 @@ export class GuestAgentLinks {
       // (guestAgentMemberId): an accountless owner — e.g. an agent identity
       // bearer — passes the owner gate but cannot mint without an account.
       if (!auth.account) fail(403, "account_session_required", "Minting a guest invite requires a signed-in account session");
+      // GA-1 (issue #941): the client must not pick the credential. A
+      // caller-supplied token can be low-entropy (e.g. all "A"s) and still
+      // becomes a live 2h room credential; OWASP session guidance says
+      // identifiers come from a server CSPRNG. The check sits after the
+      // auth gates so auth failures keep their 403s; the token is always
+      // issued below and returned once.
+      if (details.linkToken !== undefined) fail(422, "client_token_rejected", "Guest tokens are issued by the server; omit linkToken");
       if (expectedOwnerRevision !== auth.member.revision) fail(409, "stale_member_revision", "Your room permissions changed; refresh before minting");
       this.sweepExpired(token, roomId, binding);
       const memberId = guestAgentMemberId(auth.account.id, requestId);
       const existing = this.store.room(roomId).state.members[memberId];
-      // Clients can omit linkToken: a CSPRNG token is issued once and only
-      // its hash remains in storage. Legacy caller-provided tokens still work
-      // during migration, but the owner must supply the exact same bytes on
-      // a retry. A tokenless replay never discloses the original bearer.
-      const issuedToken = linkToken ?? (existing ? null : GUEST_AGENT_TOKEN_PREFIX + randomBytes(32).toString("base64url"));
-      const prior = issuedToken ? this.credential(issuedToken) : null;
+      // The token is always server-issued (GA-1): 256-bit CSPRNG, returned
+      // once. Only the hash is stored; a retry of the same requestId never
+      // discloses the original bearer.
+      const issuedToken = GUEST_AGENT_TOKEN_PREFIX + randomBytes(32).toString("base64url");
       if (existing) {
-        if (!issuedToken) {
-          if (existing.kind !== GUEST_AGENT_KIND || existing.active === false)
-            fail(409, "membership_ended", "This guest membership ended; use a new requestId");
-          const priorCredential = this.db.prepare("SELECT * FROM credentials WHERE room_id=? AND member_id=? AND kind='access'").get(roomId, memberId);
-          const nameOk = callerSuppliedName ? existing.displayName === displayName : omittedGuestName(existing.displayName);
-          if (!this.liveCredential(priorCredential, existing) || !nameOk)
-            fail(409, "idempotency_conflict", "This requestId was already used for a different guest-agent mint");
-          return { ...this.issued(null, priorCredential, existing, roomId), duplicate: true, replayed: true };
-        }
-        if (existing.kind !== GUEST_AGENT_KIND || existing.active === false) {
+        if (existing.kind !== GUEST_AGENT_KIND || existing.active === false)
           fail(409, "membership_ended", "This guest membership ended; use a new requestId");
-        }
+        // A seat can hold a revoked row (refresh rotates) next to the live
+        // one: the idempotency check must read the live credential, not
+        // whichever row the database returns first.
+        const priorCredential = this.db.prepare("SELECT * FROM credentials WHERE room_id=? AND member_id=? AND kind='access' AND revoked=0").get(roomId, memberId);
         const nameOk = callerSuppliedName ? existing.displayName === displayName : omittedGuestName(existing.displayName);
-        if (!prior || prior.room_id !== roomId || prior.member_id !== memberId || !this.liveCredential(prior, existing)
-          || !nameOk) {
+        if (!this.liveCredential(priorCredential, existing) || !nameOk)
           fail(409, "idempotency_conflict", "This requestId was already used for a different guest-agent mint");
-        }
-        return { ...this.issued(issuedToken, prior, existing, roomId), duplicate: true };
+        return { ...this.issued(null, priorCredential, existing, roomId), duplicate: true };
       }
       if (this.liveCount(roomId) >= GUEST_AGENT_MAX_JOINS) fail(429, "rate_limited", "Guest-agent mint limit reached for this room; wait for expiry or disconnect one");
       if (this.db.prepare("SELECT count(*) n FROM credentials WHERE room_id=?").get(roomId).n >= 5000) fail(409, "pilot_limit", "Credential retention limit reached");
-      this.conflict(hash(issuedToken));
       const assignedName = assignGuestName(displayName, this.store.room(roomId).state.members, callerSuppliedName);
       const membership = this.store.command(token, roomId, {
         id: `guest-agent-${hash(`${auth.account.id}:${requestId}`).slice(0, 40)}`,
@@ -335,7 +338,27 @@ export class GuestAgentLinks {
       const member = row && this.store.room(row.room_id).state.members[row.member_id];
       if (!this.liveCredential(row, member)) fail(410, "link_unavailable", "This guest invite is not valid.");
       const preview = this.previewPublic(row, member);
-      return { ...preview, memberId: member.id, access: "read_chat" };
+      const base = { ...preview, memberId: member.id, access: "read_chat" };
+      // GA-2 (issue #941): the link is single-use. The first join consumes
+      // the link and issues a separate session credential for the seat —
+      // the GX invite shape: a forwarded copy of the link grants nothing
+      // after redemption. The session keeps the link's expiry (no lifetime
+      // extension on exchange; refresh() is the renewal path).
+      const exchanged = this.db.prepare("SELECT 1 FROM guest_link_exchanges WHERE room_id=? AND member_id=?")
+        .get(row.room_id, member.id);
+      if (exchanged) {
+        // This seat already redeemed its link: the caller holds the seat's
+        // bearer, so the join is idempotent — no new credential is issued.
+        return { ...base, exchanged: false };
+      }
+      const sessionToken = GUEST_AGENT_TOKEN_PREFIX + randomBytes(32).toString("base64url");
+      this.db.prepare("INSERT INTO credentials(hash,room_id,member_id,kind,parent_hash,expires_at,account_id,account_auth_epoch) VALUES(?,?,?,'access',NULL,?,NULL,NULL)")
+        .run(hash(sessionToken), row.room_id, member.id, row.expires_at);
+      this.db.prepare("UPDATE credentials SET revoked=1 WHERE hash=?").run(row.hash);
+      this.db.prepare("INSERT INTO guest_link_exchanges(link_hash,room_id,member_id,session_hash,exchanged_at) VALUES(?,?,?,?,?)")
+        .run(row.hash, row.room_id, member.id, hash(sessionToken), this.store.now());
+      // The response token is the seat's bearer: persist it. The link is dead.
+      return { ...base, token: sessionToken, exchanged: true };
     });
   }
 
@@ -386,7 +409,6 @@ export class GuestAgentLinks {
         fail(410, "link_unavailable", "This guest credential was revoked and cannot be refreshed.");
       }
       const issuedToken = GUEST_AGENT_TOKEN_PREFIX + randomBytes(32).toString("base64url");
-      this.conflict(hash(issuedToken));
       const expiresAt = this.store.now() + GUEST_AGENT_TTL_MS;
       this.db.prepare("INSERT INTO credentials(hash,room_id,member_id,kind,parent_hash,expires_at,account_id,account_auth_epoch) VALUES(?,?,?,'access',NULL,?,NULL,NULL)")
         .run(hash(issuedToken), row.room_id, member.id, expiresAt);

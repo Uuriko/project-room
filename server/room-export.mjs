@@ -33,13 +33,23 @@ function scrubTokens(value) {
   return value.replace(new RegExp(TOKEN_SOURCE, "g"), match => sha256Hex(match));
 }
 
-function sanitizeCell(column, value) {
+export function sanitizeCell(column, value) {
   if (value === null || value === undefined) return null;
   if (secretColumn(column)) return sha256Hex(typeof value === "string" ? value : String(value));
   // REL-14: BLOB cells (room file bytes) leave as base64. JSON.stringify of a
   // Uint8Array is an object of indices that replay could not bind, so any room
   // holding a file produced an export that could not be restored.
+  // A Durable Object's SQL API returns BLOB cells as ArrayBuffer, not
+  // Uint8Array, and JSON.stringify(ArrayBuffer) is {}: every room file's
+  // bytes left production backups as an empty object until this was handled.
   if (value instanceof Uint8Array) return { $base64: Buffer.from(value).toString("base64") };
+  if (value instanceof ArrayBuffer) return { $base64: Buffer.from(new Uint8Array(value)).toString("base64") };
+  // A bare SharedArrayBuffer is neither an ArrayBuffer nor a view, but
+  // JSON.stringify turns it into {} just the same. Encode it like one.
+  // (Views over shared memory are already caught by the isView branch.)
+  if (typeof SharedArrayBuffer !== "undefined" && value instanceof SharedArrayBuffer)
+    return { $base64: Buffer.from(new Uint8Array(value)).toString("base64") };
+  if (ArrayBuffer.isView(value)) return { $base64: Buffer.from(value.buffer, value.byteOffset, value.byteLength).toString("base64") };
   if (typeof value !== "string") return value;
   return scrubTokens(value);
 }
@@ -77,6 +87,44 @@ export function* exportNdjsonLines(db) {
     const sql = `SELECT ${columns.map(quoteIdent).join(", ")} FROM ${quoteIdent(table)}${order}`;
     for (const row of db.prepare(sql).all()) yield JSON.stringify({ table, row: sanitizeRow(row) }) + "\n";
   }
+  yield JSON.stringify(exportTrailer(db)) + "\n";
+}
+
+// End-of-stream integrity trailer. The watermark is taken before the first
+// table is dumped, but the Durable Object serves requests between stream
+// pulls, so a write can land mid-stream. The watermark's event count does not
+// always see it: a write whose event row misses the events scan but whose
+// side effects land in a later-scanned table keeps the dumped count equal to
+// the watermark while the data is inconsistent (a torn backup that used to
+// replay with verified:true). The trailer re-reads the event log after the
+// last table, so replay can refuse a torn export loudly. The hash is over the
+// sanitized cells, exactly as the rows were yielded, so a future sanitize
+// rule cannot cause a false mismatch. Rooms need no trailer: a room created
+// mid-stream fails the events foreign key, and any other room tear moves the
+// event count.
+export function exportTrailer(db) {
+  const rows = db.prepare("SELECT room_id, sequence, id FROM events ORDER BY room_id, sequence").all();
+  const hash = createHash("sha256");
+  for (const row of rows) {
+    hash.update(`${sanitizeCell("room_id", row.room_id)}\t${sanitizeCell("sequence", row.sequence)}\t${sanitizeCell("id", row.id)}\n`);
+  }
+  return { kind: "trailer", version: 1, events: rows.length, eventsHash: hash.digest("hex") };
+}
+
+// Refuses a torn export: the parsed event rows must be exactly the event log
+// the trailer saw at end of stream. Older exports have no trailer and replay
+// as before (the caller reports trailer: "absent").
+export function verifyTrailer(trailer, byTable) {
+  const rows = byTable.get("events") ?? [];
+  if (rows.length !== trailer.events)
+    throw new Error(`Backup is torn: the export holds ${rows.length} events but its trailer counts ${trailer.events}; a write landed mid-export. Re-take the backup.`);
+  const tuples = rows.map(row => [row.room_id, row.sequence, row.id]);
+  tuples.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] - b[1]));
+  const hash = createHash("sha256");
+  for (const [roomId, sequence, id] of tuples) hash.update(`${roomId}\t${sequence}\t${id}\n`);
+  if (hash.digest("hex") !== trailer.eventsHash)
+    throw new Error("Backup is torn: the event log changed during the export (same count, different rows). Re-take the backup.");
+  return true;
 }
 
 export function exportNdjsonText(db) {
@@ -151,6 +199,7 @@ function parseExport(ndjson) {
   if (typeof ndjson !== "string" || !ndjson.trim()) throw new Error("Export is empty");
   const byTable = new Map();
   let watermark = null;
+  let trailer = null;
   for (const line of ndjson.split("\n")) {
     if (!line.trim()) continue;
     let record;
@@ -161,13 +210,20 @@ function parseExport(ndjson) {
       watermark = record;
       continue;
     }
+    if (record?.kind === "trailer") {
+      if (trailer) throw new Error("Export has more than one trailer");
+      if (record.version !== 1 || !Number.isSafeInteger(record.events) || typeof record.eventsHash !== "string" || !/^[0-9a-f]{64}$/.test(record.eventsHash))
+        throw new Error("Export trailer is malformed");
+      trailer = record;
+      continue;
+    }
     if (typeof record?.table !== "string" || !record.row || typeof record.row !== "object" || Array.isArray(record.row)) throw new Error("Export line is not a table row");
     const rows = byTable.get(record.table) ?? [];
     rows.push(record.row);
     byTable.set(record.table, rows);
   }
   if (!watermark || watermark.version !== 1 || !Number.isSafeInteger(watermark.events)) throw new Error("Export is missing its watermark");
-  return { watermark, byTable };
+  return { watermark, byTable, trailer };
 }
 
 function insertOrder(names) {
@@ -176,10 +232,38 @@ function insertOrder(names) {
   return ordered;
 }
 
+// Tables a production Durable Object export can carry that a fresh Node
+// store never creates. The two runtime markers belong to the Durable Object
+// writer fence (cloudflare/storage.mjs) and mean nothing in a sqlite file.
+// The retired Emissary tables stay in upgraded databases (no DROP was ever
+// issued) but no module reads them. abuse_rate_buckets is rate-limit state
+// the Durable Object creates on first use (server/abuse-rate-buckets.mjs); a
+// restored store starts with fresh budgets. Replay skips these and reports the
+// row counts; the export itself still holds the rows.
+export const REPLAY_SKIPPED_TABLES = Object.freeze([
+  "room_runtime_version", "room_writer_permit",
+  "emissary_drops", "emissary_idempotency", "emissary_invite_attribution",
+  "emissary_journal", "external_identities", "external_receipts",
+  "abuse_rate_buckets"
+]);
+
+const CLAIM_PERMIT_TABLE = "public_work_claim_writer_permit";
+
 // Replay into a new sqlite file, then run the same checks as backupRoom.
-export function replayNdjson(ndjson, filename) {
+// audit "strict" (default) refuses a store the recovery audit rejects.
+// audit "report" still requires the row load, foreign keys, quick_check,
+// file bytes and the event count to match, but returns an audit failure
+// instead of throwing: the recovery audit replays every room with the
+// current reducer, and production rooms written by older code can differ
+// from that replay while the live room serves them fine. A disaster
+// restore needs the data back and the drift named, not a refusal.
+export function replayNdjson(ndjson, filename, { audit = "strict" } = {}) {
+  if (audit !== "strict" && audit !== "report") throw new Error("audit must be strict or report");
   if (!filename) throw new Error("Missing replay paths");
-  const { watermark, byTable } = parseExport(ndjson);
+  const { watermark, byTable, trailer } = parseExport(ndjson);
+  // Fail fast on a torn export, before any store is created: a mid-stream
+  // write the watermark could not see must never verify.
+  const trailerState = trailer ? (verifyTrailer(trailer, byTable), "verified") : "absent";
   const directory = dirname(filename);
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   chmodSync(directory, 0o700);
@@ -187,12 +271,26 @@ export function replayNdjson(ndjson, filename) {
   const store = new RoomStore(filename);
   try {
     const existing = new Set(tableNames(store.db));
+    const skipped = {};
+    for (const table of REPLAY_SKIPPED_TABLES) {
+      if (existing.has(table) || !byTable.has(table)) continue;
+      skipped[table] = byTable.get(table).length;
+      byTable.delete(table);
+    }
     const order = insertOrder(new Set(byTable.keys()));
     for (const table of order) if (!existing.has(table)) throw new Error("Export names a table this store does not have");
     store.db.exec("PRAGMA foreign_keys=OFF");
+    // The public claim fence (server/public-work-claim-fence.mjs) aborts any
+    // write to a public namespace's claims unless its permit is open. Replay
+    // opens it for the bulk load and closes it again, as at rest; the
+    // exported permit row is not replayed.
+    const claimPermit = existing.has(CLAIM_PERMIT_TABLE);
+    byTable.delete(CLAIM_PERMIT_TABLE);
+    const loadOrder = order.filter(table => table !== CLAIM_PERMIT_TABLE);
     store.transaction(() => {
-      for (const table of order) store.db.prepare(`DELETE FROM ${quoteIdent(table)}`).run();
-      for (const table of order) {
+      for (const table of loadOrder) store.db.prepare(`DELETE FROM ${quoteIdent(table)}`).run();
+      if (claimPermit) store.db.prepare(`UPDATE ${CLAIM_PERMIT_TABLE} SET enabled=1 WHERE singleton=1`).run();
+      for (const table of loadOrder) {
         const rows = byTable.get(table);
         if (table === "credentials") rows.sort((a, b) => Number(a.parent_hash != null) - Number(b.parent_hash != null));
         const columns = tableColumns(store.db, table);
@@ -207,14 +305,22 @@ export function replayNdjson(ndjson, filename) {
             .run(...keys.map(key => cells[key]));
         }
       }
+      if (claimPermit) store.db.prepare(`UPDATE ${CLAIM_PERMIT_TABLE} SET enabled=0 WHERE singleton=1`).run();
     });
     store.db.exec("PRAGMA foreign_keys=ON");
     if (store.db.prepare("PRAGMA foreign_key_check").all().length) throw new Error("Restored store failed foreign key check");
-    const recovery = auditRecovery(store);
-    const audit = store.verifyInvitationAudit();
+    if (store.db.prepare("PRAGMA quick_check").get().quick_check !== "ok") throw new Error("Restored store failed quick_check");
     const events = store.db.prepare("SELECT count(*) AS n FROM events").get().n;
     if (events !== watermark.events) throw new Error("Export watermark does not match the restored event log");
+    let recovery = null, invitations = {}, auditResult = { ok: true };
+    try {
+      recovery = auditRecovery(store);
+      invitations = store.verifyInvitationAudit();
+    } catch (error) {
+      if (audit === "strict") throw error;
+      auditResult = { ok: false, error: String(error?.message ?? error).split("\n")[0].slice(0, 200) };
+    }
     chmodSync(filename, 0o600);
-    return { verified: true, events, ...audit, recovery };
+    return { verified: true, events, trailer: trailerState, ...invitations, recovery, audit: auditResult, skippedTables: skipped };
   } finally { store.close(); }
 }

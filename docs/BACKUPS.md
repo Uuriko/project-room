@@ -27,6 +27,12 @@ node scripts/replay-room-export.mjs --from room-export.ndjson --to /var/lib/proj
 
 A failed replay prints one line and leaves the destination unpromoted. The script does not print row contents.
 
+## Torn exports
+
+The watermark is written before the first table is dumped, but the hosted room keeps serving requests while the export streams, so a write can land mid-stream. The watermark's event count does not always catch that: a write whose event row misses the `events` scan but whose side effects land in a later-scanned table (a join captured in `member_accounts`, a claim row, an attachment row) keeps the dumped count equal to the watermark while the data is inconsistent. Such a torn export used to replay with `verified: true`.
+
+Every export now ends with a trailer line (`{"kind": "trailer", "version": 1, "events", "eventsHash"}`): a fresh count of the event log plus a sha256 over every event's `room_id`, `sequence` and `id`, taken after the last table. Replay refuses a torn export loudly instead of verifying it — the count catches the common case, the hash catches a same-count tear (an event deleted and another inserted in the window). The nightly KV writer applies the same count check before writing the manifest: a torn stream writes no manifest (its parts expire on their own) and the job logs `[room-backup]`. Exports written before the trailer exist replay as before; the restore script reports `trailer: "verified"` or `"absent"`. The R2 path streams without the write-time check; restore time is its backstop.
+
 ## Nightly copy (KV now, R2 when enabled)
 
 The production cron writes one backup a day of the whole Durable Object store (every room). The key is `room-backups/YYYY-MM-DD.ndjson` in UTC. If that day's backup is already there, the tick does nothing. A failed write is logged as `[room-backup]` and does not fail the rest of the cron.
@@ -52,19 +58,36 @@ Restores go into a NEW sqlite store, never over a live room. Nothing in this pat
 
 ```bash
 # From the nightly KV copy (uses your wrangler login; needs Workers KV read)
-node scripts/restore-room-backup.mjs --kv 2026-10-08 --to /tmp/restore-$(date +%s)/room.sqlite --room muse-room
+node scripts/restore-room-backup.mjs --kv 2026-10-08 --to /tmp/restore-$(date +%s)/room.sqlite --room muse-room --audit report
 
 # From an NDJSON file (an operator export or a saved copy)
 node scripts/restore-room-backup.mjs --from room-export.ndjson --to /tmp/restore-$(date +%s)/room.sqlite --room muse-room
 ```
 
-The script checks each part's sha256 and the whole file's sha256 against the manifest, refuses an existing destination, replays the export with the same recovery and invitation checks as `scripts/replay-room-export.mjs`, and prints counts only. `--room <id>` (repeatable) prints that room's event count, last sequence, room message count (DMs excluded) and a sha256 over `sequence, event id, messageId, body` of those messages. A member's reader can compute the same digest from `GET /api/rooms/<id>/events` to prove the restore matches live. `--save <path>` keeps the reassembled NDJSON (mode 0600); delete it when done, it holds every room.
+The script checks each part's sha256 and the whole file's sha256 against the manifest, refuses an existing destination, replays the export with the same recovery and invitation checks as `scripts/replay-room-export.mjs`, and prints counts only. `--room <id>` (repeatable) prints that room's event count, last sequence, room message count (DMs excluded) and a sha256 over `sequence, event id, messageId, body` of those messages. A member's reader can compute the same digest from `GET /api/rooms/<id>/events` to prove the restore matches live. `--save <path>` keeps the reassembled NDJSON (mode 0600); delete it when done, it holds every room. The message digest applies `message.edited` (last edit wins), because the live events API shows an edited message's current text.
+
+`--audit report` restores even when the recovery audit rejects the store, and prints `audit: { ok, error }`. The row load, foreign keys, `quick_check`, file bytes and the event count must still match. Use it for real restores: the audit replays every room with the current reducer, and production rooms written by older code can differ from that replay (for example a reaction stored as `celebrate` that today's reducer names `🎉`, or room instructions written by an agent owner) while the live room serves them fine. The default stays strict.
 
 Putting a restore back into the production Durable Object is a separate, deliberate operation and is not scripted here.
+
+### Drill without waiting for the nightly copy
+
+The nightly job is due 24 hours after its last run, so there is no way to force a KV copy early. For an on-demand drill, pull the same NDJSON from `GET /api/operator/export`: set a random `ROOM_BACKUP_TOKEN` (16+ characters) on `project-room` with `wrangler secret put ROOM_BACKUP_TOKEN --env production`, keep it in a 0600 file, send it as `authorization: Bearer ...` (curl `-H @file`, so it never lands in shell history or output), then `wrangler secret delete ROOM_BACKUP_TOKEN --env production` and confirm the route answers 404 again. Both secret commands publish a new Worker version with the same code; smoke `/api/version` afterwards. Restore with `--from`, then check:
+
+1. the restore exits 0 with `verified: true` and the backup's total event count;
+2. `--room <id>` message count and `messagesSha256` equal the live digest from `GET /api/rooms/<id>/events` up to the room's `lastSequence`;
+3. every `room_attachments` row in state `committed` or `staged` has bytes whose length and sha256 equal its `byte_length` and `sha256` columns (`deleted`, `discarded` and `expired` rows have no bytes by design), and a few live downloads (`room_get_file`) hash-equal the restored bytes;
+4. `skippedTables` names only the known set above.
+
+Delete the export, the restored store and any saved NDJSON when done: they hold every room.
+
+Results of each drill are recorded in `ops/STATE.md`.
 
 ## Byte equality (REL-14)
 
 - `backupRoom` writes content digests into the watermark (`digests.events`, `digests.attachments`): a sha256 over every event row and every `room_attachments` row, including a hash of each file's bytes. `scripts/backup-verify.mjs` recomputes them on the restored copy, so a same-count edit or a flipped file byte fails verification. Watermarks written before this carry counts only and still verify (the check says so).
-- The NDJSON export (the daily R2 backup's format) writes BLOB cells as `{"$base64": "..."}` and replay decodes them. Before this, any room holding a room file produced an export that replay refused.
+- The NDJSON export (the nightly backup's format) writes BLOB cells as `{"$base64": "..."}` and replay decodes them. Before this, any room holding a room file produced an export that replay refused.
+- On the Durable Object, SQL returns BLOB cells as `ArrayBuffer`, which `JSON.stringify` turns into `{}`. Until 2026-10-08 the export only encoded `Uint8Array` (what Node returns), so the first production backup carried every `room_attachments.bytes` cell as `{}` and replay refused it. The export now encodes `ArrayBuffer` and typed views too, and the KV manifest is version 2. A version 1 manifest is not trusted as that day's backup: if the job runs again on the same UTC day it rewrites it. The job itself is due 24 hours after its last run, so in practice the first version 2 copy is the next day's key, and the version 1 copy simply expires.
+- Replay skips tables a fresh Node store never creates and reports their row counts as `skippedTables`: the Durable Object writer-fence markers (`room_runtime_version`, `room_writer_permit`), the retired Emissary tables, and `abuse_rate_buckets` (rate-limit state the Durable Object creates on first use; a restored store starts with fresh budgets). The NDJSON still holds those rows. Any other unknown table still fails the replay.
 - The NDJSON export still scrubs token-shaped text in every cell, so an event whose body contains a token-shaped string does not restore byte-equal from NDJSON. The sqlite backup is byte-equal.
 - `node scripts/backup-drill.mjs` exercises this on a local room: messages, a work item, and a 512-byte room file holding every byte value.

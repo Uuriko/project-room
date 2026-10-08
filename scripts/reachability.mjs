@@ -27,6 +27,9 @@ export const KEEP = [
   // Other batches will wire these. (src/design-tokens.js was dropped from
   // this list 2026-10-06: server/receipts-page.mjs imports it now, so the
   // walk reaches it from server/http.mjs.)
+  // herdr B6 supervision inbox: not mounted yet; remove from KEEP when wired.
+  "server/supervision.mjs",
+  "server/supervision-routes.mjs",
   "server/receipt-standard.mjs",
   // Scripts and workflows load these directly.
   "server/backup.mjs",
@@ -83,10 +86,6 @@ export const KEEP = [
   // runtime-package registration). Not orphans; remove from KEEP when wired.
   "server/session-adapter.mjs",
   "server/session-adapter/herdr-bridge-adapter.mjs",
-  // herdr redesign: wired by the integration step (consumed by the
-  // notification modules + mount in http.mjs). Not orphans; remove from
-  // KEEP when wired.
-  "server/notify-classifier.mjs",
 ];
 
 const KEEP_SET = new Set(KEEP);
