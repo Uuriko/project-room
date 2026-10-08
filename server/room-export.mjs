@@ -82,6 +82,44 @@ export function* exportNdjsonLines(db) {
     const sql = `SELECT ${columns.map(quoteIdent).join(", ")} FROM ${quoteIdent(table)}${order}`;
     for (const row of db.prepare(sql).all()) yield JSON.stringify({ table, row: sanitizeRow(row) }) + "\n";
   }
+  yield JSON.stringify(exportTrailer(db)) + "\n";
+}
+
+// End-of-stream integrity trailer. The watermark is taken before the first
+// table is dumped, but the Durable Object serves requests between stream
+// pulls, so a write can land mid-stream. The watermark's event count does not
+// always see it: a write whose event row misses the events scan but whose
+// side effects land in a later-scanned table keeps the dumped count equal to
+// the watermark while the data is inconsistent (a torn backup that used to
+// replay with verified:true). The trailer re-reads the event log after the
+// last table, so replay can refuse a torn export loudly. The hash is over the
+// sanitized cells, exactly as the rows were yielded, so a future sanitize
+// rule cannot cause a false mismatch. Rooms need no trailer: a room created
+// mid-stream fails the events foreign key, and any other room tear moves the
+// event count.
+export function exportTrailer(db) {
+  const rows = db.prepare("SELECT room_id, sequence, id FROM events ORDER BY room_id, sequence").all();
+  const hash = createHash("sha256");
+  for (const row of rows) {
+    hash.update(`${sanitizeCell("room_id", row.room_id)}\t${sanitizeCell("sequence", row.sequence)}\t${sanitizeCell("id", row.id)}\n`);
+  }
+  return { kind: "trailer", version: 1, events: rows.length, eventsHash: hash.digest("hex") };
+}
+
+// Refuses a torn export: the parsed event rows must be exactly the event log
+// the trailer saw at end of stream. Older exports have no trailer and replay
+// as before (the caller reports trailer: "absent").
+export function verifyTrailer(trailer, byTable) {
+  const rows = byTable.get("events") ?? [];
+  if (rows.length !== trailer.events)
+    throw new Error(`Backup is torn: the export holds ${rows.length} events but its trailer counts ${trailer.events}; a write landed mid-export. Re-take the backup.`);
+  const tuples = rows.map(row => [row.room_id, row.sequence, row.id]);
+  tuples.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] - b[1]));
+  const hash = createHash("sha256");
+  for (const [roomId, sequence, id] of tuples) hash.update(`${roomId}\t${sequence}\t${id}\n`);
+  if (hash.digest("hex") !== trailer.eventsHash)
+    throw new Error("Backup is torn: the event log changed during the export (same count, different rows). Re-take the backup.");
+  return true;
 }
 
 export function exportNdjsonText(db) {
@@ -156,6 +194,7 @@ function parseExport(ndjson) {
   if (typeof ndjson !== "string" || !ndjson.trim()) throw new Error("Export is empty");
   const byTable = new Map();
   let watermark = null;
+  let trailer = null;
   for (const line of ndjson.split("\n")) {
     if (!line.trim()) continue;
     let record;
@@ -166,13 +205,20 @@ function parseExport(ndjson) {
       watermark = record;
       continue;
     }
+    if (record?.kind === "trailer") {
+      if (trailer) throw new Error("Export has more than one trailer");
+      if (record.version !== 1 || !Number.isSafeInteger(record.events) || typeof record.eventsHash !== "string" || !/^[0-9a-f]{64}$/.test(record.eventsHash))
+        throw new Error("Export trailer is malformed");
+      trailer = record;
+      continue;
+    }
     if (typeof record?.table !== "string" || !record.row || typeof record.row !== "object" || Array.isArray(record.row)) throw new Error("Export line is not a table row");
     const rows = byTable.get(record.table) ?? [];
     rows.push(record.row);
     byTable.set(record.table, rows);
   }
   if (!watermark || watermark.version !== 1 || !Number.isSafeInteger(watermark.events)) throw new Error("Export is missing its watermark");
-  return { watermark, byTable };
+  return { watermark, byTable, trailer };
 }
 
 function insertOrder(names) {
@@ -209,7 +255,10 @@ const CLAIM_PERMIT_TABLE = "public_work_claim_writer_permit";
 export function replayNdjson(ndjson, filename, { audit = "strict" } = {}) {
   if (audit !== "strict" && audit !== "report") throw new Error("audit must be strict or report");
   if (!filename) throw new Error("Missing replay paths");
-  const { watermark, byTable } = parseExport(ndjson);
+  const { watermark, byTable, trailer } = parseExport(ndjson);
+  // Fail fast on a torn export, before any store is created: a mid-stream
+  // write the watermark could not see must never verify.
+  const trailerState = trailer ? (verifyTrailer(trailer, byTable), "verified") : "absent";
   const directory = dirname(filename);
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   chmodSync(directory, 0o700);
@@ -267,6 +316,6 @@ export function replayNdjson(ndjson, filename, { audit = "strict" } = {}) {
       auditResult = { ok: false, error: String(error?.message ?? error).split("\n")[0].slice(0, 200) };
     }
     chmodSync(filename, 0o600);
-    return { verified: true, events, ...invitations, recovery, audit: auditResult, skippedTables: skipped };
+    return { verified: true, events, trailer: trailerState, ...invitations, recovery, audit: auditResult, skippedTables: skipped };
   } finally { store.close(); }
 }
