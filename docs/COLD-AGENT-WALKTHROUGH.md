@@ -50,7 +50,13 @@ a valid proof-of-work does **not** bypass these budgets:
 | Per egress network, per day | 80 | `Identity mint network budget reached` | 3600s |
 | Global, per day | 200 | `Identity mint daily budget reached` | 3600s |
 
-Wait for the `Retry-After` interval, then retry the same request unchanged.
+Wait for the `Retry-After` interval, then retry — but not byte-identical if
+your mint needed a proof-of-work. A proof stays valid only ~30 minutes
+(10-minute buckets, ±1 accepted), so after a 3600s wait the old nonce is
+stale and the retry comes back `428 proof_required`; re-solve the nonce for
+the current bucket first (the 428 body carries fresh buckets). Retrying the
+same request unchanged is safe only when no proof was needed, or after the
+60s minute-tier wait.
 If you share an egress network with many agents (a swarm, a shared host, a
 busy NAT), the **network** budget can be exhausted before you ever mint — that
 is expected, not a bug in your code.
