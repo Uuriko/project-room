@@ -43,7 +43,13 @@ woken with reason `assigned`. An unknown or inactive member is **422**
 | `claimed` | `in_progress`, `blocked`, `released` (`unclaimed`) |
 | `in_progress` | `blocked`, `done`, `claimed` (pause) |
 | `blocked` | `in_progress`, `claimed` |
+| `standby` | `unclaimed` (FIFO promotion when a slot frees) |
+| `cancelled` | none (terminal, immutable) |
 | `done` | none (immutable) |
+
+Closing is not an update transition: `POST .../close` is the only path to
+`cancelled`, and `POST ...` create with `standby: true` is the only path
+into `standby`.
 
 `POST .../update` with `{ "state" }` moves the claim. An illegal move is
 **422** `invalid_claim_input` and names the allowed targets, for example
@@ -80,6 +86,35 @@ stamped with the caller, and `reason` is the note. `in_progress` and
 `POST .../reassign` with `{ "newOwner", "note"? }` keeps the state and names a
 current active member. The new owner is woken with reason `assigned`.
 
+## Close (cancel)
+
+`POST .../close` with `{ "reason"? }` cancels the claim: a terminal
+transition to `cancelled`. Unlike release, closing clears the owner and the
+lease, stamps a `closed` history entry (who/when/reason), and **frees the
+board slot** — cancelled claims do not count toward the room cap. A done
+claim cannot be closed (**422**). Closing an already-cancelled claim is an
+idempotent no-op.
+
+The claim holder, the room owner, or a member with `manage_claims` may close;
+anyone else is **403**. A cancelled claim is immutable: `update`, `claim`,
+`release`, `reassign`, and `renew` all refuse it.
+
+## Standby queue
+
+When the board is full, create with `{ "standby": true }` (or
+`?standby=true`) instead of taking a **409** `work_board_full`. The item is
+parked in `standby`: it does not count toward the room cap and cannot be
+claimed directly (**409** `work_claim_standby` — it promotes on its own).
+When a slot frees — a claim is closed or reaches `done` — the oldest
+standby claim (FIFO, by enqueue order) is promoted to `unclaimed`, ready to
+claim. The freed slot's response carries the promoted item under
+`promoted`.
+
+The standby queue has its own cap, default **1000** (`maxStandbyClaims`,
+integer 1..10000); the next park is **409** `standby_full`. List responses
+stamp standby claims with `queuePosition` (1 = next to promote), and
+`?state=standby` filters the list to the queue.
+
 ## Renew
 
 `POST .../renew` with `{ "progressMessageId"?, "note"?, "leaseHours"? }`.
@@ -93,14 +128,16 @@ is **409** `claim_lease_lapsed`: claim the item again.
 
 ## Caps
 
-Open claims are everything that is not `done`.
+Open claims are everything that is not `done`, `cancelled`, or `standby`.
 
 - Per room, default **200**. The next create is **409** `work_board_full`.
-  Close stale claims (mark them done) to free a slot. Releasing a claim leaves
-  it `unclaimed`, which still counts.
+  Close stale claims (or park new ones in standby) to free a slot.
+  Releasing a claim leaves it `unclaimed`, which still counts.
 - Per member, default **20** claims that member holds in `claimed`,
   `in_progress`, or `blocked`. The next claim is **409**
   `too_many_open_claims`.
+- Standby queue, default **1000** (`maxStandbyClaims`). The next park is
+  **409** `standby_full`.
 
 These are not `file_lease_conflict`. The room owner sets the per-member cap
 with `POST /api/rooms/{roomId}/work-claims/config` and

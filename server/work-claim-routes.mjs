@@ -722,21 +722,25 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // history. Member-authored text is marked untrusted for the reader.
     // Standby FIFO positions: standby claims carry queuePosition (1 = next
     // to promote) in FIFO enqueue order, so agents can see where they
-    // stand. Computed once per list read; stable sort keeps registry
-    // insertion order for same-instant enqueues.
-    const standbyOrder = new Map();
-    registry.list(roomId)
-      .filter(entry => entry.state === "standby")
-      .sort((a, b) => (standbyEnqueuedAt(a) < standbyEnqueuedAt(b) ? -1 : standbyEnqueuedAt(a) > standbyEnqueuedAt(b) ? 1 : 0))
-      .forEach((entry, index) => standbyOrder.set(entry.id, index + 1));
-    const withQueuePosition = item => standbyOrder.has(item.id) ? { ...item, queuePosition: standbyOrder.get(item.id) } : item;
-    const present = page => stampClaimPage({ ...page, claims: page.claims.map(item => withQueuePosition(summarizeClaimHistory(item, LIST_HISTORY_ENTRIES))) }, caller);
+    // stand. Stable sort keeps registry insertion order for same-instant
+    // enqueues. Computed from the branch's already-fetched items — no
+    // extra registry scan.
+    const standbyPositions = items => {
+      const order = new Map();
+      items.filter(entry => entry.state === "standby")
+        .sort((a, b) => (standbyEnqueuedAt(a) < standbyEnqueuedAt(b) ? -1 : standbyEnqueuedAt(a) > standbyEnqueuedAt(b) ? 1 : 0))
+        .forEach((entry, index) => order.set(entry.id, index + 1));
+      return order;
+    };
+    const withQueuePosition = (order, item) => order.has(item.id) ? { ...item, queuePosition: order.get(item.id) } : item;
+    const EMPTY_QUEUE_ORDER = new Map();
+    const present = (page, order = EMPTY_QUEUE_ORDER) => stampClaimPage({ ...page, claims: page.claims.map(item => withQueuePosition(order, summarizeClaimHistory(item, LIST_HISTORY_ENTRIES))) }, caller);
     // QA7-13: ?view=summary keeps the same items, paging envelope, and trust
     // stamps as the default view, but projects each claim to the compact
     // board shape. The stamps run before the projection so an
     // undeterminable author still marks the summary untrusted.
-    const presentSummary = page => withContentTrust({ ...page, claims: page.claims.map(item =>
-      summarizeBoardClaim(withQueuePosition(stampClaim(summarizeClaimHistory(item, LIST_HISTORY_ENTRIES), caller)))) });
+    const presentSummary = (page, order = EMPTY_QUEUE_ORDER) => withContentTrust({ ...page, claims: page.claims.map(item =>
+      summarizeBoardClaim(withQueuePosition(order, stampClaim(summarizeClaimHistory(item, LIST_HISTORY_ENTRIES), caller)))) });
     const render = view === "summary" ? presentSummary : present;
     if (params.has("queue")) {
       if (params.get("queue") !== "ready") invalidInput(reject, "queue=ready");
@@ -751,7 +755,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       const state = params.get("state");
       if (!STATES.includes(state)) invalidInput(reject, `state one of ${STATES.join(", ")}`);
       const page = pageBoard(items.filter(item => item.state === state), limit, cursor);
-      return json(res, 200, { roomId, state, swept: sweptIds, ...render(page) });
+      return json(res, 200, { roomId, state, swept: sweptIds, ...render(page, standbyPositions(items)) });
     }
     // SEC-2: the default list shows done claims from the last 7 days (the
     // Landed column) and any done claim an open claim depends on. Older done
@@ -762,7 +766,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const visible = items.filter(recent);
     const olderDone = items.length - visible.length;
     const page = pageBoard(visible, limit, cursor);
-    return json(res, 200, { roomId, swept: sweptIds, ...render(page), ...(olderDone > 0 ? { olderDone, olderDoneQuery: "state=done" } : {}) });
+    return json(res, 200, { roomId, swept: sweptIds, ...render(page, standbyPositions(items)), ...(olderDone > 0 ? { olderDone, olderDoneQuery: "state=done" } : {}) });
   }
   if (workClaimRoute === "receipts" && req.method === "GET") {
     // RC-2026-09-24-205: receipts search. The room block already rejected
