@@ -19,7 +19,7 @@ const PRB = "https://github.com/Uuriko/project-room/pull/1601";
 
 function claimWithPr(registry, roomId, owner, prUrl) {
   let item = claimWork(createWork({ id: "X" }, { now: NOW, agentId: owner }),
-    owner, { now: NOW, leaseHours: null });
+    owner, { now: NOW, leaseHours: 1 });
   item = appendWorkPullRequest(item, owner, {
     pullRequest: prUrl, expectedClaimedAt: item.claimedAt,
     expectedHistoryLength: claimHistoryLength(item), now: NOW,

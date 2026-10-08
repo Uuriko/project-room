@@ -51,9 +51,9 @@ const runRoute = async ({ route, id, body = {}, memberId = "quill", registry, st
 const liveProgress = (authorId = "quill") => ({ id: "progress-1", authorId, body: "Half done.",
   createdAt: new Date(Date.now() + 60_000).toISOString(), revision: 0 });
 
-const claimedRegistry = async (claimBody = { leaseHours: 6 }) => {
+const claimedRegistry = async (claimBody = { leaseHours: 1 }) => {
   const registry = createWorkClaimRegistry();
-  const created = await runRoute({ route: "create", id: "w1", body: { id: "w1", title: "t" }, registry });
+  const created = await runRoute({ route: "create", id: "w1", body: { id: "w1", title: "t", files: ["src/w1.mjs"] }, registry });
   assert.equal(created.error, null);
   const { error } = await runRoute({ route: "claim", id: "w1", body: claimBody, registry });
   assert.equal(error, null);
@@ -61,43 +61,51 @@ const claimedRegistry = async (claimBody = { leaseHours: 6 }) => {
 };
 
 // ---------------------------------------------------------------------------
-// W1: leaseHours: null opts out of leases; absent means the 24h default
+// W1: the null opt-out is retired; absent means the kind default (work: 300s)
 // ---------------------------------------------------------------------------
-test("W1: an explicit null leaseHours opts out — no lease is applied", async () => {
-  const registry = await claimedRegistry({ leaseHours: null });
-  const item = registry.get("room1", "w1");
-  assert.equal(item.leaseExpiresAt, null);
-  assert.equal(item.leaseStartAt, null);
-  assert.equal(item.state, "claimed");
+test("W1: an explicit null leaseHours is rejected — the immortal opt-out is retired", async () => {
+  const registry = createWorkClaimRegistry();
+  await runRoute({ route: "create", id: "w1", body: { id: "w1", files: ["src/w1.mjs"] }, registry });
+  const { error } = await runRoute({ route: "claim", id: "w1", body: { leaseHours: null }, registry });
+  assert.ok(error, "expected a refusal for null leaseHours");
+  assert.equal(error.status, 422);
+  assert.equal(error.code, "claim_lease_required");
+  assert.equal(registry.get("room1", "w1").state, "unclaimed");
 });
 
-test("W1: an omitted leaseHours still applies the room default (24h)", async () => {
+test("W1: an omitted leaseHours applies the kind default (work: 300s)", async () => {
   const before = Date.now();
   const registry = await claimedRegistry({});
   const item = registry.get("room1", "w1");
   const expires = Date.parse(item.leaseExpiresAt);
-  assert.ok(expires >= before + 24 * H && expires <= Date.now() + 24 * H + 5000);
+  assert.ok(expires >= before + 300 * 1000 && expires <= Date.now() + 300 * 1000 + 5000);
 });
 
 test("W1: junk leaseHours is refused loudly, never silently defaulted", async () => {
-  for (const junk of [{ leaseHours: 0 }, { leaseHours: -3 }, { leaseHours: "forever" }, { leaseHours: 721 }]) {
+  for (const junk of [{ leaseHours: 0 }, { leaseHours: -3 }, { leaseHours: "forever" }]) {
     const registry = createWorkClaimRegistry();
-    await runRoute({ route: "create", id: "w1", body: { id: "w1" }, registry });
+    await runRoute({ route: "create", id: "w1", body: { id: "w1", files: ["src/w1.mjs"] }, registry });
     const { error } = await runRoute({ route: "claim", id: "w1", body: junk, registry });
     assert.ok(error, `expected a refusal for ${JSON.stringify(junk)}`);
     assert.equal(error.code, "invalid_claim_input");
     assert.match(error.message, /leaseHours/);
   }
+  // Over the 2h hard cap gets the domain code, not a shape error.
+  const registry = createWorkClaimRegistry();
+  await runRoute({ route: "create", id: "w1", body: { id: "w1", files: ["src/w1.mjs"] }, registry });
+  const { error } = await runRoute({ route: "claim", id: "w1", body: { leaseHours: 721 }, registry });
+  assert.ok(error);
+  assert.equal(error.code, "claim_lease_too_long");
 });
 
-test("W1: renew with null leaseHours removes the lease (explicit opt-out, like claimWork)", async () => {
+test("W1: renew with null leaseHours is rejected (no opt-out via renew either)", async () => {
   const registry = await claimedRegistry({ leaseHours: 1 });
-  const { out, error } = await runRoute({ route: "renew", id: "w1",
+  const { error } = await runRoute({ route: "renew", id: "w1",
     body: { progressMessageId: "progress-1", leaseHours: null },
     registry, storeMessages: [liveProgress()] });
-  assert.equal(error, null);
-  assert.equal(out.value.leaseExpiresAt, null);
-  assert.equal(out.value.leaseStartAt, null);
+  assert.ok(error, "expected a refusal for null leaseHours on renew");
+  assert.equal(error.status, 422);
+  assert.equal(error.code, "claim_lease_required");
 });
 
 // ---------------------------------------------------------------------------
@@ -179,7 +187,7 @@ test("W4: renew after the lease lapsed is a 409 that says claim it again", async
 
 test("W4: renew on a never-claimed item says claim it first, not an access error", async () => {
   const registry = createWorkClaimRegistry();
-  await runRoute({ route: "create", id: "w-fresh", body: { id: "w-fresh" }, registry });
+  await runRoute({ route: "create", id: "w-fresh", body: { id: "w-fresh", files: ["src/w-fresh.mjs"] }, registry });
   const { error } = await runRoute({ route: "renew", id: "w-fresh",
     body: { progressMessageId: "progress-1" }, registry, storeMessages: [liveProgress()] });
   assert.equal(error.status, 409);

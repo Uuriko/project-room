@@ -39,8 +39,8 @@ test("a claim survives a restart on the durable registry and is lost on the in-m
   const open = database(t);
   const first = open();
   const durable = createDurableWorkClaimRegistry(first);
-  await call(durable, "jill", "create", null, { id: "rc-1", title: "Board v2" });
-  const claimed = await call(durable, "jill", "claim", "rc-1", { leaseHours: 6 });
+  await call(durable, "jill", "create", null, { id: "rc-1", title: "Board v2", files: ["src/rc-1.mjs"] });
+  const claimed = await call(durable, "jill", "claim", "rc-1", { leaseHours: 1 });
   first.close();
 
   const second = open();
@@ -62,9 +62,20 @@ test("a claim survives a restart on the durable registry and is lost on the in-m
 test("room work-claim config persists across restarts", t => {
   const open = database(t);
   const first = open();
-  createDurableWorkClaimRegistry(first).configure("room1", { defaultLeaseHours: 12 });
+  createDurableWorkClaimRegistry(first).configure("room1", { defaultLeaseHours: 1 });
   first.close();
   const second = open();
   t.after(() => second.close());
-  assert.equal(createDurableWorkClaimRegistry(second).configFor("room1").defaultLeaseHours, 12);
+  assert.equal(createDurableWorkClaimRegistry(second).configFor("room1").defaultLeaseHours, 1);
+});
+
+test("room work-claim config clamps an over-cap defaultLeaseHours on write", t => {
+  const open = database(t);
+  const db = open();
+  t.after(() => db.close());
+  const registry = createDurableWorkClaimRegistry(db);
+  // 12h exceeds the 2h hard cap: persisted as 2, never as 12.
+  assert.equal(registry.configure("room1", { defaultLeaseHours: 12 }).defaultLeaseHours, 2);
+  assert.equal(registry.configFor("room1").defaultLeaseHours, 2);
+  assert.equal(registry.rawConfig("room1").defaultLeaseHours, 2);
 });

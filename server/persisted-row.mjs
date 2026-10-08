@@ -62,7 +62,7 @@ export function encodeRow(kind, data) {
 // Legacy rows (no `v` envelope) decode with the whole object as data.
 // Corrupt JSON and non-object rows still throw — that is corruption, not
 // schema evolution. Old rows never throw here.
-export function decodeRow(text, { kind = null, fields = [], defaults = {}, moved = MOVED_KINDS } = {}) {
+export function decodeRow(text, { kind = null, fields = [], defaults = {}, moved = MOVED_KINDS, passthroughUnknown = false } = {}) {
   const raw = typeof text === "string" ? JSON.parse(text) : text;
   if (!isPlainObject(raw)) throw new Error("decodeRow: persisted row is not an object");
   const known = new Set([...fields, ...Object.keys(defaults)]);
@@ -81,5 +81,12 @@ export function decodeRow(text, { kind = null, fields = [], defaults = {}, moved
   }
   const out = {};
   for (const field of known) out[field] = Object.hasOwn(data, field) ? data[field] : defaults[field];
+  // Opt-in: schema drift (production rows carry fields the checkout doesn't
+  // know). Unknown fields pass through verbatim instead of being dropped.
+  if (passthroughUnknown) {
+    for (const key of Object.keys(data)) {
+      if (!known.has(key)) out[key] = data[key];
+    }
+  }
   return out;
 }

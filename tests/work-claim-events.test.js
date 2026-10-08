@@ -46,7 +46,7 @@ test('each claim change appends one event naming the member, the action, the own
   // Renewals cite a public progress message posted after the lease started.
   await new Promise(resolve => setTimeout(resolve, 2));
   const progress = (await owner.say('Lane A is moving')).event.data.messageId;
-  await owner.renewWorkItem('lane-a', { progressMessageId: progress, leaseHours: 3 });
+  await owner.renewWorkItem('lane-a', { progressMessageId: progress, leaseHours: 2 });
   await owner.reassignWorkItem('lane-a', { newOwner: 'reviewer', note: 'handoff' });
   await peer.releaseWorkItem('lane-a', { note: 'parked' });
 
@@ -120,7 +120,7 @@ test('an archived room still records a claim and appends no event', async t => {
   const { owner } = await fixture(t);
   // Archive with the owner's own key. Issuing a second key would revoke it.
   await owner.command({ id: 'archive-room', type: 'room.archived', data: { reason: 'pilot over' } });
-  const created = await owner.workClaimCreate({ id: 'after-archive', title: 'Still recorded' });
+  const created = await owner.workClaimCreate({ id: 'after-archive', title: 'Still recorded', files: ['src/after-archive.mjs'] });
   assert.equal(created.id, 'after-archive');
   assert.equal((await claimEvents(owner)).length, 0);
 });

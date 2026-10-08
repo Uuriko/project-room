@@ -6376,13 +6376,18 @@ paths:
     post:
       summary: Renew a work claim's lease
       description: |
-        Owner-only; starts a fresh lease window from now, extending
-        leaseExpiresAt by the lease duration (explicit leaseHours, else the
-        room's default). A heartbeat body is enough. progressMessageId is
-        optional evidence: when present it must be the holder's own public
-        message posted after the current lease window began. Refused on
-        claims without a lease and on lapsed leases (claim again instead).
-        API keys need `rooms:write`.
+        Owner-only; starts a fresh lease window from now (renewing early does
+        not bank the remainder). The window resolves as explicit leaseHours,
+        else the claim's current window, else the room/kind default — capped
+        at the 2h hard cap; leaseHours:null is rejected (claim_lease_required).
+        An empty renew is 400 renew_requires_progress and the lease is
+        UNCHANGED: a renew must carry progress evidence, either
+        progressMessageId (the holder's own public room message posted after
+        the current lease start — a DM does not count) or a progress: note.
+        Deploy claims are not renewable (claim_renew_forbidden); renewals stop
+        at the kind's max total hold (claim_lease_max_total). Renewing inside
+        the grace window restores the pre-expiry state. A renew resets the
+        heartbeat anti-squatting counter. API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: claimId
@@ -6399,6 +6404,8 @@ paths:
                 progressMessageId: { type: string }
                 leaseHours: { type: number }
                 note: { type: string }
+                leaseSeq: { type: integer }
+                epoch: { type: integer }
       responses:
         '200':
           description: The renewed item
@@ -6406,10 +6413,74 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkClaim'
+        '400': { description: renew_requires_progress }
         '401': { description: unauthenticated }
         '403': { description: work_not_owner }
         '404': { description: work_claim_not_found }
-        '422': { description: claim_renewal_source_required | claim_renewal_source_stale | invalid_claim_input }
+        '409': { description: claim_lease_stale | stale_epoch }
+        '410': { description: claim_lease_lapsed }
+        '422': { description: claim_renewal_source_required | claim_renewal_source_stale | claim_lease_required | claim_lease_too_long | claim_lease_max_total | claim_renew_forbidden | invalid_claim_input }
+  /api/rooms/{roomId}/work-claims/{claimId}/heartbeat:
+    post:
+      summary: Heartbeat a held work claim (silent liveness proof)
+      description: |
+        Owner-only. Extends the CURRENT lease window (leaseStartAt=now,
+        leaseExpiresAt=now+window — the window length is unchanged, no new
+        window is minted, leaseSeq is untouched) and writes the row SILENTLY:
+        no room event is emitted, so heartbeats do not consume the room's
+        lifetime event budget (the budget gate is skipped for the same
+        reason; requireWriter still applies). Inside the grace window a
+        heartbeat restores the pre-expiry state. leaseSeq (required) must
+        match the claim's current round or the heartbeat is 409
+        claim_lease_stale; idempotencyKey (required, client-chosen) replays
+        the stored response inside a 10-minute window with no second write.
+        clientTime is informational only — the server never trusts client
+        time for lease math. After 3 consecutive heartbeats with no renew,
+        heartbeats are refused with 409 claim_renewal_required until a renew
+        with progress. Suggested cadence: min(30min, lease/4). API keys need
+        `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: claimId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [leaseSeq, idempotencyKey]
+              properties:
+                leaseSeq: { type: integer }
+                idempotencyKey: { type: string }
+                progressNote: { type: string }
+                clientTime: { type: string }
+                epoch: { type: integer }
+      responses:
+        '200':
+          description: Heartbeat receipt (state, lease window, nextHeartbeatBy, graceEndsAt)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  state: { type: string }
+                  leaseSeq: { type: integer }
+                  epoch: { type: integer }
+                  leaseStartAt: { type: string }
+                  leaseExpiresAt: { type: string }
+                  lastHeartbeatAt: { type: string }
+                  consecutiveHeartbeats: { type: integer }
+                  nextHeartbeatBy: { type: string }
+                  graceEndsAt: { type: string }
+        '401': { description: unauthenticated }
+        '403': { description: work_not_owner }
+        '404': { description: work_claim_not_found }
+        '409': { description: claim_lease_stale | stale_epoch | claim_renewal_required }
+        '410': { description: claim_lease_lapsed }
+        '422': { description: invalid_claim_input }
   /api/rooms/{roomId}/feedback:
     get:
       summary: List feedback clusters
@@ -16889,11 +16960,18 @@ components:
           items: { type: object }
     WorkClaim:
       description: |
-        A work-claim registry item. Claims carry a lease (`claimedAt` +
-        `leaseStartAt` + `leaseExpiresAt`; null `leaseExpiresAt` means no
-        lease and the claim never expires). `leaseStartAt` marks the current
-        lease window's start — a renewal requires the owner's public
-        progress message posted after it. The `done` transition records `deliveryMode` (how
+        A work-claim registry item. Claims carry a server-stamped lease
+        (`claimedAt` + `leaseStartAt` + `leaseExpiresAt`; every claim has a
+        lease — the immortal null opt-out is retired). Lease windows:
+        work 300s / land 30min / deploy 1h by default, 2h hard cap all kinds.
+        `leaseSeq` is the claim-round generation (increments on claim /
+        succession / reclaim; heartbeats and renews never touch it);
+        `epoch` is the reaper's fencing generation. `createdSeq` is the
+        server-side journal sequence of the create event (provisional-claim +
+        seq-confirmation ordering). `expired` is the grace-window state:
+        still owned, recoverable by heartbeat/renew, refused to new
+        claimants (claim_in_grace). Unknown fields pass through verbatim
+        (schema drift). The `done` transition records `deliveryMode` (how
         the work was delivered) and `reviewedBy` (the attesting member, per
         the item's `reviewPolicy`). For the `distinct_member` and
         `independent_principal` manual policies, an explicit approve with
@@ -16904,11 +16982,18 @@ components:
       properties:
         id: { type: string }
         title: { type: string }
-        state: { type: string, enum: [unclaimed, claimed, in_progress, blocked, done, closed] }
+        state: { type: string, enum: [unclaimed, claimed, in_progress, blocked, expired, done, closed] }
         owner: { type: [string, 'null'] }
         claimedAt: { type: [string, 'null'], format: date-time }
         leaseStartAt: { type: [string, 'null'], format: date-time }
         leaseExpiresAt: { type: [string, 'null'], format: date-time }
+        leaseSeq: { type: integer, description: "Claim-round generation; increments on claim/succession/reclaim" }
+        epoch: { type: integer, description: "Reaper fencing generation; stale epochs are rejected" }
+        priorActiveState: { type: [string, 'null'], enum: [claimed, in_progress, blocked, 'null'] }
+        lastHeartbeatAt: { type: [string, 'null'], format: date-time }
+        consecutiveHeartbeats: { type: integer }
+        createdSeq: { type: [integer, 'null'], description: "Server-side journal sequence of the create event" }
+        filesDeclared: { type: boolean }
         deliveryMode: { type: [string, 'null'], enum: [result, merged, production] }
         reviewPolicy: { type: [string, 'null'], enum: [self_attested, distinct_member, independent_principal] }
         reviewedBy: { type: [string, 'null'] }

@@ -52,21 +52,21 @@ test("guests and chat-profile agents cannot create, claim, renew, or update; con
   assert.equal(registry.has("room1", "guest-item"), false);
   assert.equal(registry.has("room1", "chat-item"), false);
 
-  const created = await call(registry, "owner", "create", null, { id: "open" });
+  const created = await call(registry, "owner", "create", null, { id: "open", files: ["src/open.mjs"] });
   assert.equal(created.status, 201);
   denied(await call(registry, "guest", "claim", "open", {}));
   denied(await call(registry, "chat", "claim", "open", {}));
   assert.equal(registry.get("room1", "open").state, "unclaimed");
 
-  const contribute = await call(registry, "contribute", "create", null, { id: "contrib" });
+  const contribute = await call(registry, "contribute", "create", null, { id: "contrib", files: ["src/contrib.mjs"] });
   assert.equal(contribute.status, 201);
   const claimed = await call(registry, "contribute", "claim", "contrib", {});
   assert.equal(claimed.status, 200);
   assert.equal(claimed.value.state, "claimed");
   assert.equal(claimed.value.owner, "contribute");
 
-  assert.equal((await call(registry, "review", "create", null, { id: "reviewed" })).status, 201);
-  assert.equal((await call(registry, "human", "create", null, { id: "human-item" })).status, 201);
+  assert.equal((await call(registry, "review", "create", null, { id: "reviewed", files: ["src/reviewed.mjs"] })).status, 201);
+  assert.equal((await call(registry, "human", "create", null, { id: "human-item", files: ["src/human-item.mjs"] })).status, 201);
 
   await call(registry, "owner", "reassign", "contrib", { newOwner: "guest" });
   denied(await call(registry, "guest", "update", "contrib", { state: "in_progress" }));
@@ -83,7 +83,7 @@ test("the room refuses the create past the open-claim cap, and a done claim free
   for (let index = 0; index < DEFAULT_MAX_OPEN_CLAIMS; index += 1) {
     registry.set("room1", { id: `seed-${index}`, state: "unclaimed", owner: null, history: [] });
   }
-  const full = await call(registry, "owner", "create", null, { id: "one-over" });
+  const full = await call(registry, "owner", "create", null, { id: "one-over", files: ["src/one-over.mjs"] });
   assert.equal(full.status, 409);
   assert.equal(full.value.error.code, "work_board_full");
   assert.match(full.value.error.message, /close stale claims/i);
@@ -91,14 +91,14 @@ test("the room refuses the create past the open-claim cap, and a done claim free
   assert.equal(registry.has("room1", "one-over"), false);
 
   registry.set("room1", { ...registry.get("room1", "seed-0"), state: "done" });
-  const freed = await call(registry, "owner", "create", null, { id: "one-over" });
+  const freed = await call(registry, "owner", "create", null, { id: "one-over", files: ["src/one-over.mjs"] });
   assert.equal(freed.status, 201);
 
   const small = createWorkClaimRegistry();
   small.configure("room1", { maxOpenClaims: 2 });
-  assert.equal((await call(small, "owner", "create", null, { id: "a" })).status, 201);
-  assert.equal((await call(small, "owner", "create", null, { id: "b" })).status, 201);
-  const third = await call(small, "owner", "create", null, { id: "c" });
+  assert.equal((await call(small, "owner", "create", null, { id: "a", files: ["src/a.mjs"] })).status, 201);
+  assert.equal((await call(small, "owner", "create", null, { id: "b", files: ["src/b.mjs"] })).status, 201);
+  const third = await call(small, "owner", "create", null, { id: "c", files: ["src/c.mjs"] });
   assert.equal(third.status, 409);
   assert.equal(third.value.error.code, "work_board_full");
 });
@@ -106,7 +106,7 @@ test("the room refuses the create past the open-claim cap, and a done claim free
 test("a member cannot hold more than their open-claim cap", async () => {
   const registry = createWorkClaimRegistry();
   for (let index = 0; index < DEFAULT_MAX_MEMBER_OPEN_CLAIMS + 1; index += 1) {
-    assert.equal((await call(registry, "owner", "create", null, { id: `m-${index}` })).status, 201);
+    assert.equal((await call(registry, "owner", "create", null, { id: `m-${index}`, files: [`src/m-${index}.mjs`] })).status, 201);
   }
   for (let index = 0; index < DEFAULT_MAX_MEMBER_OPEN_CLAIMS; index += 1) {
     const claimed = await call(registry, "holder", "claim", `m-${index}`, {});
@@ -119,44 +119,55 @@ test("a member cannot hold more than their open-claim cap", async () => {
 
   const small = createWorkClaimRegistry();
   small.configure("room1", { maxMemberOpenClaims: 1 });
-  await call(small, "owner", "create", null, { id: "first" });
-  await call(small, "owner", "create", null, { id: "second" });
+  await call(small, "owner", "create", null, { id: "first", files: ["src/first.mjs"] });
+  await call(small, "owner", "create", null, { id: "second", files: ["src/second.mjs"] });
   assert.equal((await call(small, "holder", "claim", "first", {})).status, 200);
   const second = await call(small, "holder", "claim", "second", {});
   assert.equal(second.status, 409);
   assert.equal(second.value.error.code, "too_many_open_claims");
 });
 
-test("720h and a null lease are refused for a non-owner; the owner may opt out", async () => {
+test("over-cap and null leases are refused for everyone; the immortal opt-out is retired", async () => {
   const registry = createWorkClaimRegistry();
-  await call(registry, "owner", "create", null, { id: "hours" });
-  await call(registry, "owner", "create", null, { id: "opt-out" });
-  await call(registry, "owner", "create", null, { id: "owner-opt-out" });
-  await call(registry, "owner", "create", null, { id: "week" });
+  const files = ["src/a.mjs"];
+  await call(registry, "owner", "create", null, { id: "hours", files });
+  await call(registry, "owner", "create", null, { id: "opt-out", files });
+  await call(registry, "owner", "create", null, { id: "owner-opt-out", files });
+  await call(registry, "owner", "create", null, { id: "week", files });
 
   await assert.rejects(call(registry, "contribute", "claim", "hours", { leaseHours: 720 }), error => {
     assert.equal(error.status, 422);
-    assert.equal(error.code, "invalid_claim_input");
-    assert.match(error.message, /168/);
+    assert.equal(error.code, "claim_lease_too_long");
+    assert.match(error.message, /2h hard cap/);
     return true;
   });
   assert.equal(registry.get("room1", "hours").state, "unclaimed");
 
+  // Null is rejected even for the room owner — no more immortal claims.
   await assert.rejects(call(registry, "contribute", "claim", "opt-out", { leaseHours: null }), error => {
     assert.equal(error.status, 422);
-    assert.match(error.message, /168/);
-    assert.match(error.message, /null/);
+    assert.equal(error.code, "claim_lease_required");
     return true;
   });
   assert.equal(registry.get("room1", "opt-out").state, "unclaimed");
+  await assert.rejects(call(registry, "owner", "claim", "owner-opt-out", { leaseHours: null }), error => {
+    assert.equal(error.status, 422);
+    assert.equal(error.code, "claim_lease_required");
+    return true;
+  });
+  assert.equal(registry.get("room1", "owner-opt-out").state, "unclaimed");
 
-  const opted = await call(registry, "owner", "claim", "owner-opt-out", { leaseHours: null });
-  assert.equal(opted.status, 200);
-  assert.equal(opted.value.leaseExpiresAt, null);
+  await assert.rejects(call(registry, "contribute", "claim", "week", { leaseHours: 168 }), error => {
+    assert.equal(error.status, 422);
+    assert.equal(error.code, "claim_lease_too_long");
+    return true;
+  });
+  assert.equal(registry.get("room1", "week").state, "unclaimed");
 
-  const week = await call(registry, "contribute", "claim", "week", { leaseHours: 168 });
-  assert.equal(week.status, 200);
-  assert.equal(typeof week.value.leaseExpiresAt, "string");
+  // The 2h cap itself is claimable.
+  const capped = await call(registry, "contribute", "claim", "week", { leaseHours: 2 });
+  assert.equal(capped.status, 200);
+  assert.equal(typeof capped.value.leaseExpiresAt, "string");
 });
 
 test("work-claim pages are ordered, stable, and do not overlap", async () => {
@@ -190,7 +201,7 @@ test("work-claim pages are ordered, stable, and do not overlap", async () => {
 
 test("the room owner releasing another member's claim is recorded as the actor", async () => {
   const registry = createWorkClaimRegistry();
-  await call(registry, "owner", "create", null, { id: "lane" });
+  await call(registry, "owner", "create", null, { id: "lane", files: ["src/lane.mjs"] });
   await call(registry, "holder", "claim", "lane", {});
   const released = await call(registry, "owner", "release", "lane", { reason: "stale lane" });
   assert.equal(released.status, 200);
@@ -204,7 +215,7 @@ test("the room owner releasing another member's claim is recorded as the actor",
 
 test("an illegal transition names the states that are allowed", async () => {
   const registry = createWorkClaimRegistry();
-  await call(registry, "owner", "create", null, { id: "lane" });
+  await call(registry, "owner", "create", null, { id: "lane", files: ["src/lane.mjs"] });
   await call(registry, "holder", "claim", "lane", {});
   await assert.rejects(call(registry, "holder", "update", "lane", { state: "done" }), error => {
     assert.equal(error.status, 422);
@@ -220,7 +231,7 @@ test("a durable claim keeps the updatedAt used for board order", async t => {
   store.initialize(initialRoom("commons"));
   t.after(() => store.close());
   const out = await handleWorkClaims({
-    req: { method: "POST", body: { id: "kept" } },
+    req: { method: "POST", body: { id: "kept", files: ["src/kept.mjs"] } },
     res: {},
     url: new URL("https://room.example/api/rooms/commons/work-claims"),
     store, roomId: "commons",

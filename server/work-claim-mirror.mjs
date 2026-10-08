@@ -1,11 +1,20 @@
 // Projection claim commands (MCP and the work-item form) write the same
 // work-claims board the REST routes use. A handoff or supersede leaves a
 // successor card that depends on the source, so the chain is visible there.
-import { createWork, claimWork, renewWork, updateWork, roomWorkClaimConfig } from "./work-claims.mjs";
+import { createWork, claimWork, renewWork, updateWork, roomWorkClaimConfig, HELD_CLAIM_STATES, MAX_LEASE_HOURS } from "./work-claims.mjs";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
 
 const BOARD_ID = /^[A-Za-z0-9_-]{1,128}$/;
-const ACTIVE = new Set(["claimed", "in_progress", "blocked"]);
+
+// The legacy work-item flow carries its own expiresAt; the board enforces
+// the 2h hard cap, so the mirror translates (clamped). Missing or past
+// expiries fall back to the kind default.
+const legacyLeaseHours = (expiresAt, nowMs) => {
+  if (typeof expiresAt !== "string") return undefined;
+  const ms = Date.parse(expiresAt) - nowMs;
+  if (!Number.isFinite(ms) || ms <= 0) return undefined;
+  return Math.min(ms / 3600000, MAX_LEASE_HOURS);
+};
 
 export function boardClaimId(workItemId) {
   if (typeof workItemId === "string" && BOARD_ID.test(workItemId)) return workItemId;
@@ -32,11 +41,28 @@ function roomLike(registry, roomId) {
 
 function commit(store, roomId, actorId, item, action, nowMs) {
   store.workClaims.set(roomId, item);
-  emitWorkClaimEvent(store, roomId, { actorId, item, action, atMs: nowMs });
+  const receipt = emitWorkClaimEvent(store, roomId, { actorId, item, action, atMs: nowMs });
+  // createdSeq comes from the server-side journal sequence — stamp it on
+  // creates with a silent second write (the event already went out).
+  const seq = receipt?.sequence;
+  if (action === "created" && Number.isSafeInteger(seq) && item.createdSeq !== seq) {
+    const stamped = { ...item, createdSeq: seq };
+    store.workClaims.set(roomId, stamped);
+    return stamped;
+  }
   return item;
 }
 
 function claimBoard(store, roomId, actorId, id, data, nowMs) {
+  const registry = store.workClaims;
+  // Atomic CAS end-to-end (collision-qa W5): the cap check, the
+  // already-claimed check and the write share one transaction — no
+  // check-then-set race against a concurrent claim on another transport.
+  const tx = typeof registry.transaction === "function" ? registry.transaction : fn => fn();
+  return tx(() => claimBoardInner(store, roomId, actorId, id, data, nowMs));
+}
+
+function claimBoardInner(store, roomId, actorId, id, data, nowMs) {
   const registry = store.workClaims;
   const files = filesFrom(data);
   const fields = {
@@ -45,11 +71,12 @@ function claimBoard(store, roomId, actorId, id, data, nowMs) {
     repo: typeof data.repository === "string" ? data.repository : undefined,
     branch: typeof data.ref === "string" ? data.ref : undefined
   };
+  const configOf = () => typeof registry.configFor === "function"
+    ? registry.configFor(roomId)
+    : roomWorkClaimConfig(roomLike(registry, roomId));
   let item = registry.get(roomId, id);
   if (!item) {
-    const config = typeof registry.configFor === "function"
-      ? registry.configFor(roomId)
-      : roomWorkClaimConfig(roomLike(registry, roomId));
+    const config = configOf();
     const open = registry.list(roomId).filter(entry => entry.state !== "done" && entry.state !== "closed").length;
     if (open >= config.maxOpenClaims) {
       const error = new Error(`This room already has ${config.maxOpenClaims} open claims. Close stale claims (close or cancel) before opening another.`);
@@ -57,24 +84,33 @@ function claimBoard(store, roomId, actorId, id, data, nowMs) {
       error.code = "work_board_full";
       throw error;
     }
+    // Files are required at creation (collide-guild addendum) unless the
+    // room opted out — then the claim is marked filesDeclared:false.
+    // The legacy work-item bridge can't invent scope: when the incoming
+    // event declares no paths, mirror it honestly as filesDeclared:false
+    // rather than refusing the sync (the POST /work-claims path still
+    // enforces files_required).
+    if (config.requireClaimFiles && !fields.files) {
+      fields.filesDeclared = false;
+    }
     item = createWork({
       id, title: data.workItemId, workItemId: data.workItemId,
-      files: fields.files, pullRequests: fields.pullRequests, repo: fields.repo, branch: fields.branch
+      files: fields.files, pullRequests: fields.pullRequests, repo: fields.repo, branch: fields.branch,
+      filesDeclared: fields.filesDeclared ?? Boolean(fields.files)
     }, { now: nowMs, agentId: actorId });
     registry.set(roomId, item);
   }
   if (item.state !== "unclaimed") return item;
-  const held = registry.list(roomId).filter(entry => entry.owner === actorId && ACTIVE.has(entry.state)).length;
-  const config = typeof registry.configFor === "function"
-    ? registry.configFor(roomId)
-    : roomWorkClaimConfig(roomLike(registry, roomId));
+  const held = registry.list(roomId).filter(entry => entry.owner === actorId && HELD_CLAIM_STATES.includes(entry.state)).length;
+  const config = configOf();
   if (held >= config.maxMemberOpenClaims) {
     const error = new Error(`You already hold ${config.maxMemberOpenClaims} open claims. Release or finish one before claiming another.`);
     error.status = 409;
     error.code = "too_many_open_claims";
     throw error;
   }
-  const claimed = claimWork(item, actorId, { ...fields, room: roomLike(registry, roomId), now: nowMs });
+  const claimed = claimWork(item, actorId, { ...fields, leaseHours: legacyLeaseHours(data.expiresAt, nowMs),
+    room: roomLike(registry, roomId), now: nowMs });
   return commit(store, roomId, actorId, claimed, "claimed", nowMs);
 }
 
@@ -99,18 +135,24 @@ export function mirrorProjectionClaim(store, roomId, actorId, incoming) {
   if (incoming.type === "claim.renewed") {
     const item = registry.get(roomId, id);
     if (!item || item.state === "unclaimed" || item.owner !== actorId) return claimBoard(store, roomId, actorId, id, data, nowMs);
-    return commit(store, roomId, actorId, renewWork(item, actorId, { room: roomLike(registry, roomId), now: nowMs }), "renewed", nowMs);
+    return commit(store, roomId, actorId, renewWork(item, actorId, { leaseHours: legacyLeaseHours(data.expiresAt, nowMs),
+      room: roomLike(registry, roomId), now: nowMs }), "renewed", nowMs);
   }
   if (incoming.type === "claim.released") {
-    let item = registry.get(roomId, id);
-    if (!item || item.state === "unclaimed" || item.state === "done" || item.state === "closed") return item;
-    if (item.state === "in_progress" || item.state === "blocked") {
-      item = updateWork(item, actorId, { state: "claimed", note: "paused for release", now: nowMs, authority: item.owner !== actorId });
-      registry.set(roomId, item);
-    }
-    return commit(store, roomId, actorId, updateWork(item, actorId, {
-      state: "unclaimed", note: "released", now: nowMs, authority: item.owner !== actorId
-    }), "released", nowMs);
+    // Release-atomic like the REST route: pause + release share one
+    // transaction so the member's held-count drops atomically.
+    const tx = typeof registry.transaction === "function" ? registry.transaction : fn => fn();
+    return tx(() => {
+      let item = registry.get(roomId, id);
+      if (!item || item.state === "unclaimed" || item.state === "done" || item.state === "closed") return item;
+      if (item.state === "in_progress" || item.state === "blocked") {
+        item = updateWork(item, actorId, { state: "claimed", note: "paused for release", now: nowMs, authority: item.owner !== actorId });
+        registry.set(roomId, item);
+      }
+      return commit(store, roomId, actorId, updateWork(item, actorId, {
+        state: "unclaimed", note: "released", now: nowMs, authority: item.owner !== actorId
+      }), "released", nowMs);
+    });
   }
   if (incoming.type === "work.handoff_recorded") {
     claimBoard(store, roomId, actorId, id, data, nowMs);

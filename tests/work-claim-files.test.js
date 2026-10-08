@@ -36,7 +36,7 @@ test("claiming a file another active claim holds is refused with the holder, the
   const registry = createWorkClaimRegistry();
   await call(registry, "jill", "create", null, { id: "a", files: ["scripts/room", "./docs/x.md"] });
   const held = await call(registry, "jill", "claim", "a", {});
-  await call(registry, "claude", "create", null, { id: "b" });
+  await call(registry, "claude", "create", null, { id: "b", files: ["docs/other.md"] });
   const out = await call(registry, "claude", "claim", "b", { files: ["scripts/room", "tests/new.test.js"] });
 
   assert.equal(out.status, 409);
@@ -52,7 +52,7 @@ test("advisory true still claims and names the other holder in fileWarnings", as
   const registry = createWorkClaimRegistry();
   await call(registry, "jill", "create", null, { id: "a", files: ["scripts/room"] });
   await call(registry, "jill", "claim", "a", {});
-  await call(registry, "claude", "create", null, { id: "b" });
+  await call(registry, "claude", "create", null, { id: "b", files: ["docs/other.md"] });
   const out = await call(registry, "claude", "claim", "b", { files: ["scripts/room", "tests/new.test.js"], advisory: true });
 
   assert.equal(out.status, 200);
@@ -61,14 +61,14 @@ test("advisory true still claims and names the other holder in fileWarnings", as
   assert.deepEqual(out.value.fileWarnings, [{ file: "scripts/room", heldBy: [{ id: "a", owner: "jill" }] }]);
 });
 
-test("a lapsed lease frees the files, and a lease that never expires still blocks", async () => {
+test("a lapsed lease frees the files, and a live lease still blocks", async () => {
   const registry = createWorkClaimRegistry();
   await call(registry, "jill", "create", null, { id: "a", files: ["scripts/room"] });
-  await call(registry, "jill", "claim", "a", { leaseHours: null });
+  await call(registry, "jill", "claim", "a", { leaseHours: 2 });
   await call(registry, "claude", "create", null, { id: "b", files: ["scripts/room"] });
   const blocked = await call(registry, "claude", "claim", "b", {});
   assert.equal(blocked.status, 409);
-  assert.equal(blocked.value.leaseExpiresAt, null);
+  assert.equal(typeof blocked.value.leaseExpiresAt, "string");
   assert.equal(blocked.value.holder.owner, "jill");
 
   registry.set("room1", { ...registry.get("room1", "a"), leaseExpiresAt: "2020-01-01T00:00:00.000Z" });
@@ -82,7 +82,7 @@ test("the same owner cannot take a second live lease on the same file", async ()
   const registry = createWorkClaimRegistry();
   await call(registry, "jill", "create", null, { id: "a", files: ["server/a.mjs"] });
   await call(registry, "jill", "claim", "a", {});
-  await call(registry, "jill", "create", null, { id: "b" });
+  await call(registry, "jill", "create", null, { id: "b", files: ["docs/other.md"] });
   const out = await call(registry, "jill", "claim", "b", { files: ["server/a.mjs"] });
   assert.equal(out.status, 409);
   assert.equal(out.value.holder.claimId, "a");
@@ -92,7 +92,10 @@ test("the same owner cannot take a second live lease on the same file", async ()
 test("done claims and claims without files never produce warnings", async () => {
   const registry = createWorkClaimRegistry();
   registry.set("room1", { ...createWork({ id: "old", files: ["scripts/room"] }), state: "done", owner: "jill" });
-  await call(registry, "grokbot", "create", null, { id: "nofiles" });
+  // A file-less claim (planted directly — the route requires files at
+  // creation, so file-less rows only arrive via the config opt-out or
+  // legacy data) never conflicts and never warns.
+  registry.set("room1", { ...createWork({ id: "nofiles" }), files: Object.freeze([]) });
   await call(registry, "grokbot", "claim", "nofiles", {});
   await call(registry, "claude", "create", null, { id: "b", files: ["scripts/room"] });
   const out = await call(registry, "claude", "claim", "b", {});
@@ -106,17 +109,17 @@ test("different block labels on one file do not conflict, and a whole-file claim
   const held = await call(registry, "jill", "claim", "a", {});
   assert.equal(held.status, 200);
   assert.deepEqual(held.value.fileBlocks, { "scripts/room": "header" });
-  await call(registry, "claude", "create", null, { id: "b" });
+  await call(registry, "claude", "create", null, { id: "b", files: ["docs/other.md"] });
   const other = await call(registry, "claude", "claim", "b", { files: [{ path: "scripts/room", region: "footer" }] });
   assert.equal(other.status, 200);
   assert.equal(other.value.state, "claimed");
   assert.deepEqual(other.value.fileBlocks, { "scripts/room": "footer" });
-  await call(registry, "ada", "create", null, { id: "c" });
+  await call(registry, "ada", "create", null, { id: "c", files: ["docs/other.md"] });
   const same = await call(registry, "ada", "claim", "c", { files: [{ path: "scripts/room", block: "header" }] });
   assert.equal(same.status, 409);
   assert.equal(same.value.error.code, "file_lease_conflict");
   assert.deepEqual(same.value.files, ["scripts/room (header)"]);
-  await call(registry, "ada", "create", null, { id: "d" });
+  await call(registry, "ada", "create", null, { id: "d", files: ["docs/other.md"] });
   const whole = await call(registry, "ada", "claim", "d", { files: ["scripts/room"] });
   assert.equal(whole.status, 409);
   assert.equal(whole.value.error.code, "file_lease_conflict");
