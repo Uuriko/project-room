@@ -13,7 +13,16 @@ name: mime-fuzz
 # `timeout` converts that into a failed step instead of a stalled pipeline.
 # Failing inputs are uploaded as artifacts with their seed for reproduction.
 on:
+  # PRs run the sweep only when the parser or its harness changes (the seed
+  # corpus still runs in `npm test` on every PR). Main pushes and the nightly
+  # deep pass stay unfiltered, so a regression from any file is still caught.
   pull_request:
+    paths:
+      - "server/mime-message.mjs"
+      - "scripts/fuzz-mime.mjs"
+      - "tests/mime-fuzz*"
+      - "tests/fuzz/mime-corpus/**"
+      - ".github/workflows/mime-fuzz.yml"
   push:
     branches: [main]
   schedule:
@@ -22,6 +31,11 @@ on:
 
 permissions:
   contents: read
+
+# A newer push to the same PR cancels the older sweep.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   fuzz:
