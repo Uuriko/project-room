@@ -38,6 +38,7 @@ import {
   renewWork, roomWorkClaimConfig, closeWhenLive, isReceiptTag, ClaimError, REVIEW_POLICIES, CLAIM_KINDS,
   claimUpdatedAt, ACTIVE_CLAIM_STATES, MAX_LEASE_HOURS, STATES, summarizeClaimHistory, isHardWork,
   walkProvenance, flagPremiseInvalid, clearPremiseFlag, closeWork, isTerminalClaimState,
+  namespaceOf, isNamespace, DEFAULT_NAMESPACE, boardCapFor,
 } from "./work-claims.mjs";
 import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
@@ -65,6 +66,8 @@ import { isRoomArchived } from "../src/events.js";
 const CLAIM_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
 // Per-room registry: roomId -> { items: Map(id -> work item), config: { defaultLeaseHours?, reviewPolicy? } }.
+// Sharded boards: items carry their namespace; list() merges every board
+// unless a namespace is passed. Claim ids are room-unique across boards.
 export function createWorkClaimRegistry() {
   const rooms = new Map();
   const room = roomId => {
@@ -72,16 +75,35 @@ export function createWorkClaimRegistry() {
     if (!entry) { entry = { items: new Map(), config: {} }; rooms.set(roomId, entry); }
     return entry;
   };
+  const boardItems = (entry, namespace) => {
+    if (namespace === undefined || namespace === null) return [...entry.items.values()];
+    return [...entry.items.values()].filter(item => (item.namespace ?? "default") === namespace);
+  };
   return {
-    get(roomId, id) { return room(roomId).items.get(id) ?? null; },
+    get(roomId, id, namespace) {
+      const entry = room(roomId);
+      const item = entry.items.get(id) ?? null;
+      if (!item || namespace === undefined || namespace === null) return item;
+      return (item.namespace ?? "default") === namespace ? item : null;
+    },
     set(roomId, item) { room(roomId).items.set(item.id, item); return item; },
-    list(roomId) { return [...room(roomId).items.values()]; },
+    list(roomId, namespace) { return boardItems(room(roomId), namespace); },
+    namespaces(roomId) { return [...new Set(boardItems(room(roomId)).map(item => item.namespace ?? "default"))]; },
     has(roomId, id) { return room(roomId).items.has(id); },
+    delete(roomId, id, namespace) {
+      const entry = room(roomId);
+      const item = entry.items.get(id);
+      if (!item) return;
+      if (namespace !== undefined && namespace !== null && (item.namespace ?? "default") !== namespace) return;
+      entry.items.delete(id);
+    },
     configure(roomId, config) {
       const entry = room(roomId);
       if (config !== undefined && config !== null) {
         if (typeof config !== "object" || Array.isArray(config)) throw new Error("room work-claim config must be an object");
-        entry.config = { ...entry.config, ...config };
+        const boards = (config.boards === undefined || config.boards === null) ? entry.config.boards
+          : { ...(entry.config.boards ?? {}), ...config.boards };
+        entry.config = { ...entry.config, ...config, ...(boards === undefined ? {} : { boards }) };
       }
       return roomWorkClaimConfig({ workClaims: entry.config });
     },
@@ -139,7 +161,7 @@ const WORK_CLAIM_PROFILES = Object.freeze({
 });
 const BOARD_LIMIT_DEFAULT = 50;
 const BOARD_LIMIT_MAX = 200;
-const BOARD_QUERY = new Set(["queue", "auth", "limit", "cursor", "state", "view"]);
+const BOARD_QUERY = new Set(["queue", "auth", "limit", "cursor", "state", "view", "namespace"]);
 
 // QA7-13: compact per-claim projection for ?view=summary — the fields a
 // board overview needs (id, title, state, owner, lease expiry) without the
@@ -153,6 +175,7 @@ function summarizeBoardClaim(item) {
     state: item.state,
     owner: item.owner ?? null,
     leaseExpiresAt: item.leaseExpiresAt ?? null,
+    namespace: item.namespace ?? DEFAULT_NAMESPACE,
   };
   if (item.untrusted === true) summary.untrusted = true;
   return summary;
@@ -671,18 +694,43 @@ function refuseRoomGuideOffStarter(registry, roomId, auth, workClaimId, method, 
 }
 
 // One decoded room list per request: the sweep, live-claim closing and the
-// list page share it until a write invalidates it.
+// list page share it until a write invalidates it. The cache key includes
+// the namespace: one board's list must never serve another's.
 function memoizeList(registry) {
   const cache = new Map();
+  const key = (roomId, namespace) => `${roomId}\u0000${namespace ?? ""}`;
+  const invalidate = roomId => {
+    for (const k of cache.keys()) if (k === roomId || k.startsWith(`${roomId}\u0000`)) cache.delete(k);
+  };
   return Object.assign(Object.create(registry), {
-    list(roomId) {
-      if (!cache.has(roomId)) cache.set(roomId, registry.list(roomId));
-      return cache.get(roomId);
+    list(roomId, namespace) {
+      const k = key(roomId, namespace);
+      if (!cache.has(k)) cache.set(k, registry.list(roomId, namespace));
+      return cache.get(k);
     },
-    set(roomId, item) { cache.delete(roomId); return registry.set(roomId, item); },
-    delete(roomId, id) { cache.delete(roomId); return registry.delete(roomId, id); },
+    get(roomId, id, namespace) { return registry.get(roomId, id, namespace); },
+    set(roomId, item) { invalidate(roomId); return registry.set(roomId, item); },
+    delete(roomId, id, namespace) { invalidate(roomId); return registry.delete(roomId, id, namespace); },
   });
 }
+
+// ?namespace= on board reads: absent means the default board (backward
+// compatible — un-namespaced clients see the default board exactly as
+// today); "*" means the read-merge across every board.
+const boardNamespaceOfQuery = (reject, params) => {
+  if (!params.has("namespace")) return { namespace: DEFAULT_NAMESPACE, global: false };
+  const raw = params.get("namespace");
+  if (raw === "*") return { namespace: null, global: true };
+  try { return { namespace: namespaceOf(raw), global: false }; }
+  catch { invalidInput(reject, "namespace as 1..64 characters matching [A-Za-z0-9_-], or *"); }
+};
+const claimNamespaceOfQuery = (reject, params) => {
+  if (!params.has("namespace")) return undefined;
+  const raw = params.get("namespace");
+  if (raw === "*") return undefined; // claim-scoped routes: search all boards
+  try { return namespaceOf(raw); }
+  catch { invalidInput(reject, "namespace as 1..64 characters matching [A-Za-z0-9_-]"); }
+};
 
 function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRoute, workClaimId, helpers, registry: sourceRegistry, pullBatch = { results: [], rateLimitedUntil: null, skipped: false }, deployStatus = null }) {
   const { json, reject, body } = helpers;
@@ -764,8 +812,12 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     invalidInput(reject, `leaseHours greater than 0 and at most ${MAX_LEASE_HOURS}; null is only for the room owner or manage_claims`);
   };
 
-  const load = id => {
-    const item = registry.get(roomId, id);
+  // Claim-scoped routes accept ?namespace=: the claim is looked up on that
+  // board. Without it, the id resolves across boards (default first) —
+  // claim ids are room-unique, so this stays unambiguous.
+  const queryNamespace = claimNamespaceOfQuery(reject, url?.searchParams ?? new URLSearchParams());
+  const load = (id, namespace = queryNamespace) => {
+    const item = registry.get(roomId, id, namespace);
     if (!item) reject(404, "work_claim_not_found", `No work claim "${id}" in this room`);
     return item;
   };
@@ -787,8 +839,29 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "list" && req.method === "GET") {
     closeLiveClaims();
-    return json(res, 200, { ...buildWorkClaimPage(registry.list(roomId), roomId, caller,
-      url?.searchParams, nowMs), swept: sweptIds });
+    // ?namespace= selects one board (default when absent — backward
+    // compatible); ?namespace=* read-merges every board. The merge is a
+    // read-only view, never a contention point.
+    const board = boardNamespaceOfQuery(reject, url?.searchParams ?? new URLSearchParams());
+    const items = board.global ? registry.list(roomId) : registry.list(roomId, board.namespace);
+    return json(res, 200, { ...buildWorkClaimPage(items, roomId, caller,
+      url?.searchParams, nowMs), swept: sweptIds, namespace: board.global ? "*" : board.namespace });
+  }
+  if (workClaimRoute === "boards" && req.method === "GET") {
+    // Per-board census: every board holding claims plus the default board.
+    // Read-only; never a contention point.
+    closeLiveClaims();
+    const seen = new Set([DEFAULT_NAMESPACE]);
+    for (const item of registry.list(roomId)) seen.add(item.namespace ?? DEFAULT_NAMESPACE);
+    const namespaces = typeof registry.namespaces === "function"
+      ? [...new Set([...seen, ...registry.namespaces(roomId)])]
+      : [...seen];
+    const boards = namespaces.map(namespace => {
+      const items = registry.list(roomId, namespace);
+      const open = items.filter(item => !isTerminalClaimState(item.state)).length;
+      return { namespace, open, total: items.length, cap: boardCapFor(config, namespace) };
+    }).sort((a, b) => (a.namespace < b.namespace ? -1 : a.namespace > b.namespace ? 1 : 0));
+    return json(res, 200, { roomId, boards });
   }
   if (workClaimRoute === "receipts" && req.method === "GET") {
     // RC-2026-09-24-205: receipts search. The room block already rejected
@@ -879,17 +952,26 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "create" && req.method === "POST") {
     const raw = body(req);
-    if (!shape(raw, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch", "kind", "revision", "assignee", "squadId"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?, kind?, revision?, assignee?, squadId?}");
+    if (!shape(raw, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch", "kind", "revision", "assignee", "squadId", "namespace"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?, kind?, revision?, assignee?, squadId?, namespace?}");
     requireWriter();
     requireEventBudget();
     const id = claimIdOf(reject, raw.id);
+    // Sharded boards: the claim lands on the named board (default when
+    // absent). The per-board cap is independent; the per-member cap stays
+    // room-wide so shard-hopping cannot evade it.
+    let boardNs = DEFAULT_NAMESPACE;
+    if (raw.namespace !== undefined) {
+      if (!isNamespace(raw.namespace)) invalidInput(reject, "namespace as 1..64 characters matching [A-Za-z0-9_-]");
+      boardNs = raw.namespace;
+    }
     const data = clientPullRequestInput(reject, boardTextFields(reject, raw, { title: {}, note: { multiline: true } }));
     assertDependsOnKnown(reject, data, { selfId: id, has: other => registry.has(roomId, other) });
     if (registry.has(roomId, id)) reject(409, "work_claim_exists", `Work claim "${id}" already exists in this room`);
-    const open = registry.list(roomId).filter(item => !isTerminalClaimState(item.state)).length;
-    if (open >= config.maxOpenClaims) {
+    const boardCap = boardCapFor(config, boardNs);
+    const open = registry.list(roomId, boardNs).filter(item => !isTerminalClaimState(item.state)).length;
+    if (open >= boardCap) {
       refuseCap("work_board_full",
-        `This room already has ${config.maxOpenClaims} open claims. Close stale claims (POST …/work-claims/{id}/close or /cancel) before opening another.`,
+        `Board "${boardNs}" already has ${boardCap} open claims. Close stale claims (POST …/work-claims/{id}/close or /cancel) before opening another.`,
         "Close stale claims (POST /api/rooms/{roomId}/work-claims/{claimId}/close or /cancel) before opening another.");
     }
     if (data.reviewPolicy !== undefined && !REVIEW_POLICIES.includes(data.reviewPolicy)) invalidInput(reject, `reviewPolicy one of ${REVIEW_POLICIES.join(", ")}`);
@@ -910,7 +992,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // Pair rule: hard work defaults to a distinct reviewer, so it cannot close
     // without a non-owner APPROVE. An explicit reviewPolicy still wins.
     const reviewPolicy = data.reviewPolicy ?? (isHardWork({ tags: data.tags }) ? "distinct_member" : undefined);
-    let item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy, note: data.note, tags: data.tags, files: data.files, dependsOn: data.dependsOn, parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs, pullRequest: data.pullRequest, pullRequests: data.pullRequests, repo: data.repo, branch: data.branch, kind: data.kind, revision: data.revision, squadId: data.squadId }, { now: nowMs, agentId: caller }));
+    let item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy, note: data.note, tags: data.tags, files: data.files, dependsOn: data.dependsOn, parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs, pullRequest: data.pullRequest, pullRequests: data.pullRequests, repo: data.repo, branch: data.branch, kind: data.kind, revision: data.revision, squadId: data.squadId, namespace: boardNs }, { now: nowMs, agentId: caller }));
     if (assignee) {
       const held = registry.list(roomId).filter(entry => entry.owner === assignee && ACTIVE_CLAIM_STATES.includes(entry.state)).length;
       if (held >= config.maxMemberOpenClaims) {
@@ -1245,14 +1327,33 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   if (workClaimRoute === "config" && (req.method === "GET" || req.method === "POST")) {
     if (req.method === "GET") return json(res, 200, { roomId, ...config });
     const data = body(req);
-    if (!shape(data, { required: ["maxMemberOpenClaims"] })) invalidInput(reject, "{maxMemberOpenClaims}");
+    if (!shape(data, { optional: ["maxMemberOpenClaims", "maxOpenClaims", "boards"] })) invalidInput(reject, "{maxMemberOpenClaims?, maxOpenClaims?, boards?}");
     const ownerId = typeof access.authority?.ownerId === "string" && access.authority.ownerId.length > 0
       ? access.authority.ownerId : null;
-    if (ownerId !== caller) reject(403, "work_claims_not_permitted", "Only the room owner can set the per-member claim cap.");
-    if (!Number.isSafeInteger(data.maxMemberOpenClaims) || data.maxMemberOpenClaims < 1 || data.maxMemberOpenClaims > 10000) {
-      invalidInput(reject, "maxMemberOpenClaims as an integer 1..10000");
+    if (ownerId !== caller) reject(403, "work_claims_not_permitted", "Only the room owner can set claim caps.");
+    const capOf = (field, value) => {
+      if (!Number.isSafeInteger(value) || value < 1 || value > 10000) invalidInput(reject, `${field} as an integer 1..10000`);
+      return value;
+    };
+    const patch = {};
+    if (data.maxMemberOpenClaims !== undefined) patch.maxMemberOpenClaims = capOf("maxMemberOpenClaims", data.maxMemberOpenClaims);
+    if (data.maxOpenClaims !== undefined) patch.maxOpenClaims = capOf("maxOpenClaims", data.maxOpenClaims);
+    if (data.boards !== undefined) {
+      if (data.boards === null || typeof data.boards !== "object" || Array.isArray(data.boards)) {
+        invalidInput(reject, "boards as a map of namespace to { maxOpenClaims }");
+      }
+      const boards = {};
+      for (const [ns, entry] of Object.entries(data.boards)) {
+        if (!isNamespace(ns)) invalidInput(reject, "board namespace as 1..64 characters matching [A-Za-z0-9_-]");
+        if (entry === null || typeof entry !== "object" || Array.isArray(entry) || entry.maxOpenClaims === undefined) {
+          invalidInput(reject, "each board entry as { maxOpenClaims }");
+        }
+        boards[ns] = { maxOpenClaims: capOf(`boards.${ns}.maxOpenClaims`, entry.maxOpenClaims) };
+      }
+      patch.boards = boards;
     }
-    const saved = registry.configure(roomId, { maxMemberOpenClaims: data.maxMemberOpenClaims });
+    if (Object.keys(patch).length === 0) invalidInput(reject, "at least one of maxMemberOpenClaims, maxOpenClaims, boards");
+    const saved = registry.configure(roomId, patch);
     return json(res, 200, { roomId, ...saved });
   }
   if (workClaimRoute === "provenance" && (req.method === "GET" || req.method === "HEAD")) {

@@ -3455,6 +3455,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const workClaimsDuplicatesMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/duplicates$/.exec(url.pathname);
       // Owner cap for open claims per member. Literal segment before {id}.
       const workClaimsConfigMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/config$/.exec(url.pathname);
+      // Sharded boards census. Literal segment before {id}.
+      const workClaimsBoardsMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claim-boards$/.exec(url.pathname);
       const workClaimItemMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})$/.exec(url.pathname);
       const workClaimClaimMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/claim$/.exec(url.pathname);
       const workClaimUpdateMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/update$/.exec(url.pathname);
@@ -3466,7 +3468,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // Provenance walk + premise-invalid rollback (orch-provenance-rollback).
       // Literal segments are matched before the {id} template so they are
       // never mistaken for a claim id.
-      const workClaimMatch = workClaimsMatch ?? workClaimsStatusMatch ?? workClaimsSweepMatch ?? workClaimsDuplicatesMatch ?? workClaimsConfigMatch ?? workClaimClaimMatch
+      const workClaimMatch = workClaimsMatch ?? workClaimsStatusMatch ?? workClaimsSweepMatch ?? workClaimsDuplicatesMatch ?? workClaimsConfigMatch ?? workClaimsBoardsMatch ?? workClaimClaimMatch
         ?? workClaimUpdateMatch ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch
         ?? workClaimItemMatch
         ?? workClaimReceiptsMatch;
@@ -3743,6 +3745,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           : workClaimsStatusMatch ? "status"
           : workClaimsDuplicatesMatch ? "duplicates"
           : workClaimsConfigMatch ? "config"
+          : workClaimsBoardsMatch ? "boards"
           : workClaimsMatch ? (req.method === "GET" ? "list" : "create")
           : workClaimReceiptsMatch ? "receipts"
           : workClaimItemMatch ? "read"

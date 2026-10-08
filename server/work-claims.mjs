@@ -285,6 +285,19 @@ const DEFAULT_LEASE_HOURS = 24;
 const MAX_LEASE_HOURS = 168;
 export const DEFAULT_MAX_OPEN_CLAIMS = 200;
 export const DEFAULT_MAX_MEMBER_OPEN_CLAIMS = 20;
+// Sharded claim boards (wave300/sharded-claim-boards): a namespace partitions
+// a room's claims into an independent board with its own open-claim cap.
+// Claim ids stay room-unique across namespaces so the global read-merge,
+// provenance walks and dependsOn references stay unambiguous.
+export const DEFAULT_NAMESPACE = "default";
+const NAMESPACE_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+export function namespaceOf(value) {
+  if (value === undefined || value === null) return DEFAULT_NAMESPACE;
+  check(typeof value === "string" && NAMESPACE_PATTERN.test(value),
+    "namespace must be 1..64 characters matching [A-Za-z0-9_-]");
+  return value;
+}
+export const isNamespace = value => typeof value === "string" && NAMESPACE_PATTERN.test(value);
 const CONFIG_CAP_CEILING = 10000;
 const DEFAULT_REVIEW_POLICY = "self_attested";
 const ACTIVE_CLAIM_STATES = ["claimed", "in_progress", "blocked"];
@@ -437,6 +450,7 @@ const workOf = value => {
     chain: chainOf(value.chain), supersededBy: optionalId(value.supersededBy, "supersededBy"),
     workItemId: optionalId(value.workItemId, "workItemId"),
     squadId: optionalId(value.squadId, "squadId"), // plan-squads: work offer targeted at a squad
+    namespace: namespaceOf(value.namespace),
     kind, revision, ci: ciOf(value.ci), reviews: reviewsOf(value.reviews) };
 };
 const agentOf = value => idOf(value, "agent id", 128);
@@ -487,8 +501,20 @@ const positiveCap = (value, fallback) =>
   Number.isSafeInteger(value) && value >= 1 && value <= CONFIG_CAP_CEILING ? value : fallback;
 // Room config hook: resolve per-room work-claim defaults from an optional
 // room object. Rooms opt in by carrying workClaims = { defaultLeaseHours,
-// reviewPolicy, maxOpenClaims, maxMemberOpenClaims }; anything missing or
-// invalid falls back to the defaults.
+// reviewPolicy, maxOpenClaims, maxMemberOpenClaims, boards }; anything missing
+// or invalid falls back to the defaults. boards maps a namespace to
+// { maxOpenClaims } — a per-board cap overriding the room-level maxOpenClaims.
+const boardsOf = raw => {
+  if (raw === undefined || raw === null) return Object.freeze({});
+  check(typeof raw === "object" && !Array.isArray(raw), "boards must map namespaces to { maxOpenClaims }");
+  const out = {};
+  for (const [ns, entry] of Object.entries(raw)) {
+    check(isNamespace(ns), "board namespace must be 1..64 characters matching [A-Za-z0-9_-]");
+    check(entry !== null && typeof entry === "object" && !Array.isArray(entry), "each board entry must be an object");
+    out[ns] = Object.freeze({ maxOpenClaims: positiveCap(entry.maxOpenClaims, DEFAULT_MAX_OPEN_CLAIMS) });
+  }
+  return Object.freeze(out);
+};
 export function roomWorkClaimConfig(room) {
   const raw = room?.workClaims ?? {};
   const defaultLeaseHours = typeof raw.defaultLeaseHours === "number" && raw.defaultLeaseHours > 0 && raw.defaultLeaseHours <= MAX_LEASE_HOURS
@@ -499,8 +525,14 @@ export function roomWorkClaimConfig(room) {
     reviewPolicy,
     maxOpenClaims: positiveCap(raw.maxOpenClaims, DEFAULT_MAX_OPEN_CLAIMS),
     maxMemberOpenClaims: positiveCap(raw.maxMemberOpenClaims, DEFAULT_MAX_MEMBER_OPEN_CLAIMS),
+    boards: boardsOf(raw.boards),
   });
 }
+// The open-claim cap for one board: its own entry wins, else the room-level
+// maxOpenClaims. The per-member cap is deliberately room-wide (not per
+// board) so shard-hopping cannot evade it.
+export const boardCapFor = (config, namespace) =>
+  config?.boards?.[namespace]?.maxOpenClaims ?? config?.maxOpenClaims ?? DEFAULT_MAX_OPEN_CLAIMS;
 const leaseHoursOf = value => {
   if (value === null || value === undefined) return value; // null = explicit opt-out of leases
   check(typeof value === "number" && Number.isFinite(value) && value > 0 && value <= MAX_LEASE_HOURS,
@@ -519,7 +551,7 @@ const pullList = (pullRequest, pullRequests) => {
 // claiming an unknown id is refused so claims always reference real work.
 // `tags` may be supplied up front (free-form, recorded on the item); blobs
 // are evidence pointers and are only recorded on the done transition.
-export function createWork({ id, title, reviewPolicy, note, tags, files, dependsOn, parentClaimId, evidenceRefs, pullRequest, pullRequests, repo, branch, fileBlocks, workItemId, kind, revision, squadId } = {}, { now, agentId } = {}) {
+export function createWork({ id, title, reviewPolicy, note, tags, files, dependsOn, parentClaimId, evidenceRefs, pullRequest, pullRequests, repo, branch, fileBlocks, workItemId, kind, revision, squadId, namespace } = {}, { now, agentId } = {}) {
   const atMs = nowMsOf(now);
   idOf(id, "work id", 256);
   if (title !== undefined) check(typeof title === "string" && title.length > 0 && title.length <= 512, "title must be 1..512 characters");
@@ -549,7 +581,8 @@ export function createWork({ id, title, reviewPolicy, note, tags, files, depends
     repo: repoOf(repo), branch: branchOf(branch),
     chain: Object.freeze([]), supersededBy: null, workItemId: optionalId(workItemId, "workItemId"),
     squadId: optionalId(squadId, "squadId"), // plan-squads: work offer targeted at a squad
-    kind: claimKind, revision: claimRevision, ci: null, reviews: Object.freeze([]) };
+    kind: claimKind, revision: claimRevision, ci: null, reviews: Object.freeze([]),
+    namespace: namespaceOf(namespace) };
   // The creating member when the route knows it; "system" for internal creates.
   return withHistory(item, atMs, agentId === undefined ? "system" : agentOf(agentId), "created", note);
 }
