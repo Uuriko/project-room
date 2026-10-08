@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { exportNdjsonStream, exportNdjsonText, operatorExportResponse, replayNdjson, sanitizeCell, REPLAY_SKIPPED_TABLES } from "../server/room-export.mjs";
+import { exportNdjsonLines, exportNdjsonStream, exportNdjsonText, operatorExportResponse, replayNdjson, sanitizeCell, REPLAY_SKIPPED_TABLES } from "../server/room-export.mjs";
 import { backupTarget, writeDailyBackup, writeKvBackup } from "../cloudflare/room-backup.mjs";
 import { assembleKvBackup, summarizeRoom } from "../scripts/restore-room-backup.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
@@ -281,6 +281,84 @@ test("audit report restores a store whose stored projection drifted from the red
   assert.match(report.audit.error, /reconciliation/);
   assert.equal(replayNdjson(exportNdjsonText(openStore(t, 1).store.db), join(directory, "clean", "room.sqlite"), { audit: "report" }).audit.ok, true);
   assert.throws(() => replayNdjson(ndjson, join(directory, "bad", "room.sqlite"), { audit: "loose" }), /strict or report/);
+});
+
+// Drives the export generator line by line, exactly like the Durable Object's
+// stream pulls, so a write can land between two tables' scans. `interleave`
+// runs once the events table has been fully dumped but before the next table
+// is scanned. Returns the reassembled NDJSON of the torn export.
+async function tornExportNdjson(t, interleave) {
+  const directory = mkdtempSync(join(tmpdir(), "room-backup-torn-"));
+  const store = new RoomStore(join(directory, "live.sqlite"));
+  t.after(() => { try { store.close(); } catch { /* closed */ } rmSync(directory, { recursive: true, force: true }); });
+  store.initialize(initialRoom());
+  store.createAccount("joiner", "repro");
+  const gen = exportNdjsonLines(store.db);
+  const lines = [];
+  const first = await gen.next();
+  lines.push(first.value);
+  const watermark = JSON.parse(first.value);
+  let eventsSeen = 0;
+  for (;;) {
+    const { value, done } = await gen.next();
+    if (done) break;
+    lines.push(value);
+    if (JSON.parse(value).table === "events" && ++eventsSeen === watermark.events) await interleave(store);
+  }
+  store.close();
+  return { directory, ndjson: lines.join("") };
+}
+
+test("a backup torn by a mid-stream write fails replay loudly instead of verifying", async t => {
+  const { directory, ndjson } = await tornExportNdjson(t, async store => {
+    // A member joins after the events table was scanned: the join event is
+    // missed by the dump, but the member_accounts row is captured. The
+    // watermark's event count cannot see this tear.
+    const seq = store.db.prepare("SELECT sequence FROM rooms WHERE id='commons'").get().sequence + 1;
+    store.db.prepare("INSERT INTO events (room_id, sequence, id, body) VALUES ('commons', ?, ?, ?)")
+      .run(seq, crypto.randomUUID(), JSON.stringify({ id: crypto.randomUUID(), type: T.MESSAGE_POSTED, roomId: "commons", actorId: "owner", at: new Date().toISOString(), data: { messageId: "m-phantom", body: "phantom" } }));
+    store.db.prepare("UPDATE rooms SET sequence=? WHERE id='commons'").run(seq);
+    store.db.prepare("INSERT INTO member_accounts (room_id, member_id, account_id, origin) VALUES ('commons', 'phantom', 'joiner', 'repro')").run();
+  });
+  assert.throws(() => replayNdjson(ndjson, join(directory, "restore", "room.sqlite")), /torn/);
+});
+
+test("a same-count tear (delete plus insert mid-stream) fails on the trailer hash", async t => {
+  const { directory, ndjson } = await tornExportNdjson(t, async store => {
+    // Net-zero on the event count: one childless bootstrap event is deleted
+    // and a new one inserted. The counts match; the row sets do not.
+    const victim = store.db.prepare("SELECT id FROM events WHERE room_id='commons' ORDER BY sequence LIMIT 1").get().id;
+    store.db.prepare("DELETE FROM events WHERE id=?").run(victim);
+    const seq = store.db.prepare("SELECT COALESCE(MAX(sequence), 0) AS m FROM events WHERE room_id='commons'").get().m + 1;
+    store.db.prepare("INSERT INTO events (room_id, sequence, id, body) VALUES ('commons', ?, ?, ?)")
+      .run(seq, crypto.randomUUID(), JSON.stringify({ id: crypto.randomUUID(), type: T.MESSAGE_POSTED, roomId: "commons", actorId: "owner", at: new Date().toISOString(), data: { messageId: "m-swap", body: "swapped" } }));
+  });
+  assert.throws(() => replayNdjson(ndjson, join(directory, "restore", "room.sqlite")), /torn/);
+});
+
+test("writeKvBackup refuses a manifest for a torn export", async t => {
+  const { store } = openStore(t, 3);
+  const text = exportNdjsonText(store.db);
+  const torn = text.replace(/\{"kind":"trailer"[^\n]*\}/, trailer => {
+    const record = JSON.parse(trailer);
+    return JSON.stringify({ ...record, events: record.events + 1 });
+  });
+  assert.notEqual(torn, text, "the fixture tear must change the export");
+  const kv = fakeKv();
+  await assert.rejects(() => writeKvBackup(kv, "room-backups/2026-10-08.ndjson", torn), /torn/);
+  assert.equal(kv.map.has("room-backups/2026-10-08.ndjson"), false, "no manifest is written for a torn export");
+});
+
+test("an untorn export carries a verified trailer; older trailer-less exports still replay", async t => {
+  const { directory, store } = openStore(t, 3);
+  const text = exportNdjsonText(store.db);
+  const good = replayNdjson(text, join(directory, "restore-new", "room.sqlite"));
+  assert.equal(good.verified, true);
+  assert.equal(good.trailer, "verified");
+  const old = text.split("\n").filter(line => !line.includes('"kind":"trailer"')).join("\n");
+  const legacy = replayNdjson(old, join(directory, "restore-old", "room.sqlite"));
+  assert.equal(legacy.verified, true);
+  assert.equal(legacy.trailer, "absent");
 });
 
 test("Durable Object BLOB cells (bare SharedArrayBuffer) export as base64, not {}", () => {
