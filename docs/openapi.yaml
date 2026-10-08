@@ -5733,6 +5733,7 @@ paths:
         '422': { description: invalid_claim_input }
   /api/rooms/{roomId}/work-claims/{claimId}/succeed:
     post:
+      x-room-permission: member
       summary: Succeed a dead holder's work claim
       description: |
         Unprivileged succession fast path: a peer takes over a claim whose
