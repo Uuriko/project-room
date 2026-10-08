@@ -248,19 +248,9 @@ const refuseSweep = () => refuseBoardAction(
   "Sweeping the Board needs a contribute, review, or collaborate profile, claim management, or the room owner.",
   "Ask the room owner or a claim manager to sweep the Board.");
 
-function refuseWorkClaims() {
-  const message = "Creating, claiming, renewing, or updating work claims needs a contribute, review, or collaborate profile.";
-  const hint = "Ask the room owner for a contribute invite.";
-  const error = new Error(message);
-  error.status = 403;
-  error.code = "work_claims_not_permitted";
-  error.body = {
-    error: { code: "work_claims_not_permitted", message },
-    hint,
-    next: [{ command: hint }],
-  };
-  throw error;
-}
+const refuseWorkClaims = () => refuseBoardAction(
+  "Creating, claiming, renewing, or updating work claims needs a contribute, review, or collaborate profile.",
+  "Ask the room owner for a contribute invite.");
 
 function refuseCap(code, message, hint) {
   const error = new Error(message);
@@ -299,6 +289,19 @@ function compareBoard(a, b) {
   return 0;
 }
 
+// Shared tail of the two page helpers: slice the window off the list and
+// stamp the opaque cursor for the next page (null when nothing follows).
+const finishPage = (list, start, limit, cursorOf) => {
+  const claims = list.slice(start, start + limit);
+  const hasMore = start + limit < list.length;
+  const last = claims[claims.length - 1];
+  return {
+    claims,
+    hasMore,
+    nextCursor: hasMore && last ? boardCursorEncode(cursorOf(last)) : null,
+  };
+};
+
 function pageBoard(items, limit, cursor, state = null) {
   const sorted = [...items].sort(compareBoard);
   let start = 0;
@@ -309,14 +312,7 @@ function pageBoard(items, limit, cursor, state = null) {
     });
     if (start < 0) start = sorted.length;
   }
-  const claims = sorted.slice(start, start + limit);
-  const hasMore = start + limit < sorted.length;
-  const last = claims[claims.length - 1];
-  return {
-    claims,
-    hasMore,
-    nextCursor: hasMore && last ? boardCursorEncode({ u: claimUpdatedAt(last), i: last.id, s: state }) : null,
-  };
+  return finishPage(sorted, start, limit, last => ({ u: claimUpdatedAt(last), i: last.id, s: state }));
 }
 
 function pageReady(items, limit, cursor) {
@@ -325,21 +321,14 @@ function pageReady(items, limit, cursor) {
     start = items.findIndex(item => item.id > cursor.i);
     if (start < 0) start = items.length;
   }
-  const claims = items.slice(start, start + limit);
-  const hasMore = start + limit < items.length;
-  const last = claims[claims.length - 1];
-  return {
-    claims,
-    hasMore,
-    nextCursor: hasMore && last ? boardCursorEncode({ q: "ready", i: last.id }) : null,
-  };
+  return finishPage(items, start, limit, last => ({ q: "ready", i: last.id }));
 }
 
 // Shared stored-state projection. No registry/store access or lifecycle effects:
 // ordinary GET calls this after housekeeping; derived reads call it directly.
 // Pages are live, not a snapshot fenced by the legacy room event sequence.
 export function buildWorkClaimPage(items, roomId, viewerId, query = new URLSearchParams(), nowMs = Date.now()) {
-  const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
+  const reject = serviceReject;
   const params = query ?? new URLSearchParams();
   for (const key of params.keys()) {
     if (!BOARD_QUERY.has(key) || params.getAll(key).length !== 1) {
@@ -483,6 +472,25 @@ const cursorDecode = (reject, value) => {
   reject(400, "bad_cursor", "cursor must be the opaque nextCursor from a prior receipts response");
 };
 
+const serviceReject = (status, code, message) => { throw new ServiceError(status, code, message); };
+
+// MCP mutations re-verify the caller inside the registry transaction. The
+// unauthenticated / identity-changed / API-key scope / guest checks are
+// identical for closeWorkClaim and linkWorkClaimPullRequest.
+const callerOf = (reject, auth, reauthorize) => {
+  const current = reauthorize ? reauthorize() : auth;
+  if (!current?.member?.id) reject(401, "unauthenticated", "Room authentication is required");
+  if (current.member.id !== auth?.member?.id) reject(403, "access_denied", "The acting identity changed");
+  if (current.kind === "api-key" && !(current.apiKeyScopes ?? []).some(scope =>
+    scope === "rooms:write" || scope.endsWith(":*") && "rooms:write".startsWith(scope.slice(0, -1)))) {
+    reject(403, "insufficient_scope", "API key lacks the rooms:write scope");
+  }
+  if (isGuestAgentMemberId(current.member.id)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
+  return current;
+};
+
+const transact = (registry, run) => registry.transaction ? registry.transaction(run) : run();
+
 // REST and hosted MCP share this owner-only mutation, including a fresh
 // authorization and claim read inside the registry transaction. This does not
 // sweep or settle other work, renew the lease, or synchronously contact GitHub.
@@ -500,16 +508,9 @@ function retire(reject, item, caller, verb, reason, authority, nowMs) {
 // MCP room_close_work_claim: the same close/cancel as the REST routes, in one
 // transaction, with the same access checks as room_link_work_claim_pr.
 export function closeWorkClaim({ store, roomId, auth, claimId, verb = "close", reason, registry = store.workClaims, reauthorize }) {
-  const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
+  const reject = serviceReject;
   const run = () => {
-    const current = reauthorize ? reauthorize() : auth;
-    if (!current?.member?.id) reject(401, "unauthenticated", "Room authentication is required");
-    if (current.member.id !== auth?.member?.id) reject(403, "access_denied", "The acting identity changed");
-    if (current.kind === "api-key" && !(current.apiKeyScopes ?? []).some(scope =>
-      scope === "rooms:write" || scope.endsWith(":*") && "rooms:write".startsWith(scope.slice(0, -1)))) {
-      reject(403, "insufficient_scope", "API key lacks the rooms:write scope");
-    }
-    if (isGuestAgentMemberId(current.member.id)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
+    const current = callerOf(reject, auth, reauthorize);
     if (verb !== "close" && verb !== "cancel") reject(422, "invalid_claim_input", "verb must be close or cancel");
     const access = resolveWorkClaimAccess(store, roomId, current);
     if (!mayWriteWorkClaims(access)) refuseWorkClaims();
@@ -529,20 +530,13 @@ export function closeWorkClaim({ store, roomId, auth, claimId, verb = "close", r
       reason: verb === "cancel" ? "cancelled" : "closed", atMs: now });
     return closed;
   };
-  return registry.transaction ? registry.transaction(run) : run();
+  return transact(registry, run);
 }
 
 export function linkWorkClaimPullRequest({ store, roomId, auth, claimId, data, registry = store.workClaims, reauthorize }) {
-  const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
+  const reject = serviceReject;
   const run = () => {
-    const current = reauthorize ? reauthorize() : auth;
-    if (!current?.member?.id) reject(401, "unauthenticated", "Room authentication is required");
-    if (current.member.id !== auth?.member?.id) reject(403, "access_denied", "The acting identity changed");
-    if (current.kind === "api-key" && !(current.apiKeyScopes ?? []).some(scope =>
-      scope === "rooms:write" || scope.endsWith(":*") && "rooms:write".startsWith(scope.slice(0, -1)))) {
-      reject(403, "insufficient_scope", "API key lacks the rooms:write scope");
-    }
-    if (isGuestAgentMemberId(current.member.id)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
+    const current = callerOf(reject, auth, reauthorize);
     const access = resolveWorkClaimAccess(store, roomId, current);
     if (!mayWriteWorkClaims(access)) refuseWorkClaims();
     enforceAutonomyTierForAction({ db: store.db, roomId, state: { room: { ownerId: access.ownerId } },
@@ -578,7 +572,7 @@ export function linkWorkClaimPullRequest({ store, roomId, auth, claimId, data, r
     emitWorkClaimEvent(store, roomId, { actorId: current.member.id, item: linked, action: "state_changed", atMs: now });
     return linked;
   };
-  return registry.transaction ? registry.transaction(run) : run();
+  return transact(registry, run);
 }
 
 // Consume the body before opening SQLite's synchronous transaction. The read,
@@ -606,17 +600,17 @@ export async function handleWorkClaims(options) {
   // lookup. An empty room, or a sweep with nothing due, does not call fetch.
   let pullBatch = { results: [], rateLimitedUntil: null, skipped: false };
   let deployStatus = null;
+  const githubTokenOf = () => options.githubToken !== undefined
+    ? options.githubToken
+    : (process.env.GITHUB_TOKEN || process.env.GH_TOKEN || null);
   if (options.workClaimRoute === "status" && req.method === "GET") {
-    const credential = options.githubToken !== undefined
-      ? options.githubToken
-      : (process.env.GITHUB_TOKEN || process.env.GH_TOKEN || null);
     // SEC-2 / Q3-A: every member reads the shared cached status; only a
     // Board writer's ?refresh=1 skips the 60 s cache.
     const access = resolveWorkClaimAccess(options.store, options.roomId, options.auth);
     const force = options.url?.searchParams?.get("refresh") === "1" && maySweepWorkClaims(access);
     deployStatus = await readBoardDeployStatus(options.store, {
       fetchImpl: options.fetchPullRequest ?? fetch,
-      token: credential || null,
+      token: githubTokenOf() || null,
       nowMs: Date.now(),
       force,
     });
@@ -629,25 +623,20 @@ export async function handleWorkClaims(options) {
   if (options.workClaimRoute === "sweep") {
     const nowMs = Date.now();
     const budget = readClaimPullBudget(options.store);
-    if (budget > nowMs) {
-      pullBatch = { results: [], rateLimitedUntil: budget, skipped: true };
-    } else {
-      const credential = options.githubToken !== undefined
-        ? options.githubToken
-        : (process.env.GITHUB_TOKEN || process.env.GH_TOKEN || null);
-      pullBatch = await collectPullRequestLookups(registry.list(options.roomId), {
-        fetchImpl: options.fetchPullRequest ?? fetch,
-        token: credential || null,
-        nowMs
-      });
-    }
+    pullBatch = budget > nowMs
+      ? { results: [], rateLimitedUntil: budget, skipped: true }
+      : await collectPullRequestLookups(registry.list(options.roomId), {
+          fetchImpl: options.fetchPullRequest ?? fetch,
+          token: githubTokenOf() || null,
+          nowMs,
+        });
   }
   const run = () => handleWorkClaimsCore({ ...options, registry, pullBatch, deployStatus,
     auth: reauthorize ? reauthorize() : options.auth,
     helpers: { ...helpers, body: () => requestData, json: (_res, status, value) => ({ status, value }) },
   });
   try {
-    const result = registry.transaction ? registry.transaction(run) : run();
+    const result = transact(registry, run);
     return helpers.json(res, result.status, result.value);
   } catch (error) {
     if (error?.code === "file_lease_conflict" && error.body) return helpers.json(res, 409, error.body);
