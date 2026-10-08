@@ -36,7 +36,9 @@ const EMPTY_UNTIL_CRON = new Set([
   // Spend grants and authorizations exist only after an owner issues a grant.
   "spend_grant_terms",
   "spend_authorizations",
-  "spend_room_reservations"
+  "spend_room_reservations",
+  // GA-2 link exchange records exist only after a guest joins via a single-use link.
+  "guest_link_exchanges"
 ]);
 
 const EVENTS = 200_000;
