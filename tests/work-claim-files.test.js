@@ -123,6 +123,20 @@ test("different block labels on one file do not conflict, and a whole-file claim
   assert.equal(registry.get("room1", "d").state, "unclaimed");
 });
 
+// QA200-MUT-26 Probe C: the declared files are immutable after claim — the
+// update shape excludes "files", so an update that tries to change them is a
+// 422 invalid_claim_input. Without this pin, update could rewrite the lease
+// scope out from under the 409 conflict check.
+test("update cannot change the declared files after claim (files are immutable)", async () => {
+  const registry = createWorkClaimRegistry();
+  await call(registry, "jill", "create", null, { id: "a", files: ["server/a.mjs"] });
+  await call(registry, "jill", "claim", "a", {});
+  // the update is otherwise valid (a note), so only the files key is at issue
+  await assert.rejects(call(registry, "jill", "update", "a", { note: "progress", files: ["server/b.mjs"] }),
+    error => error.status === 422 && error.code === "invalid_claim_input");
+  assert.deepEqual(registry.get("room1", "a").files, ["server/a.mjs"]);
+});
+
 test("paths are normalized and paths that escape the repo are refused", async () => {
   const registry = createWorkClaimRegistry();
   const made = await call(registry, "claude", "create", null, { id: "n", files: ["./server//store.mjs", "server/store.mjs", "docs/"] });
