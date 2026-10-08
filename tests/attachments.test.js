@@ -34,3 +34,11 @@ test("malformed inputs are refused", () => {
   const tracker = createDownloadTracker();
   throwsCode(() => tracker.markDone("ghost"), "invalid_attachment");
 });
+
+test("validateAttachment reads the extension the way Windows saves the file (trailing dots and spaces)", () => {
+  for (const filename of ["evil.exe.", "evil.exe ", "evil.EXE. . ", "evil.bat\t", "evil.exe..."]) {
+    throwsCode(() => validateAttachment({ filename, sizeBytes: 10, mimeType: "text/plain" }), "blocked_extension");
+  }
+  assert.equal(validateAttachment({ filename: "notes.txt.", sizeBytes: 1, mimeType: "text/plain" }).extension, "txt");
+  assert.equal(validateAttachment({ filename: "plain", sizeBytes: 1, mimeType: "text/plain" }).extension, "");
+});
