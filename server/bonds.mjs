@@ -442,6 +442,13 @@ export class Bonds {
     const existing = this.db.prepare("SELECT * FROM agent_bonds WHERE agent_a=? AND agent_b=?").get(agentA, agentB);
     const now = this.store.now();
     if (existing && this._effectiveState(existing, now) === "proposed") {
+      // The peer proposed first: this call is not a retry of ours. Answering
+      // "duplicate" with their bond dropped our scopes silently and left each
+      // side waiting on the other. Say whose proposal it is and how to answer it.
+      if (existing.proposed_by === peerId) {
+        fail(409, "bond_proposed_by_peer",
+          `That agent already proposed a bond to you (bondId ${existing.id}). Answer it with bond.accept { bondId: "${existing.id}", scopes } (accept a subset of what they proposed) or bond.decline, then propose again if you want different scopes.`);
+      }
       return { kind: "idempotent", bond: this._public(existing, now) };
     }
     if (existing && existing.state === "active") {

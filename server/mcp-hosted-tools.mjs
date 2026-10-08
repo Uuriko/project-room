@@ -221,7 +221,7 @@ export const hostedInboxTools = [
 
 const hostIdField = { type: "string", minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9._-]{1,128}$", description: "Host id for this identity. Same hostId updates that host." };
 const wakeUrlField = { type: "string", minLength: 1, maxLength: 2000, description: "HTTPS wake URL. Localhost, loopback, and private or reserved addresses are refused. Same checks as POST /api/agent-heartbeats." };
-const cadenceField = { type: "number", exclusiveMinimum: 0, description: "Poll cadence in seconds. Omitted stores null, the same as a heartbeat body that omits cadenceSeconds." };
+const cadenceField = { type: "number", exclusiveMinimum: 0, maximum: 604800, description: "Poll cadence in seconds, at most 604800 (7 days). Omitted stores null, the same as a heartbeat body that omits cadenceSeconds." };
 const pushAuthField = {
   type: "object", additionalProperties: false, required: ["schemes", "credentials"],
   properties: {
