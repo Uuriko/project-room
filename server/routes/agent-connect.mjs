@@ -42,28 +42,19 @@ function claimList(store, roomId) {
   }
 }
 
+const isStarter = item => Array.isArray(item?.tags) && item.tags.includes("starter");
+const titleOf = item => (typeof item?.title === "string" && item.title ? item.title : item?.id);
+
 export function starterFor(store, roomId, memberId) {
-  const match = claimList(store, roomId).find(item => {
-    if (!item || item.state === "done" || item.state === "closed") return false;
-    const tags = Array.isArray(item.tags) ? item.tags : [];
-    return tags.includes("starter") || (memberId && item.owner === memberId);
-  });
-  if (!match) return null;
-  return { claimId: match.id, title: typeof match.title === "string" && match.title ? match.title : match.id };
+  const match = claimList(store, roomId).find(item =>
+    item && item.state !== "done" && item.state !== "closed" && (isStarter(item) || (memberId && item.owner === memberId)));
+  return match ? { claimId: match.id, title: titleOf(match) } : null;
 }
 
 function pageClaims(store, roomId) {
   const open = claimList(store, roomId).filter(item => item && item.state === "unclaimed");
-  open.sort((a, b) => {
-    const aStarter = Array.isArray(a.tags) && a.tags.includes("starter") ? 0 : 1;
-    const bStarter = Array.isArray(b.tags) && b.tags.includes("starter") ? 0 : 1;
-    return aStarter - bStarter;
-  });
-  return open.slice(0, 3).map(item => ({
-    id: item.id,
-    title: typeof item.title === "string" && item.title ? item.title : item.id,
-    assigned: Array.isArray(item.tags) && item.tags.includes("starter"),
-  }));
+  open.sort((a, b) => (isStarter(a) ? 0 : 1) - (isStarter(b) ? 0 : 1));
+  return open.slice(0, 3).map(item => ({ id: item.id, title: titleOf(item), assigned: isStarter(item) }));
 }
 
 function plain(value, max) {
@@ -134,25 +125,17 @@ export function renderAgentConnectMarkdown({ origin, code, roomId, title, purpos
     curl("GET", `${base}/api/rooms/${encodeURIComponent(roomId)}/orient`),
     "",
   ];
-  const assigned = claims.filter(claim => claim.assigned);
-  const open = claims.filter(claim => !claim.assigned);
-  if (assigned.length) {
-    lines.push("Assigned to you:");
-    for (const claim of assigned) {
+  const groups = [["Assigned to you:", claims.filter(claim => claim.assigned)], ["Open on the board:", claims.filter(claim => !claim.assigned)]];
+  for (const [heading, group] of groups) {
+    if (!group.length) continue;
+    lines.push(heading);
+    for (const claim of group) {
       lines.push(`- ${claim.id}: ${plain(claim.title, 120)}`);
       lines.push(...claimCurls(base, roomId, claim));
     }
     lines.push("");
   }
-  if (open.length) {
-    lines.push("Open on the board:");
-    for (const claim of open) {
-      lines.push(`- ${claim.id}: ${plain(claim.title, 120)}`);
-      lines.push(...claimCurls(base, roomId, claim));
-    }
-    lines.push("");
-  }
-  if (!assigned.length && !open.length) {
+  if (!claims.length) {
     lines.push("No starter is on the board yet. Read the room, then list GET " + `${base}/api/rooms/${encodeURIComponent(roomId)}/work-claims` + ".");
     lines.push("");
   }
@@ -194,9 +177,7 @@ function unavailable(res, req, status) {
 
 function wantsMarkdown(req, url) {
   if (url.searchParams.get("format") === "md") return true;
-  const accept = String(req.headers.accept || "");
-  if (accept.includes("text/html")) return false;
-  return true;
+  return !String(req.headers.accept || "").includes("text/html");
 }
 
 export function handleAgentConnect(req, url, ctx) {

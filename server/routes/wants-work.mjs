@@ -66,16 +66,13 @@ export function deleteOwnWantsWork(ctx) {
 const parameters = Object.freeze({ type: "object", required: ["roomId"], properties: { roomId: { type: "string" } } });
 const list = Object.freeze({ type: "array", items: { type: "string" } });
 const PATH = "/api/rooms/{roomId}/members/me/wants-work";
+const RESPONSE = Object.freeze({ type: "object" });
 
 export const WANTS_WORK_ROUTES = Object.freeze([
-  Object.freeze({ id: "read-own-wants-work", method: "GET", path: PATH,
-    auth: "room", capability: null, scope: "room", handler: readOwnWantsWork,
-    schema: { params: parameters, response: { type: "object" } }, events: [] }),
-  Object.freeze({ id: "set-own-wants-work", method: "PUT", path: PATH,
-    auth: "room", capability: null, scope: "room", handler: putOwnWantsWork,
-    schema: { params: parameters, body: { type: "object", additionalProperties: false, properties: { labels: list, capabilities: list } }, response: { type: "object" } },
-    events: [] }),
-  Object.freeze({ id: "clear-own-wants-work", method: "DELETE", path: PATH,
-    auth: "room", capability: null, scope: "room", handler: deleteOwnWantsWork,
-    schema: { params: parameters, response: { type: "object" } }, events: [] }),
-]);
+  ["read-own-wants-work", "GET", readOwnWantsWork, { params: parameters, response: RESPONSE }],
+  ["set-own-wants-work", "PUT", putOwnWantsWork, { params: parameters,
+    body: { type: "object", additionalProperties: false, properties: { labels: list, capabilities: list } },
+    response: RESPONSE }],
+  ["clear-own-wants-work", "DELETE", deleteOwnWantsWork, { params: parameters, response: RESPONSE }],
+].map(([id, method, handler, schema]) => Object.freeze({
+  id, method, path: PATH, auth: "room", capability: null, scope: "room", handler, schema, events: [] })));
