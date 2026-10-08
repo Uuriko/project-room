@@ -4132,8 +4132,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (req.method === "POST") {
           const keys = Object.keys(data);
           if ((!keys.includes("permissions") && !keys.includes("profile"))
-            || keys.some(k => !["permissions", "profile", "expiresInMinutes", "displayName"].includes(k)))
-            reject(422, "invalid_invite", "permissions or profile is required; optional: expiresInMinutes, displayName");
+            || keys.some(k => !["permissions", "profile", "expiresInMinutes", "displayName", "boundIdentityId"].includes(k)))
+            reject(422, "invalid_invite", "permissions or profile is required; optional: expiresInMinutes, displayName, boundIdentityId");
           return json(res, 201, store.invites.create(selected.token, roomId, data, fence,
             // Funnel: on a deployment without a configured mailer no account can
             // ever complete email verification, so the email_unverified gate

@@ -1473,6 +1473,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // impact), so no schema version bump: IF NOT EXISTS is idempotent here
       // and the v0 block above covers fresh databases.
       this.db.exec(agentInviteSchema);
+      // Bound invite codes (guild-identity-sybil): purely additive column for
+      // existing databases; fresh databases get it from the schema above.
+      {
+        const cols = new Set(this.db.prepare("PRAGMA table_info(agent_invite_codes)").all().map(c => c.name));
+        if (!cols.has("bound_identity_id")) this.db.exec("ALTER TABLE agent_invite_codes ADD COLUMN bound_identity_id TEXT");
+      }
       // Signed referral invites: purely additive (no data migration, no
       // fence impact); the ledger is written only by the mint/redeem paths
       // and holds no credential data (tokens are bearer strings, never

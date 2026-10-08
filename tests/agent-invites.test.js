@@ -704,3 +704,44 @@ test("consent screen names the room, grant, profile and expiry before any prompt
     "consent names the expiry and the closed grant");
   assert.match(screen, /acts as itself, never as you/, "consent states no credential is shared");
 });
+
+test("bound invite codes redeem only for the bound identity (guild-identity-sybil)", async t => {
+  const { origin, ownerKey } = await serve(t);
+  const bound = await post(origin, "/api/agent-identities", { displayName: "Bound Delegate" });
+  const other = await post(origin, "/api/agent-identities", { displayName: "Sneaky Reader" });
+  assert.ok(bound.json.identityId && bound.json.secret);
+  assert.ok(other.json.identityId && other.json.secret);
+  // Unknown identityId is rejected at mint time so a typo cannot mint a dead code.
+  const badBind = await mint(origin, ownerKey, { profile: "collaborate", boundIdentityId: "ai_nonexistent000000" });
+  assert.equal(badBind.status, 422, JSON.stringify(badBind.json));
+  // Malformed boundIdentityId is rejected.
+  const badShape = await mint(origin, ownerKey, { profile: "collaborate", boundIdentityId: "not an id!!" });
+  assert.equal(badShape.status, 422, JSON.stringify(badShape.json));
+  // Mint the bound code.
+  const minted = await mint(origin, ownerKey, { profile: "collaborate", boundIdentityId: bound.json.identityId, expiresInMinutes: 60 });
+  assert.equal(minted.status, 201, JSON.stringify(minted.json));
+  assert.equal(minted.json.boundIdentityId, bound.json.identityId);
+  // A different identity's secret cannot redeem it — and the code is NOT burned.
+  const wrong = await post(origin, "/api/agent-invites/redeem",
+    { code: minted.json.code, displayName: "Sneaky" }, other.json.secret);
+  assert.equal(wrong.status, 403, JSON.stringify(wrong.json));
+  assert.equal(wrong.json.error.code, "invite_identity_mismatch");
+  // No bearer at all cannot redeem a bound code either.
+  const anon = await post(origin, "/api/agent-invites/redeem", { code: minted.json.code, displayName: "Anon" });
+  assert.equal(anon.status, 403, JSON.stringify(anon.json));
+  assert.equal(anon.json.error.code, "invite_identity_mismatch");
+  // The bound identity's own secret redeems fine, and the code burns.
+  const good = await post(origin, "/api/agent-invites/redeem",
+    { code: minted.json.code, displayName: "Bound Delegate" }, bound.json.secret);
+  assert.equal(good.status, 201, JSON.stringify(good.json));
+  assert.equal(good.json.identityId, bound.json.identityId);
+  const again = await post(origin, "/api/agent-invites/redeem",
+    { code: minted.json.code, displayName: "Bound Delegate" }, bound.json.secret);
+  assert.equal(again.status, 201);
+  assert.equal(again.json.duplicate, true);
+  // Unbound codes are unaffected: bearerless redeem still works (existing contract).
+  const open = await mint(origin, ownerKey, { profile: "chat", expiresInMinutes: 60 });
+  assert.equal(open.status, 201);
+  assert.equal(open.json.boundIdentityId, null);
+  assert.equal((await redeem(origin, open.json.code)).status, 201);
+});

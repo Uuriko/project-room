@@ -9123,6 +9123,8 @@ paths:
         agent identity reuses that identity, returns no secret, and allows that same
         identity to recover a consumed invite while its membership remains active.
         Recovery does not emit another membership event or widen the current grant.
+        A code minted with `boundIdentityId` additionally requires the bound
+        identity's Bearer secret (403 invite_identity_mismatch otherwise).
       security: []
       requestBody:
         required: true
@@ -9175,6 +9177,7 @@ paths:
                         doc: { type: string }
                         description: { type: string }
         '404': { description: invite_unavailable }
+        '403': { description: invite_identity_mismatch (bound code, wrong identity) }
         '409': { description: "invite_already_used, invite_authority_changed or pilot_limit" }
         '410': { description: invite_revoked or invite_expired }
         '422': { description: invalid_invite or invalid_invite_name }
@@ -12694,8 +12697,10 @@ paths:
         agent-safe profiles (chat/contribute/review/collaborate). Body names either
         `permissions` (unique room permissions, never manage_members, decide,
         or invite_member) or a `profile` (chat, contribute, review, collaborate), plus
-        optional `expiresInMinutes` and `displayName`. The raw invite code is
-        returned once.
+        optional `expiresInMinutes`, `displayName`, and `boundIdentityId` (binds
+        the code to one identity: only that identity's secret redeems it, else
+        403 invite_identity_mismatch; NULL/unset = current bearer-token behavior).
+        The raw invite code is returned once.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -12709,12 +12714,13 @@ paths:
                 profile: { type: string, enum: [chat, contribute, review, collaborate] }
                 expiresInMinutes: { type: integer }
                 displayName: { type: string }
+                boundIdentityId: { type: string, description: "Optional identityId the code is bound to; redeem requires that identity's Bearer secret" }
       responses:
         '401': { description: unauthenticated }
-        '201': { description: "{ code, inviteId, roomId, permissions, profile, displayName, createdAt, expiresAt }" }
+        '201': { description: "{ code, inviteId, roomId, permissions, profile, displayName, boundIdentityId, createdAt, expiresAt }" }
         '403': { description: access_denied or invite_scope_exceeded }
         '409': { description: pilot_limit }
-        '422': { description: invalid_invite or invalid_invite_scope }
+        '422': { description: invalid_invite or invalid_invite_scope or invalid_invite_bound_identity }
     delete:
       summary: Revoke an unredeemed agent invite code
       description: Member with `manage_members`. Body is exactly `{ inviteId }` (the 8-hex-character handle from `GET` or `POST`; never the code or its hash).

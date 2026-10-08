@@ -95,9 +95,11 @@ export const agentInviteSchema = `
     expires_at INTEGER NOT NULL,
     redeemed_at INTEGER,
     redeemed_identity_id TEXT,
-    revoked_at INTEGER
+    revoked_at INTEGER,
+    bound_identity_id TEXT
   );
   CREATE INDEX IF NOT EXISTS agent_invite_codes_room ON agent_invite_codes(room_id);
+  CREATE INDEX IF NOT EXISTS agent_invite_codes_bound ON agent_invite_codes(bound_identity_id);
 `;
 
 const inviteStatus = (row, now) =>
@@ -116,6 +118,7 @@ const view = (row, now) => ({
   redeemedAt: row.redeemed_at,
   redeemedIdentityId: row.redeemed_identity_id,
   revokedAt: row.revoked_at,
+  boundIdentityId: row.bound_identity_id ?? null,
   status: inviteStatus(row, now),
 });
 
@@ -150,7 +153,7 @@ export class AgentInvites {
   // permissions list or a standing profile name
   // (chat/contribute/review/collaborate); the profile maps server-side to
   // a fixed set, so editing the request cannot widen authority.
-  create(token, roomId, { permissions, profile, expiresInMinutes = DEFAULT_TTL_MINUTES, displayName } = {}, expectedSessionBinding = null,
+  create(token, roomId, { permissions, profile, expiresInMinutes = DEFAULT_TTL_MINUTES, displayName, boundIdentityId } = {}, expectedSessionBinding = null,
     { emailVerificationUnachievable = false } = {}) {
     // Owner delegates (server/owner-delegates.mjs) arrive via
     // store.authenticate with the delegate flag stamped on the member copy.
@@ -205,15 +208,26 @@ export class AgentInvites {
     if (displayName !== undefined && typeof displayName !== "string") fail(422, "invalid_invite", "displayName must be text");
     const name = displayName === undefined ? null : displayName.trim();
     if (name !== null && (!name || name.length > 80)) fail(422, "invalid_invite_name", "displayName must be 1-80 characters");
+    // Optional identity binding: the code can only be redeemed by the named
+    // identity's secret. Validated for shape AND existence so a typo cannot
+    // mint a dead code. NULL = unbound (all existing rows and flows).
+    let boundId = null;
+    if (boundIdentityId !== undefined) {
+      if (typeof boundIdentityId !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(boundIdentityId))
+        fail(422, "invalid_invite_bound_identity", "boundIdentityId must be 1-64 [A-Za-z0-9_-] characters");
+      if (!this.store.identities.get(boundIdentityId))
+        fail(422, "invalid_invite_bound_identity", "boundIdentityId does not match a known identity");
+      boundId = boundIdentityId;
+    }
     // Generate and hash before taking the write lock: scrypt is deliberately slow.
     const code = CODE_PREFIX + randomSymbols(CODE_LENGTH, CODE_ALPHABET);
     const stored = codeHash(code);
     return this.store.transaction(() => {
       const now = this.store.now();
       const expiresAt = now + expiresInMinutes * 60000;
-      this.db.prepare(`INSERT INTO agent_invite_codes(code_hash,room_id,created_by,permissions_json,display_name,created_at,expires_at)
-        VALUES(?,?,?,?,?,?,?)`).run(stored, roomId, auth.member.id, JSON.stringify(permissions), name, now, expiresAt);
-      return { code, inviteId: inviteId(stored), roomId, permissions, profile: profileName, displayName: name, createdAt: now, expiresAt, next: createNext(roomId, code) };
+      this.db.prepare(`INSERT INTO agent_invite_codes(code_hash,room_id,created_by,permissions_json,display_name,created_at,expires_at,bound_identity_id)
+        VALUES(?,?,?,?,?,?,?,?)`).run(stored, roomId, auth.member.id, JSON.stringify(permissions), name, now, expiresAt, boundId);
+      return { code, inviteId: inviteId(stored), roomId, permissions, profile: profileName, displayName: name, boundIdentityId: boundId, createdAt: now, expiresAt, next: createNext(roomId, code) };
     });
   }
 
@@ -233,6 +247,12 @@ export class AgentInvites {
     return this.store.transaction(() => {
       const row = this.db.prepare("SELECT * FROM agent_invite_codes WHERE code_hash=?").get(lookup);
       if (!row) fail(404, "invite_unavailable", "No invite was issued for this code. Ask the inviter for a fresh code");
+      // Bound codes: only the named identity's secret redeems. Checked first
+      // (before revoked/expiry/used) so a bound code leaks no more state to
+      // non-holders than an unbound code does. The bound holder's own retry
+      // still reaches the duplicate:true path below.
+      if (row.bound_identity_id != null && existingIdentity?.identityId !== row.bound_identity_id)
+        fail(403, "invite_identity_mismatch", "This invite code is bound to a specific identity");
       if (row.redeemed_at != null && existingIdentity?.identityId === row.redeemed_identity_id) {
         const linked = this.db.prepare("SELECT member_id FROM identity_links WHERE room_id=? AND identity_id=?").get(row.room_id, existingIdentity.identityId);
         const member = linked && this.store.room(row.room_id).state.members[linked.member_id];
