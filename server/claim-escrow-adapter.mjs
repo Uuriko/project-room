@@ -207,6 +207,15 @@ export function settleEscrowFromPull(settlement, { now = Date.now() } = {}) {
     `claim "${item.id}" escrow is ${escrow.status} — nothing to settle`);
   const at = isoOf(now);
   if (action === "pr_merged") {
+    // A merge RELEASE pays the split out of locked funds. "offered" is only
+    // an encumbrance — nothing moves until a worker takes the lease
+    // (offerEscrow) — so a merge on a never-funded escrow must refuse
+    // instead of minting the provider/evaluator/platform split from thin
+    // air. pr_closed (below) may still refund an offered escrow: releasing
+    // an encumbrance is the safe mirror of offer.
+    check(escrow.status === "funded" || escrow.status === "locked" || escrow.status === "evaluating",
+      "escrow_not_funded",
+      `claim "${item.id}" escrow is ${escrow.status} — never funded, nothing to release`);
     // Integer-only fee math: each fee is floored, the provider takes the
     // remainder, so provider + evaluator + platform === budgetUnits always.
     const evaluator = Math.floor(escrow.budgetUnits * escrow.evaluatorFeeBps / MAX_FEE_BPS);
