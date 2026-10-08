@@ -1,6 +1,6 @@
 # OpenAPI contract accuracy report
 
-Generated 2026-10-08T10:51:15.207Z by scripts/openapi-method-accuracy.mjs (TASKS.md task 16).
+Generated 2026-10-08T12:16:42.898Z by scripts/openapi-method-accuracy.mjs (TASKS.md task 16).
 Method: every operation in docs/openapi.yaml is probed against a scratch
 server with its documented method; 405 on the documented method (or a
 double-404 on an alternate method) is a contract mismatch. Path-template
