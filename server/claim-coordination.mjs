@@ -110,7 +110,12 @@ export function settlePullRequest(item, outcome, nowMs) {
   if (!pullsReadyToSettle(item)) return null;
   if (outcome !== "merged" && outcome !== "closed") return null;
   const at = new Date(nowMs).toISOString();
-  const current = item.pullRequest ?? pullLinks(item).at(-1);
+  const links = pullLinks(item);
+  // The settled record must name the PR the outcome was decided on: the
+  // merged link when the batch settled merged (a later closed link must not
+  // stand in for it), otherwise the last recorded link as before.
+  const decided = outcome === "merged" ? links.find(pull => pull.outcome === "merged") ?? null : null;
+  const current = decided ?? item.pullRequest ?? links.at(-1);
   const pullRequest = Object.freeze({
     ...current, outcome: current.outcome ?? outcome, syncedAt: current.syncedAt ?? at, nextPollAt: null, rateLimitedUntil: null
   });
