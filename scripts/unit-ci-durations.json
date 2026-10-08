@@ -402,6 +402,7 @@
   "tests/invitation-owner-admin.test.js": 40761,
   "tests/invitation-stats.test.js": 21252,
   "tests/invitations.test.js": 98838,
+  "tests/invite-flow-abuse.test.js": 26500,
   "tests/invite-oauth-context.test.js": 4357,
   "tests/invite-only-boundary.test.js": 134327,
   "tests/jev-admission.test.js": 5635,
