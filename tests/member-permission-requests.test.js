@@ -192,3 +192,18 @@ test("RT handler rows preserve the GET queue and share quota across both POST al
     error => error.status === 429 && error.code === "rate_limited");
   await assert.rejects(invoke("GET", "/api/rooms/commons/access-requests", null), error => error.status === 403);
 });
+
+test("a member without membership administration cannot decide a permission upgrade (HTTP)", async t => {
+  const f = await setup(t);
+  // The decider holds the requested permission but no manage_members grant:
+  // the HTTP decide endpoint must refuse them before any domain logic runs.
+  f.store.command(f.owner, "commons", { id: randomUUID(), type: "member.added",
+    data: { memberId: "plainmember", displayName: "Plain Member", kind: "human", permissions: ["accept_work"] } });
+  const plain = f.store.issueAccessKey("commons", "plainmember");
+  await f.ask({ permissions: ["accept_work"], requestId: "held_permission" });
+  const refused = await f.decide("held_permission", { decision: "approve" }, plain);
+  assert.equal(refused.status, 403);
+  assert.equal(refused.body.error.code, "access_denied");
+  assert.deepEqual(f.store.roomAuthority("commons").members[f.memberId].permissions, [],
+    "the requester's permissions are unchanged");
+});
