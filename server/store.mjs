@@ -1066,7 +1066,8 @@ function roomSchemaStamp() {
     // stamp matches skips the whole schema pass, so any DDL the pass applies
     // must be hashed here or a room stamped by an older deploy never gets it
     // (the priced-tool 500: spend_authorizations missing on muse-room).
-    updatesSchema, GRANTS_SCHEMA, SPEND_GRANTS_SCHEMA, AUTONOMY_TIERS_SCHEMA, identityLinkCodeSchema
+    updatesSchema, GRANTS_SCHEMA, SPEND_GRANTS_SCHEMA, AUTONOMY_TIERS_SCHEMA, identityLinkCodeSchema,
+    guestLinkExchangeSchema
   ];
   for (const part of parts) hash.update("\0").update(part ?? "");
   for (const [, label] of ADDITIVE_SCHEMA_ENSURES) hash.update("\0").update(label);
