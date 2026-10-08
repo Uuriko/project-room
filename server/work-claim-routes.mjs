@@ -143,7 +143,7 @@ const WORK_CLAIM_PROFILES = Object.freeze({
 });
 const BOARD_LIMIT_DEFAULT = 50;
 const BOARD_LIMIT_MAX = 200;
-const BOARD_QUERY = new Set(["queue", "auth", "limit", "cursor", "state", "view"]);
+const BOARD_QUERY = new Set(["queue", "auth", "limit", "cursor", "state", "view", "since"]);
 
 // QA7-13: compact per-claim projection for ?view=summary — the fields a
 // board overview needs (id, title, state, owner, lease expiry) without the
@@ -891,6 +891,16 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "list" && req.method === "GET") {
     closeLiveClaims();
+    // W5 boardSeq: the room event sequence is the board's monotonic version —
+    // every claim change appends a room event inside the write transaction.
+    // ?since= lets pollers short-circuit the full-board decode with a 304.
+    const boardSeq = store.room(roomId)?.sequence ?? 0;
+    const sinceParam = url?.searchParams?.get("since") ?? null;
+    if (sinceParam !== null) {
+      const sinceSeq = Number(sinceParam);
+      if (!Number.isSafeInteger(sinceSeq) || sinceSeq < 0) invalidInput(reject, "since as a non-negative integer");
+      if (sinceSeq >= boardSeq) return json(res, 304, { boardSeq });
+    }
     // Standby FIFO positions: standby claims carry queuePosition (1 = next
     // to promote) in FIFO enqueue order, so agents can see where they
     // stand. Stable sort keeps registry insertion order for same-instant
@@ -905,7 +915,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const claims = order.size > 0
       ? page.claims.map(item => order.has(item.id) ? { ...item, queuePosition: order.get(item.id) } : item)
       : page.claims;
-    return json(res, 200, { ...page, claims, swept: sweptIds });
+    return json(res, 200, { ...page, boardSeq, claims, swept: sweptIds });
   }
   if (workClaimRoute === "receipts" && req.method === "GET") {
     // RC-2026-09-24-205: receipts search. The room block already rejected
