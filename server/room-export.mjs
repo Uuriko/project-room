@@ -9,10 +9,16 @@ import { dirname } from "node:path";
 import { RoomStore } from "./store.mjs";
 import { auditRecovery } from "./recovery.mjs";
 import { Buffer } from "node:buffer";
+import { retiredTables } from "./writer-fence.mjs";
 
 const IDENT = /^[a-z_][a-z0-9_]*$/;
 const TOKEN_SOURCE = "(?:pri_|rak_|ga1\\.)[A-Za-z0-9_-]{8,}";
 const FIRST = ["accounts", "rooms", "events", "commands", "member_accounts", "account_access_events", "credentials", "account_credentials", "account_session_slots", "cursors", "projection_checkpoints"];
+
+// Rows a fresh Node store has no table for and does not need: the Durable
+// Object's own runtime markers, and retired tables no module reads. Replay
+// counts and skips them instead of refusing the whole export.
+const REPLAY_SKIPPED_TABLES = new Set(["room_runtime_version", "room_writer_permit", ...retiredTables]);
 
 const sha256Hex = value => createHash("sha256").update(value).digest("hex");
 
@@ -39,7 +45,10 @@ function sanitizeCell(column, value) {
   // REL-14: BLOB cells (room file bytes) leave as base64. JSON.stringify of a
   // Uint8Array is an object of indices that replay could not bind, so any room
   // holding a file produced an export that could not be restored.
-  if (value instanceof Uint8Array) return { $base64: Buffer.from(value).toString("base64") };
+  // Durable Object SQL hands BLOBs back as ArrayBuffer, not Uint8Array; that
+  // used to serialize as {} and drop every room file from the hosted export.
+  if (value instanceof ArrayBuffer) return { $base64: Buffer.from(value).toString("base64") };
+  if (ArrayBuffer.isView(value)) return { $base64: Buffer.from(value.buffer, value.byteOffset, value.byteLength).toString("base64") };
   if (typeof value !== "string") return value;
   return scrubTokens(value);
 }
@@ -187,6 +196,12 @@ export function replayNdjson(ndjson, filename) {
   const store = new RoomStore(filename);
   try {
     const existing = new Set(tableNames(store.db));
+    const skipped = {};
+    for (const table of [...byTable.keys()]) {
+      if (existing.has(table) || !REPLAY_SKIPPED_TABLES.has(table)) continue;
+      skipped[table] = byTable.get(table).length;
+      byTable.delete(table);
+    }
     const order = insertOrder(new Set(byTable.keys()));
     for (const table of order) if (!existing.has(table)) throw new Error("Export names a table this store does not have");
     store.db.exec("PRAGMA foreign_keys=OFF");
@@ -215,6 +230,6 @@ export function replayNdjson(ndjson, filename) {
     const events = store.db.prepare("SELECT count(*) AS n FROM events").get().n;
     if (events !== watermark.events) throw new Error("Export watermark does not match the restored event log");
     chmodSync(filename, 0o600);
-    return { verified: true, events, ...audit, recovery };
+    return { verified: true, events, ...audit, recovery, skipped };
   } finally { store.close(); }
 }

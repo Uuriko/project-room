@@ -58,6 +58,24 @@ test("NDJSON export of a room holding a file replays, and events and file bytes 
   assert.ok(Buffer.from(row.bytes).equals(FILE_BYTES));
 });
 
+// Durable Object SQL returns BLOB cells as ArrayBuffer. The export must encode
+// those too; before this, every hosted room file exported as {}.
+test("an export from a database that returns BLOBs as ArrayBuffer (Durable Object SQL) keeps the file bytes", t => {
+  const { filename, digests } = roomWithFile(t);
+  const live = new RoomStore(filename, { readOnly: true });
+  t.after(() => live.close());
+  const asArrayBuffer = row => Object.fromEntries(Object.entries(row).map(([key, value]) =>
+    [key, value instanceof Uint8Array ? value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength) : value]));
+  const doLike = { prepare(sql) { const statement = live.db.prepare(sql); return { all: (...args) => statement.all(...args).map(asArrayBuffer), get: (...args) => statement.get(...args) }; } };
+  const text = exportNdjsonText(doLike);
+  assert.equal(text.includes('"bytes":{}'), false);
+  const target = join(tempDir(t, "rel14-do-"), "replayed.sqlite");
+  assert.equal(replayNdjson(text, target).verified, true);
+  const replayed = new RoomStore(target, { readOnly: true });
+  t.after(() => replayed.close());
+  assert.deepEqual(backupDigests(replayed.db), digests);
+});
+
 test("replay refuses an object cell that is not an encoded BLOB, by name", t => {
   const { filename } = roomWithFile(t);
   const live = new RoomStore(filename, { readOnly: true });

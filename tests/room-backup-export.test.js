@@ -192,3 +192,17 @@ test("without R2 the daily backup writes KV parts and a manifest that the restor
   const flipped = new Uint8Array(values.get(part).value); flipped[10] ^= 1;
   assert.throws(() => fetchKvBackup("2026-10-08", key => key === part ? Buffer.from(flipped) : get(key)), /does not match its manifest/);
 });
+
+test("replay of a hosted export skips Durable Object runtime and retired tables and still refuses unknown ones", t => {
+  const { store } = openFixture(t);
+  const text = exportNdjsonText(store.db)
+    + JSON.stringify({ table: "room_runtime_version", row: { singleton: 1, version: 38 } }) + "\n"
+    + JSON.stringify({ table: "room_writer_permit", row: { singleton: 1, version: 38 } }) + "\n"
+    + JSON.stringify({ table: "emissary_journal", row: { id: "old" } }) + "\n";
+  const directory = mkdtempSync(join(tmpdir(), "room-replay-skip-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const result = replayNdjson(text, join(directory, "a.sqlite"));
+  assert.deepEqual(result.skipped, { room_runtime_version: 1, room_writer_permit: 1, emissary_journal: 1 });
+  const unknown = text + JSON.stringify({ table: "not_a_table", row: { id: 1 } }) + "\n";
+  assert.throws(() => replayNdjson(unknown, join(directory, "b.sqlite")), /table this store does not have/);
+});

@@ -110,7 +110,7 @@ async function main() {
       manifestEvents: manifest?.events ?? null, watermarkEvents: watermark.events,
       exported: { rooms: result.exported.rooms, events: result.exported.events, messages: result.exported.messages, digest: result.exported.digest },
       restored: { rooms: result.restored.rooms, events: result.restored.events, messages: result.restored.messages, digest: result.restored.digest },
-      verified: result.replay.verified, match: result.match && watermark.events === result.restored.events,
+      skippedTables: result.replay.skipped, verified: result.replay.verified, match: result.match && watermark.events === result.restored.events,
       kept: values.keep ? directory : null
     };
     if (values.rooms) report.perRoom = Object.fromEntries(values.rooms.split(",").map(id => [id, { exported: result.exported.perRoom[id] ?? null, restored: result.restored.perRoom[id] ?? null }]));

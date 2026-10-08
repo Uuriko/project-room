@@ -479,6 +479,8 @@ const MATCHMAKING_ADDITIVE_TABLES = Object.freeze([
   "seeker_declarations",
   "work_offer_terms",
 ]);
+// Retired tables no module creates. A restore into a fresh store leaves them out.
+export const retiredTables = Object.freeze([...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES]);
 export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES]);
 // (Audit-fix F-2 intent preserved: analytics tables are lazy/additive, never
 // required — they live in ANALYTICS_ADDITIVE_TABLES above.)
