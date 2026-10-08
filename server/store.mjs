@@ -4654,6 +4654,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (command.type === T.MESSAGE_POSTED && typeof command.data?.replyToId === "string") {
         const byId = new Map((room.state.messages || []).map(m => [m.id, m]));
         const seen = new Set();
+        let dmAncestor = null;
         for (let m = byId.get(command.data.replyToId); m && !seen.has(m.id); m = byId.get(m.replyToId)) {
           seen.add(m.id);
           // Reply requests are directed but room-threaded by design: members may
@@ -4662,7 +4663,23 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
               && m.authorId !== auth.member.id && m.toMemberId !== auth.member.id) {
             fail(422, "command_rejected", "Reply must reference a message in this Room");
           }
+          if (!dmAncestor && m.toMemberId) dmAncestor = m;
           if (!m.replyToId) break;
+        }
+        // CH-2011: a party's reply continues the DM thread, so it inherits
+        // the thread's parties. Every read surface keys DM visibility on the
+        // message's own toMemberId; without the stamp, a reply posted without
+        // one (the natural thread continuation) is served to the whole room —
+        // snapshot, events, search, /thread, conversation, MCP, notifications —
+        // and its replyToId confirms the DM id the refusal above protects.
+        // Reply-request threads stay room-visible by design, and an explicit
+        // toMemberId on the reply is the author's choice and is kept.
+        // Live admission only, like the refusal.
+        if (dmAncestor && !Object.hasOwn(room.state.replyRequests ?? {}, dmAncestor.id)
+            && (typeof command.data.toMemberId !== "string" || !command.data.toMemberId)
+            && (dmAncestor.authorId === auth.member.id || dmAncestor.toMemberId === auth.member.id)) {
+          const otherParty = dmAncestor.authorId === auth.member.id ? dmAncestor.toMemberId : dmAncestor.authorId;
+          if (typeof otherParty === "string" && otherParty) command.data.toMemberId = otherParty;
         }
       }
       // Bond / peer DM. Room chat (message.posted) is unchanged and still
