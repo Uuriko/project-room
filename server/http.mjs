@@ -4943,15 +4943,29 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (httpStatus === 413) {
         // finish means handed to the OS, not received by the client. Drain
-        // in-flight bytes without buffering, then close; a stalled sender gets
-        // at most one second to read the refusal before its socket is destroyed.
+        // in-flight bytes without buffering, then half-close. The destroy
+        // deadline re-arms while request bytes keep flowing (#976), so a
+        // slow-but-alive upload is never cut off mid-flight and always gets
+        // the readable too_large; only a sender that stops sending is
+        // destroyed after the grace period.
         const socket = req.socket;
         res.once("finish", () => {
-          if (req.complete) socket.end();
-          else req.once("end", () => socket.end());
-          const deadline = setTimeout(() => socket.destroy(), 1000);
-          deadline.unref();
-          socket.once("close", () => clearTimeout(deadline));
+          if (socket.destroyed) return;
+          let deadline = null;
+          const clear = () => { if (deadline !== null) { clearTimeout(deadline); deadline = null; } };
+          const drained = () => { clear(); if (!socket.destroyed) socket.end(); };
+          if (req.complete) { drained(); return; }
+          const arm = () => {
+            clear();
+            deadline = setTimeout(() => { deadline = null; socket.destroy(); }, 1000);
+            deadline.unref();
+          };
+          const cleanup = () => { clear(); req.off("data", arm); };
+          req.on("data", arm);
+          req.once("end", () => { cleanup(); drained(); });
+          req.once("aborted", () => { cleanup(); socket.destroy(); });
+          socket.once("close", cleanup);
+          arm();
         });
       }
       // Burs-IA steal A1: listed routes get route-aware hint/next guidance on
