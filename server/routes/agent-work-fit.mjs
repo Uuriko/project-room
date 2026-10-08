@@ -22,7 +22,7 @@ export async function workFitRoute(ctx){
   for(const [k,v] of ctx.url.searchParams){
    if(['auth','binding'].includes(k))continue;
    if(!['memberId','detail','cursor','workItemId','categories','role'].includes(k) || Object.hasOwn(query,k))ctx.reject(422,'invalid_work_fit','Invalid profile query');
-   query[k]=k==='categories'?v.split(','):v;
+   query[k]=k==='categories'?(v?v.split(','):[]):v;
   }
   value=ctx.store.workFit.read(roomId,query,authorize);
  }
