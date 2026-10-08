@@ -29,7 +29,6 @@ const GRANDFATHERED = [
   "project-offers.mjs",
   "request-runs.mjs",
   "return-brief.mjs",
-  "share-links.mjs",
   "work-help.mjs"
 ];
 
