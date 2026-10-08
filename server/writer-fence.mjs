@@ -343,6 +343,12 @@ export const unfencedAdditiveTables = Object.freeze([
   // Durable live work claims: additive, verified on open, included in recovery.
   "work_claims",
   "work_claim_config",
+  // work_claim_idempotency (PHOENIX W4: requestId dedupe journal for the
+  // work-claim write routes): additive, verified with the work-claim
+  // schema, included in recovery. Rows are scoped to an existing
+  // (room_id, claim_id, actor_id); the route-layer check-then-record inside
+  // the claim transaction is the integrity gate.
+  "work_claim_idempotency",
   // human_push_subscriptions (browser push for human members): one row per
   // device endpoint in a room. Purely additive and intentionally NOT fenced
   // — older writers have no code path to it. Rows are a delivery address,
