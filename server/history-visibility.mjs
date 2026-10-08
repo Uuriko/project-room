@@ -35,7 +35,11 @@ export function historyFloor(db, state, roomId, memberId, headSequence = null) {
   ).all(roomId, ...JOIN_TYPES, T.MEMBER_ACCESS_CHANGED, memberId);
   let row = null, active = false;
   for (const entry of rows) {
-    const nowActive = JOIN_TYPES.includes(entry.type) ? true : entry.active === 1 || entry.active === true;
+    let nowActive;
+    if (JOIN_TYPES.includes(entry.type)) nowActive = true;
+    else if (entry.active === 1 || entry.active === true) nowActive = true;
+    else if (entry.active === 0 || entry.active === false) nowActive = false;
+    else continue; // access_changed without an explicit active flag says nothing about activation
     if (nowActive && !active) row = entry;
     active = nowActive;
   }

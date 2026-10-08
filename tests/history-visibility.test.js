@@ -277,3 +277,26 @@ test("a guest reactivated through member.access_changed gets a new floor", () =>
   assert.equal(messageInHistory({ id: "m-late", createdAt: at("04") }, floor), true);
   db.close();
 });
+
+test("a permission-only member.access_changed (no active field) does not move the floor", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec("CREATE TABLE events (room_id TEXT, sequence INTEGER, body TEXT)");
+  const at = s => `2026-10-06T12:${s}:00.000Z`;
+  const rows = [
+    [1, { id: "e1", type: T.MEMBER_ADDED, at: at("00"), data: { memberId: "g" } }],
+    [2, { id: "e2", type: T.MESSAGE_POSTED, at: at("01"), data: { messageId: "m-after-join" } }],
+    [3, { id: "e3", type: T.MEMBER_ACCESS_CHANGED, at: at("02"), data: { memberId: "g", permissions: ["read"] } }],
+    [4, { id: "e4", type: T.MEMBER_ACCESS_CHANGED, at: at("03"), data: { memberId: "g", permissions: [] } }],
+    [5, { id: "e5", type: T.MEMBER_ACCESS_CHANGED, at: at("04"), data: { memberId: "g", active: true, permissions: [] } }],
+  ];
+  const insert = db.prepare("INSERT INTO events (room_id, sequence, body) VALUES (?, ?, ?)");
+  for (const [sequence, body] of rows) insert.run("commons", sequence, JSON.stringify(body));
+  const state = {
+    room: { ownerId: "owner", historyVisibility: { value: "since_join" } },
+    members: { g: { id: "g", kind: "agent", active: true, permissions: [] } },
+  };
+  const floor = historyFloor(db, state, "commons", "g");
+  assert.equal(floor.sequence, 1, "permission-only edits keep the original join floor");
+  assert.equal(messageInHistory({ id: "m-after-join", createdAt: at("01") }, floor), true);
+  db.close();
+});
