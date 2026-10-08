@@ -369,7 +369,10 @@ const workOf = value => {
     chain: chainOf(value.chain), supersededBy: optionalId(value.supersededBy, "supersededBy"),
     workItemId: optionalId(value.workItemId, "workItemId"),
     kind, revision, ci: ciOf(value.ci), reviews: reviewsOf(value.reviews),
-    epoch: epochOf(value.epoch) };
+    epoch: epochOf(value.epoch),
+    // Reaper succession input: worker-nominated successor, preserved through
+    // the machine so it survives round-trips (B2 guild-claimsboard).
+    successorHint: optionalId(value.successorHint, "successorHint") };
 };
 const agentOf = value => idOf(value, "agent id", 128);
 const stamp = (atMs, agentId, action, note) =>
