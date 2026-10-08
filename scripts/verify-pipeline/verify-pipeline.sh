@@ -29,7 +29,7 @@ T_WORKTREE=300     # git worktree add
 T_CONE=180         # cone.sh mapping
 T_CONE_RUN=1200    # node --test on the cone
 T_TOTAL=1800       # per-candidate wall budget
-FLAKY_RETRIES=2    # reruns of failed test files before calling it red
+# (adjudicate uses a fixed 1-head-rerun + 2-base-run protocol; see adjudicate)
 
 log()  { echo "[verify] $*" >&2; }
 die()  { echo "[verify] FATAL: $*" >&2; exit "${2:-2}"; }
@@ -97,15 +97,51 @@ run_cone() {
   verdict="$(timeout "$T_CONE_RUN" "$HERE/cone-run.sh" "$wt" "$conefile" "$cid")"
   local v; v="$(echo "$verdict" | grep -oE '"verdict":"[a-z-]+"' | cut -d'"' -f4)"
   if [ "$v" = "fail" ] && [ "${VERIFY_BASELINE:-1}" = "1" ]; then
-    # Baseline comparison: failures already present at base are pre-existing
-    # and do not block the candidate. Only NEW failures are red.
-    verdict="$(baseline_compare "$wt" "$base" "$cid" "$verdict")"
-    v="$(echo "$verdict" | grep -oE '"verdict":"[a-z-]+"' | cut -d'"' -f4)"
-  fi
-  if [ "$v" = "fail" ] && [ "$FLAKY_RETRIES" -gt 0 ]; then
-    verdict="$(flaky_retry "$wt" "$conefile" "$cid" "$verdict")"
+    verdict="$(adjudicate "$wt" "$base" "$cid" "$verdict")"
   fi
   echo "$verdict" | sed "s/\"label\":\"$cid\"/\"candidate\":\"$cid\"/"
+}
+
+# Adjudicate a cone failure. A failure is candidate-caused ONLY if it fails
+# consistently at head AND passes consistently at base (2 samples each —
+# single samples misfire on flaky tests, measured 2026-10-07: the board test
+# failed at base in 2 of 3 observations).
+#   head flaky (rerun passes)            -> pass-with-flakes
+#   head consistent fail, base fails ≥1  -> pass-with-baseline-failures
+#   head consistent fail, base passes 2× -> fail (red, candidate broke it)
+adjudicate() {
+  local wt="$1" base="$2" cid="$3" cur="$4"
+  local failed="$SCRATCH/$cid.failed.txt"
+  failed_files "$wt" "$cid" "$failed"
+  if [ ! -s "$failed" ]; then
+    log "adjudicate: could not isolate failed files; keeping red"
+    echo "$cur"; return 0
+  fi
+  local nf; nf="$(wc -l < "$failed")"
+  log "adjudicate: $nf failed file(s) for $cid — 1 head rerun + 2 base runs"
+  local r1 rv1
+  r1="$(timeout "$T_CONE_RUN" "$HERE/cone-run.sh" "$wt" "$failed" "$cid-r1" 2>/dev/null || true)"
+  rv1="$(echo "$r1" | grep -oE '"verdict":"[a-z-]+"' | cut -d'"' -f4)"
+  if [ "$rv1" = "pass" ]; then
+    log "adjudicate: $cid failure did NOT reproduce at head — flaky"
+    echo "$cur" | sed 's/"verdict":"fail"/"verdict":"pass-with-flakes"/'
+    return 0
+  fi
+  local bwt; bwt="$(build_worktree "$cid-base" "$base")"
+  local basefails=0 i bv
+  for i in 1 2; do
+    bv="$(timeout "$T_CONE_RUN" "$HERE/cone-run.sh" "$bwt" "$failed" "$cid-b$i" 2>/dev/null || true)"
+    if [ "$(echo "$bv" | grep -oE '"verdict":"[a-z-]+"' | cut -d'"' -f4)" != "pass" ]; then
+      basefails=$((basefails+1))
+    fi
+  done
+  if [ "$basefails" -ge 1 ]; then
+    log "adjudicate: $cid failure reproduces at base ($basefails/2) — pre-existing"
+    echo "$cur" | sed 's/"verdict":"fail"/"verdict":"pass-with-baseline-failures"/'
+  else
+    log "adjudicate: $cid failure consistent at head, clean at base (2/2) — candidate broke it"
+    echo "$cur"
+  fi
 }
 
 # Rerun the failed test files against the BASE commit. If the failing test
@@ -122,72 +158,6 @@ failed_files() {
       basename "$lg" .log | tr '_' '/'
     fi
   done | sort -u > "$out" || true
-}
-
-# Failing test NAMES within a per-file log (strip the duration suffix).
-failed_names() {
-  local lg="$1"
-  grep -E '^✖ ' "$lg" 2>/dev/null | sed -E 's/^✖ //; s/ \([0-9.]+ms\)$//' | sort -u || true
-}
-
-baseline_compare() {
-  local wt="$1" base="$2" cid="$3" cur="$4"
-  local failed="$SCRATCH/$cid.failed.txt"
-  failed_files "$wt" "$cid" "$failed"
-  if [ ! -s "$failed" ]; then
-    log "baseline: could not isolate failed files; keeping red"
-    echo "$cur"; return 0
-  fi
-  local bwt; bwt="$(build_worktree "$cid-base" "$base")"
-  timeout "$T_CONE_RUN" "$HERE/cone-run.sh" "$bwt" "$failed" "$cid-base" >/dev/null 2>&1 || true
-  local hf bf hbf bbf
-  hf=""; bf=""
-  while IFS= read -r f; do
-    [ -n "$f" ] || continue
-    safe="$(echo "$f" | tr '/' '_')"
-    hbf="$(failed_names "$wt/.cone-run-$cid/$safe.log")"
-    bbf="$(failed_names "$bwt/.cone-run-$cid-base/$safe.log")"
-    hf="$hf
-$hbf"; bf="$bf
-$bbf"
-  done < "$failed"
-  hf="$(echo "$hf" | sed '/^$/d' | sort -u)"; bf="$(echo "$bf" | sed '/^$/d' | sort -u)"
-  if [ -n "$hf" ] && [ "$hf" = "$bf" ]; then
-    log "baseline: identical failures at base — pre-existing, not caused by $cid"
-    echo "$cur" | sed 's/"verdict":"fail"/"verdict":"pass-with-baseline-failures"/'
-  else
-    log "baseline: NEW failures introduced by $cid (keeping red)"
-    echo "$cur"
-  fi
-}
-
-# Rerun only the failed test files up to FLAKY_RETRIES times.
-# A test that fails then passes on retry is quarantined as flaky, not red:
-# verdict becomes "pass-with-flakes" (still landable, flagged for quarantine).
-flaky_retry() {
-  local wt="$1" conefile="$2" cid="$3" cur="$4"
-  local attempt=1 v
-  v="$(echo "$cur" | grep -oE '"verdict":"[a-z-]+"' | cut -d'"' -f4)"
-  while [ "$v" = "fail" ] && [ "$attempt" -le "$FLAKY_RETRIES" ]; do
-    log "flaky-check: $cid attempt $attempt/$FLAKY_RETRIES — rerunning failed files"
-    local failed="$SCRATCH/$cid.failed.txt"
-    failed_files "$wt" "$cid" "$failed"
-    if [ ! -s "$failed" ]; then
-      log "flaky-check: could not isolate failed files; keeping red"
-      break
-    fi
-    local retry
-    retry="$(timeout "$T_CONE_RUN" "$HERE/cone-run.sh" "$wt" "$failed" "$cid-retry$attempt")"
-    local rv; rv="$(echo "$retry" | grep -oE '"verdict":"[a-z-]+"' | cut -d'"' -f4)"
-    if [ "$rv" = "pass" ]; then
-      log "flaky-check: $cid failures did NOT reproduce on retry — marking flaky"
-      echo "$cur" | sed 's/"verdict":"fail"/"verdict":"pass-with-flakes"/'
-      return 0
-    fi
-    log "flaky-check: $cid failures reproduced (attempt $attempt) — still red"
-    attempt=$((attempt+1))
-  done
-  echo "$cur"
 }
 
 # ---- stage 5: collision detector ----------------------------------------------

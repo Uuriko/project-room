@@ -55,8 +55,7 @@ export VERIFY_SCRATCH=/path/to/scratch       # worktrees + verdicts land here
 
 | mode | handling |
 |---|---|
-| cone fails | **baseline compare**: rerun the failed files at `base` in a second worktree. Identical failing test names → `pass-with-baseline-failures` (pre-existing, landable, failures listed). New failures → red. |
-| failure doesn't reproduce on retry (≤2 reruns of failed files) | `pass-with-flakes` — landable, flagged for quarantine |
+| cone fails | **adjudicate**: 1 rerun of the failed files at head + 2 runs at base in a second worktree. Head-flaky (rerun passes) → `pass-with-flakes`. Consistent at head but fails ≥1 at base → `pass-with-baseline-failures` (pre-existing, landable). Consistent at head + clean at base 2/2 → red. Single samples are not trusted — the board test failed at base in 2 of 3 observations (flaky), which misfires naive base-vs-head comparison. |
 | cone timeout (per-file `CONE_FILE_TIMEOUT`, default 600s) | `timeout` verdict, rank 4 |
 | empty cone | `no-coverage` — fail closed, human triage |
 | infra failure (bad ref, worktree add fails, npm ci fails) | exit 2 — retry the pipeline, don't blame the candidate |
