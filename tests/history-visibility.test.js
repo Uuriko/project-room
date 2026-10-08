@@ -249,3 +249,31 @@ test("a removed-then-reactivated guest reads nothing from the removal gap", () =
   assert.equal(eventInHistory({ id: "e6", at: at("05") }, floor), true);
   db.close();
 });
+
+// The reducer refuses a second member.added, so real reactivation is a
+// member.access_changed { active: true }. The floor must follow it, and a
+// permission edit while already active must not move it.
+test("a guest reactivated through member.access_changed gets a new floor", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec("CREATE TABLE events (room_id TEXT, sequence INTEGER, body TEXT)");
+  const at = s => `2026-10-06T12:${s}:00.000Z`;
+  const rows = [
+    [1, { id: "e1", type: T.MEMBER_ADDED, at: at("00"), data: { memberId: "g" } }],
+    [2, { id: "e2", type: T.MEMBER_ACCESS_CHANGED, at: at("01"), data: { memberId: "g", active: false } }],
+    [3, { id: "e3", type: T.MESSAGE_POSTED, at: at("02"), data: { messageId: "m-gap" } }],
+    [4, { id: "e4", type: T.MEMBER_ACCESS_CHANGED, at: at("03"), data: { memberId: "g", active: true } }],
+    [5, { id: "e5", type: T.MESSAGE_POSTED, at: at("04"), data: { messageId: "m-late" } }],
+    [6, { id: "e6", type: T.MEMBER_ACCESS_CHANGED, at: at("05"), data: { memberId: "g", active: true } }],
+  ];
+  const insert = db.prepare("INSERT INTO events (room_id, sequence, body) VALUES (?, ?, ?)");
+  for (const [sequence, body] of rows) insert.run("commons", sequence, JSON.stringify(body));
+  const state = {
+    room: { ownerId: "owner", historyVisibility: { value: "since_join" } },
+    members: { g: { id: "g", kind: "agent", active: true, permissions: [] } },
+  };
+  const floor = historyFloor(db, state, "commons", "g");
+  assert.equal(floor.sequence, 4, "floor is the reactivation, not the first join or a later edit");
+  assert.equal(messageInHistory({ id: "m-gap", createdAt: at("02") }, floor), false);
+  assert.equal(messageInHistory({ id: "m-late", createdAt: at("04") }, floor), true);
+  db.close();
+});
