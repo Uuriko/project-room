@@ -21,6 +21,7 @@
     <link rel="stylesheet" href="./src/board.css">
     <link rel="stylesheet" href="./src/public-a11y.css">
     <link rel="stylesheet" href="./src/human-experience.css">
+    <link rel="stylesheet" href="./src/conversation-polish.css">
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon-180.png">
@@ -35,6 +36,7 @@
            JavaScript runs here. -->
       <section id="static-hero" class="static-hero" aria-label="Project Room">
         <div class="static-hero-inner">
+          <img class="signin-mark" src="/project-room-mark.svg" alt="" width="80" height="80">
           <p class="static-hero-title">PROJECT ROOM</p>
           <noscript><p class="static-hero-noscript">JavaScript is off. Enable JavaScript to sign in.</p></noscript>
         </div>
@@ -69,6 +71,7 @@
         <details id="connection-details"><summary aria-label="Connection details">Details</summary><p id="connection-explanation">Connecting to room service…</p><p id="cursor-label" class="form-hint"></p></details>
       </div>
       <section id="auth-panel" class="auth-panel panel" aria-labelledby="auth-title" hidden>
+        <img class="signin-mark" src="/project-room-mark.svg" alt="" width="80" height="80">
         <h1 id="auth-title" tabindex="-1">PROJECT ROOM</h1>
         <p id="auth-error" class="status form-status" role="alert"></p>
         <p id="auth-link-error" class="status form-status" role="alert"></p>
@@ -339,7 +342,7 @@
             <div class="conversation-heading"><span id="mobile-room-name"></span><div class="conversation-title-row"><h2 id="conversation-title" tabindex="-1"># general</h2></div></div>
             <div class="topbar-actions">
               <button id="topbar-search-toggle" class="icon-button" type="button" aria-expanded="false" aria-controls="search-form" aria-label="Search" title="Search"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></button>
-              <button id="topbar-catchup" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="catchup-dialog">Catch up <span id="catchup-count" class="count-chip"></span></button>
+              <button id="topbar-catchup" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="catchup-dialog" title="Catch up"><svg class="control-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5"/><path d="M12 7v5l3 2"/></svg><span class="control-label">Catch up</span> <span id="catchup-count" class="count-chip"></span></button>
               <details id="room-more" class="room-more"><summary class="topbar-button">More</summary>
                 <div class="room-more-actions">
               <button id="topbar-activity" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="activity-dialog" title="Activity (g then a)">Activity <span id="activity-count" class="count-chip" hidden></span></button>
@@ -419,9 +422,10 @@
                 <div class="composer-options-panel" aria-label="Message options">
                   <button id="new-work-button" class="composer-add" type="button" aria-label="New work" title="New work"><span aria-hidden="true">+</span><span class="composer-add-label">New work</span></button>
                   <button id="request-reply" class="button ghost" type="button" hidden>Request a reply</button>
-                  <button id="composer-attach" class="icon-button composer-attach" type="button" aria-label="Attach a file" title="Attach a file"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg><span>Attach a file</span></button>
+
                 </div>
               </details>
+              <button id="composer-attach" class="icon-button composer-attach" type="button" aria-label="Attach a file" title="Attach a file"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
               <textarea id="message-input" rows="2" aria-describedby="message-length-status composer-hint" placeholder="Message #general" title="Enter to send · Shift + Enter for a new line" aria-description="Enter to send · Shift + Enter for a new line" aria-controls="mention-list" aria-autocomplete="list" aria-haspopup="listbox" required></textarea>
               <input id="composer-file" type="file" hidden multiple tabindex="-1">
               <button class="button primary icon-button" type="submit" aria-label="Send" title="Send"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button>

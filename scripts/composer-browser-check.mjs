@@ -106,7 +106,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     assert.equal(await optionsDisclosure.evaluate(node => node.open), false);
     assert.equal(await page.evaluate(() => document.activeElement.id), "composer-options-toggle");
 
-    await page.locator("#composer-options > summary").click();
+    assert.equal(await page.locator("#composer-attach").isVisible(), true, "attachment picker is available without opening secondary options");
     const chooserPromise = page.waitForEvent("filechooser");
     await page.locator("#composer-attach").click();
     const chooser = await chooserPromise;
