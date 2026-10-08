@@ -2089,6 +2089,95 @@ paths:
           description: File or message not found
         '422':
           description: messageId is missing or invalid
+  /api/rooms/{roomId}/payloads:
+    post:
+      summary: Upload a payload blob
+      description: |
+        Upload a payload (canonical base64 `data`, at most 25 MiB) for the
+        signed-in member. The server derives the SHA-256, so the upload is
+        idempotent: the same bytes return the same sha with `duplicate: true`
+        (200) instead of 201. An upload alone creates no pin; the blob is an
+        orphan until an event body references it. Payloads over 64 KiB must
+        ride here — events carry only `{ payload_ref }`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mediaType, data]
+              properties:
+                mediaType: { type: string }
+                data: { type: string, description: Canonical base64 payload bytes }
+      responses:
+        '201':
+          description: Payload stored
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  duplicate: { type: boolean }
+                  roomId: { type: string }
+                  payload:
+                    type: object
+                    properties:
+                      sha256: { type: string }
+                      byte_length: { type: integer }
+                      media_type: { type: string }
+        '200':
+          description: The same bytes were already stored
+        '401':
+          description: No room credential
+        '403':
+          description: API key lacks rooms:write, or guest members are denied
+        '413':
+          description: Payload exceeds the 25 MiB limit
+        '422':
+          description: Payload was rejected (bad shape, base64, or media type)
+  /api/rooms/{roomId}/payloads/{sha256}:
+    get:
+      summary: Download one payload blob
+      description: |
+        Members with read scope download one payload by its SHA-256. The
+        `{roomId}` segment is an auth anchor only: the caller must be a
+        member of that room. A malformed sha is 422; a well-formed but
+        unknown sha is 404 (same 404-not-403 posture as room files).
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: sha256
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Payload with base64 bytes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  payload:
+                    type: object
+                    properties:
+                      sha256: { type: string }
+                      byte_length: { type: integer }
+                      media_type: { type: string }
+                      encoding: { type: string }
+                      data: { type: string, description: Canonical base64 payload bytes }
+        '401':
+          description: Authentication required
+        '403':
+          description: API key lacks rooms:read, or guest members are denied
+        '404':
+          description: Payload not found
+        '422':
+          description: sha256 is not 64 lowercase hex characters
   /api/web/fetch:
     post:
       summary: Fetch a public web page as markdown and/or deterministic highlights

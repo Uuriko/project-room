@@ -147,6 +147,9 @@ optional.push("server/action-classes.mjs");
 optional.push("server/room-lifecycle.mjs");
 optional.push("server/attachment-schema.mjs");
 optional.push("server/room-attachment-bytes.mjs"); // room_attachments byte store (imported by server/store.mjs and server/http.mjs)
+optional.push("server/payload-schema.mjs"); // WAVE-300 payload store schema + limits (imported by server/payload-store.mjs, server/payload-refs.mjs, server/http.mjs)
+optional.push("server/payload-store.mjs"); // WAVE-300 content-addressed blob store + pin-set GC (imported by server/http.mjs; sibling wires it into server/store.mjs)
+optional.push("server/payload-refs.mjs"); // WAVE-300 payload_ref event-body convention helpers (imported by server/http.mjs)
 optional.push("server/inbox-attachment-bytes.mjs"); // identity inbox attachment bytes (imported by server/store.mjs)
 optional.push("server/attachments.mjs"); // filename and extension checks (imported by server/room-attachment-bytes.mjs)
 optional.push("server/wake-queue.mjs", "server/request-runs.mjs");

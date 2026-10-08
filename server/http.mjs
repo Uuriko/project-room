@@ -54,6 +54,13 @@ import { isRoomMcpPath, writeRoomMcpNode } from "./mcp-http.mjs";
 import { isA2aPath, writeA2aNode } from "./a2a-jsonrpc.mjs";
 import { mcpAttachmentBodyBytes } from "./room-attachment-bytes.mjs";
 import { createHostedRoomMcp } from "./mcp-room-profile.mjs";
+// WAVE-300 payload store: content-addressed blobs for room payloads.
+// server/payload-refs.mjs owns the event-body convention ({ payload_ref },
+// inline threshold, pin scanning); server/payload-store.mjs owns the blob
+// store and pin-set GC.
+import { PayloadStore, validPayloadData, base64LengthForPayloadBytes } from "./payload-store.mjs";
+import { payloadLimits } from "./payload-schema.mjs";
+import { externalizePayload, collectPayloadRefs, validatePayloadRef, pinPayloadRefs } from "./payload-refs.mjs";
 import { diagnoseArguments } from "./mcp-arg-errors.mjs";
 import { collectNeedsMe } from "./needs-me.mjs";
 import { isIdentitySecret } from "./agent-identities.mjs";
@@ -254,6 +261,81 @@ const sessionView = auth => ({
   expiresAt: auth.expiresAt
 });
 const exact = (value, fields) => Object.keys(value).length === fields.length && fields.every(field => Object.hasOwn(value, field));
+// WAVE-300: JSON body cap for POST /api/rooms/{room}/payloads — one max-size
+// blob as canonical base64, plus a small envelope (mirrors mcpAttachmentBodyBytes).
+const payloadBodyBytes = base64LengthForPayloadBytes(payloadLimits.maxBlobBytes) + 8192;
+// Lazily attach the payload store: read-only RoomStore opens (backup-verify,
+// audits) never pay the schema-ensure write. A store.mjs-wired instance wins
+// via ??=.
+const payloadStoreFor = store => (store.payloads ??= new PayloadStore(store.db, { now: () => store.now() }));
+
+// WAVE-300 message-post wire-in: chat messages are the highest-frequency
+// payload carrier. Recursively externalize inline { mediaType, data }
+// payload objects in the command data; a bare canonical-base64 `data`
+// field decoding to more than inlineBytes cannot be externalized (no media
+// type), so it is rejected with 413 and a pointer to the upload endpoint.
+async function externalizeMessageData(data, store) {
+  if (Array.isArray(data)) {
+    let changed = false;
+    const out = new Array(data.length);
+    for (let i = 0; i < data.length; i++) {
+      const next = await externalizeMessageData(data[i], store);
+      changed = changed || next !== data[i];
+      out[i] = next;
+    }
+    return changed ? out : data;
+  }
+  if (data && typeof data === "object") {
+    const keys = Object.keys(data);
+    if (keys.length === 2 && keys.includes("mediaType") && keys.includes("data") && typeof data.data === "string") {
+      return externalizePayload({ mediaType: data.mediaType, dataBase64: data.data }, store);
+    }
+    if (typeof data.data === "string" && validPayloadData(data.data)) {
+      const bytes = Buffer.from(data.data, "base64");
+      if (bytes.toString("base64") === data.data && bytes.length > payloadLimits.inlineBytes) {
+        throw new ServiceError(413, "payload_too_large",
+          `Inline data field exceeds the ${payloadLimits.inlineBytes}-byte inline limit; upload via POST /api/rooms/{roomId}/payloads and reference the sha256`);
+      }
+    }
+    let changed = false;
+    const out = {};
+    for (const [key, value] of Object.entries(data)) {
+      const next = await externalizeMessageData(value, store);
+      changed = changed || next !== value;
+      out[key] = next;
+    }
+    return changed ? out : data;
+  }
+  return data;
+}
+
+// Post a chat message with payload externalization: >64KiB inline payloads
+// become { payload_ref }, and every ref is pinned in the same transaction
+// as the event write (a ref is never visible before its pin exists).
+async function postMessageCommand(store, token, roomId, command, fence) {
+  if (command?.type !== "message.posted" || !command?.data || typeof command.data !== "object") {
+    return store.command(token, roomId, command, fence);
+  }
+  payloadStoreFor(store);
+  const data = await externalizeMessageData(command.data, store);
+  const messageCommand = data === command.data ? command : { ...command, data };
+  const refs = collectPayloadRefs(messageCommand.data);
+  if (refs.length === 0) return store.command(token, roomId, messageCommand, fence);
+  // Fail fast on malformed refs before the event write lands.
+  for (const ref of refs) validatePayloadRef(ref);
+  let pins = null;
+  const result = store.transaction(() => {
+    const applied = store.command(token, roomId, messageCommand, fence);
+    // pinPayloadRefs executes every PayloadStore.pin() call synchronously
+    // (no suspension points under LocalBlobBackend), so the INSERTs land in
+    // this transaction; awaiting afterwards only surfaces errors.
+    pins = pinPayloadRefs(applied?.event?.data ?? messageCommand.data,
+      { kind: "event", roomId, refId: applied?.event?.id ?? messageCommand.id }, store);
+    return applied;
+  });
+  await pins;
+  return result;
+}
 // Providers the browser may reply through from the Inbox. Email stays out until
 // an outbound email slice exists; its sources report send: false.
 const channelSendProviders = Object.freeze(["telegram-bot"]);
@@ -3342,6 +3424,60 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const staged = store.roomAttachments.stage(selected.token, roomId, data);
         return json(res, staged.duplicate ? 200 : 201, staged);
       }
+      // WAVE-300 payload store: content-addressed blobs for room payloads.
+      // Payloads over 64 KiB ride here; events carry only { payload_ref }.
+      // Same auth preamble as the room-files block: bearer/session gate,
+      // api-key scope check (rooms:write to upload, rooms:read to download),
+      // guest denial per RC-2026-09-27-2716 (design §8: denied both).
+      // Route literals stay `const x = /^...$/;` so the route-docs gate
+      // indexes them.
+      const roomPayloadsMatch = /^\/api\/rooms\/([^/]{1,384})\/payloads$/.exec(url.pathname);
+      const roomPayloadGetMatch = /^\/api\/rooms\/([^/]{1,384})\/payloads\/([^/]{1,64})$/.exec(url.pathname);
+      if (roomPayloadsMatch || roomPayloadGetMatch) {
+        const roomId = pathId((roomPayloadsMatch || roomPayloadGetMatch)[1]);
+        const sha = roomPayloadGetMatch ? roomPayloadGetMatch[2] : null;
+        const writing = req.method === "POST";
+        const selected = roomCredentials(req, url);
+        const fence = selected.mode === "account" ? accountBinding(req, null) : expectedBinding(req);
+        const auth = roomAuth(selected, roomId, fence);
+        if (selected.bearer && auth.credentialScope !== "room") reject(403, "access_denied", "Bearer <redacted> sessions are not accepted");
+        if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
+        if (auth.member && isGuestAgentMemberId(auth.member.id)) reject(403, "guest_scope_denied", "Guest members cannot use the payload store");
+        if (auth.kind === "api-key") {
+          const requiredScope = writing ? "rooms:write" : "rooms:read";
+          const granted = (auth.apiKeyScopes ?? []).some(scope =>
+            scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
+          if (!granted) reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
+        }
+        const payloads = payloadStoreFor(store);
+        if (sha !== null) {
+          if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, HEAD" });
+          rate(`read:${auth.credentialHash}`, 600);
+          if (!/^[0-9a-f]{64}$/.test(sha)) reject(422, "invalid_payload_ref", "sha256 must be 64 lowercase hex characters");
+          const row = await payloads.get(sha);
+          return json(res, 200, {
+            roomId,
+            payload: { sha256: row.sha256, byte_length: row.byte_length, media_type: row.media_type, encoding: "base64", data: row.dataBase64 }
+          }, req.method === "HEAD");
+        }
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
+        protectWrite(req, auth, selected.bearer);
+        rate(`write:${auth.credentialHash}`, 60);
+        const data = await body(req, { limit: payloadBodyBytes });
+        if (!data || typeof data.mediaType !== "string" || typeof data.data !== "string" || !exact(data, ["mediaType", "data"])) {
+          reject(422, "invalid_payload", "mediaType and data are required");
+        }
+        const stored = await payloads.put({ mediaType: data.mediaType, dataBase64: data.data });
+        // Opportunistic GC (design §7): the same pinned-set sweep a future
+        // scheduled job will call. Bounded and cheap when nothing is due.
+        await payloads.gc();
+        return json(res, stored.duplicate ? 200 : 201, {
+          status: "stored",
+          duplicate: stored.duplicate,
+          roomId,
+          payload: { sha256: stored.sha256, byte_length: stored.byte_length, media_type: data.mediaType.toLowerCase() }
+        });
+      }
       // onboarding-funnel was removed on main (replaced by activation-pack);
       // dm-consents + public-face are this branch's consent/face routes.
       const publicWorkResultsMatch = /^\/api\/rooms\/([^/]{1,384})\/public-work\/results$/.exec(url.pathname);
@@ -4858,7 +4994,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           [ATTR.ROOM_ID]: roomId, [ATTR.INGRESS]: "api" } });
         try {
           if (typeof command?.type === "string") inboundSpan.setAttribute(ATTR.EVENT_TYPE, command.type);
-          const result = store.command(selected.token, roomId, command, fence);
+          // WAVE-300: chat messages externalize >64KiB inline payloads and
+          // pin payload_refs in the same transaction as the event write.
+          const result = await postMessageCommand(store, selected.token, roomId, command, fence);
           const messageId = result?.event?.data?.messageId ?? result?.event?.id;
           if (typeof messageId === "string") inboundSpan.setAttribute(ATTR.MESSAGE_ID, messageId);
           inboundSpan.setAttribute(ATTR.OUTCOME, result?.duplicate ? "duplicate" : "ok");
