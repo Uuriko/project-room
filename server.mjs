@@ -9,6 +9,7 @@ import { wireNodeJobs } from "./server/jobs.mjs";
 import { deploymentConfig } from "./server/deployment.mjs";
 import { createServer } from "node:http";
 import { maintenanceEnabled, maintenanceReply } from "./server/maintenance.mjs";
+import { SOURCE_REVISION, BUILD_ID } from "./server/version.mjs";
 import { growthCollector } from "./src/growth-emit.js";
 import { loadFromFile, saveToFile } from "./src/growth-persistence.js";
 import { createGrowthHttp } from "./src/growth-http.js";
@@ -76,6 +77,14 @@ const server = paused ? createServer((req, res) => {
     const url = new URL(req.url, origin);
     if (url.origin !== origin || req.headers.host !== new URL(origin).host) {
       res.writeHead(403, { "Cache-Control": "no-store" }); res.end(); return;
+    }
+    // REL-22: the release receipt stays readable while paused, like the
+    // Workers /api/version/worker door. Module constants only: no storage,
+    // no cookie, no store. Health, ready, reads and writes stay 503.
+    if (url.pathname === "/api/version" && (req.method === "GET" || req.method === "HEAD")) {
+      const body = JSON.stringify({ status: "paused", mode: "maintenance", sourceRevision: SOURCE_REVISION, buildId: BUILD_ID });
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
+      res.end(req.method === "HEAD" ? undefined : body); return;
     }
     const reply = maintenanceReply(url.pathname);
     res.writeHead(reply.status, reply.headers); res.end(req.method === "HEAD" ? undefined : reply.body);
