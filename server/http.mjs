@@ -3610,6 +3610,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "public-work-review") {
         if ([...url.searchParams.keys()].some(key => (key !== "auth" && (!publicWorkResultsMatch || !["limit", "after"].includes(key))) || url.searchParams.getAll(key).length !== 1)) reject(422, "invalid_public_work_review", "Unsupported review query parameters");
+        // FO-DRIFT-1/2: the spec constrains auth to the room|account enum.
+        // Validate the selector value on the results route even when bearer
+        // or header auth is selected, where roomCredentials would otherwise
+        // ignore a malformed query parameter.
+        const authSelector = url.searchParams.get("auth");
+        if (publicWorkResultsMatch && authSelector !== null && !["room", "account"].includes(authSelector)) reject(422, "invalid_public_work_review", "Invalid auth query parameter");
         if (isGuestAgentMemberId(auth.member.id)) reject(403, "access_denied", "Guests cannot review contributions");
         const action = publicWorkDecideMatch ? "decide" : publicWorkVerifyMatch ? "verify" : publicWorkFollowUpMatch ? "follow-up" : null;
         if (!action) {
