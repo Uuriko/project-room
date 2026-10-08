@@ -529,6 +529,7 @@
   "tests/owner-attention.test.js": 62204,
   "tests/owner-delegated-admin.test.js": 32356,
   "tests/owner-delegates.test.js": 59107,
+  "tests/owner-dm-edit.test.js": 481,
   "tests/paid-work-offers.test.js": 15050,
   "tests/passkey-login.test.js": 3881,
   "tests/password-auth.test.js": 12728,
@@ -1044,5 +1045,13 @@
   "method": "Median of five solo node --test wall-clock runs; all passed.",
   "purpose": "Measured allocation only; test discovery remains authoritative."
  },
- "qa8UnmeasuredRefreshMeasurement": "43 unmeasured files (42 on main 4c11f4b9 plus tests/work-claim-conflict-hint.test.js): solo wall-clock ms of `node --test <file>` on Linux Node v24.21.0, 2026-10-08, one file at a time; all passed. Brings the unmeasured set back under UNMEASURED_CAP. Timing allocates files only, not membership."
+ "qa8UnmeasuredRefreshMeasurement": "43 unmeasured files (42 on main 4c11f4b9 plus tests/work-claim-conflict-hint.test.js): solo wall-clock ms of `node --test <file>` on Linux Node v24.21.0, 2026-10-08, one file at a time; all passed. Brings the unmeasured set back under UNMEASURED_CAP. Timing allocates files only, not membership.",
+ "ownerDmEditMeasurement": {
+  "date": "2026-10-07",
+  "runtime": "Node v22.23.3 Linux local",
+  "file": "tests/owner-dm-edit.test.js",
+  "milliseconds": 481,
+  "method": "Median of five solo node --test wall-clock runs; all passed.",
+  "purpose": "Measured allocation only; test discovery remains authoritative."
+ }
 }
