@@ -64,9 +64,12 @@ export function assertBoardLeaseHours(reject, data) {
   const value = data.leaseHours;
   // The immortal null opt-out is retired: null is rejected, not allowed.
   if (value === null) reject(422, "claim_lease_required", "leaseHours: the null (immortal) opt-out is retired — omit leaseHours for the kind default");
-  if (typeof value !== "number" || !Number.isFinite(value) || value < BOARD_LEASE_HOURS_MIN || value > BOARD_LEASE_HOURS_MAX) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < BOARD_LEASE_HOURS_MIN) {
     invalid(reject, "leaseHours", `must be a number from ${BOARD_LEASE_HOURS_MIN} to ${BOARD_LEASE_HOURS_MAX}`);
   }
+  // Over the hard cap uses the domain code so the route and the state
+  // machine agree (claim_lease_too_long, not a shape error).
+  if (value > BOARD_LEASE_HOURS_MAX) reject(422, "claim_lease_too_long", `leaseHours ${value} exceeds the 2h hard cap (all claim kinds)`);
 }
 
 export function assertDependsOnKnown(reject, data, { selfId, has }) {
