@@ -470,7 +470,9 @@ function mirrorLandClaim(store, row) {
     revision
   }, { now, agentId: row.added_by_member_id });
   if (row.claimant_member_id) {
-    item = claimWork(item, row.claimant_member_id, { leaseHours: null, pullRequest: url, now });
+    // No leaseHours: the land kind default (30min) applies. The immortal
+    // null opt-out is retired — every claim carries a lease.
+    item = claimWork(item, row.claimant_member_id, { pullRequest: url, now });
   }
   store.workClaims.set(row.room_id, item);
   return true;
