@@ -261,7 +261,8 @@ export class AgentHeartbeats {
 
   // plan-wake-live: every registered agent partitioned into the wakeable
   // list and the not-wakeable list. Read-only; never migrates (an older
-  // DB without agent_wake_polls lists everyone as not wakeable).
+  // DB without agent_wake_polls lists everyone as not wakeable; a
+  // pre-heartbeat DB without any of the tables lists nobody at all).
   wakeStatusList() {
     const at = this.now();
     let rows;
@@ -271,8 +272,14 @@ export class AgentHeartbeats {
         LEFT JOIN agent_wake_polls p ON p.agent_id = h.agent_id
         ORDER BY h.agent_id`).all();
     } catch {
-      rows = this.db.prepare("SELECT DISTINCT agent_id AS agentId FROM agent_hosts ORDER BY agent_id")
-        .all().map(row => ({ agentId: row.agentId, lastPolledAt: null }));
+      rows = [];
+      try {
+        rows = this.db.prepare("SELECT DISTINCT agent_id AS agentId FROM agent_hosts ORDER BY agent_id")
+          .all().map(row => ({ agentId: row.agentId, lastPolledAt: null }));
+      } catch {
+        // Pre-heartbeat DB without agent_hosts either (read-only opens
+        // never migrate): nobody registered, both lists stay empty.
+      }
     }
     const wakeable = [], notWakeable = [];
     for (const row of rows) {
@@ -585,10 +592,20 @@ export class AgentHeartbeats {
   // acknowledges: signals leave the queue only through ackWakes().
   notePoll({ agentId, roomId = null }) {
     checkAgentId(agentId);
-    const known = this.db.prepare("SELECT 1 FROM agent_hosts WHERE agent_id=? LIMIT 1").get(agentId);
+    let known = null;
+    try {
+      known = this.db.prepare("SELECT 1 FROM agent_hosts WHERE agent_id=? LIMIT 1").get(agentId);
+    } catch {
+      // Pre-heartbeat DB without agent_hosts (read-only opens never
+      // migrate): no host ever reported, so the agent is unregistered.
+    }
     if (!known) return Object.freeze({ agentId, registered: false, pendingWakes: Object.freeze([]) });
-    // plan-wake-live: the poll itself is listener evidence.
-    this.recordPollActivity(agentId);
+    // plan-wake-live: the poll itself is listener evidence — best-effort on
+    // pre-migration DBs without agent_wake_polls (read-only never migrates).
+    // The pending-wake read below still serves; only the stamp is skipped.
+    // recordPollActivity stays loud for its write-path caller heartbeat():
+    // a missing stamp table there is a real problem, not a legacy DB.
+    try { this.recordPollActivity(agentId); } catch { /* no stamp table yet */ }
     return Object.freeze({
       agentId, registered: true, pendingWakes: this.pendingWakes(agentId, { roomId }),
     });
@@ -646,8 +663,17 @@ export class AgentHeartbeats {
   statusOf(agentId) {
     checkAgentId(agentId);
     const at = this.now();
-    const hosts = this.db.prepare("SELECT * FROM agent_hosts WHERE agent_id=? ORDER BY last_seen_at DESC")
-      .all(agentId);
+    let hosts;
+    try {
+      hosts = this.db.prepare("SELECT * FROM agent_hosts WHERE agent_id=? ORDER BY last_seen_at DESC")
+        .all(agentId);
+    } catch {
+      // Pre-heartbeat DB without agent_hosts (read-only opens never
+      // migrate): no host ever reported — read as unregistered, never an
+      // error. presenceForCard promises null for absent heartbeat tables;
+      // that promise runs through this shape.
+      return Object.freeze({ agentId, status: "unregistered", lastSeenAt: null, hosts: Object.freeze([]) });
+    }
     if (hosts.length === 0) {
       return Object.freeze({ agentId, status: "unregistered", lastSeenAt: null, hosts: Object.freeze([]) });
     }
