@@ -73,10 +73,15 @@ test("unit shard plan is complete, deterministic, and balanced on measured runti
   for (const shard of plan.shards) assert.ok(shard.files.length > 0 && shard.estimatedMs > 0);
   assert.throws(() => parseShard("1/4 trailing"), /Shard/);
   assert.throws(() => parseShard(`2/${SHARD_COUNT + 1}`), /Shard/);
-  // Balance is only real when every suite file carries measured timing data.
+  // A new test file without a measurement is planned at the 5000ms default
+  // (unitPlan's estimate), so it never breaks the plan or the gate. Requiring
+  // a durations entry per new file failed every test-adding PR and made
+  // scripts/unit-ci-durations.json the repo's top merge-conflict hotspot.
+  // Only a large unmeasured share is a real balance problem: refresh then.
   const measured = JSON.parse(readFileSync("scripts/unit-ci-durations.json", "utf8")).milliseconds;
   const unmeasured = plan.files.filter((file) => !(Number.isFinite(measured[file]) && measured[file] > 0));
-  assert.deepEqual(unmeasured, [], `unit shard balance needs measured durations for: ${unmeasured.join(", ")}`);
+  assert.ok(unmeasured.length <= Math.ceil(plan.files.length * 0.15),
+    `${unmeasured.length} of ${plan.files.length} unit files lack measured durations; refresh scripts/unit-ci-durations.json: ${unmeasured.join(", ")}`);
   const total = plan.shards.reduce((sum, shard) => sum + shard.estimatedMs, 0);
   for (const shard of plan.shards) {
     const share = shard.estimatedMs / total;
