@@ -451,17 +451,24 @@ const accountView = row => row ? { id: row.id, active: Boolean(row.active), revi
 // NULL and onboarded 1, so legacy accounts are not forced through
 // first-run onboarding; createAccount inserts new accounts with
 // onboarded 0.
+// Additive-column convergence used by every ensure* helper and the
+// constructor's schema pass below: probe table_info for the column name,
+// ALTER TABLE when absent. Same result as the SELECT-from-pragma_table_info
+// form it replaces; PRAGMA table_info normalizes the name the same way.
+const columnNames = (db, table) => new Set(db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name));
+const addColumnIfMissing = (db, table, name, definition) => {
+  if (!columnNames(db, table).has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`);
+};
 function ensureAccountProfileSchema(db) {
   if (!db.prepare("SELECT 1 FROM sqlite_master WHERE name='accounts'").get()) return;
-  const columns = new Set(db.prepare("SELECT name FROM pragma_table_info('accounts')").all().map(r => r.name));
-  if (!columns.has("display_name")) db.exec("ALTER TABLE accounts ADD COLUMN display_name TEXT");
-  if (!columns.has("avatar_url")) db.exec("ALTER TABLE accounts ADD COLUMN avatar_url TEXT");
-  if (!columns.has("onboarded")) db.exec("ALTER TABLE accounts ADD COLUMN onboarded INTEGER NOT NULL DEFAULT 1");
+  addColumnIfMissing(db, "accounts", "display_name", "TEXT");
+  addColumnIfMissing(db, "accounts", "avatar_url", "TEXT");
+  addColumnIfMissing(db, "accounts", "onboarded", "INTEGER NOT NULL DEFAULT 1");
   // RC-2026-09-19-088: ever_had_room tracks whether the account has ever held
   // a room membership, so the default-room endpoint never resurrects a room
   // for someone who deliberately left (or was removed from) all of theirs.
-  if (!columns.has("ever_had_room")) {
-    db.exec("ALTER TABLE accounts ADD COLUMN ever_had_room INTEGER NOT NULL DEFAULT 0");
+  if (!columnNames(db, "accounts").has("ever_had_room")) {
+    addColumnIfMissing(db, "accounts", "ever_had_room", "INTEGER NOT NULL DEFAULT 0");
     // Backfill: accounts with a current membership have had a room. Defensive:
     // if member_accounts is absent (partial migration), the column defaults
     // to 0 and the endpoint treats the account as new (safe direction).
@@ -1449,10 +1456,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // hash at creation time. If the secret is rotated or revoked, sessions
       // minted with the old secret are rejected at authenticate() time.
       // Additive column; existing rows backfill NULL (no secret binding).
-      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('credentials') WHERE name='identity_secret_hash'").get()) {
-        this.db.exec("ALTER TABLE credentials ADD COLUMN identity_secret_hash TEXT");
-      }
-      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('rooms') WHERE name='archived_at'").get()) migrateRoomLifecycleV28(this);
+      addColumnIfMissing(this.db, "credentials", "identity_secret_hash", "TEXT");
+      if (!columnNames(this.db, "rooms").has("archived_at")) migrateRoomLifecycleV28(this);
       // v35: share-link and invitation issuer columns go nullable so an agent
       // room owner (no account) can be recorded honestly as the issuer.
       // SQLite cannot relax NOT NULL in place, so both tables are rebuilt.
@@ -1481,8 +1486,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.exec(referralInviteSchema);
       // Backfill the cap for members admitted before this field existed. An
       // unmatched row stays NULL and the mint path refuses it fail-closed.
-      const chainColumns = new Set(this.db.prepare("PRAGMA table_info(referral_chain_members)").all().map(c => c.name));
-      if (!chainColumns.has("max_depth")) this.db.exec("ALTER TABLE referral_chain_members ADD COLUMN max_depth INTEGER");
+      addColumnIfMissing(this.db, "referral_chain_members", "max_depth", "INTEGER");
       // Eager opens finish the backfill before serving. A deferred wake
       // leaves NULL caps for the integrity cron, 500 rows at a time. The
       // mint path refuses a NULL cap, so a partial backfill fails closed.
@@ -1558,10 +1562,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.exec(PUBLIC_READ_MODEL_SCHEMA);
       // Existing directory rows predate the independent feed visibility bit.
       // Default them on so upgrading does not silently hide public work.
-      const directoryColumns = new Set(this.db.prepare("PRAGMA table_info(room_directory_settings)").all().map(c => c.name));
-      if (!directoryColumns.has("opportunities_enabled")) {
-        this.db.exec("ALTER TABLE room_directory_settings ADD COLUMN opportunities_enabled INTEGER NOT NULL DEFAULT 1");
-      }
+      addColumnIfMissing(this.db, "room_directory_settings", "opportunities_enabled", "INTEGER NOT NULL DEFAULT 1");
       // RC-2026-09-23-100: guest invites (GX-… public handoff) — purely
       // additive side tables (no events, no projection impact), same pattern.
       this.db.exec(guestInviteSchema);
@@ -1612,11 +1613,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Rich push (sender/preview/deep link): converge existing databases.
       // Old rows read preview as on and quiet hours as unset, preserving
       // today's delivery exactly until the member touches the switches.
-      {
-        const prefColumns = new Set(this.db.prepare("PRAGMA table_info(human_push_preferences)").all().map(c => c.name));
-        if (!prefColumns.has("preview_enabled")) this.db.exec("ALTER TABLE human_push_preferences ADD COLUMN preview_enabled INTEGER NOT NULL DEFAULT 0");
-        if (!prefColumns.has("quiet_hours")) this.db.exec("ALTER TABLE human_push_preferences ADD COLUMN quiet_hours TEXT");
-      }
+      addColumnIfMissing(this.db, "human_push_preferences", "preview_enabled", "INTEGER NOT NULL DEFAULT 0");
+      addColumnIfMissing(this.db, "human_push_preferences", "quiet_hours", "TEXT");
       // Gap #2 (PR #562): explicit account_id/source_id columns converge on
       // existing databases via ALTER TABLE; old rows backfill NULL and keep
       // reading as { accountId: null, sourceId: null }.
@@ -1691,10 +1689,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.exec(accessRequestSchema);
       // "Who referred you?" free text on access requests (referral
       // attribution): converge deployed databases that predate the column.
-      {
-        const cols = new Set(this.db.prepare("PRAGMA table_info(access_requests)").all().map(c => c.name));
-        if (!cols.has("referred_by")) this.db.exec("ALTER TABLE access_requests ADD COLUMN referred_by TEXT");
-      }
+      addColumnIfMissing(this.db, "access_requests", "referred_by", "TEXT");
       // Owner-granted membership administration for agent identities
       // (RC-2026-09-18-038): purely additive, intentionally outside the
       // writer fence like access_requests — older writers have no code path
@@ -1720,13 +1715,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // ID-SEC: verified email, the password-reset banner, and the security
       // event journal. Additive and unfenced, same as the login-method tables.
       ensureVerifiedEmailSchema(this.db);
-      {
-        const keyCols = new Set(this.db.prepare("PRAGMA table_info(agent_api_keys)").all().map(column => column.name));
-        if (keyCols.size > 0 && !keyCols.has("last_used_ua")) this.db.exec("ALTER TABLE agent_api_keys ADD COLUMN last_used_ua TEXT");
-        const identityCols = new Set(this.db.prepare("PRAGMA table_info(agent_identities)").all().map(column => column.name));
-        if (identityCols.size > 0 && !identityCols.has("last_used_at")) this.db.exec("ALTER TABLE agent_identities ADD COLUMN last_used_at INTEGER");
-        if (identityCols.size > 0 && !identityCols.has("last_used_ua")) this.db.exec("ALTER TABLE agent_identities ADD COLUMN last_used_ua TEXT");
-        if (identityCols.size > 0 && !identityCols.has("mcp_legacy_uses")) this.db.exec("ALTER TABLE agent_identities ADD COLUMN mcp_legacy_uses INTEGER NOT NULL DEFAULT 0");
+      // Converge last-used columns only when the tables exist (a partial
+      // migration may not have created them yet); the helper skips absent
+      // columns but not absent tables.
+      if (columnNames(this.db, "agent_api_keys").size > 0) addColumnIfMissing(this.db, "agent_api_keys", "last_used_ua", "TEXT");
+      if (columnNames(this.db, "agent_identities").size > 0) {
+        addColumnIfMissing(this.db, "agent_identities", "last_used_at", "INTEGER");
+        addColumnIfMissing(this.db, "agent_identities", "last_used_ua", "TEXT");
+        addColumnIfMissing(this.db, "agent_identities", "mcp_legacy_uses", "INTEGER NOT NULL DEFAULT 0");
       }
       // Existing v35 databases predate persistent OAuth state. Converge this
       // unfenced additive table on every open, not only invitation migration.
@@ -1754,9 +1750,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.exec(MESSAGES_SCHEMA);
       // v38 preserves complete current message records. Existing rows remain
       // null until the budgeted replay fills them; never scan history on open.
-      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages') WHERE name='record_json'").get()) {
-        this.db.exec("ALTER TABLE messages ADD COLUMN record_json TEXT");
-      }
+      addColumnIfMissing(this.db, "messages", "record_json", "TEXT");
       // MSG-2: replay cursor. Unfenced. The integrity cron fills it. A warm
       // wake whose stamp matches skips this block; the stamp includes this DDL.
       this.db.exec(MESSAGES_BACKFILL_CURSOR_SCHEMA);
