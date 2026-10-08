@@ -21,9 +21,6 @@ function makeStore(now = () => Date.now()) {
   return { db, store: new PayloadStore(db, { now }) };
 }
 
-const throwsPayloadError = (fn, status, code) =>
-  assert.throws(fn, error => error.status === status && error.code === code);
-
 test("payloadLimits match the design doc and the schema is idempotent", () => {
   assert.equal(payloadLimits.inlineBytes, 65536);
   assert.equal(payloadLimits.maxBlobBytes, 25 * 1024 * 1024);
@@ -250,8 +247,4 @@ test("the base BlobBackend surface is unimplemented", async () => {
   await assert.rejects(() => backend.get("x"), /unimplemented/);
   await assert.rejects(() => backend.del("x"), /unimplemented/);
   await assert.rejects(() => backend.exists("x"), /unimplemented/);
-});
-
-test("throwsPayloadError helper sanity: sync ServiceError checks still work", () => {
-  throwsPayloadError(() => { throw Object.assign(new Error("x"), { status: 400, code: "c" }); }, 400, "c");
 });
