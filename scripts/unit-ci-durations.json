@@ -241,6 +241,7 @@
   "tests/dm-consents-autonomy-tier.test.js": 35449,
   "tests/dm-consents.test.js": 19080,
   "tests/dm-privacy.test.js": 99409,
+  "tests/dm-nonparty-misc.test.js": 462,
   "tests/docs-architecture.test.js": 6824,
   "tests/docs-glossary.test.js": 6883,
   "tests/docs-relative-links.test.js": 6242,
@@ -973,6 +974,14 @@
   "runtime": "macOS solo real node --test",
   "file": "tests/landing-facts.test.js",
   "milliseconds": 70,
+  "purpose": "Measured allocation only; test discovery remains authoritative."
+ },
+ "dmNonpartyMiscMeasurement": {
+  "date": "2026-10-07",
+  "runtime": "Node v22.23.3 Linux local",
+  "file": "tests/dm-nonparty-misc.test.js",
+  "milliseconds": 462,
+  "method": "Median of five solo node --test wall-clock runs; all passed.",
   "purpose": "Measured allocation only; test discovery remains authoritative."
  }
 }
