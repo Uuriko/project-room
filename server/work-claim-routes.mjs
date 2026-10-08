@@ -946,7 +946,18 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (!shape(data, { optional: ["note", "leaseHours", "files", "advisory", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch"] })) invalidInput(reject, "{note?, leaseHours?, files?, advisory?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?}");
     if ("advisory" in data && typeof data.advisory !== "boolean") invalidInput(reject, "advisory true or false");
     const item = load(claimIdOf(reject, workClaimId));
-    if (item.state !== "unclaimed") reject(409, "work_claim_conflict", `Work "${item.id}" is already ${item.state} — release it first`);
+    // H4 (QA-200 2026-10-08): a failed claim's 409 must name the real recovery.
+    // The old "release it first" advice destroyed your own claim on self
+    // re-claim and was unactionable for a foreign holder (non-owners cannot
+    // release it) — it also never named the holder.
+    if (item.state !== "unclaimed") {
+      if (item.owner === caller) {
+        reject(409, "work_claim_conflict",
+          `You already hold work "${item.id}" — no new claim was saved; read the item to confirm`);
+      }
+      reject(409, "work_claim_conflict",
+        `Work "${item.id}" is held by ${item.owner ?? "someone else"} — ask them to reassign or release it`);
+    }
     requireWriter();
     requireEventBudget();
     assertLeaseChoice(data);

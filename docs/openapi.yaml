@@ -5231,7 +5231,10 @@ paths:
       summary: Claim work
       description: |
         Claims an unclaimed item for the calling member (the anti-collision
-        rule: an already-claimed item gets 409 `work_claim_conflict`).
+        rule: an already-claimed item gets 409 `work_claim_conflict`, with the
+        message naming the holder — self re-claims are told they already hold
+        it (never "release it first"); foreign claimants are told who holds
+        it).
         `leaseHours` sets the claim lease in hours (default: the room's
         configured default, else 24h; max 168h). `null` opts out of leases
         and is only accepted from the room owner or a member with
@@ -5308,9 +5311,12 @@ paths:
         '404': { description: work_claim_not_found }
         '409':
           description: |
-            work_claim_conflict when the item is already claimed.
-            file_lease_conflict when declared files overlap a live lease.
-            The body names holder { claimId, owner }, files, and leaseExpiresAt.
+            work_claim_conflict when the item is already claimed. The message
+            names the holder: a self re-claim (same holder) says "You already
+            hold work ..." — never release it to re-claim; a foreign claimant
+            gets "held by <owner>". file_lease_conflict when declared files
+            overlap a live lease. The body names holder { claimId, owner },
+            files, and leaseExpiresAt.
         '422': { description: invalid_claim_input }
   /api/rooms/{roomId}/work-claims/{claimId}/update:
     post:
