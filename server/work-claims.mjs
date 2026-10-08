@@ -552,7 +552,12 @@ const workOf = value => {
     repo: repoOf(value.repo), branch: branchOf(value.branch),
     chain: chainOf(value.chain), supersededBy: optionalId(value.supersededBy, "supersededBy"),
     workItemId: optionalId(value.workItemId, "workItemId"),
+    kind, revision, ci: ciOf(value.ci), reviews: reviewsOf(value.reviews),
     standby: standbyOf(value.standby), createdSeq: createdSeqOf(value.createdSeq),
+    leaseSeq: leaseSeqOf(value.leaseSeq), epoch: epochOf(value.epoch),
+    priorActiveState: priorActiveStateOf(value.priorActiveState),
+    lastHeartbeatAt: isoOrNull(value.lastHeartbeatAt, "lastHeartbeatAt"),
+    consecutiveHeartbeats: countOf(value.consecutiveHeartbeats),
     filesDeclared: value.filesDeclared === undefined ? true : value.filesDeclared === true,
     // Reaper succession input: worker-nominated successor, preserved through
     // the machine so it survives round-trips (B2 guild-claimsboard).

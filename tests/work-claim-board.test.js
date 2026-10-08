@@ -84,6 +84,11 @@ async function fixture(t, { phase = { failure: false }, databasePath = ":memory:
   const origin = `http://127.0.0.1:${server.address().port}`;
   const client = token => new RoomAgentClient({ origin, roomId: "commons", token });
   const call = async (token, path, body) => {
+    // B4 integration: B1's lease-first model made files mandatory at
+    // creation. This suite predates that rule; the helper supplies a default
+    // file on creates that don't name one (unique per claim id to avoid
+    // file-lease conflicts between claims).
+    if (path === "/work-claims" && body !== undefined && !("files" in body)) body = { ...body, files: [`tasks/${body.id ?? "board"}.md`] };
     const response = await fetch(`${origin}/api/rooms/commons${path}`, {
       method: body === undefined ? "GET" : "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
