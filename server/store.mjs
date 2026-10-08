@@ -4163,9 +4163,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           if (m.toMemberId && m.authorId !== auth.member?.id && m.toMemberId !== auth.member?.id) continue;
           if (m.body.toLowerCase().includes(needle)) {
             result.total += 1;
-            if (result.messages.length < limit) {
-              result.messages.push({ id: m.id, authorId: m.authorId, body: m.body, createdAt: m.createdAt, workItemId: m.workItemId });
-            }
+            result.messages.push({ id: m.id, authorId: m.authorId, body: m.body, createdAt: m.createdAt, workItemId: m.workItemId });
+            // Keep the newest `limit` matches (still chronological). Keeping the first
+            // ones left every newer match unreachable: there is no offset, and limit
+            // tops out at 200.
+            if (result.messages.length > limit) result.messages.shift();
           }
         }
       }
