@@ -185,12 +185,15 @@ function insertOrder(names) {
 // store never creates. The two runtime markers belong to the Durable Object
 // writer fence (cloudflare/storage.mjs) and mean nothing in a sqlite file.
 // The retired Emissary tables stay in upgraded databases (no DROP was ever
-// issued) but no module reads them. Replay skips these and reports the row
-// counts; the export itself still holds the rows.
+// issued) but no module reads them. abuse_rate_buckets is rate-limit state
+// the Durable Object creates on first use (server/abuse-rate-buckets.mjs); a
+// restored store starts with fresh budgets. Replay skips these and reports the
+// row counts; the export itself still holds the rows.
 export const REPLAY_SKIPPED_TABLES = Object.freeze([
   "room_runtime_version", "room_writer_permit",
   "emissary_drops", "emissary_idempotency", "emissary_invite_attribution",
-  "emissary_journal", "external_identities", "external_receipts"
+  "emissary_journal", "external_identities", "external_receipts",
+  "abuse_rate_buckets"
 ]);
 
 const CLAIM_PERMIT_TABLE = "public_work_claim_writer_permit";
