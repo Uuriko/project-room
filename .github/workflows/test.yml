@@ -22,13 +22,16 @@ concurrency:
 
 jobs:
   # Pull requests only. Push to main skips this job so the full matrix starts
-  # immediately. Shards run unless this job explicitly sets browser=false.
+  # immediately. Shards run unless this job explicitly sets browser=false;
+  # the coverage suite re-run is skipped unless the diff can move module
+  # line coverage (coverage=false).
   changes:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
       browser: ${{ steps.plan.outputs.browser }}
+      coverage: ${{ steps.plan.outputs.coverage }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -81,10 +84,11 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npm run lint
-      # No-new-untested-server-module gate (RC-2026-09-25-302): zero-dep, no
-      # install needed, runs before the heavier suites would even finish.
-      - run: node scripts/untested-modules-lint.mjs
+      # No-new-untested-server-module gate (RC-2026-09-25-302): zero-dep, runs
+      # alongside eslint.
+      - parallel:
+          - run: npm run lint
+          - run: node scripts/untested-modules-lint.mjs
   # Root-suite unit tests (tests/*.test.js), sharded 3 ways for wall-clock
   # speed (CI-speed lane: the single `npm test` job was the ~11min long pole
   # of every head). scripts/unit-shards.mjs owns the file allocation
@@ -110,9 +114,13 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - run: npm ci
       - name: Install Linux host isolation for automatic-run unit tests
+        id: bwrap
+        background: true
         run: sudo apt-get update -qq && sudo apt-get install -y bubblewrap
+      - run: npm ci
+      - name: Wait for host isolation install
+        wait: bwrap
       - name: Permit the sandbox launcher to create its isolated namespaces
         # Ubuntu 24.04 denies capabilities inside unprivileged user namespaces
         # unless the launcher has an application profile. Scope the exception to
@@ -140,11 +148,8 @@ jobs:
       - name: Report failures to PR
         if: failure() && github.event_name == 'pull_request'
         run: |
-          BODY="## Unit test failures, shard ${{ matrix.shard }}/3 (debug)
-
-          See the job log for the failing file and assertion. Shard receipts
-          are in the unit-shard-evidence artifact."
-          gh pr comment "$PR_NUMBER" --repo Uuriko/project-room --body "$BODY" || echo "comment failed"
+          node scripts/report-unit-failures.mjs --shard=${{ matrix.shard }}/3 --body-file="$RUNNER_TEMP/unit-failures.md"
+          gh pr comment "$PR_NUMBER" --repo Uuriko/project-room --body-file "$RUNNER_TEMP/unit-failures.md" || echo "comment failed"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -176,7 +181,7 @@ jobs:
           UNIT_MATRIX_RESULT: ${{ needs.unit-shards.result }}
         run: node scripts/unit-shards-check.mjs unit-evidence
   browser-shards:
-    name: browser shard ${{ matrix.shard }}/4
+    name: browser shard ${{ matrix.shard }}/6
     needs: changes
     # Skip only when the merge-base diff explicitly does not touch browser
     # paths. A skipped or failed filter, and every main push, still runs shards.
@@ -186,7 +191,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -196,14 +201,22 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      - name: Resolve Playwright version
+        id: pw
+        run: echo "version=$(node -p "require('./node_modules/playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}-chromium
+      - name: Install Playwright Chromium (binary cached) and its OS deps
+        run: npx playwright install --with-deps chromium
       - name: Run conversation, composer recovery, Quiet Focus, accessibility, and session browser gates
         # Same suites as test:browser, plus a junit file under test-results/ for the step below.
-        run: scripts/test-env.sh npm run test:browser:ci -- --shard=${{ matrix.shard }}/4
+        run: scripts/test-env.sh npm run test:browser:ci -- --shard=${{ matrix.shard }}/6
       - name: Report failing browser tests as annotations and job summary
         # Readable through the GitHub API (check-run annotations, job summary) even when the raw log is not.
         if: always()
-        run: node scripts/report-test-failures.mjs test-results/browser-junit-${{ matrix.shard }}-of-4.xml
+        run: node scripts/report-test-failures.mjs test-results/browser-junit-${{ matrix.shard }}-of-6.xml
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
@@ -243,7 +256,7 @@ jobs:
           pattern: conversation-browser-evidence-*
           path: browser-evidence
           merge-multiple: true
-      - name: Require all four successful browser shards from this run
+      - name: Require all six successful browser shards from this run
         if: needs.browser-shards.result != 'skipped'
         env:
           BROWSER_MATRIX_RESULT: ${{ needs.browser-shards.result }}
@@ -263,8 +276,20 @@ jobs:
         with:
           version: 10
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      - name: Resolve Playwright version
+        id: pw
+        run: echo "version=$(node -p "require('./node_modules/playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}-chromium
+      - name: Install Playwright Chromium (binary cached) and its OS deps
+        id: pwinstall
+        background: true
+        run: npx playwright install --with-deps chromium
       - run: pnpm --dir cloudflare install --frozen-lockfile --ignore-scripts
+      - name: Wait for Playwright install
+        wait: pwinstall
       - name: Verify the shared Workers runtime and restart journey
         working-directory: cloudflare
         env:
@@ -289,6 +314,12 @@ jobs:
   # job in the graph was skipped, so an intentional browser-shard skip would
   # skip this required check. Evaluate the direct results instead.
   coverage:
+    needs: [changes]
+    # Skip only when the merge-base diff explicitly cannot move module line
+    # coverage (no measured source, test, or gate-file changes). A skipped or
+    # failed filter, and every main push, still runs the suite: the verdict
+    # can only be skipped when it provably cannot change.
+    if: always() && !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.coverage != 'false')
     # Per-module coverage ratchet (backlog Q015): runs the root unit suite
     # with V8 coverage and fails when any module in coverage-thresholds.json
     # drops below its threshold. Zero dependencies; the script points TMPDIR
@@ -304,9 +335,13 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - run: npm ci
       - name: Install Linux host isolation for automatic-run unit tests
+        id: bwrap
+        background: true
         run: sudo apt-get update -qq && sudo apt-get install -y bubblewrap
+      - run: npm ci
+      - name: Wait for host isolation install
+        wait: bwrap
       - name: Permit the sandbox launcher to create its isolated namespaces
         # Same setup as the unit job (Ubuntu 24.04 denies capabilities inside
         # unprivileged user namespaces without an application profile).
@@ -350,6 +385,11 @@ jobs:
             name=${pair%%:*}
             result=${pair#*:}
             echo "$name=$result"
+            # coverage=skipped is provably the intentional skip: the coverage
+            # job's if: only skips when the changes job succeeded with
+            # coverage=false (diff cannot move module line coverage). Every
+            # other path runs the suite.
+            if [ "$name" = "coverage" ] && [ "$result" = "skipped" ]; then continue; fi
             if [ "$result" != "success" ]; then failed=1; fi
           done
           exit "$failed"

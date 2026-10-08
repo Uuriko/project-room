@@ -17,7 +17,7 @@ import { canonicalLane, normalizeActor } from "./bounty-escrow.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { publishBountyEvent } from "./bounty-escrow-routes.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
-import { buildWorkClaimPage, linkWorkClaimPullRequest } from "./work-claim-routes.mjs";
+import { buildWorkClaimPage, linkWorkClaimPullRequest, closeWorkClaim } from "./work-claim-routes.mjs";
 
 import { prepareWork } from "../client/work-preparation.mjs";
 import { beginSelectedWork, findBeginReceipt } from "../client/begin-work.mjs";
@@ -258,6 +258,21 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
       return { value: { status: error.status, code: error.code, message: error.message,
         ...(error.body?.hint ? { hint: error.body.hint } : {}),
         ...(error.body?.next ? { next: error.body.next } : {}) }, isError: true };
+    }
+  }
+  if (name === "room_close_work_claim") {
+    try {
+      const value = closeWorkClaim({ store, roomId, auth, claimId: rest.claimId, verb: rest.verb ?? "close", reason: rest.reason,
+        reauthorize: () => {
+          const current = store.authenticate(secret, roomId, auth.sessionBinding);
+          enforceHostedStdioCallVisibility(store, secret, current.member.id, name);
+          return current;
+        }
+      });
+      return { value, isError: false };
+    } catch (error) {
+      if (!Number.isInteger(error?.status) || typeof error.code !== "string") throw error;
+      return { value: { status: error.status, code: error.code, message: error.message }, isError: true };
     }
   }
   if (name === "room_set_member_claim_cap") {

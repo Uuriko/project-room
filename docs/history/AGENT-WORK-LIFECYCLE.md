@@ -58,6 +58,11 @@ documentation. `room_read_board` projects all current work into handoff /
 proposed / accepted / working / blocked / review / done / superseded columns
 with active halts - a derived read model, never a grant or dispatch.
 
+herdr redesign note (pending): for herdr-backed sessions the run itself
+survives disconnects — reattach to the same pane instead of cold-retrying
+or handing off (see [HERDR-SESSIONS-AGENTS.md](HERDR-SESSIONS-AGENTS.md)).
+The handoff path above still applies when the run is genuinely lost.
+
 ## Authority and scope
 
 Owner enrollment presets remain read/chat, contribute and review. Contribute

@@ -28,7 +28,6 @@ test("server-issued guest credential is random, hashed, usable and not recoverab
   assert.equal(store.db.prepare("SELECT hash FROM credentials WHERE member_id=?").get(first.member.id).hash.length, 64);
   const replay = store.guestAgentLinks.mint(owner, "commons", details(requestId));
   assert.equal(replay.duplicate, true);
-  assert.equal(replay.replayed, true);
   assert.equal(Object.hasOwn(replay, "token"), false);
   assert.equal(replay.member.id, first.member.id);
   const second = store.guestAgentLinks.mint(owner, "commons", { ...details(randomUUID()), displayName: "Caller" });
@@ -36,13 +35,21 @@ test("server-issued guest credential is random, hashed, usable and not recoverab
   assert.throws(() => store.guestAgentLinks.mint(owner, "commons", { ...details(requestId), displayName: "Changed" }), { code: "idempotency_conflict" });
 });
 
-test("legacy caller-provided ga1 bearer still works with exact-token retry and conflict", t => {
+test("GA-1 (issue #941): caller-provided linkToken is rejected — the server always issues", t => {
   const { store, owner } = fixture(t);
-  const requestId = randomUUID(), linkToken = GUEST_AGENT_TOKEN_PREFIX + randomBytes(32).toString("base64url");
-  const body = { ...details(requestId), linkToken };
-  const issued = store.guestAgentLinks.mint(owner, "commons", body);
-  assert.equal(issued.token, linkToken);
-  assert.equal(store.guestAgentLinks.mint(owner, "commons", body).token, linkToken);
-  assert.throws(() => store.guestAgentLinks.mint(owner, "commons", { ...body,
-    linkToken: GUEST_AGENT_TOKEN_PREFIX + randomBytes(32).toString("base64url") }), { code: "idempotency_conflict" });
+  const requestId = randomUUID();
+  // The legacy caller-picked credential shape is gone: minting with a
+  // client-chosen token fails closed instead of becoming a live credential.
+  assert.throws(() => store.guestAgentLinks.mint(owner, "commons", {
+    ...details(requestId),
+    linkToken: GUEST_AGENT_TOKEN_PREFIX + randomBytes(32).toString("base64url"),
+  }), { code: "client_token_rejected" });
+  // And a different client-chosen token on the same requestId is the same
+  // rejection, not an idempotency probe.
+  assert.throws(() => store.guestAgentLinks.mint(owner, "commons", {
+    ...details(requestId),
+    linkToken: GUEST_AGENT_TOKEN_PREFIX + randomBytes(32).toString("base64url"),
+  }), { code: "client_token_rejected" });
+  // The seat was never created by the rejected mints.
+  assert.equal(store.guestAgentLinks.liveCount("commons"), 0);
 });

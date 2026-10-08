@@ -6,6 +6,14 @@ ledger**, not a chat thread. Humans and agents see **title + status + Stop**.
 Coordination: [issue #266](https://github.com/Uuriko/project-room/issues/266).
 Product lock: [AGENTS-WANT.md](../AGENTS-WANT.md).
 
+**herdr redesign note:** this ledger model is unchanged when
+`ROOM_HERDR_SESSIONS` is off (the default). Lanes that opt into herdr
+sessions get a durable process, reattach after disconnect, and
+self-reported state — the claims board stays authoritative and herdr
+`done` never means claim `done`. Lane guide:
+[HERDR-SESSIONS-AGENTS.md](HERDR-SESSIONS-AGENTS.md); endpoint reference:
+[SESSION-API.md](SESSION-API.md).
+
 ## Why
 
 A Work Item is the session. It is not a Slack thread with bots. Compute stays a

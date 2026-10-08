@@ -130,6 +130,22 @@ test('static assets and discovery documents do not enter the Durable Object', as
     const fetchesAfterScripts = assetFetches;
     await call('/src/app.js');
     assert.equal(assetFetches, fetchesAfterScripts, 'a repeated static asset must not refetch ASSETS');
+    // Scripts revalidate against a content ETag instead of re-downloading;
+    // fonts get a day of cache; the HTML shell stays no-store.
+    assert.equal(script.headers.get('cache-control'), 'no-cache');
+    const etag = script.headers.get('etag');
+    assert.match(etag, /^"[0-9a-f]{32}"$/);
+    assert.equal(scriptAgain.headers.get('etag'), etag, 'the ETag is stable for unchanged bytes');
+    const notModified = await call('/src/app.js', { headers: { 'If-None-Match': `W/${etag}` } });
+    assert.equal(notModified.status, 304);
+    assert.equal(notModified.headers.get('etag'), etag);
+    assert.equal((await notModified.arrayBuffer()).byteLength, 0);
+    const changed = await call('/src/app.js', { headers: { 'If-None-Match': '"stale"' } });
+    assert.equal(changed.status, 200);
+    assert.equal(await changed.text(), 'app-js');
+    assert.equal(fontResponse.headers.get('cache-control'), 'public, max-age=86400');
+    assert.equal(page.headers.get('cache-control'), 'no-store');
+    assert.equal(page.headers.get('etag'), null);
 
     const packet = await call('/llms.txt');
     assert.equal(packet.status, 200);

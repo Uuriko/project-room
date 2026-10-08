@@ -30,6 +30,24 @@ export const attentionSchema = `
 const MINUTES_PER_DAY = 1440;
 const prefsView = row => row ? { quietStart: row.quiet_start, quietEnd: row.quiet_end, delivery: row.delivery, digestHour: row.digest_hour, updatedAt: row.updated_at } : null;
 
+// Two-trigger discipline (lane B8): the quiet-window check shared by the
+// legacy heldUntil arithmetic and the interrupt delivery decision, so both
+// read the same window. Pure; prefs carry UTC minute offsets, may be null.
+const inQuietWindow = (prefs, at) => {
+  if (!prefs || prefs.quietStart === null || prefs.quietStart === undefined) return false;
+  const mod = Math.floor(at / 60000) % MINUTES_PER_DAY, s = prefs.quietStart, e = prefs.quietEnd;
+  return s < e ? mod >= s && mod < e : mod >= s || mod < e;
+};
+
+// Interrupt-class delivery (lane B8): interrupts are never held — inside
+// quiet hours they deliver silently (badge/count, no sound), outside they
+// deliver normally. The break-through bar (loud vs silent) is the
+// classifier's call; this is pure delivery arithmetic, and like heldUntil
+// it never mutates queue state. Additive; heldUntil below is untouched.
+export function interruptDelivery(prefs, at = Date.now()) {
+  return Object.freeze({ decision: "deliver", silent: inQuietWindow(prefs, at), heldUntil: null });
+}
+
 // Pure delivery arithmetic, in UTC minutes. A quiet window may wrap midnight
 // (start > end). heldUntil returns null when delivery is allowed at `at`,
 // otherwise the earliest later moment when delivery is allowed. Digest choice
@@ -38,11 +56,7 @@ const prefsView = row => row ? { quietStart: row.quiet_start, quietEnd: row.quie
 export function heldUntil(prefs, at) {
   if (!prefs) return null;
   const MIN = 60000, DAY = MINUTES_PER_DAY * MIN;
-  const inQuiet = ms => {
-    if (prefs.quietStart === null || prefs.quietStart === undefined) return false;
-    const mod = Math.floor(ms / MIN) % MINUTES_PER_DAY, s = prefs.quietStart, e = prefs.quietEnd;
-    return s < e ? mod >= s && mod < e : mod >= s || mod < e;
-  };
+  const inQuiet = ms => inQuietWindow(prefs, ms);
   const exitQuiet = ms => {
     if (!inQuiet(ms)) return ms;
     const s = prefs.quietStart, e = prefs.quietEnd;

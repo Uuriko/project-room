@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 // Public opportunity feed (v2).
 //
 // Read-only discovery of open work across opt-in rooms. This is the safer
@@ -53,6 +55,18 @@ class ServiceError extends Error {
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
+// #932: the feed is an open read path — JSON-parsing every listed room's
+// projection on every request is its dominant cost. Memoize parsed
+// projections keyed by a hash of the projection bytes: byte-identical rows
+// share one parsed object, and any byte change re-parses. The key IS the
+// content, so the memo can never serve stale data (this matters because the
+// repair paths rewrite projections without bumping the room sequence).
+// Bounded: one entry per room, oversized projections bypass the memo.
+const PROJECTION_MEMO_MAX_BYTES = 1_000_000;
+const PROJECTION_MEMO_MAX_ROOMS = 500;
+const projectionMemo = new Map(); // roomId -> { hash, projection }
+const hashProjection = bytes => createHash("sha256").update(bytes).digest("hex");
+
 export const OPPORTUNITIES_DEFAULT_LIMIT = 50;
 export const OPPORTUNITIES_MAX_LIMIT = 100;
 const MAX_TEXT_CHARS = 500;
@@ -107,14 +121,29 @@ function listedRoomIds(db, roomId) {
 
 function roomProjection(db, roomId) {
   const row = db.prepare("SELECT projection FROM rooms WHERE id=?").get(roomId);
-  if (!row?.projection) return null;
-  try {
-    const projection = JSON.parse(row.projection);
-    if (!projection || typeof projection !== "object") return null;
-    return projection;
-  } catch {
-    return null;
+  if (!row?.projection) { projectionMemo.delete(roomId); return null; }
+  const bytes = row.projection;
+  // Oversized projections bypass the memo: re-parsing a huge room on a rare
+  // request is cheaper than pinning its object graph in memory.
+  if (bytes.length > PROJECTION_MEMO_MAX_BYTES) {
+    try {
+      const projection = JSON.parse(bytes);
+      return projection && typeof projection === "object" ? projection : null;
+    } catch { return null; }
   }
+  const hash = hashProjection(bytes);
+  const cached = projectionMemo.get(roomId);
+  if (cached && cached.hash === hash) return cached.projection;
+  let projection = null;
+  try {
+    projection = JSON.parse(bytes);
+    if (!projection || typeof projection !== "object") projection = null;
+  } catch { projection = null; }
+  if (!projectionMemo.has(roomId) && projectionMemo.size >= PROJECTION_MEMO_MAX_ROOMS) {
+    projectionMemo.delete(projectionMemo.keys().next().value); // FIFO: evict oldest room
+  }
+  projectionMemo.set(roomId, { hash, projection });
+  return projection;
 }
 
 const roomPath = roomId => `/?room=${encodeURIComponent(roomId)}`;

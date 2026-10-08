@@ -110,6 +110,15 @@ export const IDENTITY_SECRET_PREFIX = "pri_";
 const IDENTITY_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const MEMBER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
+// #1004: member projections are plain objects from JSON.parse. A plain
+// members[id] lookup resolves inherited Object.prototype names
+// ("constructor", "toString", "valueOf", "hasOwnProperty" all pass
+// MEMBER_ID_PATTERN) to truthy functions, so call sites mistake a missing
+// member for a conflicting one. All member-map reads in this module go
+// through this helper: own properties only, inherited names read as absent.
+export const memberOf = (members, id) =>
+  members && typeof id === "string" && Object.hasOwn(members, id) ? members[id] : undefined;
+
 export function isIdentitySecret(token) {
   return typeof token === "string" && token.startsWith(IDENTITY_SECRET_PREFIX)
     && /^[A-Za-z0-9_-]{43,128}$/.test(token.slice(IDENTITY_SECRET_PREFIX.length));
@@ -630,7 +639,17 @@ export class AgentIdentities {
     return this.store.transaction(() => {
       const existing = this.db.prepare("SELECT 1 FROM identity_links WHERE room_id=? AND identity_id=?").get(roomId, identityId);
       if (existing) fail(409, "identity_already_linked", "This identity is already linked to this room");
-      const roomMember = this.store.roomAuthority(roomId).members[resolvedMemberId];
+      // #1004: resolve through the own-property helper, not a bare lookup.
+      // An inherited Object.prototype name ("constructor", "toString",
+      // "valueOf", "hasOwnProperty" — all pass MEMBER_ID_PATTERN) would
+      // resolve to a truthy function and fail closed with a misleading 409
+      // identity_conflict ("Member id is already taken"). memberOf reads own
+      // properties only; a name that exists solely on the prototype is a
+      // reserved name and is refused with a clean 422 here.
+      const roomMembers = this.store.roomAuthority(roomId).members ?? {};
+      if (!Object.hasOwn(roomMembers, resolvedMemberId) && resolvedMemberId in roomMembers)
+        fail(422, "invalid_identity", "memberId is a reserved name");
+      const roomMember = memberOf(roomMembers, resolvedMemberId);
       if (roomMember) {
         // Re-linking after an unlink: the member record (bound to this
         // identity) is reused and reactivated. A foreign member holding the
@@ -699,7 +718,7 @@ export class AgentIdentities {
     return this.store.transaction(() => {
       const link = this.db.prepare("SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=?").get(roomId, identityId);
       if (!link) fail(404, "identity_not_found", "This identity is not linked to this room");
-      const member = this.store.roomAuthority(roomId).members[link.memberId];
+      const member = memberOf(this.store.roomAuthority(roomId).members, link.memberId);
       if (member?.active !== false) {
         this.store.command(token, roomId, { id: randomUUID(), type: "member.access_changed",
           data: { memberId: link.memberId, expectedMemberRevision: member.revision, permissions: member.permissions, active: false } }, expectedSessionBinding);
@@ -848,6 +867,13 @@ export class AgentIdentities {
   // once (shown once, like the scoped-key rotation in RC-2026-09-18-050).
   // The old secret never appears in any response. Rotating a revoked
   // identity is rejected — revoke is the final state.
+  //
+  // Rotation is the compromise response ("Rotate instead when you need
+  // continuity"), so every scoped API key the identity minted is revoked
+  // with it: a key an attacker minted while holding the old secret must
+  // not survive the rotation. The same invariant revoke() enforces — a
+  // rotated identity must not keep operating through a key it minted
+  // earlier — holds here too.
   rotate(identityId, secret) {
     const identity = this.authenticateIdentitySecret(identityId, secret);
     forgetIdentityVerifier(secret);
@@ -864,7 +890,8 @@ export class AgentIdentities {
       const changed = this.db.prepare("UPDATE agent_identities SET secret_hash=?, fallback_secret_hash=?, revoked_at=NULL WHERE identity_id=? AND revoked_at IS NULL AND secret_hash=?")
         .run(next.secretHash, next.fallbackHash, identityId, row.secretHash);
       if (changed.changes !== 1) fail(409, "secret_changed", "The secret changed during rotation; re-read state and retry");
-      return { identityId, displayName: identity.displayName, secret: newSecret, rotatedAt: this.store.now() };
+      const revokedApiKeys = this.store.agentPlugin ? this.store.agentPlugin.revokeApiKeysForIdentity(identityId) : 0;
+      return { identityId, displayName: identity.displayName, secret: newSecret, rotatedAt: this.store.now(), revokedApiKeys };
     });
   }
 
@@ -1006,7 +1033,7 @@ export class AgentIdentities {
     if (!roomId || typeof identityId !== "string" || !identityId) return null;
     const link = this.db.prepare("SELECT member_id FROM identity_links WHERE room_id=? AND identity_id=?").get(roomId, identityId);
     if (!link) return null;
-    const member = this.store.roomAuthority(roomId).members[link.member_id];
+    const member = memberOf(this.store.roomAuthority(roomId).members, link.member_id);
     if (!member || member.active === false) return null;
     this.noteActivated(identityId);
     return { identityId, member };
@@ -1037,7 +1064,7 @@ export class AgentIdentities {
     // Filter to active members only, and get room titles from projection
     return rows.filter(row => {
       try {
-        const member = this.store.roomAuthority(row.roomId).members[row.memberId];
+        const member = memberOf(this.store.roomAuthority(row.roomId).members, row.memberId);
         if (!member || member.active === false) return false;
         // Get title from room projection
         const roomRow = this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(row.roomId);

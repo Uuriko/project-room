@@ -16,6 +16,21 @@ service binding, then verify the old credential is rejected. Deleting a file or
 rewriting Git history alone does not revoke a credential. Never include the
 credential itself in a report or verification receipt.
 
+## Safe harbor
+
+Security research against your own local instance or a disposable test
+deployment, conducted in good faith and reported through the channel above,
+is welcome. Do not probe the hosted production service (room.trydemigod.com)
+beyond normal use, do not access other users' data, and do not disrupt the
+service. Reports that follow these rules will not be treated as abuse.
+
+## Encrypted reports
+
+There is no maintainer PGP key published for this project. For sensitive
+reports, use GitHub's private vulnerability reporting (linked above), which
+keeps the report visible only to the reporter and the maintainers. Do not
+email plaintext exploit details, tokens, or private data anywhere.
+
 For architecture and isolation boundaries, see [SECURITY-MODEL.md](docs/SECURITY-MODEL.md)
 and [DATA-BOUNDARIES.md](docs/history/DATA-BOUNDARIES.md). The [self-host guide](docs/SELF-HOSTING.md)
 explains the supported single-node shape and recovery limitations.

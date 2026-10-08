@@ -256,3 +256,99 @@ test("GET /api/wake-status?roomId= lists the room's wakeable and not-wakeable me
     (await get(origin, "/api/wake-status?roomId=commons", outsider.credential)).status, 403,
     "non-member is refused");
 });
+
+test("wakeStatusOf on a DB without agent_wake_polls reads as not wakeable, never crashes", t => {
+  // Regression: wakeStatusList fail-closes to not-wakeable when the table is
+  // missing (pre-migration read-only file), but wakeStatusOf threw
+  // "no such table: agent_wake_polls" — the caller-mode GET /api/wake-status
+  // would 500 where the contract promises "not wakeable, never an error".
+  const db = new DatabaseSync(":memory:");
+  db.exec(agentHeartbeatSchema);
+  db.exec("DROP TABLE agent_wake_polls");
+  t.after(() => db.close());
+  const hb = new AgentHeartbeats({ db, now: () => T0 });
+  const s = hb.wakeStatusOf("ai_legacy");
+  assert.equal(s.lastPolledAt, null);
+  assert.equal(s.wakeable, false);
+});
+
+test("wakeStatusList on a DB without agent_wake_polls lists everyone as not wakeable, never crashes", t => {
+  // Regression pin: wakeStatusOf's pre-migration fail-close mirrors this
+  // list path — the DROP-TABLE fallback here must never be refactored away
+  // silently (a thrown "no such table" would 500 ?roomId= the same way the
+  // unfixed wakeStatusOf 500'd the caller-mode GET /api/wake-status).
+  const db = new DatabaseSync(":memory:");
+  db.exec(agentHeartbeatSchema);
+  db.prepare(`INSERT INTO agent_hosts
+    (agent_id, host_id, mode, wake_url, last_seen_at, created_at, updated_at)
+    VALUES (?,?,?,?,?,?,?)`).run("ai_legacy", "h", "wakeable", null, T0, T0, T0);
+  db.exec("DROP TABLE agent_wake_polls");
+  t.after(() => db.close());
+  const hb = new AgentHeartbeats({ db, now: () => T0 });
+  const list = hb.wakeStatusList();
+  assert.deepEqual(list.wakeable, []);
+  assert.equal(list.notWakeable.length, 1);
+  assert.equal(list.notWakeable[0].agentId, "ai_legacy");
+  assert.equal(list.notWakeable[0].lastPolledAt, null);
+});
+
+test("notePoll on a DB without agent_wake_polls still serves pending wakes, never crashes", t => {
+  // Challenger ch-2089: PR #2089 fail-closed wakeStatusOf for the
+  // pre-migration read-only DB, but notePoll — the GET /api/agent-wakes/poll
+  // read path — still threw "no such table: agent_wake_polls" from the
+  // unguarded recordPollActivity INSERT, 500ing the agent's wake long-poll.
+  // Contract: the poll read serves; only the listener-evidence stamp is
+  // best-effort when its table is absent.
+  const db = new DatabaseSync(":memory:");
+  db.exec(agentHeartbeatSchema);
+  db.exec("DROP TABLE agent_wake_polls");
+  t.after(() => db.close());
+  db.prepare(`INSERT INTO agent_hosts
+    (agent_id, host_id, mode, wake_url, last_seen_at, created_at, updated_at)
+    VALUES (?,?,?,?,?,?,?)`).run("ai_legacy", "h", "wakeable", null, T0, T0, T0);
+  const hb = new AgentHeartbeats({ db, now: () => T0 });
+  // A queued signal must still be delivered even though the stamp is skipped.
+  hb.enqueueWake({ agentId: "ai_legacy", kind: "mention", messageId: "m1" });
+  const poll = hb.notePoll({ agentId: "ai_legacy" });
+  assert.equal(poll.registered, true);
+  assert.equal(poll.pendingWakes.length, 1);
+  assert.equal(poll.pendingWakes[0].messageId, "m1");
+});
+
+test("notePoll on a DB without any heartbeat tables reads as unregistered, never crashes", t => {
+  // Pre-heartbeat database (read-only never migrates): no host ever
+  // reported, so the poll refuses the agent the same way it refuses an
+  // unknown agent — 404 agent_not_registered at the route, never a 500.
+  const db = new DatabaseSync(":memory:");
+  t.after(() => db.close());
+  const hb = new AgentHeartbeats({ db, now: () => T0 });
+  const poll = hb.notePoll({ agentId: "ai_legacy" });
+  assert.equal(poll.registered, false);
+  assert.deepEqual(poll.pendingWakes, []);
+});
+
+test("statusOf on a DB without any heartbeat tables reads as unregistered, never crashes", t => {
+  // presenceForCard documents "returns null when the heartbeat tables are
+  // absent (read-only on an older database)" — statusOf threw
+  // "no such table: agent_hosts" instead of reading unregistered.
+  const db = new DatabaseSync(":memory:");
+  t.after(() => db.close());
+  const hb = new AgentHeartbeats({ db, now: () => T0 });
+  const s = hb.statusOf("ai_legacy");
+  assert.equal(s.status, "unregistered");
+  assert.equal(s.lastSeenAt, null);
+  assert.deepEqual(s.hosts, []);
+});
+
+test("wakeStatusList on a DB without any heartbeat tables lists nobody, never crashes", t => {
+  // The DROP-TABLE fallback assumed agent_hosts exists; on a pre-heartbeat
+  // database it threw "no such table: agent_hosts", 500ing room-mode
+  // GET /api/wake-status the same way the unfixed wakeStatusOf 500'd
+  // caller-mode.
+  const db = new DatabaseSync(":memory:");
+  t.after(() => db.close());
+  const hb = new AgentHeartbeats({ db, now: () => T0 });
+  const list = hb.wakeStatusList();
+  assert.deepEqual(list.wakeable, []);
+  assert.deepEqual(list.notWakeable, []);
+});

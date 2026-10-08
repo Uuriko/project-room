@@ -37,7 +37,7 @@ import {
   createWork, claimWork, updateWork, appendWorkPullRequest, attestWork, recordReview, reassignWork, releaseExpired, canCloseWork,
   renewWork, roomWorkClaimConfig, closeWhenLive, isReceiptTag, ClaimError, REVIEW_POLICIES, CLAIM_KINDS,
   claimUpdatedAt, ACTIVE_CLAIM_STATES, MAX_LEASE_HOURS, STATES, summarizeClaimHistory, isHardWork,
-  walkProvenance, flagPremiseInvalid, clearPremiseFlag,
+  walkProvenance, flagPremiseInvalid, clearPremiseFlag, closeWork, isTerminalClaimState,
 } from "./work-claims.mjs";
 import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
@@ -375,8 +375,8 @@ export function buildWorkClaimPage(items, roomId, viewerId, query = new URLSearc
   }
   // Keep the canonical seven-day done window and open dependency exception.
   const since = nowMs - DONE_WINDOW_MS;
-  const needed = new Set(items.filter(item => item.state !== "done").flatMap(item => item.dependsOn ?? []));
-  const visible = items.filter(item => item.state !== "done" || needed.has(item.id) || Date.parse(claimUpdatedAt(item)) >= since);
+  const needed = new Set(items.filter(item => !isTerminalClaimState(item.state)).flatMap(item => item.dependsOn ?? []));
+  const visible = items.filter(item => !isTerminalClaimState(item.state) || needed.has(item.id) || Date.parse(claimUpdatedAt(item)) >= since);
   const olderDone = items.length - visible.length;
   return present({ ...pageBoard(visible, limit, cursor), historyScope: "recent_done_and_dependencies",
     ...(olderDone > 0 ? { olderDone, olderDoneQuery: "state=done" } : {}) });
@@ -486,6 +486,52 @@ const cursorDecode = (reject, value) => {
 // REST and hosted MCP share this owner-only mutation, including a fresh
 // authorization and claim read inside the registry transaction. This does not
 // sweep or settle other work, renew the lease, or synchronously contact GitHub.
+// Pure close/cancel with HTTP-shaped refusals: 403 not permitted, 409 already
+// terminal, 422 bad input.
+function retire(reject, item, caller, verb, reason, authority, nowMs) {
+  try {
+    return closeWork(item, caller, { verb, reason, authority, now: nowMs });
+  } catch (error) {
+    if (!(error instanceof ClaimError)) throw error;
+    reject(error.code === "work_not_owner" ? 403 : error.code === "work_claim_terminal" ? 409 : 422, error.code, error.message);
+  }
+}
+
+// MCP room_close_work_claim: the same close/cancel as the REST routes, in one
+// transaction, with the same access checks as room_link_work_claim_pr.
+export function closeWorkClaim({ store, roomId, auth, claimId, verb = "close", reason, registry = store.workClaims, reauthorize }) {
+  const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
+  const run = () => {
+    const current = reauthorize ? reauthorize() : auth;
+    if (!current?.member?.id) reject(401, "unauthenticated", "Room authentication is required");
+    if (current.member.id !== auth?.member?.id) reject(403, "access_denied", "The acting identity changed");
+    if (current.kind === "api-key" && !(current.apiKeyScopes ?? []).some(scope =>
+      scope === "rooms:write" || scope.endsWith(":*") && "rooms:write".startsWith(scope.slice(0, -1)))) {
+      reject(403, "insufficient_scope", "API key lacks the rooms:write scope");
+    }
+    if (isGuestAgentMemberId(current.member.id)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
+    if (verb !== "close" && verb !== "cancel") reject(422, "invalid_claim_input", "verb must be close or cancel");
+    const access = resolveWorkClaimAccess(store, roomId, current);
+    if (!mayWriteWorkClaims(access)) refuseWorkClaims();
+    enforceAutonomyTierForAction({ db: store.db, roomId, state: { room: { ownerId: access.ownerId } },
+      actor: access.member, action: `POST work-claim ${verb}`, fail: reject });
+    if (isRoomArchived(store.room(roomId).state)) reject(409, "room_archived", "This room is archived; nothing was closed");
+    assertBoardEventBudget(access.authority?.sequence, { privileged: mayManageAnyClaim(access) });
+    claimIdOf(reject, claimId);
+    refuseRoomGuideOffStarter(registry, roomId, current, claimId, "POST", reject);
+    const clean = boardText(reject, "reason", reason, { multiline: true });
+    const item = registry.get(roomId, claimId);
+    if (!item) reject(404, "work_claim_not_found", `No work claim "${claimId}" in this room`);
+    const now = typeof store.now === "function" ? store.now() : Date.now();
+    const closed = retire(reject, item, current.member.id, verb, clean, mayManageAnyClaim(access), now);
+    registry.set(roomId, closed);
+    emitWorkClaimEvent(store, roomId, { actorId: current.member.id, item: closed, action: "closed",
+      reason: verb === "cancel" ? "cancelled" : "closed", atMs: now });
+    return closed;
+  };
+  return registry.transaction ? registry.transaction(run) : run();
+}
+
 export function linkWorkClaimPullRequest({ store, roomId, auth, claimId, data, registry = store.workClaims, reauthorize }) {
   const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
   const run = () => {
@@ -685,7 +731,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   const closeLiveClaims = () => {
     const closed = [];
     for (const item of registry.list(roomId)) {
-      if ((item.kind !== "land" && item.kind !== "deploy") || item.state === "done") continue;
+      if ((item.kind !== "land" && item.kind !== "deploy") || isTerminalClaimState(item.state)) continue;
       const next = closeWhenLive(item, SOURCE_REVISION, nowMs);
       if (!next) continue;
       commit(next, "state_changed");
@@ -730,6 +776,24 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (item.owner === caller) return false;
     if (mayManageAnyClaim(access)) return true;
     reject(403, "work_not_owner", `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
+  };
+  // QA200 ch-2037 challenge: the file-lease exclusivity check lived only on
+  // the claim route. create-with-assignee and reassign are acquire paths
+  // too — they must refuse overlapping leases with the same 409 body, or a
+  // lease can be landed silently around the conflict check. fileLeaseConflicts
+  // already excludes the item itself by id.
+  const refuseFileLeaseConflict = item => {
+    const conflicts = fileLeaseConflicts(registry.list(roomId), item);
+    if (conflicts.length === 0) return;
+    const conflict = fileLeaseConflictBody(item, conflicts);
+    const body = {
+      ...agentErrorBody({ httpStatus: 409, code: "file_lease_conflict", message: conflict.error.message, roomId, workItemId: item.id }),
+      ...conflict
+    };
+    const error = new Error(body.error.message);
+    error.code = "file_lease_conflict";
+    error.body = body;
+    throw error;
   };
 
   if (workClaimRoute === "status" && req.method === "GET") {
@@ -779,6 +843,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "sweep" && req.method === "POST") {
     if (!maySweepWorkClaims(access)) refuseSweep();
+    // QA200-CH-2033: a sweep settles PR links and records CI facts, which
+    // emit room events — it is a Board write, so the event-budget floor
+    // applies here exactly like the other Board write routes.
+    requireEventBudget();
     const data = body(req);
     if (!shape(data, {})) invalidInput(reject, "an empty JSON object");
     let updated = 0;
@@ -840,11 +908,11 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const data = clientPullRequestInput(reject, boardTextFields(reject, raw, { title: {}, note: { multiline: true } }));
     assertDependsOnKnown(reject, data, { selfId: id, has: other => registry.has(roomId, other) });
     if (registry.has(roomId, id)) reject(409, "work_claim_exists", `Work claim "${id}" already exists in this room`);
-    const open = registry.list(roomId).filter(item => item.state !== "done").length;
+    const open = registry.list(roomId).filter(item => !isTerminalClaimState(item.state)).length;
     if (open >= config.maxOpenClaims) {
       refuseCap("work_board_full",
-        `This room already has ${config.maxOpenClaims} open claims. Close stale claims before opening another.`,
-        "Close stale claims before opening another.");
+        `This room already has ${config.maxOpenClaims} open claims. Close stale claims (POST …/work-claims/{id}/close or /cancel) before opening another.`,
+        "Close stale claims (POST /api/rooms/{roomId}/work-claims/{claimId}/close or /cancel) before opening another.");
     }
     if (data.reviewPolicy !== undefined && !REVIEW_POLICIES.includes(data.reviewPolicy)) invalidInput(reject, `reviewPolicy one of ${REVIEW_POLICIES.join(", ")}`);
     if (data.kind !== undefined && !CLAIM_KINDS.includes(data.kind)) invalidInput(reject, `kind one of ${CLAIM_KINDS.join(", ")}`);
@@ -875,6 +943,11 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       item = runPure(reject, () => claimWork(item, assignee, {
         note: data.note ?? `assigned by ${caller}`, room: roomLike, now: nowMs
       }));
+      // QA200 ch-2037: create-with-assignee lands a lease without touching
+      // the claim route, so run the exclusivity check here. The whole request
+      // is one transaction — a conflict fails atomically and the item is
+      // never created.
+      refuseFileLeaseConflict(item);
       // Retention ack (research brief 2026-09-28, mechanic #2): every claim
       // gets the bot's immediate structured receipt, so no contribution sits
       // at zero replies from t=0. First-time contributors carry the 24h
@@ -1073,6 +1146,21 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (before?.note !== after?.note) { registry.set(roomId, attested); return json(res, 200, attested); }
     return json(res, 200, item);
   }
+  if ((workClaimRoute === "close" || workClaimRoute === "cancel") && req.method === "POST") {
+    // Claim lifecycle: retire open work without delivering it. close is for
+    // the holder or claim managers; cancel is also open to whoever created
+    // the item while it is still unclaimed. Same pure path as MCP
+    // room_close_work_claim (server/work-claims.mjs closeWork).
+    const data = body(req);
+    if (!shape(data, { optional: ["reason"] })) invalidInput(reject, "{reason?}");
+    requireWriter();
+    const item = load(claimIdOf(reject, workClaimId));
+    requireEventBudget();
+    const reason = text("reason", data.reason, { multiline: true });
+    const closed = retire(reject, item, caller, workClaimRoute, reason, mayManageAnyClaim(access), nowMs);
+    commit(closed, "closed", { reason: workClaimRoute === "cancel" ? "cancelled" : "closed" });
+    return json(res, 200, closed);
+  }
   if (workClaimRoute === "release" && req.method === "POST") {
     const data = body(req);
     if (!shape(data, { optional: ["note", "reason"] })) invalidInput(reject, "{reason?, note?}");
@@ -1108,10 +1196,24 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       reject(422, "work_reassign_unknown_member",
         `newOwner "${typeof target === "string" ? target : "?"}" is not an active member of this room — reassign names a current memberId`);
     }
+    // A handoff consumes the new owner's slot just like claim and
+    // create-with-assignee do; otherwise reassign bypasses the per-member cap.
+    if (target !== item.owner) {
+      const held = registry.list(roomId).filter(entry => entry.owner === target && ACTIVE_CLAIM_STATES.includes(entry.state)).length;
+      if (held >= config.maxMemberOpenClaims) {
+        refuseCap("too_many_open_claims",
+          `${target} already holds ${config.maxMemberOpenClaims} open claims. Release or finish one before assigning another.`,
+          "Release or finish an open claim before assigning another.");
+      }
+    }
     requireEventBudget();
     const previousOwnerId = item.owner;
     const note = text("note", data.note, { multiline: true });
     const reassigned = runPure(reject, () => reassignWork(item, caller, target, { note, now: nowMs, authority, room: roomLike }));
+    // QA200 ch-2037: reassign moves a lease to a new holder (and a fresh
+    // unclaimed item lands claimed) without touching the claim route — run
+    // the exclusivity check here too.
+    refuseFileLeaseConflict(reassigned);
     commit(reassigned, "reassigned", {
       previousOwnerId,
       attention: "assigned", attentionMemberId: target,

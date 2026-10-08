@@ -4,6 +4,11 @@ A claimed work session can declare a **budget** — hard bounds on runtime,
 attempts, concurrency, spend, work-loop rounds, and tool calls. The Room
 enforces them; any interaction with a runaway session stops it first.
 
+**herdr redesign note:** budgets stay room-side. herdr knows nothing of
+cents — declaration, enforcement, and the monotonic spend/round/tool-call
+reports are unchanged for herdr-backed sessions. See
+[HERDR-SESSIONS-AGENTS.md](HERDR-SESSIONS-AGENTS.md).
+
 ## Declaring a budget
 
 Budgets are declared once, at claim time. Later status changes cannot

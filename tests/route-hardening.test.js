@@ -146,14 +146,17 @@ test("L2: the router passes the request's session fence to every agent-invite me
   const seen = {};
   for (const name of ["list", "create", "revoke"]) {
     const original = store.invites[name].bind(store.invites);
-    t.mock.method(store.invites, name, (...args) => { seen[name] = args.at(-1); return original(...args); });
+    // The fence is not always the trailing argument (create takes a trailing
+    // options object), so record whether the session fence reaches the method
+    // at all rather than asserting an argument position.
+    t.mock.method(store.invites, name, (...args) => { seen[name] = args.includes(account.session.sessionBinding); return original(...args); });
   }
   const created = await request("/api/rooms/commons/agent-invites", { method: "POST", headers, data: { permissions: ["accept_work"] } });
   assert.equal(created.status, 201);
   const { inviteId } = await created.json();
   assert.equal((await request("/api/rooms/commons/agent-invites", { headers })).status, 200);
   assert.equal((await request("/api/rooms/commons/agent-invites", { method: "DELETE", headers, data: { inviteId } })).status, 200);
-  assert.deepEqual(seen, { list: account.session.sessionBinding, create: account.session.sessionBinding, revoke: account.session.sessionBinding });
+  assert.deepEqual(seen, { list: true, create: true, revoke: true });
 });
 
 test("L3: identity creation and invite redemption rate limit before reading the body", async t => {

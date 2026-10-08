@@ -84,3 +84,47 @@ test("posting @_Agent to an offline agent with push writes no wake, push, or men
     "SELECT COUNT(*) AS n FROM mention_states WHERE room_id=? AND mentioned_member_id=?"
   ).get("commons", "agent").n, 1);
 });
+
+// Mention detection and mention delivery must resolve the same names. The
+// mention row writer (trackMentions) resolves a linked identity's display
+// name; the wake path must too, or an agent mentioned by its directory name
+// gets a "delivered" receipt but is never woken.
+test("an identity-alias @mention wakes the offline agent like a display-name mention", t => {
+  const f = createAcceptanceFixture();
+  t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  let at = Date.now();
+  f.store.now = () => at;
+  const identity = f.store.identities.create("helper-bot");
+  // Member display name ("Agent") differs from the linked identity display
+  // name ("helper-bot"): only the identity alias resolves this mention.
+  f.store.identities.link(f.keys.owner, "commons", {
+    identityId: identity.identityId, memberId: "agent",
+    displayName: "Agent", permissions: [],
+  });
+  const beat = f.store.agentHeartbeats.heartbeat({
+    agentId: identity.identityId, hostId: "host-1", mode: "wakeable",
+    wakeUrl: "https://host.example.test/wake",
+    pushNotification: { url: "https://push.example.test/hook", token: "opaque-push-token-123" },
+  });
+  assert.equal(beat.pushConfigured, true);
+  at += HEARTBEAT_STALE_AFTER_MS + 1000;
+  assert.equal(f.store.agentHeartbeats.statusOf(identity.identityId).status, "offline");
+
+  const calls = { pushNotify: 0, wakeIfOffline: 0 };
+  const wakeIfOffline = f.store.agentHeartbeats.wakeIfOffline.bind(f.store.agentHeartbeats);
+  f.store.agentHeartbeats.wakeIfOffline = args => { calls.wakeIfOffline += 1; return wakeIfOffline(args); };
+  f.store.agentHeartbeats.pushNotify = () => { calls.pushNotify += 1; };
+  f.store.agentPlugin.deliverWakePing = () => ({ deliveries: [] });
+
+  f.store.command(f.keys.owner, "commons", {
+    id: randomUUID(), type: "message.posted",
+    data: { messageId: "alias-1", body: "@helper-bot please look" },
+  });
+  // Detection: the identity alias resolves to the linked member.
+  assert.equal(f.store.db.prepare(
+    "SELECT COUNT(*) AS n FROM mention_states WHERE room_id=? AND mentioned_member_id=? AND state=?"
+  ).get("commons", "agent", "delivered").n, 1);
+  // Delivery: the same alias must wake the offline agent and ring the push doorbell.
+  assert.equal(calls.wakeIfOffline, 1);
+  assert.equal(calls.pushNotify, 1);
+});

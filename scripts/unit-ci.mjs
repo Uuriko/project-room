@@ -12,6 +12,40 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { unitPlan, parseShard } from "./unit-shards.mjs";
+import { parseFailingTests } from "./failing-tests.mjs";
+
+/**
+ * Run test files with `node --test`, teeing the reporter stream to the console.
+ * Returns { status, signal, failures }: failing test names parsed from the
+ * spec-reporter output (advisory — [] on success or when nothing parsed).
+ */
+export function runTestFiles(files) {
+  // A child `node --test` spawned from inside a test-runner process refuses
+  // to run ("recursively ... skipping running files") when it inherits
+  // NODE_TEST_CONTEXT. Drop it so the child is always a fresh top-level
+  // runner, whether invoked from CI or from a test.
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  // Pipe (not inherit) so failing test names can be parsed out of the
+  // reporter stream for the shard receipt; tee both streams to the console
+  // so the job log keeps its exact old shape.
+  const result = spawnSync(process.execPath, ["--test", ...files], {
+    stdio: ["inherit", "pipe", "pipe"],
+    maxBuffer: 256 * 1024 * 1024,
+    env,
+  });
+  if (result.error) throw result.error;
+  const stdout = result.stdout?.toString("utf8") ?? "";
+  const stderr = result.stderr?.toString("utf8") ?? "";
+  process.stdout.write(stdout);
+  process.stderr.write(stderr);
+  const status = result.status ?? 1;
+  // Failing names are advisory: a red shard must still produce its receipt so
+  // the merge gate fails closed on the receipt, and the PR comment step names
+  // the failures instead of pointing at the log.
+  const failures = status === 0 ? [] : parseFailingTests(stdout);
+  return { status, signal: result.signal, failures };
+}
 
 function main() {
   const argv = process.argv.slice(2);
@@ -38,9 +72,7 @@ function main() {
   rmSync(receiptPath, { force: true });
   console.log(`unit-ci: shard ${shard.index}/${shard.total}, ${files.length} test files`);
   const started = Date.now();
-  const result = spawnSync(process.execPath, ["--test", ...files], { stdio: "inherit" });
-  if (result.error) throw result.error;
-  const status = result.status ?? 1;
+  const { status, signal, failures } = runTestFiles(files);
   writeFileSync(
     receiptPath,
     JSON.stringify(
@@ -49,7 +81,8 @@ function main() {
         files,
         planHash: plan.planHash,
         status,
-        signal: result.signal,
+        signal,
+        failures,
         revision: process.env.GITHUB_SHA ?? "local",
         runId: process.env.GITHUB_RUN_ID ?? "local",
         runAttempt: process.env.GITHUB_RUN_ATTEMPT ?? "local",
@@ -63,4 +96,6 @@ function main() {
   process.exit(status);
 }
 
-main();
+const invokedAsScript =
+  process.argv[1] && import.meta.url === new URL(process.argv[1], "file:").href;
+if (invokedAsScript) main();

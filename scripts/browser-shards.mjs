@@ -1,7 +1,7 @@
 // Allocation consumes the canonical package script; timing data never selects membership.
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-export const SHARD_COUNT = 4;
+export const SHARD_COUNT = 6;
 const timings = JSON.parse(readFileSync(new URL("./browser-ci-durations.json", import.meta.url), "utf8")).milliseconds;
 export function parseShard(value) {
   const match = /^([1-9]\d*)\/([1-9]\d*)$/.exec(value ?? "");

@@ -34,17 +34,35 @@
 // Note-only attestations remain caller-bound records but cannot approve work.
 // This does not gate automatic PR/land/deploy settlement or bind artifact bytes.
 import { parsePullRequestUrl } from "./claim-coordination.mjs";
-const STATES = ["unclaimed", "claimed", "in_progress", "blocked", "done"];
+const STATES = ["unclaimed", "claimed", "in_progress", "blocked", "done", "closed"];
 const CLAIM_KINDS = ["work", "land", "deploy"];
 const CI_STATES = ["pending", "success", "failure", "neutral"];
 const REVIEW_VERDICTS = ["approve", "changes_requested", "comment"];
-const TRANSITIONS = {
-  unclaimed: ["claimed"],
-  claimed: ["in_progress", "blocked", "unclaimed"], // unclaimed = release
-  in_progress: ["blocked", "done", "claimed"],       // claimed = pause
-  blocked: ["in_progress", "claimed"],
-  done: [],
-};
+// Claim lifecycle: one explicit table, state x verb -> next state. Anything
+// not listed is refused. done and closed are terminal: done means the work
+// was delivered; closed means it was retired without delivery (close by the
+// room's claim managers, cancel by whoever opened or holds it). Only open
+// (non-terminal) items count against the room's open-claim cap.
+const CLAIM_LIFECYCLE = Object.freeze({
+  unclaimed: Object.freeze({ claim: "claimed", close: "closed", cancel: "closed" }),
+  claimed: Object.freeze({ start: "in_progress", block: "blocked", release: "unclaimed", close: "closed", cancel: "closed" }),
+  in_progress: Object.freeze({ block: "blocked", finish: "done", pause: "claimed", close: "closed", cancel: "closed" }),
+  blocked: Object.freeze({ start: "in_progress", pause: "claimed", close: "closed", cancel: "closed" }),
+  done: Object.freeze({}),
+  closed: Object.freeze({}),
+});
+const CLAIM_VERBS = Object.freeze(["claim", "start", "block", "release", "pause", "finish", "close", "cancel"]);
+const TERMINAL_CLAIM_STATES = Object.freeze(["done", "closed"]);
+const isTerminalClaimState = state => TERMINAL_CLAIM_STATES.includes(state);
+// The next state for a verb, or null when the table refuses it.
+function nextClaimState(state, verb) {
+  const row = Object.hasOwn(CLAIM_LIFECYCLE, state) ? CLAIM_LIFECYCLE[state] : null;
+  return row && Object.hasOwn(row, verb) ? row[verb] : null;
+}
+// The /update state moves, derived from the table (close and cancel have
+// their own routes so a retire always records who and why).
+const TRANSITIONS = Object.freeze(Object.fromEntries(Object.entries(CLAIM_LIFECYCLE).map(([state, row]) =>
+  [state, Object.freeze(Object.entries(row).filter(([verb]) => verb !== "close" && verb !== "cancel").map(([, next]) => next))])));
 const DELIVERY_MODES = ["result", "merged", "production"];
 const REVIEW_POLICIES = ["self_attested", "distinct_member", "independent_principal"];
 // Receipt tags (RC-2026-09-24-205): free-form labels recorded when work is
@@ -270,6 +288,10 @@ export const DEFAULT_MAX_MEMBER_OPEN_CLAIMS = 20;
 const CONFIG_CAP_CEILING = 10000;
 const DEFAULT_REVIEW_POLICY = "self_attested";
 const ACTIVE_CLAIM_STATES = ["claimed", "in_progress", "blocked"];
+// History actions that end a claim round (the item can be claimed again after
+// each of these). Used by appendWorkPullRequest to prove a previous round
+// existed when an outcome timestamp ties the current round's claimedAt.
+const ROUND_ENDED_ACTIONS = new Set(["pr_closed", "pr_merged", "state:unclaimed", "lease_expired"]);
 class ClaimError extends Error { constructor(code, message) { super(message); this.name = "ClaimError"; this.code = code; } }
 const fail = (code, message) => { throw new ClaimError(code, message); };
 const check = (condition, message) => { if (!condition) fail("invalid_claim_input", message); };
@@ -594,8 +616,14 @@ export function renewWork(work, agentId, { note, leaseHours, room, now } = {}) {
     note ?? (effective === null ? "lease removed" : `lease: ${effective}h`));
 }
 // Append one URL to the current claim round without replacing its lease or
-// evidence. A fresh duplicate is a byte-identical no-op; stale replay must
-// read back before deciding whether the link was already recorded.
+// evidence. A fresh duplicate in the same round is a byte-identical no-op;
+// stale replay must read back before deciding whether the link was already
+// recorded. A link whose recorded outcome provably predates the current
+// claim round (syncedAt older than claimedAt) belongs to a previous round:
+// re-linking it re-asserts the PR for the current round, so the link is
+// reset (outcome cleared) and the poller re-reads it — without the reset
+// the stale outcome would veto every future poll of the reopened PR.
+// A same-round duplicate stays a byte-identical no-op.
 export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClaimedAt, expectedHistoryLength, now } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(typeof pullRequest === "string" && pullRequest.length <= 300, "pullRequest must be a URL string of at most 300 characters");
@@ -611,13 +639,51 @@ export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClai
   if (item.claimedAt !== expectedClaimedAt || claimHistoryLength(item) !== expectedHistoryLength) {
     fail("work_claim_conflict", "The claim changed since it was read");
   }
-  if (item.pullRequests.some(pull => pull.url === parsed.url)) return work;
+  const settledLink = item.pullRequests.find(pull => pull.url === parsed.url) ?? null;
+  // A recorded outcome is stale only when it provably predates the current
+  // claim round (recorded before this round's claimedAt — the poller always
+  // stamps syncedAt when it records). A same-round duplicate stays a
+  // byte-identical no-op: the link's observations are current-round truth.
+  // An outcome stamped at or before the round start is stale: a settled
+  // outcome releases the claim, so a same-millisecond outcome and re-claim
+  // can only mean the outcome ended the previous round (equality counts as
+  // stale, so the decision does not depend on millisecond-strict ordering).
+  // When the round is not provable either way, the no-op wins.
+  const outcomeMs = typeof settledLink?.syncedAt === "string" ? Date.parse(settledLink.syncedAt) : NaN;
+  const roundStartMs = typeof item.claimedAt === "string" ? Date.parse(item.claimedAt) : NaN;
+  // At the exact same millisecond the timestamps cannot order the outcome
+  // against the round start. Equality counts as stale only when the claim's
+  // own history shows an earlier round; a link settled in the same tick as
+  // the first claim is current-round truth.
+  //
+  // A previous round provably ended when the history carries a round-ending
+  // stamp: pr_closed/pr_merged (the auto-settler), state:unclaimed (a manual
+  // release), or lease_expired (the sweep). Counting "claimed" stamps alone
+  // undercounts: a round that began via reassign stamps "reassigned:<target>"
+  // instead of "claimed", and history trimming (MAX_CLAIM_HISTORY) can drop
+  // early "claimed" stamps. Either gap misreads the tie as first-round
+  // truth, and the stale outcome then vetoes every future poll of the
+  // reopened PR. The two-"claimed"-stamps check stays as a backstop.
+  const history = item.history ?? [];
+  const priorRoundRecorded = history.some(entry => ROUND_ENDED_ACTIONS.has(entry?.action))
+    || history.filter(entry => entry?.action === "claimed").length >= 2;
+  const staleOutcome = Boolean(settledLink?.outcome)
+    && Number.isFinite(outcomeMs) && Number.isFinite(roundStartMs)
+    && (outcomeMs < roundStartMs || (outcomeMs === roundStartMs && priorRoundRecorded));
+  if (settledLink && !staleOutcome) return work;
   check(item.pullRequests.length < MAX_PULLS, `pullRequests must list at most ${MAX_PULLS} pull requests`);
   // Keep the existing observations verbatim; only the server's poller may
   // fill in the new link's outcome, polling metadata, or CI.
   const prior = Array.isArray(work.pullRequests) && work.pullRequests.length ? work.pullRequests
     : (work.pullRequest ? [work.pullRequest] : []);
-  const links = Object.freeze([...prior, pullRequestOf(parsed.url)]);
+  const canonicalUrl = entry => {
+    const raw = typeof entry === "string" ? entry : entry?.url;
+    return typeof raw === "string" ? parsePullRequestUrl(raw)?.url ?? null : null;
+  };
+  const fresh = pullRequestOf(parsed.url);
+  const links = settledLink
+    ? Object.freeze(prior.map(entry => (canonicalUrl(entry) === parsed.url ? fresh : entry)))
+    : Object.freeze([...prior, fresh]);
   return withHistory({ ...work, pullRequests: links,
     pullRequest: links.find(pull => !pull.outcome) ?? links[links.length - 1],
     ci: null, attestations: Object.freeze([]) }, atMs, agent, "pr_linked", `Linked pull request ${parsed.url}`);
@@ -632,7 +698,7 @@ export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClai
 export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, now, authority = false } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(authority === true || item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can update it`);
-  check(item.state !== "done", `work "${item.id}" is done and immutable`);
+  check(!isTerminalClaimState(item.state), `work "${item.id}" is ${item.state} and immutable`);
   if (state !== undefined) {
     check(STATES.includes(state), `state must be one of ${STATES.join(", ")}`);
     const allowed = TRANSITIONS[item.state] ?? [];
@@ -684,6 +750,35 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     blobs: state === "done" && blobs != null ? blobsOf(blobs) : item.blobs,
     ...withProvenance };
   return withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note);
+}
+// Retire open work without delivering it. close: the room's claim managers
+// (authority) or the current holder. cancel: whoever opened the item while
+// it is still unclaimed, or the current holder; authority may also cancel.
+// The item lands in the terminal closed state with no owner and no lease;
+// the history stamp ("closed" | "cancelled") names who retired it and why.
+export function closeWork(work, agentId, { verb = "close", reason, now, authority = false } = {}) {
+  const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  check(verb === "close" || verb === "cancel", "verb must be close or cancel");
+  if (reason !== undefined && reason !== null) check(typeof reason === "string" && reason.length <= 4000, "reason must be a string of at most 4000 characters");
+  const next = nextClaimState(item.state, verb);
+  if (next === null) fail("work_claim_terminal", `Cannot ${verb} "${item.id}": it is already ${item.state}`);
+  const holder = item.owner !== null && item.owner === agent;
+  const opener = item.state === "unclaimed" && item.owner === null && creatorOf(item) === agent;
+  const allowed = authority === true || holder || (verb === "cancel" && opener);
+  if (!allowed) {
+    fail("work_not_owner", verb === "cancel"
+      ? `Only the member who opened "${item.id}" (while unclaimed), its holder, or a claim manager can cancel it`
+      : `Only the holder of "${item.id}" or a claim manager (room owner or manage_claims) can close it`);
+  }
+  const closed = { ...item, state: next, owner: null, leaseStartAt: null, leaseExpiresAt: null,
+    attestations: Object.freeze([]), reviews: Object.freeze([]),
+    files: Object.freeze([]), fileBlocks: Object.freeze({}) };
+  return withHistory(closed, atMs, agent, verb === "cancel" ? "cancelled" : "closed", reason);
+}
+// The member who created the item, when the creation stamp is still in history.
+export function creatorOf(work) {
+  const first = Array.isArray(work?.history) && !work.historyOmitted ? work.history[0] : null;
+  return first && first.action === "created" && typeof first.agentId === "string" && first.agentId !== "system" ? first.agentId : null;
 }
 // Record a note from the caller's own authenticated session. A new note
 // supersedes that member's active verdict but cannot approve reviewed completion.
@@ -749,7 +844,7 @@ export function recordReview(work, agentId, { verdict, summary, url, now } = {})
 export function closeWhenLive(work, liveRevision, now) {
   const item = workOf(work);
   if (item.kind !== "land" && item.kind !== "deploy") return null;
-  if (item.state === "done" || typeof liveRevision !== "string" || liveRevision.length === 0) return null;
+  if (isTerminalClaimState(item.state) || typeof liveRevision !== "string" || liveRevision.length === 0) return null;
   const head = item.ci?.headSha ?? null;
   if (item.revision !== liveRevision && head !== liveRevision) return null;
   const atMs = nowMsOf(now);
@@ -784,7 +879,7 @@ export function notePullMerged(work, mergedSha, now) {
 export function reassignWork(work, agentId, newOwner, { note, now, authority = false, room } = {}) {
   const item = workOf(work), agent = agentOf(agentId), target = agentOf(newOwner), atMs = nowMsOf(now);
   check(authority === true || item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can reassign it`);
-  check(item.state !== "done", `work "${item.id}" is done and immutable`);
+  check(!isTerminalClaimState(item.state), `work "${item.id}" is ${item.state} and immutable`);
   // Assigning an unclaimed item hands it over as a claim: state claimed with
   // a fresh lease (room default), the same shape create-with-assignee gives.
   // Before this, the owner was set but the state stayed "unclaimed" with no
@@ -817,7 +912,7 @@ export function releaseExpired(items, now) {
     // 2026-09-30 (phase-2 gap audit L-P2-8): mirrors updateWork, where a
     // released claim drops its reviews too (attestations belong to the
     // lapsed owner's round of work, never to whoever claims next).
-    const released = { ...item, state: "unclaimed", owner: null, leaseExpiresAt: null,
+    const released = { ...item, state: "unclaimed", owner: null, leaseStartAt: null, leaseExpiresAt: null,
       files: Object.freeze([]), fileBlocks: Object.freeze({}), attestations: Object.freeze([]), reviews: Object.freeze([]) };
     return withHistory(released, atMs, item.owner ?? "system", "lease_expired",
       `claim by ${item.owner ?? "nobody"} lapsed at ${item.leaseExpiresAt} — auto-released`);
@@ -834,7 +929,7 @@ export function canCloseWork(work, reviewerId, { policy, verifyMembers, reviewMe
   const item = workOf(work);
   const effective = policy ?? item.reviewPolicy ?? DEFAULT_REVIEW_POLICY;
   check(REVIEW_POLICIES.includes(effective), `policy must be one of ${REVIEW_POLICIES.join(", ")}`);
-  if (item.state === "done" || item.state === "unclaimed" || item.owner === null) return false;
+  if (isTerminalClaimState(item.state) || item.state === "unclaimed" || item.owner === null) return false;
   if (typeof reviewerId !== "string" || reviewerId.length === 0) return false;
   if (effective === "self_attested") return reviewerId === item.owner;
   if (reviewerId === item.owner || item.supersededBy) return false;
@@ -885,7 +980,7 @@ export function hasCurrentReview(item, memberId) {
 export function workOwnedBy(items, agentId) {
   check(Array.isArray(items), "items must be a list");
   const agent = agentOf(agentId);
-  return items.map(workOf).filter(item => item.owner === agent && item.state !== "done");
+  return items.map(workOf).filter(item => item.owner === agent && !isTerminalClaimState(item.state));
 }
 export function unclaimedWork(items) {
   check(Array.isArray(items), "items must be a list");
@@ -955,4 +1050,4 @@ export function clearPremiseFlag(work, { byMemberId, note, now } = {}) {
   const { premiseFlag: _dropped, ...rest } = item;
   return withHistory({ ...rest, premiseFlag: null }, atMs, agent, "premise_cleared", note ?? null);
 }
-export { ClaimError, STATES, TRANSITIONS, DELIVERY_MODES, REVIEW_POLICIES, REVIEW_VERDICTS, CLAIM_KINDS, CI_STATES, DEFAULT_LEASE_HOURS, MAX_LEASE_HOURS, ACTIVE_CLAIM_STATES };
+export { ClaimError, STATES, TRANSITIONS, CLAIM_LIFECYCLE, CLAIM_VERBS, TERMINAL_CLAIM_STATES, isTerminalClaimState, nextClaimState, DELIVERY_MODES, REVIEW_POLICIES, REVIEW_VERDICTS, CLAIM_KINDS, CI_STATES, DEFAULT_LEASE_HOURS, MAX_LEASE_HOURS, ACTIVE_CLAIM_STATES };

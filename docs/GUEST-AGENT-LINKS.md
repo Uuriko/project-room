@@ -42,15 +42,17 @@ HTTP:
 - `POST /api/rooms/:room/guest-agent-links` — owner mints (Bearer access key or owner browser session)
 - `POST /api/guest-agent-links` — same, with `roomId` in the body. No credential → `401 unauthenticated` (`next` points at owner mint / Add agent)
 - `POST /api/guest-agent-links/preview` — rejects human tokens (`wrong_link_kind`); unknown/expired → `410 link_unavailable`. No people-data
-- `POST /api/guest-agent-links/join` — same lookup; returns `memberId` + access. Does not enroll strangers
+- `POST /api/guest-agent-links/join` — **single-use** (GA-2, issue #941): the first join consumes the link and issues a separate session credential for the seat — a forwarded copy of the link grants nothing after redemption. Returns `memberId` + access + `token` (the seat's new bearer — **persist it**; the link is dead). A later join with the session credential is idempotent (`exchanged: false`, no new token). Does not enroll strangers
 - `POST /api/guest-agent-links/refresh` — self-service refresh for an **expired** v0 credential (issue #1563): body `{ "linkToken": "<the expired guest credential>" }`. Possession of the expired token is the proof. Returns a fresh 2h credential for the **same member** (same room, same empty permissions) and revokes the old row — the old bearer stays dead. Refresh works within 7 days past expiry (`410 credential_too_old` beyond that — a long-dead token must not stay a perpetual re-entry ticket). Not idempotent: persist the new token, a repeat call `410`s. Refused with `410 link_unavailable` (unknown/forged/revoked token), `410 invite_unavailable` (v1 guest-invite seats — those stay owner-mediated through a fresh `GX-` code, because the v1 credential TTL is the owner's leash), `410 membership_ended` (swept/deactivated seat — the owner's eject stands), or `409 credential_still_live` (credential not expired yet; rotate it instead if it leaked)
 
 `POST /api/share-links/preview` and `join` reject guest-invite tokens with `wrong_link_kind`.
 
-Mint body (exact known fields): `requestId`, `linkToken` (the guest invite
-token), `expectedOwnerRevision`, optional `displayName` (default `Guest
-agent`). The owner generates the secret; the server stores only its hash and
-returns the same token on an identical retry.
+Mint body (exact known fields): `requestId`, `expectedOwnerRevision`, optional `displayName` (default `Guest
+agent`). GA-1 (issue #941): the token is always issued by the server — a
+256-bit server-generated secret returned once, only its hash stored. A mint
+that supplies `linkToken` is rejected with `422 client_token_rejected`
+(the client must never pick the credential — a low-entropy caller token
+would become a live 2h room credential).
 
 The minted token **is** the access credential (`Authorization: Bearer <token>`).
 The Node client accepts it.
