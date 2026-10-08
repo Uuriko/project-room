@@ -182,6 +182,7 @@
   "tests/claim-pr-sync-room-scoping.test.js": 5154,
   "tests/claim-reputation.test.js": 3926,
   "tests/claim-scopes.test.js": 75616,
+  "tests/claim-settle-1526.test.js": 8000,
   "tests/claim-validate.test.js": 29415,
   "tests/claims-index.test.js": 39038,
   "tests/claims-state-machine.property.test.js": 300000,
