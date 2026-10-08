@@ -77,10 +77,13 @@ test("unit shard plan is complete, deterministic, and balanced on measured runti
   // (unitPlan's estimate), so it never breaks the plan or the gate. Requiring
   // a durations entry per new file failed every test-adding PR and made
   // scripts/unit-ci-durations.json the repo's top merge-conflict hotspot.
-  // Only a large unmeasured share is a real balance problem: refresh then.
+  // Only a large unmeasured set is a real balance problem: past
+  // UNMEASURED_CAP files, refresh the durations file in one PR. The cap is
+  // absolute (about 3-4% of the suite) so 5s guesses never dominate the plan.
+  const UNMEASURED_CAP = 40;
   const measured = JSON.parse(readFileSync("scripts/unit-ci-durations.json", "utf8")).milliseconds;
   const unmeasured = plan.files.filter((file) => !(Number.isFinite(measured[file]) && measured[file] > 0));
-  assert.ok(unmeasured.length <= Math.ceil(plan.files.length * 0.15),
+  assert.ok(unmeasured.length <= UNMEASURED_CAP,
     `${unmeasured.length} of ${plan.files.length} unit files lack measured durations; refresh scripts/unit-ci-durations.json: ${unmeasured.join(", ")}`);
   const total = plan.shards.reduce((sum, shard) => sum + shard.estimatedMs, 0);
   for (const shard of plan.shards) {
