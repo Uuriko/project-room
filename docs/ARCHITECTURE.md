@@ -150,9 +150,16 @@ sequenceDiagram
 
 Details:
 
-- Claim states are `unclaimed`, `claimed`, `in_progress`, `blocked`, `done`
-  (`server/work-claims.mjs` `STATES`; `done` is immutable and carries
-  `deliveryMode`, `reviewedBy`, `tags`, `blobs`).
+- Claim states are `unclaimed`, `claimed`, `in_progress`, `blocked`, `done`,
+  `closed` (`server/work-claims.mjs` `STATES`; `done` is immutable and carries
+  `deliveryMode`, `reviewedBy`, `tags`, `blobs`). Moves are one explicit table,
+  `CLAIM_LIFECYCLE` (state × verb → state). `closed` is terminal: open work
+  retired without delivery by `close` (holder or claim manager) or `cancel`
+  (the creator of an unclaimed item, or its holder) via
+  `POST /api/rooms/{roomId}/work-claims/{claimId}/close`,
+  `POST /api/rooms/{roomId}/work-claims/{claimId}/cancel` or MCP
+  `room_close_work_claim`. Only open (non-terminal) items count against the
+  room's open-claim cap.
 - No inbound GitHub webhook is mounted: the per-minute cron and
   `POST /api/rooms/{roomId}/work-claims/sweep` poll instead; `applyPullRequestWebhook` in
   `server/claim-pr-sync.mjs` is the same settlement a `pull_request` webhook

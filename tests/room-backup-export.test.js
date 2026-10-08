@@ -2,14 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { exportNdjsonStream, exportNdjsonText, operatorExportResponse, replayNdjson } from "../server/room-export.mjs";
-import { writeDailyBackup } from "../cloudflare/room-backup.mjs";
+import { exportNdjsonStream, exportNdjsonText, operatorExportResponse, replayNdjson, sanitizeCell, REPLAY_SKIPPED_TABLES } from "../server/room-export.mjs";
+import { backupTarget, writeDailyBackup, writeKvBackup } from "../cloudflare/room-backup.mjs";
+import { assembleKvBackup, summarizeRoom } from "../scripts/restore-room-backup.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
 const sha = value => createHash("sha256").update(value).digest("hex");
@@ -26,6 +27,7 @@ const RAK = "rak_abcdefghij12";
 const KEPT_HASH = "cd".repeat(32);
 const OPERATOR = "operator-token-value";
 const replayScript = fileURLToPath(new URL("../scripts/replay-room-export.mjs", import.meta.url));
+const restoreScript = fileURLToPath(new URL("../scripts/restore-room-backup.mjs", import.meta.url));
 
 function r2(methods) {
   return new Proxy({}, {
@@ -152,4 +154,142 @@ test("the daily backup writes one object when R2 is bound and skips otherwise", 
   assert.equal(seen[0].type, "application/x-ndjson");
   assert.equal(seen[0].text.includes(HOOK), false);
   assert.equal(seen[0].text.includes(sha(HOOK)), true);
+});
+
+function fakeKv() {
+  const map = new Map();
+  return {
+    map,
+    async get(key) { return map.has(key) ? map.get(key).value : null; },
+    async put(key, value, options) {
+      const bytes = typeof value === "string" ? Buffer.from(value) : Buffer.from(value);
+      map.set(key, { value: bytes, options });
+    }
+  };
+}
+
+function openStore(t, messages = 5) {
+  const directory = mkdtempSync(join(tmpdir(), "room-backup-kv-"));
+  const store = new RoomStore(join(directory, "live.sqlite"));
+  t.after(() => { try { store.close(); } catch { /* closed */ } rmSync(directory, { recursive: true, force: true }); });
+  store.initialize(initialRoom());
+  const key = store.issueAccessKey("commons", "owner");
+  for (let i = 0; i < messages; i += 1) {
+    store.command(key, "commons", { id: crypto.randomUUID(), type: T.MESSAGE_POSTED, data: { messageId: `m-${i}`, body: `message ${i} ${"x".repeat(300)}` } });
+  }
+  return { directory, store };
+}
+
+test("the KV target is used only when R2 is absent", () => {
+  assert.equal(backupTarget({}), null);
+  assert.equal(backupTarget({ ROOM_BACKUPS_KV: fakeKv() }), "kv");
+  assert.equal(backupTarget({ ROOM_BACKUPS_KV: fakeKv(), ROOM_BACKUPS: { put() {}, head() {} } }), "r2");
+  assert.throws(() => backupTarget({ ROOM_BACKUPS_KV: {} }), /put or get/);
+});
+
+test("the daily KV backup writes parts then a manifest, once a day, with a TTL", async t => {
+  const { store } = openStore(t);
+  const kv = fakeKv();
+  const room = { exportRoomNdjson: () => exportNdjsonStream(store.db) };
+  const when = new Date(Date.UTC(2026, 9, 8, 9));
+  const wrote = await writeDailyBackup({ ROOM_BACKUPS_KV: kv }, room, when);
+  assert.equal(wrote.wrote, "room-backups/2026-10-08.ndjson");
+  assert.equal(wrote.target, "kv");
+  const manifest = JSON.parse(kv.map.get("room-backups/2026-10-08.ndjson").value.toString());
+  assert.equal(manifest.kind, "room-backup-manifest");
+  assert.equal(manifest.parts.length, wrote.parts);
+  for (const { options } of kv.map.values()) assert.equal(options.expirationTtl, 35 * 24 * 60 * 60);
+  const again = await writeDailyBackup({ ROOM_BACKUPS_KV: kv }, { exportRoomNdjson: () => { throw new Error("must not export twice"); } }, when);
+  assert.deepEqual(again, { skipped: "exists", key: "room-backups/2026-10-08.ndjson", target: "kv" });
+});
+
+test("a KV backup split into many parts reassembles byte-equal, replays, and catches tampering", async t => {
+  const { directory, store } = openStore(t, 12);
+  const kv = fakeKv();
+  const text = exportNdjsonText(store.db);
+  const manifest = await writeKvBackup(kv, "room-backups/2026-10-08.ndjson", exportNdjsonStream(store.db), { partBytes: 1000 });
+  assert.ok(manifest.parts.length > 3, "expected several parts");
+  assert.ok(manifest.parts.every(part => part.bytes <= 1000));
+  const get = key => kv.map.get(key).value;
+  const { ndjson } = assembleKvBackup(get(manifest.key), get);
+  assert.equal(ndjson.replace(/"backedUpAt":\d+/, ""), text.replace(/"backedUpAt":\d+/, ""));
+
+  const file = join(directory, "backup.ndjson");
+  writeFileSync(file, ndjson, { mode: 0o600 });
+  const target = join(directory, "restore", "room.sqlite");
+  const out = JSON.parse(execFileSync(process.execPath, [restoreScript, "--from", file, "--to", target, "--room", "commons"], { encoding: "utf8" }));
+  assert.equal(out.verified, true);
+  const live = summarizeRoom(join(directory, "live.sqlite"), "commons");
+  assert.deepEqual(out.rooms[0], live);
+  assert.equal(out.rooms[0].messages, 12);
+
+  assert.throws(() => execFileSync(process.execPath, [restoreScript, "--from", file, "--to", target], { encoding: "utf8", stdio: "pipe" }), /existing file/);
+  const tampered = Buffer.from(get(manifest.parts[1].key));
+  tampered[0] ^= 1;
+  assert.throws(() => assembleKvBackup(get(manifest.key), key => key === manifest.parts[1].key ? tampered : get(key)), /does not match its manifest/);
+  assert.equal(existsSync(join(directory, "restore", "other.sqlite")), false);
+});
+
+test("Durable Object BLOB cells (ArrayBuffer) export as base64, not {}", () => {
+  const bytes = Uint8Array.from({ length: 256 }, (_, i) => i);
+  const expected = { $base64: Buffer.from(bytes).toString("base64") };
+  assert.deepEqual(sanitizeCell("bytes", bytes.buffer.slice(0)), expected);
+  assert.deepEqual(sanitizeCell("bytes", new DataView(bytes.buffer)), expected);
+  const padded = new Uint8Array(260); padded.set(bytes, 2);
+  assert.deepEqual(sanitizeCell("bytes", new Uint8Array(padded.buffer, 2, 256)), expected);
+  assert.notEqual(JSON.stringify(sanitizeCell("bytes", bytes.buffer)), "{}");
+});
+
+test("a version 1 KV manifest for today is rewritten; a current one is kept", async t => {
+  const { store } = openStore(t, 2);
+  const kv = fakeKv();
+  const room = { exportRoomNdjson: () => exportNdjsonStream(store.db) };
+  const when = new Date(Date.UTC(2026, 9, 8, 9));
+  await kv.put("room-backups/2026-10-08.ndjson", JSON.stringify({ kind: "room-backup-manifest", version: 1, parts: [] }), {});
+  const wrote = await writeDailyBackup({ ROOM_BACKUPS_KV: kv }, room, when);
+  assert.equal(wrote.wrote, "room-backups/2026-10-08.ndjson");
+  assert.equal(JSON.parse(kv.map.get("room-backups/2026-10-08.ndjson").value.toString()).version, 2);
+  assert.equal((await writeDailyBackup({ ROOM_BACKUPS_KV: kv }, room, when)).skipped, "exists");
+});
+
+test("replay skips Durable Object runtime and retired tables and reports them", t => {
+  const { directory, store } = openStore(t, 3);
+  const extra = [
+    { table: "room_writer_permit", row: { singleton: 1, version: 41 } },
+    { table: "room_runtime_version", row: { singleton: 1, version: 41 } },
+    { table: "emissary_journal", row: { room_id: "commons", id: "j1" } },
+    { table: "abuse_rate_buckets", row: { id: "login:x", family: "login", n: 3, until_ms: 1 } }
+  ].map(line => JSON.stringify(line)).join("\n");
+  assert.ok(REPLAY_SKIPPED_TABLES.includes("room_writer_permit"));
+  assert.ok(REPLAY_SKIPPED_TABLES.includes("abuse_rate_buckets"));
+  const ndjson = `${exportNdjsonText(store.db)}${extra}\n`;
+  const result = replayNdjson(ndjson, join(directory, "skip", "room.sqlite"));
+  assert.equal(result.verified, true);
+  assert.deepEqual(result.skippedTables, { room_runtime_version: 1, room_writer_permit: 1, emissary_journal: 1, abuse_rate_buckets: 1 });
+  const unknown = `${exportNdjsonText(store.db)}${JSON.stringify({ table: "not_a_table", row: { a: 1 } })}\n`;
+  assert.throws(() => replayNdjson(unknown, join(directory, "unknown", "room.sqlite")), /does not have/);
+});
+
+test("audit report restores a store whose stored projection drifted from the reducer, strict refuses it", t => {
+  const { directory, store } = openStore(t, 2);
+  store.db.prepare("UPDATE rooms SET projection=json_set(projection, '$.drift', 1) WHERE id='commons'").run();
+  const ndjson = exportNdjsonText(store.db);
+  assert.throws(() => replayNdjson(ndjson, join(directory, "strict", "room.sqlite")), /reconciliation/);
+  const report = replayNdjson(ndjson, join(directory, "report", "room.sqlite"), { audit: "report" });
+  assert.equal(report.verified, true);
+  assert.equal(report.audit.ok, false);
+  assert.match(report.audit.error, /reconciliation/);
+  assert.equal(replayNdjson(exportNdjsonText(openStore(t, 1).store.db), join(directory, "clean", "room.sqlite"), { audit: "report" }).audit.ok, true);
+  assert.throws(() => replayNdjson(ndjson, join(directory, "bad", "room.sqlite"), { audit: "loose" }), /strict or report/);
+});
+
+test("Durable Object BLOB cells (bare SharedArrayBuffer) export as base64, not {}", () => {
+  // JSON.stringify(new SharedArrayBuffer(n)) is '{}' -- the same trap PR #2029
+  // closed for ArrayBuffer. A bare SAB is neither an ArrayBuffer nor a view.
+  const bytes = Uint8Array.from({ length: 64 }, (_, i) => i);
+  const sab = new SharedArrayBuffer(64);
+  new Uint8Array(sab).set(bytes);
+  const expected = { $base64: Buffer.from(bytes).toString("base64") };
+  assert.deepEqual(sanitizeCell("bytes", sab), expected);
+  assert.notEqual(JSON.stringify(sanitizeCell("bytes", sab)), "{}");
 });

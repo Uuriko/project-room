@@ -23,6 +23,7 @@
 import { identityNamesForRoom, resolveMentionTargetsInText } from "./mention-lifecycle.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
+import { messageInHistory } from "./history-visibility.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
@@ -354,9 +355,11 @@ export function setReadHorizon(store, token, roomId, data, expectedSessionBindin
 
 // --- saved messages -----------------------------------------------------------
 
-function savedView(store, roomId, row, memberId) {
+function savedView(store, roomId, row, memberId, floor = null) {
   const message = store.room(roomId).state.messages.find(m => m.id === row.message_id);
-  if (!message || !dmVisible(message, memberId)) return null;
+  // PRIV-2: a since_join reader's saved list follows the same floor as every
+  // other message read.
+  if (!message || !dmVisible(message, memberId) || !messageInHistory(message, floor)) return null;
   const members = store.room(roomId).state.members;
   return {
     messageId: row.message_id, savedAt: row.saved_at,
@@ -373,8 +376,9 @@ export function listSaved(store, token, roomId, expectedSessionBinding = null) {
     const rows = store.db.prepare(
       "SELECT * FROM saved_messages WHERE room_id=? AND member_id=? ORDER BY saved_at DESC, message_id").all(roomId, member.id);
     const items = [];
+    const floor = store.historyFloor(roomId, member.id);
     for (const row of rows) {
-      const view = savedView(store, roomId, row, member.id);
+      const view = savedView(store, roomId, row, member.id, floor);
       if (view) items.push(view);
     }
     return { ...viewerEnvelope(auth, roomId), count: items.length, items };
@@ -396,6 +400,7 @@ export function setSaved(store, token, roomId, data, expectedSessionBinding = nu
   return store.transaction(() => {
     const message = store.room(roomId).state.messages.find(m => m.id === data.messageId);
     if (!message || !dmVisible(message, member.id)) fail(404, "message_not_found", "No such message in this room");
+    if (data.saved && !messageInHistory(message, store.historyFloor(roomId, member.id))) fail(404, "message_not_found", "No such message in this room");
     if (data.saved && message.deletedAt) fail(409, "message_deleted", "A deleted message cannot be saved");
     const now = store.now();
     if (data.saved) {

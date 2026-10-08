@@ -7,7 +7,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { handleWorkClaims } from "../server/work-claim-routes.mjs";
+import { handleWorkClaims, closeWorkClaim } from "../server/work-claim-routes.mjs";
 import { applyPullRequestWebhook, syncClaimPullRequests } from "../server/claim-pr-sync.mjs";
 import { pullRequestOutcomeFromWebhook } from "../server/claim-coordination.mjs";
 // SEC-2: claim reads carry content-trust markers; compare the claim itself.
@@ -294,6 +294,27 @@ test("a cron deadline does not call GitHub and does not start a second lookup", 
   assert.equal(store.workClaims.get("commons", "other").pullRequest.etag ?? null, null);
 });
 
+// Claim lifecycle on the real store: REST close and the MCP closeWorkClaim
+// path both land the terminal closed state and append one validated
+// work_claim.updated event (action closed, reason closed|cancelled).
+test("close and cancel append a validated closed event on the real store, REST and MCP alike", async t => {
+  const { store, call } = await room(t);
+  await call("create", null, { id: "retire-rest" });
+  await call("create", null, { id: "retire-mcp" });
+  const before = claimEvents(store).length;
+  const closed = (await call("close", "retire-rest", { reason: "stale" })).value;
+  assert.equal(closed.state, "closed");
+  const auth = { member: { id: "owner", kind: "human", permissions: [] } };
+  const cancelled = closeWorkClaim({ store, roomId: "commons", auth, claimId: "retire-mcp", verb: "cancel", reason: "duplicate" });
+  assert.equal(cancelled.state, "closed");
+  assert.equal(store.workClaims.get("commons", "retire-mcp").history.at(-1).action, "cancelled");
+  const events = claimEvents(store).slice(before);
+  assert.deepEqual(events.map(event => [event.data.workClaim, event.data.action, event.data.claimState, event.data.reason]),
+    [["retire-rest", "closed", "closed", "closed"], ["retire-mcp", "closed", "closed", "cancelled"]]);
+  assert.throws(() => closeWorkClaim({ store, roomId: "commons", auth, claimId: "retire-mcp", verb: "close" }),
+    error => error.status === 409 && error.code === "work_claim_terminal");
+});
+
 // Distinct storage contract: a common read permits one append, and the losing
 // writer must reconcile before adding its own URL. No link or event is lost.
 test("concurrent PR attachments serialize and invalid update alternatives cannot write", async t => {
@@ -388,4 +409,143 @@ test("re-linking a settled PR URL in a new round resets the link for re-polling"
   assert.equal(relinked.history.at(-1).action, "pr_linked");
   assert.match(relinked.history.at(-1).note, /pull\/7/);
   assert.deepEqual(store.workClaims.get("commons", "relink-pr").pullRequests[0].outcome, null);
+});
+
+// Regression: the previous round's outcome and the next claim can share a
+// millisecond (webhook + re-claim in the same tick). Equal timestamps must
+// still read as a stale outcome, or the closed link survives the re-link.
+test("re-linking resets a settled PR even when syncedAt equals claimedAt", async t => {
+  const { store, call } = await room(t);
+  const now = Date.parse("2026-10-03T13:00:00Z");
+  store.now = () => now;
+  await call("create", null, { id: "relink-same-ms", title: "relink" });
+  const claimed = (await call("claim", "relink-same-ms", {})).value;
+  await call("update", "relink-same-ms", { appendPullRequest: URL_A, expectedClaimedAt: claimed.claimedAt, expectedHistoryLength: claimed.history.length });
+  applyPullRequestWebhook(store, { action: "closed", pull_request: { html_url: URL_A, merged: false, state: "closed" } }, { nowMs: now });
+  const released = store.workClaims.get("commons", "relink-same-ms");
+  assert.equal(released.pullRequests[0].outcome, "closed");
+  const round2 = (await call("claim", "relink-same-ms", {})).value;
+  assert.equal(round2.pullRequests[0].syncedAt, round2.claimedAt, "fixture must force syncedAt == claimedAt");
+  const relinked = (await call("update", "relink-same-ms", { appendPullRequest: URL_A, expectedClaimedAt: round2.claimedAt, expectedHistoryLength: round2.history.length })).value;
+  assert.equal(relinked.pullRequests[0].outcome, null);
+  assert.equal(relinked.history.at(-1).action, "pr_linked");
+});
+
+// Regression (adversarial challenge of #2010): the tie-break must not count
+// "claimed" stamps alone. A round that begins via reassign stamps
+// "reassigned:<target>", never "claimed" — the old count saw only one round
+// and a same-millisecond settle+reclaim tie was misread as current-round
+// truth, so the stale "closed" outcome survived and vetoed every future poll.
+test("re-linking resets a same-ms tie when the first round began via reassign", async t => {
+  const { store, call } = await room(t);
+  const now = Date.parse("2026-10-03T13:00:00Z");
+  store.now = () => now;
+  await call("create", null, { id: "relink-reassign-ms", title: "relink" });
+  const assigned = (await call("reassign", "relink-reassign-ms", { newOwner: "owner" })).value;
+  assert.equal(assigned.state, "claimed");
+  assert.equal(assigned.history.at(-1).action, "reassigned:owner");
+  assert.ok(!assigned.history.some(entry => entry.action === "claimed"), "reassign starts the round without a claimed stamp");
+  await call("update", "relink-reassign-ms", { appendPullRequest: URL_A, expectedClaimedAt: assigned.claimedAt, expectedHistoryLength: assigned.history.length });
+  applyPullRequestWebhook(store, { action: "closed", pull_request: { html_url: URL_A, merged: false, state: "closed" } }, { nowMs: now });
+  const released = store.workClaims.get("commons", "relink-reassign-ms");
+  assert.equal(released.pullRequests[0].outcome, "closed");
+  assert.equal(released.pullRequests[0].syncedAt, released.claimedAt, "fixture must force syncedAt == claimedAt");
+  const round2 = (await call("claim", "relink-reassign-ms", {})).value;
+  const relinked = (await call("update", "relink-reassign-ms", { appendPullRequest: URL_A, expectedClaimedAt: round2.claimedAt, expectedHistoryLength: round2.history.length })).value;
+  assert.equal(relinked.pullRequests[0].outcome, null,
+    "the pr_closed stamp proves a previous round ended, so the tie is stale");
+  assert.equal(relinked.history.at(-1).action, "pr_linked");
+});
+
+// Regression (adversarial challenge of #2010): history trimming
+// (MAX_CLAIM_HISTORY) can drop early "claimed" stamps. A same-millisecond tie
+// on a long-lived claim must still read as stale — the round-ending stamp is
+// recent and survives trimming.
+test("re-linking resets a same-ms tie even when early claimed stamps were trimmed", async t => {
+  const { store, call } = await room(t);
+  const now = Date.parse("2026-10-03T13:00:00Z");
+  store.now = () => now;
+  await call("create", null, { id: "relink-trimmed-ms", title: "relink" });
+  const claimed = (await call("claim", "relink-trimmed-ms", {})).value;
+  await call("update", "relink-trimmed-ms", { appendPullRequest: URL_A, expectedClaimedAt: claimed.claimedAt, expectedHistoryLength: claimed.history.length });
+  for (let n = 0; n < 210; n++) await call("update", "relink-trimmed-ms", { note: `filler ${n}` });
+  const trimmed = store.workClaims.get("commons", "relink-trimmed-ms");
+  assert.ok(trimmed.historyOmitted > 0, "fixture must trim history");
+  assert.ok(!trimmed.history.some(entry => entry.action === "claimed"), "round-1 claimed stamp must be trimmed away");
+  applyPullRequestWebhook(store, { action: "closed", pull_request: { html_url: URL_A, merged: false, state: "closed" } }, { nowMs: now });
+  const released = store.workClaims.get("commons", "relink-trimmed-ms");
+  assert.equal(released.pullRequests[0].outcome, "closed");
+  const round2 = (await call("claim", "relink-trimmed-ms", {})).value;
+  const item = store.workClaims.get("commons", "relink-trimmed-ms");
+  const relinked = (await call("update", "relink-trimmed-ms", { appendPullRequest: URL_A, expectedClaimedAt: round2.claimedAt, expectedHistoryLength: item.history.length + (item.historyOmitted ?? 0) })).value;
+  assert.equal(relinked.pullRequests[0].outcome, null,
+    "the recent pr_closed stamp survives trimming and proves the tie is stale");
+  assert.equal(relinked.history.at(-1).action, "pr_linked");
+});
+
+// Tie behavior, N-way: three rounds settling at the same frozen millisecond
+// each reset on re-link — including a link that was already reset once and
+// re-settled by a duplicate webhook delivery.
+test("re-linking resets same-ms ties across three claim rounds", async t => {
+  const { store, call } = await room(t);
+  const now = Date.parse("2026-10-03T13:00:00Z");
+  store.now = () => now;
+  await call("create", null, { id: "relink-three-ms", title: "relink" });
+  const r1 = (await call("claim", "relink-three-ms", {})).value;
+  await call("update", "relink-three-ms", { appendPullRequest: URL_A, expectedClaimedAt: r1.claimedAt, expectedHistoryLength: r1.history.length });
+  const webhook = { action: "closed", pull_request: { html_url: URL_A, merged: false, state: "closed" } };
+  applyPullRequestWebhook(store, webhook, { nowMs: now });
+  const r2 = (await call("claim", "relink-three-ms", {})).value;
+  const relinked2 = (await call("update", "relink-three-ms", { appendPullRequest: URL_A, expectedClaimedAt: r2.claimedAt, expectedHistoryLength: r2.history.length })).value;
+  assert.equal(relinked2.pullRequests[0].outcome, null, "round-2 re-link resets");
+  applyPullRequestWebhook(store, webhook, { nowMs: now });
+  assert.equal(store.workClaims.get("commons", "relink-three-ms").pullRequests[0].outcome, "closed");
+  const r3 = (await call("claim", "relink-three-ms", {})).value;
+  const relinked3 = (await call("update", "relink-three-ms", { appendPullRequest: URL_A, expectedClaimedAt: r3.claimedAt, expectedHistoryLength: r3.history.length })).value;
+  assert.equal(relinked3.pullRequests[0].outcome, null, "round-3 re-link resets");
+  assert.equal(relinked3.history.at(-1).action, "pr_linked");
+});
+
+// Tie behavior across rooms: one webhook settles the same PR URL in two rooms
+// at the same millisecond. Each room's re-link is independent — resetting
+// room A must not disturb room B's settled link.
+test("same-ms ties in two rooms reset independently", async t => {
+  const store = new RoomStore(":memory:");
+  store.initialize(initialRoom("commons"));
+  store.initialize(initialRoom("second"));
+  t.after(() => store.close());
+  const now = Date.parse("2026-10-03T13:00:00Z");
+  store.now = () => now;
+  const helpers = {
+    json: (_res, status, value) => ({ status, value }),
+    reject: (status, code, message) => { const error = new Error(message); error.status = status; error.code = code; throw error; },
+    body: async req => req.body,
+  };
+  const forRoom = roomId => (route, id, body) => handleWorkClaims({
+    req: { method: "POST", body }, res: {},
+    url: new URL(`https://room.example/api/rooms/${roomId}/work-claims`),
+    store, roomId,
+    auth: { member: { id: "owner", kind: "human", permissions: [] } },
+    workClaimRoute: route, workClaimId: id, helpers,
+    registry: store.workClaims, githubToken: null,
+  });
+  const callA = forRoom("commons"), callB = forRoom("second");
+  const link = item => ({ appendPullRequest: URL_A, expectedClaimedAt: item.claimedAt, expectedHistoryLength: item.history.length });
+  await callA("create", null, { id: "relink-xroom", title: "relink" });
+  const a1 = (await callA("claim", "relink-xroom", {})).value;
+  await callA("update", "relink-xroom", link(a1));
+  await callB("create", null, { id: "relink-xroom", title: "relink" });
+  const b1 = (await callB("claim", "relink-xroom", {})).value;
+  await callB("update", "relink-xroom", link(b1));
+  const applied = applyPullRequestWebhook(store,
+    { action: "closed", pull_request: { html_url: URL_A, merged: false, state: "closed" } }, { nowMs: now });
+  assert.equal(applied.applied.length, 2, "webhook settles both rooms");
+  const a2 = (await callA("claim", "relink-xroom", {})).value;
+  const relinkedA = (await callA("update", "relink-xroom", link(a2))).value;
+  assert.equal(relinkedA.pullRequests[0].outcome, null, "room A resets");
+  assert.equal(store.workClaims.get("second", "relink-xroom").pullRequests[0].outcome, "closed",
+    "room B untouched until it re-links");
+  const b2 = (await callB("claim", "relink-xroom", {})).value;
+  const relinkedB = (await callB("update", "relink-xroom", link(b2))).value;
+  assert.equal(relinkedB.pullRequests[0].outcome, null, "room B resets on its own re-link");
 });

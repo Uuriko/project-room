@@ -505,8 +505,12 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   // Lane 5 (docspolish-error-quality): the already_* 409 family means the
   // action already happened — "Check access and current work." sends the
   // agent down the wrong path. Teach reconcile-instead-of-retry.
-  if (/^already_/.test(reasonCode)) {
+  // (2026-10-07 buildqa: identity_already_linked is the same family —
+  // idempotent 409 success from the identity-link routes, not a failure —
+  // but starts with identity_, not already_. It joins the family too.)
+  if (/^already_/.test(reasonCode) || reasonCode === "identity_already_linked") {
     const alreadyHints = {
+      identity_already_linked: "This identity is already linked to this room — the earlier link is live. Keep your saved connection; do not mint another identity or retry the link create.",
       already_member: /already linked/.test(String(message || ""))
         ? "This identity is already a member of this room — do not create another membership. Act with the saved identity credential instead."
         : "Re-check the current membership with the saved credential; do not create a duplicate membership.",
@@ -581,6 +585,23 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       status: "failed", reason: reasonCode === "request_failed" ? "internal_error" : reasonCode,
       hint: "No success is claimed. Reconcile or retry the exact command.",
       next: [tool("room_check_access"), command("Retry the exact same command after checking access")]
+    };
+  }
+  // 2026-10-07 buildqa (live fuzz): method_not_allowed 405 fell through to
+  // the unmapped-code branch — "Unknown error 'method_not_allowed'. Re-check
+  // access..." sends the agent down an access path for a method problem. A
+  // 405 names the fix itself: resend with an allowed method. Many 405s carry
+  // an Allow header naming the accepted methods (e.g. the MCP transport and
+  // POST-only mint routes), but most server reject() sites omit it (60/106
+  // as of 2026-10-08 — verified live on POST /api/public/rooms/directory
+  // and POST /api/opportunities.json), and the error body does not repeat
+  // it. So the hint hedges: point at the header as a possibility, always
+  // name the route-docs fallback — never assert the header is there.
+  if (httpStatus === 405 || reasonCode === "method_not_allowed") {
+    return {
+      status: "action_required", reason: "method_not_allowed",
+      hint: "This route does not accept that HTTP method — nothing was changed. Resend with an allowed method (Allow header or route docs); do not retry the same method.",
+      next: [command("Read the 405 response's Allow header when present — otherwise the route docs — for the accepted methods, then resend with an allowed method; do not retry the same method")]
     };
   }
   // Unmapped code: name the code and the recovery (report code + message

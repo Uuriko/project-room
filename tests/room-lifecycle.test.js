@@ -280,3 +280,24 @@ test("account rooms: the membership cap bounds creation", t => {
   assert.throws(() => f.store.createAccountRoom(slot.token, session.sessionBinding, { roomId: "room-101", title: "One more", purpose: "Over the cap", kind: "personal", displayName: "Admin" }), { status: 409, code: "pilot_limit" });
   assert.equal(f.store.db.prepare("SELECT 1 FROM rooms WHERE id='room-101'").get(), undefined);
 });
+
+test("account rooms: someone who left their only room may create their first room", t => {
+ const f = createAcceptanceFixture();
+ t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+ f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: T.MEMBER_ADDED,
+ data: { memberId: "visitor", displayName: "Visitor", kind: "human", permissions: ["steer"] } });
+ f.store.createAccount("visitor-account");
+ f.store.bindHumanAccount("commons", "visitor", "visitor-account");
+ const key = f.store.issueAccountAccessKey("visitor-account");
+ const slot = f.store.createAccountSessionSlot();
+ const session = f.store.loginAccountSession(slot.token, key, 0);
+ const request = { roomId: "visitor-first", title: "Fresh start", purpose: "Own room after leaving", kind: "personal", displayName: "Visitor" };
+ assert.throws(() => f.store.createAccountRoom(slot.token, session.sessionBinding, request), { status: 403, code: "room_creation_denied" },
+ "an active conversation-only guest cannot create a second room");
+ const member = f.store.room("commons").state.members.visitor;
+ f.store.command(slot.token, "commons", { id: randomUUID(), type: T.MEMBER_ACCESS_CHANGED,
+ data: { memberId: "visitor", expectedMemberRevision: member.revision, permissions: [...member.permissions], active: false } }, session.sessionBinding);
+ assert.deepEqual(f.store.accountRooms(slot.token, session.sessionBinding).rooms, [], "no active rooms remain");
+ const created = f.store.createAccountRoom(slot.token, session.sessionBinding, request);
+ assert.equal(created.room.id, "visitor-first");
+});
