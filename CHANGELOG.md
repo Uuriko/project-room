@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Client readers no longer assume `message.body` is a string. A message
+  scrubbed by account deletion keeps its slot with a null body, `redacted`
+  true and no `deletedAt` (redacted-but-live); the reply bar, pins list,
+  decision/report dialogs, the report list, portable-work source lookup and
+  the work-loop signals treated that as a crash (`body.slice` / `body.trim`
+  on null). New shared `bodyText(message)` helper in `src/conversation.js`
+  (empty text for a missing body) plus a source-scan test pinning the fix.
 - Human browser push, mentions and direct messages only. One button asks the
   browser for permission. No notification-level picker and no quiet hours.
   Thread mutes and member mutes still suppress delivery. The push carries a
