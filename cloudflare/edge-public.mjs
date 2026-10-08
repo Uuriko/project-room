@@ -121,6 +121,31 @@ export function classifyEdgePath(pathname) {
   return null;
 }
 
+const REVALIDATED_ASSET_TYPES = ['text/javascript', 'text/css', 'image/svg+xml', 'application/manifest+json'];
+export function assetCachePolicy(type) {
+  const base = String(type).split(';')[0].trim();
+  if ((base.startsWith('image/') && base !== 'image/svg+xml') || base.startsWith('font/')) return 'public, max-age=86400';
+  if (REVALIDATED_ASSET_TYPES.includes(base)) return 'no-cache';
+  return null;
+}
+const assetEtags = new WeakMap();
+async function assetEtag(bytes) {
+  let etag = assetEtags.get(bytes);
+  if (!etag) {
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+    etag = `"${Array.from(digest.subarray(0, 16), b => b.toString(16).padStart(2, '0')).join('')}"`;
+    assetEtags.set(bytes, etag);
+  }
+  return etag;
+}
+export function etagMatches(header, etag) {
+  if (typeof header !== 'string' || !header) return false;
+  return header.split(',').some(tag => {
+    const value = tag.trim().replace(/^W\//, '');
+    return value === '*' || value === etag;
+  });
+}
+
 async function loadCachedAsset(env, file) {
   const cached = assetCache.get(file);
   if (cached) {
@@ -214,6 +239,21 @@ async function assetResponse(request, env, url) {
   }
   const contentType = (type.startsWith('image/') && !type.includes('svg')) || type.startsWith('font/') ? type : (type.includes('charset') ? type : `${type}; charset=utf-8`);
   headers.set('Content-Type', contentType);
+  // Static assets were no-store, so every visit re-downloaded the ~1.9 MB app
+  // shell (app.js, styles, emoji catalog). Binary images and fonts get the
+  // same one-day cache the Node server gives them. Scripts, styles and SVG
+  // keep unhashed names, so they revalidate on every load (no-cache) against a
+  // content ETag and an unchanged file costs a 304. HTML stays no-store.
+  const policy = assetCachePolicy(type);
+  if (policy) {
+    headers.set('Cache-Control', policy);
+    const etag = await assetEtag(bytes);
+    headers.set('ETag', etag);
+    if (etagMatches(request.headers.get('if-none-match'), etag)) {
+      headers.delete('Content-Type');
+      return new Response(null, { status: 304, headers });
+    }
+  }
   headers.set('Content-Length', String(bytes.byteLength));
   return new Response(request.method === 'HEAD' ? null : bytes, { status: 200, headers });
 }

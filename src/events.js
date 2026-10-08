@@ -1237,6 +1237,7 @@ function renameChannel(state, incoming) {
   requireFields(incoming.data, ["channelId", "name"]);
   const channel = state.channels[incoming.data.channelId];
   if (!channel) throw new Error("Unknown channel");
+  if (channel.id === DEFAULT_CHANNEL_ID) throw new Error("The main channel can't be renamed");
   if (channel.archivedAt) throw new Error("Channel is archived");
   const name = normalizeChannelName(incoming.data.name);
   if (Object.values(state.channels).some(c => c.id !== channel.id && c.name === name)) throw new Error("Channel name is taken");

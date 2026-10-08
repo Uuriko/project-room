@@ -9,7 +9,8 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { MESSAGE_BODY_READS } from "../server/routes/table.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
-import { messageInHistory, eventInHistory, rowInHistory, indexMessages } from "../server/history-visibility.mjs";
+import { messageInHistory, eventInHistory, rowInHistory, indexMessages, historyFloor } from "../server/history-visibility.mjs";
+import { DatabaseSync } from "node:sqlite";
 import { EVENT_TYPES as T, event, replay, memberHistoryVisibility, historyVisibility, PERMISSIONS } from "../src/events.js";
 
 // PRIV-2: an owner who chooses "since_join" keeps earlier messages away from
@@ -63,7 +64,8 @@ async function setup(t, { preJoinEvents = 0 } = {}) {
   cmd(T.MESSAGE_POSTED, { messageId: "before-reply", body: `${BEFORE} reply`, replyToId: "before-root" });
   cmd(T.MESSAGE_PINNED, { messageId: "before-root" });
   cmd(T.MESSAGE_POSTED, { messageId: "before-question", body: `${BEFORE} open question?` });
-  for (let i = 0; i < preJoinEvents; i++) cmd(T.CHANNEL_RENAMED, { channelId: "general", name: `general-${i}` });
+  cmd(T.CHANNEL_CREATED, { channelId: "filler", name: "filler" });
+  for (let i = 0; i < preJoinEvents; i++) cmd(T.CHANNEL_RENAMED, { channelId: "filler", name: `filler-${i}` });
   cmd(T.ROOM_HISTORY_VISIBILITY_SET, { historyVisibility: "since_join" });
   cmd(T.MEMBER_ADDED, { memberId: "late-agent", displayName: "Late agent", kind: "agent", permissions: [], accountableHumanId: "owner" });
   const lateKey = store.issueAccessKey("commons", "late-agent");
@@ -215,4 +217,35 @@ test("same-millisecond prejoin history stays private beyond500 intervening event
   const indexed = await (await f.get("/api/rooms/commons/conversation?limit=2", f.lateKey)).json();
   assert.deepEqual(indexed.messages.map(m => m.id), ["after-root"]);
   assert.equal((await f.get("/api/rooms/commons/conversation?messageId=before-root", f.lateKey)).status, 404);
+});
+
+// #1523: a since_join guest removed and later reactivated must not read
+// messages posted during the removal gap. The history floor is the LATEST
+// join event for the member id, not the first-ever one.
+test("a removed-then-reactivated guest reads nothing from the removal gap", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec("CREATE TABLE events (room_id TEXT, sequence INTEGER, body TEXT)");
+  const at = s => `2026-10-06T12:${s}:00.000Z`;
+  const rows = [
+    [1, { id: "e1", type: T.MEMBER_ADDED, at: at("00"), data: { memberId: "gap-agent" } }],
+    [2, { id: "e2", type: T.MESSAGE_POSTED, at: at("01"), data: { messageId: "m-early" } }],
+    [3, { id: "e3", type: T.MEMBER_ACCESS_CHANGED, at: at("02"), data: { memberId: "gap-agent", active: false } }],
+    [4, { id: "e4", type: T.MESSAGE_POSTED, at: at("03"), data: { messageId: "m-gap" } }],
+    [5, { id: "e5", type: T.MEMBER_ADDED, at: at("04"), data: { memberId: "gap-agent" } }],
+    [6, { id: "e6", type: T.MESSAGE_POSTED, at: at("05"), data: { messageId: "m-late" } }],
+  ];
+  const insert = db.prepare("INSERT INTO events (room_id, sequence, body) VALUES (?, ?, ?)");
+  for (const [sequence, body] of rows) insert.run("commons", sequence, JSON.stringify(body));
+  const state = {
+    room: { ownerId: "owner", historyVisibility: { value: "since_join" } },
+    members: { "gap-agent": { id: "gap-agent", kind: "agent", active: true, permissions: [] } },
+  };
+  const floor = historyFloor(db, state, "commons", "gap-agent");
+  assert.equal(floor.sequence, 5, "floor is the reactivation join, not the first join");
+  assert.equal(messageInHistory({ id: "m-early", createdAt: at("01") }, floor), false);
+  assert.equal(messageInHistory({ id: "m-gap", createdAt: at("03") }, floor), false, "removal-gap message stays hidden");
+  assert.equal(messageInHistory({ id: "m-late", createdAt: at("05") }, floor), true);
+  assert.equal(eventInHistory({ id: "e4", at: at("03") }, floor), false);
+  assert.equal(eventInHistory({ id: "e6", at: at("05") }, floor), true);
+  db.close();
 });

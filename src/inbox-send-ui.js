@@ -10,6 +10,12 @@ export function syncInboxReviewRegion() {
     .some(id => { const el = document.getElementById(id); return el && !el.hidden; });
   region.hidden = !anyVisible;
 }
+// Send-capability gate: the local simulator always has a send path; a
+// Telegram source replies through the deployment's channel transport only
+// when the connection advertises send. Email has no browser send path.
+export function isSendableDraft(d) {
+  return Boolean(d) && (d.source.adapter === "synthetic" || (d.source.adapter === "telegram" && d.source.capabilities.send === true));
+}
 export function installInboxSend({ api, ownerKey, reviewChanges, onChannelSend = () => {} }) {
   const $ = id => document.getElementById(id), states = new Map();
   const storageKey = "project-room:pending-private-send:v1";
@@ -41,7 +47,6 @@ export function installInboxSend({ api, ownerKey, reviewChanges, onChannelSend =
     && draft.reviewedSource === draft.source.revision && draft.body.trim();
   // Samples reply through the local simulator; a Telegram source replies through the
   // deployment's channel transport (live bot or inert fixture). Email has no send path yet.
-  const sendable = d => Boolean(d) && (d.source.adapter === "synthetic" || (d.source.adapter === "telegram" && d.source.capabilities.send === true));
   const isChannel = d => Boolean(d) && d.source.adapter !== "synthetic";
   const live = s => s.channelSend?.mode === "live";
   const labelsFor = s => live(s)
@@ -51,7 +56,7 @@ export function installInboxSend({ api, ownerKey, reviewChanges, onChannelSend =
       delivered: "Sample delivered", rejected: "Sample rejected · not sent", bounced: "Sample delivery failed", cancelled: "Sample cancelled · not sent" };
   function render() {
     if (!sourceId || !ownerKey()) return;
-    if (draft && !sendable(draft)) {
+    if (draft && !isSendableDraft(draft)) {
       // Email (and a bot connection without send capability) has no browser send path.
       $("inbox-send-panel").hidden = true; $("inbox-save").hidden = false; syncInboxReviewRegion(); return;
     }
@@ -80,7 +85,7 @@ export function installInboxSend({ api, ownerKey, reviewChanges, onChannelSend =
   }
   async function load(id) {
     if (!ownerKey()) return;
-    if (id === sourceId && draft && !sendable(draft)) { render(); return true; }
+    if (id === sourceId && draft && !isSendableDraft(draft)) { render(); return true; }
     const channel = id === sourceId && isChannel(draft);
     const s = state(id), owner = ownerKey(), turn = ++s.turn, gen = generation;
     s.pending ??= pending().find(r => r.sourceId === id) ?? null;
@@ -110,7 +115,7 @@ export function installInboxSend({ api, ownerKey, reviewChanges, onChannelSend =
     $("inbox-send-confirm").disabled = !canSend;
   }
   async function open(existing = false, readOnly = false) {
-    if (!sourceId || !ownerKey() || !sendable(draft)) return;
+    if (!sourceId || !ownerKey() || !isSendableDraft(draft)) return;
     const id = sourceId, s = state(id), owner = ownerKey(), turn = ++modalTurn, channel = isChannel(draft);
     if (s.busy || s.pending || (!existing && !clean())) return;
     preview = null; $("inbox-send-dialog").showModal();
@@ -229,6 +234,14 @@ export function installInboxSend({ api, ownerKey, reviewChanges, onChannelSend =
   };
 }
 
+// Pending reply-review storage validator: a restored request must name a
+// known action, carry well-formed ids, a non-negative integer revision, and
+// a 64-hex review version before it is applied.
+export function validReplyReviewPending(r) {
+  return ["reply.review", "reply.update.review"].includes(r?.action)
+    && [r.requestId, r.sourceId, r.attemptId, ...(r.action === "reply.update.review" ? [r.updateId] : [])].every(v => typeof v === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(v))
+    && Number.isSafeInteger(r.expectedRevision) && r.expectedRevision >= 0 && typeof r.reviewVersion === "string" && /^[a-f0-9]{64}$/.test(r.reviewVersion);
+}
 // Exact content acknowledgment only. Provider creation/observation stays outside
 // the browser; pending storage contains operation IDs and versions, never mail.
 export function installInboxReplyReview({ api, ownerKey }) {
@@ -236,14 +249,11 @@ export function installInboxReplyReview({ api, ownerKey }) {
   let storage; try { storage = sessionStorage; } catch {}
   let sourceId = null, draft = null, data = null, preview = null, previewLocal = null, previewBasis = null, pending = null;
   let generation = 0, readTurn = 0, modalTurn = 0, busy = false, verified = false, note = "";
-  const validPending = r => ["reply.review", "reply.update.review"].includes(r?.action)
-    && [r.requestId, r.sourceId, r.attemptId, ...(r.action === "reply.update.review" ? [r.updateId] : [])].every(v => typeof v === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(v))
-    && Number.isSafeInteger(r.expectedRevision) && r.expectedRevision >= 0 && typeof r.reviewVersion === "string" && /^[a-f0-9]{64}$/.test(r.reviewVersion);
   function restore() {
     if (pending) return;
     try {
       const raw = storage?.getItem(key), saved = raw && raw.length <= 1600 ? JSON.parse(raw) : null;
-      if (saved?.owner === ownerKey() && validPending(saved.request)) pending = saved.request;
+      if (saved?.owner === ownerKey() && validReplyReviewPending(saved.request)) pending = saved.request;
     } catch {}
   }
   function retain(request) {
@@ -413,6 +423,27 @@ export function installInboxReplyReview({ api, ownerKey }) {
   };
 }
 
+// Honest direct-send copy: every failure line guarantees nothing was sent,
+// so the composer never implies a delivery it cannot confirm.
+export function directSendErrorText(code) {
+  return ({
+    gmail_not_connected: "Gmail isn’t connected for sending. Nothing was sent.",
+    telegram_not_connected: "Telegram isn’t configured here. Nothing was sent.",
+    telegram_send_rejected: "Telegram refused the message. Nothing was sent.",
+    telegram_unavailable: "Telegram is unreachable right now. Nothing was confirmed sent.",
+    gmail_unavailable: "Gmail is unreachable right now. Nothing was confirmed sent.",
+    invalid_direct_send: "Check the recipient and message, then try again.",
+    rate_limited: "Too many sends — wait a minute and try again."
+  }[code] || "Send failed. Nothing was confirmed sent.");
+}
+
+// Receipt contract for POST /channel-sends: only a final sent/failed
+// receipt on a known channel validates. Anything else stays unconfirmed.
+export function validDirectSendResponse(v) {
+  return v && v.contractVersion === 1 && v.send && typeof v.send.id === "string"
+    && ["sent", "failed"].includes(v.send.status) && ["gmail", "telegram"].includes(v.send.channel);
+}
+
 // Direct channel composer. POSTs {channel, to, subject, body, threadId?} to
 // /api/inbox/channel-sends through the caller's authenticated api.request
 // pipeline and reports pending → sent | failed honestly. The caller supplies
@@ -427,15 +458,6 @@ export function installInboxDirectSend({ api, ownerKey, ids }) {
   }
   const threadEl = ids.threadId ? $(ids.threadId) : null;
   let state = "idle", busy = false, generation = 0;
-  const honest = code => ({
-    gmail_not_connected: "Gmail isn’t connected for sending. Nothing was sent.",
-    telegram_not_connected: "Telegram isn’t configured here. Nothing was sent.",
-    telegram_send_rejected: "Telegram refused the message. Nothing was sent.",
-    telegram_unavailable: "Telegram is unreachable right now. Nothing was confirmed sent.",
-    gmail_unavailable: "Gmail is unreachable right now. Nothing was confirmed sent.",
-    invalid_direct_send: "Check the recipient and message, then try again.",
-    rate_limited: "Too many sends — wait a minute and try again."
-  }[code] || "Send failed. Nothing was confirmed sent.");
   function render(note = "") {
     const own = Boolean(ownerKey());
     el.send.disabled = busy || !own;
@@ -446,10 +468,6 @@ export function installInboxDirectSend({ api, ownerKey, ids }) {
       : note;
     el.status.dataset.sendState = state;
   }
-  function validSend(v) {
-    return v && v.contractVersion === 1 && v.send && typeof v.send.id === "string"
-      && ["sent", "failed"].includes(v.send.status) && ["gmail", "telegram"].includes(v.send.channel);
-  }
   async function send(event) {
     event?.preventDefault?.();
     const gen = generation, owner = ownerKey();
@@ -459,17 +477,17 @@ export function installInboxDirectSend({ api, ownerKey, ids }) {
     if (threadId) data.threadId = threadId;
     busy = true; state = "pending"; render();
     try {
-      const value = await api.request("/channel-sends", { method: "POST", data }, validSend);
+      const value = await api.request("/channel-sends", { method: "POST", data }, validDirectSendResponse);
       if (gen !== generation || owner !== ownerKey()) return;
       state = value.send.status;
       render(state === "sent"
         ? `Sent via ${value.send.channel === "gmail" ? "Gmail" : "Telegram"}.`
-        : honest(value.send.errorCode));
+        : directSendErrorText(value.send.errorCode));
       if (state === "sent") el.form.reset();
     } catch (error) {
       if (gen !== generation || owner !== ownerKey()) return;
       state = "failed";
-      render(honest(error?.code));
+      render(directSendErrorText(error?.code));
     } finally {
       if (gen === generation && owner === ownerKey()) { busy = false; render(); }
     }

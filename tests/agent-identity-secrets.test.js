@@ -109,6 +109,41 @@ test("revoke kills every auth path and keeps the identity row for audit", async 
   assert.equal(await errorCode(await post(origin, path(agent.identityId), { confirm: true }, dead)), "unauthenticated");
 });
 
+test("rotate also revokes the identity's scoped API keys", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const agent = f.store.identities.create("Rotate-key agent");
+
+  const issued = await post(origin, "/api/agent-keys",
+    { scopes: ["webhooks:manage"], label: "rotate-probe" }, agent.secret);
+  assert.equal(issued.status, 201);
+  const credential = `rak_${(await issued.json()).secret}`;
+  assert.equal((await get(origin, "/api/agent-webhooks", credential)).status, 200);
+
+  // The compromise response is rotate ("Rotate instead when you need
+  // continuity"). A key the attacker minted while holding the old secret
+  // must not survive the rotation — the same invariant revoke() enforces
+  // ("a revoked identity must not keep operating through a key it minted
+  // earlier").
+  const res = await post(origin, `/api/agent-identities/${agent.identityId}/rotate`, { confirm: true }, agent.secret);
+  assert.equal(res.status, 200);
+  const rotated = await res.json();
+  assert.equal(rotated.revokedApiKeys, 1);
+  assert.ok(!JSON.stringify(rotated).includes(agent.secret));
+
+  // The scoped key dies with the rotation.
+  assert.equal((await get(origin, "/api/agent-webhooks", credential)).status, 401);
+
+  // The rotated identity keeps working with its new secret. The revoked
+  // key still lists (audit), flagged revoked.
+  assert.ok(typeof rotated.secret === "string" && rotated.secret.startsWith("pri_"));
+  const relisted = await get(origin, "/api/agent-keys", rotated.secret);
+  assert.equal(relisted.status, 200);
+  const listed = await relisted.json();
+  assert.equal(listed.keys.length, 1);
+  assert.equal(listed.keys[0].revoked, true);
+});
+
 test("revoke also revokes the identity's scoped API keys", async t => {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);

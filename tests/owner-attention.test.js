@@ -238,3 +238,55 @@ test("attention pages reach every request and reset stale continuations", t => {
   assert.equal(removed.items.some(item => item.id === deny.id), false);
   assert.throws(() => attentionReport({ store: f.store, accessRequests: f.accessRequests }, f.keys.member, "commons", null, f.clock.now, { cursor: first.nextCursor }), { code: "owner_required" });
 });
+
+// Owner-boundary contract (needs-attention rollup #90): an expired claim lease
+// is an action (not just "expiring soon" info); a non-owner who holds
+// manage_members is still refused (the gate is identity, not permission-bits);
+// and at exactly the visible cap the insertion order stays, while one item
+// past the cap pulls actions ahead of informational leases.
+test("expired claim lease is an action; non-owner with manage_members is refused", t => {
+  const f = setup(t);
+  f.send("owner", T.MEMBER_ADDED, { memberId: "deputy", displayName: "Deputy Lane", kind: "human",
+    permissions: ["manage_members", "accept_work", "complete_work", "verify"] });
+  f.keys.admin = f.store.issueAccessKey("commons", "deputy");
+  assert.throws(() => attentionReport({ store: f.store, accessRequests: f.accessRequests }, f.keys.admin, "commons"),
+    { status: 403, code: "owner_required" }, "a non-owner with manage_members is refused");
+  const wid = proposeWork(f, "w-expired", { mode: "write" });
+  f.send("agent", T.WORK_ACCEPTED, { workItemId: wid, expectedRevision: f.store.room("commons").state.workItems[wid].revision });
+  f.send("agent", T.CLAIM_ACQUIRED, { workItemId: wid, expectedRevision: f.store.room("commons").state.workItems[wid].revision,
+    repository: "repo", ref: "main", paths: ["a"], expiresAt: new Date(f.clock.now + 2 * 3600000).toISOString() });
+  // Time passes past the expiry: the rollup must now treat it as an action.
+  f.clock.now += 3 * 3600000;
+  const [item] = f.report().items.filter(i => i.kind === "claim_lease");
+  assert.ok(item, "an expired lease surfaces");
+  assert.equal(item.severity, "action", "an expired lease is an action, not info");
+  assert.match(item.detail, /expired/);
+});
+
+test("exactly at the cap keeps insertion order; past the cap actions move first", t => {
+  const f = setup(t);
+  f.store.workClaims.configure("commons", { maxMemberOpenClaims: 30 });
+  const expires = new Date(f.clock.now + 2 * 3600000).toISOString();
+  const lease = n => {
+    const wid = proposeWork(f, `cap-${String(n).padStart(2, "0")}`, { mode: "write" });
+    f.send("agent", T.WORK_ACCEPTED, { workItemId: wid, expectedRevision: f.store.room("commons").state.workItems[wid].revision });
+    f.send("agent", T.CLAIM_ACQUIRED, { workItemId: wid, expectedRevision: f.store.room("commons").state.workItems[wid].revision,
+      repository: "repo", ref: "main", paths: [`path-${n}`], expiresAt: expires });
+    return wid;
+  };
+  const first = lease(1);
+  for (let n = 2; n <= 24; n++) lease(n);
+  f.send("owner", T.ROOM_SPEND_ALLOWANCE_SET, { allowanceCents: 5000, periodDays: 30 });
+  f.send("agent", T.SESSION_STARTED, { workItemId: first, expectedRevision: f.store.room("commons").state.workItems[first].revision,
+    budget: { maxSpendCents: 4500 } });
+  // 24 informational leases + 1 spend action = 25: insertion order stays, the
+  // action sits at the end.
+  let report = f.report();
+  assert.equal(report.itemCount, 25);
+  assert.equal(report.items[report.items.length - 1].kind, "spend", "at the cap, insertion order stays");
+  // One more informational lease: 26 items, actions move ahead of info.
+  lease(25);
+  report = f.report();
+  assert.equal(report.itemCount, 26);
+  assert.equal(report.items[0].kind, "spend", "past the cap, actions come first");
+});

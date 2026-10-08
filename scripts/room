@@ -190,6 +190,7 @@ Agent verbs (post as comments on the board, prefixed [<lane>] + protocol prefix)
             first: refuses (exit 2) if the task-id is already used, or any of
             the files are claimed live by a different lane. Refusal is posted
             as RECLAIM with stamp <!-- room:duplicate-refusal:<task-id>:<ts> -->.
+            --lane must match [A-Za-z0-9_-]+ (no spaces; use the registered short lane id).
   heartbeat --task-id ID --lane LANE [--note "..."] [--dry-run]
             Post [lane]STATUS: restating the claim block with state: working.
   release   --task-id ID --lane LANE --reason "..." [--dry-run]

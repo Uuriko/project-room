@@ -1,7 +1,14 @@
 name: relay
 
 on:
+  # PRs run relay checks only when the relay or the code its checks import
+  # changes. Main pushes stay unfiltered, so a regression is still caught.
   pull_request:
+    paths:
+      - "relay/**"
+      - "machine/**"
+      - "server/work-claim*.mjs"
+      - ".github/workflows/relay.yml"
   push:
     branches: [main]
 

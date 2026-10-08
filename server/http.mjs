@@ -4055,7 +4055,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // Round-2 #113: full-text search over messages and work items.
         const q = url.searchParams.get("q");
         const kind = url.searchParams.get("kind") ?? "all";
-        const result = store.search(selected.token, roomId, q, kind, fence);
+        const limitRaw = url.searchParams.get("limit");
+        if (limitRaw !== null && (!/^[1-9]\d*$/.test(limitRaw) || Number(limitRaw) > 200)) {
+          reject(422, "invalid_search", "limit is 1 to 200");
+        }
+        const result = store.search(selected.token, roomId, q, kind, fence, { limit: limitRaw === null ? 50 : Number(limitRaw) });
         // RC-2026-09-19-070: search hits carry bodies but not toMemberId, so
         // re-resolve each hit against the projection and drop targeted DMs
         // the viewer is not a party to. Fail closed when a hit cannot be resolved.
@@ -4130,7 +4134,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if ((!keys.includes("permissions") && !keys.includes("profile"))
             || keys.some(k => !["permissions", "profile", "expiresInMinutes", "displayName"].includes(k)))
             reject(422, "invalid_invite", "permissions or profile is required; optional: expiresInMinutes, displayName");
-          return json(res, 201, store.invites.create(selected.token, roomId, data, fence));
+          return json(res, 201, store.invites.create(selected.token, roomId, data, fence,
+            // Funnel: on a deployment without a configured mailer no account can
+            // ever complete email verification, so the email_unverified gate
+            // would deadlock invite mint permanently instead of nudging the
+            // owner to verify. Where mail is configured the gate still applies.
+            { emailVerificationUnachievable: !magicMailer.isConfigured() }));
         }
         if (req.method === "DELETE") {
           if (!exact(data, ["inviteId"]) || typeof data.inviteId !== "string") reject(422, "invalid_invite", "inviteId is required");
@@ -4943,15 +4952,29 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (httpStatus === 413) {
         // finish means handed to the OS, not received by the client. Drain
-        // in-flight bytes without buffering, then close; a stalled sender gets
-        // at most one second to read the refusal before its socket is destroyed.
+        // in-flight bytes without buffering, then half-close. The destroy
+        // deadline re-arms while request bytes keep flowing (#976), so a
+        // slow-but-alive upload is never cut off mid-flight and always gets
+        // the readable too_large; only a sender that stops sending is
+        // destroyed after the grace period.
         const socket = req.socket;
         res.once("finish", () => {
-          if (req.complete) socket.end();
-          else req.once("end", () => socket.end());
-          const deadline = setTimeout(() => socket.destroy(), 1000);
-          deadline.unref();
-          socket.once("close", () => clearTimeout(deadline));
+          if (socket.destroyed) return;
+          let deadline = null;
+          const clear = () => { if (deadline !== null) { clearTimeout(deadline); deadline = null; } };
+          const drained = () => { clear(); if (!socket.destroyed) socket.end(); };
+          if (req.complete) { drained(); return; }
+          const arm = () => {
+            clear();
+            deadline = setTimeout(() => { deadline = null; socket.destroy(); }, 1000);
+            deadline.unref();
+          };
+          const cleanup = () => { clear(); req.off("data", arm); };
+          req.on("data", arm);
+          req.once("end", () => { cleanup(); drained(); });
+          req.once("aborted", () => { cleanup(); socket.destroy(); });
+          socket.once("close", cleanup);
+          arm();
         });
       }
       // Burs-IA steal A1: listed routes get route-aware hint/next guidance on
