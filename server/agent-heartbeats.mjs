@@ -243,8 +243,15 @@ export class AgentHeartbeats {
   // idle agent.
   wakeStatusOf(agentId) {
     checkAgentId(agentId);
-    const row = this.db.prepare(
-      "SELECT last_polled_at AS lastPolledAt FROM agent_wake_polls WHERE agent_id=?").get(agentId);
+    let row = null;
+    try {
+      row = this.db.prepare(
+        "SELECT last_polled_at AS lastPolledAt FROM agent_wake_polls WHERE agent_id=?").get(agentId);
+    } catch {
+      // Pre-migration DB without agent_wake_polls (read-only opens never
+      // migrate): read as not wakeable, mirroring wakeStatusList.
+      row = null;
+    }
     const lastPolledAt = row?.lastPolledAt ?? null;
     return Object.freeze({
       agentId, lastPolledAt, windowMs: WAKEABLE_WINDOW_MS,
