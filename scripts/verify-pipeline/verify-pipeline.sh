@@ -10,13 +10,17 @@
 #   collide <base> <refA> <refB>            resolve a semantic collision
 #   cone    <worktree> <base> <head>        print affected-test cone (debug aid)
 #
+# Stages: ingest -> scratch worktree -> affected-test cone -> run cone ->
+# semantic gates (pluggable, post-test) -> collision-detect/score -> verdict.
+# Gates run AFTER tests and can flip a green verdict to red.
+#
 # Layout: runs from its own directory; uses cone.sh and cone-run.sh alongside.
 # Scratch worktrees live under $VERIFY_SCRATCH (default: ./scratch).
 # NEVER commits to, pushes, or checks out branches in the source repo — all
 # work happens in --detached worktrees. Never touches main.
 #
 # Exit codes: 0 verdict green/no-collision-resolved, 1 verdict red,
-# 2 infra failure (retry the pipeline), 3 usage error.
+# 2 infra failure incl. gate-error (retry the pipeline), 3 usage error.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -28,11 +32,16 @@ T_INGEST=60        # resolve refs, compute diffstat
 T_WORKTREE=300     # git worktree add
 T_CONE=180         # cone.sh mapping
 T_CONE_RUN=1200    # node --test on the cone
+T_GATE=300         # per semantic gate
 T_TOTAL=1800       # per-candidate wall budget
 # (adjudicate uses a fixed 1-head-rerun + 2-base-run protocol; see adjudicate)
 
+# Semantic gates live here (see stage 4b). Override with VERIFY_GATES_DIR.
+GATES_DIR="${VERIFY_GATES_DIR:-$HERE/gates}"
+
 log()  { echo "[verify] $*" >&2; }
 die()  { echo "[verify] FATAL: $*" >&2; exit "${2:-2}"; }
+verdict_of() { printf '%s' "$1" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("verdict",""))' 2>/dev/null; }
 
 # ---- stage 1: ingest -------------------------------------------------------
 # resolve <ref> to a commit; emit "id base head changed_files add del"
@@ -89,16 +98,17 @@ run_cone() {
     # Fail closed: no affected tests found. Green-by-default on an empty cone
     # is how regressions slip through; route to triage instead.
     log "cone: EMPTY for $cid — fail closed (verdict no-coverage)"
-    printf '{"candidate":"%s","verdict":"no-coverage","files":0,"reason":"empty affected-test cone"}\n' "$cid"
+    printf '{"candidate":"%s","verdict":"no-coverage","files":0,"reason":"empty affected-test cone","gates":{"verdict":"skipped","reason":"no-coverage"}}\n' "$cid"
     return 1
   fi
   log "cone: $n test files for $cid"
   local verdict
   verdict="$(timeout "$T_CONE_RUN" "$HERE/cone-run.sh" "$wt" "$conefile" "$cid")"
-  local v; v="$(echo "$verdict" | grep -oE '"verdict":"[a-z-]+"' | cut -d'"' -f4)"
+  local v; v="$(verdict_of "$verdict")"
   if [ "$v" = "fail" ] && [ "${VERIFY_BASELINE:-1}" = "1" ]; then
     verdict="$(adjudicate "$wt" "$base" "$cid" "$verdict")"
   fi
+  verdict="$(run_gates "$wt" "$base" "$head" "$cid" "$verdict")"
   echo "$verdict" | sed "s/\"label\":\"$cid\"/\"candidate\":\"$cid\"/"
 }
 
@@ -144,10 +154,125 @@ adjudicate() {
   fi
 }
 
-# Rerun the failed test files against the BASE commit. If the failing test
-# names are identical at base, the failures are pre-existing:
-# verdict -> "pass-with-baseline-failures" (landable, failures listed).
-# Otherwise the candidate introduced new failures -> stays red.
+# ---- stage 4b: semantic gates --------------------------------------------------
+# Pluggable static checks that run AFTER the test cone. A failing gate flips a
+# green verdict to red — for things tests can't catch (e.g. B3's
+# duplicate-JSON-keys gate).
+#
+# Contract: each gate is an executable in $GATES_DIR (default $HERE/gates),
+# invoked as:   <gate> <repoDir> <baseSha> <headSha>
+# It must print ONE JSON object to stdout:
+#   {"name": "<gate-name>", "pass": true|false,
+#    "violations": [{"file": "...", "key": "...", "occurrences": 2,
+#                    "introducedByMerge": true}],
+#    "detail": "one-line human summary"}
+# Exit 0 = gate executed (pass/fail read from JSON). Non-zero exit, invalid
+# JSON, or timeout (T_GATE) = gate infra error -> candidate verdict
+# "gate-error" (pipeline infra, exit 2 — retry the pipeline, never silently
+# blamed on the candidate).
+#
+# Selection: VERIFY_GATES="name1:name2" for an explicit ordered list; default
+# is every executable file in $GATES_DIR, sorted. VERIFY_SKIP_GATES=1 disables
+# the stage. Gates run only when the test verdict is green-ish; otherwise the
+# gates section records "skipped". Sibling B3's first gate drops in as
+# gates/duplicate-json-keys (checkDuplicateJsonKeys semantics).
+gate_list() {
+  if [ "${VERIFY_SKIP_GATES:-0}" = "1" ]; then return 0; fi
+  if [ -n "${VERIFY_GATES:-}" ]; then
+    tr ':' '\n' <<< "$VERIFY_GATES" | sed '/^[[:space:]]*$/d'
+  elif [ -d "$GATES_DIR" ]; then
+    for g in "$GATES_DIR"/*; do
+      [ -f "$g" ] && [ -x "$g" ] && basename "$g"
+    done | sort -u
+  fi
+}
+
+run_gates() {
+  local wt="$1" base="$2" head="$3" cid="$4" verdict_json="$5"
+  local v; v="$(verdict_of "$verdict_json")"
+  local glist; glist="$(gate_list)"
+  if [ -z "$glist" ]; then
+    merge_gates "$verdict_json" "none" ""
+    return 0
+  fi
+  case "$v" in
+    pass|pass-with-flakes|pass-with-baseline-failures) ;;
+    *)
+      log "gates: skipping ($v) for $cid"
+      merge_gates "$verdict_json" "skipped" "tests not green ($v)"
+      return 0 ;;
+  esac
+  local gtmp; gtmp="$(mktemp -d)"
+  local name gpath out rc gj
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    gpath="$GATES_DIR/$name"
+    log "gate: $name for $cid"
+    if [ ! -x "$gpath" ]; then
+      printf '{"name":"%s","pass":false,"error":"gate not executable: %s"}\n' \
+        "$name" "$gpath" > "$gtmp/$name.json"
+      continue
+    fi
+    out="$(timeout "$T_GATE" "$gpath" "$wt" "$base" "$head" 2>"$gtmp/$name.stderr")"
+    rc=$?
+    if [ "$rc" -eq 124 ]; then
+      printf '{"name":"%s","pass":false,"error":"gate timeout (%ss)"}\n' \
+        "$name" "$T_GATE" > "$gtmp/$name.json"
+    elif [ "$rc" -ne 0 ]; then
+      printf '{"name":"%s","pass":false,"error":"gate exit %d"}\n' \
+        "$name" "$rc" > "$gtmp/$name.json"
+    elif ! gj="$(printf '%s' "$out" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps({"name":d.get("name"),"pass":bool(d.get("pass")),"violations":d.get("violations",[]),"detail":d.get("detail","")}))' 2>/dev/null)"; then
+      printf '{"name":"%s","pass":false,"error":"gate emitted invalid JSON"}\n' \
+        "$name" > "$gtmp/$name.json"
+    else
+      printf '%s\n' "$gj" > "$gtmp/$name.json"
+    fi
+  done <<< "$glist"
+  merge_gates "$verdict_json" "ran" "$gtmp"
+  rc=$?
+  rm -rf "$gtmp"
+  return $rc
+}
+
+# Merge the gates outcome into the verdict JSON (B1's verdict format gains a
+# `gates` section). A failing gate flips green -> red; a gate infra error ->
+# verdict "gate-error".
+merge_gates() {
+  python3 - "$1" "$2" "$3" <<'EOF'
+import json, sys, glob, os
+verdict = json.loads(sys.argv[1])
+mode, extra = sys.argv[2], sys.argv[3]
+g = {"verdict": "pass", "ran": [], "failed": [], "details": {}}
+if mode == "none":
+    g["verdict"] = "none"
+elif mode == "skipped":
+    g["verdict"] = "skipped"; g["reason"] = extra
+elif mode == "ran":
+    for p in sorted(glob.glob(os.path.join(extra, "*.json"))):
+        try:
+            d = json.load(open(p))
+        except Exception as e:
+            d = {"name": os.path.basename(p)[:-5], "pass": False,
+                 "error": "unreadable gate result: %s" % e}
+        name = d.get("name") or os.path.basename(p)[:-5]
+        g["ran"].append(name); g["details"][name] = d
+        if d.get("error"):
+            g["verdict"] = "error"; g["failed"].append(name)
+        elif not d.get("pass"):
+            g["verdict"] = "fail"; g["failed"].append(name)
+verdict["gates"] = g
+v = verdict.get("verdict")
+if g["verdict"] == "fail" and v in ("pass", "pass-with-flakes",
+                                   "pass-with-baseline-failures"):
+    verdict["verdict"] = "fail"
+    verdict["fail_reason"] = "semantic gate(s) failed: " + ", ".join(g["failed"])
+elif g["verdict"] == "error":
+    verdict["verdict"] = "gate-error"
+    verdict["fail_reason"] = "gate infra error: " + ", ".join(g["failed"])
+print(json.dumps(verdict))
+EOF
+}
+
 # List cone files that failed: per-file logs under .cone-run-<label>/ containing ✖.
 failed_files() {
   local wt="$1" label="$2" out="$3"
@@ -181,16 +306,16 @@ detect_collision() {
 
 # ---- stage 6: score ------------------------------------------------------------
 # verdict rank: pass=0, pass-with-flakes=1, pass-with-baseline-failures=1,
-# no-coverage=2, fail=3, timeout=4
+# no-coverage=2, fail=3, gate-error=4, timeout=5
 score_of() {
   local verdict_json="$1" difflines="$2" cid="$3"
-  local v; v="$(echo "$verdict_json" | grep -oE '"verdict":"[a-z-]+"' | cut -d'"' -f4)"
+  local v; v="$(verdict_of "$verdict_json")"
   local rank=9
   case "$v" in
     pass) rank=0 ;;
     pass-with-flakes|pass-with-baseline-failures) rank=1 ;;
     no-coverage) rank=2 ;;
-    fail) rank=3 ;; timeout) rank=4 ;; *) rank=9 ;;
+    fail) rank=3 ;; gate-error) rank=4 ;; timeout) rank=5 ;; *) rank=9 ;;
   esac
   printf '%d %d %s %s\n' "$rank" "$difflines" "$cid" "$v"
 }
@@ -207,11 +332,12 @@ cmd_verify() {
   local wt; wt="$(build_worktree "$cid" "$h")"
   local verdict
   if verdict="$(run_cone "$wt" "$b" "$h" "$cid")"; then
-    local v; v="$(echo "$verdict" | grep -oE '"verdict":"[a-z-]+"' | cut -d'"' -f4)"
+    local v; v="$(verdict_of "$verdict")"
     local sline; sline="$(score_of "$verdict" "$difflines" "$cid")"
     local srank; srank="$(echo "$sline" | awk '{print $1}')"
     log "verdict: $cid -> $v (diff $difflines lines, rank $srank)"
     echo "$verdict" | sed "s/}$/,\"diff_lines\":$difflines,\"score_rank\":$srank}/"
+    if [ "$v" = "gate-error" ]; then exit 2; fi
     { [ "$v" = "pass" ] || [ "$v" = "pass-with-flakes" ] || [ "$v" = "pass-with-baseline-failures" ]; } && exit 0 || exit 1
   else
     # no-coverage: run_cone's verdict JSON was captured, not printed — emit it.
