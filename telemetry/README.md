@@ -18,8 +18,30 @@ canonical shape and `FINDING-CONVENTION.md` for the room post format.
 | `submit.mjs` | CLI that builds a validated record and appends it to `findings.jsonl` | submit worker |
 | `collect.mjs` | Harvests `FINDING` posts from muse-room into `findings.jsonl` (dedupe by `id`) | submit worker |
 | `dashboard.html` + `build-dashboard-data.mjs` | One-page dashboard of every collected finding | dashboard worker |
+| `ops-dashboard.html` + `capture-baseline.mjs` | Live trip-wire gauge dashboard with before/after baselines | dashboard worker |
 | `verify.mjs` | Re-checks every record in `findings.jsonl` against the schema | verify worker |
 | `README.md`, `FINDING-CONVENTION.md` | This doc set | docs worker |
+
+## Ops dashboard
+
+Live trip-wire gauges for the WAVE-300 before/after loop (coordinator 10/10):
+
+- **`ops-dashboard.html`** — static page that polls `GET /api/health/tripwires`
+  (same origin) every 30s and renders the 5 gauges (event-budget, write-limiter
+  penalty box, event-loop p99, projection size, silent-timeout rate) with
+  status colors (ok green / warn amber / trip red / unknown gray), values,
+  warn/trip thresholds, and per-gauge updated timestamps. Degrades to a
+  "no data" panel when the endpoint is unreachable.
+- **Before/after:** press "Capture baseline" to snapshot current values into
+  localStorage, or run `node telemetry/capture-baseline.mjs --host
+  http://127.0.0.1:8787` to write `telemetry/baseline-<ISO>.json` (run once
+  before your change, once after). The dashboard renders baseline → now
+  deltas (absolute + ▲▼= direction) per gauge, and "Load baseline JSON…"
+  imports a saved file for comparison.
+
+How to open: from `telemetry/`, run `python3 -m http.server 8123` and open
+`http://localhost:8123/ops-dashboard.html` while the app server runs. The
+existing findings dashboard is untouched at `dashboard.html`.
 
 ## Quickstart
 

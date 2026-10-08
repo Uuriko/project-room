@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trip-Wire Ops Dashboard — WAVE-300</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #30363d;
+    --fg: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+    --ok: #3fb950; --warn: #d29922; --trip: #f85149; --unknown: #6e7681;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--fg); font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 24px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+  .sub a { color: var(--accent); }
+  .toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
+  button, .filebtn { background: #1c2128; color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 7px 14px; font-size: 13px; cursor: pointer; }
+  button:hover, .filebtn:hover { border-color: var(--accent); }
+  button.primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+  input[type="file"] { display: none; }
+  #statusline { font-size: 13px; color: var(--muted); margin-bottom: 16px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--unknown); display: inline-block; }
+  .dot.live { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+  .dot.dead { background: var(--trip); box-shadow: 0 0 6px var(--trip); }
+  #errbox { display: none; background: #3d1119; border: 1px solid var(--trip); border-radius: 8px; padding: 14px 18px; margin-bottom: 16px; font-size: 14px; }
+  #errbox.show { display: block; }
+  #nodata { display: none; color: var(--muted); border: 1px dashed var(--border); border-radius: 8px; padding: 40px; text-align: center; font-size: 14px; }
+  #nodata.show { display: block; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .gauge { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px 18px; border-top: 3px solid var(--unknown); }
+  .gauge.ok { border-top-color: var(--ok); }
+  .gauge.warn { border-top-color: var(--warn); }
+  .gauge.critical, .gauge.trip { border-top-color: var(--trip); }
+  .gname { font-family: monospace; font-size: 13px; margin-bottom: 6px; word-break: break-all; }
+  .grow { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .gvalue { font-size: 30px; font-weight: 700; }
+  .pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; border: 1px solid var(--border); text-transform: uppercase; letter-spacing: .05em; }
+  .pill.ok { color: var(--ok); border-color: var(--ok); }
+  .pill.warn { color: var(--warn); border-color: var(--warn); }
+  .pill.critical, .pill.trip { color: var(--trip); border-color: var(--trip); }
+  .pill.unknown { color: var(--unknown); border-color: var(--unknown); }
+  .gmeta { color: var(--muted); font-size: 12px; margin-top: 8px; line-height: 1.6; }
+  .gmeta code { color: var(--fg); }
+  .delta { font-size: 13px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+  .delta .up { color: var(--warn); }
+  .delta .down { color: var(--accent); }
+  .delta .flat { color: var(--muted); }
+  #baselineinfo { font-size: 13px; color: var(--muted); margin-bottom: 16px; }
+  #baselineinfo b { color: var(--fg); }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 20px; line-height: 1.6; }
+  .hint code { background: #1c2128; padding: 1px 6px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<h1>Trip-Wire Ops Dashboard</h1>
+<div class="sub">WAVE-300 coordinator 10/10 &middot; live trip-wire gauges for before/after measurement &middot; <a href="dashboard.html">findings dashboard &rarr;</a></div>
+
+<div class="toolbar">
+  <button class="primary" id="btn-refresh">Refresh now</button>
+  <button id="btn-baseline">Capture baseline</button>
+  <label class="filebtn">Load baseline JSON&hellip;<input type="file" id="file-baseline" accept=".json,application/json"></label>
+  <button id="btn-clear">Clear baseline</button>
+</div>
+
+<div id="statusline"><span class="dot" id="livedot"></span><span id="statustext">waiting for first poll&hellip;</span></div>
+<div id="errbox"></div>
+<div id="baselineinfo">no baseline captured yet — deltas hidden.</div>
+<div id="nodata">no data — the trip-wire endpoint is unreachable or returned nothing usable.</div>
+<div class="grid" id="gauges"></div>
+
+<div class="hint">
+  Polls <code>GET /api/health/tripwires</code> (same origin) every 30s.
+  Serve this directory against a running server, e.g. from <code>telemetry/</code>:
+  <code>python3 -m http.server 8123</code>, then open
+  <code>http://localhost:8123/ops-dashboard.html</code> while the app server runs on the same origin.
+  CLI baselines: <code>node telemetry/capture-baseline.mjs --host http://127.0.0.1:8787</code>
+  writes <code>telemetry/baseline-&lt;ISO&gt;.json</code> — run once before your change and once after,
+  then compare here with “Load baseline JSON”.
+</div>
+
+<script>
+// Ops dashboard logic. Pure render over the /api/health/tripwires shape:
+// { updatedAt, gauges: [{ name, value, warnAt, criticalAt, status, updatedAt }] }
+const ENDPOINT = '/api/health/tripwires';
+const POLL_MS = 30000;
+const LS_KEY = 'wave300.tripwire.baseline.v1';
+
+const $ = (id) => document.getElementById(id);
+let latest = null;
+let baseline = null;
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function fmtTs(ts) {
+  try {
+    if (typeof ts === 'number') return new Date(ts).toISOString().replace('T', ' ').replace('Z', ' UTC');
+    return new Date(ts).toISOString().replace('T', ' ').replace('Z', ' UTC');
+  } catch { return String(ts); }
+}
+
+function fmtVal(v) {
+  if (v == null || typeof v !== 'number' || Number.isNaN(v)) return '—';
+  if (Number.isInteger(v)) return String(v);
+  return v.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+function statusClass(s) {
+  if (s === 'ok') return 'ok';
+  if (s === 'warn') return 'warn';
+  if (s === 'critical' || s === 'trip') return 'critical';
+  return 'unknown';
+}
+
+function deltaCell(g) {
+  if (!baseline) return '';
+  const b = (baseline.gauges || []).find((x) => x.name === g.name);
+  if (!b || typeof b.value !== 'number' || typeof g.value !== 'number' ||
+      Number.isNaN(b.value) || Number.isNaN(g.value)) {
+    return '<div class="delta">baseline: — (no comparable value)</div>';
+  }
+  const d = g.value - b.value;
+  const arrow = Math.abs(d) < 1e-12 ? '<span class="flat">=</span>'
+    : d > 0 ? '<span class="up">▲</span>' : '<span class="down">▼</span>';
+  const sign = d > 0 ? '+' : '';
+  return `<div class="delta">Δ ${arrow} <code>${sign}${fmtVal(d)}</code> &nbsp;·&nbsp; baseline <code>${fmtVal(b.value)}</code> → now <code>${fmtVal(g.value)}</code></div>`;
+}
+
+function renderGauges(data) {
+  const grid = $('gauges');
+  grid.innerHTML = '';
+  (data.gauges || []).forEach((g) => {
+    const cls = statusClass(g.status);
+    const card = document.createElement('div');
+    card.className = `gauge ${cls}`;
+    card.innerHTML = `
+      <div class="gname">${esc(g.name)}</div>
+      <div class="grow">
+        <div class="gvalue">${esc(fmtVal(g.value))}</div>
+        <span class="pill ${cls}">${esc(g.status || 'unknown')}</span>
+      </div>
+      <div class="gmeta">
+        warn at <code>${esc(fmtVal(g.warnAt))}</code> · trip at <code>${esc(fmtVal(g.criticalAt))}</code><br>
+        gauge updated: ${esc(fmtTs(g.updatedAt))}
+      </div>
+      ${deltaCell(g)}`;
+    grid.appendChild(card);
+  });
+  $('nodata').classList.toggle('show', !(data.gauges || []).length);
+}
+
+function renderBaselineInfo() {
+  const el = $('baselineinfo');
+  if (!baseline) { el.textContent = 'no baseline captured yet — deltas hidden.'; return; }
+  const n = (baseline.gauges || []).length;
+  const src = baseline.source ? ` (${esc(baseline.source)})` : '';
+  el.innerHTML = `baseline: <b>${n}</b> gauges captured at <b>${esc(fmtTs(baseline.capturedAt))}</b>${src} · endpoint snapshot <b>${esc(fmtTs(baseline.updatedAt))}</b>`;
+}
+
+function setLive(ok, detail) {
+  $('livedot').className = 'dot ' + (ok ? 'live' : 'dead');
+  $('statustext').textContent = detail;
+}
+
+function saveBaseline() {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(baseline)); }
+  catch { /* private mode etc. — baseline just won't persist */ }
+}
+
+function loadStoredBaseline() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (raw) { const b = JSON.parse(raw); if (b && Array.isArray(b.gauges)) baseline = b; }
+  } catch { /* ignore corrupt localStorage */ }
+}
+
+function acceptBaseline(obj, source) {
+  if (!obj || !Array.isArray(obj.gauges)) throw new Error('file does not look like a baseline: missing gauges[] array');
+  baseline = { capturedAt: obj.capturedAt || new Date().toISOString(), source,
+               updatedAt: obj.updatedAt, gauges: obj.gauges };
+  saveBaseline();
+  renderBaselineInfo();
+  if (latest) renderGauges(latest);
+}
+
+async function poll() {
+  try {
+    const r = await fetch(ENDPOINT, { cache: 'no-store' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    if (!data || !Array.isArray(data.gauges)) throw new Error('unexpected shape: missing gauges[] array');
+    latest = data;
+    $('errbox').classList.remove('show');
+    renderGauges(data);
+    setLive(true, `live · ${data.gauges.length} gauges · fetched ${new Date().toISOString().replace('T', ' ').replace('Z', ' UTC')} · snapshot ${fmtTs(data.updatedAt)}`);
+  } catch (e) {
+    setLive(false, `unreachable · ${e.message} · retrying every 30s`);
+    if (!latest) {
+      $('gauges').innerHTML = '';
+      $('nodata').classList.add('show');
+    }
+    const eb = $('errbox');
+    eb.innerHTML = `<b>no data</b> — GET ${esc(ENDPOINT)} failed: ${esc(e.message)}. ` +
+      (latest ? 'Showing last-known values.' : 'Start the server, then press Refresh.');
+    eb.classList.add('show');
+  }
+}
+
+$('btn-refresh').addEventListener('click', poll);
+$('btn-baseline').addEventListener('click', () => {
+  if (!latest) { alert('No live data yet — refresh first.'); return; }
+  acceptBaseline({ capturedAt: new Date().toISOString(), source: 'live capture',
+                   updatedAt: latest.updatedAt, gauges: latest.gauges }, 'live capture');
+});
+$('btn-clear').addEventListener('click', () => {
+  baseline = null;
+  try { localStorage.removeItem(LS_KEY); } catch { /* ignore */ }
+  renderBaselineInfo();
+  if (latest) renderGauges(latest);
+});
+$('file-baseline').addEventListener('change', (ev) => {
+  const f = ev.target.files && ev.target.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try { acceptBaseline(JSON.parse(reader.result), `file: ${f.name}`); }
+    catch (e) { alert(`Could not load baseline: ${e.message}`); }
+  };
+  reader.onerror = () => alert('Could not read file.');
+  reader.readAsText(f);
+  ev.target.value = '';
+});
+
+loadStoredBaseline();
+renderBaselineInfo();
+poll();
+setInterval(poll, POLL_MS);
+</script>
+</body>
+</html>
