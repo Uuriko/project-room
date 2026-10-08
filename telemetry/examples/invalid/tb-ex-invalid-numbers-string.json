@@ -1,0 +1,1 @@
+{"agent":"telemetry-bus-seed","claim":"Deliberately broken fixture: numbers is a string, not an object","evidence":"Broken on purpose to exercise the validator's numbers type check","guild":"coordination","id":"tb-ex-invalid-numbers-string","numbers":"nine workers and forty tasks","timestamp":"2026-10-08T03:00:00Z"}
