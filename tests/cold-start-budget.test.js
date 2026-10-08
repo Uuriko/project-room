@@ -106,6 +106,11 @@ test("deferred cold start on a production-shaped store stays within the budget",
       for (const table of applicationTables) {
         if (!/^[a-z0-9_]+$/.test(table)) throw new Error(`unexpected table name ${table}`);
         const rows = fixture.store.db.prepare(`SELECT COUNT(*) AS n FROM "${table}"`).get().n;
+        if (table === "guest_link_exchanges") {
+          assert.equal(rows, 0, "link exchange records exist only after a guest joins via a single-use link (GA-2)");
+          counted.push(table);
+          continue;
+        }
         if (EMPTY_UNTIL_CRON.has(table)) assert.equal(rows, 0, `${table} stays empty until the cron`);
         else assert.ok(rows > 0, `${table} has production-shaped rows`);
         counted.push(table);
