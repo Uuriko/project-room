@@ -41,6 +41,7 @@ import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { evaluateReceipt } from "./jev-receipts.mjs";
 import { findClaimCollisions } from "./claim-collisions.mjs";
+import { readRequestId } from "./request-dedupe.mjs";
 import { emitWorkClaimEvent, enqueueClaimWake } from "./work-claim-events.mjs";
 import { noteReadyWork } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { isFirstContribution, retentionAck } from "./retention-response.mjs";
@@ -825,11 +826,21 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "create" && req.method === "POST") {
     const raw = body(req);
-    if (!shape(raw, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files", "dependsOn", "pullRequest", "pullRequests", "repo", "branch", "kind", "revision", "assignee"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, pullRequest?, pullRequests?, repo?, branch?, kind?, revision?, assignee?}");
+    if (!shape(raw, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files", "dependsOn", "pullRequest", "pullRequests", "repo", "branch", "kind", "revision", "assignee", "requestId"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, pullRequest?, pullRequests?, repo?, branch?, kind?, revision?, assignee?, requestId?}");
     requireWriter();
     requireEventBudget();
     const id = claimIdOf(reject, raw.id);
     const data = clientPullRequestInput(reject, boardTextFields(reject, raw, { title: {}, note: { multiline: true } }));
+    // Request-id idempotency (crash-recovery guild): a retried create whose
+    // first attempt already landed replays the stored claim instead of 409ing
+    // or double-creating. The recorded result carries the claim id so the
+    // retry resolves to the SAME claim.
+    const requestId = readRequestId(data);
+    const dedupe = store?.requestDedupe ?? null;
+    if (requestId && dedupe) {
+      const prior = dedupe.check(requestId);
+      if (prior.duplicate) return json(res, 200, { ...prior.result, duplicate: true });
+    }
     assertDependsOnKnown(reject, data, { selfId: id, has: other => registry.has(roomId, other) });
     if (registry.has(roomId, id)) reject(409, "work_claim_exists", `Work claim "${id}" already exists in this room`);
     const open = registry.list(roomId).filter(item => item.state !== "done").length;
@@ -870,9 +881,11 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
         attention: "assigned", attentionMemberId: assignee,
         wakeMemberId: assignee, wakeReason: "assigned"
       });
+      if (requestId && dedupe) dedupe.record(requestId, ackedAssignee);
       return json(res, 201, ackedAssignee);
     }
     commit(item, "created");
+    if (requestId && dedupe) dedupe.record(requestId, item);
     return json(res, 201, item);
   }
   if (workClaimRoute === "read" && req.method === "GET") {
@@ -935,6 +948,15 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const data = body(req);
     if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs", "requestId"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?, requestId?}");
     if (data.state === undefined && data.note === undefined) invalidInput(reject, "a state transition or a note");
+    // Request-id idempotency (crash-recovery guild): a retried update whose
+    // first attempt already landed replays the stored item instead of
+    // double-applying. This replaces the history-stamping approach.
+    const requestId = readRequestId(data);
+    const dedupe = store?.requestDedupe ?? null;
+    if (requestId && dedupe) {
+      const prior = dedupe.check(requestId);
+      if (prior.duplicate) return json(res, 200, { ...prior.result, duplicate: true });
+    }
     const item = load(claimIdOf(reject, workClaimId));
     if (item.owner !== caller) reject(403, "work_not_owner", `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
     requireWriter();
@@ -975,7 +997,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     }
     const updated = runPure(reject, () => updateWork(item, caller,
       { state: data.state, note: data.note, deliveryMode: data.deliveryMode, reviewedBy: data.reviewedBy,
-        tags: data.tags, blobs: data.blobs, now: nowMs, requestId: data.requestId }));
+        tags: data.tags, blobs: data.blobs, now: nowMs }));
     if (data.state === "done") {
       // Jev-harness receipt-acceptance gate, shadow mode (docs/JEV-GATES.md):
       // score the receipt, journal the would-be verdict (flagging
@@ -1003,6 +1025,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     }
     // Q3-A: a note-only update coalesces with this claim's last room event.
     commit(updated, "state_changed", { coalesce: data.state === undefined || data.state === item.state });
+    if (requestId && dedupe) dedupe.record(requestId, updated);
     return json(res, 200, updated);
   }
   if (workClaimRoute === "review" && req.method === "POST") {

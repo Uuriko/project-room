@@ -242,18 +242,6 @@ const idOf = (value, what, max) => {
   check(typeof value === "string" && value.length > 0 && value.length <= max, `${what} must be 1..${max} characters`);
   return value;
 };
-// Idempotency keys for retried updates: the charset mirrors the
-// access-request idempotency keys (server/access-requests.mjs) so one
-// client-generated key shape works across the room API.
-const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
-const requestIdOf = value => {
-  check(typeof value === "string" && REQUEST_ID_PATTERN.test(value), "requestId must match [A-Za-z0-9][A-Za-z0-9_-]{0,63}");
-  return value;
-};
-// A retried update (lost response) lands immediately after the original, so
-// the matching history stamp sits near the tail. Only the last few entries
-// are scanned; older entries age out of the 200-entry cap anyway.
-const IDEMPOTENCY_TAIL = 5;
 
 const kindOf = value => {
   if (value === undefined || value === null || value === "") return "work";
@@ -366,11 +354,8 @@ const workOf = value => {
     kind, revision, ci: ciOf(value.ci), reviews: reviewsOf(value.reviews) };
 };
 const agentOf = value => idOf(value, "agent id", 128);
-const stamp = (atMs, agentId, action, note, requestId) =>
-  Object.freeze({ at: isoOf(atMs), agentId, action, note: note ?? null,
-    // requestId is stamped only when the caller supplied one, so entries
-    // written without it keep their exact historical shape.
-    ...(requestId === undefined ? {} : { requestId }) });
+const stamp = (atMs, agentId, action, note) =>
+  Object.freeze({ at: isoOf(atMs), agentId, action, note: note ?? null });
 // SEC-2: a claim keeps at most MAX_CLAIM_HISTORY history entries. Older
 // entries are dropped from the front and counted in historyOmitted, so
 // history.length + historyOmitted is the claim's lifetime entry count and
@@ -379,8 +364,8 @@ export const MAX_CLAIM_HISTORY = 200;
 const historyOmittedOf = value => (Number.isSafeInteger(value) && value > 0 ? value : 0);
 export const claimHistoryLength = item =>
   (Array.isArray(item?.history) ? item.history.length : 0) + historyOmittedOf(item?.historyOmitted);
-const withHistory = (work, atMs, agentId, action, note, requestId) => {
-  const full = [...work.history, stamp(atMs, agentId, action, note, requestId)];
+const withHistory = (work, atMs, agentId, action, note) => {
+  const full = [...work.history, stamp(atMs, agentId, action, note)];
   const dropped = Math.max(0, full.length - MAX_CLAIM_HISTORY);
   const omitted = historyOmittedOf(work.historyOmitted) + dropped;
   return Object.freeze({ ...work, updatedAt: isoOf(atMs),
@@ -562,18 +547,8 @@ export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClai
 // four are recorded on the item and then frozen with the done state. tags
 // and blobs are only meaningful on the done transition and are refused
 // anywhere else.
-export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, now, authority = false, requestId } = {}) {
+export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, now, authority = false } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
-  // Idempotency: a retried update (the client never saw the first response)
-  // carrying the same requestId replays the stored item instead of applying
-  // twice. This runs before every mutation guard — a retried
-  // done-transition must replay the done item, not trip the
-  // done-immutability check below.
-  const key = requestId === undefined || requestId === null ? undefined : requestIdOf(requestId);
-  if (key !== undefined) {
-    const history = Array.isArray(item.history) ? item.history : [];
-    if (history.slice(-IDEMPOTENCY_TAIL).some(entry => entry?.requestId === key)) return item;
-  }
   check(authority === true || item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can update it`);
   check(item.state !== "done", `work "${item.id}" is done and immutable`);
   if (state !== undefined) {
@@ -618,7 +593,7 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     reviewedBy: state === "done" && reviewedBy != null ? reviewedBy : item.reviewedBy,
     tags: state === "done" && tags != null ? tagsOf(tags) : item.tags,
     blobs: state === "done" && blobs != null ? blobsOf(blobs) : item.blobs };
-  return withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note, key);
+  return withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note);
 }
 // Record a note from the caller's own authenticated session. A new note
 // supersedes that member's active verdict but cannot approve reviewed completion.
