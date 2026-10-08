@@ -484,7 +484,11 @@ const MATCHMAKING_ADDITIVE_TABLES = Object.freeze([
   "seeker_declarations",
   "work_offer_terms",
 ]);
-export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES]);
+// feedback_state (server/feedback-persistence.mjs): one snapshot row per room,
+// created on the first feedback call, so it is lazy: allowed when present,
+// never required. auditRecovery refused any room that had feedback without it.
+const FEEDBACK_ADDITIVE_TABLES = Object.freeze(["feedback_state"]);
+export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...FEEDBACK_ADDITIVE_TABLES]);
 // (Audit-fix F-2 intent preserved: analytics tables are lazy/additive, never
 // required — they live in ANALYTICS_ADDITIVE_TABLES above.)
 // messages (MSG-1) is fenced at v37 only. v34–v36 files do not have the
