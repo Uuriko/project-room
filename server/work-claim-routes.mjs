@@ -1003,7 +1003,6 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?, kind?, revision?, assignee?, squadId?, standby?, ...unknown passthrough}");
     }
     requireWriter();
-    requireEventBudget();
     const id = claimIdOf(reject, raw.id);
     const data = clientPullRequestInput(reject, boardTextFields(reject, raw, { title: {}, note: { multiline: true } }));
     if ("standby" in data && typeof data.standby !== "boolean") invalidInput(reject, "standby as a boolean when parking behind a full board");
@@ -1031,6 +1030,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
           "Close stale claims (POST /api/rooms/{roomId}/work-claims/{claimId}/close or /cancel) before opening another.");
       }
     }
+    // 409 shadowing fix: the board/member cap is the more actionable
+    // diagnosis — check it before the event budget, so a full board is
+    // never misreported as an event-budget problem.
+    requireEventBudget();
     if (data.reviewPolicy !== undefined && !REVIEW_POLICIES.includes(data.reviewPolicy)) invalidInput(reject, `reviewPolicy one of ${REVIEW_POLICIES.join(", ")}`);
     if (data.kind !== undefined && !CLAIM_KINDS.includes(data.kind)) invalidInput(reject, `kind one of ${CLAIM_KINDS.join(", ")}`);
     const assignee = data.assignee;
@@ -1121,17 +1124,19 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       throw refusal;
     }
     requireWriter();
-    requireEventBudget();
-    assertLeaseChoice(data);
-    assertBoardLeaseHours(reject, data);
-    assertDependsOnKnown(reject, data, { selfId: item.id, has: other => registry.has(roomId, other) });
-    Object.assign(data, clientPullRequestInput(reject, boardTextFields(reject, data, { note: { multiline: true } })));
+    // 409 shadowing fix: the member cap is the more actionable diagnosis —
+    // check it before the event budget.
     const held = registry.list(roomId).filter(entry => entry.owner === caller && HELD_CLAIM_STATES.includes(entry.state)).length;
     if (held >= config.maxMemberOpenClaims) {
       refuseCap("too_many_open_claims",
         `You already hold ${config.maxMemberOpenClaims} open claims. Release or finish one before claiming another.`,
         "Release or finish an open claim before claiming another.");
     }
+    requireEventBudget();
+    assertLeaseChoice(data);
+    assertBoardLeaseHours(reject, data);
+    assertDependsOnKnown(reject, data, { selfId: item.id, has: other => registry.has(roomId, other) });
+    Object.assign(data, clientPullRequestInput(reject, boardTextFields(reject, data, { note: { multiline: true } })));
     const claimed = runPure(reject, () => claimWork(item, caller, {
       note: data.note, leaseHours: leaseHoursOfBody(data), files: data.files,
       dependsOn: data.dependsOn, parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs,
