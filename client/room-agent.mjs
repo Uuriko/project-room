@@ -810,6 +810,11 @@ export class RoomAgentClient {
       { ...(reason === undefined ? {} : { reason }), ...(clear === undefined ? {} : { clear }),
         ...(note === undefined ? {} : { note }) }, signal);
   }
+  // Claim lifecycle: retire open work without delivering it (verb close or cancel).
+  closeWorkClaim(id, { verb = "close", reason, signal } = {}) {
+    return this.#request(`/work-claims/${encodeURIComponent(id)}/${verb === "cancel" ? "cancel" : "close"}`,
+      reason === undefined ? {} : { reason }, signal);
+  }
   claimWorkItem(id, { note, leaseHours, files, advisory, dependsOn, parentClaimId, evidenceRefs, pullRequest, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/claim`,
       { ...(note === undefined ? {} : { note }), ...(leaseHours === undefined ? {} : { leaseHours }),

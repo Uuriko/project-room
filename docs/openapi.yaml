@@ -80,7 +80,7 @@ paths:
       parameters:
         - { name: roomId, in: path, required: true, schema: { type: string } }
         - { name: queue, in: query, schema: { type: string, enum: [ready] }, description: Cannot be combined with state }
-        - { name: state, in: query, schema: { type: string, enum: [unclaimed, claimed, in_progress, blocked, done] } }
+        - { name: state, in: query, schema: { type: string, enum: [unclaimed, claimed, in_progress, blocked, done, closed] } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
         - { name: cursor, in: query, schema: { type: string, maxLength: 2048 }, description: Opaque nextCursor from the same filter }
         - { name: view, in: query, schema: { type: string, enum: [summary] } }
@@ -5611,6 +5611,82 @@ paths:
         '401': { description: unauthenticated }
         '403': { description: work_not_owner }
         '404': { description: work_claim_not_found }
+        '422': { description: invalid_claim_input }
+  /api/rooms/{roomId}/work-claims/{claimId}/close:
+    post:
+      x-room-permission: claim_owner|owner|manage_claims
+      summary: Close a work claim without delivery
+      description: |
+        The claim holder, the room owner, or a member with manage_claims
+        retires an open item (unclaimed, claimed, in_progress or blocked)
+        without delivering it. The item moves to the terminal `closed`
+        state with no owner and no lease, stops counting against the room's
+        open-claim cap, and the history entry `closed` records the caller
+        and `reason`. MCP: room_close_work_claim with verb close.
+        API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: claimId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                reason: { type: string, maxLength: 4000, description: Why the item was retired. Recorded on the history entry. }
+      responses:
+        '200':
+          description: The closed item (state closed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkClaim'
+        '401': { description: unauthenticated }
+        '403': { description: work_not_owner }
+        '404': { description: work_claim_not_found }
+        '409': { description: work_claim_terminal (already done or closed) }
+        '422': { description: invalid_claim_input }
+  /api/rooms/{roomId}/work-claims/{claimId}/cancel:
+    post:
+      x-room-permission: claim_owner|owner|manage_claims
+      summary: Cancel a work claim
+      description: |
+        Whoever created the item while it is still unclaimed, its holder,
+        the room owner, or a member with manage_claims withdraws an open
+        item. Same terminal `closed` state as close; the history entry is
+        `cancelled`. MCP: room_close_work_claim with verb cancel.
+        API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: claimId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                reason: { type: string, maxLength: 4000, description: Why the item was retired. Recorded on the history entry. }
+      responses:
+        '200':
+          description: The closed item (state closed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkClaim'
+        '401': { description: unauthenticated }
+        '403': { description: work_not_owner }
+        '404': { description: work_claim_not_found }
+        '409': { description: work_claim_terminal (already done or closed) }
         '422': { description: invalid_claim_input }
   /api/rooms/{roomId}/work-claims/{claimId}/reassign:
     post:
@@ -16814,7 +16890,7 @@ components:
       properties:
         id: { type: string }
         title: { type: string }
-        state: { type: string, enum: [unclaimed, claimed, in_progress, blocked, done] }
+        state: { type: string, enum: [unclaimed, claimed, in_progress, blocked, done, closed] }
         owner: { type: [string, 'null'] }
         claimedAt: { type: [string, 'null'], format: date-time }
         leaseStartAt: { type: [string, 'null'], format: date-time }
