@@ -294,6 +294,27 @@ test("a cron deadline does not call GitHub and does not start a second lookup", 
   assert.equal(store.workClaims.get("commons", "other").pullRequest.etag ?? null, null);
 });
 
+// Claim lifecycle on the real store: REST close and the MCP closeWorkClaim
+// path both land the terminal closed state and append one validated
+// work_claim.updated event (action closed, reason closed|cancelled).
+test("close and cancel append a validated closed event on the real store, REST and MCP alike", async t => {
+  const { store, call } = await room(t);
+  await call("create", null, { id: "retire-rest" });
+  await call("create", null, { id: "retire-mcp" });
+  const before = claimEvents(store).length;
+  const closed = (await call("close", "retire-rest", { reason: "stale" })).value;
+  assert.equal(closed.state, "closed");
+  const auth = { member: { id: "owner", kind: "human", permissions: [] } };
+  const cancelled = closeWorkClaim({ store, roomId: "commons", auth, claimId: "retire-mcp", verb: "cancel", reason: "duplicate" });
+  assert.equal(cancelled.state, "closed");
+  assert.equal(store.workClaims.get("commons", "retire-mcp").history.at(-1).action, "cancelled");
+  const events = claimEvents(store).slice(before);
+  assert.deepEqual(events.map(event => [event.data.workClaim, event.data.action, event.data.claimState, event.data.reason]),
+    [["retire-rest", "closed", "closed", "closed"], ["retire-mcp", "closed", "closed", "cancelled"]]);
+  assert.throws(() => closeWorkClaim({ store, roomId: "commons", auth, claimId: "retire-mcp", verb: "close" }),
+    error => error.status === 409 && error.code === "work_claim_terminal");
+});
+
 // Distinct storage contract: a common read permits one append, and the losing
 // writer must reconcile before adding its own URL. No link or event is lost.
 test("concurrent PR attachments serialize and invalid update alternatives cannot write", async t => {
@@ -344,25 +365,3 @@ test("PR link and event roll back together, and expiry or archived rooms cannot 
   assert.deepEqual(store.workClaims.get("commons", "atomic"), claimed);
   assert.deepEqual(claimEvents(store), eventsBefore);
 });
-
-// Claim lifecycle on the real store: REST close and the MCP closeWorkClaim
-// path both land the terminal closed state and append one validated
-// work_claim.updated event (action closed, reason closed|cancelled).
-test("close and cancel append a validated closed event on the real store, REST and MCP alike", async t => {
-  const { store, call } = await room(t);
-  await call("create", null, { id: "retire-rest" });
-  await call("create", null, { id: "retire-mcp" });
-  const before = claimEvents(store).length;
-  const closed = (await call("close", "retire-rest", { reason: "stale" })).value;
-  assert.equal(closed.state, "closed");
-  const auth = { member: { id: "owner", kind: "human", permissions: [] } };
-  const cancelled = closeWorkClaim({ store, roomId: "commons", auth, claimId: "retire-mcp", verb: "cancel", reason: "duplicate" });
-  assert.equal(cancelled.state, "closed");
-  assert.equal(store.workClaims.get("commons", "retire-mcp").history.at(-1).action, "cancelled");
-  const events = claimEvents(store).slice(before);
-  assert.deepEqual(events.map(event => [event.data.workClaim, event.data.action, event.data.claimState, event.data.reason]),
-    [["retire-rest", "closed", "closed", "closed"], ["retire-mcp", "closed", "closed", "cancelled"]]);
-  assert.throws(() => closeWorkClaim({ store, roomId: "commons", auth, claimId: "retire-mcp", verb: "close" }),
-    error => error.status === 409 && error.code === "work_claim_terminal");
-});
-
