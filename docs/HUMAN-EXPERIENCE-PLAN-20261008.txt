@@ -1,0 +1,273 @@
+PROJECT ROOM: HUMAN EXPERIENCE BACKLOG, PLAN, AND EXECUTION PROMPT
+2026-10-08 UTC / 2026-10-07 Pacific
+
+Product outcome
+Open the app, enter a room, talk with friends and one room assistant, get useful
+work back, and return later without losing the conversation. The human should
+understand what is happening without learning the swarm's internal machinery.
+Visible progress means concise reports of actions, results, uncertainty, and
+decisions requiring the user. Do not expose or promise private chain of thought.
+Agent access remains powerful and explicit; operational details belong in
+Advanced and the agent interface. Keep consent and consequential permissions clear.
+
+This is a curated execution backlog, not a claim that every item is a defect.
+CONFIRMED = observed code or measured behavior. VERIFY = a qualification task.
+PREPARED = existing work to assess, finish and integrate, rather than rebuild.
+PR numbers are a snapshot; refresh status and exact-head checks before landing.
+The larger DISCORD-QUALITY-CHECKLIST.txt remains the audit reference.
+
+Recommended order
+1. Establish a releasable baseline; finish real authentication qualification.
+2. Make the conversation and composer visually effortless.
+3. Consolidate navigation and attention without breaking their distinct semantics.
+4. Preserve context and confidence across failures, switching, and relaunch.
+5. Measure and improve speed; finish the native distribution experience.
+
+NOW: FIVE BOUNDED WORK PACKAGES
+
+H01. Finish the prepared baseline and qualify sign-in [PREPARED + VERIFY]
+Evidence: PR2001 adds the cube and shared visual polish. PR1998 collects earlier
+readiness fixes. Local Google initiation returned503 when unconfigured; live
+initiation returned302. Neither proves a real user's desktop provider round trip.
+Change: reconcile coverage between integration PRs and their source PRs; keep
+one release candidate. Check that provider availability in each environment is
+truthful before offering the action. Use real Google in the user's desktop only
+with their participation for credentials, MFA and provider consent. Preserve
+intended room/invite, draft and session across the callback. Keep the first
+screen to the cube, wordmark, account creation, login and Agent sign in.
+Done: configured web and Mac real sign-in succeeds; cancel, provider denial,
+expired return and missing configuration recover clearly; no redirect loop or
+unrelated room. Exact-head required CI passes before the serialized release.
+Do not count synthetic PKCE/cookie tests as real Google qualification.
+
+H02. Reduce composer bulk and make common actions immediate [CONFIRMED]
+Evidence: previous narrow fixture composer occupied roughly174px. It uses a
+textarea row, a44px action row, a shortcut caption and a status paragraph.
+Attachment is now direct in PR2001; New work is intentionally in Options.
+Change: audit space from empty status, use available horizontal space for
+single-line input on larger widths, retain comfortable wrapped layout on small
+widths. Keep multiline editing, attachment, Send, Ask Room, Options and all
+failure text reachable. Do not erase the keyboard hint or shrink touch targets
+just to lower a number. Address long drafts and IME before considering autosize.
+Done: fewer pixels for an empty human composer at identical viewport/fixture;
+no horizontal overflow at320/390/768/1280; text remains readable, focus visible,
+controls do not overlap, Options fits, and failed sends retain the whole draft.
+First implementation scope: own conversation-polish.css, no composer event rewrite.
+
+H03. One understandable navigation structure [CONFIRMED + DESIGN VERIFY]
+Evidence: the header exposes Updates and Catch up, while other menus and
+destinations expose related room/work/attention information. Compact icons
+reduce space but do not resolve conceptual overlap.
+Change: map every destination and its purpose before choosing names. Propose
+one attention entry with separate Needs you and Recent activity views; decide
+whether Catch up is a summary inside it. Keep room switching, people and
+project outcomes predictable. Reuse existing Work panel proposals before
+building another dashboard. Preserve deep links and browser back/forward.
+Done: user can explain where to find a mention, pending decision, result and
+friend without knowing implementation terms; each destination has one obvious
+primary entry. No loss of unread, private-message or work-decision semantics.
+Dependency: Claude's released six-commit stack includes a Work panel; evaluate
+it as existing work, including live redraw, focus and narrow layout.
+
+H04. Consistent visual and interaction language [CONFIRMED + VERIFY]
+Change: audit actual rendered states for spacing, contrast, border strength,
+icon geometry, button size, hover/focus, menu alignment and words. Share tokens
+and established icons; replace only demonstrably inconsistent treatments.
+Use tooltip/accessible names for compact controls; never make discovery rely
+on hover alone. Put frequent actions nearby and secondary actions in a menu.
+Done: sign-in, room, people, settings, search, dialogs and failures look related;
+keyboard and touch produce the same intended action; screenshots cover both
+Chromium and actual WK. Existing focus PR1990 and message-menu PR1982 should
+be integrated and qualified rather than rewritten concurrently.
+Assets: reuse Claude's green cube and existing icon system. Generate raster
+assets only if a specific missing visual benefits from them. No decorative
+illustration project while core conversation still feels awkward.
+
+H05. Measure perceived speed before choosing optimizations [VERIFY]
+Evidence: current message renderer reuses nodes, preserves scroll anchors,
+tracks pending sends, and has lazy loads. Those features already exist.
+Change: measure cold/warm start, first usable room, room switching, typing,
+search and scroll on a small and a heavy room. Record device, viewport, room
+size, commit, cache state and repeated median/p95. Profile API waterfall,
+payload size, asset weight, DOM size and long tasks. Fix the largest measured
+user-visible bottleneck, then repeat the same workload.
+Done: before/after trace supports each speed claim; no read-marker, scroll,
+focus or pending-send regressions. Target field p75 LCP<=2.5s, INP<=200ms and
+CLS<=0.1 as proposed goals, not current measured results.
+Dependencies: PR2000 render-window regression; PR1989 read-path audit; PR1980
+cache invalidation; existing performance owner checks. Do not replace them
+with duplicate microbenchmarks. A larger native icon is also worth weighing
+against package/startup cost, without assuming it is a bottleneck.
+
+NEXT: IMPORTANT ADDITIONS AND QUALIFICATION
+
+H06. Reliable return to work [VERIFY + PREPARED]
+Verify room/thread, draft, scroll position and unread horizon across switching,
+reload, close/reopen, full quit/relaunch and session expiration. The native
+human draft path uses localStorage; browser draft recovery uses sessionStorage.
+Agent drafts are not yet proven durable across full process exit. Define
+account-scoped retention and explicit sign-out cleanup before expanding storage.
+Done: no account leaks, silent lost drafts, surprise jump to the bottom or wrong
+room. Integrate storage recovery PR1997 and history PR1958 as appropriate.
+
+H07. A calm attention experience [PREPARED + DESIGN VERIFY]
+Group mentions, direct replies, pending decisions and finished results around
+what a person needs to do. Reconcile read markers across devices and views;
+opening a panel must not silently mark unrelated content read. Ask for push
+permission after a useful moment, not at the sign-in door. Respect quiet hours,
+muted rooms and stale events. PR1982 and PR1963 already address parts of this.
+Done: a real two-person sequence yields the intended badge, notification and
+original-context jump, with no duplicates and no unsolicited permission prompt.
+
+H08. One coherent assistant handoff [VERIFY]
+Make disconnected, queued, working, blocked, reconnecting and result-ready
+states understandable. A disconnected assistant should have a direct working
+connection action. Group many worker reports into concise assistant updates;
+friends can add context without creating competing primary chats. Keep a clear
+boundary between discussion and asking the assistant to act. Activity contains
+reported work summaries, not fabricated reasoning or unconfirmed success.
+Done: two humans jointly prompt, revise a request and receive one useful result;
+an unavailable agent, failed run and permission request each have a next action.
+Reuse current assistant runs, lifecycle and named-summon work (PR1942).
+
+H09. Files feel like conversation [VERIFY]
+Qualify paste, drop, picker, multiple files, large files, unsupported types,
+upload failure, cancel and retry. Evaluate useful inline image/file previews
+against existing message-preview behavior. Mac download names, destination,
+binary bytes and reveal/open affordances must be correct.
+Done: selecting/uploading/downloading never silently loses bytes or draft;
+pending versus complete attachments are clear. Native binary download has
+passed a synthetic fixture; real representative documents still need sampling.
+
+H10. Easier reading preferences [CANDIDATE; verify existing settings first]
+Add only the small set people need: chat text size and compact/default spacing,
+respecting system reduced motion. Keep defaults polished and all preferences
+in Settings. Audit current controls before adding competing preferences.
+Done: long names, messages, captions and dialogs remain readable at200%text
+and400%zoom; preferences survive return without leaking between accounts.
+Do not introduce theme marketplace, animated backgrounds or role decorations.
+
+H11. Recognizable people and rooms [CANDIDATE]
+Current sampled message/member render uses initials. Assess optional avatars,
+clear room names and lightweight presence as ways to orient people. Keep
+identity setup optional after entering the room; do not lengthen sign-up.
+If avatars are added, define storage, size/type validation, privacy and fallbacks.
+Done: distinguishing friends and the assistant is easy with or without images;
+presence communicates availability accurately rather than pretending activity.
+
+H12. Settings that can be found [VERIFY]
+Inventory settings and group by account, room, assistant and advanced controls.
+Keep account actions distinct from room-owner permissions. Add settings search
+only if the actual inventory warrants it. Clarify irreversible actions and
+preserve draft/context when returning. Evaluate PR1987 export/deletion work.
+Done: invite a friend, adjust notifications, reconnect an assistant, export data
+and leave a room without hunting or accidentally invoking an admin operation.
+
+H13. Error and offline states that preserve trust [PREPARED + VERIFY]
+Qualify API downtime, stream reconnect, expired session, permission revocation,
+outdated work revision and uncertain command completion. Existing pending and
+retry machinery stays authoritative. Never retry a consequential operation as
+a fresh duplicate because its response was lost. PR1964 covers offline recovery;
+PR1994 covers post idempotency; integrate and exercise the user journeys.
+Done: the user keeps their draft and sees a concise truthful next action;
+pending actions reconcile to one result, or explicit unresolved uncertainty.
+
+H14. A distributable Mac app [CONFIRMED native release gaps]
+Local app is ad-hoc signed, not a finished public distribution. Plan DeveloperID
+signing/notarization, trustworthy install/update behavior and production OAuth
+handoff. Evaluate deep links separately from browser redirects. APNs and signed
+updates are not implemented; do not label them ready. Use existing authorization
+and owned release credentials; human account/credential steps stay with John.
+Done: install on a second Mac, launch without misleading security guidance,
+authenticate, open the intended room, quit/relaunch, download and update safely.
+Avoid bundling unrelated new native capabilities into the chat polish release.
+
+LATER / KEEP OUT OF THIS PASS
+Voice/video, GIF/sticker catalog, avatar decorations, payments, elaborate themes,
+new dashboards, new orchestration abstractions and more onboarding copy. These
+may have value later; none substitutes for dependable shared text conversation.
+
+Execution sequence and reviewable checkpoints
+A. Save this plan; capture reproducible baseline; implement H02 only in own CSS.
+B. Run existing composer, human-experience, mobile-header and accessibility
+owners. Inspect screenshots and actual geometry. Revert or revise if readability,
+keyboard reachability or narrow controls get worse. Stop edits while tests run.
+C. Publish measured result and exact source scope. Keep this follow-up separate
+from PR2001's pending exact-head CI; do not silently mutate its reviewed head.
+D. Refresh open PRs, board claims and peer receipts. Integrate a single baseline
+through the repository's serialized, fully-green exact-head CI lane.
+E. Qualify actual live web and installed native flows. Mark unavailable provider,
+device or signing evidence as unverified. Then do H03 as a bounded design/change
+proposal, H04 across remaining surfaces, and H05 from measured profiles.
+F. Take one Next item at a time. Each checkpoint includes screenshots or traces,
+relevant behavior evidence, remaining limitations, ownership and a next action.
+Do not claim all14 are implemented because a plan or synthetic fixture passed.
+
+DETAILED SELF-PROMPT
+Continue Project Room as the existing shared product. Make the human experience
+quiet, predictable, attractive and fast on both web and Mac. Start by reading
+this backlog, current code and current ownership. Refresh the bus, live claims,
+open PRs and released peer work before choosing edits. Use an isolated checkout.
+Treat prepared changes as dependencies to evaluate, never as work to reinvent.
+
+For every proposed change, identify the person's concrete job, present behavior,
+evidence for the gap, smallest improvement and observable completion criterion.
+Choose remove/combine/move/reword/repair/add deliberately. Favor simplifying an
+existing control over inventing another destination. Keep first-screen identity
+minimal; preserve one shared conversation and one visible room assistant. Hide
+agent machinery in Advanced while keeping honest permissions and accountability.
+
+Begin with H02. Capture the same realistic human room at320,390,768and1280px.
+Measure empty composer, input and conversation space. Inspect every button's
+geometry and menu opening. Prototype a compact wider layout and a comfortable
+narrow layout using the existing DOM and handlers. Preserve text input, touch
+targets, accessible names, visible focus, shortcut hint, action labels, attachment
+and all nonempty status/error information. Do not change command semantics,
+delivery guarantees, privacy or draft retention as a side effect of styling.
+Do not assert autosize or performance gains without implementing/measuring them.
+
+Exercise long multiline text, emoji, IME, mentions, reply context, attachment
+selection, Options, failed send, retry and ordinary Enter/ShiftEnter. Use the
+existing owner tests. Add coverage only for a meaningful uncovered regression.
+Inspect screenshots; geometry and test assertions alone cannot establish beauty.
+Keep actual WK qualification distinct from Chromium. Keep real provider login
+distinct from synthetic callback tests and do not handle personal credentials.
+
+After a bounded verified checkpoint, report precisely what changed, why it helps,
+what was tested and what remains. Then continue the recommended order. Use
+measured profiles to pick performance fixes and users' tasks to pick navigation.
+If a live claim or explicit hold overlaps a file, coordinate or select a new
+nonoverlapping task; do not override the worker. Land only through the documented
+green exact-head CI and shared deploy lane. Never describe prepared work as live.
+
+Research informing the plan
+Discord display settings distinguishes text size, UI density and app zoom:
+https://discord.com/blog/making-discord-on-desktop-look-just-right-display-settings-to-ease-the-eyes
+Discord Inbox separates unread/mention views and jumps to original context:
+https://support.discord.com/hc/en-us/articles/360045027712-Inbox-FAQ
+Discord keyboard navigation integrates app-wide navigation and accessible focus:
+https://discord.com/blog/how-discord-implemented-app-wide-keyboard-navigation
+Discord spacing update emphasizes consistent surfaces and frequent composer actions:
+https://discord.com/blog/improving-mobile-with-squircles-styles-and-spacing
+Discord March6patch notes report specific startup and correctness fixes:
+https://discord.com/blog/discord-patch-notes-march-6-2026
+General audit and measurement references:
+https://www.nngroup.com/articles/ten-usability-heuristics/
+https://www.w3.org/TR/WCAG22/
+https://web.dev/articles/vitals
+
+These are design inputs, not proof that copying Discord will fix Project Room.
+Project Room-specific priorities above are our inference from current code,
+measured fixtures, product requirements and the existing work inventory.
+
+First checkpoint: H02 started and locally verified
+Empty status already has no reserved space; no new hiding rule was needed.
+Seven CSS lines reduce initial input height and padding while making attachment
+and Send44px square. Same-fixture empty composer:320/390px173.77->138.58px;
+768/1280px172.95->138.58px. Feedback remains visible; no horizontal overflow.
+Screenshots inspected at390px and error-state320px. Existing composer, human
+experience, mobile header and composer accessibility owners:8passed0failed.
+Measurement is synthetic Chromium, not a fresh MacWK or real human study.
+Evidence: research/human-composer-plan-evidence-20261008 in John's workspace.
+This checkpoint is prepared only. PR2001 has failed diff-size and unit-shard
+checks as of this snapshot; investigate those before any baseline release.
