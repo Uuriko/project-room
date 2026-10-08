@@ -112,9 +112,13 @@ const checkHostId = hostId =>
 
 // RC-2026-09-24-203: cadence is the host's declared poll interval in
 // seconds. Positive and finite; absent means the 180s default window.
+// Bounded above: the window is cadence x 1.5, so an unbounded cadence (1e300)
+// kept one heartbeat "online" for good and land-queue wakes (sent only to
+// offline claimants) never fired for an agent that had stopped.
+export const MAX_CADENCE_SECONDS = 7 * 24 * 3600;
 const checkCadenceSeconds = cadenceSeconds =>
-  check(Number.isFinite(cadenceSeconds) && cadenceSeconds > 0,
-    422, "invalid_heartbeat", "cadenceSeconds must be a positive finite number");
+  check(Number.isFinite(cadenceSeconds) && cadenceSeconds > 0 && cadenceSeconds <= MAX_CADENCE_SECONDS,
+    422, "invalid_heartbeat", `cadenceSeconds must be a positive number of seconds, at most ${MAX_CADENCE_SECONDS} (7 days)`);
 
 // RC-2026-09-24-203: validate a pushNotification subscription body.
 // Returns the normalized { url, token, authJson }. The sync shape checks
