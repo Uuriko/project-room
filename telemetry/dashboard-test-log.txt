@@ -1,0 +1,15 @@
+telemetry-bus dashboard verification — 2026-10-08T05:32Z
+--------------------------------------------------------
+$ TMPDIR=$PWD/.tmp node build-dashboard-data.mjs
+wrote telemetry/findings.json with 6 records (source: seed-findings.jsonl)
+
+$ python3 -m http.server 8123   (in telemetry/)
+curl dashboard.html -> HTTP 200, "Swarm Telemetry Bus" present (2 matches: title + h1)
+curl findings.json  -> HTTP 200, 6 records
+  guilds:      crash-recovery, coordination, identity-sybil, observability, onboarding, load (6 guilds)
+  categories:  correctness, protocol, security, performance, dx (5 categories)
+  confidence:  high,high,high,medium,medium,low
+  required fields (id, guild, claim, evidence, numbers, timestamp) present on all records: true
+dashboard.html sets tr.dataset.guild / tr.dataset.category / tr.dataset.confidence
+  (rendered as data-guild, data-category, data-confidence on each <tr>) — verify harness hooks OK
+server killed after checks.
