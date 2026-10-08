@@ -6,8 +6,8 @@
 export const BACKUP_BINDING = "ROOM_BACKUPS";
 export const BACKUP_KV_BINDING = "ROOM_BACKUPS_KV";
 export const BACKUP_PREFIX = "room-backups/";
-// KV values top out at 25 MiB. Parts are cut on line boundaries well below
-// that, so every part is whole NDJSON lines and valid UTF-8 on its own.
+// KV values top out at 25 MiB. Byte-bounded parts are reassembled before
+// decoding: oversized rows may span parts, including within UTF-8 characters.
 export const KV_PART_BYTES = 8 * 1024 * 1024;
 // KV copies expire on their own; 35 daily copies are kept.
 export const KV_RETENTION_SECONDS = 35 * 24 * 60 * 60;
@@ -60,10 +60,11 @@ function joinBytes(chunks, length) {
   return out;
 }
 
-// Each stream chunk from exportNdjsonStream is one whole line. Parts are cut
-// between chunks. The manifest goes last, so a half-written day has no
-// manifest and the next tick writes it again.
+// Each export chunk is one line. Keep ordinary lines together, but split
+// oversized rows to enforce the byte limit. The manifest goes last; a
+// half-written day has no manifest and the next tick writes it again.
 async function writeKvBackup(kv, room, now, partBytes) {
+  if (!Number.isSafeInteger(partBytes) || partBytes < 1 || partBytes > KV_PART_BYTES) throw new RangeError("Backup part size must be between 1 byte and 8 MiB");
   const date = backupDate(now);
   const manifestKey = kvManifestKey(date);
   if (await kv.get(manifestKey)) return { skipped: "exists", key: manifestKey };
@@ -80,17 +81,30 @@ async function writeKvBackup(kv, room, now, partBytes) {
     parts.push({ key, bytes: body.length, sha256: await sha256Hex(body) });
     pending = []; pendingBytes = 0;
   };
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    const chunk = typeof value === "string" ? new TextEncoder().encode(value) : value;
-    if (!watermark) {
-      try { watermark = JSON.parse(decoder.decode(chunk)); } catch { watermark = {}; }
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = typeof value === "string" ? new TextEncoder().encode(value) : value;
+      if (!watermark) {
+        try { watermark = JSON.parse(decoder.decode(chunk)); } catch { watermark = {}; }
+      }
+      if (pendingBytes && pendingBytes + chunk.length > partBytes) await flush();
+      for (let offset = 0; offset < chunk.length;) {
+        const length = Math.min(partBytes - pendingBytes, chunk.length - offset);
+        pending.push(chunk.subarray(offset, offset + length));
+        pendingBytes += length; offset += length;
+        if (pendingBytes === partBytes) await flush();
+      }
+      bytes += chunk.length; lines += 1;
     }
-    if (pendingBytes && pendingBytes + chunk.length > partBytes) await flush();
-    pending.push(chunk); pendingBytes += chunk.length; bytes += chunk.length; lines += 1;
+    await flush();
+  } catch (error) {
+    try { await reader.cancel(error); } catch { /* Preserve the original write failure. */ }
+    throw error;
+  } finally {
+    reader.releaseLock();
   }
-  await flush();
   const manifest = {
     kind: "room-backup-manifest", version: 1, date, createdAt: new Date(now).toISOString(),
     bytes, lines, events: Number.isSafeInteger(watermark?.events) ? watermark.events : null,

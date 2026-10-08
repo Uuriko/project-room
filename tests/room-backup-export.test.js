@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { exportNdjsonStream, exportNdjsonText, operatorExportResponse, replayNdjson } from "../server/room-export.mjs";
-import { KV_RETENTION_SECONDS, writeDailyBackup } from "../cloudflare/room-backup.mjs";
+import { KV_PART_BYTES, KV_RETENTION_SECONDS, writeDailyBackup } from "../cloudflare/room-backup.mjs";
 import { fetchKvBackup, restoreDrill, summarizeEvents } from "../scripts/restore-room-backup.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
@@ -191,6 +191,30 @@ test("without R2 the daily backup writes KV parts and a manifest that the restor
   const part = manifest.parts[1].key;
   const flipped = new Uint8Array(values.get(part).value); flipped[10] ^= 1;
   assert.throws(() => fetchKvBackup("2026-10-08", key => key === part ? Buffer.from(flipped) : get(key)), /does not match its manifest/);
+});
+
+test("a backup row larger than the KV value limit is bounded and reassembles byte for byte", async () => {
+  const when = new Date(Date.UTC(2026, 9, 8));
+  const text = JSON.stringify({ kind: "watermark", events: 0, rooms: [] }) + "\n"
+    + JSON.stringify({ table: "room_attachments", row: { filename: "large-💚.bin", bytes: { $base64: Buffer.alloc(25 * 1024 * 1024, 0xa5).toString("base64") } } }) + "\n";
+  const chunks = text.trimEnd().split("\n").map(line => new TextEncoder().encode(line + "\n"));
+  const values = new Map();
+  const kv = {
+    get: async key => values.get(key) ?? null,
+    put: async (key, value) => {
+      const body = typeof value === "string" ? Buffer.from(value) : Buffer.from(value);
+      assert.ok(body.length <= 25 * 1024 * 1024, "Cloudflare KV refuses larger values");
+      values.set(key, body);
+    }
+  };
+  const room = { exportRoomNdjson: () => new ReadableStream({ start(controller) { for (const chunk of chunks) controller.enqueue(chunk); controller.close(); } }) };
+  for (const partBytes of [0, -1, KV_PART_BYTES + 1]) {
+    await assert.rejects(() => writeDailyBackup({ ROOM_BACKUPS_KV: kv }, room, when, { partBytes }), /Backup part size/);
+  }
+  await writeDailyBackup({ ROOM_BACKUPS_KV: kv }, room, when);
+  const { manifest, ndjson } = fetchKvBackup("2026-10-08", key => values.get(key));
+  assert.ok(manifest.parts.every(part => part.bytes <= KV_PART_BYTES), "every part respects the configured bound");
+  assert.equal(ndjson, text, "UTF-8 and oversized rows survive reassembly");
 });
 
 test("replay of a hosted export skips Durable Object runtime and retired tables and still refuses unknown ones", t => {
