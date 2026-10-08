@@ -205,7 +205,8 @@ session's backend is herdr. Flag off = the view does not exist.
 
 Claim states and review gates, work-session card shape, events/stream/
 presence payloads, webhook delivery object and `signPayload` canonical
-form, MCP tool names/schemas/annotations, signed agent-card fields, all
-158 openapi operations, error code vocabulary (append-only), auth modes.
+form, MCP tool names/schemas/annotations, signed agent-card fields, the
+full OpenAPI surface (counted in docs/OPENAPI-CONTRACT-REPORT.md — never
+hard-code a number), error code vocabulary (append-only), auth modes.
 Every seam call is timeout-bounded with fail-closed fallback to legacy —
 the fork is allowed to disappear at any moment and the room never notices.
