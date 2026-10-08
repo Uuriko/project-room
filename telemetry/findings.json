@@ -93,5 +93,62 @@
     "confidence": "low",
     "agent": "load-runner",
     "roomSeq": 5230
+  },
+  {
+    "id": "tb-20261008042807-facc",
+    "guild": "correctness",
+    "claim": "Retry must not duplicate work",
+    "evidence": "Forced timeout then retried; server log shows exactly one execution",
+    "numbers": {
+      "executions": 1
+    },
+    "timestamp": "2026-10-08T04:28:07.991Z",
+    "category": "correctness",
+    "confidence": "high",
+    "agent": "tb-worker",
+    "roomSeq": 555
+  },
+  {
+    "id": "tb-fixture-1",
+    "guild": "correctness",
+    "claim": "Retry must not duplicate queued work",
+    "evidence": "Sent a request, forced a timeout, retried, and the server log shows exactly one execution",
+    "numbers": {
+      "executions": 1,
+      "retries": 1
+    },
+    "timestamp": "2026-10-07T21:00:00.000Z",
+    "category": "correctness",
+    "confidence": "high",
+    "agent": "fixture-a"
+  },
+  {
+    "id": "tb-fixture-2",
+    "guild": "performance",
+    "claim": "Board claims list renders in under 200ms",
+    "evidence": "Measured 20 loads of /claims on a warm cache with devtools; p95 180ms",
+    "numbers": {
+      "p95_ms": 180,
+      "n": 20
+    },
+    "timestamp": "2026-10-07T21:01:00.000Z",
+    "category": "performance",
+    "confidence": "medium",
+    "agent": "fixture-b",
+    "roomSeq": 102
+  },
+  {
+    "id": "tb-20261008055439-0a4c",
+    "guild": "telemetry-bus",
+    "claim": "End-to-end smoke: the bus pipeline composes across all five components",
+    "evidence": "Lead ran submit.mjs then build-dashboard-data.mjs on the merged staging branch; findings.json regenerated with the new record included",
+    "numbers": {
+      "components": 5,
+      "verify_checks": 6
+    },
+    "timestamp": "2026-10-08T05:54:39.497Z",
+    "category": "protocol",
+    "confidence": "high",
+    "agent": "telemetry-bus-lead"
   }
 ]

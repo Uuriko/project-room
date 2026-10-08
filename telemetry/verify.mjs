@@ -161,8 +161,10 @@ function checkD() {
   const missing = [];
   if (!html.includes("Swarm Telemetry Bus")) missing.push('"Swarm Telemetry Bus"');
   if (!html.includes("findings.json")) missing.push('"findings.json" reference');
-  for (const h of ["data-guild=", "data-category=", "data-confidence="])
-    if (!html.includes(h)) missing.push(`"${h}"`);
+  // data hooks may be literal markup (data-guild="...") or set via the DOM API
+  // (tr.dataset.guild = ...) which produces identical data-* attributes at runtime
+  for (const [lit, ds] of [["data-guild=", "dataset.guild"], ["data-category=", "dataset.category"], ["data-confidence=", "dataset.confidence"]])
+    if (!html.includes(lit) && !html.includes(ds)) missing.push(`"${lit}" or ${ds}`);
   check(name, missing.length === 0, missing.length ? `missing: ${missing.join(", ")}` : "");
 }
 
