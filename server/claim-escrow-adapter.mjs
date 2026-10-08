@@ -24,6 +24,18 @@ export const ESCROW_STATUSES = Object.freeze(
   ["offered", "funded", "locked", "evaluating", "released", "refunded"]);
 const TERMINAL_STATUSES = new Set(["released", "refunded"]);
 const ACTIVE_STATUSES = new Set(["offered", "funded", "locked", "evaluating"]);
+// Statuses the pr_merged release path treats as "funded". "locked" is
+// deliberately absent: no transition in this module ever produces it
+// (offer->offered, lock->funded, seat->evaluating, settle->released/refunded),
+// so a record stamped "locked" carries no lock-path provenance — admitting it
+// would reopen the mint-from-nothing hole #1951 closed for "offered".
+const FUNDABLE_STATUSES = new Set(["funded", "evaluating"]);
+// "funded" must mean the lock path ran, not just that the status flag says
+// so. fundedBy/fundedAt are the provenance written by lockEscrowOnClaim; a
+// record stamped "funded" without them never passed through funding.
+const fundedProvenanceOf = escrow =>
+  typeof escrow?.fundedBy === "string" && escrow.fundedBy.length > 0 &&
+  typeof escrow?.fundedAt === "string" && escrow.fundedAt.length > 0;
 
 export const MIN_EVALUATORS = 2; // lane-2 finding #1: evaluator=self is griefing; n=1 is rejected at offer
 export const MAX_EVALUATORS = 9;
@@ -154,8 +166,15 @@ export function seatEvaluation(item, roundId, { now = Date.now() } = {}) {
   check(typeof roundId === "string" && roundId.length > 0 && roundId.length <= 128,
     "invalid_escrow_input", "roundId must be a 1..128 character id");
   const escrow = escrowOf(item);
-  check(escrow && (escrow.status === "funded" || escrow.status === "locked"), "escrow_not_active",
+  check(escrow && escrow.status === "funded", "escrow_not_active",
     `claim "${item?.id}" has no fundable escrow to evaluate`);
+  // The lease IS the lock window (lockEscrowOnClaim): evaluation seats only
+  // while the funder still holds the claim. Seating a verdict round on a
+  // lapsed or moved lease would drive a dead funding to release.
+  check(item.state === "claimed", "invalid_escrow_input",
+    `evaluation seats only on a claimed lease (claim "${item.id}" is ${item.state})`);
+  check(item.owner === escrow.fundedBy, "escrow_not_owner",
+    `escrow funder must still hold the lease to seat evaluation (claim "${item.id}" is owned by ${item.owner ?? "nobody"})`);
   const at = isoOf(now);
   const next = Object.freeze({ ...escrow, status: "evaluating", roundId, evaluatingAt: at });
   const entry = journalEntry({ at, kind: "escrow_evaluating", claimId: item.id,
@@ -213,9 +232,19 @@ export function settleEscrowFromPull(settlement, { now = Date.now() } = {}) {
     // instead of minting the provider/evaluator/platform split from thin
     // air. pr_closed (below) may still refund an offered escrow: releasing
     // an encumbrance is the safe mirror of offer.
-    check(escrow.status === "funded" || escrow.status === "locked" || escrow.status === "evaluating",
+    check(FUNDABLE_STATUSES.has(escrow.status),
       "escrow_not_funded",
       `claim "${item.id}" escrow is ${escrow.status} — never funded, nothing to release`);
+    // The status flag alone is not funding: fundedBy/fundedAt are the
+    // lock-path provenance written by lockEscrowOnClaim. A record stamped
+    // "funded" without them never passed through funding.
+    check(fundedProvenanceOf(escrow), "escrow_not_funded",
+      `claim "${item.id}" escrow is ${escrow.status} but carries no funding provenance — nothing to release`);
+    // The provider leg pays the funder, not whoever happens to hold the
+    // claim now: if the lease moved between funding and settlement, the
+    // payout would misdirect to the new holder.
+    check(item.owner === escrow.fundedBy, "escrow_funder_mismatch",
+      `claim "${item.id}" escrow was funded by ${escrow.fundedBy} but is owned by ${item.owner ?? "nobody"} — release refuses a moved lease`);
     // Integer-only fee math: each fee is floored, the provider takes the
     // remainder, so provider + evaluator + platform === budgetUnits always.
     const evaluator = Math.floor(escrow.budgetUnits * escrow.evaluatorFeeBps / MAX_FEE_BPS);
