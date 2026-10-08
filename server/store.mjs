@@ -81,7 +81,7 @@ import { membershipDelegationJournalSchema, MembershipDelegationJournal } from "
 import { membershipDelegationSchema, MembershipDelegation } from "./membership-delegation.mjs";
 import { ownerDelegateSchema, OwnerDelegates } from "./owner-delegates.mjs";
 import { agentRoomSchema } from "./agent-rooms.mjs";
-import { directSendSchema } from "./inbox-outbox.mjs";
+import { directSendSchema, ensureDirectSendTable } from "./inbox-outbox.mjs";
 import { inboxStitchSchema } from "./inbox-stitch-store.mjs";
 import { ensureAttachmentSchema, verifyAttachmentSchema } from "./attachment-schema.mjs";
 import { RoomAttachmentBytes } from "./room-attachment-bytes.mjs";
@@ -1755,7 +1755,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Direct channel-send journal: purely additive, intentionally outside
       // the writer fence (see unfencedAdditiveTables). Applied here (not only in
       // createRoomServer) so store-only fixtures and the recovery audit see it.
-      this.db.exec(directSendSchema);
+      // ensureDirectSendTable (not a bare schema exec) so existing databases
+      // converge on the request_id idempotency column and its unique index.
+      ensureDirectSendTable(this.db);
       // Cross-channel thread stitching (task #19): hash-only identity index.
       // Purely additive, intentionally outside the writer fence like the
       // journals above — older writers have no code path to these tables.
