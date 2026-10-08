@@ -4724,6 +4724,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           if (typeof otherParty === "string" && otherParty) command.data.toMemberId = otherParty;
         }
       }
+      // The owner may edit room messages, but not a DM between two other
+      // members, which the owner cannot read: rewriting it blind puts words in
+      // its author's mouth inside a private thread. Live admission only; it
+      // answers like an unknown id. The owner keeps delete (a reported DM
+      // stays removable).
+      if (command.type === T.MESSAGE_EDITED && typeof command.data?.messageId === "string") {
+        const target = (room.state.messages || []).find(m => m.id === command.data.messageId);
+        if (target?.toMemberId && target.authorId !== auth.member.id && target.toMemberId !== auth.member.id) {
+          fail(422, "command_rejected", "Message not found");
+        }
+      }
       // Bond / peer DM. Room chat (message.posted) is unchanged and still
       // requires room membership plus DM consent when toMemberId is set.
       // Peer DMs are a separate command, gated by an active bond with peer.dm.
