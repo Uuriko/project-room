@@ -4659,7 +4659,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // live admission (both the pins route and direct /commands flow through
       // here). The reducer enforces the party check only on stamped events,
       // so pins recorded before the rule keep replaying.
-      const pinEvent = command.type === T.MESSAGE_PINNED;
+      const pinEvent = command.type === T.MESSAGE_PINNED || command.type === T.MESSAGE_UNPINNED;
       const incoming = event({
         type: bondEffect?.eventType ?? command.type, roomId, actorId: auth.member.id, at: new Date(this.now()).toISOString(),
         idempotencyKey: hash(`${auth.member.id}:${command.id}`), causationId: command.causationId,
