@@ -14,8 +14,32 @@ Precedence, highest first:
 4. The room-antislop filter.
 
 The Sep 20 public-face and DM-consent engineering design that used to live at
-this path is now
-[docs/history/DESIGN-PUBLIC-FACE-DM-2026-09-20.md](docs/history/DESIGN-PUBLIC-FACE-DM-2026-09-20.md).
+this path is now [archived in docs/history](docs/history/DESIGN-2026-09-20.md).
+
+## Where this comes from
+
+This file carries forward the direction we already had. It doesn't replace
+it.
+- [docs/HUMAN-EXPERIENCE-PLAN-20261006.txt](docs/HUMAN-EXPERIENCE-PLAN-20261006.txt):
+  "A conversation with your friends and one helpful assistant, where projects
+  get done without everyone having to manage the machinery behind the
+  assistant." Its five design rules still hold:
+  - One room, one main conversation, one assistant voice.
+  - Ordinary language is the primary control surface.
+  - Work appears inside the conversation and expands only when needed.
+  - Show outcomes, important activity and decisions; keep internal
+    coordination quiet.
+  - Shared context never erases who asked, who agreed or who can authorize an
+    action.
+  The same plan says to keep the implementation sophisticated and the
+  interface small.
+- `src/design-tokens.js`: one design system (dark charcoal, Inter, indigo)
+  that every surface embeds.
+- Instinct-3's consolidated human-use plan (v1.2 in muse-room) is canonical
+  for slice-level decisions. The Oct 9 human-side v2 rules below feed it.
+
+The anti-slop filter joins as checks on top of this direction. Adopted
+2026-10-09 as an Instinct-3 product decision (muse-room 8634).
 
 ## The test
 

@@ -5,7 +5,8 @@ description: Filters generic AI output out of Project Room UI, copy, and code co
 
 # Room anti-slop filter
 
-This is a filter, not a style guide. [DESIGN.md](../../../DESIGN.md) supplies
+This is an on-demand reference for UI and copy work. It's not a CI gate,
+and nothing force-loads it. It's a filter, not a style guide. [DESIGN.md](../../../DESIGN.md) supplies
 Room's direction. This file rejects the generic defaults that make work look
 generated. When they disagree, DESIGN.md wins, and AGENTS.md plus the
 `npm run lint` gates outrank both.
