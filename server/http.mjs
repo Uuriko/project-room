@@ -4871,7 +4871,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // Invitation administration admits the room owner by ID; anyone else
       // needs an account browser session.
       const requireInvitationAdmin = () => {
-        requireInvitationAdmin();
+        if (!invitationOwnerActing && (selected.mode !== "account" || selected.bearer)) reject(403, "account_session_required", "Invitation administration requires an account browser session");
       };
       if (route === "invitations" && req.method === "GET") {
         // Round-2 #108: invite-link analytics.
