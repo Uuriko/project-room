@@ -1,0 +1,10 @@
+unit=R4 branch=origin/quill/login-github-oauth
+HEAD is now at 17d4ab8f9 [quill] GitHub OAuth sign-in (slice 4, RC-2026-09-17-013)
+merge_base=14517ca3a5162ea31c8ddb4880e6ccffe954624a
+rebase=CLEAN
+=== SLICE DIFF (vs origin/main) ===
+
+test_files: 
+SUITE_RESULT=PASS
+=== DIFF REVIEW (first 120 lines) ===
+scratch removed

@@ -1,0 +1,10 @@
+unit=R7 branch=origin/jill/self-serve-join-912
+HEAD is now at f6e2a9feb Merge branch 'main' into jill/self-serve-join-912
+merge_base=dc09bca4b4354d02f23cc2ac693325256ab565f5
+rebase=CLEAN
+=== SLICE DIFF (vs origin/main) ===
+
+test_files: 
+SUITE_RESULT=PASS
+=== DIFF REVIEW (first 120 lines) ===
+scratch removed

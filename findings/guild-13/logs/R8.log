@@ -1,0 +1,10 @@
+unit=R8 branch=fork/jill/f01-rt-reuse-theft-detection
+HEAD is now at 70390467f F-01: refresh-token reuse theft detection (RC-2026-09-25-7410)
+merge_base=dfd5fe43daf6036938e266f754a09b34f9174fad
+rebase=CLEAN
+=== SLICE DIFF (vs origin/main) ===
+
+test_files: 
+SUITE_RESULT=PASS
+=== DIFF REVIEW (first 120 lines) ===
+scratch removed

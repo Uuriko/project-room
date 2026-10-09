@@ -1,0 +1,10 @@
+unit=R3 branch=origin/jill/funnel-agentcode-invite-20261007
+HEAD is now at 0cd7236b9 Funnel: let unverified owners mint agent invites when mail is unconfigured
+merge_base=60e495a7e6e7d479e18dd37cbba56a1459cfb406
+rebase=CLEAN
+=== SLICE DIFF (vs origin/main) ===
+
+test_files: 
+SUITE_RESULT=PASS
+=== DIFF REVIEW (first 120 lines) ===
+scratch removed

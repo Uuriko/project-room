@@ -1,0 +1,10 @@
+unit=R6 branch=origin/is-sec-1/guest-link-server-token-only
+HEAD is now at 4b295b9e5 GA-1+GA-3 (#941): server-issued guest tokens only; remove cross-table 409 oracle
+merge_base=04c56bdec3832182ffbac6c18a8faf07f2175c24
+rebase=CLEAN
+=== SLICE DIFF (vs origin/main) ===
+
+test_files: 
+SUITE_RESULT=PASS
+=== DIFF REVIEW (first 120 lines) ===
+scratch removed
