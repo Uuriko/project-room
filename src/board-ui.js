@@ -351,7 +351,36 @@ export function newItemCreateBody(data) {
   return body;
 }
 
-function boardHtml(items, status, viewer, members, now, { older = false, canWrite = false, capabilities = [], cap = 20, workItems = {} } = {}) {
+// Loading states (BU-02): the board never shows the empty-board copy while a
+// read is in flight. With no items yet it renders skeleton columns; with
+// items it keeps the stale board and says it is refreshing; a failed load
+// gets an honest error with a retry button instead of a silent empty board.
+export function boardSkeletonHtml() {
+  const card = `<div class="sk-card"><span class="sk-line"></span><span class="sk-line short"></span><span class="sk-line shorter"></span></div>`;
+  return `<div class="board-skeleton" aria-hidden="true">${COLUMNS.map(([, label]) => `<section><h3>${escapeHtml(label)}</h3>${card}${card}</section>`).join("")}</div>`;
+}
+
+const PENDING_OUTCOME_KEYS = {
+  claim: "board.action.pending.claim",
+  renew: "board.action.pending.renew",
+  progress: "board.action.pending.progress",
+  done: "board.action.pending.done",
+  release: "board.action.pending.release",
+  close: "board.action.pending.close",
+  cancel: "board.action.pending.cancel",
+  reassign: "board.action.pending.reassign",
+  create: "board.action.pending.create",
+};
+
+// In-flight narration for every board action, so the board never looks frozen
+// mid-request. Pure: the installWorkBoard handlers pass titleOf(id).
+export function pendingOutcome(action, title) {
+  if (action === "sweep") return uiText("board.action.pending.sweep");
+  const key = PENDING_OUTCOME_KEYS[action];
+  return key ? uiText(key, { title }) : "";
+}
+
+export function boardHtml(items, status, viewer, members, now, { older = false, canWrite = false, capabilities = [], cap = 20, workItems = {}, loading = false, loadError = false } = {}) {
   const columns = placeClaims(items, now);
   const byId = new Map(items.map(item => [item.id, item]));
   const waitingCount = columns.blocked.filter(item => item.state === "unclaimed" && !item.owner).length;
@@ -361,9 +390,14 @@ function boardHtml(items, status, viewer, members, now, { older = false, canWrit
   const hint = older ? `<p class="form-hint board-older">Older landed work is in the API</p>` : "";
   const body = items.length
     ? `${hint}<div class="board-columns">${COLUMNS.map(([id, label]) => `<section aria-labelledby="board-col-${id}"><h3 id="board-col-${id}">${label}${id === "blocked" && waitingCount ? ` · ${waitingCount} waiting` : ""}</h3>${columns[id].map(item => cardHtml(item, viewer, members, now, workItems, byId)).join("") || `<p class="form-hint">Nothing here.</p>`}</section>`).join("")}</div>`
+    : loading ? boardSkeletonHtml()
+    : loadError ? ""
     : `<p class="board-empty">${escapeHtml(emptyBoardCopy(capabilities, { canWrite, signedIn: Boolean(viewer?.id) }))}</p>${hint}`;
   const needsMe = items.length ? needsMeHtml(items, viewer, members, now) : "";
-  return `${needsMe}${form}<div class="board-head"><p class="live-chip">${escapeHtml(liveLabel(status))}</p>${sweep}${capForm}</div><p id="board-status" class="form-hint" role="status"></p>${body}`;
+  // A failed refresh keeps the stale board but must still say so, with retry.
+  const loadFailure = loadError && !loading ? uiText("board.loading.error") : "";
+  const loadingNote = loading ? uiText(items.length ? "board.loading.002" : "board.loading.001") : "";
+  return `${needsMe}${form}<div class="board-head"><p class="live-chip">${escapeHtml(liveLabel(status))}</p>${sweep}${capForm}</div><p id="board-status" class="form-hint" role="status">${escapeHtml(loadingNote)}</p>${loadFailure}${body}`;
 }
 
 function staleDonePage(claims, now) {
@@ -417,6 +451,7 @@ export function installWorkBoard({ client, getState, getSession }) {
   let seen = null;
   let loadedRoom = null;
   let loadedContext = null, operation = 0, readFlight = null, actionFlight = null;
+  let boardLoading = false, boardLoadError = false;
   const context = () => {
     const current = getSession(), member = current?.member?.id;
     return current?.roomId && member && getState()?.members?.[member]?.id === member && getState().members[member].active !== false
@@ -440,7 +475,8 @@ export function installWorkBoard({ client, getState, getSession }) {
     pendingFocus = null;
     pendingStatus = "";
     root.innerHTML = boardHtml(items, status, viewerOf(state, session), state?.members ?? {}, Date.now(), {
-      older, canWrite: canWriteClaims(state, session), capabilities: advertisedCapabilities(state), cap, workItems: state?.workItems ?? {}
+      older, canWrite: canWriteClaims(state, session), capabilities: advertisedCapabilities(state), cap, workItems: state?.workItems ?? {},
+      loading: boardLoading, loadError: boardLoadError
     });
     if (stick?.status) {
       const line = root.querySelector("#board-status");
@@ -487,6 +523,7 @@ export function installWorkBoard({ client, getState, getSession }) {
     const mark = events.length ? events[events.length - 1].id : "";
     if (!force && loadedRoom === session.roomId && seen === mark) return;
     const mine = ++operation;
+    boardLoading = true; boardLoadError = false; paint();
     let pending = null;
     try {
       pending = Promise.all([
@@ -503,12 +540,20 @@ export function installWorkBoard({ client, getState, getSession }) {
       cap = config?.maxMemberOpenClaims ?? cap;
       loadedRoom = session.roomId;
       seen = mark;
+      boardLoading = false;
       paint();
       return true;
     } catch {
-      if (mine === operation && context() === owned) note("Could not load the board.");
+      if (mine !== operation || context() !== owned) return false;
+      // Honest failure: the error block (with retry) replaces the board
+      // instead of a silent empty board plus a status whisper.
+      boardLoading = false;
+      boardLoadError = true;
+      stick = null;
+      paint();
       return false;
     } finally {
+      if (mine === operation) boardLoading = false;
       if (readFlight === pending) readFlight = null;
     }
   }
@@ -551,7 +596,21 @@ export function installWorkBoard({ client, getState, getSession }) {
     }
   }
 
+  // In-flight button feedback (BU-02): the clicked control disables with
+  // aria-busy so the board never looks frozen mid-request. paint() removes
+  // the node on success; if it survives (failed action, no repaint) it is
+  // re-enabled here.
+  function flyButton(button, run, focus) {
+    button.disabled = true;
+    button.setAttribute("aria-busy", "true");
+    act(run, focus).finally(() => {
+      if (root.contains(button)) { button.disabled = false; button.removeAttribute("aria-busy"); }
+    });
+  }
+
   root.addEventListener("click", event => {
+    const retry = event.target.closest("[data-board-retry]");
+    if (retry && root.contains(retry)) { retry.disabled = true; void load({ force: true }); return; }
     const jump = event.target.closest("[data-needs-me-open]");
     if (jump && root.contains(jump)) {
       const card = root.querySelector(`article[data-claim-id="${CSS.escape(jump.dataset.needsMeOpen)}"]`);
@@ -563,21 +622,31 @@ export function installWorkBoard({ client, getState, getSession }) {
     if (!button || !root.contains(button)) return;
     const id = button.dataset.claimId;
     const action = button.dataset.claimAction;
-    const focus = { key: button.dataset.focusKey ?? null, id: id ?? null, status: outcome(action, id) };
+    const focus = { key: button.dataset.focusKey ?? null, id: id ?? null, status: outcome(action, id), pending: pendingOutcome(action, titleOf(id)) };
     if (action === "sweep") {
-      void act(() => client.request(client.path("/work-claims/sweep"), { method: "POST", data: {} }), focus);
+      flyButton(button, () => client.request(client.path("/work-claims/sweep"), { method: "POST", data: {} }), focus);
       return;
     }
     const path = client.path(`/work-claims/${encodeURIComponent(id)}`);
-    if (action === "claim") void act(() => client.request(`${path}/claim`, { method: "POST", data: {} }), focus);
-    else if (action === "release") void act(() => client.request(`${path}/release`, { method: "POST", data: {} }), focus);
-    else if (action === "close" || action === "cancel") void act(() => client.request([path, action].join("/"), { method: "POST", data: {} }), focus);
-    else if (action === "progress") void act(() => client.request(`${path}/update`, { method: "POST", data: { state: "in_progress" } }), focus);
-    else if (action === "done") void act(() => client.request(`${path}/update`, { method: "POST", data: { state: "done" } }), focus);
+    if (action === "claim") flyButton(button, () => client.request(`${path}/claim`, { method: "POST", data: {} }), focus);
+    else if (action === "release") flyButton(button, () => client.request(`${path}/release`, { method: "POST", data: {} }), focus);
+    else if (action === "close" || action === "cancel") flyButton(button, () => client.request([path, action].join("/"), { method: "POST", data: {} }), focus);
+    else if (action === "progress") flyButton(button, () => client.request(`${path}/update`, { method: "POST", data: { state: "in_progress" } }), focus);
+    else if (action === "done") flyButton(button, () => client.request(`${path}/update`, { method: "POST", data: { state: "done" } }), focus);
     else if (action === "renew") {
-      void act(() => client.request(`${path}/renew`, { method: "POST", data: {} }), focus);
+      flyButton(button, () => client.request(`${path}/renew`, { method: "POST", data: {} }), focus);
     }
   });
+  // Same in-flight treatment for form submits (BU-02): disable the submit
+  // button with aria-busy; restore it only if the node survives the repaint.
+  function flySubmit(form, run, focus) {
+    const submit = form.querySelector("button[type=submit]");
+    if (submit) { submit.disabled = true; submit.setAttribute("aria-busy", "true"); }
+    act(run, focus).finally(() => {
+      if (submit && root.contains(submit)) { submit.disabled = false; submit.removeAttribute("aria-busy"); }
+    });
+  }
+
   root.addEventListener("submit", event => {
     const linkForm = event.target.closest("[data-claim-link-pr]");
     if (linkForm && root.contains(linkForm)) {
@@ -630,7 +699,7 @@ export function installWorkBoard({ client, getState, getSession }) {
       const body = newItemCreateBody(data);
       if (!body) return;
       const title = body.title;
-      void act(() => client.request(client.path("/work-claims"), { method: "POST", data: body }), { id: body.id, status: `Opened '${title}'` });
+      flySubmit(created, () => client.request(client.path("/work-claims"), { method: "POST", data: body }), { id: body.id, status: `Opened '${title}'`, pending: pendingOutcome("create", title) });
       return;
     }
     const form = event.target.closest("[data-claim-reassign]");
@@ -639,7 +708,7 @@ export function installWorkBoard({ client, getState, getSession }) {
     const id = form.dataset.claimReassign;
     const newOwner = new FormData(form).get("newOwner");
     if (typeof newOwner !== "string" || !newOwner) return;
-    void act(() => client.request(client.path(`/work-claims/${encodeURIComponent(id)}/reassign`), { method: "POST", data: { newOwner } }), { id, status: outcome("reassign", id) });
+    flySubmit(form, () => client.request(client.path(`/work-claims/${encodeURIComponent(id)}/reassign`), { method: "POST", data: { newOwner } }), { id, status: outcome("reassign", id), pending: pendingOutcome("reassign", titleOf(id)) });
   });
   root.addEventListener("submit", event => {
     const form = event.target.closest("[data-claim-cap]");
@@ -647,10 +716,10 @@ export function installWorkBoard({ client, getState, getSession }) {
     event.preventDefault();
     const raw = Number(new FormData(form).get("maxMemberOpenClaims"));
     if (!Number.isSafeInteger(raw)) return;
-    void act(async () => {
+    flySubmit(form, async () => {
       const saved = await client.request(client.path("/work-claims/config"), { method: "POST", data: { maxMemberOpenClaims: raw } });
       cap = saved.maxMemberOpenClaims ?? raw;
-    });
+    }, { pending: uiText("board.loading.005") });
   });
 
   return {
@@ -666,6 +735,6 @@ export function installWorkBoard({ client, getState, getSession }) {
       } catch { return false; }
       return context() === owned && loadedContext === owned && loadedRoom === getSession()?.roomId;
     },
-    reset() { operation++; mutating = false; readFlight = null; actionFlight = null; loadedContext = null; items = []; status = null; cap = 20; older = false; seen = null; loadedRoom = null; pendingFocus = null; pendingStatus = ""; stick = null; if (root.isConnected) root.replaceChildren(); }
+    reset() { operation++; mutating = false; readFlight = null; actionFlight = null; boardLoading = false; boardLoadError = false; loadedContext = null; items = []; status = null; cap = 20; older = false; seen = null; loadedRoom = null; pendingFocus = null; pendingStatus = ""; stick = null; if (root.isConnected) root.replaceChildren(); }
   };
 }
