@@ -26,10 +26,16 @@ const epochSel = epoch.indexOf("SELECT * FROM bounty_records WHERE room_id=? AND
 const epochSweep = epoch.indexOf("this._sweep(bounty");
 check("closeEpoch reads rows inside the same txn as _sweep", epochSel !== -1 && epochSweep !== -1 && epochSel < epochSweep);
 
-// (2) _keeperPass terminal states -> null (no branch matches paid/refunded/etc.)
+// (2) _keeperPass terminal states -> null: no TOP-LEVEL branch may match a
+// terminal state. (The word "refunded" appears inside the disputed branch's
+// return ternary, which is unreachable unless state=="disputed", and
+// closeEpoch's SELECT only fetches non-terminal states — so match anchored
+// top-level ifs, not the bare comparison.)
 const keeper = src.slice(src.indexOf("_keeperPass(bounty"), src.indexOf("finalizeBounty("));
+const keeperLines = keeper.split("\n");
 for (const terminal of ["paid", "refunded", "released", "cancelled"]) {
-  check(`_keeperPass has no branch for terminal state "${terminal}"`, !new RegExp(`bounty\\.state === "${terminal}"`).test(keeper));
+  const hit = keeperLines.some(l => new RegExp(`^\\s*if \\(bounty\\.state === "${terminal}"`).test(l));
+  check(`_keeperPass has no top-level branch for terminal state "${terminal}"`, !hit);
 }
 // (3) payout finality: approved only
 check('_requireFinalityMove payout requires state=="approved"',

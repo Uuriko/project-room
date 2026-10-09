@@ -63,10 +63,13 @@ for (const b of branches) {
   mkdirSync(outDir, { recursive: true });
   const lines = [];
   const log = s => { lines.push(s); console.log(`[${b.slug}] ${s}`); };
-  if (existsSync(wt)) { execFileSync("git", ["worktree", "remove", "--force", wt], { cwd: REPO }); }
-  mkdirSync(join(wt, ".tmp"), { recursive: true });
+  try {
+    execFileSync("git", ["worktree", "remove", "--force", wt], { cwd: REPO, stdio: "ignore" });
+  } catch {}
+  rmSync(wt, { recursive: true, force: true });
   let r = sh("git", ["worktree", "add", wt, b.branch], REPO);
   if (!r.ok) { log("worktree add FAILED: " + r.out.slice(-300)); report.push({ slug: b.slug, status: "worktree-failed" }); continue; }
+  mkdirSync(join(wt, ".tmp"), { recursive: true });
   r = sh("git", ["rebase", "origin/main"], wt);
   const rebased = r.ok;
   log(rebased ? "rebased cleanly onto origin/main" : "REBASE CONFLICT: " + r.out.slice(-300));

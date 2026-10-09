@@ -14,9 +14,9 @@ const mkThread = i => ({
   threadId: `t${i}`,
   channel: channels[Math.floor(rnd() * channels.length)],
   messages: Array.from({ length: Math.floor(rnd() * 8) }, (_, j) => ({
-    at: 1_700_000_000_000 + Math.floor(rnd() * 3600_000),
-    from: rnd() < 0.5 ? "agent" : "user",
     id: `m${j}`,
+    occurredAt: new Date(1_700_000_000_000 + Math.floor(rnd() * 3600_000)).toISOString(),
+    direction: rnd() < 0.5 ? "outbound" : "inbound",
   })),
 });
 let bad = 0;

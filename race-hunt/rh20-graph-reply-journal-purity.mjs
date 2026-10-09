@@ -24,10 +24,12 @@ let seed = 99;
 const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
 for (let i = 0; i < 10000; i++) {
   const updates = new Map();
-  const proposal = { requestId: `r${i}`, sourceId: "s1", attemptId: `a${i}`,
-    attemptRevision: 0, updateVersion: 1, status: "update_proposed", update: { text: "hello" } };
-  const request = { action: "reply.update.reserve", requestId: `r${i}`, sourceId: "s1",
-    attemptId: `a${i}`, expectedRevision: 0, updateVersion: 1 };
+  const hex64 = "a".repeat(64);
+  const rid = `req-${i}-x`, sid = `src-${i}-x`, aid = `att-${i}-x`;
+  const proposal = { requestId: rid, sourceId: sid, attemptId: aid,
+    attemptRevision: 0, updateVersion: hex64, status: "update_proposed", update: { text: "hello" } };
+  const request = { action: "reply.update.reserve", requestId: rid, sourceId: sid,
+    attemptId: aid, expectedRevision: 0, updateVersion: hex64 };
   const out = transitionReplyUpdate(updates, request, { proposal, dispatch: null, inspection: null, review: null, at: 1000 + i });
   if (updates.size !== 0) { bad++; console.log(`FAIL: input map mutated at ${i}`); break; }
   if (out.proposal === proposal || out.proposal.update === proposal.update) {
