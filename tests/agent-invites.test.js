@@ -704,3 +704,68 @@ test("consent screen names the room, grant, profile and expiry before any prompt
     "consent names the expiry and the closed grant");
   assert.match(screen, /acts as itself, never as you/, "consent states no credential is shared");
 });
+
+test("ANCHOR-D7a: redeem times out, retry with the same requestId recovers the membership deterministically", async t => {
+  // G1 (QA-200 failseq): redeem commits the membership burn but the 201 body
+  // is lost on timeout; the retry then gets 409 invite_already_used with no
+  // recovery path — the membership is stranded. With an opt-in client-kept
+  // requestId the retry must replay the same membership instead of 409ing.
+  const { store, origin, ownerKey } = await serve(t);
+  const minted = await mint(origin, ownerKey, { permissions: ["accept_work"], expiresInMinutes: 60, displayName: "G1 Bot" });
+  assert.equal(minted.status, 201);
+  const requestId = randomUUID();
+  const membersBefore = Object.keys(store.room("commons").state.members).length;
+  // First attempt: the server commits everything, but the client never sees
+  // the 201 (timeout). The client keeps only (code, displayName, requestId).
+  const first = await post(origin, "/api/agent-invites/redeem", { code: minted.json.code, displayName: "G1 Bot", requestId });
+  assert.equal(first.status, 201, JSON.stringify(first.json));
+  assert.equal(Object.keys(store.room("commons").state.members).length, membersBefore + 1);
+  // Retry after the timeout: same requestId, same content. Must recover the
+  // membership deterministically — never 409, never a second membership.
+  const retry = await post(origin, "/api/agent-invites/redeem", { code: minted.json.code, displayName: "G1 Bot", requestId });
+  assert.equal(retry.status, 201, JSON.stringify(retry.json));
+  assert.equal(retry.json.identityId, first.json.identityId);
+  assert.equal(retry.json.memberId, first.json.memberId);
+  assert.equal(retry.json.roomId, first.json.roomId);
+  assert.equal(retry.json.duplicate, true);
+  assert.ok(typeof retry.json.mcpToken?.credential === "string" && /^rak_/.test(retry.json.mcpToken.credential),
+    "replay re-issues an onboarding token");
+  assert.notEqual(retry.json.mcpToken.credential, first.json.mcpToken.credential, "replay mints a fresh token, not the lost one");
+  assert.equal(Object.keys(store.room("commons").state.members).length, membersBefore + 1, "no second membership");
+  assert.doesNotThrow(() => store.db.prepare("SELECT 1 FROM agent_invite_redeem_receipts WHERE request_id=?").get(requestId));
+  // Contrast: without the requestId the legacy trap still 409s — the client
+  // must keep its key across the retry.
+  const legacy = await post(origin, "/api/agent-invites/redeem", { code: minted.json.code, displayName: "G1 Bot" });
+  assert.equal(legacy.status, 409);
+  assert.equal(legacy.json.error.code, "invite_already_used");
+});
+
+test("ANCHOR-D7b: same requestId with different content is a 409, never a second redemption", async t => {
+  const { origin, ownerKey } = await serve(t);
+  const a = await mint(origin, ownerKey, { permissions: ["accept_work"], expiresInMinutes: 60 });
+  const b = await mint(origin, ownerKey, { permissions: ["accept_work"], expiresInMinutes: 60 });
+  assert.equal(a.status, 201); assert.equal(b.status, 201);
+  const requestId = randomUUID();
+  const first = await post(origin, "/api/agent-invites/redeem", { code: a.json.code, displayName: "D7 Bot", requestId });
+  assert.equal(first.status, 201);
+  const conflict = await post(origin, "/api/agent-invites/redeem", { code: b.json.code, displayName: "D7 Bot", requestId });
+  assert.equal(conflict.status, 409);
+  assert.equal(conflict.json.error.code, "invite_redeem_idempotency_conflict");
+  // Code B was never consumed by the conflicted retry: it still redeems cleanly.
+  const clean = await post(origin, "/api/agent-invites/redeem", { code: b.json.code, displayName: "D7 Other" });
+  assert.equal(clean.status, 201);
+  assert.notEqual(clean.json.identityId, first.json.identityId);
+});
+
+test("ANCHOR-D7c: a malformed requestId is a 422, never a silent new redemption", async t => {
+  const { origin, ownerKey } = await serve(t);
+  const minted = await mint(origin, ownerKey, { permissions: ["accept_work"], expiresInMinutes: 60 });
+  assert.equal(minted.status, 201);
+  for (const requestId of ["", "not a uuid!", "x".repeat(200)]) {
+    const res = await post(origin, "/api/agent-invites/redeem", { code: minted.json.code, displayName: "D7 Bot", requestId });
+    assert.equal(res.status, 422, JSON.stringify(requestId));
+  }
+  // The code survived the malformed attempts untouched.
+  const ok = await post(origin, "/api/agent-invites/redeem", { code: minted.json.code, displayName: "D7 Bot" });
+  assert.equal(ok.status, 201);
+});
