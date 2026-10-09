@@ -253,3 +253,19 @@ test("recovery-code generation shows the one-time codes", async () => {
   assert.ok(shownHtml.includes("CCCC-DDDD"));
   assert.ok(shownHtml.includes("Save these now."));
 });
+
+test("an unverified account sees the email verification form after mount (emailVerification is kept from /api/auth/methods)", async () => {
+  const methods = [{ id: "m1", type: "password", label: "Password", email: "a@b.c", createdAt: 1, lastUsedAt: null, disabled: false }];
+  const client = stubClient({ "/api/auth/methods": { methods, emailVerification: { status: "unverified", verified: false, passwordResetRequired: false },
+    providers: { mail: { configured: true } } } });
+  const ui = createAccountSettingsUI({ accountClient: client });
+  const container = fakeContainer();
+  await ui.mount(container);
+  assert.ok(container.innerHTML.includes('data-form="email-verify"'), "the verification-code form renders");
+  assert.ok(container.innerHTML.includes('name="code"'));
+  const verified = stubClient({ "/api/auth/methods": { methods, emailVerification: { status: "verified", verified: true, passwordResetRequired: false }, providers: null } });
+  const ui2 = createAccountSettingsUI({ accountClient: verified });
+  const container2 = fakeContainer();
+  await ui2.mount(container2);
+  assert.equal(container2.innerHTML.includes('data-form="email-verify"'), false, "a verified account sees no form");
+});

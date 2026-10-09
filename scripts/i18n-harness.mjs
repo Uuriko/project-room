@@ -16,12 +16,15 @@
 //     template literals (blocks later reordering for translation)
 //   - positional-placeholder : {0} / %s / %d style positional placeholders
 //     (named {name} placeholders are the readiness target)
-import { readdirSync, readFileSync, writeFileSync, existsSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync, existsSync, statSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { join, relative } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const root = fileURLToPath(new URL("..", import.meta.url));
+// I18N_SCAN_ROOT points the scan at an extracted copy of another tree (the
+// base-tree ratchet below runs this same harness there with --counts).
+const root = process.env.I18N_SCAN_ROOT ? resolve(process.env.I18N_SCAN_ROOT) : fileURLToPath(new URL("..", import.meta.url));
 const BASELINE_PATH = join(root, "strings", "i18n-baseline.json");
 const CATALOG_PATH = join(root, "strings", "en.json");
 
@@ -37,9 +40,15 @@ function isScannableRel(rel) {
 }
 
 // I18N_BASE_REF overrides the base ref (CI auto-detects the merge-base with
-// origin/main; tests pin a known ref).
+// origin/main; tests pin a known ref). On a pull_request run the checkout is
+// GitHub's merge commit, whose first parent is the base branch tip (the lint
+// job fetches depth 2 for it), so the base is the main the PR lands on.
 function baseRef() {
   if (process.env.I18N_BASE_REF) return process.env.I18N_BASE_REF;
+  if (/^pull_request/.test(process.env.GITHUB_EVENT_NAME || "")) {
+    const parent = spawnSync("git", ["rev-parse", "--verify", "--quiet", "HEAD^1"], { cwd: root, encoding: "utf8" });
+    if (parent.status === 0 && parent.stdout.trim()) return parent.stdout.trim();
+  }
   const mb = spawnSync("git", ["merge-base", "HEAD", "origin/main"], { cwd: root, encoding: "utf8" });
   if (mb.status === 0 && mb.stdout.trim()) return mb.stdout.trim();
   return "origin/main";
@@ -62,6 +71,51 @@ function fileModifiedVsBase(rel) {
   const out = gitOk(["diff", "--name-only", ref, "--", rel]);
   if (out === null) return true;
   return out.trim() !== "";
+}
+
+// Counts of the base tree, scanned by this harness's own rules: the files the
+// scan covers are extracted from `ref` with git archive and re-scanned in a
+// child process (I18N_SCAN_ROOT). Returns null when the base is unavailable
+// (shallow clone, unknown ref); the ratchet then uses the committed baseline
+// alone, exactly as before.
+export function baseTreeCounts(ref) {
+  const paths = [...UI_GLOBS, "server", "strings"].filter((p) => gitOk(["cat-file", "-e", `${ref}:${p}`]) !== null);
+  if (paths.length === 0) return null;
+  const dir = mkdtempSync(join(tmpdir(), "i18n-base-"));
+  try {
+    const archive = spawnSync("git", ["archive", "--format=tar", ref, "--", ...paths], { cwd: root, maxBuffer: 1 << 30 });
+    if (archive.status !== 0) return null;
+    const untar = spawnSync("tar", ["-x", "-C", dir], { input: archive.stdout, maxBuffer: 1 << 30 });
+    if (untar.status !== 0) return null;
+    const child = spawnSync(process.execPath, [fileURLToPath(import.meta.url), "--counts"], {
+      encoding: "utf8", env: { ...process.env, I18N_SCAN_ROOT: dir },
+    });
+    if (child.status !== 0) return null;
+    return JSON.parse(child.stdout);
+  } catch {
+    return null;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// Growth past the ratchet is allowed only when declared: the PR carries the
+// i18n-growth label or a line "i18n-growth: <reason>" in its body (read from
+// the Actions event payload), or I18N_ALLOW_GROWTH=1 locally. A label or body
+// edit needs a lint re-run (gh run rerun --failed) or a new push.
+export function growthAllowance(env = process.env) {
+  if (env.I18N_ALLOW_GROWTH === "1") return "I18N_ALLOW_GROWTH=1";
+  if (!env.GITHUB_EVENT_PATH) return null;
+  try {
+    const pr = JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, "utf8")).pull_request;
+    if (!pr) return null;
+    if ((pr.labels || []).some((l) => l?.name === "i18n-growth")) return "PR label i18n-growth";
+    const line = /^\s*i18n-growth:\s*(\S.*)$/im.exec(pr.body || "");
+    if (line) return `PR body "i18n-growth: ${line[1].trim().slice(0, 120)}"`;
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 export function checkScopeConsistency(manifest, scanned) {
@@ -317,9 +371,11 @@ function loadJson(path, label) {
 }
 
 const args = process.argv.slice(2);
-const mode = args.find((a) => ["--extract", "--check", "--baseline", "--report"].includes(a)) ?? "--check";
+const mode = args.find((a) => ["--extract", "--check", "--baseline", "--report", "--counts"].includes(a)) ?? "--check";
 
-if (mode === "--extract") {
+if (mode === "--counts") {
+  console.log(JSON.stringify(summarize(runExtraction()).counts));
+} else if (mode === "--extract") {
   console.log(JSON.stringify(runExtraction(), null, 2));
 } else if (mode === "--report") {
   const violations = runExtraction();
@@ -390,8 +446,11 @@ if (mode === "--extract") {
   //    fresh scan of the current tree. This closes the bootstrap gap: there
   //    is no earlier baseline to compare against, so an inflated (or stale)
   //    committed baseline fails instead of becoming the new truth. An
-  //    untouched baseline gets the classic ratchet: fresh counts must not
-  //    exceed committed counts.
+  //    untouched baseline gets the ratchet: fresh counts must not exceed the
+  //    larger of the committed count and the base tree's own count. The base
+  //    tree term means a PR never has to commit strings/i18n-baseline.json
+  //    just because main moved (that file was a merge-conflict magnet);
+  //    real growth over the base needs an explicit growthAllowance().
   if (fileModifiedVsBase("strings/i18n-baseline.json")) {
     for (const r of RULES) {
       const now = s.counts[r] ?? 0;
@@ -402,12 +461,21 @@ if (mode === "--extract") {
       }
     }
   } else {
+    const ref = baseRef();
+    const baseCounts = baseTreeCounts(ref);
+    if (!baseCounts) console.log(`i18n-harness: base tree ${ref} not available; ratchet uses the committed baseline only`);
+    const allowance = growthAllowance();
     for (const r of RULES) {
       const now = s.counts[r] ?? 0;
-      const base = baseline.counts?.[r] ?? 0;
+      const committed = baseline.counts?.[r] ?? 0;
+      const base = Math.max(committed, baseCounts?.[r] ?? 0);
       if (now > base) {
-        console.error(`i18n-harness FAIL: ${r} grew ${base} -> ${now} (baseline ratchet)`);
-        failed = true;
+        if (allowance) {
+          console.log(`i18n-harness: ${r} grew ${base} -> ${now}, allowed by ${allowance}`);
+        } else {
+          console.error(`i18n-harness FAIL: ${r} grew ${base} -> ${now} (baseline ratchet; base ${ref}). Move the copy into strings/en.json, or declare it: PR label i18n-growth or a PR body line "i18n-growth: <reason>" (then re-run lint), I18N_ALLOW_GROWTH=1 locally. Do not commit a regenerated baseline for this.`);
+          failed = true;
+        }
       }
     }
   }

@@ -17,7 +17,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync, renameSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, renameSync, rmSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import {
@@ -29,6 +30,7 @@ import {
   scannableRels,
   checkScopeConsistency,
   findUnpinnedFiles,
+  growthAllowance,
   RULES,
 } from "../scripts/i18n-harness.mjs";
 
@@ -152,9 +154,12 @@ test("--check ratchets in steady state: fails when counts grow past an untouched
   // Current copy may be below the ratchet after a legitimate catalog migration.
   // Add enough real probe literals to exceed the unchanged baseline by one.
   const probe = join(root, "src", "__i18n-probe.tmp.mjs");
-  const env = { ...process.env, I18N_BASE_REF: "HEAD" };
-  const baseCount = JSON.parse(readFileSync(baselinePath, "utf8")).counts["hardcoded-ui-string"];
+  const env = { ...strictEnv(), I18N_BASE_REF: "HEAD" };
+  // The ceiling is the larger of the committed count and the base tree's
+  // own scan (HEAD here, without the untracked probe).
+  const committedCount = JSON.parse(readFileSync(baselinePath, "utf8")).counts["hardcoded-ui-string"];
   const currentCount = summarize(runExtraction()).counts["hardcoded-ui-string"];
+  const baseCount = Math.max(committedCount, currentCount);
   const addedCount = Math.max(1, baseCount - currentCount + 1);
   try {
     const literals = Array(addedCount).fill('"This is a brand new hardcoded user facing sentence for the probe"');
@@ -167,6 +172,87 @@ test("--check ratchets in steady state: fails when counts grow past an untouched
   }
   const r2 = spawnSync(process.execPath, [harness, "--check"], { encoding: "utf8", env });
   assert.equal(r2.status, 0, `--check should exit 0 within baseline; stderr: ${r2.stderr}`);
+});
+
+// The environment minus anything that would allow growth, so a CI run on a
+// PR carrying the i18n-growth label still exercises the strict ratchet.
+function strictEnv() {
+  const env = { ...process.env };
+  delete env.I18N_ALLOW_GROWTH;
+  delete env.GITHUB_EVENT_PATH;
+  delete env.GITHUB_EVENT_NAME;
+  return env;
+}
+
+function git(args, env = process.env) {
+  const r = spawnSync("git", args, { cwd: root, encoding: "utf8", env });
+  assert.equal(r.status, 0, `git ${args.join(" ")}: ${r.stderr}`);
+  return r.stdout.trim();
+}
+
+test("--check: declared growth passes, undeclared growth names the way to declare it", () => {
+  const probe = join(root, "src", "__i18n-probe-growth.tmp.mjs");
+  const env = { ...strictEnv(), I18N_BASE_REF: "HEAD" };
+  const committedCount = JSON.parse(readFileSync(baselinePath, "utf8")).counts["hardcoded-ui-string"];
+  const currentCount = summarize(runExtraction()).counts["hardcoded-ui-string"];
+  const added = Math.max(1, Math.max(committedCount, currentCount) - currentCount + 1);
+  try {
+    writeFileSync(probe, `export const probe = [${Array(added).fill('"Another brand new hardcoded user facing sentence for the probe"').join(",")}];\n`);
+    const strict = spawnSync(process.execPath, [harness, "--check"], { encoding: "utf8", env });
+    assert.equal(strict.status, 1, strict.stderr);
+    assert.match(strict.stderr, /i18n-growth/);
+    assert.match(strict.stderr, /Do not commit a regenerated baseline/);
+    const allowed = spawnSync(process.execPath, [harness, "--check"], { encoding: "utf8", env: { ...env, I18N_ALLOW_GROWTH: "1" } });
+    assert.equal(allowed.status, 0, allowed.stderr);
+    assert.match(allowed.stdout, /allowed by I18N_ALLOW_GROWTH=1/);
+  } finally {
+    rmSync(probe, { force: true });
+  }
+});
+
+test("--check: growth already in the base tree passes without a regenerated baseline", () => {
+  // Main moved: the base tree carries strings the committed baseline does not
+  // count. Build that base as a throwaway commit (temporary index, no ref is
+  // moved) and check the same working tree against it.
+  const probeRel = "src/__i18n-probe-base.tmp.mjs";
+  const probe = join(root, probeRel);
+  const dir = mkdtempSync(join(tmpdir(), "i18n-index-"));
+  const committedCount = JSON.parse(readFileSync(baselinePath, "utf8")).counts["hardcoded-ui-string"];
+  const currentCount = summarize(runExtraction()).counts["hardcoded-ui-string"];
+  const added = Math.max(1, committedCount - currentCount + 1);
+  try {
+    writeFileSync(probe, `export const probe = [${Array(added).fill('"A sentence that already landed on the base branch for the probe"').join(",")}];\n`);
+    const indexEnv = { ...process.env, GIT_INDEX_FILE: join(dir, "index") };
+    git(["read-tree", "HEAD"], indexEnv);
+    git(["add", "-f", probeRel], indexEnv);
+    const tree = git(["write-tree"], indexEnv);
+    const base = git(["-c", "user.name=probe", "-c", "user.email=probe@example.invalid", "commit-tree", tree, "-p", "HEAD", "-m", "i18n probe base"]);
+    const env = { ...strictEnv(), I18N_BASE_REF: base };
+    const r = spawnSync(process.execPath, [harness, "--check"], { encoding: "utf8", env });
+    // The scope manifest does not list the probe, so only the pin may fail;
+    // the count ratchet itself must not.
+    assert.doesNotMatch(r.stderr, /grew/, r.stderr);
+    const strict = spawnSync(process.execPath, [harness, "--check"], { encoding: "utf8", env: { ...env, I18N_BASE_REF: "HEAD" } });
+    assert.match(strict.stderr, /grew/, "against HEAD (no probe) the same tree is growth");
+  } finally {
+    rmSync(probe, { force: true });
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("growthAllowance reads the PR label or an i18n-growth body line from the event payload", () => {
+  const dir = mkdtempSync(join(tmpdir(), "i18n-event-"));
+  const event = join(dir, "event.json");
+  try {
+    const at = pr => { writeFileSync(event, JSON.stringify({ pull_request: pr })); return growthAllowance({ GITHUB_EVENT_PATH: event }); };
+    assert.equal(at({ labels: [{ name: "i18n-growth" }], body: "" }), "PR label i18n-growth");
+    assert.match(at({ labels: [], body: "Summary\n\ni18n-growth: new onboarding copy, catalog move tracked in #1\n" }), /new onboarding copy/);
+    assert.equal(at({ labels: [{ name: "docs" }], body: "mentions i18n-growth in prose only" }), null);
+    assert.equal(growthAllowance({}), null);
+    assert.equal(growthAllowance({ I18N_ALLOW_GROWTH: "1" }), "I18N_ALLOW_GROWTH=1");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("findUnpinnedFiles flags tracked surface files missing from the manifest", () => {
