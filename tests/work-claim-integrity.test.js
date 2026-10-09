@@ -12,6 +12,7 @@ import { handleWorkClaims } from "../server/work-claim-routes.mjs";
 import { MAX_CLAIM_HISTORY, claimWork, createWork, updateWork } from "../server/work-claims.mjs";
 import { CONTENT_TRUST } from "../server/content-trust.mjs";
 import { readClaimPullBudget, writeClaimPullBudget } from "../server/claim-pr-sync.mjs";
+import { flushClaimDigestWindow } from "../server/work-claim-events.mjs";
 import {
   boardText, clientPullRequestInput, assertBoardLeaseHours, assertDependsOnKnown, assertBoardEventBudget,
   roomEventsRemaining, BOARD_LEASE_HOURS_MAX, EVENT_BUDGET_RESERVE
@@ -105,7 +106,9 @@ test("review notes come from reviewers, the owner, or claim managers", async t =
   assert.equal(self.status, 403);
 });
 
-test("100 notes from one reviewer on one claim revision produce one room event", async t => {
+// FIX-69: note-only reviews never emit per-transition room events; they ride
+// the claim digest. The 60s coalesce machinery is retired.
+test("100 notes from one reviewer on one claim revision produce no per-transition room events", async t => {
   const f = roomFixture(t);
   await held(f, "dedupe");
   const before = f.events();
@@ -114,7 +117,11 @@ test("100 notes from one reviewer on one claim revision produce one room event",
     last = await f.call("reviewer", "review", { id: "dedupe", body: { note: `pass ${i}` } });
     assert.equal(last.status, 200);
   }
-  assert.equal(f.events() - before, 1);
+  assert.equal(f.events() - before, 0, "note-only reviews ride the digest");
+  flushClaimDigestWindow(f.store, "commons", {});
+  assert.equal(f.events() - before, 0, "the digest is a work_claim.digest event");
+  const digests = f.store.db.prepare("SELECT COUNT(*) AS n FROM events WHERE room_id='commons' AND json_extract(body,'$.type')='work_claim.digest'").get().n;
+  assert.equal(digests, 1);
   const stored = f.store.workClaims.get("commons", "dedupe");
   const mine = stored.attestations.filter(entry => entry.memberId === "reviewer");
   assert.equal(mine.length, 1);
@@ -122,7 +129,7 @@ test("100 notes from one reviewer on one claim revision produce one room event",
   assert.equal(stored.history.filter(entry => entry.action === "reviewed").length, 1);
 });
 
-test("50 rapid note updates on one claim produce at most 2 room events", async t => {
+test("50 rapid note updates on one claim batch into the digest while transitions stay visible", async t => {
   const f = roomFixture(t);
   await held(f, "chatty");
   const before = f.events();
@@ -130,12 +137,15 @@ test("50 rapid note updates on one claim produce at most 2 room events", async t
     const out = await f.call("contrib", "update", { id: "chatty", body: { note: `progress ${i}` } });
     assert.equal(out.status, 200);
   }
-  assert.ok(f.events() - before <= 2, `events +${f.events() - before}`);
-  // A state transition is never coalesced.
+  assert.equal(f.events() - before, 0, "note-only updates ride the digest");
+  // A state transition is still visible at digest flush.
   const started = await f.call("contrib", "update", { id: "chatty", body: { state: "in_progress" } });
   assert.equal(started.status, 200);
-  const last = f.store.db.prepare("SELECT body FROM events WHERE room_id='commons' ORDER BY sequence DESC LIMIT 1").get();
-  assert.equal(JSON.parse(last.body).data.claimState, "in_progress");
+  flushClaimDigestWindow(f.store, "commons", {});
+  const digest = f.store.db.prepare("SELECT body FROM events WHERE room_id='commons' AND json_extract(body,'$.type')='work_claim.digest' ORDER BY sequence DESC LIMIT 1").get();
+  const entry = JSON.parse(digest.body).data.digestClaims.find(entry => entry.workClaim === "chatty");
+  assert.equal(entry.action, "state_changed");
+  assert.equal(entry.claimState, "in_progress");
 });
 
 test("sweep is for Board writers, claim managers and the owner, and refuses before any GitHub read", async t => {
@@ -208,7 +218,9 @@ test("the Board list pages done claims by age and summarizes history", async t =
   await created(f, "waiting", "owner", { dependsOn: ["needed"] });
 
   await f.call("owner", "list", { query: "?limit=200" });
-  const page = await f.call("owner", "list", { query: "?limit=50" });
+  // FIX-69: the default list returns claim summaries; history detail needs
+  // view=full.
+  const page = await f.call("owner", "list", { query: "?limit=50&view=full" });
   const bytes = Buffer.byteLength(JSON.stringify(page.value));
   assert.ok(bytes < 64 * 1024, `a 50-claim page is ${bytes} bytes`);
   assert.equal(page.value.olderDone, 30, "done claims older than 7 days leave the default list");
@@ -267,7 +279,9 @@ test("Board reads mark another member's claim text untrusted and never the reade
   await held(f, "theirs");
   await f.call("reviewer", "review", { id: "theirs", body: { note: "SENTINEL from the reviewer" } });
   await created(f, "mine", "owner");
-  const list = await f.call("owner", "list");
+  // FIX-69: the default list returns claim summaries; history detail needs
+  // view=full.
+  const list = await f.call("owner", "list", { query: "?view=full" });
   assert.equal(list.value.contentTrust, CONTENT_TRUST);
   const theirs = list.value.claims.find(claim => claim.id === "theirs");
   const mine = list.value.claims.find(claim => claim.id === "mine");
@@ -331,11 +345,16 @@ test("with under 10% of the event budget left a writer's sweep is refused and em
   assert.equal(f.events(), before, "no room events past the floor");
   const stored = f.store.workClaims.get("commons", "sweepy");
   assert.equal(stored.state, "claimed", "the PR settlement did not land");
-  // Privileged writers can still sweep to wind the room down.
+  // Privileged writers can still sweep to wind the room down. The settlement
+  // rides the digest (FIX-69), not a per-transition event.
   const ownerSweep = await f.call("owner", "sweep", { body: {}, fetchPullRequest });
   assert.equal(ownerSweep.status, 200);
   assert.equal(ownerSweep.value.pullRequests.updated, 1);
-  assert.equal(f.events(), before + 1);
+  assert.equal(f.events(), before);
+  flushClaimDigestWindow(f.store, "commons", {});
+  const digest = f.store.db.prepare("SELECT body FROM events WHERE room_id='commons' AND json_extract(body,'$.type')='work_claim.digest' ORDER BY sequence DESC LIMIT 1").get();
+  const entry = JSON.parse(digest.body).data.digestClaims.find(entry => entry.workClaim === "sweepy");
+  assert.equal(entry.action, "pr_merged");
 });
 
 test("deploy status is fetched at most once per 60 s, and only writers can refresh", async t => {
