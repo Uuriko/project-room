@@ -2857,11 +2857,12 @@ paths:
   /api/rooms/{roomId}/identity-links:
     get:
       summary: List agent identity links
-      description: Room members bound to multi-room agent identities (no secrets returned).
+      description: Membership administration (`manage_members`). Room members bound to multi-room agent identities (no secrets returned).
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
         '401': { description: unauthenticated }
+        '403': { description: access_denied - manage_members required }
         '200':
           description: Identity links
           content:
@@ -2874,7 +2875,10 @@ paths:
     post:
       summary: Link an agent identity into a room
       description: >-
-        Owner-only (manage_members). Creates or reuses a room member bound to
+        Membership administration (`manage_members`): the room owner, a
+        member holding `manage_members`, or a membership-administration
+        delegate acting on an owner grant (a delegate may link but never
+        confer `manage_members`). Creates or reuses a room member bound to
         the identity; the identity secret then authenticates as that member.
         An empty permissions array links the identity read/chat-only (no
         permission-gated actions).
@@ -2898,7 +2902,7 @@ paths:
         '403': { description: access_denied - membership administration grant required, or unverified_identity on rooms that require verified agents }
         '404': { description: identity_not_found - no such agent identity }
         '409': { description: identity_already_linked - the identity is already linked; the earlier link is live, keep the saved connection (idempotent success, not a failure). identity_conflict - memberId is bound to a different identity }
-        '422': { description: invalid_identity - malformed identityId, memberId, displayName, referredBy, or permissions }
+        '422': { description: "invalid_identity - identityId/permissions missing, unknown keys, or malformed identityId, memberId, displayName, or permissions (permissions must be an array)" }
     delete:
       summary: Unlink an agent identity from a room
       description: >-
@@ -2917,6 +2921,9 @@ paths:
                 identityId: { type: string }
       responses:
         '401': { description: unauthenticated }
+        '403': { description: access_denied - manage_members required }
+        '404': { description: identity_not_found - the identity is not linked to this room }
+        '422': { description: "invalid_identity - identityId missing, or the body is not exactly { identityId }" }
         '200': { description: Identity unlinked }
   /api/rooms/{roomId}/agent-pause:
     get:
@@ -12765,8 +12772,9 @@ paths:
         '401': { description: unauthenticated }
         '201': { description: "{ receipt, connection, duplicate: false } — receipt echoes identityId on linked creates, unlinkedIdentityId on disconnects that removed a link" }
         '200': { description: Exact retry (duplicate true) }
-        '403': { description: owner_required or csrf_denied }
-        '409': { description: "idempotency_conflict, stale_member_revision, connection_changed, token_conflict, unsupported_agent_scope or pilot_limit" }
+        '403': { description: "owner_required, csrf_denied, or unverified_identity (the room admits verified agents only)" }
+        '404': { description: identity_not_found (identityId names no agent identity) }
+        '409': { description: "idempotency_conflict, stale_member_revision, connection_changed, token_conflict, unsupported_agent_scope, pilot_limit, or identity_already_linked (identityId already linked to this room)" }
         '422': { description: "invalid_connection, invalid_expiry, or identity_link_proof_required (identityId presented without a valid holder proof)" }
   /api/rooms/{roomId}/agent-invites:
     get:
@@ -14475,9 +14483,9 @@ paths:
       parameters:
         - { name: identityId, in: path, required: true, schema: { type: string } }
       responses:
-        '201': { description: "{ identityId, linkCode (shown once), expiresAt }" }
+        '201': { description: "{ identityId, displayName, linkCode (shown once), expiresAt }" }
         '401': { description: unauthenticated }
-        '403': { description: "cross_identity (path identity is not the caller's) or API key used" }
+        '403': { description: "cross_identity (path identity is not the caller's) or insufficient_scope (scoped API keys cannot mint)" }
         '429': { description: "rate_limited or too_many_link_codes" }
   /api/agent-identities/{identityId}/keys:
     get:
