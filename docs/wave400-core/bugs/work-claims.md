@@ -6,7 +6,7 @@ store commit path in server/work-claim-routes.mjs and the route guards.
 
 ## Race conditions
 
-- `server/work-claims.mjs:618` (appendWorkPullRequest) + `server/work-claim-routes.mjs:702`
+- `server/work-claims.mjs:627` (appendWorkPullRequest) + `server/work-claim-routes.mjs:702`
   (commit -> registry.set) — the compare-and-release (expectedClaimedAt +
   expectedHistoryLength) guards only a STALE CALLER, not concurrent writers.
   The route does registry.get -> appendWorkPullRequest -> registry.set with a
@@ -24,23 +24,23 @@ store commit path in server/work-claim-routes.mjs and the route guards.
 
 ## Release / reclaim paths (stale state)
 
-- `server/work-claims.mjs:731-744` (updateWork release branch),
-  `server/work-claims.mjs:946-949` (releaseExpired),
-  `server/work-claims.mjs:764-766` (closeWork) — none of the release/retire
+- `server/work-claims.mjs:727-744` (updateWork release branch),
+  `server/work-claims.mjs:904-916` (releaseExpired),
+  `server/work-claims.mjs:759-768` (closeWork) — none of the release/retire
   paths clear `claimedAt`. A released (unclaimed) or closed item keeps the
   previous round's claimedAt, visible on board reads. claimWork overwrites it
   on the next claim, so the window is "unclaimed/closed item with someone
   else's claimedAt"; appendWorkPullRequest compares claimedAt only after a
   fresh claim, so the main risk is misleading reads, not a logic break.
-- `server/work-claims.mjs:731-744` (updateWork release) and
-  `server/work-claims.mjs:946-949` (releaseExpired) — a release drops the
+- `server/work-claims.mjs:727-744` (updateWork release) and
+  `server/work-claims.mjs:904-916` (releaseExpired) — a release drops the
   lapsed owner's files, reviews, and attestations (comment: "attestations
   belong to the lapsed owner's round, never to whoever claims next"), but
   KEEPS `pullRequests`/`pullRequest` and `ci`. The next owner inherits the
   previous owner's PR links and CI observations — arguably as owner-specific
   as files. Inconsistent with the stated "whoever claims next starts clean"
   intent. If deliberate, the comment should say so.
-- `server/work-claims.mjs:618` — the byte-identical no-op path returns the
+- `server/work-claims.mjs:627` — the byte-identical no-op path returns the
   raw `work` input (`return work;`) instead of the normalized `item`
   (workOf). The mutating path returns a fully normalized object. Callers
   comparing shapes across the two paths can see un-normalized passthrough
@@ -48,15 +48,15 @@ store commit path in server/work-claim-routes.mjs and the route guards.
 
 ## Review / attestation edge cases
 
-- `server/work-claims.mjs:782-788` (attestWork) — the duplicate-note early
+- `server/work-claims.mjs:792` (attestWork) — the duplicate-note early
   return (`return Object.freeze(item)`) produces no history stamp and no
   updatedAt change. The route layer must not assume every attest call
   emitted a room event; the code is correct, the hazard is for callers.
   (recorded here because the route at work-claim-routes.mjs:1139 coalesces on
   this path — verified consistent.)
-- `server/work-claims.mjs:829-830` (recordReview) — a re-attestation by the
+- `server/work-claims.mjs:831` (recordReview) — a re-attestation by the
   same member keeps the ORIGINAL `at` (`prior.at` in attestWork's in-place
-  replace, `server/work-claims.mjs:788-790`). canCloseWork requires
+  replace, `server/work-claims.mjs:798`). canCloseWork requires
   `attestation.at === review.at`; a member who attested at T1 and then got an
   approve recorded at T2 gets a fresh attestation at T2 (recordReview filters
   then appends), so this path is consistent — but the attestWork in-place
@@ -65,13 +65,13 @@ store commit path in server/work-claim-routes.mjs and the route guards.
 
 ## Lease semantics
 
-- `server/work-claims.mjs:933` (isLeaseExpired) — expiry is inclusive:
+- `server/work-claims.mjs:896-900` (isLeaseExpired) — expiry is inclusive:
   `Date.parse(item.leaseExpiresAt) <= nowMs`. A lease lapses exactly at the
   deadline, not after. Documented behavior; flagged only because renewWork
   uses strict `>` (`Date.parse(item.leaseExpiresAt) > atMs`) — consistent
   (renew at exactly the deadline is refused, then sweep releases it), but the
   two formulations should stay in sync if either changes.
-- `server/work-claims.mjs:596-604` (claimWork) — when `leaseHours` is
+- `server/work-claims.mjs:563-597` (claimWork) — when `leaseHours` is
   explicitly `null` the claim carries no lease and `note ?? "lease: ..."`.
   If a caller passes `leaseHours: null` intending "room default", they get
   no-lease instead. leaseHoursOf treats null as opt-out; `undefined` is the

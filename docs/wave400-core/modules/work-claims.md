@@ -236,17 +236,17 @@ open (non-terminal) items count against the room open-claim cap.
 
 ## Stale comments
 
-- `server/work-claims.mjs:5` — "Persistence is a later slice." STALE:
+- `server/work-claims.mjs:7` — "Persistence is a later slice." STALE:
   `server/work-claim-sqlite.mjs` persists `work_claims` per room to SQLite
   (upsert/select by room_id + claim_id) and per-room config.
-- `server/work-claims.mjs:8` — "Only the claiming agent may update, release,
+- `server/work-claims.mjs:4` — "Only the claiming agent may update, release,
   or reassign its work — anyone else's attempt is refused". STALE/overstated:
   updateWork, reassignWork, and closeWork all accept `authority = true`
   (claim managers: room owner or manage_claims), and work-claim-routes calls
   updateWork with `authority` to pause/release others' claims (routes ~1176-1179).
-- `server/work-claims.mjs:672` (updateWork header) — "Only the owner may
+- `server/work-claims.mjs:691` (updateWork header) — "Only the owner may
   update." Same overstatement: the function takes `authority` and the route
   uses it for manager pause/release.
-- `server/work-claims.mjs:900`-ish (reassignWork header) — "the owner hands
+- `server/work-claims.mjs:877` (reassignWork header) — "the owner hands
   work to another agent (stays in the same state)". Understated: authority
   can also reassign (and unclaimed items become claimed with a fresh lease).

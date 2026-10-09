@@ -25,19 +25,19 @@ public API for external agents/tools; removal is a breaking change.
 - `server/work-claims.mjs:54` — `CLAIM_VERBS`: exported constant, zero
   internal uses, zero external references outside
   `tests/claims-state-machine.property.test.js`.
-- `server/work-claims.mjs:44` — `REVIEW_VERDICTS`: exported constant, zero
+- `server/work-claims.mjs:40` — `REVIEW_VERDICTS`: exported constant, zero
   references anywhere outside the module (not even tests).
-- `server/work-claims.mjs:43` — `CI_STATES`: exported constant, zero
+- `server/work-claims.mjs:39` — `CI_STATES`: exported constant, zero
   references anywhere outside the module (not even tests).
-- `server/work-claims.mjs:~972` — `workOwnedBy(items, agentId)`: only callers
+- `server/work-claims.mjs:980` — `workOwnedBy(items, agentId)`: only callers
   are `tests/work-claim-leases.test.js` and `tests/work-claims.test.js`. No
   production caller.
-- `server/work-claims.mjs:~977` — `unclaimedWork(items)`: only callers are
+- `server/work-claims.mjs:985` — `unclaimedWork(items)`: only callers are
   `tests/work-claim-leases.test.js` and `tests/work-claims.test.js`. No
   production caller.
-- `server/work-claims.mjs:~87` — `DELIVERY_MODES`: only referenced in
+- `server/work-claims.mjs:66` — `DELIVERY_MODES`: only referenced in
   `tests/work-claim-leases.test.js`.
-- `server/work-claims.mjs:~90` — `DEFAULT_MAX_MEMBER_OPEN_CLAIMS`: only
+- `server/work-claims.mjs:287` — `DEFAULT_MAX_MEMBER_OPEN_CLAIMS`: only
   referenced in `tests/work-claim-guards.test.js`.
 
 ## Checked and alive (zero external callers but used inside the module)
