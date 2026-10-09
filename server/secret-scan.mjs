@@ -17,6 +17,10 @@ const PATTERNS = [
   { id: "bearer-token", label: "bearer token", regex: /\bbearer\s+[A-Za-z0-9\-_.~+/]{20,}=*/i },
   { id: "slack-token", label: "Slack token", regex: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/ },
   { id: "stripe-key", label: "Stripe key", regex: /\b[rs]k_(?:live|test)_[A-Za-z0-9]{16,}\b/ },
+  // Room credentials accepted by the HTTP credential grammar: identity
+  // secrets, minted API keys, and guest links. A trailing hyphen is valid
+  // in those alphabets, so the end boundary is not a word boundary.
+  { id: "room-credential", label: "room credential", regex: /(?<![A-Za-z0-9_])(?:pri_[A-Za-z0-9_-]{43,128}|rak_[A-Za-z0-9_-]{16,128}|ga1\.[A-Za-z0-9_-]{43})(?![A-Za-z0-9_])/ },
   // Regression rule for secret-scanning alert #1 (2026-09-17): a real
   // Telegram bot token was committed in tests/telegram-connect.test.js.
   // BotFather tokens are <bot-id>:<secret>; the burned one was 9 digits
