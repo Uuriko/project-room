@@ -511,14 +511,14 @@ async function spawnHandle() {
 }
 
 test('report without a handle (caller-asserted pane ids) is rejected', async () => {
-  const before = fixtureA.callsFor('pane.report_agent').length;
+  const callsBefore = fixtureA.callsFor('pane.report_agent').length;
   const { status, json } = await post('/v1/report', {
     kind: 'state', targetPaneId: 'pane-1', herdrPaneId: 'pane-1',
     state: 'done', idempotencyKey: randomUUID(),
   });
   assert.equal(status, 404);
   assert.equal(json.error.code, 'handle_not_found');
-  assert.equal(fixtureA.callsFor('pane.report_agent').length, before);
+  assert.equal(fixtureA.callsFor('pane.report_agent').length, callsBefore);
 });
 
 test('report with an issued handle reaches the socket on the handle pane', async () => {
@@ -658,14 +658,14 @@ test('events without auth is 401', async () => {
 // ---------------------------------------------------------------------------
 test('concurrent retries with the same idempotencyKey execute the write once', async () => {
   const sp = await post('/v1/spawn', { kind: 'claude', idempotencyKey: randomUUID() });
-  const before = fixtureA.callsFor('agent.prompt').length;
+  const callsBefore = fixtureA.callsFor('agent.prompt').length;
   fixtureA.state.delayMs = 60;
   try {
     const body = { handle: sp.json.handle, text: 'race', idempotencyKey: randomUUID() };
     const [r1, r2] = await Promise.all([post('/v1/send', body), post('/v1/send', body)]);
     assert.equal(r1.status, 200);
     assert.equal(r2.status, 200);
-    assert.equal(fixtureA.callsFor('agent.prompt').length, before + 1, 'in-flight duplicate must wait, not re-run');
+    assert.equal(fixtureA.callsFor('agent.prompt').length, callsBefore + 1, 'in-flight duplicate must wait, not re-run');
   } finally { fixtureA.state.delayMs = 0; }
 });
 
