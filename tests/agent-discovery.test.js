@@ -7,7 +7,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { roomEntry } from "../deploy/room-entry.mjs";
 import {
-  agentCard, llmsTxt, llmsFullTxt, kitsTxt, agentCardJson, agentsJson, discoveryDoc, DISCOVERY_PATHS,
+  agentCard, llmsTxt, llmsFullTxt, skillMd, kitsTxt, agentCardJson, agentsJson, discoveryDoc, DISCOVERY_PATHS,
   AFTER_PASTE_SECTION, joinPrompt, JOIN_HOSTS, JOIN_PROMPT_PATH, SHORT_PACKET_FILES, SHORT_PACKET_SYNONYMS, AGENT_CARD_SYNONYMS, HEALTH_ALIAS_PATHS,
   KITS_CATALOG_PATH, KITS_CATALOG_SYNONYMS, KITS_CATALOG_FILES, AGENTS_JSON_PATH,
   isHealthAliasPath, rewriteRoomApiPrefix, edgeDoorApiPath, DISCOVERY_PROTOCOL_VERSION, AGENT_CARD_A2A_PATH,
@@ -631,4 +631,30 @@ test("llms.txt documents the work-claims REST contract (issue #1529)", () => {
   assert.match(section, /\/work-claims\/{claimId}\/update/);
   assert.match(section, /\/work-claims\/{claimId}\/release/);
   assert.match(section, /first claim wins/i);
+});
+
+test("/SKILL.md Step 4 access-request example matches the POST contract (plugin-discovery-lane3)", () => {
+  // The server gate requires {roomId, identityId, displayName,
+  // requestedPermissions} with additionalProperties:false — a wrong example
+  // body here 422s every stranger who follows the discovery doc. This
+  // shipped as {roomSlug} and burned a real newcomer (RC-2026-09-28-3410
+  // fixed the gate's diagnosis; this guards the doc that caused it).
+  const body = skillMd();
+  const step4 = body.slice(body.indexOf("## Step 4"));
+  assert.ok(step4.length > 0, "Step 4 exists");
+  assert.ok(step4.includes("POST") && step4.includes("/api/access-requests"), "Step 4 names the route");
+  for (const field of ["roomId", "identityId", "displayName", "requestedPermissions"]) {
+    assert.ok(step4.includes(`"${field}"`), `Step 4 example names ${field}`);
+  }
+  assert.ok(!body.includes("roomSlug"), "no roomSlug anywhere in the skill");
+});
+
+test("agent card muse-room skill teaches the access-request POST body (plugin-discovery-lane3)", () => {
+  // A machine client reading only /.well-known/agent-card.json must be able
+  // to construct the access-request POST without fetching openapi.json.
+  const skill = agentCard().skills.find(s => s.id === "muse-room");
+  assert.ok(skill, "muse-room skill exists");
+  for (const field of ["roomId", "identityId", "displayName", "requestedPermissions"]) {
+    assert.ok(skill.description.includes(field), `muse-room skill names ${field}`);
+  }
 });

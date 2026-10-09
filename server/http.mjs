@@ -3100,9 +3100,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         });
       }
       // POST-only route: a wrong method is 405 (Allow: POST), not a 404
-      // unknown-route, so a mistaken GET reads as a method error.
+      // unknown-route. A stranger probing with GET learns the POST contract
+      // here instead of a bare method error: the generic envelope's next[]
+      // hints assume MCP tools the stranger does not have yet.
       if (url.pathname === "/api/access-requests" && req.method !== "POST") {
-        reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
+        reject(405, "method_not_allowed",
+          "Method not allowed: request access with POST /api/access-requests and body {roomId, identityId, displayName, requestedPermissions} (optional note, referredBy, requestId); see /openapi.json",
+          { Allow: "POST" });
       }
       // Agent room ownership, self-serve path: a self-minted identity
       // creates a room and becomes its owner. The pri_ secret travels in

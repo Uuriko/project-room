@@ -174,3 +174,19 @@ test("access-requests still accepts the legacy 6- and 7-field shapes (RC-2026-09
     assert.equal(res.status, 201, `${label} shape still files`);
   }
 });
+
+test("access-requests GET 405 teaches the POST contract (plugin-discovery-lane3)", async t => {
+  // A stranger probing the route with the wrong method should learn the
+  // POST body shape, not a bare "Method not allowed": the generic error
+  // envelope's next[] hints (room_check_access, room_list_work) assume MCP
+  // tools the stranger does not have yet.
+  const fixture = createAcceptanceFixture();
+  const origin = await startServer(t, fixture);
+  const res = await get(origin, "/api/access-requests");
+  assert.equal(res.status, 405);
+  assert.equal(res.headers.get("allow"), "POST");
+  const json = await res.json();
+  for (const field of ["roomId", "identityId", "displayName", "requestedPermissions"]) {
+    assert.ok(json.error.message.includes(field), `405 teaches ${field}`);
+  }
+});
