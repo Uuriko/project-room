@@ -49,8 +49,25 @@ test("every additive schema step in the full pass is part of the warm-wake stamp
   const ensureList = source.slice(source.indexOf("const ADDITIVE_SCHEMA_ENSURES"), source.indexOf("];", source.indexOf("const ADDITIVE_SCHEMA_ENSURES")));
   assert.ok(ensureList.length > 0, "ADDITIVE_SCHEMA_ENSURES is missing");
   const pass = source.slice(source.indexOf("const stampMatches ="), source.indexOf("schemaStampMatches() {"));
-  const ensures = [...new Set([...pass.matchAll(/\b(ensure\w+Schema)\(this\.db\)/g)].map(m => m[1]))];
-  const execs = [...new Set([...pass.matchAll(/this\.db\.exec\(([A-Za-z_][A-Za-z0-9_]*)\)/g)].map(m => m[1]))];
+  // The schema pass applies DDL through several call shapes: direct
+  // ensure*Schema(this.db) calls, the ensure loop, direct
+  // this.db.exec(SCHEMA) calls, execSchemas(this.db, [...]) groups, the
+  // version-gated [minVersion, schema] loop, and
+  // convergeJournalSchema(this.db, journal, SCHEMA).
+  const identifiers = text => [...text.matchAll(/\b([A-Za-z_][A-Za-z0-9_]*)\b/g)].map(m => m[1]);
+  const ensures = [...new Set([
+    ...[...pass.matchAll(/\b(ensure\w+Schema)\(this\.db\)/g)].map(m => m[1]),
+    ...[...pass.matchAll(/for \(const ensureSchema of \[([\s\S]*?)\]\) ensureSchema\(this\.db\)/g)]
+      .flatMap(m => identifiers(m[1]).filter(n => /^ensure\w+Schema$/.test(n))),
+  ])];
+  const execs = [...new Set([
+    ...[...pass.matchAll(/this\.db\.exec\(([A-Za-z_][A-Za-z0-9_]*)\)/g)].map(m => m[1]),
+    ...[...pass.matchAll(/execSchemas\(this\.db, \[([\s\S]*?)\]\)/g)]
+      .flatMap(m => identifiers(m[1]).filter(n => /schema$/i.test(n))),
+    ...[...pass.matchAll(/for \(const \[minVersion, schema\] of \[([\s\S]*?)\]\)/g)]
+      .flatMap(m => identifiers(m[1]).filter(n => /schema$/i.test(n))),
+    ...[...pass.matchAll(/convergeJournalSchema\(this\.db, [^,]+, ([A-Za-z_][A-Za-z0-9_]*)\)/g)].map(m => m[1]),
+  ])];
   assert.ok(ensures.length >= 5 && execs.length >= 5, "schema pass not found");
   const missingEnsures = ensures.filter(name => !new RegExp(`\\b${name}\\b`).test(ensureList));
   const missingDdl = execs.filter(name => !new RegExp(`\\b${name}\\b`).test(stampFn));
@@ -71,7 +88,7 @@ const SOURCE_PINS = {
   "ensureOperatorActionsSchema@1": "766e8f9fed79c6e6",
   "ensureGrantsSchema@1": "fe4b311a64923973",
   "ensureSpendGrantsSchema@1": "b4661b0ef05d5593",
-  "ensureAccountProfileSchema@1": "3fb6bfb33febc621",
+  "ensureAccountProfileSchema@2": "d418a36012ca5307",
   "ensureVerifiedEmailSchema@1": "a8321ba9d34e6ad4",
   "ensureAttachmentSchema@1": "3189ca5ebea7bf33"
 };

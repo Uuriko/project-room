@@ -1047,7 +1047,7 @@ export const ADDITIVE_SCHEMA_ENSURES = [
   [ensureOperatorActionsSchema, "ensureOperatorActionsSchema@1"],
   [ensureGrantsSchema, "ensureGrantsSchema@1"],
   [ensureSpendGrantsSchema, "ensureSpendGrantsSchema@1"],
-  [ensureAccountProfileSchema, "ensureAccountProfileSchema@1"],
+  [ensureAccountProfileSchema, "ensureAccountProfileSchema@2"],
   [ensureVerifiedEmailSchema, "ensureVerifiedEmailSchema@1"],
   [ensureAttachmentSchema, "ensureAttachmentSchema@1"]
 ];
@@ -1241,8 +1241,8 @@ export class RoomStore {
     this.telegramLiveStatus = new DurableTelegramLiveStatus(this); // Task 10: durable live-delivery/send facts.
     this.spamQuarantine = new SpamQuarantineJournal(this); // Durable spam-guard quarantine journal (PR #554 queue, now restart-safe).
     this.jevShadow = new JevShadowJournal(this); // Jev-harness shadow-decision journal (docs/JEV-GATES.md): append-only measurement, never enforced.
-this.quarantineSplits = new QuarantineThreadSplits(this); // Thread-split records for the quarantine review UI (owner "split" action).
-this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-app sink for SLA-breach deliver.
+    this.quarantineSplits = new QuarantineThreadSplits(this); // Thread-split records for the quarantine review UI (owner "split" action).
+    this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-app sink for SLA-breach deliver.
     this.handoffs = new InboxHandoffJournal(this); // Task 23: durable agent handoff journal.
     this.handoffEnvelopes = new HandoffEnvelopeJournal(this); // RC-2026-09-19-062: typed handoff envelope journal.
     this.collab = new InboxCollabStore(this); // Lane C inbox collaboration journals (task RC-2026-09-18-011).
@@ -1279,19 +1279,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.verifyInvitationAudit();
         this.shareLinks.verify();
         this.reminders.verifySchema();
-        // Wake queue (W4-45) and attention preference (W4-46) tables are purely
-        // additive at v27, so a backup taken before them is still a valid v27
-        // file. Read-only never migrates, so verify them only when present.
-        this.wakeQueue.verifySchema({ allowAbsent: true });
-        this.requestRuns.verifySchema({ allowAbsent: true });
+        // Additive journals: read-only never migrates, so verify them only
+        // when present. (W4-45 wake queue, W4-48 pause surface, W4-46
+        // attention prefs, RC-2026-09-25-911 next-action dismissals.)
+        for (const journal of [this.wakeQueue, this.requestRuns]) journal.verifySchema({ allowAbsent: true });
         this.wakeQueue.verifyPauseSchema({ allowAbsent: true });
-        this.attention.verifySchema({ allowAbsent: true });
-        this.workClaims.verifySchema({ allowAbsent: true });
-        this.publicWorkClaims.verifySchema({ allowAbsent: true });
-        this.publicWorkReviews.verifySchema({ allowAbsent: true });
-        this.publicWorkSuccessors.verifySchema({ allowAbsent: true });
+        for (const journal of [this.attention, this.workClaims, this.publicWorkClaims, this.publicWorkReviews, this.publicWorkSuccessors, this.nextActions]) journal.verifySchema({ allowAbsent: true });
         verifyPublicWorkClaimFence(this.db, { allowAbsent: true });
-        this.nextActions.verifySchema({ allowAbsent: true }); // RC-2026-09-25-911: next-action tables additive, read-only never migrates.
         this.agentConnections.verify();
         this.verifyHelpHistory();
         this.inbox.verify();
@@ -1301,25 +1295,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.inbox.stitcher.verifySchema({ allowAbsent: true });
         this.email.verify();
         this.delegationJournal.verify({ allowAbsent: true });
-        // The webhook update journal (B20) is purely additive at v27, so a
-        // backup taken before it is still a valid v27 file; read-only never
-        // migrates, so verify it only when present.
-        this.channelUpdates.verifySchema({ allowAbsent: true });
-        this.handoffs.verifySchema({ allowAbsent: true }); // Task 23: purely additive, like the channel journal.
-        this.handoffEnvelopes.verifySchema({ allowAbsent: true }); // RC-2026-09-19-062: typed envelopes additive, read-only never migrates.
-        this.collab.verifySchema({ allowAbsent: true }); // Lane C collab tables: purely additive, read-only never migrates.
-        this.agentPlugin.verifySchema({ allowAbsent: true }); // Lane D plug-in tables: additive, read-only never migrates.
-        this.workWakes.verifySchema({ allowAbsent: true }); // Opt-in work delivery tables additive, read-only never migrates.
-        this.agentHeartbeats.verifySchema({ allowAbsent: true }); // RC-2026-09-18-051: heartbeat tables additive, read-only never migrates.
-        this.inboxAttachments.verifySchema({ allowAbsent: true }); // Identity inbox attachment bytes: additive, read-only never migrates.
-        this.guestInvites.verifySchema({ allowAbsent: true }); // RC-2026-09-23-100: guest-invite tables additive, read-only never migrates.
+        // Purely additive journals (B20 channel journal, task-23 handoffs,
+        // RC-2026-09-19-062 typed envelopes, lane C collab, lane D plug-ins,
+        // opt-in work delivery, RC-2026-09-18-051 heartbeats, identity inbox
+        // attachments, RC-2026-09-23-100 guest invites, RC-2026-09-23-102
+        // web-fetch, RC-2026-09-24-310 research journal, quarantine thread
+        // splits): read-only never migrates, so verify only when present.
+        for (const journal of [this.channelUpdates, this.handoffs, this.handoffEnvelopes, this.collab, this.agentPlugin, this.workWakes, this.agentHeartbeats, this.inboxAttachments, this.guestInvites, this.webFetch, this.webResearch, this.quarantineSplits]) journal.verifySchema({ allowAbsent: true });
         this.guestInvites.verifySelfServeSchema({ allowAbsent: true }); // RC-2026-09-25-912: self-serve seats + idempotency records, additive, read-only never migrates.
-        this.webFetch.verifySchema({ allowAbsent: true }); // RC-2026-09-23-102: web-fetch cache/journal additive, read-only never migrates.
-        this.webResearch.verifySchema({ allowAbsent: true }); // RC-2026-09-24-310: research journal additive, read-only never migrates.
-        this.quarantineSplits.verifySchema({ allowAbsent: true }); // Quarantine thread splits: additive, read-only never migrates.
         verifyRoomLifecycle(this);
-        this.moderation.verifySchema({ allowAbsent: true }); // E4 message reports: additive at v27 as well.
-        this.bountyEscrow.verifySchema({ allowAbsent: true }); // Escrowed bounties: additive, read-only never migrates.
+        // E4 message reports and escrowed bounties: additive, read-only never migrates.
+        for (const journal of [this.moderation, this.bountyEscrow]) journal.verifySchema({ allowAbsent: true });
         logColdStart(coldStart, this.db, false);
         return;
       } catch (error) { logColdStart(coldStart, this.db, error); this.db.close(); throw error; }
@@ -1562,24 +1548,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // room schema stamp already hashes shareLinkSchema, so deferred wakes
       // re-run this block too.
       this.db.exec(shareLinkSchema);
-      // #658: mention lifecycle tracking. Purely additive side tables (no
-      // events, no projection impact): IF NOT EXISTS is idempotent, no
-      // schema version bump, intentionally outside the writer fence.
-      this.db.exec(mentionStateSchema);
-      // Attention (mark unread / save for later / activity feed): purely
-      // additive side tables (no events, no projection impact): IF NOT
+      // Purely additive side tables (no events, no projection impact): IF NOT
       // EXISTS is idempotent, no schema version bump, intentionally outside
-      // the writer fence.
-      this.db.exec(activitySchema);
-      // Per-thread mutes. Purely additive side table (no events, no
-      // projection impact): IF NOT EXISTS is idempotent, no schema version
-      // bump, intentionally outside the writer fence. DDL matches the
-      // attention slice's table so the two converge on merge.
-      this.db.exec(threadMutesSchema);
-      // Squads (plan-squads). Purely additive side table (no events, no
-      // projection impact): IF NOT EXISTS is idempotent, no schema version
-      // bump, registered in writer-fence unfencedAdditiveTables.
-      this.db.exec(squadSchema);
+      // the writer fence (squads registered in unfencedAdditiveTables; the
+      // thread-mutes DDL matches the attention slice's table so the two
+      // converge on merge) — #658 mention lifecycle tracking, attention (mark
+      // unread / save for later / activity feed), per-thread mutes, and
+      // plan-squads.
+      execSchemas(this.db, [mentionStateSchema, activitySchema, threadMutesSchema, squadSchema]);
       // Human browser push subscriptions. Purely additive side tables (no
       // events, no projection impact): IF NOT EXISTS is idempotent, no
       // schema version bump, intentionally outside the writer fence.
@@ -1595,12 +1571,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // existing databases via ALTER TABLE; old rows backfill NULL and keep
       // reading as { accountId: null, sourceId: null }.
       migrateSpamQuarantineColumns(this.db);
-// Quarantine thread-split records are purely additive as well:
-      // IF NOT EXISTS is idempotent, no schema version bump, and the table is
-      // intentionally outside the writer fence (see unfencedAdditiveTables).
-      this.db.exec(quarantineThreadSplitSchema);
-// The SLA-breach alert journal (task 26) follows the same additive pattern:
-      this.db.exec(slaBreachAlertSchema);
+      // Quarantine thread-split records and the task-26 SLA-breach alert
+      // journal: purely additive, IF NOT EXISTS is idempotent, no schema
+      // version bump, intentionally outside the writer fence (see
+      // unfencedAdditiveTables).
+      execSchemas(this.db, [quarantineThreadSplitSchema, slaBreachAlertSchema]);
       // The agent handoff journal (task 23) follows the same additive pattern:
       // IF NOT EXISTS is idempotent, no schema version bump, and the table is
       // intentionally outside the writer fence (see unfencedAdditiveTables).
@@ -1656,27 +1631,21 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // attribution): converge deployed databases that predate the column.
       addColumnIfMissing(this.db, "access_requests", "referred_by", "TEXT");
       // Owner-granted membership administration for agent identities
-      // (RC-2026-09-18-038): purely additive, intentionally outside the
-      // writer fence like access_requests — older writers have no code path
-      // to the table, and the grant journal's grant→revoke transitions plus
-      // the owner-only grant rule are the integrity gate.
-      this.db.exec(membershipDelegationSchema);
-      // Owner delegates (server/owner-delegates.mjs): persisted per-room
-      // grants. Purely additive, intentionally outside the writer fence like
-      // membership_delegation_grants above — older writers have no code path
-      // to the tables, and the owner-only grant rule is the integrity gate.
-      this.db.exec(ownerDelegateSchema);
+      // (RC-2026-09-18-038) and persisted per-room owner grants: purely
+      // additive, intentionally outside the writer fence like access_requests
+      // — older writers have no code path to the tables, and the owner-only
+      // grant rule is the integrity gate.
+      execSchemas(this.db, [membershipDelegationSchema, ownerDelegateSchema]);
       const hadDelegationJournal = !!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='membership_delegation_journal'").get();
       this.db.exec(membershipDelegationJournalSchema);
       if (!hadDelegationJournal) this.delegationJournal.baseline();
       const rollbackChanges = this.delegationJournal.reconcileRollback();
       if (rollbackChanges) console.warn(`Imported ${rollbackChanges} unattributed membership-delegation changes from a rollback-era writer`);
-      this.db.exec(agentRoomSchema);
-      // Multi-method login tables (slice 1): purely additive, intentionally
-      // outside the writer fence like access_requests above — older writers
-      // have no code path to them, and method rows are always scoped to an
-      // existing account.
-      this.db.exec(accountLoginMethodsSchema);
+      // Agent rooms and multi-method login tables (slice 1): purely
+      // additive, intentionally outside the writer fence like access_requests
+      // above — older writers have no code path to them, and method rows are
+      // always scoped to an existing account.
+      execSchemas(this.db, [agentRoomSchema, accountLoginMethodsSchema]);
       // ID-SEC: verified email, the password-reset banner, and the security
       // event journal. Additive and unfenced, same as the login-method tables.
       ensureVerifiedEmailSchema(this.db);
@@ -1697,53 +1666,40 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       ensurePayoutColumns(this.db);
       ensureGrowthFundingColumn(this.db);
       this.requestRuns.verifySchema();
-      // Direct channel-send journal: purely additive, intentionally outside
-      // the writer fence (see unfencedAdditiveTables). Applied here (not only in
-      // createRoomServer) so store-only fixtures and the recovery audit see it.
-      this.db.exec(directSendSchema);
-      // Cross-channel thread stitching (task #19): hash-only identity index.
-      // Purely additive, intentionally outside the writer fence like the
-      // journals above — older writers have no code path to these tables.
-      this.db.exec(inboxStitchSchema);
+      // Purely additive, intentionally outside the writer fence (older
+      // writers have no code path to these tables): the direct channel-send
+      // journal and the task-#19 cross-channel thread-stitching hash index.
+      execSchemas(this.db, [directSendSchema, inboxStitchSchema]);
       ensureAttachmentSchema(this.db); // Converge the deployed v28-v33 attachment lineage before installing v34 fences.
-      // MSG-1: fenced messages table (schema v37). The table has to exist
-      // before installWriterFence attaches the v37 triggers. IF NOT EXISTS
-      // is idempotent. A warm wake whose stamp matches skips this block.
-      this.db.exec(MESSAGES_SCHEMA);
+      // Idempotent additive DDL (every one is hashed into the room schema
+      // stamp, so a warm wake skips this block): MSG-1 fenced messages table
+      // (schema v37 — must exist before installWriterFence attaches the v37
+      // triggers), the MSG-2 replay cursor (unfenced; the integrity cron
+      // fills it), the BOARD-WAKE-2 opt-in ready-work preference (unfenced,
+      // empty until an agent opts in), code-drop patch metadata + review
+      // checks (unfenced; the bytes stay in room_attachments), and phase-1a
+      // content-addressed message bodies (released by trigger when the
+      // projection stops referencing them).
+      execSchemas(this.db, [MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, WANTS_WORK_SCHEMA, CODE_DROPS_SCHEMA, PROJECTION_BODIES_SCHEMA]);
       // v38 preserves complete current message records. Existing rows remain
       // null until the budgeted replay fills them; never scan history on open.
       addColumnIfMissing(this.db, "messages", "record_json", "TEXT");
-      // MSG-2: replay cursor. Unfenced. The integrity cron fills it. A warm
-      // wake whose stamp matches skips this block; the stamp includes this DDL.
-      this.db.exec(MESSAGES_BACKFILL_CURSOR_SCHEMA);
+      // MSG-2: existing rows predate the cursor; restart the replay.
       if (version > 0 && version < 38) {
         this.db.prepare("DELETE FROM messages_backfill_cursor").run();
       }
-      // BOARD-WAKE-2: opt-in ready-work preference. Unfenced, empty until an
-      // agent opts in. The stamp includes this DDL.
-      this.db.exec(WANTS_WORK_SCHEMA);
-      // Code drops: patch metadata and review checks. Unfenced and additive;
-      // the bytes stay in room_attachments. The stamp includes this DDL.
-      this.db.exec(CODE_DROPS_SCHEMA);
-      // Phase 1a: message bodies at rest, content-addressed, released by a
-      // trigger when the projection stops referencing them. The stamp
-      // includes this DDL.
-      this.db.exec(PROJECTION_BODIES_SCHEMA);
       // Idempotent: recreates fences for tables the additive schemas just
       // (re)created, and refuses a file whose existing triggers drifted.
       phase("fence");
       this.storagePlatform.installWriterFence(this.db);
       this.storagePlatform.verifyWriterFence(this.db);
-      this.db.exec(INTEGRITY_SNAPSHOT_SCHEMA);
-      this.db.exec(INTEGRITY_JOB_CURSOR_SCHEMA);
+      execSchemas(this.db, [INTEGRITY_SNAPSHOT_SCHEMA, INTEGRITY_JOB_CURSOR_SCHEMA]);
       this.ensureIntegrityRoomState();
       if (!deferIntegrity) this.verifyInvitationAudit();
-      this.reminders.verifySchema();
-      this.wakeQueue.verifySchema();
+      // Journals verified on every eager open (escrow bounties additive at v36).
+      for (const journal of [this.reminders, this.wakeQueue]) journal.verifySchema();
       this.wakeQueue.verifyPauseSchema();
-      this.attention.verifySchema();
-      this.moderation.verifySchema();
-      this.bountyEscrow.verifySchema(); // Escrowed bounties: additive at v36, verified like the other journals.
+      for (const journal of [this.attention, this.moderation, this.bountyEscrow]) journal.verifySchema();
       // A lease whose holder died with the process is expired back to pending
       // here, so a restart preserves the intent exactly once (W4-45 done-when).
       if (!this.readOnly) this.wakeQueue.recover(this.now());
@@ -1755,12 +1711,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Deferred opens (the Durable Object) replay these on the integrity
       // cron, in batches. An eager open still checks them before serving.
       if (!deferIntegrity) {
-        this.shareLinks.verify();
-        this.agentConnections.verify();
-        this.inbox.verify();
-        this.email.verify();
-        this.channelUpdates.verify();
-        this.quarantineSplits.verify();
+        for (const journal of [this.shareLinks, this.agentConnections, this.inbox, this.email, this.channelUpdates, this.quarantineSplits]) journal.verify();
         verifyRoomLifecycle(this);
         if (!this.readOnly) this.identities.expireInactive();
       }
