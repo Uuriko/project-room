@@ -8418,6 +8418,133 @@ paths:
       responses:
         '200': { description: Response headers only }
         '503': { description: Response headers only }
+  /api/wiki/procedures:
+    get:
+      summary: Embedded procedure docs
+      description: >-
+        Open (also HEAD). Read-only embedded repo docs (procedures, experience
+        log, runbooks) served prefix-delegated by server/wiki-read-api.mjs.
+        No store, no writes, no network. `{ procedures, count }`.
+      security: []
+      responses:
+        '200': { description: "{ procedures, count }" }
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      responses:
+        '200': { description: Response headers only }
+  /api/wiki/procedures/{id}:
+    get:
+      summary: Single embedded procedure doc
+      description: >-
+        Open (also HEAD). `{ id, title, body, source }`. Unknown or malformed
+        id -> 404 not_found.
+      security: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: "{ id, title, body, source }" }
+        '404': { description: "{ code: not_found }" }
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      responses:
+        '200': { description: Response headers only }
+        '404': { description: Response headers only }
+  /api/wiki/entries:
+    get:
+      summary: Embedded experience-log entries
+      description: >-
+        Open (also HEAD). Paginated experience-log entries.
+        `{ entries, count, total, limit, offset }`. Query params limit
+        (default 20, 1-100) and offset (default 0).
+      security: []
+      parameters:
+        - { name: limit, in: query, required: false, schema: { type: integer, default: 20 } }
+        - { name: offset, in: query, required: false, schema: { type: integer, default: 0 } }
+      responses:
+        '200': { description: "{ entries, count, total, limit, offset }" }
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      responses:
+        '200': { description: Response headers only }
+  /api/wiki/entries/{id}:
+    get:
+      summary: Single experience-log entry
+      description: >-
+        Open (also HEAD). `{ id, date, slice, agent, tried, outcome, lesson,
+        rejected }`. Unknown or malformed id -> 404 not_found.
+      security: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: "{ id, date, slice, agent, tried, outcome, lesson, rejected }" }
+        '404': { description: "{ code: not_found }" }
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      responses:
+        '200': { description: Response headers only }
+        '404': { description: Response headers only }
+  /api/wiki/runbooks:
+    get:
+      summary: Embedded runbooks index
+      description: Open (also HEAD). `{ runbooks, count }` (id, title, path summaries).
+      security: []
+      responses:
+        '200': { description: "{ runbooks, count }" }
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      responses:
+        '200': { description: Response headers only }
+  /api/wiki/runbooks/{id}:
+    get:
+      summary: Single embedded runbook
+      description: >-
+        Open (also HEAD). `{ id, title, path, body }`. Unknown or malformed
+        id -> 404 not_found.
+      security: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: "{ id, title, path, body }" }
+        '404': { description: "{ code: not_found }" }
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      responses:
+        '200': { description: Response headers only }
+        '404': { description: Response headers only }
+  /api/wiki/search:
+    get:
+      summary: Search embedded docs
+      description: >-
+        Open (also HEAD). Full-text search across procedures, entries, and
+        runbooks. Query param q is required (max 200 chars); limit defaults
+        to 20 (1-100). `{ query, procedures, entries, runbooks, count }`.
+        Missing/blank q -> 400 bad_request; q over 200 chars -> 400 bad_request.
+      security: []
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string, maxLength: 200 } }
+        - { name: limit, in: query, required: false, schema: { type: integer, default: 20 } }
+      responses:
+        '200': { description: "{ query, procedures, entries, runbooks, count }" }
+        '400': { description: "{ code: bad_request }" }
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      responses:
+        '200': { description: Response headers only }
+        '400': { description: Response headers only }
   /api/guest-invites:
     get:
       x-consumer: agent-api
