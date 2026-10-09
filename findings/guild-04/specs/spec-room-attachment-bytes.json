@@ -1,0 +1,44 @@
+{
+  "cwd": "/home/hatch/workspace/pr-wave1000-guild-04",
+  "file": "server/room-attachment-bytes.mjs",
+  "mutants": [
+    {
+      "count": 1,
+      "desc": "drop file-bytes cap check (unlimited stage size)",
+      "id": "A1",
+      "pattern": "if \\(bytes\\.length > attachmentLimits\\.fileBytes\\) fail\\(413, \"attachment_too_large\", \"File exceeds the room attachment size limit\"\\);",
+      "repl": ""
+    },
+    {
+      "count": 1,
+      "desc": "drop guest denial on stage() (guests can stage files)",
+      "id": "A2",
+      "pattern": "fail\\(403, \"guest_scope_denied\", \"Guest members cannot stage room files\"\\);",
+      "repl": ""
+    },
+    {
+      "count": 1,
+      "desc": "discard conflict check inverted (throws on success)",
+      "id": "A3",
+      "pattern": "if \\(changed !== 1\\) fail\\(409, \"attachment_conflict\", \"That attachment changed before it could be discarded\"\\);",
+      "repl": "if (changed !== 0) fail(409, \"attachment_conflict\", \"That attachment changed before it could be discarded\");"
+    },
+    {
+      "count": 1,
+      "desc": "drop executable blocklist check (BLOCKED_MEDIA_TYPES bypassed)",
+      "id": "A4",
+      "pattern": "BLOCKED_MEDIA_TYPES\\.has\\(type\\) \\|\\| ",
+      "repl": ""
+    },
+    {
+      "count": 1,
+      "desc": "expiry boundary off-by-one (<= -> <)",
+      "id": "A5",
+      "pattern": "expires_at<=\\?",
+      "repl": "expires_at<?"
+    }
+  ],
+  "tests": [
+    "tests/room-mcp-inbox-attachments.test.js"
+  ]
+}

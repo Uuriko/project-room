@@ -1,0 +1,44 @@
+{
+  "cwd": "/home/hatch/workspace/pr-wave1000-guild-04",
+  "file": "server/room-key-presence.mjs",
+  "mutants": [
+    {
+      "count": 1,
+      "desc": "auth check inverted (legit room-key agents refused)",
+      "id": "K1",
+      "pattern": "auth\\.credentialScope !== \"room\" \\|\\| auth\\.kind !== \"access\" \\|\\| auth\\.member\\?\\.kind !== \"agent\"",
+      "repl": "auth.credentialScope === \"room\" || auth.kind === \"access\" || auth.member?.kind === \"agent\""
+    },
+    {
+      "count": 1,
+      "desc": "single-room linkage weakened to <1 (multi-room identities pass)",
+      "id": "K2",
+      "pattern": "if \\(rooms\\.length !== 1 \\|\\| rooms\\[0\\]\\.roomId !== auth\\.roomId \\|\\| rooms\\[0\\]\\.memberId !== auth\\.member\\.id\\)",
+      "repl": "if (rooms.length < 1 || rooms[0].roomId !== auth.roomId || rooms[0].memberId !== auth.member.id)"
+    },
+    {
+      "count": 1,
+      "desc": "pull-only check inverted (refuses pull-only, allows wake URLs)",
+      "id": "K3",
+      "pattern": "data\\.wakeUrl != null",
+      "repl": "data.wakeUrl == null"
+    },
+    {
+      "count": 1,
+      "desc": "hostId length cap off-by-one (128 -> 129)",
+      "id": "K4",
+      "pattern": "/\\^\\[A-Za-z0-9\\._-\\]\\{1,128\\}\\$/",
+      "repl": "/^[A-Za-z0-9._-]{1,129}$/"
+    },
+    {
+      "count": 1,
+      "desc": "host id hash truncation 48 -> 47 chars",
+      "id": "K5",
+      "pattern": "\\.digest\\(\"hex\"\\)\\.slice\\(0, 48\\)",
+      "repl": ".digest(\"hex\").slice(0, 47)"
+    }
+  ],
+  "tests": [
+    "tests/room-key-heartbeat.test.js"
+  ]
+}

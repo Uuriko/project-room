@@ -1,0 +1,44 @@
+{
+  "cwd": "/home/hatch/workspace/pr-wave1000-guild-04",
+  "file": "server/room-context.mjs",
+  "mutants": [
+    {
+      "count": 1,
+      "desc": "reject sequence 0 (< 0 -> <= 0)",
+      "id": "C1",
+      "pattern": "sequence < 0",
+      "repl": "sequence <= 0"
+    },
+    {
+      "count": 1,
+      "desc": "superseded filter || -> && (superseded sessions leak into live)",
+      "id": "C2",
+      "pattern": "if \\(item\\.supersededBy \\|\\| item\\.state === \"superseded\"\\) continue;",
+      "repl": "if (item.supersededBy && item.state === \"superseded\") continue;"
+    },
+    {
+      "count": 1,
+      "desc": "liveSessions sort comparator flipped (descending)",
+      "id": "C3",
+      "pattern": "rows\\.sort\\(\\(a, b\\) => a\\.workItemId < b\\.workItemId \\? -1 : a\\.workItemId > b\\.workItemId \\? 1 : 0\\);",
+      "repl": "rows.sort((a, b) => a.workItemId < b.workItemId ? 1 : a.workItemId > b.workItemId ? -1 : 0);"
+    },
+    {
+      "count": 1,
+      "desc": "haltAll === true -> !== true (handoff halt flag inverted)",
+      "id": "C4",
+      "pattern": "haltAll: handoff\\.haltAll === true,",
+      "repl": "haltAll: handoff.haltAll !== true,"
+    },
+    {
+      "count": 1,
+      "desc": "canonical hash loses key sort (context_version unstable)",
+      "id": "C5",
+      "pattern": "Object\\.keys\\(value\\)\\.sort\\(\\)",
+      "repl": "Object.keys(value)"
+    }
+  ],
+  "tests": [
+    "tests/room-context.test.js"
+  ]
+}

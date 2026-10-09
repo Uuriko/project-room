@@ -1,0 +1,37 @@
+{
+  "cwd": "/home/hatch/workspace/pr-wave1000-guild-04",
+  "file": "server/room-activation-pack.mjs",
+  "mutants": [
+    {
+      "count": 1,
+      "desc": "blocked work hidden from activation pack (dropped from OPEN set)",
+      "id": "P1",
+      "pattern": "WORK_STATES\\.ACCEPTED, WORK_STATES\\.WORKING, WORK_STATES\\.BLOCKED",
+      "repl": "WORK_STATES.ACCEPTED, WORK_STATES.WORKING"
+    },
+    {
+      "count": 1,
+      "desc": "claim expiry boundary flipped (> -> >=)",
+      "id": "P2",
+      "pattern": "Date\\.parse\\(claim\\.expiresAt\\) > Date\\.parse\\(nowIso\\) \\? \"active\" : \"expired\"",
+      "repl": "Date.parse(claim.expiresAt) >= Date.parse(nowIso) ? \"active\" : \"expired\""
+    },
+    {
+      "count": 1,
+      "desc": "drop pin visibility filter (pins leak to unauthorized viewers)",
+      "id": "P3",
+      "pattern": "\\.filter\\(pin => messageVisibleToViewer\\(pin\\.message, viewerId, floor\\)\\)",
+      "repl": ""
+    },
+    {
+      "count": 1,
+      "desc": "coordinationNorms shared mutable reference (drop per-pack copy)",
+      "id": "P4",
+      "pattern": "coordinationNorms: \\{ \\.\\.\\.COORDINATION_NORMS \\},",
+      "repl": "coordinationNorms: COORDINATION_NORMS,"
+    }
+  ],
+  "tests": [
+    "tests/room-activation-pack.test.js"
+  ]
+}

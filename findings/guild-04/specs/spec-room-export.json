@@ -1,0 +1,44 @@
+{
+  "cwd": "/home/hatch/workspace/pr-wave1000-guild-04",
+  "file": "server/room-export.mjs",
+  "mutants": [
+    {
+      "count": 1,
+      "desc": "torn-export check inverted (throws on GOOD exports)",
+      "id": "E1",
+      "pattern": "rows\\.length !== trailer\\.events",
+      "repl": "rows.length === trailer.events"
+    },
+    {
+      "count": 1,
+      "desc": "drop canonical-base64 BLOB check on replay",
+      "id": "E2",
+      "pattern": "if \\(bytes\\.toString\\(\"base64\"\\) !== value\\.\\$base64\\) throw new Error\\(\"Export BLOB cell is not canonical base64\"\\);",
+      "repl": ""
+    },
+    {
+      "count": 1,
+      "desc": "byte-integrity check inverted (throws when bytes MATCH sha256)",
+      "id": "E3",
+      "pattern": "sha256Hex\\(row\\.bytes\\) !== row\\.sha256",
+      "repl": "sha256Hex(row.bytes) === row.sha256"
+    },
+    {
+      "count": 1,
+      "desc": "drop SQL identifier validation (quoteIdent passthrough)",
+      "id": "E4",
+      "pattern": "if \\(!IDENT\\.test\\(name\\)\\) throw new Error\\(\"Export names a table or column this store will not write\"\\);",
+      "repl": ""
+    },
+    {
+      "count": 1,
+      "desc": "operator auth: timingSafeEqual -> === (timing side channel)",
+      "id": "E5",
+      "pattern": "return timingSafeEqual\\(Buffer\\.from\\(actual\\), Buffer\\.from\\(wanted\\)\\) \\? \"ok\" : \"denied\";",
+      "repl": "return actual === wanted ? \"ok\" : \"denied\";"
+    }
+  ],
+  "tests": [
+    "tests/room-export.test.js"
+  ]
+}

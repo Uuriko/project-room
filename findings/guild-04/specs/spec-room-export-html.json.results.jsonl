@@ -1,0 +1,5 @@
+{"id": "H1", "desc": "message body unescaped in HTML (stored XSS)", "status": "TIMEOUT-HANG", "detail": "test run exceeded timeout \u2014 possible hang introduced"}
+{"id": "H2", "desc": "safeEvidenceHref allows http: (was https-only)", "status": "TIMEOUT-HANG", "detail": "test run exceeded timeout \u2014 possible hang introduced"}
+{"id": "H3", "desc": "deleted message body kept (tombstone leaks text)", "status": "TIMEOUT-HANG", "detail": "test run exceeded timeout \u2014 possible hang introduced"}
+{"id": "H4", "desc": "attr() unescaped (attribute injection)", "status": "TIMEOUT-HANG", "detail": "test run exceeded timeout \u2014 possible hang introduced"}
+{"id": "H5", "desc": "drop CSP meta tag from exported document", "status": "TIMEOUT-HANG", "detail": "test run exceeded timeout \u2014 possible hang introduced"}

@@ -1,0 +1,44 @@
+{
+  "cwd": "/home/hatch/workspace/pr-wave1000-guild-04",
+  "file": "server/work-claim-sqlite.mjs",
+  "mutants": [
+    {
+      "count": 1,
+      "desc": "delete(): dependency-waive filter inverted (keeps only deleted dep)",
+      "id": "W1",
+      "pattern": "\\.filter\\(dep => dep !== id\\)",
+      "repl": ".filter(dep => dep === id)"
+    },
+    {
+      "count": 1,
+      "desc": "drop title??id fallback on decode",
+      "id": "W2",
+      "pattern": "if \\(item\\.title == null\\) item\\.title = item\\.id;",
+      "repl": ""
+    },
+    {
+      "count": 1,
+      "desc": "upsert DO UPDATE -> DO NOTHING (claim updates silently lost)",
+      "id": "W3",
+      "pattern": "DO UPDATE SET item_json=excluded\\.item_json, updated_at=excluded\\.updated_at",
+      "repl": "DO NOTHING"
+    },
+    {
+      "count": 1,
+      "desc": "list() order reversed (rowid DESC)",
+      "id": "W4",
+      "pattern": "ORDER BY rowid ASC",
+      "repl": "ORDER BY rowid DESC"
+    },
+    {
+      "count": 1,
+      "desc": "wrong default claim state (claimed instead of unclaimed)",
+      "id": "W5",
+      "pattern": "state: \"unclaimed\"",
+      "repl": "state: \"claimed\""
+    }
+  ],
+  "tests": [
+    "tests/work-claim-sqlite.test.js"
+  ]
+}
