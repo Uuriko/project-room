@@ -1,0 +1,29 @@
+✔ resume keeps obligations/own claims and refs, never transcript or effects (69.641201ms)
+✔ pagination retains exact source cursor and exposes capped continuation (48.898132ms)
+✔ last fresh authority denial drops all gathered private content and cursors (30.756627ms)
+✔ identity mismatch refuses before attention read; no weaker fallback (4.659853ms)
+✔ partial unavailable attention is explicit and current obligations survive (8.266746ms)
+✔ final changed projection replaces stale obligations (3.283598ms)
+✔ unchanged context keeps fresh cursors and directs reuse rather than inventing an empty queue (5.805292ms)
+{"event":"room.cold_start","durationMs":2087,"integrity":"eager","phases":{"schema":{"ms":73,"rowsRead":0},"plugin":{"ms":892,"rowsRead":0},"fence":{"ms":479,"rowsRead":0},"verifies":{"ms":623,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":170,"heapBytes":34367112,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ oversized responses and never-settling transport are bounded (29.128543ms)
+✔ cross-room attention content is excluded and secret in any output field is refused (106.143561ms)
+✔ malformed attention identity/cursor and unsolicited not-modified are refused (583.077537ms)
+✔ attention completion is never inferred from missing or nonboolean hasMore (93.238915ms)
+✔ failed continuation returns no fabricated progress and exact input cursor retries safely (12.221501ms)
+✔ CLI help/invalid arguments never touch config or network and errors are sanitized (3.650038ms)
+room diagnostic op_-F77Bxck 401 unauthenticated access /api/rooms/:roomId/context
+{"benchmark":"synthetic30messages1000chars","baselineRequests":2,"baselineBytes":82939,"first":{"requests":3,"responseBytes":3676,"attentionPages":1},"repeat":{"requests":3,"responseBytes":3676,"attentionPages":1}}
+{"event":"room.cold_start","durationMs":1963,"integrity":"eager","phases":{"schema":{"ms":509,"rowsRead":0},"plugin":{"ms":1259,"rowsRead":0},"fence":{"ms":176,"rowsRead":0},"verifies":{"ms":7,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":145,"heapBytes":44141824,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ real HTTP compact resume measures bytes against existing full snapshot and conditional repeat (8473.438445ms)
+room diagnostic op_ccs7T6Kx 401 unauthenticated access /api/rooms/:roomId/context
+✔ reply-only resume retains old open requests independently of delta observations and clears revoked reads (5774.77769ms)
+ℹ tests 15
+ℹ suites 0
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 31227.942062

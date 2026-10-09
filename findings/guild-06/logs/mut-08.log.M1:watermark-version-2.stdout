@@ -1,0 +1,95 @@
+{"event":"room.cold_start","durationMs":3544,"integrity":"eager","phases":{"schema":{"ms":536,"rowsRead":0},"plugin":{"ms":1666,"rowsRead":0},"fence":{"ms":883,"rowsRead":0},"verifies":{"ms":103,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":217,"heapBytes":22004808,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":372,"cpuMs":34,"heapBytes":26191384,"rooms":1,"sequences":5,"projectionBytes":1330,"events":5}
+{"event":"room.cold_start","durationMs":1741,"integrity":"eager","phases":{"schema":{"ms":140,"rowsRead":0},"plugin":{"ms":1092,"rowsRead":0},"fence":{"ms":205,"rowsRead":0},"verifies":{"ms":33,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":157,"heapBytes":31879592,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":538,"cpuMs":39,"heapBytes":23557672,"rooms":1,"sequences":5,"projectionBytes":1330,"events":5}
+{"event":"room.cold_start","durationMs":2935,"integrity":"eager","phases":{"schema":{"ms":277,"rowsRead":0},"plugin":{"ms":1382,"rowsRead":0},"fence":{"ms":593,"rowsRead":0},"verifies":{"ms":90,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":158,"heapBytes":27556368,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":483,"cpuMs":29,"heapBytes":31503400,"rooms":1,"sequences":5,"projectionBytes":1330,"events":5}
+{"event":"room.cold_start","durationMs":3215,"integrity":"eager","phases":{"schema":{"ms":555,"rowsRead":0},"plugin":{"ms":1701,"rowsRead":0},"fence":{"ms":578,"rowsRead":0},"verifies":{"ms":21,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":179,"heapBytes":37002000,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":3358,"integrity":"eager","phases":{"schema":{"ms":499,"rowsRead":0},"plugin":{"ms":2169,"rowsRead":0},"fence":{"ms":379,"rowsRead":0},"verifies":{"ms":35,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":169,"heapBytes":25948024,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":499,"cpuMs":26,"heapBytes":29921040,"rooms":1,"sequences":5,"projectionBytes":1330,"events":5}
+{"event":"room.cold_start","durationMs":2937,"integrity":"eager","phases":{"schema":{"ms":713,"rowsRead":0},"plugin":{"ms":1181,"rowsRead":0},"fence":{"ms":372,"rowsRead":0},"verifies":{"ms":179,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":162,"heapBytes":35470848,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2855,"integrity":"eager","phases":{"schema":{"ms":810,"rowsRead":0},"plugin":{"ms":1451,"rowsRead":0},"fence":{"ms":151,"rowsRead":0},"verifies":{"ms":10,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":159,"heapBytes":39449776,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2545,"integrity":"eager","phases":{"schema":{"ms":342,"rowsRead":0},"plugin":{"ms":1397,"rowsRead":0},"fence":{"ms":271,"rowsRead":0},"verifies":{"ms":32,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":168,"heapBytes":27548872,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1469,"integrity":"eager","phases":{"schema":{"ms":299,"rowsRead":0},"plugin":{"ms":473,"rowsRead":0},"fence":{"ms":253,"rowsRead":0},"verifies":{"ms":38,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":158,"heapBytes":31766224,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ NDJSON export of a room holding a file replays, and events and file bytes come back equal (10082.097808ms)
+✔ replay refuses an object cell that is not an encoded BLOB, by name (9133.342987ms)
+✔ replay refuses a tampered BLOB by its stored sha256 and byte_length (15552.720562ms)
+{"event":"room.cold_start","durationMs":548,"cpuMs":41,"heapBytes":25671432,"rooms":1,"sequences":5,"projectionBytes":1330,"events":5}
+{"event":"room.cold_start","durationMs":67,"cpuMs":22,"heapBytes":33079200,"rooms":1,"sequences":5,"projectionBytes":1330,"events":5}
+{"event":"room.cold_start","durationMs":2816,"integrity":"eager","phases":{"schema":{"ms":829,"rowsRead":0},"plugin":{"ms":1225,"rowsRead":0},"fence":{"ms":301,"rowsRead":0},"verifies":{"ms":140,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":170,"heapBytes":36970360,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✖ a clean backup verifies with byte checks, and its watermark carries the live digests (4444.851392ms)
+{"event":"room.cold_start","durationMs":165,"cpuMs":26,"heapBytes":26223048,"rooms":1,"sequences":5,"projectionBytes":1330,"events":5}
+{"event":"room.cold_start","durationMs":965,"cpuMs":34,"heapBytes":33528120,"rooms":1,"sequences":5,"projectionBytes":1330,"events":5}
+{"event":"room.cold_start","durationMs":2935,"integrity":"eager","phases":{"schema":{"ms":416,"rowsRead":0},"plugin":{"ms":1550,"rowsRead":0},"fence":{"ms":447,"rowsRead":0},"verifies":{"ms":15,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":177,"heapBytes":37400992,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ verification fails when an event body changes but the event count does not (6352.621283ms)
+{"event":"room.cold_start","durationMs":107,"cpuMs":24,"heapBytes":26454424,"rooms":1,"sequences":5,"projectionBytes":1330,"events":5}
+{"event":"room.cold_start","durationMs":243,"cpuMs":22,"heapBytes":33711592,"rooms":1,"sequences":5,"projectionBytes":1330,"events":5}
+✔ verification fails when room file bytes change at the same length (6216.979565ms)
+✖ the drill covers room files and proves byte equality (20918.219736ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 5
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 82137.157668
+
+✖ failing tests:
+
+test at tests/rel14-backup-bytes.test.js:90:1
+✖ a clean backup verifies with byte checks, and its watermark carries the live digests (4444.851392ms)
+  AssertionError [ERR_ASSERTION]: [{"name":"watermark-version","ok":false,"detail":"version=1"}]
+  
+  false !== true
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-08/tests/rel14-backup-bytes.test.js:94:10)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/rel14-backup-bytes.test.js:127:1
+✖ the drill covers room files and proves byte equality (20918.219736ms)
+  Error: Command failed: /usr/bin/node /home/hatch/workspace/.g6-wt/mut-08/scripts/backup-drill.mjs
+  {"event":"room.cold_start","durationMs":1811,"integrity":"eager","phases":{"schema":{"ms":300,"rowsRead":0},"plugin":{"ms":390,"rowsRead":0},"fence":{"ms":593,"rowsRead":0},"verifies":{"ms":91,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":171,"heapBytes":25308504,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+  {"event":"room.cold_start","durationMs":524,"cpuMs":33,"heapBytes":23598704,"rooms":1,"sequences":9,"projectionBytes":2577,"events":9}
+  {"event":"room.cold_start","durationMs":694,"cpuMs":36,"heapBytes":31773616,"rooms":1,"sequences":9,"projectionBytes":2577,"events":9}
+  {"event":"room.cold_start","durationMs":656,"cpuMs":35,"heapBytes":35412016,"rooms":1,"sequences":9,"projectionBytes":2577,"events":9}
+  node:internal/modules/run_main:107
+      triggerUncaughtException(
+      ^
+  
+  AssertionError [ERR_ASSERTION]: restore verification failed: [{"name":"watermark-version","ok":false,"detail":"version=1"}]
+  
+  false !== true
+  
+      at file:///home/hatch/workspace/.g6-wt/mut-08/scripts/backup-drill.mjs:61:8 {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+  
+  Node.js v24.20.0
+  
+      at genericNodeError (node:internal/errors:986:15)
+      at wrappedFn (node:internal/errors:540:14)
+      at ChildProcess.exithandler (node:child_process:417:12)
+      at ChildProcess.emit (node:events:514:28)
+      at maybeClose (node:internal/child_process:1141:16)
+      at ChildProcess._handle.onexit (node:internal/child_process:306:5) {
+    code: 1,
+    killed: false,
+    signal: null,
+    cmd: '/usr/bin/node /home/hatch/workspace/.g6-wt/mut-08/scripts/backup-drill.mjs',
+    stdout: '',
+    stderr: `{"event":"room.cold_start","durationMs":1811,"integrity":"eager","phases":{"schema":{"ms":300,"rowsRead":0},"plugin":{"ms":390,"rowsRead":0},"fence":{"ms":593,"rowsRead":0},"verifies":{"ms":91,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":171,"heapBytes":25308504,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}\n{"event":"room.cold_start","durationMs":524,"cpuMs":33,"heapBytes":23598704,"rooms":1,"sequences":9,"projectionBytes":2577,"events":9}\n{"event":"room.cold_start","durationMs":694,"cpuMs":36,"heapBytes":31773616,"rooms":1,"sequences":9,"projectionBytes":2577,"events":9}\n{"event":"room.cold_start","durationMs":656,"cpuMs":35,"heapBytes":35412016,"rooms":1,"sequences":9,"projectionBytes":2577,"events":9}\nnode:internal/modules/run_main:107\n    triggerUncaughtException(\n    ^\n\nAssertionError [ERR_ASSERTION]: restore verification failed: [{"name":"watermark-version","ok":false,"detail":"version=1"}]\n\nfalse !== true\n\n    at file:///home/hatch/workspace/.g6-wt/mut-08/scripts/backup-drill.mjs:61:8 {\n  generatedMessage: false,\n  code: 'ERR_ASSERTION',\n  actual: false,\n  expected: true,\n  operator: 'strictEqual',\n  diff: 'simple'\n}\n\nNode.js v24.20.0\n`
+  }

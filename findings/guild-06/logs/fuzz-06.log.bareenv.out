@@ -1,0 +1,14 @@
+reachability: 437 server/src modules, 0 orphans outside the keep allowlist, 13 kept by allowlist
+  keep server/channel-adapters/discord-webhook.mjs
+  keep server/channel-adapters/slack-webhook.mjs
+  keep server/channel-adapters/webhook-secret.mjs
+  keep server/merge-queue.mjs
+  keep server/notify-email.mjs
+  keep server/notify-policy.mjs
+  keep server/secret-scan.mjs
+  keep server/session-adapter.mjs
+  keep server/session-adapter/herdr-bridge-adapter.mjs
+  keep server/spam-shadow-report.mjs
+  keep server/supervision-routes.mjs
+  keep server/supervision.mjs
+  keep src/seed.js

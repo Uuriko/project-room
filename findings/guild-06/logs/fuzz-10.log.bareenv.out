@@ -1,0 +1,1 @@
+usage: node scripts/perf-budget.mjs [--origin URL] [--pages /,/about] [--viewport 390,1280] [--cpu 4] [--network auto|none|mobile|desktop] [--out file.json]

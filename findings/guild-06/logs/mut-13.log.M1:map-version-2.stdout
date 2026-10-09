@@ -1,0 +1,25 @@
+✖ coverage map parses and every claimed capability has wired executable evidence (40.499638ms)
+✔ a claim with no unit or browser evidence is an untested user path (0.851038ms)
+✔ missing files and unwired browser checks fail closed (3.869076ms)
+✔ malformed maps fail loudly instead of passing vacuously (15.556045ms)
+✔ browser suite membership is exact, not substring: check.mjs is not other-check.mjs (101.961664ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 4
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2054.18015
+
+✖ failing tests:
+
+test at tests/journey-coverage.test.js:9:1
+✖ coverage map parses and every claimed capability has wired executable evidence (40.499638ms)
+  Error: coverage map must be { version: 1, claims: [...] } with at least one claim
+      at parseCoverageMap (file:///home/hatch/workspace/.g6-wt/mut-13/scripts/journey-coverage.mjs:14:11)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-13/tests/journey-coverage.test.js:10:15)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.start (node:internal/test_runner/test:1257:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17)

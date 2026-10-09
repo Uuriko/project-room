@@ -1,0 +1,73 @@
+{"event":"room.cold_start","durationMs":4420,"integrity":"eager","phases":{"schema":{"ms":1571,"rowsRead":0},"plugin":{"ms":1317,"rowsRead":0},"fence":{"ms":1054,"rowsRead":0},"verifies":{"ms":30,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":199,"heapBytes":22413800,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ parseSchedule: named intervals (19.043418ms)
+✔ parseSchedule: duration forms (41.870916ms)
+✖ parseSchedule: cron form (41.891977ms)
+✔ parseSchedule: rejects junk (1.043406ms)
+✔ nextRunAfter: interval adds the interval (0.349294ms)
+✖ nextRunAfter: cron finds the next matching minute (UTC) (35.67015ms)
+✖ nextRunAfter: cron every-5-minutes steps (0.235854ms)
+✔ scheduleIsDue: never-run is due, fresh run is not, failed run retries (10.020468ms)
+{"event":"room.cold_start","durationMs":924,"cpuMs":34,"heapBytes":24481112,"rooms":1,"sequences":5,"projectionBytes":1333,"events":5}
+{"event":"room.cold_start","durationMs":142,"cpuMs":27,"heapBytes":32245960,"rooms":1,"sequences":5,"projectionBytes":1333,"events":5}
+{"event":"room.cold_start","durationMs":608,"cpuMs":33,"heapBytes":35778824,"rooms":1,"sequences":5,"projectionBytes":1333,"events":5}
+{"event":"room.cold_start","durationMs":637,"cpuMs":28,"heapBytes":24950920,"rooms":1,"sequences":5,"projectionBytes":1333,"events":5}
+{"event":"room.cold_start","durationMs":177,"cpuMs":33,"heapBytes":32317096,"rooms":1,"sequences":5,"projectionBytes":1333,"events":5}
+{"event":"room.cold_start","durationMs":316,"cpuMs":29,"heapBytes":35797952,"rooms":1,"sequences":5,"projectionBytes":1333,"events":5}
+{"event":"room.cold_start","durationMs":3165,"integrity":"eager","phases":{"schema":{"ms":211,"rowsRead":0},"plugin":{"ms":1478,"rowsRead":0},"fence":{"ms":733,"rowsRead":0},"verifies":{"ms":32,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":175,"heapBytes":24926824,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ runBackupCycle: full cycle verifies, writes state, then skips when not due (17168.181332ms)
+{"event":"room.cold_start","durationMs":163,"cpuMs":25,"heapBytes":28886008,"rooms":1,"sequences":5,"projectionBytes":1333,"events":5}
+{"event":"room.cold_start","durationMs":469,"cpuMs":37,"heapBytes":36212640,"rooms":1,"sequences":5,"projectionBytes":1333,"events":5}
+{"event":"room.cold_start","durationMs":910,"cpuMs":39,"heapBytes":22921704,"rooms":1,"sequences":5,"projectionBytes":1333,"events":5}
+{"event":"room.cold_start","durationMs":950,"cpuMs":32,"heapBytes":26411112,"rooms":1,"sequences":5,"projectionBytes":1333,"events":5}
+✔ verifyRestoredBackup: flags a backup whose events drifted from the watermark (9378.138002ms)
+✔ verifyRestoredBackup: missing watermark fails fast (18.479443ms)
+✔ cli: --print-cron emits a usable crontab line (8107.349654ms)
+{"event":"room.cold_start","durationMs":3063,"integrity":"eager","phases":{"schema":{"ms":304,"rowsRead":0},"plugin":{"ms":1103,"rowsRead":0},"fence":{"ms":1202,"rowsRead":0},"verifies":{"ms":119,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":165,"heapBytes":30743720,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ cli: missing --db/--to is a usage error (7101.024866ms)
+✔ cli: --force runs a full cycle and prints JSON (18466.600026ms)
+ℹ tests 14
+ℹ suites 0
+ℹ pass 11
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 70407.156191
+
+✖ failing tests:
+
+test at tests/backup-verify.test.js:59:1
+✖ parseSchedule: cron form (41.891977ms)
+  Error: invalid schedule: 0 * * * * (want hourly|daily|weekly, 15m|6h|2d|1w, or 5-field cron)
+      at parseSchedule (file:///home/hatch/workspace/.g6-wt/mut-07/scripts/backup-verify.mjs:55:9)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-07/tests/backup-verify.test.js:60:13)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests/backup-verify.test.js:75:1
+✖ nextRunAfter: cron finds the next matching minute (UTC) (35.67015ms)
+  Error: invalid schedule: 30 2 * * * (want hourly|daily|weekly, 15m|6h|2d|1w, or 5-field cron)
+      at parseSchedule (file:///home/hatch/workspace/.g6-wt/mut-07/scripts/backup-verify.mjs:55:9)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-07/tests/backup-verify.test.js:76:13)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests/backup-verify.test.js:82:1
+✖ nextRunAfter: cron every-5-minutes steps (0.235854ms)
+  Error: invalid schedule: */5 * * * * (want hourly|daily|weekly, 15m|6h|2d|1w, or 5-field cron)
+      at parseSchedule (file:///home/hatch/workspace/.g6-wt/mut-07/scripts/backup-verify.mjs:55:9)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-07/tests/backup-verify.test.js:83:13)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7)

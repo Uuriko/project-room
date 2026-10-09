@@ -1,0 +1,3 @@
+M1:severity-validation-inverted: KILLED(exit=1)
+M2:error-detection-every: SURVIVED
+unit=mut-11 DONE

@@ -1,0 +1,33 @@
+{"event":"room.cold_start","durationMs":3141,"integrity":"eager","phases":{"schema":{"ms":557,"rowsRead":0},"plugin":{"ms":878,"rowsRead":0},"fence":{"ms":1062,"rowsRead":0},"verifies":{"ms":166,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":218,"heapBytes":37274936,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":2069,"integrity":"eager","phases":{"schema":{"ms":312,"rowsRead":0},"plugin":{"ms":1026,"rowsRead":0},"fence":{"ms":419,"rowsRead":0},"verifies":{"ms":57,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":150,"heapBytes":35256304,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ owner account session reads the full review; removed members are absent (9137.646495ms)
+{"event":"room.cold_start","durationMs":3126,"integrity":"eager","phases":{"schema":{"ms":482,"rowsRead":0},"plugin":{"ms":1483,"rowsRead":0},"fence":{"ms":581,"rowsRead":0},"verifies":{"ms":6,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":167,"heapBytes":42201744,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ the review contains no token, secret or hash fields or values (5307.004761ms)
+room diagnostic op_9hDt3DFW 403 owner_required access /api/rooms/:roomId/access-review
+room diagnostic op_Kcq1v7TU 403 owner_required access /api/rooms/:roomId/access-review
+room diagnostic op_1VYAU5GF 403 owner_required access /api/rooms/:roomId/access-review
+room diagnostic op_K1DwV09b 403 owner_required access /api/rooms/:roomId/access-review
+room diagnostic op_ESyesexR 401 unauthenticated access /api/rooms/:roomId/access-review
+room diagnostic op_qJna1D3D 409 session_binding_changed conflict /api/rooms/:roomId/access-review
+{"event":"room.cold_start","durationMs":1938,"integrity":"eager","phases":{"schema":{"ms":314,"rowsRead":0},"plugin":{"ms":627,"rowsRead":0},"fence":{"ms":662,"rowsRead":0},"verifies":{"ms":106,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":149,"heapBytes":37667240,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ non-owners are refused: agent key, manage_members human, guest session, anonymous (7636.913207ms)
+{"event":"room.cold_start","durationMs":1386,"integrity":"eager","phases":{"schema":{"ms":187,"rowsRead":0},"plugin":{"ms":620,"rowsRead":0},"fence":{"ms":347,"rowsRead":0},"verifies":{"ms":46,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":157,"heapBytes":43372600,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ expired guests, guest agents and links are shown as expired (4908.112782ms)
+room diagnostic op_uSBfYy5e 403 owner_required access /api/rooms/:roomId/access-review
+{"event":"room.cold_start","durationMs":1831,"integrity":"eager","phases":{"schema":{"ms":281,"rowsRead":0},"plugin":{"ms":496,"rowsRead":0},"fence":{"ms":654,"rowsRead":0},"verifies":{"ms":139,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":175,"heapBytes":35001160,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ the script prints the route's report from the store file and from a running service (36866.746105ms)
+room diagnostic op_1ZO7ZGXG 429 rate_limited rate_limited /api/rooms/:roomId/access-review
+{"event":"room.cold_start","durationMs":1609,"integrity":"eager","phases":{"schema":{"ms":311,"rowsRead":0},"plugin":{"ms":802,"rowsRead":0},"fence":{"ms":292,"rowsRead":0},"verifies":{"ms":8,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":200,"heapBytes":54278824,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ the review shares the per-credential read allowance with sibling room reads (24501.485742ms)
+{"event":"room.cold_start","durationMs":1938,"integrity":"eager","phases":{"schema":{"ms":444,"rowsRead":0},"plugin":{"ms":939,"rowsRead":0},"fence":{"ms":177,"rowsRead":0},"verifies":{"ms":16,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":166,"heapBytes":62591720,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ the review command records one revoke that removes both administration stores (12757.712959ms)
+✔ a review of one identity shows both administration stores, and one revoke removes the effective permission (4987.826559ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 114283.316572

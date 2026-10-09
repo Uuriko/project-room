@@ -1,0 +1,37 @@
+{"event":"room.cold_start","durationMs":2214,"integrity":"eager","phases":{"schema":{"ms":482,"rowsRead":0},"plugin":{"ms":875,"rowsRead":0},"fence":{"ms":548,"rowsRead":0},"verifies":{"ms":16,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":183,"heapBytes":38055272,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✖ preparation reads every real discussion page without writing or exposing the connection (15440.313682ms)
+✖ changed task and later events are reported, while a stuck cursor refuses a partial brief (3.826703ms)
+✔ checkout review fails closed for remote uncertainty, drift, dirty trees and failed guard (18.264039ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 1
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 26186.266912
+
+✖ failing tests:
+
+test at tests/agent-work-preflight.test.js:11:1
+✖ preparation reads every real discussion page without writing or exposing the connection (15440.313682ms)
+  Error: Invalid checkpoint
+      at readPreparation (file:///home/hatch/workspace/.g6-wt/mut-04/scripts/agent-work-preflight.mjs:9:57)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-04/tests/agent-work-preflight.test.js:30:24)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+
+test at tests/agent-work-preflight.test.js:39:1
+✖ changed task and later events are reported, while a stuck cursor refuses a partial brief (3.826703ms)
+  Error: Invalid checkpoint
+      at readPreparation (file:///home/hatch/workspace/.g6-wt/mut-04/scripts/agent-work-preflight.mjs:9:57)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-04/tests/agent-work-preflight.test.js:45:24)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)

@@ -1,0 +1,2 @@
+skills-sync-check: OK
+Lint gate: eslint is not installed. Run `npm ci` first.

@@ -1,0 +1,3 @@
+M1:focus-validation-inverted: KILLED(exit=1)
+M2:dup-arg-allowed: SURVIVED
+unit=mut-03 DONE

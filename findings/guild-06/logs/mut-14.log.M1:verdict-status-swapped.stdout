@@ -1,0 +1,413 @@
+{"event":"room.cold_start","durationMs":2768,"integrity":"eager","phases":{"schema":{"ms":398,"rowsRead":0},"plugin":{"ms":1003,"rowsRead":0},"fence":{"ms":618,"rowsRead":0},"verifies":{"ms":171,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":239,"heapBytes":34750952,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✖ classifier: 405 on the documented method is a method mismatch (42.081201ms)
+✖ classifier: double 404 is not served; single 404 is a resource miss (4.650189ms)
+✔ classifier: everything else holds (auth, validation, success) (9.073076ms)
+✔ concrete() seeds the room id and dummies the rest (6.974777ms)
+✔ report renders a summary, mismatch section and operation table (12.969334ms)
+room diagnostic op_rPCjeCZN 401 unauthenticated access /api/rooms/:roomId/work-claims-read
+room diagnostic op_tHysLJbg 401 unauthenticated access /api/rooms/:roomId/project-offers/probe-id/claims
+room diagnostic op_seaNtoqg 401 unauthenticated access /api/rooms/:roomId/project-offers
+room diagnostic op_m5fJZuQs 401 unauthenticated access /api/rooms/:roomId/project-offers
+room diagnostic op_IKMCh471 401 unauthenticated access /api/rooms/:roomId/project-offers
+room diagnostic op_iD_L_bNg 401 unauthenticated access /api/rooms/:roomId/project-offers/probe-id/publish
+room diagnostic op_SHVth-AV 401 unauthenticated access /api/rooms/:roomId/project-offers/probe-id/withdraw
+room diagnostic op_oDNhg-Ki 401 unauthenticated access /api/rooms/:roomId/conversation
+room diagnostic op_2OlOP3UV 401 unauthenticated access /api/rooms/:roomId/commands
+room diagnostic op_gPiaG4Yx 401 unauthenticated access /api/rooms/:roomId/events
+room diagnostic op_V64tDzDW 401 unauthenticated access /api/rooms/:roomId/stream
+room diagnostic op_s5oze8PV 401 unauthenticated access /api/rooms/:roomId/presence
+room diagnostic op_mUWcgBuA 401 unauthenticated access /api/rooms/:roomId/export
+room diagnostic op_96Ly76LZ 401 unauthenticated access /api/rooms/:roomId/import
+room diagnostic op_dGjknLZp 401 unauthenticated access /api/rooms/:roomId/messages/probe-id/thread
+room diagnostic op_dFAKXGNp 401 unauthenticated access /api/rooms/:roomId/search
+room diagnostic op_UoocwqzX 401 unauthenticated access /api/rooms/:roomId/pins
+room diagnostic op_hgU4K3IE 401 unauthenticated access /api/rooms/:roomId/pins
+room diagnostic op_6_VnCI9l 401 unauthenticated access /api/rooms/:roomId/squads
+room diagnostic op_wfNIt7pr 401 unauthenticated access /api/rooms/:roomId/squads
+room diagnostic op_s0TTaTPd 401 unauthenticated access /api/rooms/:roomId/squads/probe-id
+room diagnostic op_zOmgHlRw 401 unauthenticated access /api/rooms/:roomId/squads/probe-id/members
+room diagnostic op_Bc5mHZ6X 401 unauthenticated access /api/rooms/:roomId/squads/probe-id/disband
+room diagnostic op_gfsf_ITS 401 unauthenticated access /api/rooms/:roomId/typing
+room diagnostic op_l2DgHgSy 401 unauthenticated access /api/rooms/:roomId/code
+room diagnostic op_jZwWeXCI 401 unauthenticated access /api/rooms/:roomId/code
+room diagnostic op_TfcRo5pY 401 unauthenticated access /api/rooms/:roomId/code/probe-id
+room diagnostic op_EsTMGQJN 401 unauthenticated access /api/rooms/:roomId/code/probe-id/raw
+room diagnostic op_IDhladJv 401 unauthenticated access /api/rooms/:roomId/code/probe-id/checks
+room diagnostic op_Ra5uQmoG 401 unauthenticated access /api/rooms/:roomId/files
+room diagnostic op_dFTibC-t 401 unauthenticated access /api/rooms/:roomId/files
+room diagnostic op_S3XHV9LV 401 unauthenticated access /api/rooms/:roomId/files/probe-id
+room diagnostic op_ZOY3xZoI 401 unauthenticated access /api/rooms/:roomId/files/probe-id/commit
+room diagnostic op_06eVzFnt 401 unauthenticated access /api/rooms/:roomId/identity-links
+room diagnostic op_vwjOFykO 401 unauthenticated access /api/rooms/:roomId/identity-links
+room diagnostic op_DC3RPWTy 401 unauthenticated access /api/rooms/:roomId/identity-links
+room diagnostic op_jlE64TYU 401 unauthenticated access /api/rooms/:roomId/agent-pause
+room diagnostic op_gRICEi40 401 unauthenticated access /api/rooms/:roomId/agent-pause
+room diagnostic op_eS4vqcIB 401 unauthenticated access /api/rooms/:roomId/provider-heartbeats
+room diagnostic op_5PpFHth- 401 unauthenticated access /api/rooms/:roomId/spend-allowance
+room diagnostic op_V0ucpxVW 401 unauthenticated access /api/rooms/:roomId/spend-allowance
+room diagnostic op_6ZxM99uF 401 unauthenticated access /api/rooms/:roomId/spend-pricing
+room diagnostic op_DyymNXBj 401 unauthenticated access /api/rooms/:roomId/spend-pricing
+room diagnostic op_UUx7gDFX 401 unauthenticated access /api/rooms/:roomId/spend-grants
+room diagnostic op_E41bYkIC 401 unauthenticated access /api/rooms/:roomId/spend-grants/probe-id
+room diagnostic op__7sW3zez 401 unauthenticated access /api/rooms/:roomId/spend-grant
+room diagnostic op_3Ul_7bBJ 401 unauthenticated access /api/rooms/:roomId/usage
+room diagnostic op_8sWKBZXO 401 unauthenticated access /api/rooms/:roomId/invitations
+room diagnostic op_BZVPzFTP 401 unauthenticated access /api/rooms/:roomId/invitations
+room diagnostic op_3gSTWfrP 401 unauthenticated access /api/rooms/:roomId/access-review
+room diagnostic op_vtYYs1V- 401 unauthenticated access /api/rooms/:roomId/access-requests
+room diagnostic op_3111Q7DJ 401 unauthenticated access /api/rooms/:roomId/access-requests
+room diagnostic op_ExgJ96rB 401 unauthenticated access /api/rooms/:roomId/agents/overview
+room diagnostic op_VuVjTsJE 401 unauthenticated access /api/rooms/:roomId/members/me/wants-work
+room diagnostic op_7RIJ7GOM 401 unauthenticated access /api/rooms/:roomId/members/me/wants-work
+room diagnostic op_Ckq0I9_W 401 unauthenticated access /api/rooms/:roomId/members/me/wants-work
+room diagnostic op_LrqsOg2J 401 unauthenticated access /api/rooms/:roomId/members/me/permission-requests
+room diagnostic op_TUBIkbPM 401 unauthenticated access /api/rooms/:roomId/access-requests/probe-id/decide
+room diagnostic op_cLkb1-vJ 401 unauthenticated access /api/rooms/:roomId/referrals
+room diagnostic op_ebiABr50 401 unauthenticated access /api/rooms/:roomId/membership-delegation
+room diagnostic op_Dqq94c15 401 unauthenticated access /api/rooms/:roomId/membership-delegation/grant
+room diagnostic op_zJ5MfMCB 401 unauthenticated access /api/rooms/:roomId/membership-delegation/revoke
+room diagnostic op_nnLBWvx3 401 unauthenticated access /api/rooms/:roomId/owner-delegates
+room diagnostic op_9LZsKP1S 401 unauthenticated access /api/rooms/:roomId/owner-delegates/grant
+room diagnostic op_q3d9XkCn 401 unauthenticated access /api/rooms/:roomId/owner-delegates/revoke
+room diagnostic op_BtkwJqst 401 unauthenticated access /api/rooms/:roomId/ownership/transfer
+room diagnostic op__YPO7Njm 401 unauthenticated access /api/rooms/:roomId/capabilities
+room diagnostic op_RdchfP73 401 unauthenticated access /api/rooms/:roomId/work-sessions
+room diagnostic op_il8a4iYg 401 unauthenticated access /api/rooms/:roomId/work-sessions
+room diagnostic op_1KGnWJ0S 401 unauthenticated access /api/rooms/:roomId/work-context
+room diagnostic op_nmhj3lR2 401 unauthenticated access /api/rooms/:roomId/work-result
+room diagnostic op_IaESR-gd 401 unauthenticated access /api/rooms/:roomId/return-brief
+room diagnostic op_NaSbTbgq 401 unauthenticated access /api/rooms/:roomId/notifications
+room diagnostic op_SqUo8KPh 401 unauthenticated access /api/rooms/:roomId/cursor
+room diagnostic op_MO0F8IEI 401 unauthenticated access /api/rooms/:roomId/reports
+room diagnostic op_X2YbXftp 401 unauthenticated access /api/rooms/:roomId/reports
+room diagnostic op_9Ler86Ek 401 unauthenticated access /api/rooms/:roomId/agent-inbox
+room diagnostic op_2sCQtWl0 401 unauthenticated access /api/rooms/:roomId/next-actions
+room diagnostic op_htJ1dLNw 401 unauthenticated access /api/rooms/:roomId/next-actions-dismiss
+room diagnostic op_meX-JQdS 401 unauthenticated access /api/rooms/:roomId/next-actions-suppressions
+room diagnostic op_s4uNx3cu 401 unauthenticated access /api/rooms/:roomId/next-actions-suppressions
+room diagnostic op_eLCqAVAt 401 unauthenticated access /api/rooms/:roomId/next-actions-dismissals
+room diagnostic op_zR1a0ziR 401 unauthenticated access /api/rooms/:roomId/matchmaking/seeker
+room diagnostic op_rIJfejPh 401 unauthenticated access /api/rooms/:roomId/matchmaking/openings
+room diagnostic op_Xrhr1pHw 401 unauthenticated access /api/rooms/:roomId/matchmaking/match
+room diagnostic op_b-kpvdbw 401 unauthenticated access /api/rooms/:roomId/matchmaking/decisions
+room diagnostic op_4HsV0WS6 401 unauthenticated access /api/rooms/:roomId/matchmaking/decisions/probe-id
+room diagnostic op_IJ9hQFt8 401 unauthenticated access /api/rooms/:roomId/matchmaking/decisions/probe-id/answer
+room diagnostic op_szv1HQlP 401 unauthenticated access /api/rooms/:roomId/work-claims
+room diagnostic op_-jr2QtXo 401 unauthenticated access /api/rooms/:roomId/work-claims
+room diagnostic op_d9huihD8 401 unauthenticated access /api/rooms/:roomId/work-claims/config
+room diagnostic op_ySwVXv-A 401 unauthenticated access /api/rooms/:roomId/work-claims/config
+room diagnostic op_Xj0h-jKT 401 unauthenticated access /api/rooms/:roomId/work-claims/status
+room diagnostic op_o-XJl63q 401 unauthenticated access /api/rooms/:roomId/work-claims/sweep
+room diagnostic op_iJ6S2R__ 401 unauthenticated access /api/rooms/:roomId/work-claims/duplicates
+room diagnostic op_wN148Oa1 401 unauthenticated access /api/rooms/:roomId/work-claims/retention
+room diagnostic op_MT6y9Cd6 401 unauthenticated access /api/rooms/:roomId/work-claims/probe-id
+room diagnostic op_qTPzK8W5 401 unauthenticated access /api/rooms/:roomId/work-claims/probe-id/claim
+room diagnostic op_JS7Fanoa 401 unauthenticated access /api/rooms/:roomId/work-claims/probe-id/update
+room diagnostic op_u0JHohxD 401 unauthenticated access /api/rooms/:roomId/work-claims/probe-id/provenance
+room diagnostic op_Tqss5x8Y 401 unauthenticated access /api/rooms/:roomId/work-claims/probe-id/premise-invalid
+room diagnostic op_xM94s4Tj 401 unauthenticated access /api/rooms/:roomId/work-claims/probe-id/review
+room diagnostic op_o4DSsYR7 401 unauthenticated access /api/rooms/:roomId/work-claims/probe-id/release
+room diagnostic op_2CjojQtb 401 unauthenticated access /api/rooms/:roomId/work-claims/probe-id/close
+room diagnostic op_MgzBI3_W 401 unauthenticated access /api/rooms/:roomId/work-claims/probe-id/cancel
+room diagnostic op__OEcxXzd 401 unauthenticated access /api/rooms/:roomId/work-claims/probe-id/reassign
+room diagnostic op_VGc1REeS 401 unauthenticated access /api/rooms/:roomId/board/:item/claims
+room diagnostic op_7DKRys5M 401 unauthenticated access /api/rooms/:roomId/board/:item/claims
+room diagnostic op_7Wb5AWr8 401 unauthenticated access /api/rooms/:roomId/board/:item/claims/probe-id/heartbeat
+room diagnostic op_I4Qkoxp1 401 unauthenticated access /api/rooms/:roomId/board/:item/claims/probe-id/release
+room diagnostic op_rXxMDxY7 401 unauthenticated access /api/rooms/:roomId/board/:item/claims/probe-id/receipts
+room diagnostic op_383jY7rg 401 unauthenticated access /api/rooms/:roomId/board/:item/board
+room diagnostic op_u8KHJcmJ 401 unauthenticated access /api/rooms/:roomId/board/:item/events
+room diagnostic op_rb2_4KMV 401 unauthenticated access /api/rooms/:roomId/board/:item/notes
+room diagnostic op_O5YLzTOL 401 unauthenticated access /api/rooms/:roomId/board/:item/notes
+room diagnostic op_JxEFjAhb 401 unauthenticated access /api/rooms/:roomId/board/:item/findings
+room diagnostic op_gLMPsdK5 401 unauthenticated access /api/rooms/:roomId/board/:item/findings
+room diagnostic op_zJlwUuUw 401 unauthenticated access /api/rooms/:roomId/board/:item/decisions
+room diagnostic op_kI-iaWjR 401 unauthenticated access /api/rooms/:roomId/board/:item/decisions
+room diagnostic op_0fnhRTww 401 unauthenticated access /api/rooms/:roomId/board/:item/mirror-map
+room diagnostic op_X6U4bgXE 401 unauthenticated access /api/rooms/:roomId/board/:item/mirror-map
+room diagnostic op_qZTz6kTe 401 unauthenticated access /api/rooms/:roomId/board/:item/health
+room diagnostic op_CvHqj4jE 401 unauthenticated access /api/rooms/:roomId/receipts
+room diagnostic op_kegc4RQ8 401 unauthenticated access /api/rooms/:roomId/work-claims/probe-id/renew
+room diagnostic op_XzZPURC1 401 unauthenticated access /api/rooms/:roomId/feedback
+room diagnostic op_JQqI5Bxp 401 unauthenticated access /api/rooms/:roomId/feedback
+room diagnostic op_iJ0-By-V 401 unauthenticated access /api/rooms/:roomId/feedback/queue
+room diagnostic op_yP4U75Y_ 401 unauthenticated access /api/rooms/:roomId/feedback/notifications
+room diagnostic op__aMfUa75 401 unauthenticated access /api/rooms/:roomId/feedback/probe-id
+room diagnostic op_d8AvSZRM 401 unauthenticated access /api/rooms/:roomId/feedback/probe-id/triage
+room diagnostic op_QY5_bNT2 401 unauthenticated access /api/rooms/:roomId/feedback/probe-id/appeal
+room diagnostic op_4891RpJD 401 unauthenticated access /api/rooms/:roomId/feedback/probe-id/appeal/decision
+room diagnostic op_zsUyqTEu 401 unauthenticated access /api/rooms/:roomId/feedback/probe-id/outcome
+room diagnostic op_LSVgjdPf 401 unauthenticated access /api/rooms/:roomId/bounties
+room diagnostic op_r3KNqWLT 401 unauthenticated access /api/rooms/:roomId/bounties
+room diagnostic op_PUIKlK8L 401 unauthenticated access /api/rooms/:roomId/bounties/probe-id/fund
+room diagnostic op_nFEYoCcu 401 unauthenticated access /api/rooms/:roomId/bounties/probe-id/rubric
+room diagnostic op_rjBV8rlm 401 unauthenticated access /api/rooms/:roomId/bounties/reviews
+room diagnostic op_n36JZ2u- 401 unauthenticated access /api/rooms/:roomId/bounties/reputation-reviews
+room diagnostic op_0iwLNQ3X 401 unauthenticated access /api/rooms/:roomId/bounties/sybil-flags
+room diagnostic op_4bhlftzx 401 unauthenticated access /api/rooms/:roomId/bounties/sybil-flags/probe-id/dismiss
+room diagnostic op_BtN7oJdY 401 unauthenticated access /api/rooms/:roomId/bounties/sybil-flags/probe-id/confirm
+room diagnostic op_pu2LU2PL 401 unauthenticated access /api/rooms/:roomId/bounties/probe-id/decline
+room diagnostic op_EmCkJ-7w 401 unauthenticated access /api/rooms/:roomId/bounties/probe-id/snooze
+room diagnostic op_Ua4ISLE9 401 unauthenticated access /api/rooms/:roomId/bounties/probe-id/duplicate
+room diagnostic op_mzp6d6Oz 401 unauthenticated access /api/rooms/:roomId/bounties/probe-id/claim
+room diagnostic op_7Xvp3bvF 401 unauthenticated access /api/rooms/:roomId/bounties/probe-id/watch
+room diagnostic op_tpqRuV9a 401 unauthenticated access /api/rooms/:roomId/bounties/probe-id/submit
+room diagnostic op_GMKFdtRM 401 unauthenticated access /api/rooms/:roomId/bounties/probe-id/accept
+room diagnostic op_8NZCk4oa 401 unauthenticated access /api/rooms/:roomId/bounties/probe-id/reject
+room diagnostic op_tLTFJr9t 401 unauthenticated access /api/rooms/:roomId/bounties/probe-id/dispute
+room diagnostic op_l5Xy7htb 401 unauthenticated access /api/rooms/:roomId/bounties/probe-id/dispute/decide
+room diagnostic op_zxLt1EkI 401 unauthenticated access /api/rooms/:roomId/bounties/probe-id/finalize
+room diagnostic op_qKp5Y_mV 401 unauthenticated access /api/rooms/:roomId/credits/balances/probe-id
+room diagnostic op_AJOVNtOI 401 unauthenticated access /api/rooms/:roomId/credits/history/probe-id
+room diagnostic op_f1CiziZr 401 unauthenticated access /api/rooms/:roomId/credits/transfer
+room diagnostic op_NYT_ZWJO 401 unauthenticated access /api/rooms/:roomId/credits/epoch/close
+room diagnostic op_fKtZrk8F 401 unauthenticated access /api/rooms/:roomId/:item
+room diagnostic op_oLxz1s9G 401 unauthenticated access /api/rooms/:roomId/:item
+room diagnostic op_OkooNd51 401 unauthenticated access /api/rooms/:roomId/:item
+room diagnostic op_RV7Zvq0o 401 unauthenticated access /api/rooms/:roomId/:item
+room diagnostic op_Lc_9H-03 401 unauthenticated access /api/rooms/:roomId/bonds
+room diagnostic op_gfNWSHTZ 401 unauthenticated access /api/rooms/:roomId/peer-dms
+room diagnostic op_UUypozCK 401 unauthenticated access /api/rooms/:roomId/peer-dms/probe-id
+room diagnostic op_H0nJiHpW 401 unauthenticated access /api/rooms/:roomId/dm-consents
+room diagnostic op_0f42Nj_j 401 unauthenticated access /api/rooms/:roomId/dm-consents
+room diagnostic op_x3EVcQc7 401 unauthenticated access /api/rooms/:roomId/dm-consents/probe-id/decide
+room diagnostic op__a8A85cT 401 unauthenticated access /api/rooms/:roomId/dm-consents/revoke
+room diagnostic op_Q7pxmTa_ 401 unauthenticated access /api/rooms/:roomId/dm-consents/unblock
+room diagnostic op_FdPQInDf 401 unauthenticated access /api/rooms/:roomId/dm-consents/block
+room diagnostic op_zqXepm0v 401 unauthenticated access /api/rooms/:roomId/public-face
+room diagnostic op_uf2xvga0 401 unauthenticated access /api/rooms/:roomId/public-face
+room diagnostic op_rogfTBCa 401 unauthenticated access /api/rooms/:roomId/directory
+room diagnostic op_JsqGWuMw 401 unauthenticated access /api/rooms/:roomId/directory
+room diagnostic op_aTQ_bLTr 401 unauthenticated access /api/rooms/:roomId/opportunities
+room diagnostic op_hq9Rw3P3 401 unauthenticated access /api/rooms/:roomId/opportunities
+room diagnostic op_z3wbflfE 401 unauthenticated access /api/rooms/:roomId/public-face/rotate
+room diagnostic op_IPdMLWWJ 401 unauthenticated access /api/rooms/:roomId/updates
+room diagnostic op_r1hWVAcz 401 unauthenticated access /api/rooms/:roomId/updates/probe-id/read
+room diagnostic op_9MS-GP_l 401 unauthenticated access /api/rooms/:roomId/updates/probe-id/done
+room diagnostic op_pFVK23lg 401 unauthenticated access /api/rooms/:roomId/updates/probe-id/clear
+room diagnostic op_Q3TNmmfm 401 unauthenticated access /api/rooms/:roomId/collab/assignments
+room diagnostic op_GS7wWZ0M 401 unauthenticated access /api/rooms/:roomId/collab/assignments
+room diagnostic op_zYRpksJ9 401 unauthenticated access /api/rooms/:roomId/collab/assignments/probe-id/release
+room diagnostic op_vsv-R9Ne 401 unauthenticated access /api/rooms/:roomId/collab/notes
+room diagnostic op_zD9KpND5 401 unauthenticated access /api/rooms/:roomId/collab/notes
+room diagnostic op_1V88LhVs 401 unauthenticated access /api/rooms/:roomId/collab/draft-locks/acquire
+room diagnostic op_byfHvDRD 401 unauthenticated access /api/rooms/:roomId/collab/draft-locks/release
+room diagnostic op_x4UgwVGt 401 unauthenticated access /api/rooms/:roomId/collab/draft-locks
+room diagnostic op_4CAeeprI 401 unauthenticated access /api/rooms/:roomId/collab/approvals
+room diagnostic op_ojygSLuC 401 unauthenticated access /api/rooms/:roomId/collab/approvals
+room diagnostic op_1QK5yunV 401 unauthenticated access /api/rooms/:roomId/collab/approvals/probe-id/decide
+room diagnostic op_dMR3M37O 401 unauthenticated access /api/rooms/:roomId/collab/approvals/probe-id/resubmit
+room diagnostic op_xWahADbW 401 unauthenticated access /api/rooms/:roomId/collab/routing/mentions
+room diagnostic op_hte5QV6f 401 unauthenticated access /api/rooms/:roomId/collab/routing
+room diagnostic op_9qWCaKID 401 unauthenticated access /api/rooms/:roomId/collab/routing/probe-id/resolve
+room diagnostic op_wjMXDXHr 401 unauthenticated access /api/rooms/:roomId/collab/routing/policy
+room diagnostic op_Llviq6C2 401 unauthenticated access /api/rooms/:roomId/collab/handoffs
+room diagnostic op_qb48Lz63 401 unauthenticated access /api/rooms/:roomId/collab/handoffs
+room diagnostic op_k3C2WYUA 401 unauthenticated access /api/rooms/:roomId/collab/handoffs/probe-id/transition
+room diagnostic op_xReM-ret 401 unauthenticated access /api/rooms/:roomId/collab/envelopes
+room diagnostic op_y4HWVd6K 401 unauthenticated access /api/rooms/:roomId/collab/envelopes
+room diagnostic op_SPopYQb2 401 unauthenticated access /api/rooms/:roomId/collab/envelopes/probe-id/transition
+room diagnostic op_i7Xoe1Gc 401 unauthenticated access /api/rooms/:roomId/collab/envelopes/sweep
+room diagnostic op_wn4Kr7Gf 401 unauthenticated access /api/rooms/:roomId/collab/envelopes/metrics
+room diagnostic op_v31n-O5D 401 unauthenticated access /api/rooms/:roomId
+room diagnostic op_scNv4d7M 401 unauthenticated access /api/rooms/:roomId/agent-connections
+room diagnostic op_vgjUGH7j 401 unauthenticated access /api/rooms/:roomId/agent-connections
+room diagnostic op_tYkYkX7a 401 unauthenticated access /api/rooms/:roomId/agent-invites
+room diagnostic op_B1rNT_XG 401 unauthenticated access /api/rooms/:roomId/agent-invites
+room diagnostic op_rCYbu5oE 401 unauthenticated access /api/rooms/:roomId/agent-invites
+room diagnostic op_XYTywNAH 401 unauthenticated access /api/rooms/:roomId/referral-invites
+room diagnostic op_0SC6MJjH 401 unauthenticated access /api/rooms/:roomId/charter
+room diagnostic op_BYyJw39n 401 unauthenticated access /api/rooms/:roomId/diagnostics
+room diagnostic op_KnTBeIiZ 401 unauthenticated access /api/rooms/:roomId/diagnostics-export
+room diagnostic op_3-e7DNSl 401 unauthenticated access /api/rooms/:roomId/needs-attention
+room diagnostic op_Ck-qlB5c 401 unauthenticated access /api/rooms/:roomId/jev-shadow
+room diagnostic op_PuxbeFJr 401 unauthenticated access /api/rooms/:roomId/mentions
+room diagnostic op_9E6-YL4f 401 unauthenticated access /api/rooms/:roomId/open-questions
+room diagnostic op_FCXlRdD9 401 unauthenticated access /api/rooms/:roomId/mentions/probe-id/ack
+room diagnostic op_ud-wLVOK 401 unauthenticated access /api/rooms/:roomId/mentions/settings
+room diagnostic op_qBFCfbzv 401 unauthenticated access /api/rooms/:roomId/members/probe-id
+room diagnostic op_uOdeQ8FL 401 unauthenticated access /api/rooms/:roomId/members/probe-id/card
+room diagnostic op__HbTPIrz 401 unauthenticated access /api/rooms/:roomId/directory/seed
+room diagnostic op_45FVRQZP 401 unauthenticated access /api/rooms/:roomId/operator/agents/probe-id
+room diagnostic op_4nP39V8P 401 unauthenticated access /api/rooms/:roomId/operator/agents/probe-id
+room diagnostic op_hhUv4r02 401 unauthenticated access /api/rooms/:roomId/agent-grants
+room diagnostic op_Taaz2MQq 401 unauthenticated access /api/rooms/:roomId/agent-grants
+room diagnostic op_7X9Dk3Jg 401 unauthenticated access /api/rooms/:roomId/agent-grants/probe-id/probe-id
+room diagnostic op_EZXlGB86 401 unauthenticated access /api/rooms/:roomId/agent-capabilities
+room diagnostic op_HW7Rn8Pt 401 unauthenticated access /api/rooms/:roomId/human-push
+room diagnostic op_Zz0dgJ-Y 401 unauthenticated access /api/rooms/:roomId/human-push
+room diagnostic op_wdaUK0FS 401 unauthenticated access /api/rooms/:roomId/human-push
+room diagnostic op_j44jkxXg 401 unauthenticated access /api/rooms/:roomId/human-push
+room diagnostic op_RHjQ7_T- 401 unauthenticated access /api/rooms/:roomId/thread-mutes
+room diagnostic op_caD45_Q- 401 unauthenticated access /api/rooms/:roomId/thread-mutes
+room diagnostic op_kw4x5dfD 401 unauthenticated access /api/rooms/:roomId/activity
+room diagnostic op_RaXWTJUd 401 unauthenticated access /api/rooms/:roomId/activity-unread-count
+room diagnostic op_broF0Lp- 401 unauthenticated access /api/rooms/:roomId/activity-read
+room diagnostic op_FtYsKGVw 401 unauthenticated access /api/rooms/:roomId/activity-read-all
+room diagnostic op_iQzApTHu 401 unauthenticated access /api/rooms/:roomId/read-horizon
+room diagnostic op_Me6Be78z 401 unauthenticated access /api/rooms/:roomId/read-horizon
+room diagnostic op_ofOOdJmQ 401 unauthenticated access /api/rooms/:roomId/saved
+room diagnostic op_j2WKwqXk 401 unauthenticated access /api/rooms/:roomId/saved
+room diagnostic op_2HFFVfyu 401 unauthenticated access /api/rooms/:roomId/saved
+room diagnostic op_FXCfC7Oc 401 unauthenticated access /api/rooms/:roomId/saved/probe-id
+room diagnostic op_g7Lverfh 401 unauthenticated access /api/rooms/:roomId/guest-agent-links
+room diagnostic op_jpFvgwqX 401 unauthenticated access /api/rooms/:roomId/guest-invites
+room diagnostic op_du5Rzilq 401 unauthenticated access /api/rooms/:roomId/guest-invites-list
+room diagnostic op_I53u58RG 401 unauthenticated access /api/rooms/:roomId/guest-invites-revoke
+room diagnostic op_5TXiflwn 401 unauthenticated access /api/rooms/:roomId/guest-invites-disconnect
+room diagnostic op_TKh0t4uV 401 unauthenticated access /api/rooms/:roomId/guest-invites-revoke-all
+room diagnostic op_nrRUiHyz 401 unauthenticated access /api/rooms/:roomId/guest-invites-upgrade
+room diagnostic op_v3vQanMM 401 unauthenticated access /api/rooms/:roomId/invitations/probe-id/revoke
+room diagnostic op_4TEcE4VV 401 unauthenticated access /api/rooms/:roomId/reminders
+room diagnostic op_BL9lq0K7 401 unauthenticated access /api/rooms/:roomId/reminders
+room diagnostic op_ihN0poq8 401 unauthenticated access /api/rooms/:roomId/outside-agents
+room diagnostic op_IqqH_kf5 401 unauthenticated access /api/rooms/:roomId/outside-agents
+room diagnostic op__22P6kve 401 unauthenticated access /api/rooms/:roomId/reply-requests
+room diagnostic op_wcLvBAMB 401 unauthenticated access /api/rooms/:roomId/assistant
+room diagnostic op_1p5-Udwc 401 unauthenticated access /api/rooms/:roomId/assistant
+room diagnostic op_qtNW9pdy 401 unauthenticated access /api/rooms/:roomId/assistant
+room diagnostic op_1UnBxpE6 401 unauthenticated access /api/rooms/:roomId/request-runs
+room diagnostic op_pISLaJd8 401 unauthenticated access /api/rooms/:roomId/request-runs
+room diagnostic op_U1FNjJfP 401 unauthenticated access /api/rooms/:roomId/reply-context
+room diagnostic op_gKCOsijl 401 unauthenticated access /api/rooms/:roomId/reply-history
+room diagnostic op_7lMXpbKZ 401 unauthenticated access /api/rooms/:roomId/share-links
+room diagnostic op_yObO13tW 401 unauthenticated access /api/rooms/:roomId/share-links
+room diagnostic op_8bhK5YA1 401 unauthenticated access /api/rooms/:roomId/share-links-cancel
+room diagnostic op_X_X1bh8A 401 unauthenticated access /api/rooms/:roomId/work-changes
+room diagnostic op_n5IN-Ubj 401 unauthenticated access /api/rooms/:roomId/work-discussion
+room diagnostic op_MyvGNW74 401 unauthenticated access /api/rooms/:roomId/context
+room diagnostic op_gonk-G3h 401 unauthenticated access /api/rooms/:roomId/activation-pack
+room diagnostic op_B0oIKIiT 401 unauthenticated access /api/rooms/:roomId/orient
+room diagnostic op_PMIA2Mxl 401 unauthenticated access /api/rooms/:roomId/verification-policy
+room diagnostic op_P2VzD8dq 401 unauthenticated access /api/rooms/:roomId/verification-policy
+room diagnostic op_F3tiuvy7 401 unauthenticated access /api/rooms/:roomId/public-work/receipts/probe-id
+room diagnostic op_qOP9u0Ey 401 unauthenticated access /api/rooms/:roomId/public-work/receipts/probe-id
+room diagnostic op_KWi-6fim 401 unauthenticated access /api/rooms/:roomId/public-work/receipts/probe-id/decide
+room diagnostic op_EDGHOPe0 401 unauthenticated access /api/rooms/:roomId/public-work/receipts/probe-id/follow-up
+room diagnostic op_Be5_pje8 401 unauthenticated access /api/rooms/:roomId/public-work/receipts/probe-id/verify
+room diagnostic op_7hULmFD4 401 unauthenticated access /api/rooms/:roomId/public-work/results
+room diagnostic op_jTvnFZC0 401 unauthenticated access /api/rooms/:roomId/public-work/results
+room diagnostic op_vYphghkz 401 unauthenticated access /api/rooms/:roomId/demigod-offers
+room diagnostic op_m8lHfNs6 401 unauthenticated access /api/rooms/:roomId/demigod-offers
+room diagnostic op_NiK2Mlr3 401 unauthenticated access /api/rooms/:roomId/demigod-offers/probe-id
+room diagnostic op_VMHsDyX5 401 unauthenticated access /api/rooms/:roomId/demigod-offers/probe-id/present
+room diagnostic op_wPO3u640 401 unauthenticated access /api/rooms/:roomId/demigod-offers/probe-id/accept
+room diagnostic op_ptS3nXfu 401 unauthenticated access /api/rooms/:roomId/demigod-offers/probe-id/decline
+room diagnostic op_vL7aaz9L 401 unauthenticated access /api/rooms/:roomId/demigod-offers/probe-id/expire
+room diagnostic op_5dtFZ-OJ 401 unauthenticated access /api/rooms/:roomId/demigod-offers/probe-id/withdraw
+room diagnostic op_wqLzHYgH 401 unauthenticated access /api/rooms/:roomId/demigod-offers/probe-id/document
+room diagnostic op_WYVJJ8vC 401 unauthenticated access /api/rooms/:roomId/demigod-contracts
+room diagnostic op_-iI52J5A 401 unauthenticated access /api/rooms/:roomId/demigod-contracts
+room diagnostic op_BU5slt5h 401 unauthenticated access /api/rooms/:roomId/demigod-contracts/probe-id
+room diagnostic op_JQrwXMGq 401 unauthenticated access /api/rooms/:roomId/demigod-contracts/probe-id/acknowledge
+room diagnostic op_Y9TD3B8b 401 unauthenticated access /api/rooms/:roomId/demigod-contracts/probe-id/complete
+room diagnostic op_850CNBft 401 unauthenticated access /api/rooms/:roomId/demigod-contracts/probe-id/terminate
+room diagnostic op_E9NjqK92 401 unauthenticated access /api/rooms/:roomId/signoff-loops
+room diagnostic op_-sCCLJv8 401 unauthenticated access /api/rooms/:roomId/signoff-loops
+room diagnostic op_hmDQw96p 401 unauthenticated access /api/rooms/:roomId/signoff-loops/probe-id
+room diagnostic op_k2QnThvc 401 unauthenticated access /api/rooms/:roomId/signoff-loops/probe-id/submit
+room diagnostic op_GZc99mcv 401 unauthenticated access /api/rooms/:roomId/signoff-loops/probe-id/review
+room diagnostic op_pzmkYsRD 401 unauthenticated access /api/rooms/:roomId/signoff-loops/probe-id/cancel
+room diagnostic op_DTnpI9IP 401 unauthenticated access /api/rooms/:roomId/signoff-loops/probe-id/status
+room diagnostic op__0dWv1-H 401 unauthenticated access /api/rooms/:roomId/trial-tasks
+room diagnostic op_zU_ZcqlI 401 unauthenticated access /api/rooms/:roomId/trial-tasks
+room diagnostic op_M5GVhfwC 401 unauthenticated access /api/rooms/:roomId/trial-tasks/probe-id
+room diagnostic op_byo9g-bW 401 unauthenticated access /api/rooms/:roomId/trial-tasks/probe-id/receipt
+✖ every documented operation is served with its documented method (32743.258816ms)
+✔ scratch parent honors TMPDIR, else defaults to repo-local .tmp (48.41691ms)
+✔ concrete() uses a declared vocabulary where the server constrains the segment (0.267562ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 5
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 46887.89624
+
+✖ failing tests:
+
+test at tests/openapi-method-accuracy.test.js:13:1
+✖ classifier: 405 on the documented method is a method mismatch (42.081201ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'ok'
+  - 'method_mismatch'
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-14/tests/openapi-method-accuracy.test.js:14:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.start (node:internal/test_runner/test:1257:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'ok',
+    expected: 'method_mismatch',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/openapi-method-accuracy.test.js:18:1
+✖ classifier: double 404 is not served; single 404 is a resource miss (4.650189ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'method_mismatch'
+  - 'not_served'
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-14/tests/openapi-method-accuracy.test.js:19:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'method_mismatch',
+    expected: 'not_served',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/openapi-method-accuracy.test.js:42:1
+✖ every documented operation is served with its documented method (32743.258816ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + [
+  +   'POST /api/github/pr-webhook: documented method answered 405 method_not_allowed',
+  +   'GET /api/public-work/receipts/{receiptId}: documented method answered 405 method_not_allowed',
+  +   'HEAD /api/public-work/receipts/{receiptId}: documented method answered 405 method_not_allowed',
+  +   'GET /api/public-work/receipts/{receiptId}/artifact: documented method answered 405 method_not_allowed',
+  +   'HEAD /api/public-work/receipts/{receiptId}/artifact: documented method answered 405 method_not_allowed',
+  +   'GET /api/public-work/tasks/{taskId}: documented method answered 405 method_not_allowed',
+  +   'HEAD /api/public-work/tasks/{taskId}: documented method answered 405 method_not_allowed',
+  +   'GET /api/project-offers/{offerId}: documented method answered 405 method_not_allowed',
+  +   'HEAD /api/project-offers/{offerId}: documented method answered 405 method_not_allowed',
+  +   'GET /api/project-offers/{offerId}/brief.md: documented method answered 405 method_not_allowed',
+  +   'HEAD /api/project-offers/{offerId}/brief.md: documented method answered 405 method_not_allowed',
+  +   'GET /api/public/rooms/{code}: documented method answered 405 method_not_allowed',
+  +   'GET /api/public/rooms/{code}/feed: documented method answered 405 method_not_allowed',
+  +   'GET /api/agents/directory/{agentId}: documented method answered 405 method_not_allowed',
+  +   'HEAD /api/agents/directory/{agentId}: documented method answered 405 method_not_allowed',
+  +   'GET /api/agents/{identityId}/card: documented method answered 405 method_not_allowed',
+  +   'HEAD /api/agents/{identityId}/card: documented method answered 405 method_not_allowed',
+  +   'GET /api/agent-identities/{identityId}/keys: documented method answered 405 method_not_allowed',
+  +   'HEAD /api/agent-identities/{identityId}/keys: documented method answered 405 method_not_allowed'
+  + ]
+  - []
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-14/tests/openapi-method-accuracy.test.js:45:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'POST /api/github/pr-webhook: documented method answered 405 method_not_allowed', 'GET /api/public-work/receipts/{receiptId}: documented method answered 405 method_not_allowed', 'HEAD /api/public-work/receipts/{receiptId}: documented method answered 405 method_not_allowed', 'GET /api/public-work/receipts/{receiptId}/artifact: documented method answered 405 method_not_allowed', 'HEAD /api/public-work/receipts/{receiptId}/artifact: documented method answered 405 method_not_allowed', 'GET /api/public-work/tasks/{taskId}: documented method answered 405 method_not_allowed', 'HEAD /api/public-work/tasks/{taskId}: documented method answered 405 method_not_allowed', 'GET /api/project-offers/{offerId}: documented method answered 405 method_not_allowed', 'HEAD /api/project-offers/{offerId}: documented method answered 405 method_not_allowed', 'GET /api/project-offers/{offerId}/brief.md: documented method answered 405 method_not_allowed', 'HEAD /api/project-offers/{offerId}/brief.md: documented method answered 405 method_not_allowed', 'GET /api/public/rooms/{code}: documented method answered 405 method_not_allowed', 'GET /api/public/rooms/{code}/feed: documented method answered 405 method_not_allowed', 'GET /api/agents/directory/{agentId}: documented method answered 405 method_not_allowed', 'HEAD /api/agents/directory/{agentId}: documented method answered 405 method_not_allowed', 'GET /api/agents/{identityId}/card: documented method answered 405 method_not_allowed', 'HEAD /api/agents/{identityId}/card: documented method answered 405 method_not_allowed', 'GET /api/agent-identities/{identityId}/keys: documented method answered 405 method_not_allowed', 'HEAD /api/agent-identities/{identityId}/keys: documented method answered 405 method_not_allowed' ],
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

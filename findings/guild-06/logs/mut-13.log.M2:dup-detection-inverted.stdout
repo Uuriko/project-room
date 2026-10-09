@@ -1,0 +1,66 @@
+✖ coverage map parses and every claimed capability has wired executable evidence (210.549202ms)
+✔ a claim with no unit or browser evidence is an untested user path (0.621623ms)
+✔ missing files and unwired browser checks fail closed (0.332999ms)
+✔ malformed maps fail loudly instead of passing vacuously (9.028589ms)
+✔ browser suite membership is exact, not substring: check.mjs is not other-check.mjs (2.447032ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 4
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2692.095392
+
+✖ failing tests:
+
+test at tests/journey-coverage.test.js:9:1
+✖ coverage map parses and every claimed capability has wired executable evidence (210.549202ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + [
+  +   'accounts-invitations-guests: duplicate claim id',
+  +   'conversation-threads-reactions-search: duplicate claim id',
+  +   'work-status-model: duplicate claim id',
+  +   'exact-version-verification: duplicate claim id',
+  +   'resumable-catch-up: duplicate claim id',
+  +   'tab-draft-recovery: duplicate claim id',
+  +   'combined-verification-entrypoint: duplicate claim id',
+  +   'agent-pause-remove: duplicate claim id',
+  +   'agent-presence-status: duplicate claim id',
+  +   'unified-inbox-connections: duplicate claim id',
+  +   'telegram-fixture-import: duplicate claim id',
+  +   'inbox-connection-routes: duplicate claim id',
+  +   'telegram-live-trigger: duplicate claim id',
+  +   'unified-inbox-ui: duplicate claim id',
+  +   'channel-webhook-journal: duplicate claim id',
+  +   'room-export-portability: duplicate claim id',
+  +   'owner-access-review: duplicate claim id',
+  +   'access-preview: duplicate claim id',
+  +   'notification-feed: duplicate claim id',
+  +   'telegram-send-preview: duplicate claim id',
+  +   'room-usage-summary: duplicate claim id',
+  +   'pinned-messages: duplicate claim id',
+  +   'room-review-policy: duplicate claim id',
+  +   'room-trust: duplicate claim id',
+  +   'room-lifecycle: duplicate claim id',
+  +   'room-spend-allowance: duplicate claim id',
+  +   'report-and-mute: duplicate claim id',
+  +   'room-channels: duplicate claim id',
+  +   'human-signin-navigation: duplicate claim id'
+  + ]
+  - []
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-13/tests/journey-coverage.test.js:13:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.start (node:internal/test_runner/test:1257:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'accounts-invitations-guests: duplicate claim id', 'conversation-threads-reactions-search: duplicate claim id', 'work-status-model: duplicate claim id', 'exact-version-verification: duplicate claim id', 'resumable-catch-up: duplicate claim id', 'tab-draft-recovery: duplicate claim id', 'combined-verification-entrypoint: duplicate claim id', 'agent-pause-remove: duplicate claim id', 'agent-presence-status: duplicate claim id', 'unified-inbox-connections: duplicate claim id', 'telegram-fixture-import: duplicate claim id', 'inbox-connection-routes: duplicate claim id', 'telegram-live-trigger: duplicate claim id', 'unified-inbox-ui: duplicate claim id', 'channel-webhook-journal: duplicate claim id', 'room-export-portability: duplicate claim id', 'owner-access-review: duplicate claim id', 'access-preview: duplicate claim id', 'notification-feed: duplicate claim id', 'telegram-send-preview: duplicate claim id', 'room-usage-summary: duplicate claim id', 'pinned-messages: duplicate claim id', 'room-review-policy: duplicate claim id', 'room-trust: duplicate claim id', 'room-lifecycle: duplicate claim id', 'room-spend-allowance: duplicate claim id', 'report-and-mute: duplicate claim id', 'room-channels: duplicate claim id', 'human-signin-navigation: duplicate claim id' ],
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

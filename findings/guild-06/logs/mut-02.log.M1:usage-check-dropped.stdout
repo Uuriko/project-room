@@ -1,0 +1,61 @@
+✔ doctorHealthUrl prefixes /room on getdasha hosts (9.763151ms)
+✔ doctor --help explains the self-test (10129.598393ms)
+✖ doctor rejects extra arguments (10713.847189ms)
+✔ doctor with no configuration names the missing origin (13413.576567ms)
+✔ doctor flags an invalid origin (9484.811077ms)
+{"event":"room.cold_start","durationMs":1043,"integrity":"eager","phases":{"schema":{"ms":134,"rowsRead":0},"plugin":{"ms":538,"rowsRead":0},"fence":{"ms":58,"rowsRead":0},"verifies":{"ms":22,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":159,"heapBytes":32630792,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ doctor flags an unreachable origin (10782.984313ms)
+{"event":"room.cold_start","durationMs":1740,"integrity":"eager","phases":{"schema":{"ms":348,"rowsRead":0},"plugin":{"ms":707,"rowsRead":0},"fence":{"ms":438,"rowsRead":0},"verifies":{"ms":23,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":154,"heapBytes":37952056,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ doctor with only an origin looks for a saved connection first (12413.621489ms)
+{"event":"room.cold_start","durationMs":2569,"integrity":"eager","phases":{"schema":{"ms":547,"rowsRead":0},"plugin":{"ms":1166,"rowsRead":0},"fence":{"ms":394,"rowsRead":0},"verifies":{"ms":100,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":173,"heapBytes":45178184,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ doctor reports HTTP access health without claiming native host or execution verification (12665.493755ms)
+room diagnostic op_wIFUgLP4 401 unauthenticated access /api/rooms/:roomId
+{"event":"room.cold_start","durationMs":2572,"integrity":"eager","phases":{"schema":{"ms":580,"rowsRead":0},"plugin":{"ms":1074,"rowsRead":0},"fence":{"ms":648,"rowsRead":0},"verifies":{"ms":11,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":168,"heapBytes":40497176,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ doctor does not invent a membership diagnosis from an ambiguous identity 401 (12593.719383ms)
+✔ doctor flags mixed credential sources without a misleading origin error (10163.999198ms)
+{"event":"room.cold_start","durationMs":2896,"integrity":"eager","phases":{"schema":{"ms":427,"rowsRead":0},"plugin":{"ms":1173,"rowsRead":0},"fence":{"ms":765,"rowsRead":0},"verifies":{"ms":187,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":169,"heapBytes":35238432,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ doctor appends the failure-signature table after the repair step (5298.886137ms)
+room diagnostic op_mgv-HkSP 401 unauthenticated access /api/rooms/:roomId
+{"event":"room.cold_start","durationMs":3308,"integrity":"eager","phases":{"schema":{"ms":550,"rowsRead":0},"plugin":{"ms":1245,"rowsRead":0},"fence":{"ms":977,"rowsRead":0},"verifies":{"ms":183,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":168,"heapBytes":40533656,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ signature table covers the unlinked-identity silent failure (12413.800988ms)
+✔ signature table covers the mixed-credential-source silent failure (13938.662076ms)
+✔ signature table covers the no-room-to-join silent failure (10217.003212ms)
+{"event":"room.cold_start","durationMs":2838,"integrity":"eager","phases":{"schema":{"ms":327,"rowsRead":0},"plugin":{"ms":2168,"rowsRead":0},"fence":{"ms":48,"rowsRead":0},"verifies":{"ms":4,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":164,"heapBytes":34918736,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ signature table covers the stale-MCP-client and outdated-CLI failures (14550.333234ms)
+✔ healthy doctor output carries no signature table (15472.93022ms)
+{"event":"room.cold_start","durationMs":1566,"integrity":"eager","phases":{"schema":{"ms":544,"rowsRead":0},"plugin":{"ms":522,"rowsRead":0},"fence":{"ms":48,"rowsRead":0},"verifies":{"ms":22,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":153,"heapBytes":36455256,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2491,"integrity":"eager","phases":{"schema":{"ms":175,"rowsRead":0},"plugin":{"ms":1393,"rowsRead":0},"fence":{"ms":577,"rowsRead":0},"verifies":{"ms":39,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":153,"heapBytes":37071560,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ doctor never echoes the credential in output, healthy or not (RC-2026-09-18-042) (21348.350235ms)
+room diagnostic op_xuq-xZiG 401 unauthenticated access /api/rooms/:roomId
+{"event":"room.cold_start","durationMs":3308,"integrity":"eager","phases":{"schema":{"ms":159,"rowsRead":0},"plugin":{"ms":1485,"rowsRead":0},"fence":{"ms":1282,"rowsRead":0},"verifies":{"ms":72,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":180,"heapBytes":35421184,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+room diagnostic op_iYHC0g1G 403 proxy_denied access /api/rooms/:roomId
+✔ doctor distinguishes an invalid identity 401 from a proxy 403 without creating identities (28856.39ms)
+ℹ tests 18
+ℹ suites 0
+ℹ pass 17
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 237538.556308
+
+✖ failing tests:
+
+test at tests/agent-doctor.test.js:66:1
+✖ doctor rejects extra arguments (10713.847189ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /usage_error/. Input:
+  
+  ''
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-02/tests/agent-doctor.test.js:69:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '',
+    expected: /usage_error/,
+    operator: 'match',
+    diff: 'simple'
+  }

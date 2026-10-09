@@ -1,0 +1,14 @@
+✔ scores mention, recommendation, position, and competitors from the answer text (79.426205ms)
+✔ the prompt file names eight questions and the four engine secrets (19.707515ms)
+✔ each configured engine sends its own request, and a missing key is skipped (139.449873ms)
+✔ Claude and Grok requests use their web-search tools and omit temperature when the model rejects it (29.192078ms)
+✔ an unrecognized provider payload is not scored as a miss, and a leaked key is redacted (28.72656ms)
+✔ missing answer-engine keys exit 0 with a skip line and no mention rate (453.711578ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2200.470137

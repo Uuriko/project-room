@@ -1,0 +1,3 @@
+M1:db-origin-conflict-weakened: KILLED(exit=1)
+M2:revoke-arity-2: KILLED(exit=1)
+unit=mut-01 DONE

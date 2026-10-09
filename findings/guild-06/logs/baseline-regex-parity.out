@@ -1,0 +1,11 @@
+✔ TASK_ID_RE parity: claim-validate, claims-index (2.108505ms)
+✔ LEASE_RE parity: claim-validate, claims-index (0.548583ms)
+✔ STATE_RE parity: claim-validate, claims-index (0.410145ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1255.316691

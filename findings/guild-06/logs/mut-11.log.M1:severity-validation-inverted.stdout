@@ -1,0 +1,171 @@
+✖ parseAuditJson: npm v7 payload → flat records with name/severity/title (7.968808ms)
+✖ parseAuditJson: npm v6 advisory payload → mapped to the same shape (0.338468ms)
+✔ parseAuditJson: empty audit → zero vulnerabilities, no error (4.153283ms)
+✔ parseAuditJson: malformed JSON throws AuditError (3.321886ms)
+✔ parseAuditJson: npm error payload throws AuditError mentioning the cause (3.280643ms)
+✔ parseAuditJson: payload with no vulnerabilities section throws (0.378959ms)
+✖ parseAuditJson: unknown severity throws AuditError (0.864087ms)
+✖ groupBySeverity: every severity key present, records in severity order (0.226169ms)
+✔ groupBySeverity: empty input → all empty groups (7.235018ms)
+✖ summarizeAudit: counts, total, and highest severity (0.441603ms)
+✔ summarizeAudit: empty audit → total 0, highest null (0.63956ms)
+✔ normalizeThreshold: accepts all severities, rejects junk (0.377356ms)
+✖ thresholdBreached: breach at threshold and above, pass below (0.232028ms)
+✖ thresholdBreached: no breach when nothing reaches the threshold (0.14017ms)
+✔ renderMarkdown: clean audit shows zero table and a no-vulns note (15.55254ms)
+✖ renderMarkdown: findings list severity-descending with names (0.529044ms)
+✖ renderJsonSummary: machine-readable summary carries counts, threshold, verdict (0.271287ms)
+✖ runAudit: injected runner wires parse → summarize → verdict (0.516495ms)
+✔ runAudit: runner that returns malformed JSON propagates AuditError (22.168959ms)
+✔ runAudit: runner that rejects propagates its error (0.418067ms)
+✖ runAudit: default threshold is high (0.328813ms)
+✔ parseArgs: flags parsed, unknown flags rejected (24.219286ms)
+ℹ tests 22
+ℹ suites 0
+ℹ pass 11
+ℹ fail 11
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3337.841316
+
+✖ failing tests:
+
+test at tests/dependency-audit.test.js:86:1
+✖ parseAuditJson: npm v7 payload → flat records with name/severity/title (7.968808ms)
+  Error [AuditError]: Unknown severity "critical"
+      at normalizeSeverity (file:///home/hatch/workspace/.g6-wt/mut-11/scripts/dependency-audit.mjs:34:44)
+      at parseAuditJson (file:///home/hatch/workspace/.g6-wt/mut-11/scripts/dependency-audit.mjs:65:19)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-11/tests/dependency-audit.test.js:87:39)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.start (node:internal/test_runner/test:1257:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17)
+
+test at tests/dependency-audit.test.js:97:1
+✖ parseAuditJson: npm v6 advisory payload → mapped to the same shape (0.338468ms)
+  Error [AuditError]: Unknown severity "high"
+      at normalizeSeverity (file:///home/hatch/workspace/.g6-wt/mut-11/scripts/dependency-audit.mjs:34:44)
+      at parseAuditJson (file:///home/hatch/workspace/.g6-wt/mut-11/scripts/dependency-audit.mjs:79:19)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-11/tests/dependency-audit.test.js:98:39)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+
+test at tests/dependency-audit.test.js:142:1
+✖ parseAuditJson: unknown severity throws AuditError (0.864087ms)
+  AssertionError [ERR_ASSERTION]: Missing expected exception (AuditError).
+      at TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-11/tests/dependency-audit.test.js:144:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    operator: 'throws',
+    diff: 'simple'
+  }
+
+test at tests/dependency-audit.test.js:147:1
+✖ groupBySeverity: every severity key present, records in severity order (0.226169ms)
+  Error [AuditError]: Unknown severity "critical"
+      at normalizeSeverity (file:///home/hatch/workspace/.g6-wt/mut-11/scripts/dependency-audit.mjs:34:44)
+      at parseAuditJson (file:///home/hatch/workspace/.g6-wt/mut-11/scripts/dependency-audit.mjs:65:19)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-11/tests/dependency-audit.test.js:148:31)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests/dependency-audit.test.js:163:1
+✖ summarizeAudit: counts, total, and highest severity (0.441603ms)
+  Error [AuditError]: Unknown severity "critical"
+      at normalizeSeverity (file:///home/hatch/workspace/.g6-wt/mut-11/scripts/dependency-audit.mjs:34:44)
+      at parseAuditJson (file:///home/hatch/workspace/.g6-wt/mut-11/scripts/dependency-audit.mjs:65:19)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-11/tests/dependency-audit.test.js:164:31)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests/dependency-audit.test.js:185:1
+✖ thresholdBreached: breach at threshold and above, pass below (0.232028ms)
+  Error [AuditError]: Unknown severity "critical"
+      at normalizeSeverity (file:///home/hatch/workspace/.g6-wt/mut-11/scripts/dependency-audit.mjs:34:44)
+      at parseAuditJson (file:///home/hatch/workspace/.g6-wt/mut-11/scripts/dependency-audit.mjs:65:19)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-11/tests/dependency-audit.test.js:186:31)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests/dependency-audit.test.js:195:1
+✖ thresholdBreached: no breach when nothing reaches the threshold (0.14017ms)
+  Error [AuditError]: Unknown severity "info"
+      at normalizeSeverity (file:///home/hatch/workspace/.g6-wt/mut-11/scripts/dependency-audit.mjs:34:44)
+      at parseAuditJson (file:///home/hatch/workspace/.g6-wt/mut-11/scripts/dependency-audit.mjs:65:19)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-11/tests/dependency-audit.test.js:196:34)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests/dependency-audit.test.js:214:1
+✖ renderMarkdown: findings list severity-descending with names (0.529044ms)
+  Error [AuditError]: Unknown severity "critical"
+      at normalizeSeverity (file:///home/hatch/workspace/.g6-wt/mut-11/scripts/dependency-audit.mjs:34:44)
+      at parseAuditJson (file:///home/hatch/workspace/.g6-wt/mut-11/scripts/dependency-audit.mjs:65:19)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-11/tests/dependency-audit.test.js:215:44)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests/dependency-audit.test.js:223:1
+✖ renderJsonSummary: machine-readable summary carries counts, threshold, verdict (0.271287ms)
+  Error [AuditError]: Unknown severity "critical"
+      at normalizeSeverity (file:///home/hatch/workspace/.g6-wt/mut-11/scripts/dependency-audit.mjs:34:44)
+      at parseAuditJson (file:///home/hatch/workspace/.g6-wt/mut-11/scripts/dependency-audit.mjs:65:19)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-11/tests/dependency-audit.test.js:224:34)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests/dependency-audit.test.js:237:1
+✖ runAudit: injected runner wires parse → summarize → verdict (0.516495ms)
+  Error [AuditError]: Unknown severity "critical"
+      at normalizeSeverity (file:///home/hatch/workspace/.g6-wt/mut-11/scripts/dependency-audit.mjs:34:44)
+      at parseAuditJson (file:///home/hatch/workspace/.g6-wt/mut-11/scripts/dependency-audit.mjs:65:19)
+      at runAudit (file:///home/hatch/workspace/.g6-wt/mut-11/scripts/dependency-audit.mjs:191:18)
+      at async TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-11/tests/dependency-audit.test.js:239:18)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests/dependency-audit.test.js:256:1
+✖ runAudit: default threshold is high (0.328813ms)
+  Error [AuditError]: Unknown severity "low"
+      at normalizeSeverity (file:///home/hatch/workspace/.g6-wt/mut-11/scripts/dependency-audit.mjs:34:44)
+      at parseAuditJson (file:///home/hatch/workspace/.g6-wt/mut-11/scripts/dependency-audit.mjs:65:19)
+      at runAudit (file:///home/hatch/workspace/.g6-wt/mut-11/scripts/dependency-audit.mjs:191:18)
+      at async TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-11/tests/dependency-audit.test.js:258:18)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7)

@@ -1,0 +1,15 @@
+✔ detector flags the alternating fixture as flaky (5750.118003ms)
+✔ detector does NOT flag the stable fixture (5549.719694ms)
+✔ detector isolates flaky tests in a mixed file (6462.479358ms)
+✔ detector reports a missing file instead of crashing (19.310709ms)
+✔ detector keeps same-named subtests under different parents separate (5123.904321ms)
+✔ cli: contradictory run counts are rejected, not silently overridden (2734.80697ms)
+✔ cli: non-numeric timeout is rejected (1281.623049ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 28522.36595

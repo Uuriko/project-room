@@ -1,0 +1,2 @@
+check-deps: 10 declared dependencies are missing from node_modules: @axe-core/playwright, eslint, eslint-plugin-security, fast-check, globals, pixelmatch, playwright, pngjs, sanitize-html, yaml
+check-deps: your install is stale — run `npm install` (or `npm ci`) and try again.

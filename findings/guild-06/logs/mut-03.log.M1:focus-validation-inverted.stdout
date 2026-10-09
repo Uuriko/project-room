@@ -1,0 +1,50 @@
+✔ resume keeps obligations/own claims and refs, never transcript or effects (219.568398ms)
+✔ pagination retains exact source cursor and exposes capped continuation (215.104819ms)
+✔ last fresh authority denial drops all gathered private content and cursors (190.050509ms)
+✔ identity mismatch refuses before attention read; no weaker fallback (17.024279ms)
+✔ partial unavailable attention is explicit and current obligations survive (68.630324ms)
+✔ final changed projection replaces stale obligations (55.838037ms)
+✔ unchanged context keeps fresh cursors and directs reuse rather than inventing an empty queue (104.064701ms)
+{"event":"room.cold_start","durationMs":876,"integrity":"eager","phases":{"schema":{"ms":181,"rowsRead":0},"plugin":{"ms":312,"rowsRead":0},"fence":{"ms":280,"rowsRead":0},"verifies":{"ms":25,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":200,"heapBytes":32103832,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ oversized responses and never-settling transport are bounded (310.41425ms)
+✔ cross-room attention content is excluded and secret in any output field is refused (28.511146ms)
+✔ malformed attention identity/cursor and unsolicited not-modified are refused (25.389142ms)
+✔ attention completion is never inferred from missing or nonboolean hasMore (27.170174ms)
+✔ failed continuation returns no fabricated progress and exact input cursor retries safely (14.19326ms)
+✖ CLI help/invalid arguments never touch config or network and errors are sanitized (11.789212ms)
+room diagnostic op_y5vUBpR4 401 unauthenticated access /api/rooms/:roomId/context
+{"benchmark":"synthetic30messages1000chars","baselineRequests":2,"baselineBytes":82939,"first":{"requests":3,"responseBytes":3676,"attentionPages":1},"repeat":{"requests":3,"responseBytes":3676,"attentionPages":1}}
+{"event":"room.cold_start","durationMs":1373,"integrity":"eager","phases":{"schema":{"ms":713,"rowsRead":0},"plugin":{"ms":589,"rowsRead":0},"fence":{"ms":62,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":132,"heapBytes":42875768,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ real HTTP compact resume measures bytes against existing full snapshot and conditional repeat (4196.916445ms)
+room diagnostic op_7CIROpbx 401 unauthenticated access /api/rooms/:roomId/context
+✔ reply-only resume retains old open requests independently of delta observations and clears revoked reads (5659.643197ms)
+ℹ tests 15
+ℹ suites 0
+ℹ pass 14
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 24541.699401
+
+✖ failing tests:
+
+test at tests/agent-resume.test.js:160:1
+✖ CLI help/invalid arguments never touch config or network and errors are sanitized (11.789212ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'invalid_config'
+  - 'usage_error'
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-03/tests/agent-resume.test.js:172:10)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'invalid_config',
+    expected: 'usage_error',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

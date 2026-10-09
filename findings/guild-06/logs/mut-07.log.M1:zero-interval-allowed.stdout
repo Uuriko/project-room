@@ -1,0 +1,55 @@
+{"event":"room.cold_start","durationMs":3256,"integrity":"eager","phases":{"schema":{"ms":714,"rowsRead":0},"plugin":{"ms":858,"rowsRead":0},"fence":{"ms":885,"rowsRead":0},"verifies":{"ms":208,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":202,"heapBytes":22567512,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ parseSchedule: named intervals (68.76764ms)
+✔ parseSchedule: duration forms (4.759993ms)
+✔ parseSchedule: cron form (11.052907ms)
+✖ parseSchedule: rejects junk (4.561856ms)
+✔ nextRunAfter: interval adds the interval (10.177443ms)
+✔ nextRunAfter: cron finds the next matching minute (UTC) (27.892087ms)
+✔ nextRunAfter: cron every-5-minutes steps (18.996618ms)
+✔ scheduleIsDue: never-run is due, fresh run is not, failed run retries (8.573406ms)
+{"event":"room.cold_start","durationMs":203,"cpuMs":27,"heapBytes":24431192,"rooms":1,"sequences":5,"projectionBytes":1333,"events":5}
+{"event":"room.cold_start","durationMs":457,"cpuMs":30,"heapBytes":32241056,"rooms":1,"sequences":5,"projectionBytes":1333,"events":5}
+{"event":"room.cold_start","durationMs":338,"cpuMs":28,"heapBytes":35775632,"rooms":1,"sequences":5,"projectionBytes":1333,"events":5}
+{"event":"room.cold_start","durationMs":386,"cpuMs":25,"heapBytes":24947696,"rooms":1,"sequences":5,"projectionBytes":1333,"events":5}
+{"event":"room.cold_start","durationMs":145,"cpuMs":27,"heapBytes":32319640,"rooms":1,"sequences":5,"projectionBytes":1333,"events":5}
+{"event":"room.cold_start","durationMs":104,"cpuMs":24,"heapBytes":35794664,"rooms":1,"sequences":5,"projectionBytes":1333,"events":5}
+{"event":"room.cold_start","durationMs":2070,"integrity":"eager","phases":{"schema":{"ms":585,"rowsRead":0},"plugin":{"ms":618,"rowsRead":0},"fence":{"ms":463,"rowsRead":0},"verifies":{"ms":45,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":168,"heapBytes":24925512,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ runBackupCycle: full cycle verifies, writes state, then skips when not due (8558.38858ms)
+{"event":"room.cold_start","durationMs":458,"cpuMs":30,"heapBytes":28882760,"rooms":1,"sequences":5,"projectionBytes":1333,"events":5}
+{"event":"room.cold_start","durationMs":359,"cpuMs":28,"heapBytes":36210032,"rooms":1,"sequences":5,"projectionBytes":1333,"events":5}
+{"event":"room.cold_start","durationMs":499,"cpuMs":32,"heapBytes":22988656,"rooms":1,"sequences":5,"projectionBytes":1333,"events":5}
+{"event":"room.cold_start","durationMs":261,"cpuMs":27,"heapBytes":26463248,"rooms":1,"sequences":5,"projectionBytes":1333,"events":5}
+✔ verifyRestoredBackup: flags a backup whose events drifted from the watermark (5832.902869ms)
+✔ verifyRestoredBackup: missing watermark fails fast (8.479415ms)
+✔ cli: --print-cron emits a usable crontab line (6984.722681ms)
+{"event":"room.cold_start","durationMs":1565,"integrity":"eager","phases":{"schema":{"ms":501,"rowsRead":0},"plugin":{"ms":525,"rowsRead":0},"fence":{"ms":259,"rowsRead":0},"verifies":{"ms":81,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":151,"heapBytes":30795168,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ cli: missing --db/--to is a usage error (7618.646805ms)
+✔ cli: --force runs a full cycle and prints JSON (18098.458985ms)
+ℹ tests 14
+ℹ suites 0
+ℹ pass 13
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 55146.985029
+
+✖ failing tests:
+
+test at tests/backup-verify.test.js:65:1
+✖ parseSchedule: rejects junk (4.561856ms)
+  AssertionError [ERR_ASSERTION]: Missing expected exception.
+      at TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-07/tests/backup-verify.test.js:67:12)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: /schedule required|invalid schedule/,
+    operator: 'throws',
+    diff: 'simple'
+  }

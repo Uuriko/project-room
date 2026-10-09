@@ -1,0 +1,13 @@
+{"event":"room.cold_start","durationMs":4265,"integrity":"eager","phases":{"schema":{"ms":767,"rowsRead":0},"plugin":{"ms":1814,"rowsRead":0},"fence":{"ms":932,"rowsRead":0},"verifies":{"ms":120,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":238,"heapBytes":38096544,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ preparation reads every real discussion page without writing or exposing the connection (14211.14313ms)
+✔ changed task and later events are reported, while a stuck cursor refuses a partial brief (37.152144ms)
+✔ checkout review fails closed for remote uncertainty, drift, dirty trees and failed guard (14.702394ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 23432.810746

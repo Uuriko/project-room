@@ -1,0 +1,54 @@
+{"event":"room.cold_start","durationMs":2587,"integrity":"eager","phases":{"schema":{"ms":239,"rowsRead":0},"plugin":{"ms":806,"rowsRead":0},"fence":{"ms":1019,"rowsRead":0},"verifies":{"ms":129,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":188,"heapBytes":37265048,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":1305,"integrity":"eager","phases":{"schema":{"ms":230,"rowsRead":0},"plugin":{"ms":761,"rowsRead":0},"fence":{"ms":43,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":161,"heapBytes":35279304,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ owner account session reads the full review; removed members are absent (10432.784707ms)
+{"event":"room.cold_start","durationMs":4442,"integrity":"eager","phases":{"schema":{"ms":650,"rowsRead":0},"plugin":{"ms":2487,"rowsRead":0},"fence":{"ms":702,"rowsRead":0},"verifies":{"ms":117,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":171,"heapBytes":42188008,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ the review contains no token, secret or hash fields or values (6249.045667ms)
+room diagnostic op_EOhSANm7 403 owner_required access /api/rooms/:roomId/access-review
+room diagnostic op_3b84XaPM 403 owner_required access /api/rooms/:roomId/access-review
+room diagnostic op_P--rOzou 403 owner_required access /api/rooms/:roomId/access-review
+room diagnostic op_X7aDTPHz 403 owner_required access /api/rooms/:roomId/access-review
+room diagnostic op_jkLkb0lh 401 unauthenticated access /api/rooms/:roomId/access-review
+room diagnostic op_kUMzF2kD 409 session_binding_changed conflict /api/rooms/:roomId/access-review
+{"event":"room.cold_start","durationMs":2204,"integrity":"eager","phases":{"schema":{"ms":250,"rowsRead":0},"plugin":{"ms":947,"rowsRead":0},"fence":{"ms":421,"rowsRead":0},"verifies":{"ms":132,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":157,"heapBytes":37733760,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ non-owners are refused: agent key, manage_members human, guest session, anonymous (9460.849277ms)
+{"event":"room.cold_start","durationMs":2188,"integrity":"eager","phases":{"schema":{"ms":526,"rowsRead":0},"plugin":{"ms":1409,"rowsRead":0},"fence":{"ms":46,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":165,"heapBytes":43445576,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ expired guests, guest agents and links are shown as expired (8289.876593ms)
+room diagnostic op_ZSK0M_kk 403 owner_required access /api/rooms/:roomId/access-review
+{"event":"room.cold_start","durationMs":3503,"integrity":"eager","phases":{"schema":{"ms":689,"rowsRead":0},"plugin":{"ms":1409,"rowsRead":0},"fence":{"ms":566,"rowsRead":0},"verifies":{"ms":361,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":184,"heapBytes":34959608,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ the script prints the route's report from the store file and from a running service (74835.371738ms)
+room diagnostic op_gzZ1WWYY 429 rate_limited rate_limited /api/rooms/:roomId/access-review
+{"event":"room.cold_start","durationMs":4233,"integrity":"eager","phases":{"schema":{"ms":434,"rowsRead":0},"plugin":{"ms":2102,"rowsRead":0},"fence":{"ms":967,"rowsRead":0},"verifies":{"ms":116,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":188,"heapBytes":52945752,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ the review shares the per-credential read allowance with sibling room reads (34689.348664ms)
+{"event":"room.cold_start","durationMs":2585,"integrity":"eager","phases":{"schema":{"ms":259,"rowsRead":0},"plugin":{"ms":797,"rowsRead":0},"fence":{"ms":994,"rowsRead":0},"verifies":{"ms":88,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":168,"heapBytes":48049304,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✖ the review command records one revoke that removes both administration stores (11528.659272ms)
+✔ a review of one identity shows both administration stores, and one revoke removes the effective permission (6653.41069ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 7
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 172986.429222
+
+✖ failing tests:
+
+test at tests/access-review.test.js:269:1
+✖ the review command records one revoke that removes both administration stores (11528.659272ms)
+  AssertionError [ERR_ASSERTION]: --revoke-identity requires exactly one --room
+  
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-01/tests/access-review.test.js:282:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

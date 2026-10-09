@@ -1,0 +1,565 @@
+########## probe-prod.mjs
+// Production probe + 1101 classifier (plan task R6). Zero dependencies.
+// Hits the endpoint matrix, records status + latency, and classifies the
+// failure domain: edge-down, worker-down, or do-rpc-fail (the 2026-09-25
+// 1101 signature). Exit 0 when everything answers, 1 on any failure.
+//
+// Usage: node scripts/probe-prod.mjs [--json] [--base https://room.trydemigod.com]
+import { probeProd } from "./probe-prod-lib.mjs";
+
+const args = process.argv.slice(2);
+const json = args.includes("--json");
+const baseFlag = args.indexOf("--base");
+const BASE = baseFlag >= 0 ? args[baseFlag + 1] : "https://room.trydemigod.com";
+
+const report = await probeProd(BASE);
+if (json) { console.log(JSON.stringify(report, null, 2)); }
+else {
+  console.log(`probe ${BASE} @ ${report.probed_at}`);
+  for (const r of report.endpoints) console.log(`  ${r.ok ? "ok  " : "FAIL"} ${r.label.padEnd(16)} ${String(r.statu
+########## procedures-index.mjs
+// W008: shared procedure library index generator (docs-first).
+//
+// Source of truth: docs/procedures/*.md, each with YAML frontmatter:
+//   id, title, version (semver), author, source_room, updated (YYYY-MM-DD),
+//   status (active|deprecated, default active).
+//
+// This script validates every file and bakes a frozen index into
+// deploy/procedures-index.mjs, which the discovery surface serves at
+// GET /procedures (read-only, global namespace: every room reads the same
+// bytes). Run it after adding or editing a procedure:
+//
+//   node scripts/procedures-index.mjs
+//   node scripts/procedures-index.mjs --check   # CI-style: exit 1 when stale
+//
+// The library is read-only by design in v1: there is no write API and the
+// served doc advertises none. New versions land through pull requests that
+// edit the markdown and regenerate this index.
+import { readdirSync, readFileSync, writeFile
+########## prod-deploy-smoke.mjs
+#!/usr/bin/env node
+// Post-deploy smoke for the production lane (.github/workflows/deploy-prod.yml
+// and rollback-prod.yml). Public endpoints only: no credentials, no writes.
+//
+//   node scripts/prod-deploy-smoke.mjs --sha <40-hex> \
+//     [--origin https://room.trydemigod.com] [--entry https://www.getdasha.com/room] \
+//     [--wait-ms 300000] \
+//     [--agent-card-public-key <base64>] [--agent-card-key-id <id>] \
+//     [--agent-card-agent-id <id>] [--agent-card-fetches 10] \
+//     [--agent-card-wait-ms 90000]
+//
+// Test-only knobs (env fallbacks SMOKE_AGENT_CARD_PUBLIC_KEY,
+// SMOKE_AGENT_CARD_KEY_ID, SMOKE_AGENT_CARD_AGENT_ID, SMOKE_AGENT_CARD_FETCHES,
+// SMOKE_AGENT_CARD_WAIT_MS): let the test suite inject its own signing key,
+// shrink the repeated card fetches and the propagation window. The deploy
+// pipeline never sets them, so production always pins the real key, runs the
+########## prod-flow-probes.mjs
+#!/usr/bin/env node
+// Prod flow probes: read-only checks of the paths a person or agent walks first.
+// Exit 1 on any failure. No credentials. No writes. Safe to run on a schedule.
+// Usage: node scripts/prod-flow-probes.mjs [--json]
+const ROOM = process.env.ROOM_ORIGIN ?? "https://room.trydemigod.com";
+const WWW = process.env.WWW_ORIGIN ?? "https://www.trydemigod.com";
+const UA = "project-room-prod-probe/1";
+
+async function get(url, init = {}) {
+  const res = await fetch(url, { redirect: "follow", ...init, headers: { "User-Agent": UA, ...(init.headers ?? {}) } });
+  return { status: res.status, headers: res.headers, text: await res.text() };
+}
+export const PROBES = [
+  ["room version is ok", async () => { const r = await get(`${ROOM}/api/version`); return r.status === 200 && JSON.parse(r.text).status === "ok"; }],
+  ["public work tasks list", async () => (await get(`${ROOM}/api/public-
+########## progressive-disclosure-check.mjs
+// Consistent progressive disclosure (backlog C7): in-room section disclosures
+// share one summary anatomy (chevron, label, trailing chip/note), hit target,
+// focus ring - and toggling never moves focus. Disposable rooms only.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { rmSync } from "node:fs";
+import { chromium } from "playwright";
+import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
+import { createRoomServer } from "../server/http.mjs";
+import { signInFixture } from "./auth-signin.mjs";
+import { openCatchUp, openSettings } from "./room-chrome.mjs";
+
+// In-room section disclosures that still use the shared .section-summary anatomy.
+// People is sidebar chrome (`sidebar-label`), not a section summary.
+// The chat composer no longer has an Options disclosure.
+const SHARED = ["#record-panel", "#decision-section"];
+
+async function setup(t
+########## project-offers-browser-check.mjs
+// Public offer journeys against the real Node HTTP/store boundary; no identities
+// are enrolled and no external host, mail, funding or cashout is started.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { chromium } from 'playwright';
+import { RoomStore } from '../server/store.mjs';
+import { initialRoom } from '../server/bootstrap.mjs';
+import { createRoomServer } from '../server/http.mjs';
+
+function publish(store, id, reward, extra = {}) {
+  store.projectOffers.create('commons', 'owner', { requestId: `create-${id}`, offerId: id, reviewerMemberIds: ['owner'], terms: {
+    kind: 'task', title: `${id} · useful work`, summary: 'A focused contribution with clear scope.', acceptanceCriteria: ['A working result', 'A reproducible check'], exclusions
+########## provision.mjs
+import { parseArgs } from "node:util";
+import { mkdirSync, writeFileSync, openSync, fchmodSync, closeSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { RoomStore } from "../server/store.mjs";
+import { initialRoom } from "../server/bootstrap.mjs";
+import { EVENT_TYPES as T } from "../src/events.js";
+
+const { values } = parseArgs({ allowPositionals: true, options: { help: { type: "boolean" }, init: { type: "boolean" }, "account-key": { type: "boolean" }, room: { type: "string", default: "commons" }, member: { type: "string", default: "owner" }, account: { type: "string" }, name: { type: "string" }, kind: { type: "string", default: "human" }, permissions: { type: "string", default: "accept_work,complete_work,verify" }, "print-key": { type: "boolean" }, "key-file": { type: "string" } } });
+if (values.help) {
+  process.stdout.write(`Usage: node scripts/provision.mjs
+########## public-pages-polish-browser-check.mjs
+// Compare pages and the HTML 404: axe serious/critical at 390 and 1280,
+// and no Content-Security-Policy console errors on the compare pages.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { createServer } from "node:http";
+import { join } from "node:path";
+import { chromium } from "playwright";
+import AxeBuilder from "@axe-core/playwright";
+import { RoomStore } from "../server/store.mjs";
+import { createRoomServer } from "../server/http.mjs";
+
+const pages = ["/about", "/receipts", "/compare/project-room-vs-slack", "/compare/project-room-vs-discord",
+  "/compare/agent-collaboration-tool", "/compare/multi-agent-workspace",
+  "/compare/ai-agent-coordination", "/compare/project-room-vs-agent-room", "/no-such-page"];
+const viewports = [{ width: 1280, height: 800 }, { w
+########## public-work-matching-browser-check.mjs
+// Actual owner enable → anonymous suggestions → outside-agent claim. No live services.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { chromium } from 'playwright';
+import { createAcceptanceFixture } from './acceptance-fixture.mjs';
+import { signInFixtureInPlace } from './in-place-fixture-signin.mjs';
+import { initialRoom } from '../server/bootstrap.mjs';
+import { createRoomServer } from '../server/http.mjs';
+import { createAgentIdentity } from '../client/room-agent.mjs';
+import { PublicWorkClaimsClient } from '../client/public-work-claims.mjs';
+async function setup(t, width) {
+  const fixture = createAcceptanceFixture();
+  const server = createRoomServer({ store: fixture.store, assetRoot: new URL('../', import.meta.url) });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const origin =
+########## public-work-mcp-journey-check.mjs
+// Synthetic outside-agent usability: advertised hosted endpoint replayed to real
+// loopback HTTP. No live identities, Room admission, host launch or payment.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { createAcceptanceFixture } from './acceptance-fixture.mjs';
+import { createRoomServer } from '../server/http.mjs';
+
+test('hosted discovery supports a zero-Room outside contributor through lost submission and own feedback', { timeout: 45000 }, async t => {
+  const f = createAcceptanceFixture(), store = f.store;
+  const identity = store.identities.create('Disposable saved contributor'), other = store.identities.create('Disposable other contributor');
+  store.projectOffers.create('commons', 'owner', { requestId: 'mcp-create', offerId: 'mcp-task', reviewerMemberIds: ['owner'], terms: { kind: 'task', title: 'Voluntee
+########## public-work-results-browser-check.mjs
+// Real HTTP submission/review and private owner UI; no live identities or mail.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { chromium } from 'playwright';
+import { createAcceptanceFixture } from './acceptance-fixture.mjs';
+import { signInFixtureInPlace } from './in-place-fixture-signin.mjs';
+import { createRoomServer } from '../server/http.mjs';
+import { createAgentIdentity } from '../client/room-agent.mjs';
+import { PublicWorkClaimsClient } from '../client/public-work-claims.mjs';
+async function setup(t, { width = 1280, mixed = false, withdrawn = false } = {}) {
+  const fixture = createAcceptanceFixture(), { store } = fixture;
+  const mode = mixed ? 'human_with_agent_review' : 'human', id = 'result-task';
+  store.projectOffers.create('commons', 'owner', { requestId: 'create-result', offerId: id, reviewerMemberId
+########## purpose-invite-check.mjs
+import { clickChrome } from "./room-chrome.mjs";
+// W4-51 L3: invite for a purpose. An inviter can point an invitation link at the
+// question or result the guest is invited to help with; after joining, the room
+// opens on that item. The purpose travels only in the URL fragment (never sent to
+// the server). It selects a destination; guest access still covers room history.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { rmSync } from "node:fs";
+import { randomBytes, randomUUID } from "node:crypto";
+import { chromium } from "playwright";
+import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
+import { createRoomServer } from "../server/http.mjs";
+import { signInFixture } from "./auth-signin.mjs";
+import { EVENT_TYPES as T } from "../src/events.js";
+import { makeTestSigner } from "./helpers/signed-evidence.mjs";
+
+test("invite for a purpose: link
+########## push-doctor.mjs
+import { readFileSync } from "node:fs";
+import { parseArgs } from "node:util";
+import { generateVapidKeys } from "../server/web-push.mjs";
+import { deliverPush, normaliseSubscription, pushConfigured, pushPayloadFor, vapidFromEnv } from "../server/push-subscriptions.mjs";
+
+// Trusted local operator tool for turning push delivery on and proving it works.
+// It prints no room content and no private key it was given: --keys writes a new
+// private key to stdout because that is the only moment it exists, and --send
+// prints only the push service's verdict.
+//
+// Push delivery is off until three secrets are set, so the intended order is:
+//   1. node scripts/push-doctor.mjs --keys        generate a VAPID pair
+//   2. wrangler secret put ROOM_VAPID_PRIVATE_KEY (and the public key, subject)
+//   3. node scripts/push-doctor.mjs --check       confirm the worker sees them
+//   4. node scripts/push
+########## pwa-browser-check.mjs
+// Install button and the push soft ask, in Chromium. The ask is absent on
+// load and appears only after a needs-you item is handed to the dock.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { createServer } from "node:http";
+import { readFileSync } from "node:fs";
+import { chromium } from "playwright";
+
+const pageHtml = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Room</title></head>
+<body>
+  <div id="account"></div>
+  <div id="dock"></div>
+  <script type="module">
+    import { mountPwaInstall } from "/src/pwa-install.js";
+    import { mountPushAsk } from "/src/push-ask.js";
+    window.__permissionCalls = 0;
+    window.__install = mountPwaInstall({
+      account: document.querySelector("#account"),
+      firstValue: false,
+      userAgent: navigator.userAgent
+    });
+
+########## qa5-a11y-c-browser-check.mjs
+// Slice C (QA5 UI/UX + a11y): user-testing for the newly merged UI work.
+// Covers the render paths the unit tests don't reach:
+//   - S1 (#1456): the viewer-aware empty-board copy is wired through boardHtml
+//     (the pure emptyBoardCopy function has its own unit test; this guards the
+//     call site that passes canWrite/signedIn).
+//   - S3 (#1456): the New-item form's Note field is label-associated and the
+//     note reaches the created claim end to end (the F-parity-1 regression).
+//   - D-c (#1459): the client-side boot() fail path shows the error screen
+//     with the back-to-sign-in fallback for a malformed invite code.
+//   - 320px viewport: no horizontal overflow on the main page or board dialog.
+//   - Coarse pointers: the 44px touch-target floor holds on board controls.
+// Real browser + disposable loopback server; no external identity.
+import test from "node:test";
+impor
+########## quarantine-check.mjs
+#!/usr/bin/env node
+/**
+ * scripts/quarantine-check.mjs
+ *
+ * Zero-Bug System: flaky-test quarantine gate.
+ *
+ * Reads tests/quarantine.json and fails (exit 1) when any entry violates
+ * the quarantine contract:
+ *   1. repair_by is in the past (overdue) — CI fails until the entry is
+ *      repaired (test fixed and re-admitted) or the repair-by date is moved
+ *      with justification in the reason field.
+ *   2. quarantined_at is older than 14 days AND the entry has no owner —
+ *      an ownerless flake that lingers forever defeats the quarantine.
+ *
+ * Additional sanity checks: malformed entries, unparseable dates,
+ * quarantined_at in the future, repair_by beyond the 14-day cap.
+ *
+ * Dependency-free: uses only node builtins.
+ */
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+
+########## quarantine-review-coverage.mjs
+// Review-coverage dashboard for the spam-quarantine queue.
+//
+// Reads a room store READ-ONLY (PRAGMA query_only) and reports per-signal
+// review coverage over the durable quarantine journal
+// (server/spam-quarantine-journal.mjs): for each spam signal that fired on a
+// held row, the held count, the reviewed count, the Confirm (released into
+// the inbox) / Dismiss (confirmed spam) / Split (detached off its thread)
+// breakdown, and the coverage ratio — the reviewCoverage metric from the
+// #567 shadow-analysis tooling (server/quarantine-review-coverage.mjs).
+//
+// Usage:
+//   node scripts/quarantine-review-coverage.mjs --store /path/to/room.db \
+//     [--since 2026-09-18T00:00:00Z | --since <ms-epoch>] [--until ...] \
+//     [--now <ms-epoch>] [--format text|json]
+//
+// --since/--until filter holds by their quarantined_at; a review verdict
+//   joins regardless of when it landed. 
+########## quiet-attribution-browser-check.mjs
+// Simulated local readers, not human research or identity verification.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { rmSync, mkdirSync } from 'node:fs';
+import { chromium } from 'playwright';
+import { createAcceptanceFixture } from './acceptance-fixture.mjs';
+import { createRoomServer } from '../server/http.mjs';
+import { signInFixture } from "./auth-signin.mjs";
+import { ensurePeopleOpen, ensureSidebarClosed, openSearch } from "./room-chrome.mjs";
+import { admitHistoricalMember } from "./unstamped-member.mjs";
+
+for (const touch of [false, true]) test(`quiet attribution ${touch ? 'touch' : 'desktop'}: short summaries, exact choices, live duplicate names`, { timeout: 45000 }, async t => {
+  const f = createAcceptanceFixture({ dmConsent: true }), server = createRoomServer({ store: f.store, streamInterval: 50 });
+  let browser;
+  t.after(async () => { awa
+########## quiet-copy-browser-check.mjs
+import { openMagicSignin, backToPasswordSignin } from "./signin-browser-journey.mjs";
+import { clickChrome } from "./room-chrome.mjs";
+// Automated usability checks with synthetic identities, not human participant research.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { rmSync } from "node:fs";
+import { chromium } from "playwright";
+import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
+import { signInFixture } from "./auth-signin.mjs";
+import { createRoomServer } from "../server/http.mjs";
+
+async function setup(t, viewport) {
+  const fixture = createAcceptanceFixture();
+  const server = createRoomServer({ store: fixture.store, streamInterval: 60 });
+  let browser;
+  t.after(async () => {
+    await browser?.close();
+    server.closeStreams(); server.closeAllConnections();
+    if (server.listening) await new Promise(resolve => server.close(res
+########## quiet-design-check.mjs
+import { openComposerOptions } from "./room-chrome.mjs";
+import { clickChrome } from "./room-chrome.mjs";
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdirSync, rmSync } from "node:fs";
+import { chromium } from "playwright";
+import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
+import { createRoomServer } from "../server/http.mjs";
+import { EVENT_TYPES as T } from "../src/events.js";
+import { signInFixture } from "./auth-signin.mjs";
+
+for (const touch of [false, true]) {
+  const label = touch ? "touch" : "desktop";
+  test(`quiet design ${label}: disclosure, keyboard sending, modal focus and reflow`, { timeout: 60000 }, async t => {
+    const fixture = createAcceptanceFixture();
+    const server = createRoomServer({ store: fixture.store, streamInterval: 60 });
+    await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+    le
+########## quiet-focus-a34-check.mjs
+// Quiet Focus A3/A4 evidence: keyboard-operable disclosures, usable narrow
+// composer, composer-local send failure with Send-as-retry, and explicit
+// disconnected/reconnecting states. Real browser + local HTTP service;
+// all identities, messages, and keys are disposable fixtures.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { chromium } from "playwright";
+import { RoomStore } from "../server/store.mjs";
+import { createRoomServer } from "../server/http.mjs";
+import { initialRoom } from "../server/bootstrap.mjs";
+import { EVENT_TYPES as T } from "../src/events.js";
+import { signInFixture } from "./auth-signin.mjs";
+import { openMemberProfile, ensurePeopleOpen, ensureSidebarClosed } from "./room-chrome.mjs";
+
+test("A3/A4: keyboard disclosure
+########## quiet-focus-final-check.mjs
+// Quiet Focus final causal proofs (Codex 5557784549): post-connect stream loss
+// transition, and measurable reflow at 390px and 200%-zoom-equivalent CSS width.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { chromium } from "playwright";
+import { RoomStore } from "../server/store.mjs";
+import { createRoomServer } from "../server/http.mjs";
+import { initialRoom } from "../server/bootstrap.mjs";
+import { signInFixture } from "./auth-signin.mjs";
+
+async function boot(t, viewport) {
+  const directory = mkdtempSync(join(tmpdir(), "room-final-"));
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  store.initialize(initialRoom());
+  const owner = store.issueAccessKey("commons", "owner");
+  const server = createRoomServer({ store, stre
+########## quiet-invites-check.mjs
+import { clickChrome } from "./room-chrome.mjs";
+// Synthetic UI regressions; no human-participant findings are inferred.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdirSync, rmSync } from 'node:fs';
+import { chromium } from 'playwright';
+import { createAcceptanceFixture } from './acceptance-fixture.mjs';
+import { createRoomServer } from '../server/http.mjs';
+import { signInFixture } from "./auth-signin.mjs";
+
+for (const touch of [false, true]) {
+  test(`quiet invitations ${touch ? 'touch' : 'desktop'}: disclosure, truthful limits, late-list ordering and retry`, { timeout: 60000 }, async t => {
+    const fixture = createAcceptanceFixture();
+    const server = createRoomServer({ store: fixture.store, streamInterval: 60 });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const origin = `http://127.0.0.1:${server.address().
+########## ralph-loop.mjs
+#!/usr/bin/env node
+/**
+ * ralph-loop.mjs — Ralph-style night-shift burndown loop driver (BL-005 / S4).
+ *
+ * One loop iteration, per the software-factory brief (S4):
+ *   1. `scripts/room backlog pull` takes the top unclaimed ready item
+ *      (the pull itself refuses when the item's files are held live by
+ *      another lane — the S1 overlap guard).
+ *   2. This driver reserves a worker slot (cap: MAX_WORKERS concurrent),
+ *      creates a PERSISTENT worktree (never /tmp), and prints the worker
+ *      brief: the exact [lane][claim] text to post plus a worker prompt
+ *      template that runs claim -> implement -> test -> open PR -> receipt.
+ *   3. A fresh worker (fresh agent context, no inherited transcript) does
+ *      the actual work. The driver never implements, never merges,
+ *      never deploys.
+ *
+ * Safety invariants (light factory — the gates are the product):
+ *   
+########## reachability.mjs
+// Import-graph reachability for server/ and src/.
+//
+// Walks static `import` / `export ... from`, bare `import "x"`, and
+// string-literal `import("x")` from runtime entry points. Relative
+// specifiers resolve with .mjs / .js (and /index). A `new URL("...", import.meta.url)`
+// literal is followed too: that is how the push service worker is loaded.
+//
+// Entry points: cloudflare/room.mjs, server.mjs, the browser documents,
+// every file named by package.json "scripts", every `node <file>` in
+// .github/workflows, cloudflare *.check.mjs and *.test-fixture.mjs, and the
+// runtime-package required roots plus public assets. Optional allowlist
+// entries are packaging permissions, not loaders. A module that is only
+// named there is still unreachable.
+//
+// `node scripts/reachability.mjs --check` fails when a server/ or src/ module
+// is unreachable and not in KEEP, so unwired modules cann
+########## real-agent-fixture.mjs
+// Operator-started, loopback-only fixture for real agent participation.
+// Seeds are explicitly synthetic; it never creates a participating agent's answer or verdict.
+import { createServer } from 'node:https';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
+import { RoomStore } from '../server/store.mjs';
+import { initialRoom } from '../server/bootstrap.mjs';
+import { createRoomServer } from '../server/http.mjs';
+import { EVENT_TYPES as T } from '../src/events.js';
+import { seedWorkContextExercise } from './work-context-agent-seed.mjs';
+
+const digest = bytes => createHash('sha256').update(bytes).digest('hex');
+const listen = (server, protocol = 'http') =
+########## receipts-browser-check.mjs
+// /receipts/<id> at a phone width: the document fits the viewport and exposes
+// main and footer landmarks.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { chromium } from "playwright";
+import { RoomStore } from "../server/store.mjs";
+import { createRoomServer } from "../server/http.mjs";
+import { initialRoom } from "../server/bootstrap.mjs";
+import { collectPublicReceipts } from "../server/receipts-live.mjs";
+
+test("a public receipt fits a 390px viewport", { timeout: 60000 }, async t => {
+  const directory = mkdtempSync(join(tmpdir(), "receipts-browser-"));
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  store.initialize(initialRoom("commons"));
+  const ownerKey = store.issueAccessKey("commons", "owner");
+  store.command(own
+########## receive-qualify.mjs
+// Drives one complete exchange against a throwaway local Room:
+// directed request, pointer, Room-tool reply, wake ack, stored answer.
+// Starts no model. Prints one receipt. The token stays in the private directory.
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { setTimeout as delay } from 'node:timers/promises';
+import { saveAgentConnection } from '../client/agent-connection.mjs';
+import { AgentRooms } from '../server/agent-rooms.mjs';
+import { createRoomServer } from '../server/http.mjs';
+import { RoomStore } from '../server/store.mjs';
+
+const roomId = 'qualify-room';
+const messageId = 'qualify-question';
+
+async function qualify() {
+  const store = 
+########## reconnect-collaboration-browser-check.mjs
+import { clickChrome } from "./room-chrome.mjs";
+// Scripted protocol participants + simulated human browser. No model invocation.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { chromium } from 'playwright';
+import { createAcceptanceFixture } from './acceptance-fixture.mjs';
+import { openMcpTestClient } from './mcp-test-client.mjs';
+import { createRoomServer } from '../server/http.mjs';
+import { RoomStore } from '../server/store.mjs';
+import { saveAgentConnection } from '../client/agent-connection.mjs';
+import { auditRecovery } from '../server/recovery.mjs';
+import { textVersion } from '../server/text-results.mjs';
+import { signInFixture } from "./auth-signin.mjs";
+import { openCatchUp, closeCatchUp, openSearch } from "./room-chrome.mjs";
+
+for (const touch of [fa
+########## record-rails-fixture.mjs
+// Synthetic qualification helpers use the real event and durable rail authority.
+import {randomUUID} from 'node:crypto';
+import {generateReceiptKeyPair,issueVettingReceipt} from '../server/vetting-receipts.mjs';
+export function addRailMember(store,id,kind='human',ownerKey=null){
+ if(store.room('commons').state.members[id])return;
+ store.command(ownerKey??store.issueAccessKey('commons','owner'),'commons',{id:randomUUID(),type:'member.added',data:{memberId:id,displayName:id,kind,permissions:kind==='agent'?['accept_work']:[]}});
+}
+export function submittedTrial(store,{id='trial-abc123',candidateId='worker',buyerId='owner',criterion='c1'}={}){
+ addRailMember(store,candidateId);
+ const task=store.trialTasks.apply('commons','owner',{action:'create',requestId:`create-${id}`,taskId:id,candidateId,buyerId,demigodReqId:'demigod-req-42',title:'Synthetic trial',trialScope:{hoursMax:'40',deliverable
+########## recovery-browser-check.mjs
+// Simulated human journey on a disposable database; no production traffic.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { createServer } from 'node:http';
+import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { chromium } from 'playwright';
+import { createRecoveryFixture } from './recovery-fixture.mjs';
+import { auditRecovery } from '../server/recovery.mjs';
+import { signInFixture } from "./auth-signin.mjs";
+
+test('actual Node entrypoint pauses without touching populated data, then resumes the same Room in a browser', { timeout: 45000 }, async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'room-recovery-browser-'));
+  const fixture = createRecoveryFixture(join(directory, 'room.sqlite')), before = auditRecovery(fixture.store);
+########## recovery-coverage.mjs
+import {seedRecordRails} from "./record-rails-fixture.mjs";
+// The rows the recovery audit requires. Shared with the cold-start budget so
+// a wake is measured against a store that has every application table, not
+// only the event log. Disposable synthetic data only.
+import { createHash, randomUUID } from "node:crypto";
+import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
+import { flagMessage } from "../server/inbox-spam.mjs";
+import { createNotifyPrefs } from "../server/notify-prefs.mjs";
+import { issueGrant } from "../server/grants.mjs";
+import { appendOperatorAction } from "../server/operator-actions.mjs";
+import { RoomAssistant } from "../server/room-assistant.mjs";
+import { EVENT_TYPES as T } from "../src/events.js";
+
+export async function seedRecoveryCoverage(f) {
+  // Immutable account redemption history must survive captures and restarts.
+  const linkId 

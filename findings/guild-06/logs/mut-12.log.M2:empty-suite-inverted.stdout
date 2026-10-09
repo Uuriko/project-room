@@ -1,0 +1,71 @@
+✖ detector flags the alternating fixture as flaky (8487.098515ms)
+✖ detector does NOT flag the stable fixture (7272.118367ms)
+✔ detector isolates flaky tests in a mixed file (8586.144905ms)
+✔ detector reports a missing file instead of crashing (23.07586ms)
+✖ detector keeps same-named subtests under different parents separate (9943.571662ms)
+✔ cli: contradictory run counts are rejected, not silently overridden (5959.712442ms)
+✔ cli: non-numeric timeout is rejected (2218.178763ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 4
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 44671.099822
+
+✖ failing tests:
+
+test at tests/flaky-detect.test.js:21:1
+✖ detector flags the alternating fixture as flaky (8487.098515ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  2 !== 1
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-12/tests/flaky-detect.test.js:33:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 2,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/flaky-detect.test.js:36:1
+✖ detector does NOT flag the stable fixture (7272.118367ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  2 !== 0
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-12/tests/flaky-detect.test.js:42:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 2,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/flaky-detect.test.js:70:1
+✖ detector keeps same-named subtests under different parents separate (9943.571662ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  2 !== 1
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-12/tests/flaky-detect.test.js:90:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 2,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

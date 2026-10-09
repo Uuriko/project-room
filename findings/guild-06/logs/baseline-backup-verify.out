@@ -1,0 +1,35 @@
+{"event":"room.cold_start","durationMs":1440,"integrity":"eager","phases":{"schema":{"ms":593,"rowsRead":0},"plugin":{"ms":330,"rowsRead":0},"fence":{"ms":199,"rowsRead":0},"verifies":{"ms":14,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":174,"heapBytes":22344056,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ parseSchedule: named intervals (30.074904ms)
+✔ parseSchedule: duration forms (0.495874ms)
+✔ parseSchedule: cron form (8.239906ms)
+✔ parseSchedule: rejects junk (0.554863ms)
+✔ nextRunAfter: interval adds the interval (5.071701ms)
+✔ nextRunAfter: cron finds the next matching minute (UTC) (12.0873ms)
+✔ nextRunAfter: cron every-5-minutes steps (0.37312ms)
+✔ scheduleIsDue: never-run is due, fresh run is not, failed run retries (0.914312ms)
+{"event":"room.cold_start","durationMs":424,"cpuMs":37,"heapBytes":24552448,"rooms":1,"sequences":5,"projectionBytes":1333,"events":5}
+{"event":"room.cold_start","durationMs":508,"cpuMs":29,"heapBytes":32230664,"rooms":1,"sequences":5,"projectionBytes":1333,"events":5}
+{"event":"room.cold_start","durationMs":392,"cpuMs":30,"heapBytes":35784208,"rooms":1,"sequences":5,"projectionBytes":1333,"events":5}
+{"event":"room.cold_start","durationMs":189,"cpuMs":24,"heapBytes":25013408,"rooms":1,"sequences":5,"projectionBytes":1333,"events":5}
+{"event":"room.cold_start","durationMs":302,"cpuMs":30,"heapBytes":32444496,"rooms":1,"sequences":5,"projectionBytes":1333,"events":5}
+{"event":"room.cold_start","durationMs":282,"cpuMs":27,"heapBytes":35948416,"rooms":1,"sequences":5,"projectionBytes":1333,"events":5}
+{"event":"room.cold_start","durationMs":1008,"integrity":"eager","phases":{"schema":{"ms":41,"rowsRead":0},"plugin":{"ms":647,"rowsRead":0},"fence":{"ms":68,"rowsRead":0},"verifies":{"ms":4,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":157,"heapBytes":24856392,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ runBackupCycle: full cycle verifies, writes state, then skips when not due (6362.372427ms)
+{"event":"room.cold_start","durationMs":250,"cpuMs":35,"heapBytes":28813144,"rooms":1,"sequences":5,"projectionBytes":1333,"events":5}
+{"event":"room.cold_start","durationMs":79,"cpuMs":32,"heapBytes":36130944,"rooms":1,"sequences":5,"projectionBytes":1333,"events":5}
+{"event":"room.cold_start","durationMs":655,"cpuMs":44,"heapBytes":22917544,"rooms":1,"sequences":5,"projectionBytes":1333,"events":5}
+{"event":"room.cold_start","durationMs":117,"cpuMs":26,"heapBytes":26401240,"rooms":1,"sequences":5,"projectionBytes":1333,"events":5}
+✔ verifyRestoredBackup: flags a backup whose events drifted from the watermark (2963.192759ms)
+✔ verifyRestoredBackup: missing watermark fails fast (0.718989ms)
+✔ cli: --print-cron emits a usable crontab line (4517.264443ms)
+{"event":"room.cold_start","durationMs":2000,"integrity":"eager","phases":{"schema":{"ms":134,"rowsRead":0},"plugin":{"ms":1121,"rowsRead":0},"fence":{"ms":426,"rowsRead":0},"verifies":{"ms":42,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":156,"heapBytes":30748264,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ cli: missing --db/--to is a usage error (5957.703919ms)
+✔ cli: --force runs a full cycle and prints JSON (7356.778938ms)
+ℹ tests 14
+ℹ suites 0
+ℹ pass 14
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 32880.118863

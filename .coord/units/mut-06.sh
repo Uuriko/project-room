@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+set -u
+exec "$HOME/workspace/pr-wave1000-guild-06/.coord/mut-unit.sh" '06' 'answer-engine-check.mjs' 'answer-engine-check.test.js' 'prompt-validation-every' 'if (config.prompts.some(prompt => typeof prompt !== "string" || !prompt.trim())) throw new Error("answer-engine prompts must be non-empty strings");' 'if (config.prompts.every(prompt => typeof prompt !== "string" || !prompt.trim())) throw new Error("answer-engine prompts must be non-empty strings");' 'sort-order-reversed' 'matches.sort((a, b) => a.start - b.start || (b.end - b.start) - (a.end - a.start));' 'matches.sort((a, b) => b.start - a.start || (b.end - b.start) - (a.end - a.start));'

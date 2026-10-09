@@ -1,0 +1,12 @@
+noargs: exit=1 expect=any verdict=OK
+help: exit=1 expect=any verdict=OK
+badflag: exit=1 expect=nonzero verdict=OK
+dashdash: exit=1 expect=any verdict=OK
+missingfile: exit=1 expect=nonzero verdict=OK
+emptyarg: exit=1 expect=any verdict=OK
+hugearg: exit=1 expect=any verdict=OK
+nullbytes: exit=1 expect=any verdict=OK
+garbage-stdin: exit=1 verdict=OK
+concurrent-help: exit=0 (0=all-clean)
+bare-env-help: exit=1
+unit=fuzz-01 DONE

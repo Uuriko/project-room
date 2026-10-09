@@ -1,0 +1,14 @@
+{"event":"room.cold_start","durationMs":3208,"integrity":"eager","phases":{"schema":{"ms":768,"rowsRead":0},"plugin":{"ms":810,"rowsRead":0},"fence":{"ms":1004,"rowsRead":0},"verifies":{"ms":102,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":194,"heapBytes":22109504,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":3207,"integrity":"eager","phases":{"schema":{"ms":753,"rowsRead":0},"plugin":{"ms":1688,"rowsRead":0},"fence":{"ms":510,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":172,"heapBytes":27263944,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1250,"integrity":"eager","phases":{"schema":{"ms":418,"rowsRead":0},"plugin":{"ms":447,"rowsRead":0},"fence":{"ms":44,"rowsRead":0},"verifies":{"ms":7,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":141,"heapBytes":31610144,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ backfill reports hand-counted weeks and leaves the input file unchanged (4517.284634ms)
+✔ an excluded room is counted beside productive rooms, including an env id applied at read time (7382.684154ms)
+✔ the backfill command requires a database path (2371.813694ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 25419.725049

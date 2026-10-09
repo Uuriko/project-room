@@ -1,0 +1,21 @@
+{"event":"room.cold_start","durationMs":3489,"integrity":"eager","phases":{"schema":{"ms":501,"rowsRead":0},"plugin":{"ms":1674,"rowsRead":0},"fence":{"ms":914,"rowsRead":0},"verifies":{"ms":24,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":212,"heapBytes":25209144,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ lane split labels lane activity as testing, distinctly from organic (3.039852ms)
+✔ unconfigured lane attribution is flagged, never silently folded (2.741424ms)
+✔ settled/week never fabricates USD and attributes posters honestly (1.28585ms)
+✔ unattributed posters stay out of both sides when john attribution is unconfigured (0.955734ms)
+✔ bond forfeit rate is measured from journal kinds (1.090716ms)
+✔ no bond activity means unmeasured, not zero churn (0.885599ms)
+✔ stalled funded bounties are counted against the escrow falsifier (1.057797ms)
+✔ unmeasurable falsifiers are published as rows, not hidden (1.188573ms)
+✔ barrel exports resolve to the new functions (1.575274ms)
+✔ dashboardHonestyReport composes lane, settled, and falsifier sections (1.812591ms)
+✔ lane split counts the tail's sampling weights from analytics_events (1.080562ms)
+✔ the backfill dashboard output carries the honesty section (5237.256048ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 13483.51215

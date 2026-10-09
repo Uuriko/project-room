@@ -1,0 +1,35 @@
+✖ scores mention, recommendation, position, and competitors from the answer text (240.85327ms)
+✔ the prompt file names eight questions and the four engine secrets (29.702615ms)
+✔ each configured engine sends its own request, and a missing key is skipped (280.892106ms)
+✔ Claude and Grok requests use their web-search tools and omit temperature when the model rejects it (98.317686ms)
+✔ an unrecognized provider payload is not scored as a miss, and a leaked key is redacted (59.120893ms)
+✔ missing answer-engine keys exit 0 with a skip line and no mention rate (691.295631ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 5
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2683.902747
+
+✖ failing tests:
+
+test at tests/answer-engine-check.test.js:36:1
+✖ scores mention, recommendation, position, and competitors from the answer text (240.85327ms)
+  AssertionError [ERR_ASSERTION]: named first and linked position
+  
+  3 !== 1
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-06/tests/answer-engine-check.test.js:103:14)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.start (node:internal/test_runner/test:1257:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 3,
+    expected: 1,
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

@@ -1,0 +1,144 @@
+✖ clean fixture: exit 0, ok report covering the room (14059.890093ms)
+✖ corrupt chain: exit 1 with a machine-readable violation report (10851.402649ms)
+✖ read-only guarantee: the check mutates neither the file nor its directory (10538.573574ms)
+✔ missing database file: exit 2 (1962.180876ms)
+✔ no --db and no ROOM_DB: exit 2 (2070.929715ms)
+✖ database without escrow schema: exit 2, not a violation (3254.734638ms)
+✔ database without rooms table: exit 2 (11432.782699ms)
+✖ ROOM_DB env fallback is honored (12069.84389ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 3
+ℹ fail 5
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 67767.888828
+
+✖ failing tests:
+
+test at tests/bounty-conservation-check.test.js:78:1
+✖ clean fixture: exit 0, ok report covering the room (14059.890093ms)
+  AssertionError [ERR_ASSERTION]: stderr: bounty-conservation-check: environment error: bounty escrow schema absent in /home/hatch/workspace/.g6-wt/mut-09/.tmp/bcc-test-13Hwfl/clean.sqlite: nothing to verify
+  usage: node scripts/bounty-conservation-check.mjs --db <room.sqlite>
+         (falls back to $ROOM_DB)
+  
+  Opens the room database read-only and runs BountyEscrow.verifyConservation
+  across every room. Exit 0 = clean, 1 = violations, 2 = environment error.
+  
+  
+  2 !== 0
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-09/tests/bounty-conservation-check.test.js:82:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.start (node:internal/test_runner/test:1257:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 2,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/bounty-conservation-check.test.js:92:1
+✖ corrupt chain: exit 1 with a machine-readable violation report (10851.402649ms)
+  AssertionError [ERR_ASSERTION]: stderr: bounty-conservation-check: environment error: bounty escrow schema absent in /home/hatch/workspace/.g6-wt/mut-09/.tmp/bcc-test-5oxn07/corrupt.sqlite: nothing to verify
+  usage: node scripts/bounty-conservation-check.mjs --db <room.sqlite>
+         (falls back to $ROOM_DB)
+  
+  Opens the room database read-only and runs BountyEscrow.verifyConservation
+  across every room. Exit 0 = clean, 1 = violations, 2 = environment error.
+  
+  
+  2 !== 1
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-09/tests/bounty-conservation-check.test.js:96:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 2,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/bounty-conservation-check.test.js:107:1
+✖ read-only guarantee: the check mutates neither the file nor its directory (10538.573574ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  2 !== 1
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-09/tests/bounty-conservation-check.test.js:113:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 2,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/bounty-conservation-check.test.js:135:1
+✖ database without escrow schema: exit 2, not a violation (3254.734638ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /schema absent/. Input:
+  
+  'bounty-conservation-check: environment error: verifyConservation threw for room room-check: Bounty escrow schema not converged on read-only path (missing tables: bounty_journal, bounty_records, bounty_disputes, bounty_events, bounty_idempotency, bounty_watchers, bounty_sequences, bounty_rubric_versions, bounty_flakes, bounty_review_packets, bounty_sybil_flags, bounty_reputation_packets)\n' +
+    'usage: node scripts/bounty-conservation-check.mjs --db <room.sqlite>\n' +
+    '       (falls back to $ROOM_DB)\n' +
+    '\n' +
+    'Opens the room database read-only and runs BountyEscrow.verifyConservation\n' +
+    'across every room. Exit 0 = clean, 1 = violations, 2 = environment error.\n'
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-09/tests/bounty-conservation-check.test.js:140:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'bounty-conservation-check: environment error: verifyConservation threw for room room-check: Bounty escrow schema not converged on read-only path (missing tables: bounty_journal, bounty_records, bounty_disputes, bounty_events, bounty_idempotency, bounty_watchers, bounty_sequences, bounty_rubric_versions, bounty_flakes, bounty_review_packets, bounty_sybil_flags, bounty_reputation_packets)\nusage: node scripts/bounty-conservation-check.mjs --db <room.sqlite>\n       (falls back to $ROOM_DB)\n\nOpens the room database read-only and runs BountyEscrow.verifyConservation\nacross every room. Exit 0 = clean, 1 = violations, 2 = environment error.\n',
+    expected: /schema absent/,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+test at tests/bounty-conservation-check.test.js:151:1
+✖ ROOM_DB env fallback is honored (12069.84389ms)
+  AssertionError [ERR_ASSERTION]: stderr: bounty-conservation-check: environment error: bounty escrow schema absent in /home/hatch/workspace/.g6-wt/mut-09/.tmp/bcc-test-9zUrqa/clean.sqlite: nothing to verify
+  usage: node scripts/bounty-conservation-check.mjs --db <room.sqlite>
+         (falls back to $ROOM_DB)
+  
+  Opens the room database read-only and runs BountyEscrow.verifyConservation
+  across every room. Exit 0 = clean, 1 = violations, 2 = environment error.
+  
+  
+  2 !== 0
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-09/tests/bounty-conservation-check.test.js:156:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 2,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

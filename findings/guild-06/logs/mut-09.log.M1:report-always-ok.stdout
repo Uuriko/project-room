@@ -1,0 +1,61 @@
+✔ clean fixture: exit 0, ok report covering the room (10208.942376ms)
+✖ corrupt chain: exit 1 with a machine-readable violation report (8337.508183ms)
+✖ read-only guarantee: the check mutates neither the file nor its directory (8363.730927ms)
+✔ missing database file: exit 2 (2705.678376ms)
+✔ no --db and no ROOM_DB: exit 2 (2640.521165ms)
+✔ database without escrow schema: exit 2, not a violation (3022.342515ms)
+✔ database without rooms table: exit 2 (10620.616977ms)
+✔ ROOM_DB env fallback is honored (10225.712022ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 6
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 59861.738285
+
+✖ failing tests:
+
+test at tests/bounty-conservation-check.test.js:92:1
+✖ corrupt chain: exit 1 with a machine-readable violation report (8337.508183ms)
+  AssertionError [ERR_ASSERTION]: stderr: bounty-conservation-check: OK — 1 room(s) verified, no conservation violations
+  
+  
+  0 !== 1
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-09/tests/bounty-conservation-check.test.js:96:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/bounty-conservation-check.test.js:107:1
+✖ read-only guarantee: the check mutates neither the file nor its directory (8363.730927ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  0 !== 1
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-09/tests/bounty-conservation-check.test.js:113:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

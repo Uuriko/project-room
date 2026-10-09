@@ -1,0 +1,529 @@
+########## measure-cold-start.mjs
+// Cold-start measurement (re-audit 2026-09-14, M5; folds PR #141 and #160).
+//
+// cloudflare/wrangler.jsonc caps the Worker at `limits.cpu_ms`; the Durable
+// Object's first request evaluates the modules, opens the store (schema
+// verification, provenance and invitation audits) and answers. This script
+// measures those phases so the cap is chosen against a number, not a guess.
+// Results and the reading against the cap live in docs/WORKER-LIMITS.md.
+//
+// Two subcommands, one CLI. `--json` works for both; the report is a table
+// otherwise.
+//
+//   node scripts/measure-cold-start.mjs [phases] [runs=3] [--json] [--no-miniflare]
+//
+// `phases` (the default, from PR #160) answers "what does the first request
+// pay on an empty workspace?". Node: each run is a fresh child process that
+// times import of server/store.mjs + server/http.mjs, a fresh store
+// (initialize), listen plus the fir
+########## member-perms-browser-check.mjs
+// MEMBER-PERMS PR2: simulated browser journeys against a disposable real server.
+// Authoring gate: these own UI wiring, selection, retry and session lifecycle.
+// Credible regressions are posting admission instead of an authenticated upgrade,
+// sending unselected grants, duplicating a committed request after response loss,
+// or painting the previous member's callback into a new session. HTTP tests do
+// not mount the UI; these use no production test seams or fabricated API replies.
+// The two happy-path viewports additionally guard mobile reachability and native
+// keyboard activation; Escape review dismissal must restore the initiating focus.
+// Additional regressions own prelookup-throttle retry continuity, live ownership
+// loss with an open review, and keyboard focus across real stream-driven refreshes.
+import test from "node:test";
+import assert from "node:assert/strict";
+import
+########## merge-hold.mjs
+#!/usr/bin/env node
+// scripts/merge-hold.mjs — machine-readable main-merge holds on #266.
+//
+// Release holds are prose today ("please hold non-urgent main merges until
+// 22:00 UTC"), so lanes miss them: on 2026-09-26 #1081 and #1103 both merged
+// during announced holds and restarted a ~13 minute release CI cycle each.
+// This script gives a hold a fenced block that tools can read, and a check a
+// lane runs right before `gh pr merge`. Holds are advisory coordination data,
+// not authenticated authority: by/exempt-pr never grant permission or bypass
+// CI or branch protection. scripts/room has no merge verb; callers must run
+// this fresh check themselves and stop on a blocking hold or read failure.
+//
+// Hold block (post on #266):
+//
+//   ```room-hold
+//   scope:  main-merges
+//   until:  2026-09-26T22:20:00Z
+//   by:     codex
+//   exempt-pr: 1104
+//   reason: release #1104 exact-
+########## merge-queue-dryrun.mjs
+// merge-queue-dryrun.mjs — read-only merge-queue readiness tracker.
+//
+// DRY-RUN ONLY: performs no writes, enables nothing, needs no admin rights.
+// Lists open PRs targeting `main`, fetches each PR's combined check state and
+// mergeable_state via the read-only GitHub API, and prints the simulated FIFO
+// queue order with per-PR flags:
+//
+//   READY      green required checks + mergeable      -> safe to enqueue
+//   NOT-GREEN  required checks not green/absent       -> cannot enqueue yet
+//   DIRTY      mergeable_state == "dirty"             -> would be ejected;
+//              (known platform behavior: GitHub creates NO pull_request
+//              workflow runs for dirty PRs, so a dirty PR may show no CI at
+//              all — rebase first, then re-verify, then enqueue)
+//   BEHIND     mergeable but behind main              -> informational; the
+//              queue re-verifie
+########## merge-queue-eject-budget.mjs
+// merge-queue-eject-budget.mjs — measured flake eject budget for GitHub's
+// native merge queue.
+//
+// GitHub's merge queue is batch-then-eject (NOT batch-then-bisect): when a
+// check fails in a merge_group, the failing PR is ejected and the group
+// rebuilds. Without a budget, a flaky PR can eject/requeue forever, burning
+// 25-75 min of CI per cycle and blocking its whole group each time.
+//
+// What this does:
+//   - On `merge_group` `destroyed` events, classifies the eject. Only
+//     explicit check-failure ejects burn budget; lane pushes (design doc
+//     MERGE-QUEUE-DESIGN.md §1.3: eject first, push, re-verify, re-enqueue),
+//     manual dequeues, dirty-PR ejects, and unknown reasons never count.
+//   - Counts failure-ejects per PR in a rolling window (default: 3 ejects /
+//     24h) persisted in tests/merge-queue-eject-budget.json (the repo-file
+//     ledger, committed back
+########## merge-queue-receipt.mjs
+// Merge-queue receipt. Posts one room message through the GitHub door
+// (ROOM_DOOR_SECRET, the same secret as room-github-door.yml). Issue #266
+// is locked, so this does not comment there. When the door secret is unset
+// the run skips and says so.
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+import { RoomAgentClient } from "../client/room-agent.mjs";
+import { resolveConfig } from "./github-door.mjs";
+
+export function receiptCommand({ repo, action, headRef, headSha, baseRef, reason }) {
+  const h = createHash("sha256").update(`merge-queue-receipt:${repo}:${action}:${headSha}`).digest("hex");
+  const id = `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
+  const prs = String(headRef ?? "").match(/pr-(\d+)/g)?.map(part => `#${part.slice(3)}`).join(", ") || headRef 
+########## merge-queue-worker.mjs
+// merge-queue-worker.mjs — automation for the room-coordinated merge queue.
+//
+// Phase 1 (docs/MERGE-QUEUE-DESIGN.md): lanes claim a merge-slot via
+// POST /api/rooms/{roomId}/merge-queue/enqueue; THIS script does the serial
+// work — rebase the PR onto current main, run the checks, merge, release the
+// slot. Lanes stop fighting HEAD themselves.
+//
+// Usage:
+//   node scripts/merge-queue-worker.mjs status [--room muse-room]
+//   node scripts/merge-queue-worker.mjs tick [--room muse-room] [--live] [--authorized-head <40-char SHA>]
+//   node scripts/merge-queue-worker.mjs sweep [--room muse-room]
+//
+// tick processes the active slot once. Dry-run is the default: it verifies
+// the PR and prints the plan without pushing, merging, or releasing.
+// --live performs the rebase, push, check-wait, merge, and release.
+// Scheduling (cron) and --live are John's tap; until then run tick by ha
+########## message-preview-browser-check.mjs
+// Authoring gate: real Chromium owns disclosure accessibility and retained DOM
+// during streamed updates. Markdown tests cannot detect paragraph reparsing,
+// lost selection/focus, duplicate visible text or theme/mobile layout failures.
+// Regression control: baseline has no expandable preview. No production hooks.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdirSync, rmSync } from 'node:fs';
+import { chromium } from 'playwright';
+import { createAcceptanceFixture } from './acceptance-fixture.mjs';
+import { createRoomServer } from '../server/http.mjs';
+import { signInFixture } from './auth-signin.mjs';
+
+for (const mobile of [false, true]) test(`long message preview ${mobile ? 'mobile' : 'desktop'}: accessible expansion, complete safe text and retained reading state`, { timeout: 45000 }, async t => {
+  const f = createAcceptanceFixture();
+  const body
+########## mobile-header-check.mjs
+// Automated usability checks with synthetic identities, not human participant research.
+// C1: mobile actions stay readable and reflow as whole controls; infrequent actions live in an
+// accessible menu; identity and connection recovery are available in the account menu.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdirSync, rmSync } from "node:fs";
+import { chromium } from "playwright";
+import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
+import { createRoomServer } from "../server/http.mjs";
+import { signInFixture } from "./auth-signin.mjs";
+import { EVENT_TYPES as T } from "../src/events.js";
+import { openCatchUp, closeCatchUp } from "./room-chrome.mjs";
+
+async function setup(t, viewport) {
+  const fixture = createAcceptanceFixture();
+  const server = createRoomServer({ store: fixture.store, streamInterval: 60 });
+  let browser;
+  t.
+########## mobile-signin-history-browser-check.mjs
+// Mobile sign-in history is a real navigation boundary: Back must leave the
+// email step, Forward must restore it, and pending writes must stay visible.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { chromium } from "playwright";
+import { RoomStore } from "../server/store.mjs";
+import { createRoomServer } from "../server/http.mjs";
+import { initialRoom } from "../server/bootstrap.mjs";
+import { createMagicLinkMailer } from "../server/magic-links.mjs";
+
+test("mobile email taps and browser Back/Forward retain the room and fence a pending sign-in link", { timeout: 45000 }, async t => {
+  const directory = mkdtempSync(join(tmpdir(), "room-mobile-history-"));
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  store.initialize(initi
+########## moderation-browser-check.mjs
+import { openMemberProfile, enableHumanAdvanced } from "./room-chrome.mjs";
+// Simulated human journey against disposable first-party data, not human research.
+// Issue #6 E4: a member reports a message to the room owner and mutes an author for
+// themselves; the owner alone sees the report list with the reporter's name.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { rmSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { chromium } from "playwright";
+import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
+import { createRoomServer } from "../server/http.mjs";
+import { EVENT_TYPES as T } from "../src/events.js";
+import { signInFixture } from "./auth-signin.mjs";
+import { dialogPrimarySubmit, ensurePeopleOpen, openSettings } from "./room-chrome.mjs";
+
+async function setup(t, viewport = { width: 1440, height: 1000 }) {
+  cons
+########## native-draft-browser-check.mjs
+// Scripted people and MCP reviewer, isolated local data. No model or provider use.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { chromium } from "playwright";
+import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
+import { createRoomServer } from "../server/http.mjs";
+import { saveAgentConnection } from "../client/agent-connection.mjs";
+import { openMcpTestClient } from "./mcp-test-client.mjs";
+import { signInFixture } from "./auth-signin.mjs";
+
+async function setup(t, touch = false) {
+  const f = createAcceptanceFixture(), workItemId = "native-guide", errors = [], traffic = [];
+  const state = () => f.store.room("commons").state, item = () => state().workItems[workItemId];
+  const send = (actor, type, data) => f.store.command(f.keys[actor], "commo
+########## native-host-binary.mjs
+// Resolve the executable for a native host, without hardcoding anyone's home
+// directory. The runner used to name one developer's install path directly,
+// which meant the acceptance exercise could only ever run on that one laptop
+// and failed on every other machine with a bare ENOENT from spawn.
+//
+// Resolution order, first hit wins:
+//   1. An explicit environment override, so an unusual install is always
+//      reachable without editing the script.
+//   2. The executable on PATH, which is where a normal install puts it.
+//   3. A platform default, kept only for the packaged macOS application that
+//      genuinely does live at a fixed location and is not on PATH.
+//
+// This never throws. Resolution happens before a host is started but the
+// caller reserves its evidence file first, so an unresolvable binary has to
+// be reportable rather than fatal; returning a reason keeps that 
+########## native-host-request-run.mjs
+// Manual acceptance runner, deliberately excluded from automatic test suites.
+// Uses existing subscription auth; never installs/configures a provider or host.
+import { readFileSync, writeFileSync, openSync, closeSync, writeSync } from "node:fs";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawn } from "node:child_process";
+import { roomTools, attentionTools } from "../client/mcp-stdio.mjs";
+import { resolveHostBinary } from "./native-host-binary.mjs";
+const [host, metadataPath, phase, outputPath] = process.argv.slice(2);
+if (process.argv.length !== 6 || !["codex", "claude"].includes(host) || !["clarify", "produce", "review"].includes(phase)) throw new Error("Choose host, fixture metadata, phase and a new evidence file");
+const fixture = JSON.parse(readFileSync(metadataPath, "utf8"));
+const memberId = phase === "review" ? "reviewer" : "produce
+########## native-result-browser-check.mjs
+// Simulated human interaction in disposable local rooms, never a user study.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chromium } from "playwright";
+import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
+import { createRoomServer } from "../server/http.mjs";
+import { EVENT_TYPES as T } from "../src/events.js";
+import { textVersion } from "../server/text-results.mjs";
+import { signInFixture } from "./auth-signin.mjs";
+
+async function setup(t, { mobile = false, review = false, viewport = null, body = "  A quiet room\n\nCafé 🪷 — one clear next step.  \n" } = {}) {
+  const f = createAcceptanceFixture(), workItemId = "native-human";
+  const send = (type, data, actor = "owner") => f.store.command(f.keys[actor], "commons", { id: crypto.randomUUID(), type, data });
+  send(T.MEMBE
+########## notification-feed-browser-check.mjs
+import { clickChrome } from "./room-chrome.mjs";
+// B4 notification feed: badge, compact list, and "Mark read" moving the cursor.
+// Simulated human tasks against isolated synthetic data; no real user research.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdirSync, rmSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { chromium } from "playwright";
+import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
+import { createRoomServer } from "../server/http.mjs";
+import { EVENT_TYPES as T } from "../src/events.js";
+import { signInFixture } from "./auth-signin.mjs";
+import { openCatchUpPanel, closeCatchUp } from "./room-chrome.mjs";
+
+for (const mobile of [false, true]) {
+  const label = mobile ? "mobile" : "desktop";
+  test(`notification feed ${label}: badge counts unread items, list opens the message, Mark read moves only the
+########## open-routes.mjs
+// Open-route inventory (security review 2026-09-14, L3 / B48).
+//
+// docs/openapi.yaml is the single source for which HTTP routes are served
+// without a credential: an operation is open exactly when it declares
+// `security: []`. This module reads that list with a minimal, line-based
+// extraction (the repo has no YAML reader and the spec is hand-written with
+// two-space indentation), tests/invite-only-boundary.test.js compares it with
+// what the server actually serves anonymously, and `--check` verifies that
+// docs/ROUTE-AUTH-TABLE.md and docs/INVITE-ONLY-CHECKLIST.md §1 name every
+// open route, so a new open route cannot land undocumented.
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+
+const METHODS = ["get", "post", "put", "delete", "patch", "head", "options"];
+
+// Every operation under `paths:` as { method, 
+########## openapi-gen.mjs
+// OpenAPI gate (batch RT).
+//
+// Until the legacy chain is empty, this check parses docs/openapi.yaml,
+// keeps the template gate, and requires every documented operation to be a
+// row in server/routes/table.mjs or a row still listed in the legacy
+// allowlist. A documented HEAD is covered when GET is served for the same
+// template: several handlers answer HEAD as 404 today, and this batch does
+// not change that.
+//
+// Byte-for-byte generation of docs/openapi.yaml from the table starts when
+// the allowlist is empty (RT-final). Until then a rewrite would fight other
+// open pull requests that still edit the document by hand.
+
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { parseDocument } from "yaml";
+import { openapiOperations } from "./open-routes.mjs";
+import { routeDocsDrift, routeSources } from "./route
+########## openapi-method-accuracy.mjs
+// Method-level OpenAPI contract accuracy check (TASKS.md task 16).
+//
+// scripts/route-docs-check.mjs (the template gate) only compares route
+// *templates*: it cannot see method-level drift — e.g. docs/openapi.yaml
+// documenting POST on a route the server serves GET-only (the #594
+// dogfood bug class). This check closes that half: it boots a scratch
+// server (RoomStore + initialRoom in a temp dir, discarded afterwards; no
+// fixture or production state is touched) and probes every operation
+// declared in docs/openapi.yaml with its documented method:
+//
+//   documented method -> 405 method_not_allowed        => method mismatch (FAIL)
+//   documented method -> 404 not_found, and an        => route not served at all (FAIL)
+//     alternate method also 404s
+//   documented method -> 404 not_found but an         => served; the 404 is a
+//     alternate method does not 404             
+########## operator-console-browser-check.mjs
+// Operator console (operator.html) against a real server with the operator
+// secret configured: status renders, find -> plan shows counts, execute stays
+// disabled until the room title is typed, the purge runs, and the token lives
+// only in sessionStorage. axe reports no serious or critical issue at 390 px.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { createHash, randomBytes } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { chromium } from "playwright";
+import AxeBuilder from "@axe-core/playwright";
+import { RoomStore } from "../server/store.mjs";
+import { createRoomServer } from "../server/http.mjs";
+import { event, EVENT_TYPES as T, PERMISSIONS } from "../src/events.js";
+import { confirmationPhrase, describeFailure } from "../src/operator-ui.js";
+
+// A 
+########## outside-agents.mjs
+// Print or post a room message that names an agent who is not a member.
+// The message grants no access and mints no identity. Other members read the
+// same messages through server/outside-agents.mjs.
+import { outsideAgentBody } from "../server/outside-agents.mjs";
+
+const arg = name => {
+  const index = process.argv.indexOf(name);
+  return index === -1 ? null : process.argv[index + 1] ?? null;
+};
+const externalRef = arg("--ref"), displayName = arg("--name"), origin = arg("--origin") ?? "other";
+if (!externalRef || !displayName || process.argv.includes("--help")) {
+  console.error("node scripts/outside-agents.mjs --ref bus:cursor --name Cursor --origin bus --reach bus:cursor [--note text] [--post]");
+  process.exit(process.argv.includes("--help") ? 0 : 1);
+}
+const body = outsideAgentBody({
+  v: 1, kind: "introduce", externalRef, displayName, origin, reach: arg("--reach"), note: arg("--n
+########## owner-project-offers-browser-check.mjs
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { chromium } from 'playwright';
+import { createAcceptanceFixture } from './acceptance-fixture.mjs';
+import { signInFixtureInPlace } from './in-place-fixture-signin.mjs';
+import { createRoomServer } from '../server/http.mjs';
+import { offerMinorUnits } from '../src/owner-project-offers-ui.js';
+async function setup(t, { member = 'owner', mobile = false } = {}) {
+  const fixture = createAcceptanceFixture();
+  const server = createRoomServer({ store: fixture.store, assetRoot: new URL('../', import.meta.url) });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+  const page = await browser.newPage({ viewport: { width: mobile ? 320 
+########## paid-work.mjs
+#!/usr/bin/env node
+import { readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+import { PAID_WORK_OFFERS, preparePaidWork } from "../src/paid-work-offers.js";
+
+import { prepareContributionBrief, contributionMarkdown } from "../src/contribution-brief.js";
+
+export function main(args = process.argv.slice(2)) {
+  if (args.length === 1 && args[0] === "catalog") return PAID_WORK_OFFERS;
+  if (!["prepare", "command", "markdown", "skill"].includes(args[0]) || ![2, 4].includes(args.length) || args.length === 4 && args[2] !== "--context") throw new Error("Usage: node scripts/paid-work.mjs catalog | prepare|command|markdown|skill brief.json [--context context.json]");
+  const bytes = readFileSync(args[1]);
+  if (bytes.length > 32768) throw new Error("Brief exceeds 32 KiB");
+  const input = JSON.parse(bytes.toString("utf8"));
+  let context;
+  if (args.length === 4) {
+    const
+########## password-reset-browser-check.mjs
+// Actual reset mail links and fresh sign-in, using local synthetic delivery only.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { rmSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { chromium } from 'playwright';
+import { createAcceptanceFixture } from './acceptance-fixture.mjs';
+import { createRoomServer } from '../server/http.mjs';
+import { createMagicLinkMailer } from '../server/magic-links.mjs';
+import { hashPassword } from '../src/password-auth.mjs';
+const email = 'reset-browser@example.invalid', oldPassword = 'synthetic-old-password', newPassword = 'synthetic-new-password';
+async function setup(t) {
+  const f = createAcceptanceFixture(), delivered = [];
+  f.store.createAccount('reset-browser-account'); f.store.completeOnboarding('reset-browser-account');
+  f.store.accountLogins.linkPasswordMethod('reset-browser-account', { em
+########## people-rail-browser-check.mjs
+import { enableHumanAdvanced, ensurePeopleOpen } from "./room-chrome.mjs";
+import { clickChrome } from "./room-chrome.mjs";
+import { openSettings, closeSettings } from "./room-chrome.mjs";
+// People-rail: presence dots, one-line status, loud @agent handles, Done chips.
+// Also checks tip #11 Done-chip spring is instant under prefers-reduced-motion.
+// Real browser + local HTTP service; identities and keys are disposable fixtures.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { chromium } from "playwright";
+import { RoomStore } from "../server/store.mjs";
+import { createRoomServer } from "../server/http.mjs";
+import { initialRoom } from "../server/bootstrap.mjs";
+import { EVENT_TYPES as T } from "../src/events.js";
+import { signInFix
+########## perf-budget.mjs
+#!/usr/bin/env node
+// PERF-0: repeatable page-weight budget for signed-out pages.
+// Loads each page cold (fresh browser context, empty cache) and records the
+// request count, transferred bytes, DOM node count and the lab Largest
+// Contentful Paint with 4x CPU throttling and network throttling over CDP
+// (390 px and narrower: 150 ms RTT, 1.6 Mbps down, 750 Kbps up, close to
+// Lighthouse mobile; wider: 40 ms RTT, 10 Mbps). Prints one JSON document.
+//
+//   node scripts/perf-budget.mjs                         # local server, default pages, 390 + 1280 px
+//   node scripts/perf-budget.mjs --pages / --viewport 390
+//   node scripts/perf-budget.mjs --network none          # CPU throttling only
+//   node scripts/perf-budget.mjs --origin https://room.trydemigod.com --out perf.json
+//
+// Without --origin it starts a throwaway local createRoomServer on an empty
+// temporary database. Local by
+########## pinned-messages-browser-check.mjs
+// Simulated human journey against disposable first-party data, not human research.
+// Issue #6 B2: a member pins a message from the keyboard, the Pinned section
+// lists pins in pin order and follows other members' pins live, unpin works
+// from the section itself, and a deleted message drops out of the section.
+// Backlog follow-up 8: the "Pinned only" search toggle lists pins alone,
+// narrows by the typed term, follows unpin live, and clears with the search.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { rmSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { chromium } from "playwright";
+import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
+import { createRoomServer } from "../server/http.mjs";
+import { EVENT_TYPES as T } from "../src/events.js";
+import { signInFixture } from "./auth-signin.mjs";
+
+// UI calming #2 mo
+########## portable-work-browser-check.mjs
+import { clickChrome } from "./room-chrome.mjs";
+// Simulated human journeys in real browsers against isolated, synthetic rooms.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdirSync, rmSync } from "node:fs";
+import { chromium } from "playwright";
+import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
+import { createRoomServer } from "../server/http.mjs";
+import { EVENT_TYPES as T } from "../src/events.js";
+import { signInFixture } from "./auth-signin.mjs";
+import { signInFixtureInPlace } from "./in-place-fixture-signin.mjs";
+
+for (const mobile of [false, true]) {
+  const label = mobile ? "mobile" : "desktop";
+  test(`portable work ${label}: selected export, copy fallback, stale return and lost-response retry`, { timeout: 90000 }, async t => {
+    const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterv
+########## pr-diff-size-check.mjs
+// PR diff-size gate.
+//
+// Diffs over MAX_DIFF_LINES (default 300) must carry an explicit
+// "Large diff justification:" section in the PR body, or the check fails.
+// Why: smaller diffs mean fewer rebase conflicts (PR #1530 needed five rebase
+// cycles partly because of diff size) and faster reviews. Split the PR when
+// you can; justify it when you cannot.
+//
+// Pure contract: checkDiffSize({ numstat, prBody, threshold? }) -> { ok, counted, message }.
+// CLI: BASE_SHA/HEAD_SHA (env or --base/--head), PR_BODY or PR_BODY_B64
+// (env) or --body/--body-b64/--body-file args. DIFF_SIZE_THRESHOLD overrides
+// the single constant without a code change.
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+
+// Single configurable constant. Override per-run with DIFF_SIZE_THRESHOLD.
+export const MAX_DIFF_LINES = 300;
+
+// Justification text must carry at leas
+########## pr-overlap.mjs
+#!/usr/bin/env node
+// scripts/pr-overlap.mjs — cross-PR overlap check for open pull requests.
+//
+// Open PRs are reviewed one at a time, so nothing notices when two of them
+// change the same code. On 2026-09-26 five PRs (#1088-#1092) each added
+// `export function enforceAutonomyTierForAction` to server/autonomy-tiers.mjs.
+// Git merges #1088 with any of the others cleanly and leaves a duplicate
+// declaration, so the module fails to load.
+//
+// This script reports, across open PRs:
+//   duplicateDeclarations  the same top-level function/class/const/let added
+//                          to the same file by two or more PRs
+//   overlappingHunks       PRs whose changed line ranges overlap in one file
+//   sharedFiles            files changed by two or more PRs
+//
+// Read-only. The only network calls are GitHub REST GETs. Pure analysis lives
+// in analyzeOverlap() so tests run offline a
+########## probe-prod-lib.mjs
+// Shared probe logic for probe-prod.mjs (CLI) and watch-deploy-drift.mjs.
+// Matrix and classification are built from the 2026-09-25 1101 incident
+// evidence, not from path-shape guesses:
+//   - "/" is DO-BACKED: it served an 1101 during the outage. It is not an
+//     edge-static canary.
+//   - /.well-known/agent.json also flows through the DO on the canonical
+//     host, so it cannot be an independent edge canary.
+//   - /api/health/jobs is the JOBS CANARY: its handler catches DO RPC errors
+//     and answers a clean 503. During the incident it kept answering while
+//     every other DO-backed route hard-failed. A 200 or a clean JSON 503
+//     with schema room.job-health/1 proves the Worker itself is alive; it hard-failing means the
+//     Worker or the DO is failing; use external edge and logs to distinguish.
+export const MATRIX = [
+  ["home", "/", "do"],
+  ["version", "/api/versi

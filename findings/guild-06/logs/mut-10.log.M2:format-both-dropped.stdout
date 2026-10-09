@@ -1,0 +1,16 @@
+claims-index: --format must be json|md|both, got both
+✖ tests/regex-parity.test.js (2185.782556ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2397.389275
+
+✖ failing tests:
+
+test at tests/regex-parity.test.js:1:1
+✖ tests/regex-parity.test.js (2185.782556ms)
+  'test failed'

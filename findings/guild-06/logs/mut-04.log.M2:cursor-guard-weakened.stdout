@@ -1,0 +1,40 @@
+{"event":"room.cold_start","durationMs":2968,"integrity":"eager","phases":{"schema":{"ms":805,"rowsRead":0},"plugin":{"ms":1268,"rowsRead":0},"fence":{"ms":336,"rowsRead":0},"verifies":{"ms":8,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":190,"heapBytes":38352528,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ preparation reads every real discussion page without writing or exposing the connection (20916.197821ms)
+✖ changed task and later events are reported, while a stuck cursor refuses a partial brief (23.440807ms)
+✔ checkout review fails closed for remote uncertainty, drift, dirty trees and failed guard (8.759936ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 2
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 38534.162056
+
+✖ failing tests:
+
+test at tests/agent-work-preflight.test.js:39:1
+✖ changed task and later events are reported, while a stuck cursor refuses a partial brief (23.440807ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /did not advance/. Input:
+  
+  'Error: Discussion exceeds preparation limit; read it explicitly before proceeding'
+  
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-04/tests/agent-work-preflight.test.js:49:3)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: Error: Discussion exceeds preparation limit; read it explicitly before proceeding
+        at readPreparation (file:///home/hatch/workspace/.g6-wt/mut-04/scripts/agent-work-preflight.mjs:23:34)
+        at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+        at async waitForActual (node:assert:646:5)
+        at async strict.rejects (node:assert:769:25)
+        at async TestContext.<anonymous> (file:///home/hatch/workspace/.g6-wt/mut-04/tests/agent-work-preflight.test.js:49:3)
+        at async Test.run (node:internal/test_runner/test:1404:7)
+        at async Test.processPendingSubtests (node:internal/test_runner/test:969:7),
+    expected: /did not advance/,
+    operator: 'rejects',
+    diff: 'simple'
+  }
