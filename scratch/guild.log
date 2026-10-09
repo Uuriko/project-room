@@ -1,0 +1,65 @@
+# GUILD-01 guild.log (COORD-300)
+
+## 2026-10-09 12:14 PDT — recovery respawn
+- Previous coordinator died in daemon restart. Respawned as replacement.
+- Worktree ~/workspace/pr-coord300-guild-01/ present, branch coord300/guild-01 checked out,
+  clean tree, no origin branch pushed yet — no partial work to resume. Fresh start.
+- Pulled wave500/protocol docs (docs/ROOM-PROTOCOL-SCALE.md) and wave500/coord-cost
+  model (df9dab52d532260dd35b17fd59f1ff6c8214503b, docs/ROOM-CHATTER-COST.md).
+  Baseline: 6.5 events/lifecycle, 10k-event ceiling; E5/D4 fixed on release (#2088).
+
+## 2026-10-09 12:2x PDT — REDIRECT FROM DOT (relayed via parent, cites room seq 8263)
+- New mission: re-aim from "build new protocol v2" to "repair observed coordination
+  failures". Deliverable: compatibility/diff checklist for CURRENT handoff protocol +
+  executable examples; NOT a competing protocol v2.
+- Constraints accepted: additive + offline/fixture-backed; no live permission changes;
+  NO additional workers launched; no board/protocol replacement; no new parallel queue.
+- Acknowledgment of this redirect is in the final report + ROLLUP.md.
+- NOTE: could not independently verify the seq-8263 room post (reading the live
+  muse-room event log needs an enrolled agent identity; not going to hunt
+  credentials). Treating the parent-relayed handoff as authoritative per
+  subagent instructions; flagging the unverified provenance to the parent.
+- Also noted: MEMORY.md correction — PR #886 is MERGED (a7e52ee9a, 2026-09-24),
+  the old "watch-only" note is stale.
+
+## Investigation (no workers — done directly by coordinator per redirect)
+- Pinned released-vs-done semantics across 5 systems:
+  board work-claims (release=verb->unclaimed, done=terminal keeps owner),
+  claim-collisions (released+done both "closed" for file holding),
+  claim-reputation (claim_released vs claim_completed vs claim_flaked),
+  inbox-handoff (released=terminal), handoff envelopes (no released).
+- Pinned round-bound retries per route: release REQUIRED (#2088), reassign REQUIRED
+  (#2262), appendPullRequest REQUIRED, /update note+state OPT-IN (#2078),
+  requestId replay dedup OPT-IN (A4).
+- OBSERVED FAILURE reproduced (route-level, real handleWorkClaims, in-memory
+  registry): a round-1 `done` retried with no preconditions after release+reclaim
+  returns 200 and marks round 2 done. Stale-self-retry class, finish path still open.
+- Control: same stale done WITH stale preconditions -> 409 work_claim_conflict.
+
+## Deliverables (branch coord300/guild-01, all additive under coord300/guild-01/)
+- HANDOFF-PROTOCOL-CHECKLIST.md — compatibility/diff checklist (deployed vs
+  documented), released-vs-done table, round-binding per-route table, gaps,
+  integration dependencies, "what is NOT proven".
+- tests/stale-done-round-boundary.test.js — runnable; 5 tests:
+  negative control FAILS on current tree (got 200), 409-control + happy path pass,
+  negative control + happy path PASS against test-time strengthened copy.
+- examples/stale-done-retry.mjs — executable demo, prints A/B cases.
+- fixes/candidate-require-round-binding-on-done.patch — one-line candidate,
+  `git apply --check` clean, NOT applied to the tree.
+- ROLLUP.md — coordinator rollup (SHA, numbers, caveats).
+
+## Comms
+- Workers: none launched (redirect forbids); nothing posted to the room by workers.
+- GUILD-CHARTER: not posted (mission re-aimed before charter; previous coordinator
+  never posted one — no origin branch, no charter in tree).
+- DONE-ROLLUP: redirect says "one coordinator rollup at the end" — delivered as
+  ROLLUP.md in-branch + final report to parent. No live-room post from this
+  subagent (no enrolled identity / browser); parent to decide on room posting.
+
+## Decisions / open questions for parent
+- Whether the done path SHOULD require round binding (breaking legacy clients that
+  omit preconditions) is a protocol decision for John/Dot — patch is candidate only.
+- DOCS gap: WORK-CLAIMS.md documents round-bound retry as THE discipline while the
+  deployed default is opt-in; PRODUCT200-IDEMPOTENCY-MATRIX.md is stale on 2 rows
+  (reassign round token, update requestId dedup). Flagged in checklist, not edited
+  (additive-only branch; docs edits are a future PR's call).

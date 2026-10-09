@@ -1,0 +1,29 @@
+# CANDIDATE FIX — NOT APPLIED, NOT LANDED, NOT REVIEWED (GUILD-01, COORD-300)
+#
+# Requires round binding (expectedClaimedAt + expectedHistoryLength) on the
+# POST /work-claims/:id/update `state: "done"` transition, mirroring #2088
+# (release) and #2262 (reassign). A done with absent preconditions is refused
+# with 422 invalid_claim_input; a done with stale preconditions is refused
+# with 409 work_claim_conflict (existing check).
+#
+# Behavior change: legacy clients that omit preconditions on done retries will
+# start getting 422 instead of a silent 200. This is the protocol decision for
+# John/Dot — the patch is evidence + a starting diff for a future PR
+# (this guild will not open one).
+#
+# Validated: coord300/guild-01/tests/stale-done-round-boundary.test.js
+#   - negative control fails on the unpatched tree (stale done -> 200)
+#   - negative control + happy path pass against the patched tree
+# Anchor is unique (one occurrence) in server/work-claim-routes.mjs.
+# Apply: git apply coord300/guild-01/fixes/candidate-require-round-binding-on-done.patch
+--- a/server/work-claim-routes.mjs
++++ b/server/work-claim-routes.mjs
+@@ -1069,7 +1069,7 @@
+     // must describe the claim exactly as the client last read it, otherwise
+     // the write is refused with 409 work_claim_conflict. Absent preconditions
+     // keep the legacy behavior unchanged.
+-    if (Object.hasOwn(data, "expectedClaimedAt") || Object.hasOwn(data, "expectedHistoryLength")) {
++    if (data.state === "done" || Object.hasOwn(data, "expectedClaimedAt") || Object.hasOwn(data, "expectedHistoryLength")) {
+       if (!(typeof data.expectedClaimedAt === "string" && data.expectedClaimedAt.length <= 100
+         && Number.isFinite(Date.parse(data.expectedClaimedAt)))) invalidInput(reject, "expectedClaimedAt must be the current claim timestamp");
+       if (!(Number.isSafeInteger(data.expectedHistoryLength) && data.expectedHistoryLength >= 0)) invalidInput(reject, "expectedHistoryLength must be the current history length");
