@@ -114,7 +114,7 @@ test("uncommitted return retry unlocks only after stale rejection, preserving me
 
 test("confirmed draft with failed snapshot remains saved, then becomes findable on refresh", { timeout: 30000 }, async t => {
   const f = await setup(t), { page } = f; let failSnapshot = false, command;
-  await page.route("**/api/rooms/commons", route => failSnapshot ? route.fulfill({ status: 503, json: { error: { code: "temporary", message: "Synthetic snapshot unavailable" } } }) : route.continue());
+  await page.route(/\/api\/rooms\/commons(\?.*)?$/, route => failSnapshot ? route.fulfill({ status: 503, json: { error: { code: "temporary", message: "Synthetic snapshot unavailable" } } }) : route.continue());
   await page.route("**/commands", async route => { command = route.request().postDataJSON(); failSnapshot = true; const response = await route.fetch(); return route.fulfill({ response }); });
   await f.open(); await f.input.fill(f.answer()); await f.submit.click(); await f.dialog.waitFor({ state: "hidden" });
   await page.getByText("Draft posted. Refresh to view it. Work status is unchanged.", { exact: true }).waitFor();
