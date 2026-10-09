@@ -1,11 +1,8 @@
 // Simulated human journeys in real browsers against isolated, synthetic rooms.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { chromium } from "playwright";
-import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
-import { createRoomServer } from "../server/http.mjs";
+import { boot } from "./browser-harness.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
 
@@ -14,13 +11,7 @@ import { signInFixture } from "./auth-signin.mjs";
 // one item with duplicate drafts, one with an acknowledgement chain and one
 // clean item, then checks what the owner actually sees.
 test("loop warning: duplicate drafts and acknowledgement chains pause-hint on the work card", { timeout: 90000 }, async t => {
-  const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 60 });
-  let browser;
-  t.after(async () => {
-    await browser?.close(); server.closeStreams(); server.closeAllConnections();
-    if (server.listening) await new Promise(resolve => server.close(resolve));
-    f.store.close(); rmSync(f.directory, { recursive: true, force: true });
-  });
+  const f = await boot(t, { streamInterval: 60, context: true, abortOutside: true, defaultTimeout: 12000 }), { page, errors, origin } = f;
   const command = (actor, type, data) => f.store.command(f.keys[actor], "commons", { id: randomUUID(), type, data });
   const post = (actor, messageId, body, extra = {}) => command(actor, T.MESSAGE_POSTED, { messageId, body, ...extra });
   command("owner", T.WORK_PROPOSED, { workItemId: "loop-talk", title: "Test: settle the venue question", definitionOfDone: "A decision is recorded in the work item.", accountableMemberId: "producer", mode: "read" });
@@ -35,17 +26,6 @@ test("loop warning: duplicate drafts and acknowledgement chains pause-hint on th
   post("guest", "loop-ack-3", "Sure?", { workItemId: "loop-talk" });
   post("producer", "loop-ack-4", "Sure.", { workItemId: "loop-talk" });
   post("guest", "loop-clean-note", "One ordinary update on otherwise calm work.", { workItemId: "loop-clean" });
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  const origin = `http://127.0.0.1:${server.address().port}`;
-  browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
-  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: "reduce" });
-  const errors = [];
-  await context.route("**/*", route => {
-    if (new URL(route.request().url()).origin !== origin) return route.abort();
-    return route.continue();
-  });
-  const page = await context.newPage(); page.setDefaultTimeout(12000);
-  page.on("pageerror", error => errors.push(error.message));
   await page.goto(origin); await signInFixture(page, f.keys.owner);
   await page.locator("#main").waitFor({ state: "visible" });
   const duplicates = page.locator('[data-work-record-id="test-handoff"] .loop-warning');

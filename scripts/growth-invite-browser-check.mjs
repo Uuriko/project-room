@@ -2,35 +2,22 @@
 // a landing that names the inviter, and a dead link that still offers a next step.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, rmSync } from "node:fs";
-import { chromium } from "playwright";
-import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
-import { createRoomServer } from "../server/http.mjs";
+import { mkdirSync } from "node:fs";
+import { boot } from "./browser-harness.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 import { clickChrome } from "./room-chrome.mjs";
 
 test("growth invite: copy kit, inviter landing, dead link", { timeout: 60000 }, async t => {
-  const fixture = createAcceptanceFixture();
-  const server = createRoomServer({ store: fixture.store, streamInterval: 60 });
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  const origin = `http://127.0.0.1:${server.address().port}`;
-  let browser;
-  t.after(async () => {
-    await browser?.close();
-    server.closeStreams(); server.closeAllConnections();
-    await new Promise(resolve => server.close(resolve));
-    fixture.store.close(); rmSync(fixture.directory, { recursive: true, force: true });
-  });
-  browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, reducedMotion: "reduce" });
-  await context.addInitScript(() => Object.defineProperty(navigator, "clipboard", { configurable: true,
-    value: { writeText: async value => { window.growthCopied = value; } } }));
-  const page = await context.newPage();
-  page.setDefaultTimeout(10000);
-  const errors = [];
-  page.on("pageerror", error => errors.push(error.message));
+  const f = await boot(t, {
+    streamInterval: 60,
+    context: true,
+    viewport: { width: 1280, height: 900 },
+    defaultTimeout: 10000,
+    initScripts: [() => Object.defineProperty(navigator, "clipboard", { configurable: true,
+      value: { writeText: async value => { window.growthCopied = value; } } })],
+  }), { page, errors, origin, browser } = f;
   await page.goto(origin);
-  await signInFixture(page, fixture.keys.owner);
+  await signInFixture(page, f.keys.owner);
   await page.locator("#main").waitFor({ state: "visible" });
   assert.equal(await page.locator("#invite-people-button").evaluate(node => node.textContent), "Invite");
   await clickChrome(page, "#invite-people-button");

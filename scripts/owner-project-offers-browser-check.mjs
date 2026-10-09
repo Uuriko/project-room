@@ -1,21 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chromium } from 'playwright';
-import { createAcceptanceFixture } from './acceptance-fixture.mjs';
+import { boot } from './browser-harness.mjs';
 import { signInFixtureInPlace } from './in-place-fixture-signin.mjs';
-import { createRoomServer } from '../server/http.mjs';
 import { offerMinorUnits } from '../src/owner-project-offers-ui.js';
 async function setup(t, { member = 'owner', mobile = false } = {}) {
-  const fixture = createAcceptanceFixture();
-  const server = createRoomServer({ store: fixture.store, assetRoot: new URL('../', import.meta.url) });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
-  const page = await browser.newPage({ viewport: { width: mobile ? 320 : 1280, height: 900 }, isMobile: mobile, hasTouch: mobile }); page.setDefaultTimeout(10000);
-  const errors = []; page.on('pageerror', error => errors.push(error.message));
-  const origin = `http://127.0.0.1:${server.address().port}`;
-  t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); fixture.store.close(); assert.deepEqual(errors, []); });
-  await page.goto(`${origin}/?room=commons`); await signInFixtureInPlace(page, fixture.store, fixture.keys[member]);
-  return { page, store: fixture.store, origin };
+  const f = await boot(t, {
+    server: { assetRoot: new URL('../', import.meta.url) },
+    viewport: { width: mobile ? 320 : 1280, height: 900 },
+    pageOptions: { isMobile: mobile, hasTouch: mobile },
+    reducedMotion: null,
+    defaultTimeout: 10000,
+  }), { page, errors, origin } = f;
+  t.after(() => { assert.deepEqual(errors, []); });
+  await page.goto(`${origin}/?room=commons`); await signInFixtureInPlace(page, f.store, f.keys[member]);
+  return { page, store: f.store, origin };
 }
 async function open(page) { await page.locator('#room-more > summary').click(); await page.locator('#owner-offers-open').click(); await page.locator('#owner-offers-dialog').waitFor({ state: 'visible' }); }
 async function fill(page, { reward = 'credit' } = {}) {
