@@ -339,3 +339,31 @@ test("publishBountyEvent maps the journal event to the fanout envelope", () => {
   assert.equal(event.data.before, "proposed");
   assert.equal(event.data.after, "funded");
 });
+
+// --- mutation response key contracts ----------------------------------------
+// The route layer elides extra escrow-result keys for most mutations
+// (destructured named returns) but spreads the whole escrow result for
+// watch/transfer. A stubbed escrow carrying EXTRA keys proves the
+// table-driven mutations preserve that contract verbatim.
+test("mutation responses keep their exact key contracts (elision vs spread)", async () => {
+  const { store } = makeStore();
+  const fake = Object.create(BountyEscrow.prototype);
+  fake.idemExecute = (roomId, key, route, status, thunk) =>
+    ({ replayed: false, status, body: thunk() });
+  fake.fundBounty = () => ({ bounty: { id: "b1" }, receipt: { r: 1 }, EXTRA: "drop-me" });
+  fake.watchBounty = () => ({ watching: true, EXTRA: "keep-me" });
+  fake.transfer = () => ({ moved: 5, EXTRA: "keep-me" });
+  store.bountyEscrow = fake;
+
+  const fund = await call(store, { route: "fund", bodyData: {}, bountyId: "b1" });
+  assert.equal(fund.statusCode, 200);
+  assert.deepEqual(Object.keys(fund.body).sort(), ["bounty", "receipt", "roomId"]);
+
+  const watch = await call(store, { route: "watch", bodyData: {}, bountyId: "b1" });
+  assert.equal(watch.statusCode, 200);
+  assert.deepEqual(Object.keys(watch.body).sort(), ["EXTRA", "roomId", "watching"]);
+
+  const transfer = await call(store, { route: "transfer", bodyData: { to: GROK, amount: 1 } });
+  assert.equal(transfer.statusCode, 200);
+  assert.deepEqual(Object.keys(transfer.body).sort(), ["EXTRA", "moved", "roomId"]);
+});
