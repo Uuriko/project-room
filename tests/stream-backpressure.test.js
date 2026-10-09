@@ -299,7 +299,10 @@ test("one slow consumer among 99 peers: the slow one gets stream_lagging, peers 
     "exactly one lagging record: no eager peer tripped the cap");
   assert.ok(!peerArrivals.some(arrivals => arrivals.has("LAGGING")), "no peer saw stream_lagging");
   // The dropped stream released its slot: the same credential reopens.
-  const replacement = await probeOpen(keys[33], start);
+  // Open at the current head: reopening with the stale `after` would ask
+  // the first pump to burst the whole flood backlog (> cap) and trip the
+  // guard again — correct behavior, but not what this step is proving.
+  const replacement = await probeOpen(keys[33], store.room("commons").sequence);
   assert.equal(replacement.status, 200, "the closed stream no longer occupies a slot");
   replacement.socket.destroy();
   // Peers keep receiving after the slow consumer was dropped: every peer
@@ -325,4 +328,6 @@ test("one slow consumer among 99 peers: the slow one gets stream_lagging, peers 
   const p99 = latencies[Math.floor(latencies.length * 0.99)];
   assert.ok(latencies.at(-1) < 30000,
     `peer marker latency stays bounded while a slow consumer is dropped (max=${latencies.at(-1).toFixed(0)}ms p99=${p99.toFixed(0)}ms over ${latencies.length} deliveries)`);
+  assert.equal((await diagnostics()).filter(entry => entry.code === "stream_lagging").length, 1,
+    "still exactly one lagging record at the end: the marker phase tripped no peer");
 });
