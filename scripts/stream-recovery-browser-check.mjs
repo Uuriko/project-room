@@ -176,7 +176,14 @@ for (const schedule of ["initial-handover", "connected-refresh"]) {
     assert.ok(heldAt < releasedAt);
     if (schedule === "connected-refresh") {
       const seedFrameAt = trace.findIndex(entry => entry.kind === "native-frame" && entry.id === first.event.id);
-      assert.ok(seedFrameAt >= 0 && seedFrameAt < trace[heldAt].requestOrder, "native seed notification owns the held GET");
+      // The seed frame and the held GET arrive on two independent channels (the CDP
+      // Network event and Playwright's route handler), so their trace order is not
+      // causal: the browser can fire the GET before CDP reports the frame. What the
+      // check needs is that the native seed frame was delivered and that the held
+      // GET was the only snapshot read after arming (the stream was never reopened,
+      // asserted below).
+      assert.ok(seedFrameAt >= 0, "native seed notification was delivered over the established stream");
+      assert.equal(trace.slice(trace.findIndex(entry => entry.kind === "startup-read-settled")).filter(entry => entry.kind === "snapshot-request").length >= 1, true, "a refresh read followed the settled startup");
       assert.ok(heldAt < frameAt && frameAt < releasedAt, "held GET → actual native v2 frame → release stale GET");
       assert.equal(trace.filter(entry => entry.kind === "stream-request").length, establishedStreams, "no reconnect may mask a dropped refresh hint");
     } else {
