@@ -1,0 +1,274 @@
+{
+ "partitions": [
+  {
+   "name": "wave300-data-plane",
+   "branches": [
+    "wave300/data-plane-fastpath"
+   ],
+   "claimIds": [
+    "wave300-data-plane-01"
+   ],
+   "files": [
+    "docs/WORK-CLAIMS-FAST-PATH.md",
+    "docs/openapi.yaml",
+    "server/mcp-full-profile.mjs",
+    "server/work-claim-routes.mjs",
+    "tests/work-claims-fast-path.test.js"
+   ],
+   "worktree": "/home/hatch/workspace/pr-wave300-data-plane"
+  },
+  {
+   "name": "wave300-reaper",
+   "branches": [
+    "guild-claimsboard/lease-first-reaper"
+   ],
+   "claimIds": [
+    "wave300-reaper-01"
+   ],
+   "files": [
+    "scripts/runtime-package.mjs",
+    "server/jobs.mjs",
+    "server/work-claim-reaper.mjs",
+    "server/work-claim-sqlite.mjs",
+    "server/work-claims.mjs",
+    "tests/job-heartbeat.test.js",
+    "tests/work-claim-epoch-fencing.test.js",
+    "tests/work-claim-reaper.test.js"
+   ],
+   "worktree": "/home/hatch/workspace/pr-guild-claimsboard-reaper"
+  },
+  {
+   "name": "wave300-backpressure",
+   "branches": [
+    "wave300/honest-backpressure"
+   ],
+   "claimIds": [
+    "wave300-backpressure-01"
+   ],
+   "files": [
+    "docs/HONEST-BACKPRESSURE-SPEC.md",
+    "docs/HONEST-BACKPRESSURE.md",
+    "docs/INDEX.md",
+    "docs/INVITE-ONLY-CHECKLIST.md",
+    "docs/ROUTE-AUTH-TABLE.md",
+    "docs/openapi.yaml",
+    "server/command-admission.mjs",
+    "server/discoverability.mjs",
+    "server/http.mjs",
+    "tests/admission-intent.test.mjs",
+    "tests/command-admission-http.test.mjs",
+    "tests/command-admission.test.mjs",
+    "tests/honest-backpressure-rate.test.mjs",
+    "tests/invite-only-boundary.test.js",
+    "tests/measure-backpressure-results.md",
+    "tests/measure-backpressure.mjs"
+   ],
+   "worktree": "/home/hatch/workspace/pr-wave300-backpressure"
+  },
+  {
+   "name": "wave300-fanout",
+   "branches": [
+    "wave300-fanout-perf"
+   ],
+   "claimIds": [
+    "wave300-fanout-01"
+   ],
+   "files": [
+    "docs/WAVE300-FANOUT-DESIGN.md",
+    "docs/openapi.yaml",
+    "perf/f4-after-probe.mjs",
+    "perf/f4-read-isolation-sim.mjs",
+    "perf/wave300-f2-drain-bench.mjs",
+    "server/agent-plugin-store.mjs",
+    "server/http.mjs",
+    "server/mcp-full-profile.mjs",
+    "server/routes/work-claims.mjs",
+    "server/store.mjs",
+    "server/work-claim-routes.mjs",
+    "server/work-claim-sqlite.mjs",
+    "tests/bench-fanout-f1.mjs",
+    "tests/f4-projection-cache-isolation.test.js",
+    "tests/stream-shared-pump.test.js",
+    "tests/webhook-dispatch-parallel.test.js",
+    "tests/work-claim-board-seq.test.js"
+   ],
+   "worktree": "/home/hatch/workspace/pr-wave300-fanout"
+  },
+  {
+   "name": "wave300-shards",
+   "branches": [
+    "wave300/sharded-claim-boards"
+   ],
+   "claimIds": [
+    "wave300-shards-01"
+   ],
+   "files": [
+    "docs/WORK-CLAIM-BOARDS.md",
+    "docs/openapi.yaml",
+    "server/http.mjs",
+    "server/work-claim-routes.mjs",
+    "server/work-claim-sqlite.mjs",
+    "server/work-claims.mjs",
+    "tests/work-claim-boards.test.js"
+   ],
+   "worktree": "/home/hatch/workspace/pr-wave300-shards"
+  },
+  {
+   "name": "wave300-payloads",
+   "branches": [
+    "wave300/payload-store"
+   ],
+   "claimIds": [
+    "wave300-payloads-01"
+   ],
+   "files": [
+    "docs/PAYLOAD-STORE.md",
+    "docs/openapi.yaml",
+    "scripts/runtime-package.mjs",
+    "server/http.mjs",
+    "server/payload-refs.mjs",
+    "server/payload-schema.mjs",
+    "server/payload-store.mjs",
+    "server/store.mjs",
+    "tests/payload-routes.test.mjs",
+    "tests/payload-store.test.mjs",
+    "tests/schema-stamp-coverage.test.js"
+   ],
+   "worktree": "/home/hatch/workspace/pr-wave300-payloads"
+  },
+  {
+   "name": "wave300-replay",
+   "branches": [
+    "wave300/replay-harness"
+   ],
+   "claimIds": [
+    "wave300-replay-01"
+   ],
+   "files": [
+    ".gitignore",
+    "bin/harness.mjs",
+    "docs/REPLAY-HARNESS.md",
+    "lib/replay.mjs",
+    "lib/scrub.mjs",
+    "lib/smoke.mjs",
+    "lib/trace.mjs",
+    "results/claim-a-task/3f68f03.json",
+    "results/index.json",
+    "tests/fixtures/replay/fixture-skill.trace.jsonl",
+    "tests/fixtures/replay/fixture-skill/SKILL.md",
+    "tests/fixtures/replay/fixture-skill/scripts/ok.mjs",
+    "tests/gate.test.js",
+    "tests/replay.test.js",
+    "tests/trace.test.js",
+    "traces/BROKEN-CHANGE-DEMO.md",
+    "traces/REPLAY-REPORT.md",
+    "traces/claim-a-task-3f68f03-20261008T200040Z.trace.jsonl",
+    "traces/claim-a-task-3f68f03-20261008T200840Z.trace.jsonl",
+    "traces/claim-a-task-3f68f03-20261008T200921Z.trace.jsonl",
+    "traces/claim-a-task-3f68f03-20261008T200929Z.trace.jsonl",
+    "traces/claim-a-task-3f68f03-20261008T200935Z.trace.jsonl",
+    "traces/claim-a-task-3f68f03-20261008T200940Z.trace.jsonl",
+    "traces/claim-a-task-3f68f03-20261008T200946Z.trace.jsonl",
+    "traces/claim-a-task-3f68f03-20261008T200956Z.trace.jsonl",
+    "traces/claim-a-task-3f68f03-20261008T201004Z.trace.jsonl",
+    "traces/claim-a-task-3f68f03-20261008T201015Z.trace.jsonl",
+    "traces/claim-a-task-3f68f03-20261008T201025Z.trace.jsonl",
+    "traces/join-project-room-3f68f03-20261008T200909Z.trace.jsonl",
+    "traces/join-project-room-3f68f03-20261008T201052Z.trace.jsonl",
+    "traces/join-project-room-3f68f03-20261008T201111Z.trace.jsonl",
+    "traces/join-project-room-3f68f03-20261008T201126Z.trace.jsonl",
+    "traces/join-project-room-3f68f03-20261008T201146Z.trace.jsonl",
+    "traces/join-project-room-3f68f03-20261008T201205Z.trace.jsonl",
+    "traces/join-project-room-3f68f03-20261008T201218Z.trace.jsonl",
+    "traces/join-project-room-3f68f03-20261008T201237Z.trace.jsonl",
+    "traces/join-project-room-3f68f03-20261008T201253Z.trace.jsonl",
+    "traces/join-project-room-3f68f03-20261008T201310Z.trace.jsonl"
+   ],
+   "worktree": "/home/hatch/workspace/pr-wave300-replay"
+  },
+  {
+   "name": "wave300-stranger-qa",
+   "branches": [
+    "wave300/stranger-qa"
+   ],
+   "claimIds": [
+    "wave300-stranger-qa-01"
+   ],
+   "files": [
+    "tests/stranger-qa-journey.test.js",
+    "docs/STRANGER-QA.md"
+   ]
+  },
+  {
+   "name": "wave300-burn-down",
+   "branches": [
+    "wave300/burn-down"
+   ],
+   "claimIds": [
+    "wave300-burn-down-01"
+   ],
+   "files": [
+    "ops/burn-down-board.mjs",
+    "docs/BURN-DOWN.md"
+   ]
+  },
+  {
+   "name": "wave300-telemetry",
+   "branches": [
+    "wave300/telemetry-prod"
+   ],
+   "claimIds": [
+    "wave300-telemetry-01"
+   ],
+   "files": [
+    "scripts/runtime-package.mjs",
+    "server/http.mjs",
+    "server/tripwires.mjs",
+    "telemetry/FINDING-CONVENTION.md",
+    "telemetry/README.md",
+    "telemetry/TRIPWIRE-LOAD-REPORT.md",
+    "telemetry/build-dashboard-data.mjs",
+    "telemetry/capture-baseline.mjs",
+    "telemetry/collect.mjs",
+    "telemetry/dashboard-test-log.txt",
+    "telemetry/dashboard.html",
+    "telemetry/examples/invalid/tb-ex-invalid-missing-claim.json",
+    "telemetry/examples/invalid/tb-ex-invalid-numbers-string.json",
+    "telemetry/examples/tb-ex-batch-dispatch.json",
+    "telemetry/examples/tb-ex-idempotency.json",
+    "telemetry/examples/tb-ex-identity.json",
+    "telemetry/finding-schema.json",
+    "telemetry/findings.json",
+    "telemetry/findings.jsonl",
+    "telemetry/fixtures/sample-events.json",
+    "telemetry/gauges.mjs",
+    "telemetry/ops-dashboard.html",
+    "telemetry/seed-findings.jsonl",
+    "telemetry/selftest/examples/invalid/bad.json",
+    "telemetry/selftest/examples/valid-good.json",
+    "telemetry/selftest/schema.json",
+    "telemetry/submission-test-log.txt",
+    "telemetry/submit.mjs",
+    "telemetry/tripwire-contract.test.mjs",
+    "telemetry/validate.mjs",
+    "telemetry/validation-log.txt",
+    "telemetry/verify-selftest-log.txt",
+    "telemetry/verify.mjs",
+    "tests/tripwires.test.mjs"
+   ],
+   "worktree": "/home/hatch/workspace/pr-wave300-telemetry"
+  }
+ ],
+ "_provenance": {
+  "wave300-data-plane": "branch file set vs origin/main merge-base (my clone)",
+  "wave300-reaper": "branch file set vs its own origin/main merge-base",
+  "wave300-backpressure": "branch file set vs its own origin/main merge-base",
+  "wave300-fanout": "branch file set vs its own origin/main merge-base",
+  "wave300-shards": "branch file set vs origin/main merge-base (my clone)",
+  "wave300-payloads": "branch file set vs its own origin/main merge-base",
+  "wave300-replay": "branch file set vs its own origin/main merge-base",
+  "wave300-stranger-qa": "RECONSTRUCTED placeholder",
+  "wave300-burn-down": "RECONSTRUCTED placeholder",
+  "wave300-telemetry": "branch file set vs origin/main merge-base (my clone)"
+ }
+}

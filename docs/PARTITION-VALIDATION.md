@@ -16,15 +16,17 @@ Method for all experiments: run the real `scripts/partition-check.mjs` against J
 
 ## Experiment (a) — WAVE-300 ten-lane partition, real branch/worktree/file data
 
-**Verdict: checker FAILS — 31 overlap(s) across 10 partitions (45 pairs).**
-Full output: `docs/partition-validation/wave300-10lanes.check.txt`
+**Verdict: checker FAILS — 32 overlap(s) across 10 partitions (45 pairs).**
+Full output: `docs/partition-validation/wave300-10lanes.worker16.check.txt` (worker-16-owned evidence file; the sibling-shared `wave300-10lanes.check.txt` was overwritten by another lane's planner run mid-validation — see caveats).
+
+NOTE on live-data drift: the first run (19:30 PDT) reported 31 overlaps; a re-run at ~23:35 PDT reported 32 — the payloads lane added `server/store.mjs` in between (new `fanout × payloads` flag). The lanes are still live, so counts move; the contention pattern is unchanged.
 
 ### Reconstruction method
 - 8 of 10 lanes verified against live data: branch names read from the actual lane checkouts (e.g. `pr-wave300-backpressure` → `wave300/honest-backpressure`, `pr-wave300-fanout` → `wave300-fanout-perf`, `pr-wave300-payloads` → `wave300/payload-store`, `pr-wave300-replay` → `wave300/replay-harness`; `wave300/data-plane-fastpath`, `wave300/sharded-claim-boards`, `wave300/telemetry-prod`, `guild-claimsboard/lease-first-reaper` verified as origin refs); file sets = `git diff --name-only` of each branch vs its own origin/main merge-base (read-only, never touched the lane repos).
 - 2 lanes (`wave300/stranger-qa`, `wave300/burn-down`) have no surviving branch or worktree: reconstructed with topic-derived placeholder file sets, clearly marked in `_provenance`. Verdicts on the 8 pairs involving them are **unvalidated** (see false-positive FP-1).
 - Claim IDs were synthesized (`wave300-<lane>-01`); the historical per-lane claim IDs are not recoverable, so the claim-id axis verdict is weak by construction. All branch names, worktrees, and 8/10 file sets are real.
 
-### The 31 overlaps (by file)
+### The 32 overlaps (by file)
 | file | pairs hit | count |
 |---|---|---|
 | `docs/openapi.yaml` | dp×bp, dp×fan, dp×shards, dp×pay, bp×fan, bp×shards, bp×pay, fan×shards, fan×pay, shards×pay | 10 |
@@ -34,6 +36,7 @@ Full output: `docs/partition-validation/wave300-10lanes.check.txt`
 | `scripts/runtime-package.mjs` | reaper×pay, reaper×tel, pay×tel | 3 |
 | `server/work-claims.mjs` | reaper×shards | 1 |
 | `server/mcp-full-profile.mjs` | dp×fan | 1 |
+| `server/store.mjs` | fan×pay | 1 (appeared in re-run ~23:35 PDT — live lane added it; see drift note) |
 
 (lane abbreviations: dp=data-plane, bp=backpressure, fan=fanout, shards, pay=payloads, tel=telemetry, reaper=guild-claimsboard/lease-first-reaper)
 
@@ -94,11 +97,12 @@ A preliminary manual disjoint assignment (stand-in from before the planner lande
 5. **FN-2 (what the checker can't see):** same-file different-line edits (the `#1436`/`#1443` class: same file, overlapping *hunks*) vs same-file disjoint edits — the checker treats both identically. It is a collision *gate*, not a merge oracle. Conversely, it misses cross-file semantic coupling (e.g. lane A changes an API that lane B's untouched file consumes).
 6. **Coverage note:** the replay lane had three sub-worktrees (replay-w1/w2/w3); only the harness branch was modeled as the lane partition. Sub-partition overlap inside a lane is out of scope for the lane-level gate.
 7. **Planner honesty, confirmed:** exit 1 on residual imbalance (sizes 7,7,7,7,5,5,5,5 vs 8×6) is a feature, not a bug — indivisible conflict atoms are reported, not silently split. A coordinator consuming exit codes must treat 1 as "review," not "broken."
-8. **Internal vs cross-partition conflicts:** the planner flags within-partition conflicts (same-lane tasks sharing a docs dir) in its own `internalConflicts` — the checker only gates *across* partitions. The two tools answer different questions; use both.
+9. **Shared-dir evidence hazard (observed live):** `docs/partition-validation/` is shared by lanes 9/16/17; worker9's process overwrote my `wave300-10lanes.check.txt` and removed `wave300-10lanes.json` mid-validation. Lesson: validation evidence files must be worker-namespaced (`*.worker16.*`) or the next lane's run silently replaces your results.
+10. **Internal vs cross-partition conflicts:** the planner flags within-partition conflicts (same-lane tasks sharing a docs dir) in its own `internalConflicts` — the checker only gates *across* partitions. The two tools answer different questions; use both.
 
 ## Assets
-- `docs/partition-validation/wave300-10lanes.json` — experiment (a) input (with `_provenance` per lane)
-- `docs/partition-validation/wave300-10lanes.check.txt` — experiment (a) raw tool output
+- `docs/partition-validation/wave300-10lanes.json` — experiment (a) input, regenerated 23:35 PDT (with `_provenance` per lane)
+- `docs/partition-validation/wave300-10lanes.worker16.check.txt` — experiment (a) raw tool output (32 overlaps). `wave300-10lanes.check.txt` in the same dir is a sibling lane's planner-run output, not mine.
 - `docs/partition-validation/qa2-collision.json` / `.check.txt` — experiment (b)
 - `docs/partition-validation/swarm40-tasks.json` — experiment (c) planner input (48 tasks, 8 injected conflicts)
 - `docs/partition-validation/swarm40-plan.json` / `swarm40-plan.stdout.txt` — experiment (c) real planner output + stdout
