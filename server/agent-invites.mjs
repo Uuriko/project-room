@@ -19,7 +19,7 @@ import { createHash, randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { ServiceError, PILOT_LIMITS, activeMemberCount } from "./store.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
-import { event, EVENT_TYPES as T, memberCan, canInviteMembers, MEMBERSHIP_AUTHORITY_POLICY_VERSION, PERMISSIONS, AGENT_INVITE_SAFE_PERMISSIONS } from "../src/events.js";
+import { event, EVENT_TYPES as T, memberCan, canInviteMembers, MEMBERSHIP_AUTHORITY_POLICY_VERSION, PERMISSIONS, AGENT_INVITE_SAFE_PERMISSIONS, validId } from "../src/events.js";
 import { nextActionsForInviteRedeem } from "./discoverability.mjs";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { agentAccessProfiles } from "./agent-connections.mjs";
@@ -98,6 +98,21 @@ export const agentInviteSchema = `
     revoked_at INTEGER
   );
   CREATE INDEX IF NOT EXISTS agent_invite_codes_room ON agent_invite_codes(room_id);
+  -- G1 idempotent redeem (PRODUCT-200 D7): a client-kept requestId makes an
+  -- uncertain retry safe. The receipt is written in the same transaction as
+  -- the code burn, so a retry after a lost 201 replays the membership
+  -- instead of 409ing on the burned code. Purely additive: older writers
+  -- never read or write it.
+  CREATE TABLE IF NOT EXISTS agent_invite_redeem_receipts (
+    request_id TEXT PRIMARY KEY,
+    code_hash TEXT NOT NULL,
+    identity_id TEXT NOT NULL,
+    room_id TEXT NOT NULL,
+    member_id TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    permissions_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
 `;
 
 const inviteStatus = (row, now) =>
@@ -118,6 +133,28 @@ const view = (row, now) => ({
   revokedAt: row.revoked_at,
   status: inviteStatus(row, now),
 });
+
+// G1 idempotent redeem replay (PRODUCT-200 D7): replays a journaled
+// redemption for an uncertain retry. No new identity, no new member event,
+// no second burn — the same membership, a fresh onboarding token,
+// duplicate:true. Mirrors the duplicate-identity path's active-membership
+// check so a removed member's receipt cannot resurrect the grant.
+const replayRedeemReceipt = (invites, receipt) => {
+  const store = invites.store;
+  const linked = invites.db.prepare("SELECT member_id FROM identity_links WHERE room_id=? AND identity_id=?")
+    .get(receipt.room_id, receipt.identity_id);
+  const member = linked && store.room(receipt.room_id).state.members[linked.member_id];
+  if (!member?.active) fail(403, "access_ended", "Membership is no longer active");
+  const mcpToken = store.agentPlugin.issueOnboardingMcpToken({
+    identityId: receipt.identity_id, roomId: receipt.room_id, label: member.displayName
+  });
+  return withConnect(store, receipt.room_id, linked.member_id, {
+    identityId: receipt.identity_id, roomId: receipt.room_id, memberId: linked.member_id,
+    displayName: member.displayName, permissions: JSON.parse(receipt.permissions_json),
+    duplicate: true, mcpToken,
+    next: redeemNext(receipt.room_id, member.displayName), nextActions: nextActionsForInviteRedeem(receipt.room_id)
+  });
+};
 
 export class AgentInvites {
   constructor(store) { this.store = store; this.db = store.db; }
@@ -219,9 +256,20 @@ export class AgentInvites {
 
   // Unauthenticated: the code is the bearer credential. Burns the code,
   // mints an identity, and links it as an agent member — all atomically.
-  redeem(code, { displayName, identitySecret = null } = {}) {
+  //
+  // G1 idempotent redeem (PRODUCT-200 D7): an opt-in client-kept `requestId`
+  // makes an uncertain retry safe. The receipt is journaled in the same
+  // transaction as the burn, so redeem → timeout → retry replays the same
+  // membership (duplicate:true, fresh onboarding token) instead of 409ing
+  // `invite_already_used` on the burned code with no recovery path. Same
+  // key + different code/displayName is a 409
+  // `invite_redeem_idempotency_conflict` (mirrors the direct-send
+  // idempotency convention). Without a requestId the legacy behavior is
+  // unchanged.
+  redeem(code, { displayName, identitySecret = null, requestId = null } = {}) {
     const existingIdentity = identitySecret === null ? null : this.store.identities.resolveGlobalIdentitySecret(identitySecret);
     if (identitySecret !== null && !existingIdentity) fail(401, "unauthenticated", "Active identity credential required");
+    if (requestId !== null && !validId(requestId)) fail(422, "invalid_invite", "Send a valid request id for retry-safe redemption.");
     // Legacy codes never contain I/L/O, so folding the confusables is safe
     // for both formats.
     const normalized = typeof code === "string" ? code.trim().toUpperCase().replace(/[IL]/g, "1").replace(/O/g, "0") : "";
@@ -233,6 +281,23 @@ export class AgentInvites {
     return this.store.transaction(() => {
       const row = this.db.prepare("SELECT * FROM agent_invite_codes WHERE code_hash=?").get(lookup);
       if (!row) fail(404, "invite_unavailable", "No invite was issued for this code. Ask the inviter for a fresh code");
+      // G1 idempotent redeem: the receipt check comes before the revoked /
+      // expiry / already-used gates — a retry replays the membership the
+      // first attempt committed, even if the code has since expired.
+      if (requestId !== null) {
+        const receipt = this.db.prepare("SELECT * FROM agent_invite_redeem_receipts WHERE request_id=?").get(requestId);
+        if (receipt) {
+          const name = typeof displayName === "string" && displayName.trim() ? displayName.trim()
+            : row.display_name || DEFAULT_INVITE_NAME;
+          if (receipt.code_hash !== row.code_hash || receipt.display_name !== name)
+            fail(409, "invite_redeem_idempotency_conflict", "This request id already redeemed a different invite.");
+          // A caller that presents an identity credential must be the identity
+          // that redeemed: the replay mints a fresh onboarding token for it.
+          if (existingIdentity && existingIdentity.identityId !== receipt.identity_id)
+            fail(403, "invite_redeem_identity_mismatch", "This request id belongs to a different identity.");
+          return replayRedeemReceipt(this, receipt);
+        }
+      }
       if (row.redeemed_at != null && existingIdentity?.identityId === row.redeemed_identity_id) {
         const linked = this.db.prepare("SELECT member_id FROM identity_links WHERE room_id=? AND identity_id=?").get(row.room_id, existingIdentity.identityId);
         const member = linked && this.store.room(row.room_id).state.members[linked.member_id];
@@ -319,6 +384,14 @@ export class AgentInvites {
       const burned = this.db.prepare(`UPDATE agent_invite_codes SET redeemed_at=?,redeemed_identity_id=?
         WHERE code_hash=? AND redeemed_at IS NULL AND revoked_at IS NULL`).run(now, identity.identityId, row.code_hash);
       if (burned.changes !== 1) fail(409, "invite_already_used", "Invite code was already used");
+      // G1 idempotent redeem: journal the receipt in the SAME transaction as
+      // the burn, so an uncertain retry replays this exact membership.
+      if (requestId !== null) {
+        this.db.prepare(`INSERT INTO agent_invite_redeem_receipts
+          (request_id, code_hash, identity_id, room_id, member_id, display_name, permissions_json, created_at)
+          VALUES (?,?,?,?,?,?,?,?)`)
+          .run(requestId, row.code_hash, identity.identityId, row.room_id, memberId, name, JSON.stringify(permissions), now);
+      }
       // Referral attribution, same transaction, after the winning burn: the
       // minter is the referrer. Exactly-once per referee via the referrals
       // table primary key; a retry of this same redemption returns the
