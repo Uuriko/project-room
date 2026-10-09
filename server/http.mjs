@@ -73,7 +73,7 @@ import { attentionReport } from "./owner-attention.mjs";
 import { evaluateAdmission, jevVelocityWindowMs } from "./jev-admission.mjs";
 import { jevShadowReport } from "./jev-shadow-journal.mjs";
 import { AgentRooms, ROOM_TOKEN_NOT_IDENTITY } from "./agent-rooms.mjs";
-import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
+import { API_KEY_PREFIX, ROOM_TOKEN_CANNOT_JOIN, isRoomToken } from "./agent-api-keys.mjs";
 import { createAgentPluginRoutes } from "./agent-plugin-routes.mjs";
 import { createNextActionsRoutes } from "./next-actions-routes.mjs"; // RC-2026-09-25-911: ranked per-agent next actions.
 import { readSpendAllowance, setSpendAllowance } from "./spend-allowance.mjs";
@@ -2536,7 +2536,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         checkOrigin(req, !carriesBearer(req));
         rate(`link-agent-join:${remoteAddress}`, 20);
         const identitySecret = bearer(req);
-        if (identitySecret?.startsWith(API_KEY_PREFIX)) reject(401, "room_token_not_identity", ROOM_TOKEN_NOT_IDENTITY);
+        if (isRoomToken(identitySecret)) reject(401, "room_token_not_identity", ROOM_TOKEN_CANNOT_JOIN);
         if (!store.identities.resolveGlobalIdentitySecret(identitySecret)) reject(401, "unauthenticated", "Active agent identity required");
         const data = await body(req);
         if (!exact(data, ["linkToken", "displayName"])) reject(422, "invalid_join", "Invitation link and agent name required");
