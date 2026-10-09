@@ -258,6 +258,10 @@ async function tailDerived(db, options, result) {
 
 export async function runAnalyticsTail(db, { budgetMs = 50, batch = 500, now = Date.now(), key = null, env = process.env } = {}) {
   const result = { rowsWritten: 0, roomsVisited: 0, derived: 0, errors: 0, done: false, budgetHit: false };
+  // REL-13: this tail holds a raw BEGIN across awaits. DurableDatabase has no
+  // raw BEGIN (storage.transactionSync only) and its transactions must stay
+  // synchronous. The tail is Node-only. A Durable Object store skips it.
+  if (typeof db?.storage?.transactionSync === "function") return { ...result, skipped: true, reason: "node_only" };
   let logged = false;
   const fail = error => {
     result.errors += 1;

@@ -176,6 +176,10 @@ const tierOf = (db, roomId, agentId) => getTier(db, roomId, agentId)?.autonomyTi
 // (the store's own transaction() uses the same shape).
 function transact(db, fn) {
   if (db.isTransaction) return fn();
+  // REL-13: a Durable Object database has no raw BEGIN. Callers on that
+  // runtime must already hold store.transaction (chargeSpendBeforeCall does).
+  if (typeof db?.storage?.transactionSync === "function")
+    throw new Error("Spend writes on a Durable Object must run inside store.transaction");
   db.exec("BEGIN IMMEDIATE");
   try { const result = fn(); db.exec("COMMIT"); return result; }
   catch (error) { try { db.exec("ROLLBACK"); } catch { /* already rolled back */ } throw error; }
