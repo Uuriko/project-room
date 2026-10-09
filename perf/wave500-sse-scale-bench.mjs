@@ -35,6 +35,7 @@
 import { monitorEventLoopDelay } from "node:perf_hooks";
 import { setTimeout as sleep } from "node:timers/promises";
 import { appendFileSync } from "node:fs";
+import { loadavg } from "node:os";
 import { createRoomServer } from "../server/http.mjs";
 
 const rawArgs = process.argv.slice(2);
@@ -84,12 +85,13 @@ function fakeStore() {
   }
   return {
     eventsAfterCalls: 0,
+    pumpCalls: 0, // eventsAfter calls from pump ticks (excludes open-time validation)
     rowsDelivered: 0,
     _tickCount: new Map(), // token -> number of eventsAfter calls
     _lastTick: new Map(),  // token -> performance.now() of last call
     _late: [],             // per-stream tick interval deviation from INTERVAL
     resetRun() {
-      this.eventsAfterCalls = 0; this.rowsDelivered = 0;
+      this.eventsAfterCalls = 0; this.pumpCalls = 0; this.rowsDelivered = 0;
       this._tickCount.clear(); this._lastTick.clear(); this._late = [];
     },
     authenticate(token) {
@@ -112,7 +114,7 @@ function fakeStore() {
         if (rows.length >= limit) break;
       }
       // Only pump ticks (call >= 2) fetch rows that get written to sockets.
-      if (n >= 2) this.rowsDelivered += rows.length;
+      if (n >= 2) { this.pumpCalls++; this.rowsDelivered += rows.length; }
       const sequence = PRELOAD;
       const reachedEnd = rows.length < limit;
       const next = reachedEnd ? sequence : rows.at(-1).sequence;
@@ -174,7 +176,9 @@ async function runOnce(runIdx, store) {
 
     const histogram = monitorEventLoopDelay({ resolution: 1 });
     histogram.enable();
+    const loadBefore = loadavg();
     const callsBefore = store.eventsAfterCalls;
+    const pumpBefore = store.pumpCalls;
     const rowsBefore = store.rowsDelivered;
     const cpuBefore = process.cpuUsage();
     const wallBefore = performance.now();
@@ -184,6 +188,8 @@ async function runOnce(runIdx, store) {
     const cpu = process.cpuUsage(cpuBefore);
     const cpuMs = (cpu.user + cpu.system) / 1000;
     const rows = store.rowsDelivered - rowsBefore;
+    const pumpCalls = store.pumpCalls - pumpBefore;
+    const expectedTicks = opened * (SECONDS * 1000 / INTERVAL);
 
     const late = store._late;
     const result = {
@@ -198,6 +204,12 @@ async function runOnce(runIdx, store) {
       projectionMessages: PROJECTION_MESSAGES,
       atHead: AT_HEAD,
       eventsAfterCalls: store.eventsAfterCalls - callsBefore,
+      pump: {
+        ticks: pumpCalls,
+        expectedTicks: Math.round(expectedTicks),
+        deliveryRatio: Number((pumpCalls / expectedTicks).toFixed(3)),
+      },
+      loadavg: { before: loadBefore.map(v => Number(v.toFixed(2))), after: loadavg().map(v => Number(v.toFixed(2))) },
       cpu: {
         cpuMsPerSec: Number((cpuMs / (wallMs / 1000)).toFixed(1)),
         cpuMsTotal: Number(cpuMs.toFixed(0)),
