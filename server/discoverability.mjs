@@ -250,6 +250,21 @@ const JSON_RPC_STATUSES = Object.freeze({
   "/room/mcp": new Set(["400", "401"]),
 });
 
+// REL-21: body-reading routes refuse a non-JSON Content-Type with 415
+// (json_required) before any handler runs. Schemathesis saw it on 29
+// operations where the spec did not list it. These POSTs read no body and
+// never return 415; the JSON-RPC doors answer with their own parse error.
+const NO_JSON_BODY_ROUTES = new Set([
+  "/api/agent-webhooks/deliveries/{deliveryId}/redrive",
+  "/api/oauth/sessions/revoke-all",
+]);
+
+export function readsJsonBody(entry, method) {
+  if (JSON_RPC_STATUSES[entry.path] || NO_JSON_BODY_ROUTES.has(entry.path)) return false;
+  if (["POST", "PUT", "PATCH"].includes(method)) return true;
+  return Boolean(entry.requestBodies?.[method]);
+}
+
 function errorComponents() {
   const responses = {};
   for (const name of ERROR_RESPONSES) {
@@ -258,6 +273,10 @@ function errorComponents() {
       content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorEnvelope" } } },
     };
   }
+  responses.UnsupportedMediaType = {
+    description: "Content-Type is not application/json (error.code json_required). Resend the body as JSON.",
+    content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorEnvelope" } } },
+  };
   return responses;
 }
 
@@ -271,10 +290,15 @@ function jsonRpcErrorResponse(status) {
   };
 }
 
+// POST routes that answer 200, not 201: they create nothing. The served spec
+// must match the live status (schemathesis drift FO-DRIFT-3: claims/validate
+// answered 200 while the generated spec documented only 201).
+const POST_NON_CREATE_PATHS = new Set(["/api/needs-me", "/api/claims/validate"]);
+
 function operationResponses(entry, method) {
   const success = entry.path === "/demo"
     ? { "200": { description: entry.summary, content: { "text/html": { schema: { type: "string" } } } } }
-    : method === "POST" && entry.path !== "/api/needs-me"
+    : method === "POST" && !POST_NON_CREATE_PATHS.has(entry.path)
     ? { "201": { description: "Created. Success bodies carry next[] guidance toward the next step." } }
     : { "200": { description: "OK. Success bodies carry next[] guidance toward the next step." } };
   const errors = {};
@@ -285,6 +309,7 @@ function operationResponses(entry, method) {
       ? jsonRpcErrorResponse(status)
       : { $ref: `#/components/responses/${name}` };
   }
+  if (readsJsonBody(entry, method)) errors["415"] = { $ref: "#/components/responses/UnsupportedMediaType" };
   return { ...success, ...errors };
 }
 

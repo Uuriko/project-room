@@ -106,17 +106,31 @@ export const directSendSchema = `CREATE TABLE IF NOT EXISTS direct_channel_sends
   recipient TEXT NOT NULL, subject TEXT NOT NULL DEFAULT '',
   body_hash TEXT NOT NULL, thread_id TEXT,
   status TEXT NOT NULL, provider_id TEXT, error_code TEXT,
+  request_id TEXT,
   created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`;
 const DIRECT_SEND_INDEX = `CREATE INDEX IF NOT EXISTS direct_channel_sends_account ON direct_channel_sends(account_id, created_at)`;
-const ensureDirectSendTable = db => { db.exec(directSendSchema); db.exec(DIRECT_SEND_INDEX); };
+// Caller-supplied idempotency key (optional). NULL keys are never compared:
+// SQLite treats NULLs as distinct in a UNIQUE index, so keyless sends keep
+// the legacy one-row-per-request behavior.
+const DIRECT_SEND_REQUEST_INDEX = `CREATE UNIQUE INDEX IF NOT EXISTS direct_channel_sends_request ON direct_channel_sends(account_id, request_id)`;
+export const ensureDirectSendTable = db => {
+  db.exec(directSendSchema); db.exec(DIRECT_SEND_INDEX);
+  const columns = new Set(db.prepare("PRAGMA table_info(direct_channel_sends)").all().map(c => c.name));
+  if (!columns.has("request_id")) db.exec("ALTER TABLE direct_channel_sends ADD COLUMN request_id TEXT");
+  db.exec(DIRECT_SEND_REQUEST_INDEX);
+};
 const emailTo = v => typeof v === "string" && v.length >= 3 && v.length <= 320 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
 const chatTo = v => typeof v === "string" && /^-?\d{1,20}$/.test(v);
 const directSendFields = data => data && typeof data === "object" && !Array.isArray(data)
-  && (exact(data, ["channel", "to", "subject", "body"]) || exact(data, ["channel", "to", "subject", "body", "threadId"]));
+  && (exact(data, ["channel", "to", "subject", "body"]) || exact(data, ["channel", "to", "subject", "body", "threadId"])
+    || exact(data, ["channel", "to", "subject", "body", "requestId"])
+    || exact(data, ["channel", "to", "subject", "body", "threadId", "requestId"]));
 
 export function validateDirectSend(data) {
   if (!directSendFields(data)) fail(422, "invalid_direct_send", "Send channel, recipient, subject and body.");
   if (!directSendChannels.includes(data.channel)) fail(422, "invalid_direct_send", "Send over gmail or telegram.");
+  if (data.requestId !== undefined && !validId(data.requestId))
+    fail(422, "invalid_direct_send", "Send a valid request id for retry-safe delivery.");
   const toOk = data.channel === "gmail" ? emailTo(data.to) : chatTo(data.to);
   if (!toOk) fail(422, "invalid_direct_send", data.channel === "gmail" ? "A valid email recipient is required." : "A Telegram chat id is required.");
   if (typeof data.subject !== "string" || data.subject.length > 300) fail(422, "invalid_direct_send", "Subject must be at most 300 characters.");
@@ -126,15 +140,25 @@ export function validateDirectSend(data) {
   if (data.threadId !== undefined && !validId(data.threadId)) fail(422, "invalid_direct_send", "Thread reference is invalid.");
 }
 
-export function recordDirectSend(db, { id, accountId, channel, to, subject, bodyHash, threadId, at }) {
+export function recordDirectSend(db, { id, accountId, channel, to, subject, bodyHash, threadId, requestId = null, at }) {
   ensureDirectSendTable(db);
   if (!validId(id) || !validId(accountId) || !directSendChannels.includes(channel) || typeof to !== "string" || !to
-    || typeof bodyHash !== "string" || !/^[a-f0-9]{64}$/.test(bodyHash) || !Number.isSafeInteger(at))
+    || typeof bodyHash !== "string" || !/^[a-f0-9]{64}$/.test(bodyHash) || !Number.isSafeInteger(at)
+    || (requestId !== null && !validId(requestId)))
     fail(422, "invalid_direct_send", "Send channel, recipient and body are required.");
   db.prepare(`INSERT INTO direct_channel_sends
-    (id, account_id, channel, recipient, subject, body_hash, thread_id, status, provider_id, error_code, created_at, updated_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, accountId, channel, to, subject, bodyHash, threadId ?? null, "pending", null, null, at, at);
+    (id, account_id, channel, recipient, subject, body_hash, thread_id, status, provider_id, error_code, request_id, created_at, updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, accountId, channel, to, subject, bodyHash, threadId ?? null, "pending", null, null, requestId, at, at);
   return getDirectSend(db, id);
+}
+
+// Idempotency-key lookup for the direct-send write path. A caller that keeps
+// its request (with requestId) across an uncertain retry gets the journaled
+// send back instead of a second provider delivery.
+export function getDirectSendByRequestId(db, accountId, requestId) {
+  ensureDirectSendTable(db);
+  if (!validId(accountId) || !validId(requestId)) return null;
+  return db.prepare("SELECT * FROM direct_channel_sends WHERE account_id=? AND request_id=?").get(accountId, requestId) ?? null;
 }
 
 export function completeDirectSend(db, id, { status, providerId = null, errorCode = null, at }) {

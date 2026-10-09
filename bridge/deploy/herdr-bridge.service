@@ -1,0 +1,43 @@
+[Unit]
+Description=Project Room herdr bridge (host-side session broker)
+Documentation=https://github.com/Uuriko/project-room
+After=network.target cloudflared.service
+Wants=cloudflared.service
+
+[Service]
+Type=simple
+User=herdr-bridge
+Group=herdr-bridge
+EnvironmentFile=/etc/herdr-bridge/env
+# env file (0600 root:herdr-bridge) provides:
+#   BRIDGE_MASTER_SECRET, BRIDGE_MASTER_SECRET_PREV (rotation window only),
+#   BRIDGE_KEY_ID, BRIDGE_KEY_ID_PREV (rotation window only),
+#   BRIDGE_TENANTS_FILE=/etc/herdr-bridge/tenants.json
+ExecStart=/usr/local/bin/node /opt/herdr-bridge/herdr-bridge.mjs
+Restart=on-failure
+RestartSec=5
+
+# Hardening: the bridge needs network (loopback), its config, the per-tenant
+# socket dirs, and its audit log — nothing else. It must NOT read tenant data
+# dirs; it only passes socket paths.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+ReadWritePaths=/run/herdr /var/log/herdr-bridge
+# /etc/herdr-bridge is read-only to the bridge user (root-owned, 0640 env via group)
+
+# The ONLY privilege the bridge user holds (see /etc/sudoers.d/herdr-bridge):
+#   herdr-bridge ALL=(root) NOPASSWD: /usr/bin/systemctl start herdr@*, \
+#       /usr/bin/systemctl stop herdr@*, /usr/bin/systemctl is-active herdr@*
+
+[Install]
+WantedBy=multi-user.target
