@@ -3608,8 +3608,25 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
         if (!granted) reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
       }
+      // Read-route query guard: every key must be expected and single-valued.
+      const rejectBadQuery = (params, names, code, message) => {
+        if ([...params.keys()].some(key => !names.includes(key) || params.getAll(key).length !== 1)) reject(422, code, message);
+      };
+      // Positive-integer query parameter (limit, before, ...).
+      const rejectBadCount = (params, name, code, message) => {
+        if (params.has(name) && !/^[1-9]\d*$/.test(params.get(name))) reject(422, code, message);
+      };
+      // Idempotent create/upsert: 201 when the call wrote, 200 on replay.
+      const jsonCreated = value => json(res, value.duplicate ? 200 : 201, value);
+      // Single-field body shapes: exact fields, optionally a typed value.
+      const requireBodyField = (data, field, type, code, message) => {
+        if (!exact(data, [field]) || typeof data[field] !== type) reject(422, code, message);
+      };
+      const requireExactBody = (data, fields, code, message) => {
+        if (!exact(data, fields)) reject(422, code, message);
+      };
       if (route === "public-work-review") {
-        if ([...url.searchParams.keys()].some(key => (key !== "auth" && (!publicWorkResultsMatch || !["limit", "after"].includes(key))) || url.searchParams.getAll(key).length !== 1)) reject(422, "invalid_public_work_review", "Unsupported review query parameters");
+        rejectBadQuery(url.searchParams, publicWorkResultsMatch ? ["limit", "after", "auth"] : ["auth"], "invalid_public_work_review", "Unsupported review query parameters");
         // FO-DRIFT-1/2: the spec constrains auth to the room|account enum.
         // Validate the selector value on the results route even when bearer
         // or header auth is selected, where roomCredentials would otherwise
@@ -3700,6 +3717,28 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         && !["GET", "HEAD"].includes(req.method)) {
         reject(403, "guest_scope_denied", "Guest members cannot perform this action");
       }
+      // Room-funnel sub-handlers (collab, work claims, matchmaking,
+      // feedback, bounty escrow) re-verify the credential inside the
+      // transaction: a revocation or role change after the read checks
+      // above must not linger. The API-key and guest gates mirror the
+      // funnel's read-time gates.
+      const reauthorizeFunnel = ({ credentialChecks = false, writeScope = false, writeProtection = false, guestReadBan = false } = {}) => {
+        const current = selected.mode === "account"
+          ? store.authenticateAccountSession(selected.token, roomId, fence)
+          : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
+        if (credentialChecks) {
+          if (selected.bearer && current.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
+          if (!selected.bearer && current.kind !== "session") reject(401, "unauthenticated", "Browser session required");
+        }
+        if (writeProtection) protectWrite(req, current, selected.bearer);
+        const required = writeScope ? "rooms:write" : (["GET", "HEAD"].includes(req.method) ? "rooms:read" : "rooms:write");
+        if (current.kind === "api-key" && !(current.apiKeyScopes ?? []).some(scope =>
+          scope === required || (scope.endsWith(":*") && required.startsWith(scope.slice(0, -1)))))
+          reject(403, "insufficient_scope", `API key lacks the ${required} scope`);
+        if (isGuestAgentMemberId(current.member.id) && (guestReadBan || !["GET", "HEAD"].includes(req.method)))
+          reject(403, "guest_scope_denied", "Guest members cannot perform this action");
+        return current;
+      };
       // Lane C inbox collaboration (task RC-2026-09-18-011): room-scoped
       // collab routes share the credential, fence and rate-limit checks
       // above; the handler maps pure-module errors to stable 4xx codes.
@@ -3728,18 +3767,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           ?? collabRoutingResolveMatch ?? collabHandoffTransitionMatch ?? collabEnvelopeTransitionMatch;
         return await handleInboxCollab({ req, res, url, store, roomId, auth, collabRoute,
           collabId: collabIdMatch ? pathId(collabIdMatch[2]) : null,
-          reauthorize: () => {
-            const current = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
-              : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
-            if (selected.bearer && current.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
-            if (!selected.bearer && current.kind !== "session") reject(401, "unauthenticated", "Browser session required");
-            protectWrite(req, current, selected.bearer);
-            if (current.kind === "api-key" && !(current.apiKeyScopes ?? []).some(scope =>
-              scope === "rooms:write" || scope.endsWith(":*") && "rooms:write".startsWith(scope.slice(0, -1))))
-              reject(403, "insufficient_scope", "API key lacks the rooms:write scope");
-            if (isGuestAgentMemberId(current.member.id)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
-            return current;
-          }, helpers: { json, reject, body } });
+          reauthorize: () => reauthorizeFunnel({ credentialChecks: true, writeScope: true, writeProtection: true, guestReadBan: true }),
+          helpers: { json, reject, body } });
       }
       // Work claims (task RC-2026-09-18-041): room-scoped claim registry
       // routes share the credential, fence and rate-limit checks above; the
@@ -3765,16 +3794,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           workClaimId: workClaimIdMatch ? pathId(workClaimIdMatch[2]) : null, registry: store.workClaims,
           ...(fetchPullRequest ? { fetchPullRequest } : {}),
           ...(githubToken !== undefined ? { githubToken } : {}),
-          reauthorize: () => {
-            const current = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
-              : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
-            if (current.kind === "api-key") {
-              const required = ["GET", "HEAD"].includes(req.method) ? "rooms:read" : "rooms:write";
-              if (!(current.apiKeyScopes ?? []).some(scope => scope === required || (scope.endsWith(":*") && required.startsWith(scope.slice(0, -1))))) reject(403, "insufficient_scope", `API key lacks the ${required} scope`);
-            }
-            if (isGuestAgentMemberId(current.member.id) && !["GET", "HEAD"].includes(req.method)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
-            return current;
-          }, helpers: { json, reject, body } });
+          reauthorize: () => reauthorizeFunnel(), helpers: { json, reject, body } });
       }
       // Matchmaking (arrival surface): an agent declares what it is here for,
       // a room declares what an opening needs, and the pure matcher pairs
@@ -3801,16 +3821,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return await handleMatchmaking({ req, res, url, store, roomId, auth, matchmakingRoute,
           matchmakingId: matchmakingIdMatch ? pathId(matchmakingIdMatch[2]) : null,
           registry: store.matchmaking,
-          reauthorize: () => {
-            const current = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
-              : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
-            if (current.kind === "api-key") {
-              const required = ["GET", "HEAD"].includes(req.method) ? "rooms:read" : "rooms:write";
-              if (!(current.apiKeyScopes ?? []).some(scope => scope === required || (scope.endsWith(":*") && required.startsWith(scope.slice(0, -1))))) reject(403, "insufficient_scope", `API key lacks the ${required} scope`);
-            }
-            if (isGuestAgentMemberId(current.member.id) && !["GET", "HEAD"].includes(req.method)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
-            return current;
-          }, helpers: { json, reject, body } });
+          reauthorize: () => reauthorizeFunnel(), helpers: { json, reject, body } });
       }
       // Agent /feedback endpoint (task RC-2026-09-27-2745): structured
       // bug/feature reports with a Mark-staked triage economy, feeding the
@@ -3834,16 +3845,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const feedbackIdMatch = feedbackTriageMatch ?? feedbackAppealMatch ?? feedbackOutcomeMatch ?? feedbackItemMatch;
         return await handleFeedback({ req, res, url, store, roomId, auth, feedbackRoute,
           feedbackId: feedbackIdMatch ? pathId(feedbackIdMatch[2]) : null,
-          reauthorize: () => {
-            const current = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
-              : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
-            if (current.kind === "api-key") {
-              const required = ["GET", "HEAD"].includes(req.method) ? "rooms:read" : "rooms:write";
-              if (!(current.apiKeyScopes ?? []).some(scope => scope === required || (scope.endsWith(":*") && required.startsWith(scope.slice(0, -1))))) reject(403, "insufficient_scope", `API key lacks the ${required} scope`);
-            }
-            if (isGuestAgentMemberId(current.member.id) && !["GET", "HEAD"].includes(req.method)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
-            return current;
-          }, helpers: { json, reject, body } });
+          reauthorize: () => reauthorizeFunnel(), helpers: { json, reject, body } });
       }
       // Board v2 is retired. Authenticated callers get 410 and a pointer at
       // the work-claims board. The board_vtwo_* tables are not dropped.
@@ -3881,22 +3883,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           bountyId: bountyIdMatch ? pathId(bountyIdMatch[2]) : null,
           sybilFlagId: sybilFlagIdMatch ? pathId(sybilFlagIdMatch[2]) : null,
           identity: identityMatch ? identityMatch[2] : null,
-          reauthorize: () => {
-            const current = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
-              : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
-            if (selected.bearer && current.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
-            if (!selected.bearer && current.kind !== "session") reject(401, "unauthenticated", "Browser session required");
-            if (current.kind === "api-key" && !(current.apiKeyScopes ?? []).some(scope =>
-              scope === "rooms:write" || scope.endsWith(":*") && "rooms:write".startsWith(scope.slice(0, -1))))
-              reject(403, "insufficient_scope", "API key lacks the rooms:write scope");
-            if (isGuestAgentMemberId(current.member.id)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
-            return current;
-          }, helpers: { json, reject, body } });
+          reauthorize: () => reauthorizeFunnel({ credentialChecks: true, writeScope: true, guestReadBan: true }),
+          helpers: { json, reject, body } });
       }
       if (route === "conversation" && req.method === "GET") {
         const params = url.searchParams;
-        if ([...params.keys()].some(key => !["limit", "cursor", "since", "messageId", "channelId", "auth"].includes(key) || params.getAll(key).length !== 1)
-          || params.has("limit") && !/^[1-9]\d*$/.test(params.get("limit"))) reject(422, "invalid_conversation_selection", "Choose a bounded conversation page or one message");
+        rejectBadQuery(params, ["limit", "cursor", "since", "messageId", "channelId", "auth"], "invalid_conversation_selection", "Choose a bounded conversation page or one message");
+        rejectBadCount(params, "limit", "invalid_conversation_selection", "Choose a bounded conversation page or one message");
         return json(res, 200, readConversation(store, selected.token, roomId, {
           ...(params.has("limit") ? { limit: Number(params.get("limit")) } : {}),
           cursor: params.get("cursor"), since: params.get("since"), messageId: params.get("messageId"), channelId: params.get("channelId"), expectedSessionBinding: fence
@@ -3913,9 +3906,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (!route && req.method === "GET") {
         const params = url.searchParams;
-        if (params.has("view") && (params.getAll("view").length !== 1 || params.get("view") !== "work"
-          || [...params.keys()].some(key => !["view", "auth"].includes(key) || params.getAll(key).length !== 1))) {
-          reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
+        if (params.has("view")) {
+          rejectBadQuery(params, ["view", "auth"], "invalid_snapshot_view", "Choose a supported snapshot view");
+          if (params.get("view") !== "work") reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
         }
         const helpContext = req.headers["x-project-room-help-context"];
         if (helpContext !== undefined && (helpContext !== "1" || !params.has("view"))) reject(422, "invalid_help_context", "Choose version 1 with the current work view");
@@ -3965,8 +3958,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (["reply-requests", "reply-context", "reply-history"].includes(route) && req.method === "GET") {
         const params = url.searchParams, names = route === "reply-requests" ? ["direction", "status"]
           : route === "reply-context" ? ["requestMessageId", "cursor", "limit"] : ["direction", "cursor", "checkpoint", "limit"];
-        if ([...params.keys()].some(key => ![...names, "auth"].includes(key) || params.getAll(key).length !== 1)
-          || params.has("limit") && !/^[1-9]\d*$/.test(params.get("limit"))) reject(422, "invalid_reply_selection", "Invalid request selection");
+        rejectBadQuery(params, [...names, "auth"], "invalid_reply_selection", "Invalid request selection");
+        rejectBadCount(params, "limit", "invalid_reply_selection", "Invalid request selection");
         const options = Object.fromEntries(names.filter(key => key !== "requestMessageId" && params.has(key)).map(key => [key, key === "limit" ? Number(params.get(key)) : params.get(key)]));
         options.expectedSessionBinding = fence;
         const value = route === "reply-requests" ? store.replyRequests.list(selected.token, roomId, options)
@@ -3977,31 +3970,29 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route === "work-changes" && req.method === "GET") {
         // F3: derived read-time change list for one work item; never a write.
         const params = url.searchParams;
-        if ([...params.keys()].some(key => !["workItemId", "since", "auth"].includes(key) || params.getAll(key).length !== 1)
-          || !params.has("workItemId") || params.has("since") && !/^(0|[1-9]\d*)$/.test(params.get("since"))) reject(422, "invalid_history_selection", "Choose a work item and optional basis revision");
+        rejectBadQuery(params, ["workItemId", "since", "auth"], "invalid_history_selection", "Choose a work item and optional basis revision");
+        if (!params.has("workItemId") || params.has("since") && !/^(0|[1-9]\d*)$/.test(params.get("since"))) reject(422, "invalid_history_selection", "Choose a work item and optional basis revision");
         return json(res, 200, store.workItemHistory(selected.token, roomId, params.get("workItemId"), fence, params.has("since") ? Number(params.get("since")) : null));
       }
       if (route === "charter" && req.method === "GET") {
         const params = url.searchParams;
-        if ([...params.keys()].some(key => !["revision", "auth"].includes(key) || params.getAll(key).length !== 1)
-          || params.has("revision") && !/^(0|[1-9]\d*)$/.test(params.get("revision"))) reject(422, "invalid_charter_revision", "Choose an instructions version");
+        rejectBadQuery(params, ["revision", "auth"], "invalid_charter_revision", "Choose an instructions version");
+        if (params.has("revision") && !/^(0|[1-9]\d*)$/.test(params.get("revision"))) reject(422, "invalid_charter_revision", "Choose an instructions version");
         return json(res, 200, store.charter(selected.token, roomId, { ...(params.has("revision") ? { revision: Number(params.get("revision")) } : {}), expectedSessionBinding: fence }));
       }
       if (route === "work-context" && req.method === "GET") {
         const params = url.searchParams;
         const offerContext = req.headers["x-project-room-offer-context"];
         if (offerContext !== undefined && offerContext !== "1") reject(422, "invalid_offer_context", "Choose offer context version 1");
-        if ([...params.keys()].some(key => !["workItemId", "includeSource", "auth"].includes(key) || params.getAll(key).length !== 1)
-          || (params.has("includeSource") && !["true", "false"].includes(params.get("includeSource")))) {
-          reject(422, "invalid_work_context", "Choose one work ID and an optional source inclusion flag");
-        }
+        rejectBadQuery(params, ["workItemId", "includeSource", "auth"], "invalid_work_context", "Choose one work ID and an optional source inclusion flag");
+        if (params.has("includeSource") && !["true", "false"].includes(params.get("includeSource"))) reject(422, "invalid_work_context", "Choose one work ID and an optional source inclusion flag");
         return json(res, 200, store.workContext(selected.token, roomId, params.get("workItemId"), {
           includeSource: params.get("includeSource") === "true", includeOffers: offerContext === "1", expectedSessionBinding: fence
         }));
       }
       if (route === "work-result" && req.method === "GET") {
         const params = url.searchParams;
-        if ([...params.keys()].some(key => !["workItemId", "completionEventId", "draftMessageId", "auth"].includes(key) || params.getAll(key).length !== 1)) reject(422, "invalid_result_selection", "Invalid result selection");
+        rejectBadQuery(params, ["workItemId", "completionEventId", "draftMessageId", "auth"], "invalid_result_selection", "Invalid result selection");
         return json(res, 200, store.workResult(selected.token, roomId, params.get("workItemId"), {
           completionEventId: params.get("completionEventId"), draftMessageId: params.get("draftMessageId"), expectedSessionBinding: fence
         }));
