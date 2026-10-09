@@ -46,7 +46,9 @@ export function installHumanExperience({ getState, getSession, client, notice, o
   setup.querySelector('#assistant-enroll').onclick = () => { setup.close(); $('#connect-agent-button').click(); };
   $('#assistant-setup').onclick = () => {
     const state = getState();
-    setup.querySelector('select').innerHTML = uiText("human.copy.008") + Object.values(state.members).filter(m => m.kind === 'agent' && m.active !== false && m.permissions.includes('accept_work')).map(m => ["<option value=\"", esc(m.id), "\">", esc(m.displayName), "</option>"].join('')).join('');
+    const coordinators = Object.values(state.members).filter(m => m.kind === 'agent' && m.active !== false && m.permissions.includes('accept_work'));
+    if (!coordinators.length && !configureOperation) { $('#connect-agent-button').click(); return; }
+    setup.querySelector('select').innerHTML = uiText("human.copy.008") + coordinators.map(m => ["<option value=\"", esc(m.id), "\">", esc(m.displayName), "</option>"].join('')).join('');
     if (configureOperation) setup.querySelector('select').value = configureOperation.coordinatorMemberId;
     setup.querySelector('select').disabled = Boolean(configureOperation);
     $('#assistant-setup-error').textContent = ''; setup.showModal();

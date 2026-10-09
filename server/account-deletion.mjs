@@ -65,6 +65,7 @@ export const RETENTION_POLICY = Object.freeze({
     Object.freeze({ category: "terms", description: "The terms-of-service acceptance record (account_terms) is deleted." }),
     Object.freeze({ category: "oauth_tokens", description: "Third-party OAuth grants (authorization codes, access and refresh tokens) are deleted and revoked; connectors lose access immediately." }),
     Object.freeze({ category: "analytics", description: "Analytics events attributed to the account (analytics_events) are permanently deleted." }),
+    Object.freeze({ category: "work_fit", description: "Optional work-fit profiles and authored feedback text are purged; other workers retain their preferences and unrelated contributions. Shared journal identifiers remain redacted tombstones." }),
     Object.freeze({ category: "profile", description: "The account row is deactivated (active=0), its auth epoch is rotated so no residual credential can authenticate, and display name / avatar are scrubbed." }),
   ]),
   retained: Object.freeze([
@@ -301,7 +302,7 @@ function rebuildRoom(store, roomId) {
 // Events are redacted, then the projection is rebuilt so recovery matches.
 function archivePersonalRoom(store, room) {
   // Public activity summaries and retry responses can contain room text too.
-  for (const table of ["room_assistant_config", "room_assistant_runs", "room_assistant_ops", "room_trial_tasks", "room_trial_requests", "room_vetting_keys", "room_vetting_receipts", "demigod_offer_profiles", "demigod_offer_requests", "demigod_contracts", "demigod_contract_requests", "buyer_signoff_loops", "buyer_signoff_requests"]) {
+  for (const table of ["agent_work_fit_events", "agent_work_fit_profiles", "room_assistant_config", "room_assistant_runs", "room_assistant_ops", "room_trial_tasks", "room_trial_requests", "room_vetting_keys", "room_vetting_receipts", "demigod_offer_profiles", "demigod_offer_requests", "demigod_contracts", "demigod_contract_requests", "buyer_signoff_loops", "buyer_signoff_requests"]) {
     if (store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table))
       store.db.prepare(`DELETE FROM ${table} WHERE room_id=?`).run(room.id);
   }
@@ -356,6 +357,9 @@ export function inventoryFromStore(store, accountId, rooms = null) {
       itemCount: countWhere(store, "account_access_events", accountId),
       legalHold: true,
       legalHoldReason: "Access history is retained for security auditing, fraud prevention, and dispute resolution.",
+    },
+    work_fit: {
+      itemCount: store.workFit.present() ? store.db.prepare('SELECT COUNT(*) AS n FROM agent_work_fit_events e JOIN member_accounts m ON m.room_id=e.room_id AND (m.member_id=e.subject_id OR m.member_id=e.actor_id) WHERE m.account_id=?').get(accountId).n : 0,
     },
     profile: { itemCount: 1 },
     // Connected Gmail data and account setup answers: purged by their own
@@ -575,6 +579,11 @@ const EXECUTORS = {
   },
   analytics: (store, accountId) =>
     deleteWhereIfExists(store, "analytics_events", "account_id", accountId),
+  work_fit: (store, accountId) => {
+    let removed=0;
+    for(const m of store.db.prepare('SELECT room_id,member_id FROM member_accounts WHERE account_id=?').all(accountId))removed+=store.workFit.purgeMember(m.room_id,m.member_id);
+    return removed;
+  },
   profile: (store, accountId) => {
     return store.db.prepare(`UPDATE accounts SET active=0, auth_epoch=auth_epoch+1,
       display_name=NULL, avatar_url=NULL, onboarded=1 WHERE id=?`).run(accountId).changes;

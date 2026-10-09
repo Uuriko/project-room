@@ -1,4 +1,4 @@
-import { clickChrome } from "./room-chrome.mjs";
+import { clickChrome, enableHumanAdvanced } from "./room-chrome.mjs";
 // Disposable synthetic journeys. These are not retention or human-study evidence.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -36,6 +36,7 @@ async function setup(t, touch = false) {
   page.on('request', request => requests.push(`${request.url()} ${request.postData() ?? ''}`));
   await page.goto(origin); await signInFixture(page, fixture.keys.owner);
   await page.locator('#main').waitFor({ state: 'visible' });
+  await enableHumanAdvanced(page);
   await clickChrome(page, "#invite-people-button");
   return { fixture, origin, page, errors, requests };
 }

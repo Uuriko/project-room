@@ -1,3 +1,4 @@
+import { installWorkFit } from "./agent-work-fit-ui.js";
 import { uiText } from "./strings.js";
 import { installOwnerProjectOffers } from "./owner-project-offers-ui.js";
 import { createMemberDisplayNames } from "./member-display-names.js";
@@ -104,6 +105,7 @@ $("#skip-link").addEventListener("click", event => {
   event.preventDefault();
   const target = !$("#inbox-panel").hidden ? "#inbox-heading"
     : !$("#main").hidden ? "#conversation-title"
+    : !$("#account-rooms-panel").hidden ? "#account-rooms-title"
     : $("#auth-panel").hidden ? "#connection-status"
     : "#auth-title";
   $(target).focus();
@@ -494,6 +496,7 @@ const client = new RoomClient({
     workFormOpener = null; clearNotice();
     $("#main").hidden = true; $("#auth-panel").hidden = false; $("#signout-button").hidden = true;
     humanExperience?.sync();
+    workFit?.sync();
     $("#account-settings-button").hidden = true;
     syncSessionMenu();
     $("#auth-panel").setAttribute("aria-busy", pendingSignout ? "true" : "false");
@@ -872,6 +875,16 @@ async function openRememberedRoomOrInbox() {
     return false;
   }
 }
+// First-room creation owns this handoff; ordinary room restores keep their focus.
+function focusFirstRoomComposer(body, owned, restored) {
+  const input = $("#message-input");
+  if (body?.created !== true || accountClient.session !== owned || !restored || session !== restored
+    || state?.room?.id !== body.room?.id || state.room.kind !== "personal"
+    || leavingPage || signoutLoading || busy || currentThreadId || replyToId
+    || pendingMessage || pendingAction || drafts.hasText() || document.querySelector("dialog[open]")
+    || input.value || input.disabled || input.readOnly || input.closest("[hidden]") || !input.getClientRects().length) return;
+  input.focus();
+}
 // --- Q3-C: signup with no chosen room opens that account's room. ---
 async function openPersonalRoomAfterSignup() {
   const owned = accountClient.session;
@@ -889,7 +902,11 @@ async function openPersonalRoomAfterSignup() {
   const roomId = body?.room?.id;
   if (!roomId) { showAccountWorkspace(); return; }
   history.replaceState(null, "", roomHandoffLocation(roomId));
-  try { await client.restore(roomId); inboxUI.showRooms(); inboxUI.refreshSetup?.(); }
+  try {
+    const restored = await client.restore(roomId);
+    inboxUI.showRooms(); inboxUI.refreshSetup?.();
+    focusFirstRoomComposer(body, owned, restored);
+  }
   catch { if (accountClient.session === owned && !state) showAccountWorkspace(); }
 }
 // --- end Q3-C ---
@@ -974,7 +991,11 @@ async function openStartedRoom() {
   const roomId = body?.room?.id;
   if (!roomId) { inboxUI.open(); return; }
   history.replaceState(null, "", roomHandoffLocation(roomId));
-  try { await client.restore(roomId); inboxUI.showRooms(); inboxUI.refreshSetup?.(); }
+  try {
+    const restored = await client.restore(roomId);
+    inboxUI.showRooms(); inboxUI.refreshSetup?.();
+    focusFirstRoomComposer(body, owned, restored);
+  }
   catch { if (accountClient.session === owned && !state) { inboxUI.showRoomList(); $("#account-rooms-status").textContent = "Couldn’t open your room. Choose it below."; } }
 }
 async function confirmAccount() {
@@ -2102,6 +2123,7 @@ function render() {
   setText("#decision-count", state.eventLog.filter(e => e.type === T.DECISION_RECORDED).length || "");
   renderRecordPanel();
   humanExperience?.sync();
+  workFit?.sync();
   revealAgentSigninLink();
 }
 function renderRecordPanel() {
@@ -3764,6 +3786,7 @@ $("#join-agent-copy")?.addEventListener("click", async () => {
 installRoomLayout();
 const humanExperience = installHumanExperience({ getState: () => state, getSession: () => session, client, notice,
   openWork: id => revealWork(id), openMessage: id => revealMessage(id), selectResult: (id, messageId) => openWorkAction(state.workItems[id], "complete", messageId), refreshTranscript: () => { if (state) renderMessages(); } });
+const workFit = installWorkFit({getState:()=>state,getSession:()=>session,client,openWork:id=>revealWork(id)});
 const sessionMenu = $("#session-menu");
 const sessionMenuButton = $("#session-menu-button");
 const setSessionMenuOpen = open => {
@@ -4557,6 +4580,18 @@ document.addEventListener("keydown", event => {
 });
 $("#search-form").addEventListener("submit", e => { e.preventDefault(); if (state) renderSearch(); });
 $("#message-search").addEventListener("input", () => { if (state) renderSearch(); });
+$("#message-search").addEventListener("keydown", event => {
+  if (event.key !== "Escape") return;
+  // Search owns Escape: native query clearing must not dismiss a chat thread.
+  event.stopPropagation();
+  if (event.repeat || event.isComposing || event.keyCode === 229
+    || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey
+    || document.querySelector("dialog[open]") || event.currentTarget.value
+    || $("#search-form").hidden || $("#main").hidden) return;
+  event.preventDefault();
+  $("#topbar-search-toggle").click();
+  $("#topbar-search-toggle").focus();
+});
 $("#search-mentions").addEventListener("click", () => {
   const on = mentionsFilterOn();
   $("#search-mentions").setAttribute("aria-pressed", on ? "false" : "true");

@@ -1,0 +1,45 @@
+// Distinct native boundary: real WK identity entry, cookies, storage and room APIs.
+const $ = selector => document.querySelector(selector);
+const check = (value, label) => { if (!value) throw new Error(label); };
+const wait = async (predicate, label) => {
+  const until = Date.now() + 20000;
+  while (Date.now() < until) { if (predicate()) return; await new Promise(resolve => setTimeout(resolve, 40)); }
+  throw new Error('Timed out: ' + label);
+};
+const fill = (selector, value) => { const input = $(selector); check(input, selector); input.value = value; input.dispatchEvent(new Event('input', {bubbles:true})); };
+await wait(() => $('#agent-signin-button'), 'minimal entry');
+$('#agent-signin-button').click(); $('[data-agent-new]').click();
+fill('[name=createName]', 'Native readiness agent');
+$('[data-agent-form=create] [type=submit]').click();
+await wait(() => $('[data-agent-created]'), 'identity created');
+const secrets = [...document.querySelectorAll('[data-agent-secret]')].map(input => input.value);
+check(secrets.length === 2 && [...document.querySelectorAll('[data-agent-secret]')].every(input => input.type === 'password'), 'one-time credentials are masked');
+$('[data-agent-saved]').click();
+await wait(() => $('[data-agent-create-room]'), 'room choice');
+$('[data-agent-create-room]').click(); fill('[name=roomTitle]', 'Native readiness agent room');
+$('[data-agent-form=make-room] [type=submit]').click();
+await wait(() => $('#main')?.hidden === false && $('#message-input'), 'agent room');
+await wait(() => $('#agent-first-run'), 'orientation');
+$('#agent-first-run [data-step=dismiss]').click();
+check(!$('[data-agent-secret]'), 'one-time credentials removed');
+check(!secrets.some(secret => Object.values(localStorage).concat(Object.values(sessionStorage)).some(value => value.includes(secret))), 'credentials never stored in web storage');
+check(!secrets.some(secret => location.href.includes(secret)), 'credentials never placed in URL');
+const session = await (await fetch('/api/session')).json();
+check(session.member.kind === 'agent', 'authenticated agent member');
+const path = '/api/rooms/' + encodeURIComponent(session.roomId) + '/work-fit';
+const initial = await (await fetch(path)).json();
+check(initial.advisory && initial.caseCount === 0, 'unknown work fit is normal');
+const change = {action:'update_self',requestId:crypto.randomUUID(),expectedRevision:initial.selfRevision,preferences:{learn:['browser_native_qa']}};
+const response = await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':session.csrf},body:JSON.stringify(change)});
+check(response.ok, 'authenticated direct agent command');
+const profile = await (await fetch(path)).json();
+check(profile.preferences.learn.includes('browser_native_qa'), 'direct command persisted');
+fill('#message-input', 'Native agent can chat after direct commands.'); $('#message-form').requestSubmit();
+await wait(() => [...document.querySelectorAll('[data-message-record-id]')].some(node => node.textContent.includes('Native agent can chat after direct commands.')), 'agent chat receipt');
+await wait(() => !$('#message-input').disabled && $('#message-input').value === '', 'composer ready after send');
+fill('#message-input', 'Unsent native agent draft survives closing the window.');
+check($('#message-input').value === 'Unsent native agent draft survives closing the window.', 'agent draft retained in composer');
+check(!localStorage.getItem('project-room:drafts:v3'), 'accountless agent draft is not persisted under a human account scope');
+check(!document.cookie.includes('room_session='), 'room credential cookie is HttpOnly');
+check(document.documentElement.scrollWidth <= innerWidth + 1, 'no horizontal overflow');
+return JSON.stringify({agentIdentityCreated:true,maskedCredentials:true,roomEntered:true,directCommand:true,chatReceipt:true,inMemoryDraft:true});
