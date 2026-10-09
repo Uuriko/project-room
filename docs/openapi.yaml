@@ -12645,11 +12645,20 @@ paths:
         context; `x-project-room-offer-context: 1` (full view only) adds
         offer context. Room routes accept a room bearer key, a browser room
         session, or a signed-in account session with `?auth=account`.
+        `?messages=recent` (full view only, no other filters) returns the
+        full snapshot with only the newest 100 visible messages in
+        `state.messages` and a `messagesWindow` `{ mode: recent, limit,
+        omitted, older: conversation }`; the first
+        `/api/rooms/{roomId}/conversation?limit=100` page is the same window,
+        so older history pages from its `nextCursor`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: view
           in: query
           schema: { type: string, enum: [work] }
+        - name: messages
+          in: query
+          schema: { type: string, enum: [recent] }
       responses:
         '200': { description: Snapshot }
         '401': { description: unauthenticated }

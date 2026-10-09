@@ -208,3 +208,58 @@ for (const schedule of ["initial-handover", "connected-refresh"]) {
     t.diagnostic(`${schedule}: held ${heldSequence}; native ${latest.sequence}; exact final identities/content; three oracle controls rejected`);
   });
 }
+
+// Live refreshes after a new message re-read only the newest messages
+// (`?messages=recent`) and keep the older history already on screen; an edit to
+// an older message still reads the full snapshot and shows the edit.
+test("a new message refreshes a busy room with the recent window, an old edit with the full snapshot", { timeout: 30000 }, async t => {
+  const f = createAcceptanceFixture();
+  f.store.roomFlood = { consume() {} };
+  const post = (key, body) => { const id = randomUUID(); f.store.command(key, "commons", { id, type: "message.posted", data: { messageId: id, body } }); return id; };
+  const ids = [];
+  for (let i = 0; i < 130; i++) ids.push(post(f.keys.producer, `history ${i}`));
+  const server = createRoomServer({ store: f.store, streamInterval: 50 });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+  t.after(async () => {
+    await browser.close(); server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true });
+  });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  page.setDefaultTimeout(10000);
+  const errors = [], reads = [];
+  page.on("pageerror", error => errors.push(error.message));
+  page.on("response", async response => {
+    const url = new URL(response.url());
+    if (url.pathname === "/api/rooms/commons" && response.request().method() === "GET")
+      reads.push({ search: url.search, messages: (await response.json().catch(() => null))?.state?.messages?.length });
+  });
+  await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await signInFixture(page, f.keys.owner);
+  await page.waitForFunction(() => document.querySelector("#connection-status").textContent.startsWith("Connected"));
+  await page.locator(`[data-message-record-id="${ids.at(-1)}"]`).waitFor({ state: "visible" });
+  const rendered = () => page.locator("[data-message-record-id]").evaluateAll(nodes => nodes.map(node => node.dataset.messageRecordId));
+  const before = await rendered();
+  assert.ok(reads.length >= 1 && reads.every(read => read.search === ""), "opening reads the full snapshot");
+
+  const opened = reads.length;
+  const arrival = post(f.keys.producer, "a new arrival");
+  await page.locator(`[data-message-record-id="${arrival}"]`).waitFor({ state: "visible" });
+  await page.waitForFunction(count => document.querySelectorAll("[data-message-record-id]").length >= count, before.length);
+  const live = reads.slice(opened);
+  // With the server's recent view each read carries 100 messages; a server
+  // without it answers in full, and the client uses that as is.
+  assert.ok(live.length >= 1 && live.every(read => read.search === "?messages=recent" && [100, reads[0].messages + 1].includes(read.messages)), JSON.stringify(live));
+  assert.deepEqual((await rendered()).filter(id => id !== arrival), before, "the history on screen is unchanged apart from the arrival");
+
+  // An edit to the oldest message (outside the window) must still show.
+  const oldest = ids[0], edited = reads.length;
+  assert.ok(before.includes(oldest), "the oldest message is on screen");
+  const fullRead = page.waitForResponse(response => { const url = new URL(response.url());
+    return url.pathname === "/api/rooms/commons" && url.search === "" && response.request().method() === "GET"; });
+  f.store.command(f.keys.producer, "commons", { id: randomUUID(), type: "message.edited", data: { messageId: oldest, body: "history 0, edited", expectedMessageRevision: 0 } });
+  await fullRead;
+  await page.locator(`[data-message-record-id="${oldest}"]`, { hasText: "history 0, edited" }).waitFor({ state: "attached" });
+  assert.deepEqual(reads.slice(edited).map(read => read.search), [""]);
+  assert.deepEqual(errors, []);
+});
