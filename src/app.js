@@ -4136,14 +4136,16 @@ function updateReply() {
   $("#reply-bar").hidden = Boolean(requestMode) || !target || replyToId === currentThreadId;
   const author = target ? replyAuthorToAddress(session?.member?.id, state.members[target.authorId]) : null;
   const addressing = Boolean(author && messageMentionsMember($("#message-input").value, author));
-  $("#reply-context").textContent = target
+  // Runs on every keystroke: write text only when it changes. Replacing an
+  // unchanged text node still forces a layout of the whole timeline.
+  setText("#reply-context", target
     ? `Replying to ${name(target.authorId)}${addressing ? ` · addressing ${author.displayName}` : ""}: ${target.deletedAt ? "Message deleted" : target.body.slice(0, 100)}`
-    : "";
+    : "");
   const mention = $("#reply-mention");
   mention.hidden = !author;
   mention.disabled = busy;
   mention.setAttribute("aria-pressed", addressing ? "true" : "false");
-  mention.textContent = author ? `Also @ ${author.displayName}` : "Also @";
+  setText("#reply-mention", author ? `Also @ ${author.displayName}` : "Also @");
 }
 function clearReply() { replyToId = currentThreadId; updateReply(); }
 $("#cancel-reply").addEventListener("click", () => { clearReply(); $("#message-input").focus({ preventScroll: true }); });
