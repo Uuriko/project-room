@@ -90,28 +90,26 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
   // wrapper covers the bump and the claim row together. The table is created
   // lazily and is deliberately NOT part of workClaimSchema, so
   // verifySchema()'s exact-shape check can never fire on existing databases
-  // (no reconciliation path, no schema version bump).
-  let boardSeqTableReady = false;
-  const ensureBoardSeqTable = () => {
-    if (boardSeqTableReady) return;
-    db.exec(`CREATE TABLE IF NOT EXISTS work_claim_board_seq (
-      room_id TEXT PRIMARY KEY,
-      seq INTEGER NOT NULL
-    )`);
-    boardSeqTableReady = true;
-  };
+  // (no reconciliation path, no schema version bump). CREATE TABLE IF NOT
+  // EXISTS runs on every bump/read with no ready-flag: it is idempotent, and
+  // a rolled-back write must not leave a stale "table exists" belief behind
+  // (the failing-transaction test covers exactly that).
+  const BOARD_SEQ_TABLE_SQL = `CREATE TABLE IF NOT EXISTS work_claim_board_seq (
+    room_id TEXT PRIMARY KEY,
+    seq INTEGER NOT NULL
+  )`;
   const bumpBoardSeq = statement(`INSERT INTO work_claim_board_seq (room_id, seq) VALUES (?, 1)
     ON CONFLICT(room_id) DO UPDATE SET seq = seq + 1 RETURNING seq`);
   const selectBoardSeq = statement("SELECT seq FROM work_claim_board_seq WHERE room_id=?");
   const nextBoardSeq = roomId => {
-    ensureBoardSeqTable();
+    db.exec(BOARD_SEQ_TABLE_SQL);
     return bumpBoardSeq.get(roomId).seq;
   };
 
   return {
     transaction,
     boardSeq(roomId) {
-      ensureBoardSeqTable();
+      db.exec(BOARD_SEQ_TABLE_SQL);
       return selectBoardSeq.get(roomId)?.seq ?? 0;
     },
     verifySchema({ allowAbsent = false } = {}) {

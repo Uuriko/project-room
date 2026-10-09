@@ -292,10 +292,15 @@ const boardLimitOf = (reject, raw) => {
   return Number(raw);
 };
 
-// F3 (wave300-fanout): ?since=<boardSeq> asks for the delta — only claims
-// mutated after the given cursor. 400 invalid_input on anything that is not
-// a non-negative integer, or when combined with cursor/queue/state (the
-// delta is defined on the default board view only).
+// F3 (wave300-fanout): the per-claim boardSeq lives in storage and on the
+// delta wire only. Every other surface keeps its existing shape, so strip
+// it before returning a stored item outside the board page.
+const stripBoardSeq = item => {
+  if (!item || !Object.hasOwn(item, "boardSeq")) return item;
+  const { boardSeq: _dropped, ...rest } = item;
+  return rest;
+};
+
 const boardDeltaSinceOf = (reject, params) => {
   if (!params.has("since")) return null;
   const raw = params.get("since");
@@ -391,15 +396,11 @@ export function buildWorkClaimPage(items, roomId, viewerId, query = new URLSearc
   if (view !== null && view !== "summary") invalidInput(reject, "view=summary");
   const metadata = { roomId, source: "work-claims", evaluatedAt: new Date(nowMs).toISOString(),
     consistency: "live", limit, historyLimit: LIST_HISTORY_ENTRIES };
-  const stripBoardSeq = item => {
-    if (!Object.hasOwn(item, "boardSeq")) return item;
-    const { boardSeq: _dropped, ...rest } = item;
-    return rest;
-  };
+  const stripClaimSeq = (item, isDelta) => (isDelta ? item : stripBoardSeq(item));
   const present = (page, { delta = false } = {}) => {
     const projected = page.claims
       .map(item => summarizeClaimHistory(item, LIST_HISTORY_ENTRIES))
-      .map(item => (delta ? item : stripBoardSeq(item)));
+      .map(item => stripClaimSeq(item, delta));
     const stamped = stampClaimPage({ ...metadata, ...page, boardSeq: seqNow, claims: projected }, viewerId);
     return view === "summary" ? withContentTrust({ ...stamped, claims: stamped.claims.map(summarizeBoardClaim) }) : stamped;
   };
@@ -627,10 +628,13 @@ export function linkWorkClaimPullRequest({ store, roomId, auth, claimId, data, r
       }
       throw refusal;
     }
-    if (linked === item) return item;
+    if (linked === item) return stripBoardSeq(item);
     registry.set(roomId, linked);
     emitWorkClaimEvent(store, roomId, { actorId: current.member.id, item: linked, action: "state_changed", atMs: now });
-    return linked;
+    // F3: appendWorkPullRequest spreads the stored item, so the returned
+    // claim can carry a stale boardSeq — the link response keeps its
+    // existing shape.
+    return stripBoardSeq(linked);
   };
   return registry.transaction ? registry.transaction(run) : run();
 }
@@ -993,7 +997,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   if (workClaimRoute === "read" && req.method === "GET") {
     closeLiveClaims();
     // SEC-2: member-authored text is marked untrusted for the reader.
-    return json(res, 200, withContentTrust(stampClaim(load(claimIdOf(reject, workClaimId)), caller)));
+    // F3: the stored boardSeq is a board-page concern — the single-claim
+    // read keeps its existing shape.
+    return json(res, 200, withContentTrust(stampClaim(stripBoardSeq(load(claimIdOf(reject, workClaimId))), caller)));
   }
   if (workClaimRoute === "claim" && req.method === "POST") {
     const data = body(req);
@@ -1152,7 +1158,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       if (!duplicate && data.verdict === "changes_requested") {
         enqueueClaimWake(store, roomId, item.owner, `work-claim:${item.id}:review:${caller}:${nowMs}`, { reason: "review", actorId: caller });
       }
-      return json(res, 200, duplicate ? item : reviewed);
+      return json(res, 200, duplicate ? stripBoardSeq(item) : reviewed);
     }
     if (!shape(data, { optional: ["note"] })) invalidInput(reject, "{note?} or {verdict, summary, url?}");
     if (!mayAttestWorkClaims(access)) refuseAttest();
@@ -1171,7 +1177,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // SEC-2: a repeat note from this reviewer on the same claim round and
     // revision replaces the stored note without a history entry or event.
     if (before?.note !== after?.note) { registry.set(roomId, attested); return json(res, 200, attested); }
-    return json(res, 200, item);
+    return json(res, 200, stripBoardSeq(item));
   }
   if ((workClaimRoute === "close" || workClaimRoute === "cancel") && req.method === "POST") {
     // Claim lifecycle: retire open work without delivering it. close is for

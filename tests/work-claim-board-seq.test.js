@@ -134,6 +134,18 @@ test("invalid since is 400 invalid_input", async () => {
   assert.equal(page.value.claims.length, 1);
 });
 
+test("single-claim reads keep their existing shape (no boardSeq leak)", async () => {
+  const registry = createWorkClaimRegistry();
+  await call(registry, "owner", "create", null, { id: "r-1" });
+  await call(registry, "owner", "claim", "r-1", {});
+  const read = await call(registry, "owner", "read", "r-1", undefined);
+  assert.equal(read.status, 200);
+  assert.ok(!Object.hasOwn(read.value, "boardSeq"), "single-claim reads strip boardSeq");
+  // The cursor still advanced underneath.
+  assert.equal(registry.boardSeq("room1"), 2);
+  assert.equal(registry.get("room1", "r-1").boardSeq, 2);
+});
+
 test("durable registry persists boardSeq and per-claim seq across restarts; legacy rows read as 0", async t => {
   const open = database(t);
   const first = open();
