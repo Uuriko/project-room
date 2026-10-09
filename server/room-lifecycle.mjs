@@ -67,6 +67,11 @@ export const accountRoomEntry = (row, memberId) => ({
 
 const accountViewer = auth => ({ accountId: auth.account.id, authEpoch: auth.account.authEpoch, sessionRevision: auth.sessionRevision, sessionBinding: auth.sessionBinding });
 const text = (value, max, multiline = false) => typeof value === "string" && value.trim().length > 0 && value.length <= max && !(multiline ? controlExceptBreaks : control).test(value);
+const needText = (request, field, max, multiline, message) => {
+  const value = request[field];
+  if (!text(value, max, multiline)) fail(422, "invalid_room_request", message);
+  return value.trim();
+};
 
 // An account may create a room when it has no rooms yet — a stranger becomes
 // owner of their first room — or when it already administers membership
@@ -86,9 +91,9 @@ export function createAccountRoom(store, token, binding, request) {
   }
   const { roomId, kind } = request;
   if (!validId(roomId) || roomId.length > 64) fail(422, "invalid_room_request", "Room id must be 1 to 64 letters, digits, dots, colons, underscores or hyphens");
-  if (!text(request.title, 120)) fail(422, "invalid_room_request", "Room name must be 1 to 120 characters");
-  if (!text(request.purpose, 1000, true)) fail(422, "invalid_room_request", "Room purpose must be 1 to 1000 characters");
-  if (!text(request.displayName, 80)) fail(422, "invalid_room_request", "Your name in the room must be 1 to 80 characters");
+  let title = needText(request, "title", 120, false, "Room name must be 1 to 120 characters");
+  const purpose = needText(request, "purpose", 1000, true, "Room purpose must be 1 to 1000 characters");
+  const displayName = needText(request, "displayName", 80, false, "Your name in the room must be 1 to 80 characters");
   if (!ROOM_KINDS.includes(kind)) fail(422, "invalid_room_request", "Room kind must be personal or organization");
   // ACT-1a: optional intent / start=1 seed Room Guide. Requests without them
   // keep the existing two-step onboarding. ACT-1b is what sends these fields.
@@ -110,9 +115,7 @@ export function createAccountRoom(store, token, binding, request) {
     templateSlug = request.templateSlug;
   }
   const wantsStarter = Boolean(intent) || start;
-  let title = request.title.trim();
   if (intent) title = starterTitleForIntent(intent);
-  const purpose = request.purpose.trim(), displayName = request.displayName.trim();
   return store.transaction(() => {
     const auth = store.authenticateAccountSession(token, null, binding);
     const accountId = auth.account.id;
