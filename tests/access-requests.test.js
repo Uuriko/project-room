@@ -111,6 +111,29 @@ test("requestId collision across identities is rejected", async t => {
   }), /requestId is already in use/);
 });
 
+// PRODUCT-200 B10 (QA200-MUT-14 design question): request_id is a global
+// PRIMARY KEY and the retry lookup was unscoped (WHERE request_id=? with no
+// room_id). A client-supplied key minted in room A and retried in room B must
+// NOT replay room A's request — it fails honestly with the same 409 the
+// cross-identity collision uses.
+test("requestId reused in a different room is rejected, not replayed", async t => {
+  const { store, requests, identity } = setup(t);
+  store.initialize(initialRoom("lab"));
+  const first = requests.request("commons", {
+    identityId: identity.identityId, displayName: "Requesting Agent",
+    requestedPermissions: ["accept_work"], requestId: "ar_crossroom"
+  });
+  assert.equal(first.roomId, "commons");
+  assert.throws(() => requests.request("lab", {
+    identityId: identity.identityId, displayName: "Requesting Agent",
+    requestedPermissions: ["accept_work"], requestId: "ar_crossroom"
+  }), /requestId is already in use/);
+  // The original room's request is untouched: one row, still in commons.
+  const rows = store.db.prepare(
+    "SELECT count(*) AS n FROM access_requests WHERE request_id='ar_crossroom'").get().n;
+  assert.equal(rows, 1);
+});
+
 test("unknown identity or room is a bare 404", async t => {
   const { requests } = setup(t);
   assert.throws(() => requests.request("commons", {
