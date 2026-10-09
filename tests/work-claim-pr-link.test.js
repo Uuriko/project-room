@@ -12,6 +12,14 @@ import { applyPullRequestWebhook, syncClaimPullRequests } from "../server/claim-
 import { pullRequestOutcomeFromWebhook } from "../server/claim-coordination.mjs";
 // SEC-2: claim reads carry content-trust markers; compare the claim itself.
 const stripTrust = value => JSON.parse(JSON.stringify(value, (key, entry) => (key === "untrusted" || key === "contentTrust" ? undefined : entry)));
+// F3 (wave500 W4): stored rows carry boardSeq (the board-page cursor) while
+// write responses keep their shape, so stored-vs-response comparisons strip
+// the cursor from the stored side.
+const stripBoardSeq = item => {
+  if (!item || !Object.hasOwn(item, "boardSeq")) return item;
+  const { boardSeq: _dropped, ...rest } = item;
+  return rest;
+};
 
 const URL_A = "https://github.com/Uuriko/project-room/pull/7";
 
@@ -82,7 +90,7 @@ test("linking a draft after claiming preserves the lease and reconciles exact du
   const repeated = (await call("update", "later-pr", { ...body, expectedHistoryLength: linked.history.length })).value;
   assert.deepEqual(repeated, linked);
   assert.equal(claimEvents(store).length, beforeEvents + 1);
-  assert.deepEqual(store.workClaims.get("commons", "later-pr"), linked);
+  assert.deepEqual(stripBoardSeq(store.workClaims.get("commons", "later-pr")), linked);
 });
 
 test("a webhook close and a polled pull reduce to the same outcomes", () => {
@@ -333,7 +341,7 @@ test("concurrent PR attachments serialize and invalid update alternatives cannot
   for (const extra of [{ state: "done" }, { note: "do more" }, { pullRequests: [] }, { ci: { state: "success" } }, { leaseHours: 12 }]) {
     await assert.rejects(call("update", "concurrent", { ...basis, expectedHistoryLength: current.history.length, appendPullRequest: URL_A, ...extra }), error => error.status === 422 && error.code === "invalid_claim_input");
   }
-  assert.deepEqual(store.workClaims.get("commons", "concurrent"), current);
+  assert.deepEqual(stripBoardSeq(store.workClaims.get("commons", "concurrent")), current);
   assert.deepEqual(claimEvents(store), eventsBefore);
 });
 
