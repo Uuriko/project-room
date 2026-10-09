@@ -1,0 +1,21 @@
+{"event":"room.cold_start","durationMs":1630,"integrity":"eager","phases":{"schema":{"ms":386,"rowsRead":0},"plugin":{"ms":625,"rowsRead":0},"fence":{"ms":252,"rowsRead":0},"verifies":{"ms":122,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":171,"heapBytes":37504424,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1174,"integrity":"eager","phases":{"schema":{"ms":402,"rowsRead":0},"plugin":{"ms":290,"rowsRead":0},"fence":{"ms":239,"rowsRead":0},"verifies":{"ms":21,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":154,"heapBytes":33318344,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1284,"integrity":"eager","phases":{"schema":{"ms":214,"rowsRead":0},"plugin":{"ms":687,"rowsRead":0},"fence":{"ms":136,"rowsRead":0},"verifies":{"ms":7,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":147,"heapBytes":39090376,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1323,"integrity":"eager","phases":{"schema":{"ms":179,"rowsRead":0},"plugin":{"ms":37,"rowsRead":0},"fence":{"ms":767,"rowsRead":0},"verifies":{"ms":180,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":127,"heapBytes":31538440,"rooms":1,"sequences":10,"projectionBytes":2920,"events":10}
+{"event":"room.cold_start","durationMs":3141,"integrity":"eager","phases":{"schema":{"ms":879,"rowsRead":0},"plugin":{"ms":1134,"rowsRead":0},"fence":{"ms":36,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":153,"heapBytes":35517992,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2242,"integrity":"eager","phases":{"schema":{"ms":715,"rowsRead":0},"plugin":{"ms":869,"rowsRead":0},"fence":{"ms":434,"rowsRead":0},"verifies":{"ms":39,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":155,"heapBytes":41196120,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1484,"integrity":"eager","phases":{"schema":{"ms":401,"rowsRead":0},"plugin":{"ms":827,"rowsRead":0},"fence":{"ms":86,"rowsRead":0},"verifies":{"ms":11,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":143,"heapBytes":47574640,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ enqueue validates exactly, coalesces per queue key and retries idempotently (3354.900787ms)
+✔ leased wakes retry with bounded backoff and dead-letter when exhausted (3200.689271ms)
+✔ done-when: a restart preserves intent without duplicate action (4143.427605ms)
+✔ wake queue is draft-class and enqueueing appends no room events (4771.24309ms)
+✔ receipt capacity bounds requeue as well as enqueue (4407.124145ms)
+✔ guest-agent members cannot enqueue or requeue wakes, and can pause their own (3042.576942ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 28839.211711

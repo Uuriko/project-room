@@ -1,0 +1,32 @@
+{"event":"room.cold_start","durationMs":1731,"integrity":"eager","phases":{"schema":{"ms":441,"rowsRead":0},"plugin":{"ms":495,"rowsRead":0},"fence":{"ms":411,"rowsRead":0},"verifies":{"ms":125,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":179,"heapBytes":37392824,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":604,"integrity":"eager","phases":{"schema":{"ms":178,"rowsRead":0},"plugin":{"ms":66,"rowsRead":0},"fence":{"ms":173,"rowsRead":0},"verifies":{"ms":41,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":97,"heapBytes":34478248,"rooms":1,"sequences":10,"projectionBytes":2920,"events":10}
+✖ recover dead-letters an expired lease with exhausted attempts (M-18) (4432.708871ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 11805.626157
+
+✖ failing tests:
+
+test at findings/guild-12/regress/recover-exhausted-dead.test.js:30:1
+✖ recover dead-letters an expired lease with exhausted attempts (M-18) (4432.708871ms)
+  AssertionError [ERR_ASSERTION]: exhausted lease goes to dead on crash recovery, not pending
+  
+  'leased' !== 'dead'
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-12/findings/guild-12/regress/recover-exhausted-dead.test.js:51:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.start (node:internal/test_runner/test:1257:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'leased',
+    expected: 'dead',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

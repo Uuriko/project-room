@@ -1,0 +1,13 @@
+{"event":"room.cold_start","durationMs":2003,"integrity":"eager","phases":{"schema":{"ms":155,"rowsRead":0},"plugin":{"ms":1125,"rowsRead":0},"fence":{"ms":430,"rowsRead":0},"verifies":{"ms":54,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":185,"heapBytes":37782304,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ every command type and every out-of-band surface carries exactly one class (40.484054ms)
+✔ message posts and session launches are act-class; reminder scheduling is draft-class (0.470877ms)
+✔ the reminder module never imports a send, post, session or spend capability (18.700534ms)
+✔ done-when: enabling a reminder posts no message and launches no session or paid work (3232.015824ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 9037.314567

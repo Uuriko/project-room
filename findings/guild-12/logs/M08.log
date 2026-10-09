@@ -1,0 +1,131 @@
+{"event":"room.cold_start","durationMs":2757,"integrity":"eager","phases":{"schema":{"ms":871,"rowsRead":0},"plugin":{"ms":944,"rowsRead":0},"fence":{"ms":488,"rowsRead":0},"verifies":{"ms":174,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":216,"heapBytes":37307152,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2922,"integrity":"eager","phases":{"schema":{"ms":524,"rowsRead":0},"plugin":{"ms":1148,"rowsRead":0},"fence":{"ms":687,"rowsRead":0},"verifies":{"ms":118,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":195,"heapBytes":32888552,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1881,"integrity":"eager","phases":{"schema":{"ms":324,"rowsRead":0},"plugin":{"ms":805,"rowsRead":0},"fence":{"ms":472,"rowsRead":0},"verifies":{"ms":6,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":164,"heapBytes":38556472,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1568,"integrity":"eager","phases":{"schema":{"ms":279,"rowsRead":0},"plugin":{"ms":963,"rowsRead":0},"fence":{"ms":149,"rowsRead":0},"verifies":{"ms":12,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":159,"heapBytes":44002232,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":3016,"integrity":"eager","phases":{"schema":{"ms":388,"rowsRead":0},"plugin":{"ms":1168,"rowsRead":0},"fence":{"ms":589,"rowsRead":0},"verifies":{"ms":69,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":176,"heapBytes":32466856,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1237,"integrity":"eager","phases":{"schema":{"ms":191,"rowsRead":0},"plugin":{"ms":702,"rowsRead":0},"fence":{"ms":58,"rowsRead":0},"verifies":{"ms":28,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":146,"heapBytes":38202336,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✖ enqueue validates exactly, coalesces per queue key and retries idempotently (4924.581636ms)
+✖ leased wakes retry with bounded backoff and dead-letter when exhausted (4671.12353ms)
+✖ done-when: a restart preserves intent without duplicate action (5285.178376ms)
+✖ wake queue is draft-class and enqueueing appends no room events (3296.559876ms)
+✖ receipt capacity bounds requeue as well as enqueue (6325.958631ms)
+✖ guest-agent members cannot enqueue or requeue wakes, and can pause their own (2981.940184ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 0
+ℹ fail 6
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 36340.490802
+
+✖ failing tests:
+
+test at tests/wake-queue.test.js:23:1
+✖ enqueue validates exactly, coalesces per queue key and retries idempotently (4924.581636ms)
+  Error: Guest members cannot queue wake intents
+      at fail (file:///home/hatch/workspace/pr-wave1000-guild-12/server/wake-queue.mjs:21:49)
+      at file:///home/hatch/workspace/pr-wave1000-guild-12/server/wake-queue.mjs:174:9
+      at run (file:///home/hatch/workspace/pr-wave1000-guild-12/server/store.mjs:647:22)
+      at Object.transaction (file:///home/hatch/workspace/pr-wave1000-guild-12/server/store.mjs:674:22)
+      at RoomStore.transaction (file:///home/hatch/workspace/pr-wave1000-guild-12/server/store.mjs:2621:41)
+      at WakeQueue.enqueue (file:///home/hatch/workspace/pr-wave1000-guild-12/server/wake-queue.mjs:167:23)
+      at f.enqueue (file:///home/hatch/workspace/pr-wave1000-guild-12/tests/wake-queue.test.js:17:66)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-12/tests/wake-queue.test.js:29:19)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25) {
+    status: 403,
+    code: 'guest_scope_denied',
+    headers: null
+  }
+
+test at tests/wake-queue.test.js:43:1
+✖ leased wakes retry with bounded backoff and dead-letter when exhausted (4671.12353ms)
+  Error: Guest members cannot queue wake intents
+      at fail (file:///home/hatch/workspace/pr-wave1000-guild-12/server/wake-queue.mjs:21:49)
+      at file:///home/hatch/workspace/pr-wave1000-guild-12/server/wake-queue.mjs:174:9
+      at run (file:///home/hatch/workspace/pr-wave1000-guild-12/server/store.mjs:647:22)
+      at Object.transaction (file:///home/hatch/workspace/pr-wave1000-guild-12/server/store.mjs:674:22)
+      at RoomStore.transaction (file:///home/hatch/workspace/pr-wave1000-guild-12/server/store.mjs:2621:41)
+      at WakeQueue.enqueue (file:///home/hatch/workspace/pr-wave1000-guild-12/server/wake-queue.mjs:167:23)
+      at f.enqueue (file:///home/hatch/workspace/pr-wave1000-guild-12/tests/wake-queue.test.js:17:66)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-12/tests/wake-queue.test.js:45:5)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25) {
+    status: 403,
+    code: 'guest_scope_denied',
+    headers: null
+  }
+
+test at tests/wake-queue.test.js:66:1
+✖ done-when: a restart preserves intent without duplicate action (5285.178376ms)
+  Error: Guest members cannot queue wake intents
+      at fail (file:///home/hatch/workspace/pr-wave1000-guild-12/server/wake-queue.mjs:21:49)
+      at file:///home/hatch/workspace/pr-wave1000-guild-12/server/wake-queue.mjs:174:9
+      at run (file:///home/hatch/workspace/pr-wave1000-guild-12/server/store.mjs:647:22)
+      at Object.transaction (file:///home/hatch/workspace/pr-wave1000-guild-12/server/store.mjs:674:22)
+      at RoomStore.transaction (file:///home/hatch/workspace/pr-wave1000-guild-12/server/store.mjs:2621:41)
+      at WakeQueue.enqueue (file:///home/hatch/workspace/pr-wave1000-guild-12/server/wake-queue.mjs:167:23)
+      at f.enqueue (file:///home/hatch/workspace/pr-wave1000-guild-12/tests/wake-queue.test.js:17:66)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-12/tests/wake-queue.test.js:68:5)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25) {
+    status: 403,
+    code: 'guest_scope_denied',
+    headers: null
+  }
+
+test at tests/wake-queue.test.js:95:1
+✖ wake queue is draft-class and enqueueing appends no room events (3296.559876ms)
+  Error: Guest members cannot queue wake intents
+      at fail (file:///home/hatch/workspace/pr-wave1000-guild-12/server/wake-queue.mjs:21:49)
+      at file:///home/hatch/workspace/pr-wave1000-guild-12/server/wake-queue.mjs:174:9
+      at run (file:///home/hatch/workspace/pr-wave1000-guild-12/server/store.mjs:647:22)
+      at Object.transaction (file:///home/hatch/workspace/pr-wave1000-guild-12/server/store.mjs:674:22)
+      at RoomStore.transaction (file:///home/hatch/workspace/pr-wave1000-guild-12/server/store.mjs:2621:41)
+      at WakeQueue.enqueue (file:///home/hatch/workspace/pr-wave1000-guild-12/server/wake-queue.mjs:167:23)
+      at f.enqueue (file:///home/hatch/workspace/pr-wave1000-guild-12/tests/wake-queue.test.js:17:66)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-12/tests/wake-queue.test.js:99:5)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25) {
+    status: 403,
+    code: 'guest_scope_denied',
+    headers: null
+  }
+
+test at tests/wake-queue.test.js:108:1
+✖ receipt capacity bounds requeue as well as enqueue (6325.958631ms)
+  Error: Guest members cannot queue wake intents
+      at fail (file:///home/hatch/workspace/pr-wave1000-guild-12/server/wake-queue.mjs:21:49)
+      at file:///home/hatch/workspace/pr-wave1000-guild-12/server/wake-queue.mjs:174:9
+      at run (file:///home/hatch/workspace/pr-wave1000-guild-12/server/store.mjs:647:22)
+      at Object.transaction (file:///home/hatch/workspace/pr-wave1000-guild-12/server/store.mjs:674:22)
+      at RoomStore.transaction (file:///home/hatch/workspace/pr-wave1000-guild-12/server/store.mjs:2621:41)
+      at WakeQueue.enqueue (file:///home/hatch/workspace/pr-wave1000-guild-12/server/wake-queue.mjs:167:23)
+      at f.enqueue (file:///home/hatch/workspace/pr-wave1000-guild-12/tests/wake-queue.test.js:17:66)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-12/tests/wake-queue.test.js:110:19)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25) {
+    status: 403,
+    code: 'guest_scope_denied',
+    headers: null
+  }
+
+test at tests/wake-queue.test.js:128:1
+✖ guest-agent members cannot enqueue or requeue wakes, and can pause their own (2981.940184ms)
+  AssertionError [ERR_ASSERTION]: expected a guest_scope_denied rejection
+      at denied (file:///home/hatch/workspace/pr-wave1000-guild-12/tests/wake-queue.test.js:139:12)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-12/tests/wake-queue.test.js:141:3)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: undefined,
+    operator: 'fail',
+    diff: 'simple'
+  }

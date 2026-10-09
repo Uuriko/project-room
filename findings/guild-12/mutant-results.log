@@ -1,0 +1,17 @@
+M01 KILLED file=server/wake-queue.mjs test=tests/wake-queue.test.js dur=33s
+M09 SURVIVED file=server/work-wakes.mjs test=tests/agent-wake.test.js dur=63s
+M02 KILLED file=server/wake-queue.mjs test=tests/wake-queue.test.js dur=37s
+M04 SURVIVED file=server/wake-queue.mjs test=tests/wake-queue.test.js dur=39s
+M15 KILLED file=server/action-classes.mjs test=tests/action-classes.test.js dur=13s
+M10 SURVIVED file=server/work-wakes.mjs test=tests/agent-wake.test.js dur=51s
+M15 KILLED file=server/action-classes.mjs test=tests/action-classes.test.js dur=16s
+M06 SURVIVED file=server/wake-queue.mjs test=tests/wake-queue.test.js dur=29s
+M03 KILLED file=server/wake-queue.mjs test=tests/wake-queue.test.js dur=32s
+M05 KILLED file=server/wake-queue.mjs test=tests/wake-queue.test.js dur=48s
+M09 KILLED file=server/work-wakes.mjs test=tests/agent-wake.test.js tests/agent-wake-poll.test.js tests/board-wake.test.js tests/board-wake-ready-work.test.js tests/room-mcp-wake.test.js tests/pull-only-heartbeat-wakes.test.js tests/agent-heartbeats.test.js dur=225s
+M07 KILLED file=server/wake-queue.mjs test=tests/wake-queue.test.js dur=38s
+M11 KILLED file=server/work-wakes.mjs test=tests/agent-wake.test.js tests/agent-wake-poll.test.js tests/board-wake.test.js tests/board-wake-ready-work.test.js tests/room-mcp-wake.test.js tests/pull-only-heartbeat-wakes.test.js tests/agent-heartbeats.test.js dur=294s
+M08 KILLED file=server/wake-queue.mjs test=tests/wake-queue.test.js dur=37s
+M12 KILLED file=server/work-wakes.mjs test=tests/agent-wake.test.js tests/agent-wake-poll.test.js tests/board-wake.test.js tests/board-wake-ready-work.test.js tests/room-mcp-wake.test.js tests/pull-only-heartbeat-wakes.test.js tests/agent-heartbeats.test.js dur=269s
+M13 SURVIVED file=server/wake-queue-limits.mjs test=tests/wake-queue.test.js dur=29s
+M10 KILLED file=server/work-wakes.mjs test=tests/agent-wake.test.js tests/agent-wake-poll.test.js tests/board-wake.test.js tests/board-wake-ready-work.test.js tests/room-mcp-wake.test.js tests/pull-only-heartbeat-wakes.test.js tests/agent-heartbeats.test.js dur=259s

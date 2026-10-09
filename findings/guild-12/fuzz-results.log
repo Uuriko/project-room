@@ -1,0 +1,5 @@
+F3 exit=1 :: 
+F3 exit=0 :: PASS F3 resumed from 5, got 2 newer events; tip resume clean
+F4 exit=0 :: PASS F4 future cursor -> 409, server healthy
+F7 exit=1 :: FAIL F7 negative dueAt: did not throw
+F5 exit=1 :: FAIL F5 garbage cursor "11111111111111111111" -> unexpected 431

@@ -1,0 +1,44 @@
+{"event":"room.cold_start","durationMs":2470,"integrity":"eager","phases":{"schema":{"ms":221,"rowsRead":0},"plugin":{"ms":723,"rowsRead":0},"fence":{"ms":596,"rowsRead":0},"verifies":{"ms":253,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":188,"heapBytes":37225200,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2524,"integrity":"eager","phases":{"schema":{"ms":211,"rowsRead":0},"plugin":{"ms":1432,"rowsRead":0},"fence":{"ms":495,"rowsRead":0},"verifies":{"ms":11,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":187,"heapBytes":32921600,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2699,"integrity":"eager","phases":{"schema":{"ms":76,"rowsRead":0},"plugin":{"ms":1087,"rowsRead":0},"fence":{"ms":1344,"rowsRead":0},"verifies":{"ms":24,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":174,"heapBytes":38598096,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1273,"integrity":"eager","phases":{"schema":{"ms":252,"rowsRead":0},"plugin":{"ms":145,"rowsRead":0},"fence":{"ms":443,"rowsRead":0},"verifies":{"ms":36,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":122,"heapBytes":32238624,"rooms":1,"sequences":10,"projectionBytes":2920,"events":10}
+{"event":"room.cold_start","durationMs":3196,"integrity":"eager","phases":{"schema":{"ms":465,"rowsRead":0},"plugin":{"ms":1783,"rowsRead":0},"fence":{"ms":358,"rowsRead":0},"verifies":{"ms":51,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":177,"heapBytes":36180952,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":3021,"integrity":"eager","phases":{"schema":{"ms":542,"rowsRead":0},"plugin":{"ms":1176,"rowsRead":0},"fence":{"ms":750,"rowsRead":0},"verifies":{"ms":155,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":179,"heapBytes":41802200,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1890,"integrity":"eager","phases":{"schema":{"ms":285,"rowsRead":0},"plugin":{"ms":832,"rowsRead":0},"fence":{"ms":480,"rowsRead":0},"verifies":{"ms":32,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":180,"heapBytes":33949168,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ enqueue validates exactly, coalesces per queue key and retries idempotently (4913.726957ms)
+✖ leased wakes retry with bounded backoff and dead-letter when exhausted (4751.207413ms)
+✔ done-when: a restart preserves intent without duplicate action (6562.801191ms)
+✔ wake queue is draft-class and enqueueing appends no room events (6014.012982ms)
+✔ receipt capacity bounds requeue as well as enqueue (6522.553321ms)
+✔ guest-agent members cannot enqueue or requeue wakes, and can pause their own (3966.529002ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 5
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 45788.607041
+
+✖ failing tests:
+
+test at tests/wake-queue.test.js:43:1
+✖ leased wakes retry with bounded backoff and dead-letter when exhausted (4751.207413ms)
+  AssertionError [ERR_ASSERTION]: wake is due again after backoff
+  
+  0 !== 1
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-12/tests/wake-queue.test.js:55:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

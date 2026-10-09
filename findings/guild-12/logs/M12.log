@@ -1,0 +1,321 @@
+{"event":"room.cold_start","durationMs":2774,"integrity":"eager","phases":{"schema":{"ms":706,"rowsRead":0},"plugin":{"ms":819,"rowsRead":0},"fence":{"ms":553,"rowsRead":0},"verifies":{"ms":142,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":203,"heapBytes":38652136,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ heartbeat validates mode, host id, and the wakeable wake-URL contract (124.850704ms)
+✔ heartbeat upserts hosts and derives online/offline/unregistered status (39.564264ms)
+✔ wake signals coalesce per message and deliver through pending/ack (167.779939ms)
+✔ a registered host queues one wake per message regardless of mode or presence (152.166997ms)
+✔ hosts and signals survive a restart (new instance on the same database) (104.941647ms)
+✔ buildWakePing carries the canonical agent.wake payload (16.440031ms)
+service diagnostic op_Mzu1Gnf5 500 internal_error internal /api/agent-heartbeats/ack
+error-trace eid_Ij91cZjLjoIr fp=276f4cc76897b188 status=500 code=internal_error
+{"event":"room.cold_start","durationMs":1521,"integrity":"eager","phases":{"schema":{"ms":94,"rowsRead":0},"plugin":{"ms":807,"rowsRead":0},"fence":{"ms":148,"rowsRead":0},"verifies":{"ms":68,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":162,"heapBytes":37897424,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✖ heartbeat endpoints: auth, scopes, validation, and the ack roundtrip (7635.946957ms)
+{"event":"room.cold_start","durationMs":2921,"integrity":"eager","phases":{"schema":{"ms":427,"rowsRead":0},"plugin":{"ms":1718,"rowsRead":0},"fence":{"ms":461,"rowsRead":0},"verifies":{"ms":60,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":184,"heapBytes":45778712,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ mention of an offline agent enqueues a wake and journals the webhook ping (6091.405696ms)
+{"event":"room.cold_start","durationMs":3513,"integrity":"eager","phases":{"schema":{"ms":228,"rowsRead":0},"plugin":{"ms":1892,"rowsRead":0},"fence":{"ms":782,"rowsRead":0},"verifies":{"ms":114,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":180,"heapBytes":38530232,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ fresh wakeable agents retain mentions while non-agent mentions queue nothing (5511.149643ms)
+{"event":"room.cold_start","durationMs":2904,"integrity":"eager","phases":{"schema":{"ms":442,"rowsRead":0},"plugin":{"ms":1359,"rowsRead":0},"fence":{"ms":743,"rowsRead":0},"verifies":{"ms":44,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":179,"heapBytes":45834384,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ room presence lists agent members with additive host presence (7320.59058ms)
+{"event":"room.cold_start","durationMs":866,"integrity":"eager","phases":{"schema":{"ms":137,"rowsRead":0},"plugin":{"ms":472,"rowsRead":0},"fence":{"ms":98,"rowsRead":0},"verifies":{"ms":8,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":141,"heapBytes":40072320,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ directory cards carry host-reported presence (additive field) (4853.074686ms)
+{"event":"room.cold_start","durationMs":385,"cpuMs":32,"heapBytes":46845376,"rooms":1,"sequences":13,"projectionBytes":4452,"events":13}
+service diagnostic op_p2vrgkkP 500 internal_error internal /api/agent-heartbeats/ack
+error-trace eid_B_IzZJMdBWMh fp=276f4cc76897b188 status=500 code=internal_error
+{"event":"room.cold_start","durationMs":2147,"integrity":"eager","phases":{"schema":{"ms":523,"rowsRead":0},"plugin":{"ms":823,"rowsRead":0},"fence":{"ms":528,"rowsRead":0},"verifies":{"ms":12,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":167,"heapBytes":52692928,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":312,"cpuMs":30,"heapBytes":42269616,"rooms":1,"sequences":10,"projectionBytes":2920,"events":10}
+{"event":"room.cold_start","durationMs":392,"integrity":"eager","phases":{"schema":{"ms":30,"rowsRead":0},"plugin":{"ms":6,"rowsRead":0},"fence":{"ms":184,"rowsRead":0},"verifies":{"ms":60,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":49,"heapBytes":49243024,"rooms":1,"sequences":10,"projectionBytes":2920,"events":10}
+✖ opted-in work wakes survive retries and obey current pause, preferences, revision and membership (5479.073505ms)
+✔ pre-work-delivery stores open read-only without migration and upgrade without enabling hosts (5259.656485ms)
+✔ fresh wakeable hosts queue durable wakes without activating offline-only push targets (101.806933ms)
+✔ cadenceSeconds is bounded so one heartbeat cannot stay online indefinitely (32.395286ms)
+{"event":"room.cold_start","durationMs":2421,"integrity":"eager","phases":{"schema":{"ms":352,"rowsRead":0},"plugin":{"ms":651,"rowsRead":0},"fence":{"ms":689,"rowsRead":0},"verifies":{"ms":221,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":191,"heapBytes":38897272,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ notePoll refuses unregistered agents with the registered:false shape (25.075582ms)
+✔ notePoll returns pending signals immediately and never consumes them (20.734537ms)
+✔ enqueueWake releases the waiter only for genuinely new signals (17.501695ms)
+✔ waiter replacement is per host: same hostId replaces, other hosts coexist (9.40199ms)
+✔ two hosts wait side by side; one signal releases both (9.512406ms)
+✔ heartbeat defaults: omitted mode is wakeable, omitted wakeUrl is null (28.477416ms)
+{"event":"room.cold_start","durationMs":3704,"integrity":"eager","phases":{"schema":{"ms":669,"rowsRead":0},"plugin":{"ms":1767,"rowsRead":0},"fence":{"ms":659,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":164,"heapBytes":37342912,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ poll route: auth, scope, registration, and waitMs validation (8533.600951ms)
+{"event":"room.cold_start","durationMs":3395,"integrity":"eager","phases":{"schema":{"ms":463,"rowsRead":0},"plugin":{"ms":1177,"rowsRead":0},"fence":{"ms":1149,"rowsRead":0},"verifies":{"ms":249,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":174,"heapBytes":44373624,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ poll times out cleanly when nothing arrives (6498.028256ms)
+service diagnostic op_ciRqgPoT 500 internal_error internal /api/agent-heartbeats/ack
+error-trace eid_imwxa_jLtWOf fp=49f8991ac7236fdc status=500 code=internal_error
+{"event":"room.cold_start","durationMs":2891,"integrity":"eager","phases":{"schema":{"ms":342,"rowsRead":0},"plugin":{"ms":1284,"rowsRead":0},"fence":{"ms":991,"rowsRead":0},"verifies":{"ms":10,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":175,"heapBytes":34438960,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✖ a real mention releases a waiting poll: the wakeable-by-default loop (11110.11461ms)
+{"event":"room.cold_start","durationMs":1254,"integrity":"eager","phases":{"schema":{"ms":310,"rowsRead":0},"plugin":{"ms":245,"rowsRead":0},"fence":{"ms":452,"rowsRead":0},"verifies":{"ms":44,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":148,"heapBytes":37519048,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a reconnect with the same hostId releases the first poll (5265.64392ms)
+{"event":"room.cold_start","durationMs":2090,"integrity":"eager","phases":{"schema":{"ms":346,"rowsRead":0},"plugin":{"ms":1481,"rowsRead":0},"fence":{"ms":114,"rowsRead":0},"verifies":{"ms":6,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":163,"heapBytes":39467664,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ an aborted poll releases the host slot instead of wedging it (4684.563109ms)
+{"event":"room.cold_start","durationMs":2302,"integrity":"eager","phases":{"schema":{"ms":312,"rowsRead":0},"plugin":{"ms":1368,"rowsRead":0},"fence":{"ms":406,"rowsRead":0},"verifies":{"ms":46,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":162,"heapBytes":35948360,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a different host's poll leaves the first host's wait alone (6555.877781ms)
+{"event":"room.cold_start","durationMs":2838,"integrity":"eager","phases":{"schema":{"ms":59,"rowsRead":0},"plugin":{"ms":1099,"rowsRead":0},"fence":{"ms":241,"rowsRead":0},"verifies":{"ms":27,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":239,"heapBytes":38989464,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ held wake poll rejects a key revoked before a new signal (4868.19033ms)
+{"event":"room.cold_start","durationMs":1516,"integrity":"eager","phases":{"schema":{"ms":94,"rowsRead":0},"plugin":{"ms":690,"rowsRead":0},"fence":{"ms":517,"rowsRead":0},"verifies":{"ms":23,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":151,"heapBytes":41144456,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ room-key poll cannot replace an identity-owned host wait (5874.330369ms)
+{"event":"room.cold_start","durationMs":2867,"integrity":"eager","phases":{"schema":{"ms":168,"rowsRead":0},"plugin":{"ms":1667,"rowsRead":0},"fence":{"ms":651,"rowsRead":0},"verifies":{"ms":98,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":169,"heapBytes":37704728,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ fresh heartbeating host receives a mention through its active poll (3907.150953ms)
+{"event":"room.cold_start","durationMs":272,"integrity":"eager","phases":{"schema":{"ms":27,"rowsRead":0},"plugin":{"ms":17,"rowsRead":0},"fence":{"ms":89,"rowsRead":0},"verifies":{"ms":11,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":57,"heapBytes":41818120,"rooms":1,"sequences":6,"projectionBytes":1230,"events":6}
+service diagnostic op_m8tssMVH 500 internal_error internal /api/agent-heartbeats/ack
+error-trace eid_GLaS8NPkimPL fp=49f8991ac7236fdc status=500 code=internal_error
+✖ fresh wakeable host retains between-poll mention across database restart until explicit ack (5373.301343ms)
+{"event":"room.cold_start","durationMs":2088,"integrity":"eager","phases":{"schema":{"ms":434,"rowsRead":0},"plugin":{"ms":1092,"rowsRead":0},"fence":{"ms":404,"rowsRead":0},"verifies":{"ms":72,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":178,"heapBytes":37224696,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":526,"integrity":"eager","phases":{"schema":{"ms":115,"rowsRead":0},"plugin":{"ms":293,"rowsRead":0},"fence":{"ms":105,"rowsRead":0},"verifies":{"ms":9,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":157,"heapBytes":35341848,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ doctor is read-only and setup without URL registers a custom-linked identity without claiming a listener (2904.213458ms)
+{"event":"room.cold_start","durationMs":360,"integrity":"eager","phases":{"schema":{"ms":112,"rowsRead":0},"plugin":{"ms":157,"rowsRead":0},"fence":{"ms":77,"rowsRead":0},"verifies":{"ms":13,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":123,"heapBytes":41248576,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✖ wait returns current read observations even with empty hints and never acknowledges queued hints (1223.412451ms)
+service diagnostic op_8jD2N2wU 500 internal_error internal /api/agent-heartbeats/ack
+error-trace eid_VcpX0aQyDE8t fp=faf93ede0c275792 status=500 code=internal_error
+service diagnostic op_tYL-nsAF 500 internal_error internal /api/agent-heartbeats/ack
+error-trace eid_vt0ysAMwzb4c fp=faf93ede0c275792 status=500 code=internal_error
+{"event":"room.cold_start","durationMs":784,"integrity":"eager","phases":{"schema":{"ms":23,"rowsRead":0},"plugin":{"ms":236,"rowsRead":0},"fence":{"ms":511,"rowsRead":0},"verifies":{"ms":12,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":130,"heapBytes":34668808,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✖ lost wait output leaves signals queued; ambiguous ack is unconfirmed and explicit retry reports authoritative state (2707.489575ms)
+room diagnostic op_ubzEfxav 401 unauthenticated access /api/rooms/:roomId
+{"event":"room.cold_start","durationMs":1875,"integrity":"eager","phases":{"schema":{"ms":124,"rowsRead":0},"plugin":{"ms":1056,"rowsRead":0},"fence":{"ms":654,"rowsRead":0},"verifies":{"ms":33,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":149,"heapBytes":39763752,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ adapter refuses Room keys, mismatched configured members and invalid commands without leaking credentials (1319.130837ms)
+room diagnostic op_KJMG98YY 401 unauthenticated access /api/rooms/:roomId/context
+{"event":"room.cold_start","durationMs":418,"integrity":"eager","phases":{"schema":{"ms":161,"rowsRead":0},"plugin":{"ms":176,"rowsRead":0},"fence":{"ms":56,"rowsRead":0},"verifies":{"ms":19,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":135,"heapBytes":46282752,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ revocation between poll and final fresh check discards signals and leaves them unacknowledged (2653.81196ms)
+{"event":"room.cold_start","durationMs":1638,"integrity":"eager","phases":{"schema":{"ms":474,"rowsRead":0},"plugin":{"ms":820,"rowsRead":0},"fence":{"ms":116,"rowsRead":0},"verifies":{"ms":11,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":233,"heapBytes":50746840,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ invalid observation cursors refuse before any network and transport response secrets are never output (757.548758ms)
+{"event":"room.cold_start","durationMs":295,"integrity":"eager","phases":{"schema":{"ms":81,"rowsRead":0},"plugin":{"ms":14,"rowsRead":0},"fence":{"ms":59,"rowsRead":0},"verifies":{"ms":5,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":60,"heapBytes":38295384,"rooms":1,"sequences":4,"projectionBytes":819,"events":4}
+service diagnostic op_Q5BveE8Q 500 internal_error internal /api/agent-heartbeats/ack
+error-trace eid_vXhzG0ji4j_w fp=faf93ede0c275792 status=500 code=internal_error
+✖ actual CLI saved connection survives server restart; unknown ACK and lost committed ACK remain truthful and private (20804.455319ms)
+{"event":"room.cold_start","durationMs":870,"integrity":"eager","phases":{"schema":{"ms":82,"rowsRead":0},"plugin":{"ms":240,"rowsRead":0},"fence":{"ms":362,"rowsRead":0},"verifies":{"ms":170,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":173,"heapBytes":35776256,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":2005,"integrity":"eager","phases":{"schema":{"ms":25,"rowsRead":0},"plugin":{"ms":103,"rowsRead":0},"fence":{"ms":1837,"rowsRead":0},"verifies":{"ms":35,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":138,"heapBytes":37406712,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ five matching creates inside ten minutes are one ready_work wake; the next window wakes again (3323.913975ms)
+{"event":"room.cold_start","durationMs":1946,"integrity":"eager","phases":{"schema":{"ms":287,"rowsRead":0},"plugin":{"ms":965,"rowsRead":0},"fence":{"ms":557,"rowsRead":0},"verifies":{"ms":130,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":157,"heapBytes":45167512,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ default off, a filter that does not match, and an assigned create send no ready_work wake (3720.641347ms)
+{"event":"room.cold_start","durationMs":850,"integrity":"eager","phases":{"schema":{"ms":97,"rowsRead":0},"plugin":{"ms":275,"rowsRead":0},"fence":{"ms":456,"rowsRead":0},"verifies":{"ms":13,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":139,"heapBytes":38716288,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a release wakes other opted-in agents, not the agent that released it (2704.895321ms)
+{"event":"room.cold_start","durationMs":1739,"integrity":"eager","phases":{"schema":{"ms":168,"rowsRead":0},"plugin":{"ms":964,"rowsRead":0},"fence":{"ms":548,"rowsRead":0},"verifies":{"ms":58,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":149,"heapBytes":43950472,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a paused agent gets no ready_work wake and its window does not start (1277.118108ms)
+room diagnostic op_bOsK4f9U 403 agent_only access /api/rooms/:roomId/members/me/wants-work
+room diagnostic op_MrdcYCiS 422 invalid_request input /api/rooms/:roomId/members/me/wants-work
+room diagnostic op_RsKwl6FX 422 invalid_request input /api/rooms/:roomId/members/me/wants-work
+room diagnostic op_pKsv-_Qu 422 invalid_request input /api/rooms/:roomId/members/me/wants-work
+room diagnostic op_UKtgMVYa 422 invalid_request input /api/rooms/:roomId/members/me/wants-work
+room diagnostic op_kuXrG3-l 422 invalid_request input /api/rooms/:roomId/members/me/wants-work
+✔ only agents opt in, input is validated, and DELETE turns it off (2474.087616ms)
+✔ matching rules: any tag overlap, kind in capabilities, empty lists match all (7.014447ms)
+✔ the wants-work rows are in the route table: GET, PUT and DELETE on the caller's own membership (24.695421ms)
+{"event":"room.cold_start","durationMs":2022,"integrity":"eager","phases":{"schema":{"ms":150,"rowsRead":0},"plugin":{"ms":1424,"rowsRead":0},"fence":{"ms":372,"rowsRead":0},"verifies":{"ms":27,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":174,"heapBytes":35899064,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":827,"integrity":"eager","phases":{"schema":{"ms":48,"rowsRead":0},"plugin":{"ms":219,"rowsRead":0},"fence":{"ms":485,"rowsRead":0},"verifies":{"ms":73,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":129,"heapBytes":35492536,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ reassign to a pull-mode agent is the next wake, with reason assigned (3763.64979ms)
+{"event":"room.cold_start","durationMs":412,"integrity":"eager","phases":{"schema":{"ms":139,"rowsRead":0},"plugin":{"ms":232,"rowsRead":0},"fence":{"ms":36,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":121,"heapBytes":41101376,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ creating a claim with an assignee wakes that pull-mode agent (1361.4534ms)
+{"event":"room.cold_start","durationMs":325,"integrity":"eager","phases":{"schema":{"ms":55,"rowsRead":0},"plugin":{"ms":187,"rowsRead":0},"fence":{"ms":75,"rowsRead":0},"verifies":{"ms":6,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":128,"heapBytes":46987176,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a webhook-mode agent gets one signed delivery for the assignment (520.212856ms)
+{"event":"room.cold_start","durationMs":387,"integrity":"eager","phases":{"schema":{"ms":78,"rowsRead":0},"plugin":{"ms":196,"rowsRead":0},"fence":{"ms":100,"rowsRead":0},"verifies":{"ms":9,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":123,"heapBytes":39013928,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ lease expiry under a fake clock wakes the former owner once (798.663358ms)
+{"event":"room.cold_start","durationMs":903,"integrity":"eager","phases":{"schema":{"ms":410,"rowsRead":0},"plugin":{"ms":302,"rowsRead":0},"fence":{"ms":105,"rowsRead":0},"verifies":{"ms":14,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":147,"heapBytes":44750408,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a paused agent gets no wake and still gets an Updates attention item (1112.350681ms)
+✔ a read-only agent gets no assignment wake and still gets the attention item (1638.679435ms)
+{"event":"room.cold_start","durationMs":3189,"integrity":"eager","phases":{"schema":{"ms":599,"rowsRead":0},"plugin":{"ms":1378,"rowsRead":0},"fence":{"ms":975,"rowsRead":0},"verifies":{"ms":37,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":221,"heapBytes":37796344,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+service diagnostic op_DiTv1gyQ 500 internal_error internal /api/agent-heartbeats/ack
+error-trace eid_d28G_fHupBog fp=eeebb6e2c449017c status=500 code=internal_error
+{"event":"room.cold_start","durationMs":1663,"integrity":"eager","phases":{"schema":{"ms":247,"rowsRead":0},"plugin":{"ms":948,"rowsRead":0},"fence":{"ms":253,"rowsRead":0},"verifies":{"ms":16,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":162,"heapBytes":35523096,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✖ an online pull-only host receives a mention on its next heartbeat and ack clears it (8980.581207ms)
+✔ 120 mentions return the 50 oldest heartbeat signals and more:true (19904.18625ms)
+{"event":"room.cold_start","durationMs":2253,"integrity":"eager","phases":{"schema":{"ms":536,"rowsRead":0},"plugin":{"ms":554,"rowsRead":0},"fence":{"ms":445,"rowsRead":0},"verifies":{"ms":221,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":178,"heapBytes":37047568,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":2329,"integrity":"eager","phases":{"schema":{"ms":327,"rowsRead":0},"plugin":{"ms":1175,"rowsRead":0},"fence":{"ms":667,"rowsRead":0},"verifies":{"ms":38,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":170,"heapBytes":35908032,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ wake tools stay behind a live identity secret (4968.009539ms)
+{"event":"room.cold_start","durationMs":991,"integrity":"eager","phases":{"schema":{"ms":195,"rowsRead":0},"plugin":{"ms":409,"rowsRead":0},"fence":{"ms":176,"rowsRead":0},"verifies":{"ms":16,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":142,"heapBytes":42988296,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✖ an enrolled identity registers, reads, and clears an HTTPS wakeUrl (4193.070494ms)
+{"event":"room.cold_start","durationMs":941,"integrity":"eager","phases":{"schema":{"ms":166,"rowsRead":0},"plugin":{"ms":525,"rowsRead":0},"fence":{"ms":105,"rowsRead":0},"verifies":{"ms":20,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":154,"heapBytes":47750656,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ push registration reuses the subscribe-time public DNS check and does not echo credentials (1780.782801ms)
+{"event":"room.cold_start","durationMs":2307,"integrity":"eager","phases":{"schema":{"ms":246,"rowsRead":0},"plugin":{"ms":1325,"rowsRead":0},"fence":{"ms":482,"rowsRead":0},"verifies":{"ms":69,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":172,"heapBytes":38229520,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ webhook subscribe list and unsubscribe stay on this identity (2709.461925ms)
+{"event":"room.cold_start","durationMs":3054,"integrity":"eager","phases":{"schema":{"ms":213,"rowsRead":0},"plugin":{"ms":1220,"rowsRead":0},"fence":{"ms":676,"rowsRead":0},"verifies":{"ms":72,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":165,"heapBytes":44361880,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ wake.pause and wake.resume use the room wake-queue pause path (4995.429087ms)
+{"event":"room.cold_start","durationMs":1526,"integrity":"eager","phases":{"schema":{"ms":308,"rowsRead":0},"plugin":{"ms":901,"rowsRead":0},"fence":{"ms":148,"rowsRead":0},"verifies":{"ms":11,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":152,"heapBytes":50217104,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a session cookie without a bearer secret gets the anonymous MCP catalog (3891.570341ms)
+✔ wake.register and heartbeat.set reject cadenceSeconds above the 7-day bound (2997.236569ms)
+ℹ tests 60
+ℹ suites 0
+ℹ pass 51
+ℹ fail 9
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 267456.178015
+
+✖ failing tests:
+
+test at tests/agent-heartbeats.test.js:182:1
+✖ heartbeat endpoints: auth, scopes, validation, and the ack roundtrip (7635.946957ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  500 !== 200
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-12/tests/agent-heartbeats.test.js:234:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 500,
+    expected: 200,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/agent-heartbeats.test.js:384:1
+✖ opted-in work wakes survive retries and obey current pause, preferences, revision and membership (5479.073505ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  
+  undefined !== []
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-12/tests/agent-heartbeats.test.js:433:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/agent-wake-poll.test.js:235:1
+✖ a real mention releases a waiting poll: the wakeable-by-default loop (11110.11461ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + [
+  +   {
+  +     ackHint: 'react 👍 to acknowledge',
+  +     agentId: 'ai_yDpznXUdEyBOVFsC',
+  +     createdAt: 1791539110375,
+  +     deliveredAt: null,
+  +     kind: 'mention',
+  +     messageId: 'm-live',
+  +     roomId: 'commons',
+  +     signalId: 'ws_mv0s4oo7zxJtDYHf'
+  +   }
+  + ]
+  - []
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-12/tests/agent-wake-poll.test.js:272:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ { signalId: 'ws_mv0s4oo7zxJtDYHf', agentId: 'ai_yDpznXUdEyBOVFsC', kind: 'mention', roomId: 'commons', messageId: 'm-live', createdAt: 1791539110375, deliveredAt: null, ackHint: 'react 👍 to acknowledge' } ],
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/agent-wake-poll.test.js:410:1
+✖ fresh wakeable host retains between-poll mention across database restart until explicit ack (5373.301343ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  500 !== 200
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-12/tests/agent-wake-poll.test.js:444:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 500,
+    expected: 200,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/agent-wake.test.js:35:1
+✖ wait returns current read observations even with empty hints and never acknowledges queued hints (1223.412451ms)
+  ReferenceError: id is not defined
+      at WorkWakes.ack (file:///home/hatch/workspace/pr-wave1000-guild-12/server/work-wakes.mjs:110:99)
+      at AgentHeartbeats.ackWakes (file:///home/hatch/workspace/pr-wave1000-guild-12/server/agent-heartbeats.mjs:542:49)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-12/tests/agent-wake.test.js:41:50)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests/agent-wake.test.js:56:1
+✖ lost wait output leaves signals queued; ambiguous ack is unconfirmed and explicit retry reports authoritative state (2707.489575ms)
+  Error: Wake request not confirmed
+      at #request (file:///home/hatch/workspace/pr-wave1000-guild-12/client/agent-wake.mjs:53:31)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async AgentWakeClient.ack (file:///home/hatch/workspace/pr-wave1000-guild-12/client/agent-wake.mjs:97:19)
+      at async TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-12/tests/agent-wake.test.js:67:17)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    status: 500,
+    code: 'internal_error',
+    retryAfterMs: null,
+    reason: 'internal_error',
+    hint: 'No success is claimed. Reconcile or retry the exact command.',
+    next: [ { tool: 'room_check_access' }, { command: 'Retry the exact same command after checking access' } ],
+    errorStatus: 'failed'
+  }
+
+test at tests/agent-wake.test.js:102:1
+✖ actual CLI saved connection survives server restart; unknown ACK and lost committed ACK remain truthful and private (20804.455319ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-12/tests/agent-wake.test.js:142:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/pull-only-heartbeat-wakes.test.js:60:1
+✖ an online pull-only host receives a mention on its next heartbeat and ack clears it (8980.581207ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  500 !== 200
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-12/tests/pull-only-heartbeat-wakes.test.js:86:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 500,
+    expected: 200,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/room-mcp-wake.test.js:95:1
+✖ an enrolled identity registers, reads, and clears an HTTPS wakeUrl (4193.070494ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + undefined
+  - [
+  -   'ws_mv0s4cne2m-uDGyJ'
+  - ]
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-12/tests/room-mcp-wake.test.js:140:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [ 'ws_mv0s4cne2m-uDGyJ' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

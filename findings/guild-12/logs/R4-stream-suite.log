@@ -1,0 +1,58 @@
+✔ native reconnect is preserved; closed streams retry once with bounded backoff and the current cursor (87.969326ms)
+✔ disconnect, access end, manual reconnect, and identity replacement invalidate pending stream retries (25.825868ms)
+✔ expired authorization ends access and cancels a queued closed-stream retry (13.281291ms)
+✔ a queued reconnect rechecks account ownership without signing out the replacement account (5.938532ms)
+✔ a late stream-refresh rejection cannot clear a replacement session (0.918499ms)
+✔ a transient unavailable stream and failed refresh preserve identity and reconnect without ending access (30.576927ms)
+{"event":"room.cold_start","durationMs":1654,"integrity":"eager","phases":{"schema":{"ms":238,"rowsRead":0},"plugin":{"ms":791,"rowsRead":0},"fence":{"ms":340,"rowsRead":0},"verifies":{"ms":63,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":190,"heapBytes":38154080,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":2248,"integrity":"eager","phases":{"schema":{"ms":139,"rowsRead":0},"plugin":{"ms":558,"rowsRead":0},"fence":{"ms":352,"rowsRead":0},"verifies":{"ms":40,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":157,"heapBytes":35206800,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ return brief hides a targeted DM from unrelated owner and guest but keeps both participants (4392.66108ms)
+{"event":"room.cold_start","durationMs":485,"integrity":"eager","phases":{"schema":{"ms":154,"rowsRead":0},"plugin":{"ms":141,"rowsRead":0},"fence":{"ms":34,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":126,"heapBytes":42573560,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a hidden return-brief page advances its scanned continuation and freezes the original horizon (3835.438273ms)
+{"event":"room.cold_start","durationMs":2169,"integrity":"eager","phases":{"schema":{"ms":322,"rowsRead":0},"plugin":{"ms":686,"rowsRead":0},"fence":{"ms":312,"rowsRead":0},"verifies":{"ms":106,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":167,"heapBytes":38556880,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ live stream reaches a public event beyond a full invisible private page (11611.806521ms)
+{"event":"room.cold_start","durationMs":1407,"integrity":"eager","phases":{"schema":{"ms":115,"rowsRead":0},"plugin":{"ms":468,"rowsRead":0},"fence":{"ms":444,"rowsRead":0},"verifies":{"ms":25,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":162,"heapBytes":47000640,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ return brief retains peer-DM identity filtering alongside targeted message filtering (4249.044915ms)
+{"event":"room.cold_start","durationMs":1368,"integrity":"eager","phases":{"schema":{"ms":92,"rowsRead":0},"plugin":{"ms":732,"rowsRead":0},"fence":{"ms":106,"rowsRead":0},"verifies":{"ms":7,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":149,"heapBytes":37569296,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ event polling reads fresh authority without decoding full projections (3133.968294ms)
+✔ authority optimization still rejects membership and credential revocation on the next poll (2353.312318ms)
+✔ id-less frame without a body sequence yields null, not 0 (1.376465ms)
+✔ frames with numeric ids still yield their sequence (0.291667ms)
+✔ id-less frame with a body sequence yields the body sequence (0.222654ms)
+{"event":"room.cold_start","durationMs":3274,"integrity":"eager","phases":{"schema":{"ms":278,"rowsRead":0},"plugin":{"ms":397,"rowsRead":0},"fence":{"ms":1320,"rowsRead":0},"verifies":{"ms":229,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":195,"heapBytes":37069296,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a client that never reads is closed with stream_lagging while a reading peer keeps receiving (27794.69489ms)
+✔ the stream queue cap is validated (3.407904ms)
+{"event":"room.cold_start","durationMs":1205,"integrity":"eager","phases":{"schema":{"ms":125,"rowsRead":0},"plugin":{"ms":383,"rowsRead":0},"fence":{"ms":404,"rowsRead":0},"verifies":{"ms":25,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":170,"heapBytes":36972976,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":1674,"integrity":"eager","phases":{"schema":{"ms":77,"rowsRead":0},"plugin":{"ms":527,"rowsRead":0},"fence":{"ms":577,"rowsRead":0},"verifies":{"ms":288,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":221,"heapBytes":33033992,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a shorter pump interval delivers a committed message sooner (5454.831776ms)
+{"event":"room.cold_start","durationMs":2056,"integrity":"eager","phases":{"schema":{"ms":243,"rowsRead":0},"plugin":{"ms":799,"rowsRead":0},"fence":{"ms":595,"rowsRead":0},"verifies":{"ms":129,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":198,"heapBytes":37291696,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+room diagnostic op_RHlO2SPX 429 stream_limit rate_limited /api/rooms/:roomId/stream
+{"event":"room.cold_start","durationMs":1805,"integrity":"eager","phases":{"schema":{"ms":164,"rowsRead":0},"plugin":{"ms":885,"rowsRead":0},"fence":{"ms":437,"rowsRead":0},"verifies":{"ms":34,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":147,"heapBytes":35797496,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ request cancellation releases only its stream and preserves the three-stream limit (4935.568694ms)
+✔ already-aborted and repeated cancelled requests leave no occupied stream slots (2895.073973ms)
+{"event":"room.cold_start","durationMs":1984,"integrity":"eager","phases":{"schema":{"ms":319,"rowsRead":0},"plugin":{"ms":885,"rowsRead":0},"fence":{"ms":339,"rowsRead":0},"verifies":{"ms":65,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":201,"heapBytes":38145952,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":1548,"integrity":"eager","phases":{"schema":{"ms":192,"rowsRead":0},"plugin":{"ms":596,"rowsRead":0},"fence":{"ms":400,"rowsRead":0},"verifies":{"ms":61,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":155,"heapBytes":34933760,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a transient storage503 ends transport without claiming lost access and the same credential reconnects (4734.904216ms)
+{"event":"room.cold_start","durationMs":676,"integrity":"eager","phases":{"schema":{"ms":118,"rowsRead":0},"plugin":{"ms":296,"rowsRead":0},"fence":{"ms":97,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":130,"heapBytes":42030272,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a transient unexpected error ends transport without claiming lost access and the same credential reconnects (3255.303101ms)
+{"event":"room.cold_start","durationMs":1244,"integrity":"eager","phases":{"schema":{"ms":185,"rowsRead":0},"plugin":{"ms":716,"rowsRead":0},"fence":{"ms":65,"rowsRead":0},"verifies":{"ms":27,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":149,"heapBytes":48475384,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a transient non-Error failure ends transport without claiming lost access and the same credential reconnects (2444.239473ms)
+✔ credential revocation during an open stream still emits conclusive access-ended (2862.98676ms)
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ shared pump fetches once per tick per room, not once per stream (1726.402361ms)
+✔ each stream receives exactly its visible events in order (180.157113ms)
+✔ Last-Event-ID resume continues from the shared cursor (123.025766ms)
+✔ a revoked credential ends only its stream with access-ended (280.452136ms)
+✔ rooms pump independently on their own intervals (239.704345ms)
+ℹ tests 29
+ℹ suites 0
+ℹ pass 29
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 116230.639821

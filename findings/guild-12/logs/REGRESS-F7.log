@@ -1,0 +1,27 @@
+{"event":"room.cold_start","durationMs":1253,"integrity":"eager","phases":{"schema":{"ms":205,"rowsRead":0},"plugin":{"ms":629,"rowsRead":0},"fence":{"ms":268,"rowsRead":0},"verifies":{"ms":34,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":179,"heapBytes":37125800,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✖ enqueue rejects non-positive dueAt (2943.470663ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 10319.436284
+
+✖ failing tests:
+
+test at findings/guild-12/regress/enqueue-negative-dueat.test.js:26:1
+✖ enqueue rejects non-positive dueAt (2943.470663ms)
+  AssertionError [ERR_ASSERTION]: Missing expected exception: dueAt=-5 must be rejected
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-12/findings/guild-12/regress/enqueue-negative-dueat.test.js:30:12)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.start (node:internal/test_runner/test:1257:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    operator: 'throws',
+    diff: 'simple'
+  }

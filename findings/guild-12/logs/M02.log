@@ -1,0 +1,41 @@
+{"event":"room.cold_start","durationMs":3900,"integrity":"eager","phases":{"schema":{"ms":786,"rowsRead":0},"plugin":{"ms":1246,"rowsRead":0},"fence":{"ms":1295,"rowsRead":0},"verifies":{"ms":230,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":204,"heapBytes":37167584,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2556,"integrity":"eager","phases":{"schema":{"ms":532,"rowsRead":0},"plugin":{"ms":1165,"rowsRead":0},"fence":{"ms":601,"rowsRead":0},"verifies":{"ms":30,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":180,"heapBytes":32966128,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1415,"integrity":"eager","phases":{"schema":{"ms":361,"rowsRead":0},"plugin":{"ms":637,"rowsRead":0},"fence":{"ms":211,"rowsRead":0},"verifies":{"ms":22,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":177,"heapBytes":38711464,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":316,"integrity":"eager","phases":{"schema":{"ms":98,"rowsRead":0},"plugin":{"ms":15,"rowsRead":0},"fence":{"ms":81,"rowsRead":0},"verifies":{"ms":7,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":50,"heapBytes":37419632,"rooms":1,"sequences":10,"projectionBytes":2920,"events":10}
+{"event":"room.cold_start","durationMs":1743,"integrity":"eager","phases":{"schema":{"ms":67,"rowsRead":0},"plugin":{"ms":994,"rowsRead":0},"fence":{"ms":467,"rowsRead":0},"verifies":{"ms":32,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":150,"heapBytes":41433424,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1994,"integrity":"eager","phases":{"schema":{"ms":270,"rowsRead":0},"plugin":{"ms":1411,"rowsRead":0},"fence":{"ms":99,"rowsRead":0},"verifies":{"ms":8,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":145,"heapBytes":31785064,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1941,"integrity":"eager","phases":{"schema":{"ms":56,"rowsRead":0},"plugin":{"ms":1175,"rowsRead":0},"fence":{"ms":371,"rowsRead":0},"verifies":{"ms":56,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":162,"heapBytes":38066720,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ enqueue validates exactly, coalesces per queue key and retries idempotently (6423.736446ms)
+✔ leased wakes retry with bounded backoff and dead-letter when exhausted (4313.577399ms)
+✔ done-when: a restart preserves intent without duplicate action (3180.98438ms)
+✔ wake queue is draft-class and enqueueing appends no room events (3423.813745ms)
+✖ receipt capacity bounds requeue as well as enqueue (3644.984307ms)
+✔ guest-agent members cannot enqueue or requeue wakes, and can pause their own (3279.309557ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 5
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 35215.573042
+
+✖ failing tests:
+
+test at tests/wake-queue.test.js:108:1
+✖ receipt capacity bounds requeue as well as enqueue (3644.984307ms)
+  AssertionError [ERR_ASSERTION]: Missing expected exception: requeue at the cap is refused
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-12/tests/wake-queue.test.js:120:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: { code: 'wake_limit', status: 409 },
+    operator: 'throws',
+    diff: 'simple'
+  }

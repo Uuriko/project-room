@@ -1,0 +1,77 @@
+{"event":"room.cold_start","durationMs":2439,"integrity":"eager","phases":{"schema":{"ms":418,"rowsRead":0},"plugin":{"ms":975,"rowsRead":0},"fence":{"ms":480,"rowsRead":0},"verifies":{"ms":184,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":194,"heapBytes":37448760,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2935,"integrity":"eager","phases":{"schema":{"ms":314,"rowsRead":0},"plugin":{"ms":1302,"rowsRead":0},"fence":{"ms":822,"rowsRead":0},"verifies":{"ms":237,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":225,"heapBytes":28152128,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2084,"integrity":"eager","phases":{"schema":{"ms":756,"rowsRead":0},"plugin":{"ms":905,"rowsRead":0},"fence":{"ms":94,"rowsRead":0},"verifies":{"ms":32,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":170,"heapBytes":34120408,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":861,"integrity":"eager","phases":{"schema":{"ms":389,"rowsRead":0},"plugin":{"ms":87,"rowsRead":0},"fence":{"ms":217,"rowsRead":0},"verifies":{"ms":31,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":59,"heapBytes":42799568,"rooms":1,"sequences":10,"projectionBytes":2920,"events":10}
+{"event":"room.cold_start","durationMs":2842,"integrity":"eager","phases":{"schema":{"ms":694,"rowsRead":0},"plugin":{"ms":1660,"rowsRead":0},"fence":{"ms":288,"rowsRead":0},"verifies":{"ms":15,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":170,"heapBytes":31830304,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2538,"integrity":"eager","phases":{"schema":{"ms":377,"rowsRead":0},"plugin":{"ms":1552,"rowsRead":0},"fence":{"ms":293,"rowsRead":0},"verifies":{"ms":96,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":179,"heapBytes":37362600,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2147,"integrity":"eager","phases":{"schema":{"ms":467,"rowsRead":0},"plugin":{"ms":751,"rowsRead":0},"fence":{"ms":384,"rowsRead":0},"verifies":{"ms":84,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":169,"heapBytes":42939192,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ enqueue validates exactly, coalesces per queue key and retries idempotently (4043.14564ms)
+✖ leased wakes retry with bounded backoff and dead-letter when exhausted (4916.666017ms)
+✖ done-when: a restart preserves intent without duplicate action (5566.963413ms)
+✔ wake queue is draft-class and enqueueing appends no room events (4118.828078ms)
+✖ receipt capacity bounds requeue as well as enqueue (4397.78555ms)
+✔ guest-agent members cannot enqueue or requeue wakes, and can pause their own (5296.265575ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 3
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 36239.951952
+
+✖ failing tests:
+
+test at tests/wake-queue.test.js:43:1
+✖ leased wakes retry with bounded backoff and dead-letter when exhausted (4916.666017ms)
+  AssertionError [ERR_ASSERTION]: Missing expected exception.
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-12/tests/wake-queue.test.js:50:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: { code: 'wake_not_leased' },
+    operator: 'throws',
+    diff: 'simple'
+  }
+
+test at tests/wake-queue.test.js:66:1
+✖ done-when: a restart preserves intent without duplicate action (5566.963413ms)
+  Error: Only the lease holder can complete a wake.
+      at fail (file:///home/hatch/workspace/pr-wave1000-guild-12/server/wake-queue.mjs:21:49)
+      at file:///home/hatch/workspace/pr-wave1000-guild-12/server/wake-queue.mjs:318:77
+      at run (file:///home/hatch/workspace/pr-wave1000-guild-12/server/store.mjs:647:22)
+      at Object.transaction (file:///home/hatch/workspace/pr-wave1000-guild-12/server/store.mjs:674:22)
+      at RoomStore.transaction (file:///home/hatch/workspace/pr-wave1000-guild-12/server/store.mjs:2621:41)
+      at WakeQueue.complete (file:///home/hatch/workspace/pr-wave1000-guild-12/server/wake-queue.mjs:302:23)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-12/tests/wake-queue.test.js:86:34)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18) {
+    status: 409,
+    code: 'wake_not_leased',
+    headers: null
+  }
+
+test at tests/wake-queue.test.js:108:1
+✖ receipt capacity bounds requeue as well as enqueue (4397.78555ms)
+  Error: Only the lease holder can fail a wake.
+      at fail (file:///home/hatch/workspace/pr-wave1000-guild-12/server/wake-queue.mjs:21:49)
+      at file:///home/hatch/workspace/pr-wave1000-guild-12/server/wake-queue.mjs:331:77
+      at run (file:///home/hatch/workspace/pr-wave1000-guild-12/server/store.mjs:647:22)
+      at Object.transaction (file:///home/hatch/workspace/pr-wave1000-guild-12/server/store.mjs:674:22)
+      at RoomStore.transaction (file:///home/hatch/workspace/pr-wave1000-guild-12/server/store.mjs:2621:41)
+      at WakeQueue.fail (file:///home/hatch/workspace/pr-wave1000-guild-12/server/wake-queue.mjs:329:23)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-12/tests/wake-queue.test.js:113:34)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18) {
+    status: 409,
+    code: 'wake_not_leased',
+    headers: null
+  }

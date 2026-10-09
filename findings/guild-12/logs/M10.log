@@ -1,0 +1,147 @@
+{"event":"room.cold_start","durationMs":2116,"integrity":"eager","phases":{"schema":{"ms":430,"rowsRead":0},"plugin":{"ms":687,"rowsRead":0},"fence":{"ms":588,"rowsRead":0},"verifies":{"ms":114,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":186,"heapBytes":38669920,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ heartbeat validates mode, host id, and the wakeable wake-URL contract (15.597267ms)
+✔ heartbeat upserts hosts and derives online/offline/unregistered status (7.14945ms)
+✔ wake signals coalesce per message and deliver through pending/ack (5.323239ms)
+✔ a registered host queues one wake per message regardless of mode or presence (6.055327ms)
+✔ hosts and signals survive a restart (new instance on the same database) (12.486989ms)
+✔ buildWakePing carries the canonical agent.wake payload (3.452571ms)
+{"event":"room.cold_start","durationMs":915,"integrity":"eager","phases":{"schema":{"ms":194,"rowsRead":0},"plugin":{"ms":252,"rowsRead":0},"fence":{"ms":320,"rowsRead":0},"verifies":{"ms":22,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":139,"heapBytes":37944160,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ heartbeat endpoints: auth, scopes, validation, and the ack roundtrip (7498.377395ms)
+{"event":"room.cold_start","durationMs":1477,"integrity":"eager","phases":{"schema":{"ms":243,"rowsRead":0},"plugin":{"ms":776,"rowsRead":0},"fence":{"ms":331,"rowsRead":0},"verifies":{"ms":4,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":169,"heapBytes":45723744,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ mention of an offline agent enqueues a wake and journals the webhook ping (2971.125164ms)
+{"event":"room.cold_start","durationMs":1757,"integrity":"eager","phases":{"schema":{"ms":180,"rowsRead":0},"plugin":{"ms":887,"rowsRead":0},"fence":{"ms":383,"rowsRead":0},"verifies":{"ms":13,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":172,"heapBytes":38321752,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ fresh wakeable agents retain mentions while non-agent mentions queue nothing (3079.223668ms)
+{"event":"room.cold_start","durationMs":2139,"integrity":"eager","phases":{"schema":{"ms":248,"rowsRead":0},"plugin":{"ms":888,"rowsRead":0},"fence":{"ms":525,"rowsRead":0},"verifies":{"ms":118,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":175,"heapBytes":45603112,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ room presence lists agent members with additive host presence (3398.620408ms)
+{"event":"room.cold_start","durationMs":1873,"integrity":"eager","phases":{"schema":{"ms":124,"rowsRead":0},"plugin":{"ms":754,"rowsRead":0},"fence":{"ms":509,"rowsRead":0},"verifies":{"ms":185,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":159,"heapBytes":39980712,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ directory cards carry host-reported presence (additive field) (5646.162647ms)
+{"event":"room.cold_start","durationMs":470,"cpuMs":35,"heapBytes":46773720,"rooms":1,"sequences":13,"projectionBytes":4452,"events":13}
+{"event":"room.cold_start","durationMs":1223,"integrity":"eager","phases":{"schema":{"ms":315,"rowsRead":0},"plugin":{"ms":437,"rowsRead":0},"fence":{"ms":303,"rowsRead":0},"verifies":{"ms":14,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":145,"heapBytes":42512448,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":221,"cpuMs":31,"heapBytes":47956608,"rooms":1,"sequences":10,"projectionBytes":2920,"events":10}
+{"event":"room.cold_start","durationMs":509,"integrity":"eager","phases":{"schema":{"ms":44,"rowsRead":0},"plugin":{"ms":37,"rowsRead":0},"fence":{"ms":238,"rowsRead":0},"verifies":{"ms":23,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":64,"heapBytes":40387312,"rooms":1,"sequences":10,"projectionBytes":2920,"events":10}
+✔ opted-in work wakes survive retries and obey current pause, preferences, revision and membership (6966.982178ms)
+✔ pre-work-delivery stores open read-only without migration and upgrade without enabling hosts (4404.393778ms)
+✔ fresh wakeable hosts queue durable wakes without activating offline-only push targets (6.097ms)
+✔ cadenceSeconds is bounded so one heartbeat cannot stay online indefinitely (10.173327ms)
+{"event":"room.cold_start","durationMs":1332,"integrity":"eager","phases":{"schema":{"ms":163,"rowsRead":0},"plugin":{"ms":453,"rowsRead":0},"fence":{"ms":395,"rowsRead":0},"verifies":{"ms":114,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":172,"heapBytes":38903784,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ notePoll refuses unregistered agents with the registered:false shape (30.570487ms)
+✔ notePoll returns pending signals immediately and never consumes them (19.34465ms)
+✔ enqueueWake releases the waiter only for genuinely new signals (11.223743ms)
+✔ waiter replacement is per host: same hostId replaces, other hosts coexist (4.042116ms)
+✔ two hosts wait side by side; one signal releases both (4.815146ms)
+✔ heartbeat defaults: omitted mode is wakeable, omitted wakeUrl is null (14.403506ms)
+{"event":"room.cold_start","durationMs":1803,"integrity":"eager","phases":{"schema":{"ms":290,"rowsRead":0},"plugin":{"ms":1242,"rowsRead":0},"fence":{"ms":111,"rowsRead":0},"verifies":{"ms":14,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":162,"heapBytes":37412424,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ poll route: auth, scope, registration, and waitMs validation (4264.402342ms)
+{"event":"room.cold_start","durationMs":2098,"integrity":"eager","phases":{"schema":{"ms":76,"rowsRead":0},"plugin":{"ms":1534,"rowsRead":0},"fence":{"ms":317,"rowsRead":0},"verifies":{"ms":10,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":180,"heapBytes":44475144,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ poll times out cleanly when nothing arrives (5347.243538ms)
+{"event":"room.cold_start","durationMs":1594,"integrity":"eager","phases":{"schema":{"ms":75,"rowsRead":0},"plugin":{"ms":831,"rowsRead":0},"fence":{"ms":223,"rowsRead":0},"verifies":{"ms":56,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":164,"heapBytes":38491760,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a real mention releases a waiting poll: the wakeable-by-default loop (4089.256149ms)
+{"event":"room.cold_start","durationMs":1359,"integrity":"eager","phases":{"schema":{"ms":103,"rowsRead":0},"plugin":{"ms":776,"rowsRead":0},"fence":{"ms":306,"rowsRead":0},"verifies":{"ms":7,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":171,"heapBytes":44836536,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a reconnect with the same hostId releases the first poll (3875.634225ms)
+{"event":"room.cold_start","durationMs":2422,"integrity":"eager","phases":{"schema":{"ms":153,"rowsRead":0},"plugin":{"ms":1548,"rowsRead":0},"fence":{"ms":457,"rowsRead":0},"verifies":{"ms":25,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":169,"heapBytes":36607272,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ an aborted poll releases the host slot instead of wedging it (4991.882275ms)
+{"event":"room.cold_start","durationMs":1143,"integrity":"eager","phases":{"schema":{"ms":335,"rowsRead":0},"plugin":{"ms":353,"rowsRead":0},"fence":{"ms":190,"rowsRead":0},"verifies":{"ms":23,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":148,"heapBytes":36031584,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a different host's poll leaves the first host's wait alone (6288.844854ms)
+{"event":"room.cold_start","durationMs":2248,"integrity":"eager","phases":{"schema":{"ms":283,"rowsRead":0},"plugin":{"ms":1062,"rowsRead":0},"fence":{"ms":539,"rowsRead":0},"verifies":{"ms":108,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":159,"heapBytes":35510088,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ held wake poll rejects a key revoked before a new signal (3067.642248ms)
+{"event":"room.cold_start","durationMs":3893,"integrity":"eager","phases":{"schema":{"ms":413,"rowsRead":0},"plugin":{"ms":303,"rowsRead":0},"fence":{"ms":205,"rowsRead":0},"verifies":{"ms":7,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":157,"heapBytes":39039192,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ room-key poll cannot replace an identity-owned host wait (5145.718227ms)
+{"event":"room.cold_start","durationMs":1126,"integrity":"eager","phases":{"schema":{"ms":20,"rowsRead":0},"plugin":{"ms":754,"rowsRead":0},"fence":{"ms":168,"rowsRead":0},"verifies":{"ms":19,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":141,"heapBytes":39388840,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ fresh heartbeating host receives a mention through its active poll (5492.584561ms)
+{"event":"room.cold_start","durationMs":632,"integrity":"eager","phases":{"schema":{"ms":62,"rowsRead":0},"plugin":{"ms":47,"rowsRead":0},"fence":{"ms":256,"rowsRead":0},"verifies":{"ms":66,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":60,"heapBytes":42143728,"rooms":1,"sequences":6,"projectionBytes":1230,"events":6}
+✔ fresh wakeable host retains between-poll mention across database restart until explicit ack (3698.253338ms)
+{"event":"room.cold_start","durationMs":480,"integrity":"eager","phases":{"schema":{"ms":122,"rowsRead":0},"plugin":{"ms":120,"rowsRead":0},"fence":{"ms":109,"rowsRead":0},"verifies":{"ms":24,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":147,"heapBytes":37216352,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":1834,"integrity":"eager","phases":{"schema":{"ms":213,"rowsRead":0},"plugin":{"ms":983,"rowsRead":0},"fence":{"ms":533,"rowsRead":0},"verifies":{"ms":92,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":162,"heapBytes":35368904,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ doctor is read-only and setup without URL registers a custom-linked identity without claiming a listener (2971.92279ms)
+{"event":"room.cold_start","durationMs":638,"integrity":"eager","phases":{"schema":{"ms":122,"rowsRead":0},"plugin":{"ms":257,"rowsRead":0},"fence":{"ms":232,"rowsRead":0},"verifies":{"ms":9,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":128,"heapBytes":48026232,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ wait returns current read observations even with empty hints and never acknowledges queued hints (5286.789404ms)
+{"event":"room.cold_start","durationMs":1210,"integrity":"eager","phases":{"schema":{"ms":211,"rowsRead":0},"plugin":{"ms":575,"rowsRead":0},"fence":{"ms":397,"rowsRead":0},"verifies":{"ms":18,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":137,"heapBytes":41591896,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ lost wait output leaves signals queued; ambiguous ack is unconfirmed and explicit retry reports authoritative state (1797.24148ms)
+room diagnostic op_sXz8k5L1 401 unauthenticated access /api/rooms/:roomId
+{"event":"room.cold_start","durationMs":1070,"integrity":"eager","phases":{"schema":{"ms":210,"rowsRead":0},"plugin":{"ms":470,"rowsRead":0},"fence":{"ms":366,"rowsRead":0},"verifies":{"ms":16,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":137,"heapBytes":46520120,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ adapter refuses Room keys, mismatched configured members and invalid commands without leaking credentials (2039.34769ms)
+room diagnostic op_89WlaNUm 401 unauthenticated access /api/rooms/:roomId/context
+{"event":"room.cold_start","durationMs":1008,"integrity":"eager","phases":{"schema":{"ms":438,"rowsRead":0},"plugin":{"ms":172,"rowsRead":0},"fence":{"ms":375,"rowsRead":0},"verifies":{"ms":22,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":131,"heapBytes":41141896,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ revocation between poll and final fresh check discards signals and leaves them unacknowledged (1714.754541ms)
+{"event":"room.cold_start","durationMs":2601,"integrity":"eager","phases":{"schema":{"ms":368,"rowsRead":0},"plugin":{"ms":671,"rowsRead":0},"fence":{"ms":1397,"rowsRead":0},"verifies":{"ms":7,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":158,"heapBytes":45637328,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ invalid observation cursors refuse before any network and transport response secrets are never output (1150.329766ms)
+{"event":"room.cold_start","durationMs":1588,"integrity":"eager","phases":{"schema":{"ms":348,"rowsRead":0},"plugin":{"ms":286,"rowsRead":0},"fence":{"ms":544,"rowsRead":0},"verifies":{"ms":28,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":75,"heapBytes":38998520,"rooms":1,"sequences":4,"projectionBytes":819,"events":4}
+✔ actual CLI saved connection survives server restart; unknown ACK and lost committed ACK remain truthful and private (33930.33632ms)
+{"event":"room.cold_start","durationMs":2059,"integrity":"eager","phases":{"schema":{"ms":343,"rowsRead":0},"plugin":{"ms":995,"rowsRead":0},"fence":{"ms":542,"rowsRead":0},"verifies":{"ms":50,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":177,"heapBytes":35794184,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":1314,"integrity":"eager","phases":{"schema":{"ms":95,"rowsRead":0},"plugin":{"ms":808,"rowsRead":0},"fence":{"ms":392,"rowsRead":0},"verifies":{"ms":13,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":135,"heapBytes":37484952,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ five matching creates inside ten minutes are one ready_work wake; the next window wakes again (6481.008605ms)
+{"event":"room.cold_start","durationMs":2755,"integrity":"eager","phases":{"schema":{"ms":493,"rowsRead":0},"plugin":{"ms":1592,"rowsRead":0},"fence":{"ms":654,"rowsRead":0},"verifies":{"ms":16,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":161,"heapBytes":45180744,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ default off, a filter that does not match, and an assigned create send no ready_work wake (2132.191021ms)
+{"event":"room.cold_start","durationMs":2240,"integrity":"eager","phases":{"schema":{"ms":101,"rowsRead":0},"plugin":{"ms":1969,"rowsRead":0},"fence":{"ms":160,"rowsRead":0},"verifies":{"ms":8,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":141,"heapBytes":38840112,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a release wakes other opted-in agents, not the agent that released it (4405.566177ms)
+{"event":"room.cold_start","durationMs":1046,"integrity":"eager","phases":{"schema":{"ms":370,"rowsRead":0},"plugin":{"ms":606,"rowsRead":0},"fence":{"ms":53,"rowsRead":0},"verifies":{"ms":4,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":133,"heapBytes":44118848,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a paused agent gets no ready_work wake and its window does not start (2706.752999ms)
+room diagnostic op_smahaSBr 403 agent_only access /api/rooms/:roomId/members/me/wants-work
+room diagnostic op_xL1hIqZ7 422 invalid_request input /api/rooms/:roomId/members/me/wants-work
+room diagnostic op_qxmvOO_3 422 invalid_request input /api/rooms/:roomId/members/me/wants-work
+room diagnostic op_Ot8EEZUR 422 invalid_request input /api/rooms/:roomId/members/me/wants-work
+room diagnostic op_LbfxjXRW 422 invalid_request input /api/rooms/:roomId/members/me/wants-work
+room diagnostic op_zdHBhmq9 422 invalid_request input /api/rooms/:roomId/members/me/wants-work
+✔ only agents opt in, input is validated, and DELETE turns it off (1552.861197ms)
+✔ matching rules: any tag overlap, kind in capabilities, empty lists match all (6.758693ms)
+✔ the wants-work rows are in the route table: GET, PUT and DELETE on the caller's own membership (9.519817ms)
+{"event":"room.cold_start","durationMs":1869,"integrity":"eager","phases":{"schema":{"ms":163,"rowsRead":0},"plugin":{"ms":771,"rowsRead":0},"fence":{"ms":870,"rowsRead":0},"verifies":{"ms":46,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":176,"heapBytes":35650952,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":1147,"integrity":"eager","phases":{"schema":{"ms":269,"rowsRead":0},"plugin":{"ms":494,"rowsRead":0},"fence":{"ms":355,"rowsRead":0},"verifies":{"ms":13,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":148,"heapBytes":35488696,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ reassign to a pull-mode agent is the next wake, with reason assigned (3405.412671ms)
+{"event":"room.cold_start","durationMs":837,"integrity":"eager","phases":{"schema":{"ms":195,"rowsRead":0},"plugin":{"ms":560,"rowsRead":0},"fence":{"ms":73,"rowsRead":0},"verifies":{"ms":7,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":133,"heapBytes":41107008,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ creating a claim with an assignee wakes that pull-mode agent (1602.004446ms)
+{"event":"room.cold_start","durationMs":1207,"integrity":"eager","phases":{"schema":{"ms":243,"rowsRead":0},"plugin":{"ms":584,"rowsRead":0},"fence":{"ms":315,"rowsRead":0},"verifies":{"ms":46,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":141,"heapBytes":46989464,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a webhook-mode agent gets one signed delivery for the assignment (1555.04154ms)
+{"event":"room.cold_start","durationMs":1011,"integrity":"eager","phases":{"schema":{"ms":58,"rowsRead":0},"plugin":{"ms":290,"rowsRead":0},"fence":{"ms":614,"rowsRead":0},"verifies":{"ms":45,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":128,"heapBytes":39023952,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ lease expiry under a fake clock wakes the former owner once (1934.890471ms)
+{"event":"room.cold_start","durationMs":600,"integrity":"eager","phases":{"schema":{"ms":53,"rowsRead":0},"plugin":{"ms":209,"rowsRead":0},"fence":{"ms":295,"rowsRead":0},"verifies":{"ms":41,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":125,"heapBytes":44749880,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a paused agent gets no wake and still gets an Updates attention item (1269.49607ms)
+✔ a read-only agent gets no assignment wake and still gets the attention item (1325.839044ms)
+{"event":"room.cold_start","durationMs":1289,"integrity":"eager","phases":{"schema":{"ms":279,"rowsRead":0},"plugin":{"ms":504,"rowsRead":0},"fence":{"ms":235,"rowsRead":0},"verifies":{"ms":33,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":174,"heapBytes":37761048,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":1344,"integrity":"eager","phases":{"schema":{"ms":337,"rowsRead":0},"plugin":{"ms":418,"rowsRead":0},"fence":{"ms":305,"rowsRead":0},"verifies":{"ms":63,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":153,"heapBytes":35593000,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ an online pull-only host receives a mention on its next heartbeat and ack clears it (5208.424141ms)
+✖ 120 mentions return the 50 oldest heartbeat signals and more:true (20691.435179ms)
+{"event":"room.cold_start","durationMs":1786,"integrity":"eager","phases":{"schema":{"ms":486,"rowsRead":0},"plugin":{"ms":687,"rowsRead":0},"fence":{"ms":193,"rowsRead":0},"verifies":{"ms":75,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":192,"heapBytes":36944304,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":1548,"integrity":"eager","phases":{"schema":{"ms":182,"rowsRead":0},"plugin":{"ms":1004,"rowsRead":0},"fence":{"ms":118,"rowsRead":0},"verifies":{"ms":11,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":179,"heapBytes":35906560,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ wake tools stay behind a live identity secret (4953.778262ms)
+{"event":"room.cold_start","durationMs":1907,"integrity":"eager","phases":{"schema":{"ms":399,"rowsRead":0},"plugin":{"ms":844,"rowsRead":0},"fence":{"ms":309,"rowsRead":0},"verifies":{"ms":28,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":181,"heapBytes":43543816,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ an enrolled identity registers, reads, and clears an HTTPS wakeUrl (3924.923454ms)
+{"event":"room.cold_start","durationMs":2859,"integrity":"eager","phases":{"schema":{"ms":424,"rowsRead":0},"plugin":{"ms":1868,"rowsRead":0},"fence":{"ms":156,"rowsRead":0},"verifies":{"ms":164,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":195,"heapBytes":48225232,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ push registration reuses the subscribe-time public DNS check and does not echo credentials (2914.565555ms)
+{"event":"room.cold_start","durationMs":1341,"integrity":"eager","phases":{"schema":{"ms":192,"rowsRead":0},"plugin":{"ms":816,"rowsRead":0},"fence":{"ms":62,"rowsRead":0},"verifies":{"ms":13,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":157,"heapBytes":38217120,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ webhook subscribe list and unsubscribe stay on this identity (4180.799629ms)
+{"event":"room.cold_start","durationMs":1611,"integrity":"eager","phases":{"schema":{"ms":189,"rowsRead":0},"plugin":{"ms":911,"rowsRead":0},"fence":{"ms":341,"rowsRead":0},"verifies":{"ms":42,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":167,"heapBytes":44339024,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ wake.pause and wake.resume use the room wake-queue pause path (4524.415074ms)
+{"event":"room.cold_start","durationMs":1852,"integrity":"eager","phases":{"schema":{"ms":124,"rowsRead":0},"plugin":{"ms":876,"rowsRead":0},"fence":{"ms":577,"rowsRead":0},"verifies":{"ms":67,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":166,"heapBytes":50236184,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a session cookie without a bearer secret gets the anonymous MCP catalog (2277.634749ms)
+✔ wake.register and heartbeat.set reject cadenceSeconds above the 7-day bound (2519.679266ms)
+ℹ tests 60
+ℹ suites 0
+ℹ pass 59
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 256841.224868
+
+✖ failing tests:
+
+test at tests/pull-only-heartbeat-wakes.test.js:93:1
+✖ 120 mentions return the 50 oldest heartbeat signals and more:true (20691.435179ms)
+  [TypeError: fetch failed] {
+    [cause]: Error [SocketError]: other side closed
+        at Socket.onHttpSocketEnd (node:internal/deps/undici/undici:7833:26)
+        at Socket.emit (node:events:526:24)
+        at endReadableNT (node:internal/streams/readable:1757:12)
+        at process.processTicksAndRejections (node:internal/process/task_queues:90:21) {
+      code: 'UND_ERR_SOCKET',
+      socket: { localAddress: '127.0.0.1', localPort: 50512, remoteAddress: undefined, remotePort: undefined, remoteFamily: undefined, timeout: undefined, bytesWritten: 616, bytesRead: 11595 }
+    }
+  }

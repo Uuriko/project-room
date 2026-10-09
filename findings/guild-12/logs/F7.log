@@ -1,0 +1,2 @@
+{"event":"room.cold_start","durationMs":1890,"integrity":"eager","phases":{"schema":{"ms":376,"rowsRead":0},"plugin":{"ms":722,"rowsRead":0},"fence":{"ms":314,"rowsRead":0},"verifies":{"ms":69,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":176,"heapBytes":36564368,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+FAIL F7 negative dueAt: did not throw

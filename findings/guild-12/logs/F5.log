@@ -1,0 +1,11 @@
+{"event":"room.cold_start","durationMs":3553,"integrity":"eager","phases":{"schema":{"ms":404,"rowsRead":0},"plugin":{"ms":2282,"rowsRead":0},"fence":{"ms":593,"rowsRead":0},"verifies":{"ms":24,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":192,"heapBytes":36227736,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+room diagnostic op_ZAxQYhGW 422 invalid_cursor input /api/rooms/:roomId/stream
+room diagnostic op_U8PpvhQ_ 422 invalid_cursor input /api/rooms/:roomId/stream
+room diagnostic op_Twv_zHsc 422 invalid_cursor input /api/rooms/:roomId/stream
+room diagnostic op_ISlEgG-M 409 cursor_ahead conflict /api/rooms/:roomId/stream
+room diagnostic op_56y_UPTq 422 invalid_cursor input /api/rooms/:roomId/stream
+room diagnostic op_ePFMsOt4 422 invalid_cursor input /api/rooms/:roomId/stream
+room diagnostic op_nQ_GssNm 422 invalid_cursor input /api/rooms/:roomId/stream
+room diagnostic op_UrDWYGAR 422 invalid_cursor input /api/rooms/:roomId/stream
+FAIL F5 garbage cursor "11111111111111111111" -> unexpected 431

@@ -1,0 +1,26 @@
+{"event":"room.cold_start","durationMs":2062,"integrity":"eager","phases":{"schema":{"ms":495,"rowsRead":0},"plugin":{"ms":938,"rowsRead":0},"fence":{"ms":555,"rowsRead":0},"verifies":{"ms":67,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":180,"heapBytes":37085584,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":1855,"integrity":"eager","phases":{"schema":{"ms":230,"rowsRead":0},"plugin":{"ms":1024,"rowsRead":0},"fence":{"ms":597,"rowsRead":0},"verifies":{"ms":4,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":151,"heapBytes":35417280,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ doctor is read-only and setup without URL registers a custom-linked identity without claiming a listener (5582.098295ms)
+{"event":"room.cold_start","durationMs":960,"integrity":"eager","phases":{"schema":{"ms":555,"rowsRead":0},"plugin":{"ms":235,"rowsRead":0},"fence":{"ms":149,"rowsRead":0},"verifies":{"ms":14,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":128,"heapBytes":48074776,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ wait returns current read observations even with empty hints and never acknowledges queued hints (4558.058223ms)
+{"event":"room.cold_start","durationMs":832,"integrity":"eager","phases":{"schema":{"ms":61,"rowsRead":0},"plugin":{"ms":640,"rowsRead":0},"fence":{"ms":128,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":120,"heapBytes":41645320,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ lost wait output leaves signals queued; ambiguous ack is unconfirmed and explicit retry reports authoritative state (2528.9709ms)
+room diagnostic op_qkkno4IJ 401 unauthenticated access /api/rooms/:roomId
+{"event":"room.cold_start","durationMs":1673,"integrity":"eager","phases":{"schema":{"ms":144,"rowsRead":0},"plugin":{"ms":1066,"rowsRead":0},"fence":{"ms":376,"rowsRead":0},"verifies":{"ms":66,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":152,"heapBytes":46548792,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ adapter refuses Room keys, mismatched configured members and invalid commands without leaking credentials (892.78718ms)
+room diagnostic op_SiuBAkh8 401 unauthenticated access /api/rooms/:roomId/context
+{"event":"room.cold_start","durationMs":773,"integrity":"eager","phases":{"schema":{"ms":240,"rowsRead":0},"plugin":{"ms":472,"rowsRead":0},"fence":{"ms":44,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":118,"heapBytes":41190912,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ revocation between poll and final fresh check discards signals and leaves them unacknowledged (2988.99408ms)
+{"event":"room.cold_start","durationMs":1616,"integrity":"eager","phases":{"schema":{"ms":287,"rowsRead":0},"plugin":{"ms":897,"rowsRead":0},"fence":{"ms":233,"rowsRead":0},"verifies":{"ms":8,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":156,"heapBytes":45686336,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ invalid observation cursors refuse before any network and transport response secrets are never output (799.587024ms)
+{"event":"room.cold_start","durationMs":309,"integrity":"eager","phases":{"schema":{"ms":34,"rowsRead":0},"plugin":{"ms":19,"rowsRead":0},"fence":{"ms":86,"rowsRead":0},"verifies":{"ms":6,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":57,"heapBytes":53225208,"rooms":1,"sequences":4,"projectionBytes":819,"events":4}
+✔ actual CLI saved connection survives server restart; unknown ACK and lost committed ACK remain truthful and private (23624.571232ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 48201.361845

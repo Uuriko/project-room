@@ -1,0 +1,4 @@
+{"event":"room.cold_start","durationMs":2368,"integrity":"eager","phases":{"schema":{"ms":634,"rowsRead":0},"plugin":{"ms":1014,"rowsRead":0},"fence":{"ms":380,"rowsRead":0},"verifies":{"ms":45,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":190,"heapBytes":36171960,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+room diagnostic op_qx5tRGqc 409 cursor_ahead conflict /api/rooms/:roomId/stream
+PASS F4 future cursor -> 409, server healthy

@@ -1,0 +1,69 @@
+{"event":"room.cold_start","durationMs":2306,"integrity":"eager","phases":{"schema":{"ms":299,"rowsRead":0},"plugin":{"ms":1130,"rowsRead":0},"fence":{"ms":380,"rowsRead":0},"verifies":{"ms":177,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":185,"heapBytes":37696000,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2042,"integrity":"eager","phases":{"schema":{"ms":98,"rowsRead":0},"plugin":{"ms":1358,"rowsRead":0},"fence":{"ms":318,"rowsRead":0},"verifies":{"ms":12,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":151,"heapBytes":33290608,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2533,"integrity":"eager","phases":{"schema":{"ms":574,"rowsRead":0},"plugin":{"ms":952,"rowsRead":0},"fence":{"ms":719,"rowsRead":0},"verifies":{"ms":31,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":162,"heapBytes":38895976,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1391,"integrity":"eager","phases":{"schema":{"ms":51,"rowsRead":0},"plugin":{"ms":755,"rowsRead":0},"fence":{"ms":287,"rowsRead":0},"verifies":{"ms":38,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":170,"heapBytes":44367800,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1455,"integrity":"eager","phases":{"schema":{"ms":80,"rowsRead":0},"plugin":{"ms":292,"rowsRead":0},"fence":{"ms":758,"rowsRead":0},"verifies":{"ms":103,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":151,"heapBytes":33005560,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":957,"integrity":"eager","phases":{"schema":{"ms":141,"rowsRead":0},"plugin":{"ms":486,"rowsRead":0},"fence":{"ms":57,"rowsRead":0},"verifies":{"ms":16,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":141,"heapBytes":38535344,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ enqueue validates exactly, coalesces per queue key and retries idempotently (4643.00332ms)
+✖ leased wakes retry with bounded backoff and dead-letter when exhausted (3800.768664ms)
+✖ done-when: a restart preserves intent without duplicate action (4219.667659ms)
+✔ wake queue is draft-class and enqueueing appends no room events (3433.097388ms)
+✖ receipt capacity bounds requeue as well as enqueue (3056.840627ms)
+✔ guest-agent members cannot enqueue or requeue wakes, and can pause their own (2829.884804ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 3
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 30412.681245
+
+✖ failing tests:
+
+test at tests/wake-queue.test.js:43:1
+✖ leased wakes retry with bounded backoff and dead-letter when exhausted (3800.768664ms)
+  TypeError: Cannot read properties of null (reading 'attempts')
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-12/tests/wake-queue.test.js:48:23)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+
+test at tests/wake-queue.test.js:66:1
+✖ done-when: a restart preserves intent without duplicate action (4219.667659ms)
+  AssertionError [ERR_ASSERTION]: wake is in-flight when the process dies
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-12/tests/wake-queue.test.js:72:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at tests/wake-queue.test.js:108:1
+✖ receipt capacity bounds requeue as well as enqueue (3056.840627ms)
+  Error: Only the lease holder can fail a wake.
+      at fail (file:///home/hatch/workspace/pr-wave1000-guild-12/server/wake-queue.mjs:21:49)
+      at file:///home/hatch/workspace/pr-wave1000-guild-12/server/wake-queue.mjs:331:77
+      at run (file:///home/hatch/workspace/pr-wave1000-guild-12/server/store.mjs:647:22)
+      at Object.transaction (file:///home/hatch/workspace/pr-wave1000-guild-12/server/store.mjs:674:22)
+      at RoomStore.transaction (file:///home/hatch/workspace/pr-wave1000-guild-12/server/store.mjs:2621:41)
+      at WakeQueue.fail (file:///home/hatch/workspace/pr-wave1000-guild-12/server/wake-queue.mjs:329:23)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-12/tests/wake-queue.test.js:113:34)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18) {
+    status: 409,
+    code: 'wake_not_leased',
+    headers: null
+  }
