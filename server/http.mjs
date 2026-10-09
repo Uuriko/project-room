@@ -2747,27 +2747,26 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // keys and room sessions) carry their room_id, so no roomId appears in
       // the path. Identity secrets and API keys cannot resolve a room without
       // one and answer 401 here; use a room bearer credential instead.
-      // Documented in docs/openapi.yaml like every other route literal here.
-      if (url.pathname === "/api/web/fetch") {
+      // Room-side web routes (RC-2026-09-23-102 fetch, RC-2026-09-24-310
+      // research) share one auth posture: owner + full members, the #798
+      // guest gate (isWebFetchGuest covers ga1. guest-agents and human
+      // share-link guests with role === "guest"), and typed WebFetchError
+      // failures — quota-exceeded is a 429 with retry info, never a 500,
+      // and every typed failure carries its request_id for journal
+      // correlation.
+      const serveWebRoute = async run => {
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
         const isBearer = Boolean(req.headers.authorization);
         const token = bearer(req) ?? cookie(req, roomCookieName);
-        const webAuth = store.authenticate(token, undefined, expectedBinding(req), { allowAccountSession: false });
-        // Owner + full members only. The guest gate uses the #798 code and
-        // copy (isWebFetchGuest covers ga1. guest-agents and human
-        // share-link guests with role === "guest"). There is no drafts-only
-        // member tier in the room data model, so every other active member
-        // qualifies; the choice is documented in the PR.
-        if (!webAuth.member?.id) reject(401, "unauthenticated", "Member credential required");
-        if (isWebFetchGuest(webAuth.member)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
-        protectWrite(req, webAuth, isBearer);
-        rate(`write:${webAuth.credentialHash}`, 60);
+        const auth = store.authenticate(token, undefined, expectedBinding(req), { allowAccountSession: false });
+        if (!auth.member?.id) reject(401, "unauthenticated", "Member credential required");
+        if (isWebFetchGuest(auth.member)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
+        protectWrite(req, auth, isBearer);
+        rate(`write:${auth.credentialHash}`, 60);
         const data = await body(req);
         try {
-          return json(res, 200, await store.webFetch.fetch(webAuth.roomId, webAuth.member.id, data, { credentialHash: webAuth.credentialHash }));
+          return json(res, 200, await run(auth, data));
         } catch (error) {
-          // Quota-exceeded is a typed 429 with retry info, never a 500.
-          // Every typed failure carries its request_id for journal correlation.
           if (error instanceof WebFetchError) {
             const payload = { error: { code: error.code, message: error.message }, request_id: error.requestId ?? null };
             if (error.code === "rate_limited") {
@@ -2778,37 +2777,21 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           }
           throw error;
         }
+      };
+      // POST /api/web/fetch. The room comes from the credential itself —
+      // room Bearer <redacted> (access keys and room sessions) carry their room_id.
+      // Documented in docs/openapi.yaml like every other route literal here.
+      // `return await` (not bare `return`): the helper is async, and the
+      // auth rejects below must land in the listener's try/catch as
+      // ServiceError JSON, not as unhandled promise rejections.
+      if (url.pathname === "/api/web/fetch") {
+        return await serveWebRoute((auth, data) => store.webFetch.fetch(auth.roomId, auth.member.id, data, { credentialHash: auth.credentialHash }));
       }
-      // Room-side knowledge router (RC-2026-09-24-310): POST /api/web/research.
-      // An agent asks a question; the room plans which sources to consult (its own
-      // fetch memory, local docs corpus, explicit URLs, env-configured provider)
-      // and returns evidence with provenance receipts. Same auth posture as
-      // /api/web/fetch: owner + full members, #798 guest gate. Planning
-      // (planOnly) is free; execution bills research quota, and fetch-leg URLs
-      // additionally bill web-fetch quota (credit semantics, Alexandria-style).
+      // POST /api/web/research. Planning (planOnly) is free; execution
+      // bills research quota, and fetch-leg URLs additionally bill
+      // web-fetch quota (credit semantics, Alexandria-style).
       if (url.pathname === "/api/web/research") {
-        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
-        const researchIsBearer = Boolean(req.headers.authorization);
-        const researchToken = bearer(req) ?? cookie(req, roomCookieName);
-        const researchAuth = store.authenticate(researchToken, undefined, expectedBinding(req), { allowAccountSession: false });
-        if (!researchAuth.member?.id) reject(401, "unauthenticated", "Member credential required");
-        if (isWebFetchGuest(researchAuth.member)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
-        protectWrite(req, researchAuth, researchIsBearer);
-        rate(`write:${researchAuth.credentialHash}`, 60);
-        const researchData = await body(req);
-        try {
-          return json(res, 200, await store.webResearch.research(researchAuth.roomId, researchAuth.member.id, researchData, { credentialHash: researchAuth.credentialHash }));
-        } catch (error) {
-          if (error instanceof WebFetchError) {
-            const payload = { error: { code: error.code, message: error.message }, request_id: error.requestId ?? null };
-            if (error.code === "rate_limited") {
-              res.setHeader("Retry-After", String(Math.max(1, Math.ceil(error.retryAfterMs / 1000))));
-              return json(res, 429, { ...payload, retryAfterMs: error.retryAfterMs, resetAt: error.resetAt });
-            }
-            return json(res, error.status, payload);
-          }
-          throw error;
-        }
+        return await serveWebRoute((auth, data) => store.webResearch.research(auth.roomId, auth.member.id, data, { credentialHash: auth.credentialHash }));
       }
       // Synchronous claim-block validation (RC-2026-09-24-204):
       // POST /api/claims/validate. Agents validate the ```room-claim block
