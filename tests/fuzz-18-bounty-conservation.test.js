@@ -37,6 +37,12 @@ import {
   MILLIS_PER_CREDIT,
   DISPUTE_BOND_RATIO,
 } from "../server/bounty-escrow.mjs";
+import { REASON_CODES } from "../server/bounty-disputes.mjs";
+
+// Dispute-machine outcomes (server/bounty-disputes.mjs OUTCOMES). The escrow
+// settlement maps upheld->cancel, split->split, everything else->release.
+const VALID_OUTCOMES = ["upheld", "rejected", "split", "frivolous"];
+const validReasonCodes = () => [pick(REASON_CODES)];
 
 const SEED = Number(process.env.FUZZ_SEED ?? 20261008);
 console.log(`[fuzz-18] bounty-escrow conservation fuzz seed=${SEED}`);
@@ -67,8 +73,28 @@ const AWARD_KINDS = ["escrow-lock", "attribute", "approve", "payout", "refund", 
 function freshFixture() {
   const db = new DatabaseSync(":memory:");
   db.exec(bountyEscrowSchema);
-  const t = fn => fn();
-  const store = { db, transaction: t, readTransaction: t };
+  // Real, depth-counted transactions: nested store.transaction calls
+  // (e.g. ensureGenesis inside fundBounty) must not BEGIN twice, and a
+  // throwing op must roll back its partial journal writes — otherwise every
+  // mid-transaction throw looks like a conservation break (harness artifact).
+  let depth = 0;
+  const transaction = fn => {
+    if (depth > 0) return fn();
+    depth++;
+    db.exec("BEGIN");
+    try {
+      const out = fn();
+      db.exec("COMMIT");
+      return out;
+    } catch (e) {
+      db.exec("ROLLBACK");
+      throw e;
+    } finally {
+      depth--;
+    }
+  };
+  const readTransaction = fn => fn();
+  const store = { db, transaction, readTransaction };
   let nowMs = BASE_MS;
   const escrow = new BountyEscrow(store, { now: () => nowMs, allowLegacyStringLanes: true });
   escrow.ensureGenesis(ROOM);
@@ -129,7 +155,7 @@ function validCitations(b) {
 // valid for its current state (15% hostile role/arg). Drives deep chains:
 // post -> fund -> claim -> submit -> accept -> dispute -> decide,
 // plus keeper timeouts and epoch sweeps.
-function genValidOp(fx, bounties) {
+function genValidOp(fx, bounties, hot) {
   const { escrow } = fx;
   const live = bounties.filter(b => !b.dead);
   if (!live.length) return null;
@@ -192,26 +218,26 @@ function genValidOp(fx, bounties) {
     }
     case "submitted": {
       const r = rng();
-      if (r < 0.4) {
+      if (r < 0.35) {
         const acceptor = hostile ? lane()
           : b.approvalMode === "agent" ? (b.verifier ?? b.poster) : b.poster;
         const citations = hostile && rng() < 0.5 ? [{ criterionId: "nope", verdict: "pass" }] : validCitations(b);
         return mk("accept", { acceptor },
           () => escrow.acceptWork(ROOM, id, { acceptor, verifierAttestation: { at: new Date(fx.nowMs).toISOString(), citations, note: "ok" } }));
       }
-      if (r < 0.55) {
+      if (r < 0.5) {
         const rejector = hostile ? lane() : b.poster;
         return mk("reject", { rejector },
           () => escrow.rejectWork(ROOM, id, { rejector, reason: "bad work " + ((rng() * 1e6) | 0) }));
       }
-      if (r < 0.75) return genDisputeOp(fx, b, hostile);
+      if (r < 0.8) return genDisputeOp(fx, b, hostile, hot);
       advancePast(fx, b.deadlineMs); // keeper: submitted-but-unverified settles at zero
       const args = rng() < 0.5 ? { caller: lane() } : {};
       return mk("finalize", args, () => escrow.finalizeBounty(ROOM, id, args),
         res => { stats.finalize[res.action] = (stats.finalize[res.action] ?? 0) + 1; refreshBounty(fx, b); });
     }
     case "accepted": {
-      if (rng() < 0.5) return genDisputeOp(fx, b, hostile);
+      if (rng() < 0.6) return genDisputeOp(fx, b, hostile, hot);
       advancePast(fx, b.challengeEndsMs); // keeper auto-approve
       const args = rng() < 0.5 ? { caller: lane() } : {};
       return mk("finalize", args, () => escrow.finalizeBounty(ROOM, id, args),
@@ -221,10 +247,12 @@ function genValidOp(fx, bounties) {
       const r = rng();
       if (r < 0.7) {
         const decider = hostile ? lane() : (b.verifier ?? lane());
-        const outcome = hostile && rng() < 0.4
-          ? pick(["bogus", undefined, "timeout-default"])
-          : pick(["upheld", "split", "release"]);
-        const args = { decider, outcome, reasonCodes: ["rc1"] };
+        const badOutcome = hostile && rng() < 0.4;
+        const outcome = badOutcome
+          ? pick(["bogus", undefined, "timeout-default", "release"]) // "release" is NOT a machine outcome
+          : pick(VALID_OUTCOMES);
+        const reasonCodes = badOutcome && rng() < 0.5 ? pick([["bogus"], ["rc1"], []]) : validReasonCodes();
+        const args = { decider, outcome, reasonCodes };
         return mk("decide", { decider, outcome }, () => escrow.decideDispute(ROOM, id, args),
           res => { stats.decideOk[res.resolution?.kind] = (stats.decideOk[res.resolution?.kind] ?? 0) + 1; refreshBounty(fx, b); });
       }
@@ -243,7 +271,7 @@ function genValidOp(fx, bounties) {
   }
 }
 
-function genDisputeOp(fx, b, hostile) {
+function genDisputeOp(fx, b, hostile, hot) {
   const { escrow } = fx;
   const id = b.id;
   const challenger = hostile ? (rng() < 0.5 ? b.claimant : lane()) : maybeLane([b.claimant].filter(Boolean));
@@ -252,7 +280,34 @@ function genDisputeOp(fx, b, hostile) {
     : pick([Math.floor(b.amountMillis * DISPUTE_BOND_RATIO) / MILLIS_PER_CREDIT, 0, -1]);
   const grounds = hostile && rng() < 0.3 ? "" : "grounds " + ((rng() * 1e6) | 0);
   return { name: "dispute", args: { bountyId: id, challenger, bond },
-    run: () => escrow.disputeBounty(ROOM, id, { challenger, bond, grounds }) };
+    run: () => escrow.disputeBounty(ROOM, id, { challenger, bond, grounds }),
+    onOk: () => { stats.disputes = (stats.disputes ?? 0) + 1; if (hot && !hot.includes(b)) hot.push(b); } };
+}
+
+// Follow-up decide on a hot (freshly disputed) bounty — drives the
+// dispute -> decision settlement path that random walks rarely reach.
+function genHotDecideOp(fx, hot) {
+  const { escrow } = fx;
+  const b = refreshBounty(fx, pick(hot));
+  if (b.dead || b.state !== "disputed") {
+    hot.splice(hot.indexOf(b), 1);
+    return null;
+  }
+  const id = b.id;
+  const hostile = rng() < 0.2;
+  const decider = hostile ? lane() : (b.verifier ?? lane());
+  const outcome = hostile && rng() < 0.4
+    ? pick(["bogus", undefined, "release"])
+    : pick(VALID_OUTCOMES);
+  const reasonCodes = hostile && rng() < 0.4 ? pick([[["bogus"]], []]) : validReasonCodes();
+  const args = { decider, outcome, reasonCodes };
+  return { name: "decide", args: { bountyId: id, decider, outcome, hot: true },
+    run: () => escrow.decideDispute(ROOM, id, args),
+    onOk: res => {
+      stats.decideOk[res.resolution?.kind] = (stats.decideOk[res.resolution?.kind] ?? 0) + 1;
+      hot.splice(hot.indexOf(b), 1);
+      refreshBounty(fx, b);
+    } };
 }
 
 // Fully hostile soup: wrong states, wrong roles, invalid shapes, unknown ids.
@@ -266,7 +321,7 @@ function genHostileOp(fx, bounties, b = null) {
   if (r < 0.36) { const c = lane(); return { name: "submit", args: { bountyId: id, claimant: c }, run: () => escrow.submitWork(ROOM, id, { claimant: c, evidence: validEvidence() }) }; }
   if (r < 0.46) { const a = lane(); return { name: "accept", args: { bountyId: id, acceptor: a }, run: () => escrow.acceptWork(ROOM, id, { acceptor: a, verifierAttestation: { at: new Date(fx.nowMs).toISOString(), citations: [{ criterionId: "c1", verdict: "pass" }], note: "x" } }) }; }
   if (r < 0.54) { const ch = lane(); return { name: "dispute", args: { bountyId: id, challenger: ch }, run: () => escrow.disputeBounty(ROOM, id, { challenger: ch, bond: 1, grounds: "g" }) }; }
-  if (r < 0.62) { const d = lane(); return { name: "decide", args: { bountyId: id, decider: d }, run: () => escrow.decideDispute(ROOM, id, { decider: d, outcome: pick(["upheld", "split", "release"]), reasonCodes: ["rc"] }) }; }
+  if (r < 0.62) { const d = lane(); const o = rng() < 0.7 ? pick(VALID_OUTCOMES) : pick(["bogus", "release"]); return { name: "decide", args: { bountyId: id, decider: d, outcome: o }, run: () => escrow.decideDispute(ROOM, id, { decider: d, outcome: o, reasonCodes: validReasonCodes() }) }; }
   if (r < 0.70) { const args = rng() < 0.5 ? { caller: lane() } : {}; return { name: "finalize", args: { bountyId: id }, run: () => escrow.finalizeBounty(ROOM, id, args) }; }
   if (r < 0.76) { const args = rng() < 0.5 ? { caller: lane() } : {}; return { name: "epoch", args, run: () => escrow.closeEpoch(ROOM, args) }; }
   if (r < 0.88) {
@@ -274,8 +329,9 @@ function genHostileOp(fx, bounties, b = null) {
     let to = lane();
     const tr = rng();
     if (tr < 0.1) to = from;
-    else if (tr < 0.2) to = "pool";
-    else if (tr < 0.3) to = "id:agent/outsider";
+    else if (tr < 0.16) to = from.replace("id:agent/", "id:agent:"); // canonicalization-aliased self
+    else if (tr < 0.24) to = "pool";
+    else if (tr < 0.32) to = "id:agent/outsider";
     const amount = pickAmount();
     return { name: "transfer", args: { from, to, amount }, run: () => escrow.transfer(ROOM, { from, to, amount }) };
   }
@@ -306,12 +362,13 @@ function genPostOp(fx, bounties) {
     onOk: res => bounties.push(refreshBounty(fx, { id: res.bounty.bountyId })) };
 }
 
-// Build one random op: ~12% fresh post, ~58% state-driven (deep chains),
-// ~30% hostile soup.
-function genOp(fx, bounties) {
+// Build one random op: ~10% fresh post, ~25% hot dispute follow-up,
+// ~45% state-driven (deep chains), ~20% hostile soup.
+function genOp(fx, bounties, hot) {
   const r = rng();
-  if (r < 0.12 || !bounties.some(b => !b.dead)) return genPostOp(fx, bounties);
-  if (r < 0.70) return genValidOp(fx, bounties) ?? genHostileOp(fx, bounties);
+  if (r < 0.10 || !bounties.some(b => !b.dead)) return genPostOp(fx, bounties);
+  if (r < 0.35 && hot.length) return genHotDecideOp(fx, hot) ?? genHostileOp(fx, bounties);
+  if (r < 0.80) return genValidOp(fx, bounties, hot) ?? genHostileOp(fx, bounties);
   return genHostileOp(fx, bounties);
 }
 
@@ -359,22 +416,31 @@ function checkSequenceDeep(fx, genesisTotal, seq, log) {
 
 const SEQUENCES = Number(process.env.FUZZ_SEQUENCES ?? 10_000);
 
-const stats = { decideOk: {}, finalize: {}, epochs: 0, paid: 0 };
+const stats = { decideOk: {}, finalize: {}, epochs: 0, paid: 0, errSample: [] };
 
 test("fuzz-18: random bounty-escrow sequences conserve money", () => {
   let ops = 0, throws = 0;
-  const t0 = Date.now();
   for (let seq = 0; seq < SEQUENCES; seq++) {
     const fx = freshFixture();
     const { db, escrow } = fx;
     const genesisTotal = db
       .prepare("SELECT COALESCE(SUM(amount),0) AS t FROM bounty_journal WHERE kind='genesis'").get().t;
     const bounties = [];
+    const hot = []; // freshly disputed bounties awaiting a decide follow-up
     const log = [];
-    const nOps = 6 + ((rng() * 14) | 0);
+    const nOps = 10 + ((rng() * 16) | 0);
     for (let i = 0; i < nOps; i++) {
-      if (rng() < 0.30) fx.advance((rng() * 14 * DAY) | 0); // hostile clock jumps
-      const op = genOp(fx, bounties);
+      if (rng() < 0.25) fx.advance((rng() * 14 * DAY) | 0); // hostile clock jumps
+      let op = genOp(fx, bounties, hot);
+      // 15%: wrap the op in idemExecute with a key drawn from a tiny pool —
+      // forces idempotency-key collisions/replays across ops and callers.
+      if (rng() < 0.15 && op.name !== "post-hostile") {
+        const inner = op, key = pick(["ik1", "ik2", "ik3", "ik4", "ik5"]), callerLane = lane();
+        op = { name: inner.name + "+idem", args: { ...inner.args, idemKey: key, callerLane },
+          run: () => escrow.idemExecute(ROOM, key, "fuzz/" + inner.name, 200, inner.run,
+            { callerLane, bountyId: inner.args.bountyId ?? null }),
+          onOk: res => { if (!res.replayed && inner.onOk) inner.onOk(res.body); } };
+      }
       const before = journalCount(db);
       let threw = null;
       try {
@@ -383,6 +449,8 @@ test("fuzz-18: random bounty-escrow sequences conserve money", () => {
       } catch (e) {
         threw = `${e.code ?? e.name}: ${String(e.message).slice(0, 160)}`;
         throws++;
+        if ((op.name === "dispute" || op.name === "decide") && stats.errSample.length < 8)
+          stats.errSample.push(`${op.name}: ${threw}`);
       }
       ops++;
       log.push({ i, op: op.name, args: op.args, threw });
@@ -413,5 +481,6 @@ test("fuzz-18: random bounty-escrow sequences conserve money", () => {
   }
   console.log(`[fuzz-18] DONE seed=${SEED}: ${SEQUENCES} sequences, ${ops} ops, ${throws} expected throws, ` +
     `${stats.epochs} epochs, ${stats.paid} payouts — zero conservation violations`);
-  console.log(`[fuzz-18] path coverage: decide outcomes=${JSON.stringify(stats.decideOk)} finalize actions=${JSON.stringify(stats.finalize)}`);
+  console.log(`[fuzz-18] path coverage: decide outcomes=${JSON.stringify(stats.decideOk)} finalize actions=${JSON.stringify(stats.finalize)} disputes raised=${stats.disputes ?? 0}`);
+  if (stats.errSample.length) console.log(`[fuzz-18] dispute/decide error sample: ${JSON.stringify(stats.errSample, null, 1)}`);
 });
