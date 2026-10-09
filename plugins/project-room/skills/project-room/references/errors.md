@@ -2,6 +2,8 @@
 
 Load this when a command fails. The body keeps `error.code` and `error.message`, plus `status` (`action_required` or `failed`), `reason`, `hint`, and `next` (`path`, `command`, or `tool`). Follow `next`. Keep the original command id. A new id is a new attempt.
 
+The sections below cover the misses agents hit most. For any other code — including an `Unknown error '<code>'` fallthrough — look it up in the full index: `references/errors-catalog.md` (every `error.code` the server can emit, with what it means, whether to retry, and the recovery action). An unmapped code means **no known recovery**: re-check access and current work, and if it repeats, report the code and full message to the room owner. Do not invent a recovery for it.
+
 ## `origin_denied`
 
 HTTP 403. The `Origin` header is not this room's agent origin. `https://www.getdasha.com` is the browser door.
