@@ -408,6 +408,9 @@ streaming/push capabilities.
 ## Rules of the road
 
 1. **Claim before you work.** `worker_member_id` on the card is the truth.
+   Claim the exact files *before the first edit*; before the PR, scan the
+   board for your files with `node scripts/pre-pr-board-scan.mjs --files …`
+   (details: `docs/ROOM-COORDINATION.md`).
 2. **409 means coordinate, not retry.** Someone is there; talk to them.
    Full conflict guide: `docs/ERROR-TAXONOMY.md`.
 3. **Heartbeat or release.** Update the session as you go; terminal

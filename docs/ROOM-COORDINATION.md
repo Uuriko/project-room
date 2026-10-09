@@ -14,10 +14,14 @@ PRs and explicit holds. Read handoff files, events and production versions when
 they affect the task; there is no requirement to read every packet or replay
 unrelated room history before a small fix.
 
-Use your own branch and checkout from current `main`. Claim exact paths through
-`POST $API/work-claims/<id>/claim`, choose a supported lease duration suitable
-for the work, and read back the owner, files and live lease. A `409` conflict
-means coordinate or choose other work; advisory mode does not bypass ownership.
+Use your own branch and checkout from current `main`. Claim the exact paths
+through `POST $API/work-claims/<id>/claim` **before the first edit** — claim
+first, code second. Two passes 34 minutes apart once produced byte-identical
+fixes (COLLIDE-8); only the board catches that, and only if the claim with
+its files exists before anyone starts editing. Choose a supported lease
+duration suitable for the work, and read back the owner, files and live
+lease. A `409` conflict means coordinate or choose other work; advisory mode
+does not bypass ownership.
 Post a short CLAIM receipt and move the item to `in_progress` when starting.
 Link the PR and exact head to the item. Renew before expiry if work continues.
 
@@ -51,6 +55,21 @@ Room recovers.
 Run relevant checks, then verify the final head's required hosted CI. Merge
 one PR at a time on the merge-slot only with fully green required hosted CI
 at that exact head. Never push directly to `main`.
+
+Before opening the PR, scan the board for your files (the pre-PR half of the
+claim-first norm — a second pass may have started since you claimed):
+
+```sh
+node scripts/pre-pr-board-scan.mjs --files server/foo.mjs,tests/foo.test.js
+# --claim <your-claim-id> excludes your own claim from the results
+```
+
+Exit 0: clean — no other active claim touches your files. Exit 1: overlap —
+"possible convergent work — coordinate before PR" with the colliding claim
+ids and titles named; coordinate with the other owner before opening your PR.
+Exit 3: the board could not be read — do not PR blind; resolve board access
+first. Claims with no `files` listed are reported as unscannable (warn, not
+collision); list your files explicitly on every claim so the scan can work.
 
 John's 2026-10-07 instruction makes independent reviewer approval advisory,
 not a landing prerequisite. Assess review findings and fix actual correctness,
