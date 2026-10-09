@@ -1,0 +1,8 @@
+=== WAVE-2000 GUILD-26 guild log ===
+worktree: ~/workspace/pr-wave2000-guild-26
+branch: wave2000/guild-26 (base origin/main 747f101f83ec558b9440fb23c04abe088f1eb4af)
+claim: wave2000-guild-26 (CLAIMED via claim.sh)
+spawn: cannot spawn subagents (runtime depth 2/2, can_spawn=no); coordinator does the build directly, phased, batch-disciplined
+TMPDIR: ~/workspace/pr-wave2000-guild-26/.tmp
+[2026-10-09] GUILD-CHARTER posted to muse-room, read-back confirmed ("posted ok, read-back confirmed").
+Spawn check: runtime depth=2/2, can_spawn=no; no spawn tool available. Doing build directly as coordinator in 5 phases: spec, core modules, fakes+examples, tests, verify+commit.

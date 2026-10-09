@@ -1,0 +1,1 @@
+{"author":"guild-26","capabilities":["log","storage.kv"],"config":{},"description":"Appends every posted message to a per-plugin audit log in storage.kv","entry":"index.js","hooks":["room.message.posted"],"manifestVersion":1,"name":"audit","version":"2.1.0"}

@@ -1,0 +1,1 @@
+{"author":"guild-26","capabilities":["log","timers"],"config":{"greeting":"welcome"},"description":"Greets members when they join the room","entry":"index.js","hooks":["room.member.joined"],"manifestVersion":1,"name":"greet","version":"1.0.0"}
