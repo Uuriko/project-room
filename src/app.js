@@ -2321,6 +2321,12 @@ function renderMessages() {
   // they are not arrivals.
   let windowStart = timelineWindowStart(view, allMessages);
   let messages = windowStart ? allMessages.slice(windowStart) : allMessages;
+  // The "New messages" divider rides on the first unread message; keep it in the
+  // DOM when the unread run is modest (a larger run keeps the 150-row window).
+  const horizonIndex = horizonAnchorId ? allMessages.findIndex(m => m.id === horizonAnchorId) : -1;
+  if (horizonIndex > 0 && horizonIndex < windowStart && allMessages.length - horizonIndex <= 3 * TIMELINE_WINDOW) {
+    windowStart = horizonIndex; messages = allMessages.slice(windowStart);
+  }
   const firstKnown = sameView ? messages.findIndex(m => previous.has(`message:${m.id}`)) : -1;
   const newMessages = sameView ? messages.filter((m, i) => !previous.has(`message:${m.id}`) && (firstKnown < 0 || i > firstKnown)) : [];
   // Arrivals grow the window so retained rows stay put; a reader at the bottom
