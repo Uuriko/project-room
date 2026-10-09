@@ -94,7 +94,7 @@ test("formatFailureComment without failure names falls back to the log pointer",
 });
 
 test("formatFailureComment omits the deliberate fail-probe fixture and keeps real failures", async () => {
-  const { formatFailureComment, FIXTURE_FAILURE_NAMES, parseFailingTests } = await import("../scripts/failing-tests.mjs");
+  const { FIXTURE_FAILURE_NAMES } = await import("../scripts/failing-tests.mjs");
   assert.ok(FIXTURE_FAILURE_NAMES.has("probe fails deterministically"));
   assert.deepEqual(parseFailingTests("not ok 1 - probe fails deterministically\n"), ["probe fails deterministically"], "the parser still reports it for the runner test");
   const body = formatFailureComment({ shard: 2, total: 3, failures: ["probe fails deterministically", "real failure"], runUrl: "" });
