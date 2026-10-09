@@ -101,6 +101,7 @@ paths:
         '401': { description: Invalid or missing credential }
         '403': { description: Scope, binding or active membership denied }
         '422': { description: Invalid query, duplicate parameter or incompatible cursor }
+        '429': { description: Rate limit exceeded (rate_limited). }
   /api/github/pr-webhook:
     post:
       x-room-permission: webhook_signature
@@ -4887,12 +4888,27 @@ paths:
           description: |
             Opaque nextCursor from the previous page. Order is updatedAt
             descending, then id. Pages from one board do not overlap.
+        - name: state
+          in: query
+          schema: { type: string, enum: [unclaimed, claimed, in_progress, blocked, done, closed] }
+          description: |
+            Filter to one claim state. Cannot be combined with queue=ready.
+            Cursors bind the state filter: a cursor from a different state
+            filter is rejected.
+        - name: view
+          in: query
+          schema: { type: string, enum: [summary] }
+          description: |
+            `summary` returns the compact per-claim projection (id, title,
+            state, owner, leaseExpiresAt) instead of the full items.
       responses:
         '200':
           description: |
             One page of the room's work claims: `{ roomId, swept, claims, nextCursor, hasMore }`.
             With `queue=ready`, only unheld claims whose dependencies are done:
             `{ roomId, queue: "ready", swept, claims, nextCursor, hasMore }`.
+            With `state`, only claims in that state. With `view=summary`,
+            each claim is the compact projection.
           content:
             application/json:
               schema:
@@ -4910,7 +4926,9 @@ paths:
                   nextCursor: { type: [string, 'null'] }
                   hasMore: { type: boolean }
         '401': { description: unauthenticated }
-        '403': { description: work_claims_not_permitted (writes only; reads stay open to members) }
+        '403': { description: insufficient_scope (API key without rooms:read) or access_denied (bearer account sessions are not accepted) }
+        '422': { description: invalid_claim_input — unknown or repeated query parameter, bad limit/cursor, bad view, or state outside the claim states }
+        '429': { description: Rate limit exceeded (rate_limited). }
     post:
       summary: Register a work claim item
       description: |
@@ -4963,6 +4981,20 @@ paths:
                 pullRequest:
                   type: string
                   description: https://github.com/{owner}/{repo}/pull/{number}. A merge completes the claim; a close releases it.
+                pullRequests:
+                  type: array
+                  items: { type: string, maxLength: 300 }
+                  maxItems: 16
+                  description: Additional linked GitHub pull request URLs (canonical HTTPS, same rules as pullRequest).
+                repo:
+                  type: string
+                  description: The repository this work targets (owner/name).
+                branch:
+                  type: string
+                  description: The branch this work targets.
+                squadId:
+                  type: string
+                  description: Active squad id this work offer targets. An unknown or inactive squad is 422 squad_unknown.
                 kind:
                   type: string
                   enum: [work, land, deploy]
@@ -4985,9 +5017,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
-        '403': { description: work_claims_not_permitted }
-        '409': { description: work_claim_exists, work_board_full, or too_many_open_claims }
-        '422': { description: invalid_claim_input or work_assignee_unknown_member }
+        '403': { description: work_claims_not_permitted, insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
+        '409': { description: work_claim_exists, work_board_full, too_many_open_claims, file_lease_conflict (create-with-assignee overlapping a live lease), or room_event_budget_low }
+        '422': { description: invalid_claim_input, work_assignee_unknown_member, or squad_unknown }
+        '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/config:
     get:
       summary: Read the room's work-claim caps
@@ -4999,6 +5032,8 @@ paths:
       responses:
         '200': { description: Caps for this room }
         '401': { description: unauthenticated }
+        '403': { description: insufficient_scope (API key without rooms:read) or access_denied (bearer account sessions are not accepted) }
+        '429': { description: Rate limit exceeded (rate_limited). }
     post:
       summary: Set the per-member open claim cap
       description: |
@@ -5018,8 +5053,10 @@ paths:
                 maxMemberOpenClaims: { type: integer, minimum: 1, maximum: 10000 }
       responses:
         '200': { description: The saved caps }
-        '403': { description: work_claims_not_permitted }
+        '401': { description: unauthenticated }
+        '403': { description: work_claims_not_permitted, insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
         '422': { description: invalid_claim_input }
+        '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/status:
     get:
       summary: Live revision compared with GitHub main
@@ -5033,6 +5070,13 @@ paths:
         API keys need `rooms:read`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - name: refresh
+          in: query
+          schema: { type: string, enum: ['1'] }
+          description: |
+            `refresh=1` skips the 60s deploy-status cache and polls GitHub
+            now. Only a member with Board write access may force it; anyone
+            else reads the shared cached value.
       responses:
         '200':
           description: Live and main
@@ -5046,7 +5090,12 @@ paths:
                   main: { type: [string, 'null'] }
                   behind: { type: [integer, 'null'] }
                   checkedAt: { type: [string, 'null'], format: date-time }
+                  stale: { type: boolean, description: True while the GitHub pull-poll budget is held and the cached value is served }
+                  heldUntil: { type: [string, 'null'], format: date-time, description: When the pull-poll budget releases, when stale }
+                  eventsRemaining: { type: [integer, 'null'], description: Room event budget left before Board writes are limited to the owner and claim managers }
         '401': { description: unauthenticated }
+        '403': { description: insufficient_scope (API key without rooms:read) or access_denied (bearer account sessions are not accepted) }
+        '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/sweep:
     post:
       summary: Release expired work-claim leases
@@ -5067,7 +5116,8 @@ paths:
           application/json:
             schema:
               type: object
-              properties: {}
+              additionalProperties: false
+              description: Must be an empty object — any key is 422 invalid_claim_input.
       responses:
         '200':
           description: Sweep receipt
@@ -5089,7 +5139,10 @@ paths:
                       updated: { type: integer }
                       rateLimited: { type: boolean }
         '401': { description: unauthenticated }
+        '403': { description: work_claims_not_permitted, insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
+        '409': { description: room_event_budget_low — the room is nearly out of room events; only the owner and claim managers may write }
         '422': { description: invalid_claim_input }
+        '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/duplicates:
     get:
       summary: Find possible duplicate work claims
@@ -5134,7 +5187,9 @@ paths:
                         owner: { type: string, nullable: true }
                         score: { type: number, minimum: 0, maximum: 1 }
         '401': { description: unauthenticated }
+        '403': { description: insufficient_scope (API key without rooms:read) or access_denied (bearer account sessions are not accepted) }
         '422': { description: 'invalid_claim_input (bad q/limit) or invalid_duplicate_input' }
+        '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/retention:
     get:
       summary: First-response SLA queue and zero-reply watchdog
@@ -5223,7 +5278,8 @@ paths:
                       medianMs: { type: number, nullable: true }
                       measured: { type: integer }
         '401': { description: unauthenticated }
-        '403': { description: not_member }
+        '403': { description: not_member, insufficient_scope (API key without rooms:read), or access_denied (bearer account sessions are not accepted) }
+        '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/{claimId}:
     get:
       summary: Read one work claim
@@ -5242,7 +5298,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
+        '403': { description: insufficient_scope (API key without rooms:read) or access_denied (bearer account sessions are not accepted) }
         '404': { description: work_claim_not_found }
+        '422': { description: "invalid_claim_input — the claim id must match [A-Za-z0-9_-]{1,128}" }
+        '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/{claimId}/claim:
     post:
       summary: Claim work
@@ -5299,11 +5358,24 @@ paths:
                 pullRequest:
                   type: [string, 'null']
                   description: Links or clears the GitHub pull request URL.
+                pullRequests:
+                  type: array
+                  items: { type: string, maxLength: 300 }
+                  maxItems: 16
+                  description: Additional linked GitHub pull request URLs.
+                repo:
+                  type: string
+                  description: The repository this work targets (owner/name).
+                branch:
+                  type: string
+                  description: The branch this work targets.
       responses:
         '200':
           description: |
             The claimed item. `fileWarnings` names other live claims on the
             same files when `advisory` is true; otherwise it is empty.
+            `requiredReading` lists the repo-relative docs the claim's kind
+            asks the holder to read (advisory; acks go to /update).
           content:
             application/json:
               schema:
@@ -5324,7 +5396,12 @@ paths:
                                 properties:
                                   id: { type: string }
                                   owner: { type: [string, 'null'] }
+                      requiredReading:
+                        type: array
+                        items: { type: string }
+                        description: Advisory per-kind reading list for the claim holder
         '401': { description: unauthenticated }
+        '403': { description: work_claims_not_permitted, insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
         '404': { description: work_claim_not_found }
         '409':
           description: |
@@ -5333,8 +5410,12 @@ paths:
             hold work ..." — never release it to re-claim; a foreign claimant
             gets "held by <owner>". file_lease_conflict when declared files
             overlap a live lease. The body names holder { claimId, owner },
-            files, and leaseExpiresAt.
+            files, and leaseExpiresAt. too_many_open_claims when the caller
+            already holds the room's per-member cap. room_event_budget_low
+            when the room is nearly out of room events (owner and claim
+            managers may still write).
         '422': { description: invalid_claim_input }
+        '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/{claimId}/update:
     post:
       summary: Update claimed work or append a PR link
@@ -5398,6 +5479,7 @@ paths:
                   anyOf:
                     - required: [state]
                     - required: [note]
+                    - required: [readingAck]
                   properties:
                     state:
                       type: string
@@ -5421,6 +5503,17 @@ paths:
                       items: { type: string, pattern: '^sha256:[0-9a-f]{64}$' }
                       maxItems: 10
                       description: sha256 evidence pointers; only on the done transition
+                    readingAck:
+                      type: object
+                      required: [docs]
+                      additionalProperties: false
+                      properties:
+                        docs:
+                          type: array
+                          items: { type: string, maxLength: 256 }
+                          minItems: 1
+                          maxItems: 20
+                      description: Confirms the owner read the enrollment reading list; recorded on the claim with who and when. A malformed ack is 422.
                     parentClaimId:
                       type: string
                       pattern: '[A-Za-z0-9_-]{1,128}'
@@ -5467,11 +5560,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
-        '403': { description: work_not_owner, work_claims_not_permitted, work_review_rejected, insufficient_scope, or existing membership/autonomy refusal }
+        '403': { description: work_not_owner, work_claims_not_permitted, work_review_rejected, insufficient_scope, guest_scope_denied, or existing membership/autonomy refusal }
         '404': { description: work_claim_not_found }
         '409':
-          description: Append or preconditioned update refused with work_claim_conflict for stale basis or inactive/superseded work, claim_lease_lapsed for an expired lease, or room_archived. Read the current item before deciding whether a fresh same-round request is appropriate
+          description: Append or preconditioned update refused with work_claim_conflict for stale basis or inactive/superseded work, claim_lease_lapsed for an expired lease, room_archived, or room_event_budget_low. Read the current item before deciding whether a fresh same-round request is appropriate
         '422': { description: invalid_claim_input, including mixed append/state bodies, non-string PR input, malformed preconditions, or a seventeenth distinct URL }
+        '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/{claimId}/provenance:
     get:
       summary: Walk the claim provenance graph
@@ -5514,7 +5608,10 @@ paths:
                         owner: { type: [string, 'null'] }
                         title: { type: string }
         '401': { description: unauthenticated }
+        '403': { description: not_member, insufficient_scope (API key without rooms:read), or access_denied (bearer account sessions are not accepted) }
         '404': { description: work_claim_not_found }
+        '422': { description: "invalid_claim_input — the claim id must match [A-Za-z0-9_-]{1,128}" }
+        '429': { description: Rate limit exceeded (rate_limited). }
     head:
       operationId: "headClaimProvenance"
       summary: Provenance walk headers without the graph body
@@ -5583,9 +5680,11 @@ paths:
                     items: { type: string }
                   truncated: { type: boolean }
         '401': { description: unauthenticated }
-        '403': { description: work_not_owner — the claim's owner, the room owner, or manage_claims may declare }
+        '403': { description: work_not_owner — the claim's owner, the room owner, or manage_claims may declare; also insufficient_scope (API key without rooms:write), guest_scope_denied, not_member, or agent_readonly }
         '404': { description: work_claim_not_found }
+        '409': { description: room_event_budget_low — the room is nearly out of room events; only the owner and claim managers may write }
         '422': { description: invalid_claim_input }
+        '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/{claimId}/review:
     post:
       summary: Record a review
@@ -5634,9 +5733,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
-        '403': { description: work_review_rejected (review policy not satisfied) }
+        '403': { description: work_review_rejected (review policy not satisfied), work_claims_not_permitted (no review or attest rights), insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
         '404': { description: work_claim_not_found }
+        '409': { description: room_event_budget_low — the room is nearly out of room events; only the owner and claim managers may write }
         '422': { description: invalid_claim_input }
+        '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/{claimId}/release:
     post:
       summary: Release a work claim
@@ -5684,10 +5785,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
-        '403': { description: work_not_owner }
+        '403': { description: work_not_owner, insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
         '404': { description: work_claim_not_found }
-        '409': { description: work_claim_conflict (stale expectedClaimedAt/expectedHistoryLength — re-read and retry) }
+        '409': { description: work_claim_conflict (stale expectedClaimedAt/expectedHistoryLength — re-read and retry), or room_event_budget_low }
         '422': { description: invalid_claim_input }
+        '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/{claimId}/close:
     post:
       x-room-permission: claim_owner|owner|manage_claims
@@ -5723,10 +5825,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
-        '403': { description: work_not_owner }
+        '403': { description: work_not_owner, work_claims_not_permitted, insufficient_scope (API key without rooms:write), guest_scope_denied, not_member, or agent_readonly }
         '404': { description: work_claim_not_found }
-        '409': { description: work_claim_terminal (already done or closed) }
+        '409': { description: work_claim_terminal (already done or closed), or room_event_budget_low }
         '422': { description: invalid_claim_input }
+        '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/{claimId}/cancel:
     post:
       x-room-permission: claim_owner|owner|manage_claims
@@ -5760,10 +5863,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
-        '403': { description: work_not_owner }
+        '403': { description: work_not_owner, work_claims_not_permitted, insufficient_scope (API key without rooms:write), guest_scope_denied, not_member, or agent_readonly }
         '404': { description: work_claim_not_found }
-        '409': { description: work_claim_terminal (already done or closed) }
+        '409': { description: work_claim_terminal (already done or closed), or room_event_budget_low }
         '422': { description: invalid_claim_input }
+        '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/{claimId}/reassign:
     post:
       summary: Reassign a work claim
@@ -5797,9 +5901,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
-        '403': { description: work_not_owner }
+        '403': { description: work_not_owner, insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
         '404': { description: work_claim_not_found }
-        '422': { description: invalid_claim_input }
+        '409':
+          description: |
+            too_many_open_claims when the new owner already holds the room's
+            per-member cap. file_lease_conflict when the claim's declared
+            files overlap another live lease. room_event_budget_low when the
+            room is nearly out of room events (owner and claim managers may
+            still write).
+        '422': { description: invalid_claim_input or work_reassign_unknown_member — the new owner must be a current, active member }
+        '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/board/v2/claims:
     get:
       summary: List board claims
@@ -6480,9 +6592,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
-        '403': { description: work_not_owner }
+        '403': { description: work_not_owner, claim_renewal_source_foreign (the progress message must be the holder's own), insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
         '404': { description: work_claim_not_found }
+        '409': { description: claim_lease_lapsed — the lease already lapsed and the claim auto-released; claim it again instead of renewing. Also room_event_budget_low. }
         '422': { description: claim_renewal_source_required | claim_renewal_source_stale | invalid_claim_input }
+        '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/feedback:
     get:
       summary: List feedback clusters
