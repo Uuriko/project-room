@@ -22,6 +22,7 @@ import {
 import {
   createWork, claimWork, appendWorkPullRequest, claimHistoryLength, isLeaseExpired,
 } from "../server/work-claims.mjs";
+import { flushClaimDigestWindow } from "../server/work-claim-events.mjs";
 
 const PR1 = "https://github.com/Uuriko/project-room/pull/1500";
 const PR2 = "https://github.com/Uuriko/project-room/pull/1501";
@@ -121,9 +122,21 @@ async function roomStore(t) {
   return { store, call };
 }
 
-const claimEvents = store => store.db.prepare(
-  "SELECT body FROM events WHERE room_id=? ORDER BY sequence"
-).all("commons").map(row => JSON.parse(row.body)).filter(event => event.type === "work_claim.updated");
+const claimEvents = store => {
+  // FIX-69: routine transitions batch into work_claim.digest; flush and
+  // flatten to the action list the assertions below read.
+  flushClaimDigestWindow(store, "commons", {});
+  const rows = store.db.prepare("SELECT body FROM events WHERE room_id=? ORDER BY sequence")
+    .all("commons").map(row => JSON.parse(row.body));
+  const out = [];
+  for (const event of rows) {
+    if (event.type === "work_claim.updated") out.push(event);
+    else if (event.type === "work_claim.digest") {
+      for (const entry of event.data.digestClaims) out.push({ data: entry });
+    }
+  }
+  return out;
+};
 
 test("B2 (#1526): the cron tick sweeps lapsed leases before polling, matching the HTTP path", async t => {
   const { store, call } = await roomStore(t);

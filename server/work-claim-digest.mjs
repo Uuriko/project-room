@@ -60,10 +60,14 @@ export function takeClaimDigest(store, roomId, nowMs) {
   if (!buffer) return null;
   buffers.get(store).delete(roomId);
   const stamp = Number.isFinite(nowMs) ? nowMs : Date.now();
+  // Clock skew (an explicit nowMs behind the store clock, or the reverse)
+  // must never produce an invalid window: the window ends at the later of
+  // the flush time and the window start.
+  const endMs = Math.max(stamp, buffer.windowStart);
   const entries = [...buffer.claims.values()].slice(0, WORK_CLAIM_DIGEST_MAX_CLAIMS);
   return {
     windowStart: new Date(buffer.windowStart).toISOString(),
-    windowEnd: new Date(stamp).toISOString(),
+    windowEnd: new Date(endMs).toISOString(),
     actorId: entries.length > 0 ? entries[entries.length - 1].actorId : null,
     counts: Object.fromEntries(buffer.counts),
     claims: entries,

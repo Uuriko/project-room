@@ -5,7 +5,7 @@
 //     name, an explicit `claim:` marker, the PR title, or the PR body, with a
 //     fixed priority (marker > branch > title > body) and an ambiguity guard.
 //  2. autoLinkPullRequest — the system (no owner session) attaches a PR URL
-//     to a live claim and emits one work_claim.updated receipt.
+//     to a live claim and batches one digest entry (FIX-69).
 //  3. handlePrWebhookPayload — a verified pull_request payload auto-links an
 //     unlinked PR and settles already-linked claims, with a minimal response.
 //  4. discoverUnlinkedPulls — poll fallback: open PRs are matched to claims
@@ -43,6 +43,7 @@ import {
 } from "../server/claim-autolink.mjs";
 
 import { writeClaimPullBudget } from "../server/claim-pr-sync.mjs";
+import { flushClaimDigestWindow } from "../server/work-claim-events.mjs";
 
 const URL_A = "https://github.com/Uuriko/project-room/pull/7";
 const URL_B = "https://github.com/Uuriko/project-room/pull/8";
@@ -69,9 +70,23 @@ function makeRoom(t, roomId = "commons") {
   return { store, call, roomId };
 }
 
-const claimEvents = (store, roomId) => store.db.prepare(
-  "SELECT body FROM events WHERE room_id=? ORDER BY sequence"
-).all(roomId).map(row => JSON.parse(row.body)).filter(event => event.type === "work_claim.updated");
+const claimEvents = (store, roomId) => {
+  // FIX-69: routine transitions batch into work_claim.digest; flush the
+  // window and return a flat chronological list of claim transitions in the
+  // shape the assertions below read ({ data }).
+  flushClaimDigestWindow(store, roomId, {});
+  const rows = store.db.prepare(
+    "SELECT body FROM events WHERE room_id=? ORDER BY sequence"
+  ).all(roomId).map(row => JSON.parse(row.body));
+  const out = [];
+  for (const event of rows) {
+    if (event.type === "work_claim.updated") out.push({ data: event.data });
+    else if (event.type === "work_claim.digest") {
+      for (const entry of event.data.digestClaims) out.push({ data: entry });
+    }
+  }
+  return out;
+};
 
 async function liveClaim(make, id, extra = {}) {
   const { store, call, roomId } = make;
@@ -312,15 +327,19 @@ test("linkDeployToSettledClaims: stamped revision links back to the items it shi
   const make = makeRoom(t);
   await liveClaim(make, "lane-deploy");
   const rev = "a".repeat(40);
-  const before = claimEvents(make.store, make.roomId).length;
   // settle via merge, then stamp the required revision and close it live
   handlePrWebhookPayload(make.store,
     prPayload({ top: { action: "closed" }, pull_request: { head: { ref: "lane-deploy" }, merged: true, state: "closed" } }), {});
   let item = make.store.workClaims.get(make.roomId, "lane-deploy");
   assert.equal(item.revision, null); // normal claims carry no required revision
+  assert.equal(item.state, "done");
   const out = linkDeployToSettledClaims(make.store, { revision: rev, nowMs: 1_700_000_000_000 });
   assert.equal(out.linked, 0);
-  assert.equal(claimEvents(make.store, make.roomId).length, before + 2); // auto-link + settle events
+  // FIX-69: the digest keeps the latest transition per claim, so the
+  // auto-link and the settle collapse to one pr_merged entry.
+  const entries = claimEvents(make.store, make.roomId);
+  const lane = entries.filter(entry => entry.data.workClaim === "lane-deploy").at(-1);
+  assert.equal(lane.data.action, "pr_merged");
 });
 
 test("linkDeployToSettledClaims: land-kind items with a matching revision get the deploy link", async t => {
@@ -331,16 +350,16 @@ test("linkDeployToSettledClaims: land-kind items with a matching revision get th
   // merge recording the revision and the deploy closing it
   const item0 = make.store.workClaims.get(make.roomId, "lane-land");
   make.store.workClaims.set(make.roomId, { ...item0, state: "done", revision: rev });
-  const before = claimEvents(make.store, make.roomId).length;
   const out = linkDeployToSettledClaims(make.store, { revision: rev, nowMs: 1_700_000_000_000 });
   assert.equal(out.linked, 1);
   const item = make.store.workClaims.get(make.roomId, "lane-land");
   assert.equal(item.deploy.revision, rev);
   assert.equal(item.history.at(-1).action, "deploy_linked");
-  const events = claimEvents(make.store, make.roomId);
-  assert.equal(events.length, before + 1);
-  assert.equal(events.at(-1).data.action, "state_changed");
-  assert.equal(events.at(-1).data.reason, undefined);
+  // FIX-69: the digest keeps the latest transition per claim.
+  const entries = claimEvents(make.store, make.roomId);
+  const lane = entries.filter(entry => entry.data.workClaim === "lane-land").at(-1);
+  assert.equal(lane.data.action, "state_changed");
+  assert.equal(lane.data.reason, undefined);
   // unstamped and mismatched revisions link nothing
   assert.equal(linkDeployToSettledClaims(make.store, { revision: "unstamped" }).linked, 0);
   assert.equal(linkDeployToSettledClaims(make.store, { revision: "c".repeat(40) }).linked, 0);
