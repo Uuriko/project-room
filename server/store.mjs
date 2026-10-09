@@ -4367,17 +4367,24 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // non-targeted messages and room-level events that also carry a
       // toMemberId, like ownership transfers) are unaffected. The cursor
       // still advances past filtered events so pagination cannot stall.
+      // F1 (WAVE-300/WAVE-500): the shared SSE pump fetches once per room
+      // per tick with { includeInvisible: true } and fans out per viewer
+      // itself, so the page must carry the UNION of every stream's visible
+      // rows. The default path below is unchanged.
       const viewerId = auth.member.id;
-      const identityId = this.bonds.identityForMember(roomId, viewerId);
-      const isOwner = viewerId === authority.ownerId;
-      // PRIV-2: since_join readers page past events from before their join.
-      const floor = this.historyFloor(roomId, viewerId, sequence);
-      const floorMessages = floor ? indexHistoryMessages(this.room(roomId).state.messages) : null;
-      // SEC-19: thunk keeps the zero-decode polling optimization: the full
-      // projection only decodes if the page actually holds a follow-up event.
-      const dmVisible = dmEventVisibility(viewerId, () => this.room(roomId).state.messages, events);
-      const visible = events.filter(row => rowInHistory(row, floor, floorMessages) && dmVisible(row.event)
-        && peerEventVisible(row.event, { memberId: viewerId, identityId, isOwner }));
+      let visible = events;
+      if (!opts.includeInvisible) {
+        const identityId = this.bonds.identityForMember(roomId, viewerId);
+        const isOwner = viewerId === authority.ownerId;
+        // PRIV-2: since_join readers page past events from before their join.
+        const floor = this.historyFloor(roomId, viewerId, sequence);
+        const floorMessages = floor ? indexHistoryMessages(this.room(roomId).state.messages) : null;
+        // SEC-19: thunk keeps the zero-decode polling optimization: the full
+        // projection only decodes if the page actually holds a follow-up event.
+        const dmVisible = dmEventVisibility(viewerId, () => this.room(roomId).state.messages, events);
+        visible = events.filter(row => rowInHistory(row, floor, floorMessages) && dmVisible(row.event)
+          && peerEventVisible(row.event, { memberId: viewerId, identityId, isOwner }));
+      }
       // #658: mention chips ride on message views. One batched query for
       // the whole page (no N+1); only members who can read the room see it.
       const messageIds = visible.filter(({ event }) => event?.type === T.MESSAGE_POSTED).map(({ event }) => event.id);
