@@ -142,7 +142,7 @@ export class MachineDaemon {
     if (message.type === "pause") {
       const until = pauseUntilFromMinutes(message.minutes);
       if (until == null) return;
-      this.state.pausedUntil = until;
+      this.holdPause(until);
       await suspendGuests(this.state);
       return;
     }
@@ -150,6 +150,7 @@ export class MachineDaemon {
       this.state.halted = false;
       this.state.pausedUntil = null;
       this.config.halted = false;
+      this.config.pausedUntil = null;
       saveConfig(this.config, this.home);
       return;
     }
@@ -269,15 +270,24 @@ export class MachineDaemon {
   async pause(minutes) {
     const until = pauseUntilFromMinutes(minutes);
     if (until == null) return { pausedUntil: this.state.pausedUntil };
-    this.state.pausedUntil = until;
+    this.holdPause(until);
     await suspendGuests(this.state);
     return { pausedUntil: this.state.pausedUntil };
+  }
+
+  // Like halt, a pause is written to config so a daemon restarted by launchd
+  // (crash, reboot) mid-pause comes back paused instead of quietly resuming.
+  holdPause(until) {
+    this.state.pausedUntil = until;
+    this.config.pausedUntil = until;
+    saveConfig(this.config, this.home);
   }
 
   async resume() {
     this.state.halted = false;
     this.state.pausedUntil = null;
     this.config.halted = false;
+    this.config.pausedUntil = null;
     saveConfig(this.config, this.home);
     return { halted: false };
   }
