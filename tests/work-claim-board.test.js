@@ -125,7 +125,13 @@ test("a contribute-profile agent creates, renews, and releases a claim without w
   const renewed = await coord.renewWorkItem("coord-1", { progressMessageId: progress, leaseHours: 3 });
   assert.equal(renewed.state, "claimed");
   assert.ok(Date.parse(renewed.leaseExpiresAt) > Date.parse(claimed.leaseExpiresAt));
-  const released = await coord.releaseWorkItem("coord-1", { reason: "parked" });
+  const released = await (async () => {
+    // E5/D4 (QA-200 2026-10-08): /release binds the claim round the client read.
+    const held = await coord.workClaimGet("coord-1");
+    return coord.releaseWorkItem("coord-1", { reason: "parked",
+      expectedClaimedAt: held.claimedAt,
+      expectedHistoryLength: held.history.length + (held.historyOmitted ?? 0) });
+  })();
   assert.equal(released.state, "unclaimed");
   assert.equal(released.owner, null);
   const refused = await call(coordKey, "/work-claims", { id: "chat-cannot" });
