@@ -43,10 +43,13 @@ async function fixture(t) {
   const origin = `http://127.0.0.1:${server.address().port}`;
   const owner = new RoomAgentClient({ origin, roomId: "commons", token: ownerKey });
   const call = async (method, path, token, body) => {
+    // FIX-45: files is required on claim creation — declare [] explicitly.
+    const sent = method === "POST" && path === "/api/rooms/commons/work-claims" && body !== undefined
+      && !("files" in Object(body)) ? { files: [], ...body } : body;
     const response = await fetch(`${origin}${path}`, {
       method,
       headers: { authorization: `Bearer ${token}`, ...(body === undefined ? {} : { "content-type": "application/json" }) },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) })
+      ...(body === undefined ? {} : { body: JSON.stringify(sent) })
     });
     return { status: response.status, value: await response.json() };
   };
@@ -80,7 +83,7 @@ test("five matching creates inside ten minutes are one ready_work wake; the next
   assert.equal(set.status, 200);
   assert.deepEqual(set.value.wantsWork, { labels: ["docs"], capabilities: [] });
   for (let index = 0; index < 5; index += 1) {
-    await owner.workClaimCreate({ id: `docs-${index}`, title: `Docs ${index}`, tags: ["docs"] });
+    await owner.workClaimCreate({ id: `docs-${index}`, title: `Docs ${index}`, tags: ["docs"], files: [] }); // FIX-45
     advance(60 * 1000);
   }
   const first = await readyWakes(agent);
@@ -91,7 +94,7 @@ test("five matching creates inside ten minutes are one ready_work wake; the next
   assert.equal(state.value.foldedSinceWake, 4);
   assert.equal(typeof state.value.lastWakeAt, "string");
   advance(TEN_MINUTES);
-  await owner.workClaimCreate({ id: "docs-late", title: "Docs late", tags: ["docs"] });
+  await owner.workClaimCreate({ id: "docs-late", title: "Docs late", tags: ["docs"], files: [] }); // FIX-45
   const second = (await readyWakes(agent)).map(wake => wake.workClaim);
   assert.deepEqual(second.sort(), ["docs-0", "docs-late"].sort());
   assert.equal((await readWants(agent)).value.foldedSinceWake, 0);
@@ -103,7 +106,7 @@ test("default off, a filter that does not match, and an assigned create send no 
   const landOnly = await enroll("Land Agent");
   assert.equal((await wants(landOnly, { capabilities: ["land"] })).status, 200);
   assert.deepEqual((await readWants(silent)).value, { roomId: "commons", memberId: silent.memberId, wantsWork: null, lastWakeAt: null, foldedSinceWake: 0 });
-  await owner.workClaimCreate({ id: "plain", title: "Plain work" });
+  await owner.workClaimCreate({ id: "plain", title: "Plain work", files: [] }); // FIX-45
   assert.equal((await call("POST", "/api/rooms/commons/work-claims", ownerKey, { id: "for-quiet", title: "Assigned", kind: "land", assignee: silent.memberId })).status, 201);
   assert.equal((await readyWakes(silent)).length, 0);
   assert.equal((await readyWakes(landOnly)).length, 0);
@@ -118,7 +121,7 @@ test("a release wakes other opted-in agents, not the agent that released it", as
   const holder = await enroll("Holder Agent");
   const watcher = await enroll("Watcher Agent");
   assert.equal((await wants(holder, {})).status, 200);
-  await owner.workClaimCreate({ id: "lane-r", title: "Lane R", assignee: holder.memberId });
+  await owner.workClaimCreate({ id: "lane-r", title: "Lane R", assignee: holder.memberId, files: [] }); // FIX-45
   assert.equal((await wants(watcher, {})).status, 200);
   await holder.client.releaseWorkItem("lane-r", { reason: "handing back", ...roundOf(await holder.client.workClaimGet("lane-r")) });
   assert.deepEqual((await readyWakes(watcher)).map(wake => wake.workClaim), ["lane-r"]);
@@ -130,7 +133,7 @@ test("a paused agent gets no ready_work wake and its window does not start", asy
   const agent = await enroll("Paused Agent");
   assert.equal((await wants(agent, {})).status, 200);
   store.wakeQueue.pause(ownerKey, "commons", { requestId: randomUUID(), reason: "away" }, null, { memberId: agent.memberId });
-  await owner.workClaimCreate({ id: "while-paused", title: "While paused" });
+  await owner.workClaimCreate({ id: "while-paused", title: "While paused", files: [] }); // FIX-45
   assert.equal((await readyWakes(agent)).length, 0);
   assert.equal((await readWants(agent)).value.lastWakeAt, null);
 });
@@ -150,7 +153,7 @@ test("only agents opt in, input is validated, and DELETE turns it off", async t 
   const cleared = await call("DELETE", "/api/rooms/commons/members/me/wants-work", agent.key);
   assert.equal(cleared.status, 200);
   assert.equal(cleared.value.wantsWork, null);
-  await owner.workClaimCreate({ id: "after-off", title: "After off", tags: ["docs"] });
+  await owner.workClaimCreate({ id: "after-off", title: "After off", tags: ["docs"], files: [] }); // FIX-45
   assert.equal((await readyWakes(agent)).length, 0);
 });
 

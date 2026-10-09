@@ -313,8 +313,8 @@ async function boardHttpFixture(t) {
 // discarded by callTool or JSON-RPC success manufactured after an HTTP refusal.
 test("stdio Board reads forward canonical selections through the real SDK and HTTP route", async t => {
   const { client, requests } = await boardHttpFixture(t);
-  for (const id of ["a-ready", "b-ready", "held"]) await client.workClaimCreate({ id, title: id });
-  const held = await client.claimWorkItem("held", { leaseHours: 2 });
+  for (const id of ["a-ready", "b-ready", "held"]) await client.workClaimCreate({ id, title: id, files: [] }); // FIX-45
+  const held = await client.claimWorkItem("held", { leaseHours: 2, files: [] }); // FIX-45
   const h = harness(t, client, { memberId: "owner" });
   await h.ready();
   const definition = (await h.rpc("tools/list")).result.tools.find(tool => tool.name === "room_read_board");

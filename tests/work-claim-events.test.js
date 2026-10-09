@@ -112,7 +112,7 @@ test('the full event log, claim events included, replays from an empty room', as
 test('a blank title is refused before any claim or event is recorded', async t => {
   const { owner } = await fixture(t);
   // Q3-A: a title that is empty once whitespace is removed is invalid input.
-  await assert.rejects(owner.workClaimCreate({ id: 'blank-title', title: '   ' }),
+  await assert.rejects(owner.workClaimCreate({ id: 'blank-title', title: '   ', files: [] }), // FIX-45
     error => error.status === 422 && error.code === 'invalid_claim_input' && /title/.test(error.message));
   assert.equal((await claimEvents(owner)).length, 0);
 });
@@ -121,7 +121,7 @@ test('an archived room still records a claim and appends no event', async t => {
   const { owner } = await fixture(t);
   // Archive with the owner's own key. Issuing a second key would revoke it.
   await owner.command({ id: 'archive-room', type: 'room.archived', data: { reason: 'pilot over' } });
-  const created = await owner.workClaimCreate({ id: 'after-archive', title: 'Still recorded' });
+  const created = await owner.workClaimCreate({ id: 'after-archive', title: 'Still recorded', files: [] }); // FIX-45
   assert.equal(created.id, 'after-archive');
   assert.equal((await claimEvents(owner)).length, 0);
 });

@@ -134,7 +134,7 @@ test('done closes a claimed or blocked item by moving it through in progress', a
   assert.equal(started.state, 'done');
   assert.equal(started.history.some(entry => entry.note === 'started to close'), false);
 
-  await owner.workClaimCreate({ id: 'needs-review', reviewPolicy: 'distinct_member' });
+  await owner.workClaimCreate({ id: 'needs-review', reviewPolicy: 'distinct_member', files: [] }); // FIX-45
   await claimAndVerify(owner, 'needs-review', { memberId: 'owner', leaseHours: 1 });
   await assert.rejects(closeClaim(owner, 'needs-review', { memberId: 'owner', note: 'shipped' }),
     error => error instanceof CoordError && error.code === 'work_review_rejected');
@@ -199,7 +199,7 @@ test('status shows live, mine, expiring and overlapping claims plus the land que
         : { title: 'Room coordination verbs', merged: false, merge_commit_sha: null, mergeable: true, mergeable_state: 'clean', head: { sha: PR_SHA } }) }) });
   await claimAndVerify(owner, 'short', { memberId: 'owner', files: ['server'], leaseHours: 1 });
   await claimAndVerify(peer, 'long', { memberId: 'reviewer', files: ['server/x.mjs'], leaseHours: 8, allowOverlap: true });
-  await owner.workClaimCreate({ id: 'waiting' });
+  await owner.workClaimCreate({ id: 'waiting', files: [] }); // FIX-45
   const queued = await land(lander, { repo: 'acme/demo', prNumber: 7 });
   assert.deepEqual([queued.item.repo, queued.item.prNumber, queued.duplicate], ['acme/demo', 7, false]);
 

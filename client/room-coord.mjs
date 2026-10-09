@@ -243,7 +243,10 @@ export async function claimAndVerify(client, id, { memberId, title, files, lease
     const conflicts = await conflictsFor(client, declared, { memberId, claimId, now: at, signal });
     if (conflicts.length) throw new CoordError("claim_conflict", "Another member holds a live claim on these files", { conflicts });
   }
-  await callRoom(() => client.workClaim(claimId, { title, files: wanted, leaseHours, note, tags, signal }));
+  // FIX-45: the create route requires a files declaration. Carry the resolved
+  // declaration (the item's files, or [] for a new item) so a create lands
+  // declared; allowOverlap keeps the old omit-and-inherit claim behavior.
+  await callRoom(() => client.workClaim(claimId, { title, files: wanted ?? (allowOverlap ? undefined : declared), leaseHours, note, tags, signal }));
   const claim = verifyClaim(await callRoom(() => client.workClaimGet(claimId, { signal })), { memberId, now: at });
   // The pre-check can lose a race: both members read a clear board, then both
   // write. Read the board again after the room confirms this claim, and

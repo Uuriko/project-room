@@ -203,7 +203,7 @@ test("CI state changes are stored, receipted, and wake the owner on failure", as
     id: "ci-1", pullRequest: "https://github.com/acme/demo/pull/7"
   });
   assert.equal(created.status, 201);
-  const claimed = await call(coordKey, "/work-claims/ci-1/claim", {});
+  const claimed = await call(coordKey, "/work-claims/ci-1/claim", { files: [] }); // FIX-45
   assert.equal(claimed.status, 200);
   const pending = await call(coordKey, "/work-claims/sweep", {});
   assert.equal(pending.status, 200);
@@ -234,7 +234,7 @@ test("CI state changes are stored, receipted, and wake the owner on failure", as
 test("review records refuse the owner and a chat agent, and a changes request wakes the owner", async t => {
   const { call, ownerKey, coordKey, chatKey, store } = await fixture(t);
   assert.equal((await call(ownerKey, "/work-claims", { id: "rev-1", title: "Review me" })).status, 201);
-  assert.equal((await call(ownerKey, "/work-claims/rev-1/claim", {})).status, 200);
+  assert.equal((await call(ownerKey, "/work-claims/rev-1/claim", { files: [] })).status, 200); // FIX-45
   const ownerReview = await call(ownerKey, "/work-claims/rev-1/review", { verdict: "approve", summary: "ship it" });
   assert.equal(ownerReview.status, 403);
   assert.equal(ownerReview.value.error.code, "work_review_rejected");
@@ -321,7 +321,7 @@ test("human verify permits review without granting Board writes, and self-attest
   assert.equal((await f.call(f.ownerKey, "/work-claims", { id: "open-for-claim" })).status, 201);
   for (const [path, body] of [
     ["/work-claims", { id: "verifier-cannot-create" }],
-    ["/work-claims/open-for-claim/claim", {}],
+    ["/work-claims/open-for-claim/claim", { files: [] }], // FIX-45
   ]) {
     const denied = await f.call(f.verifierKey, path, body);
     assert.equal(denied.status, 403);
@@ -528,9 +528,9 @@ test("reassign honors the room's per-member open-claim cap", async t => {
   const f = await fixture(t);
   await f.call(f.ownerKey, "/work-claims/config", { maxMemberOpenClaims: 1 });
   assert.equal((await f.call(f.coordKey, "/work-claims", { id: "reassign-cap-1" })).status, 201);
-  assert.equal((await f.call(f.coordKey, "/work-claims/reassign-cap-1/claim", {})).status, 200);
+  assert.equal((await f.call(f.coordKey, "/work-claims/reassign-cap-1/claim", { files: [] })).status, 200); // FIX-45
   assert.equal((await f.call(f.ownerKey, "/work-claims", { id: "reassign-cap-2" })).status, 201);
-  assert.equal((await f.call(f.ownerKey, "/work-claims/reassign-cap-2/claim", {})).status, 200);
+  assert.equal((await f.call(f.ownerKey, "/work-claims/reassign-cap-2/claim", { files: [] })).status, 200); // FIX-45
   const sequence = f.store.room("commons").sequence;
   const result = await f.call(f.ownerKey, "/work-claims/reassign-cap-2/reassign", { newOwner: "coord" });
   assert.equal(result.status, 409);
