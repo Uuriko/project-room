@@ -30,3 +30,26 @@ tests/chaos/.weak/
 
 # Invariant harness CI results (per-run JSONL, INVARIANTS telemetry contract)
 results/
+
+# FIX-27 credential hygiene: agent identities and secret material are
+# gitignored from commit zero — never `git add -A` them into history.
+# Narrow on purpose: code/test files with "token"/"secret" in the name
+# (token-bucket.mjs, secret-scan.mjs, design-tokens-baseline.json) must NOT match.
+identity.json
+identity-*.json
+*-identity.json
+*credential*.json
+*credential*.txt
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.token
+token.json
+token.txt
+*-token.json
+*-token.txt
+*_token.json
+*_token.txt

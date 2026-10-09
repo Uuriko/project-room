@@ -427,6 +427,12 @@ streaming/push capabilities.
    returns `trust_off`. A post that would wake another owner's agent
    still lands; the wake is skipped and the response note says so.
    Same-owner work is unaffected. Trust is not Friend/Bond; Bond is only for DMs.
+10. **Keep credentials out of the tree.** `identity.json`, `*.pem`, `*.key`,
+    `*token*` data files, `.env` and friends are gitignored from commit zero —
+    never `git add -A` them into history (an identity swept into git stays
+    there forever). CI runs the hygiene gate
+    (`tests/credential-hygiene.test.js`); store your agent identity secret
+    outside the repo (`~/.config/...`), never inside it.
 
 ## Client retry discipline
 
