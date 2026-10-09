@@ -396,6 +396,29 @@ const readingAcksOf = value => {
   }
   return Object.freeze(out);
 };
+// PRODUCT-200 A4 (QA-200 AQ-HI-06): opt-in idempotency keys for updates. A
+// requestId that already landed on the claim replays the stored outcome
+// instead of appending another history entry — retry must not duplicate.
+// The map rides on the work item so it survives the durable registry
+// round-trip (restart/deploy); it is capped at MAX_REQUEST_OUTCOMES
+// entries, oldest first.
+export const MAX_REQUEST_OUTCOMES = 256;
+const REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+export const requestIdOf = value => {
+  check(typeof value === "string" && REQUEST_ID_PATTERN.test(value),
+    "requestId must be 1..128 characters [A-Za-z0-9_-]");
+  return value;
+};
+const requestOutcomesOf = value => {
+  if (value === undefined || value === null) return null;
+  check(typeof value === "object" && !Array.isArray(value), "requestOutcomes must be an object");
+  const kept = Object.entries(value)
+    .filter(([key, at]) => REQUEST_ID_PATTERN.test(key)
+      && typeof at === "string" && Number.isFinite(Date.parse(at)));
+  // String-key insertion order is oldest-first: drop the oldest beyond the cap.
+  return Object.freeze(Object.fromEntries(kept.slice(Math.max(0, kept.length - MAX_REQUEST_OUTCOMES))));
+};
+const recordRequestOutcome = (current, key, at) => requestOutcomesOf({ ...(current ?? {}), [key]: at });
 const workOf = value => {
   check(value !== null && typeof value === "object" && !Array.isArray(value), "work must be an object");
   check(typeof value.id === "string" && value.id.length > 0 && value.id.length <= 256, "work id must be 1..256 characters");
@@ -428,9 +451,11 @@ const workOf = value => {
   if (kind === "deploy") check(revision, "a deploy claim needs a revision");
   const historyOmitted = historyOmittedOf(value.historyOmitted);
   const readingAcks = readingAcksOf(value.readingAcks);
+  const requestOutcomes = requestOutcomesOf(value.requestOutcomes);
   return { id: value.id, title: value.title ?? value.id, state: value.state ?? "unclaimed",
     owner: value.owner ?? null, history: Array.isArray(value.history) ? value.history : [],
     readingAcks,
+    ...(requestOutcomes !== null ? { requestOutcomes } : {}),
     ...(historyOmitted > 0 ? { historyOmitted } : {}),
     claimedAt: value.claimedAt ?? null, leaseStartAt: value.leaseStartAt ?? null, leaseExpiresAt: value.leaseExpiresAt ?? null,
     deliveryMode: value.deliveryMode ?? null, reviewPolicy: value.reviewPolicy ?? null,
@@ -703,8 +728,13 @@ export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClai
 // four are recorded on the item and then frozen with the done state. tags
 // and blobs are only meaningful on the done transition and are refused
 // anywhere else.
-export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, now, authority = false } = {}) {
+export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, requestId, now, authority = false } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  // PRODUCT-200 A4 (QA-200 AQ-HI-06): idempotent retry. A requestId that
+  // already landed on this claim replays the stored outcome — the update
+  // applied exactly once, so the identical retry appends nothing.
+  const key = requestId === undefined ? undefined : requestIdOf(requestId);
+  if (key !== undefined && Object.hasOwn(item.requestOutcomes ?? {}, key)) return item;
   check(authority === true || item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can update it`);
   check(!isTerminalClaimState(item.state), `work "${item.id}" is ${item.state} and immutable`);
   if (state !== undefined) {
@@ -757,7 +787,9 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     tags: state === "done" && tags != null ? tagsOf(tags) : item.tags,
     blobs: state === "done" && blobs != null ? blobsOf(blobs) : item.blobs,
     ...withProvenance };
-  return withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note);
+  return key === undefined ? withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note)
+    : Object.freeze({ ...withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note),
+      requestOutcomes: recordRequestOutcome(item.requestOutcomes, key, isoOf(atMs)) });
 }
 // Release a claim, bound to the claim round the caller read (E5/D4, QA-200
 // 2026-10-08): expectedClaimedAt + expectedHistoryLength must match the
