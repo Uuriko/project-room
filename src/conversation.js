@@ -562,3 +562,18 @@ export class DraftRecovery {
     } catch { this.clear(); return null; }
   }
 }
+
+// Timeline windowing: a room with thousands of messages renders only its
+// newest `limit` root messages; the pager widens the window a page at a time.
+export const TIMELINE_WINDOW = 200;
+export function windowTimeline(messages, limit = TIMELINE_WINDOW) {
+  const hidden = Math.max(0, messages.length - limit);
+  return { messages: hidden ? messages.slice(hidden) : messages, hidden };
+}
+// The window size that renders message `id`, never smaller than `current`.
+export function windowToInclude(messages, id, current = TIMELINE_WINDOW, page = TIMELINE_WINDOW) {
+  const index = messages.findIndex(message => message.id === id);
+  if (index < 0) return current;
+  const needed = messages.length - index;
+  return needed > current ? Math.ceil(needed / page) * page : current;
+}
