@@ -904,6 +904,15 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (!shape(raw, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch", "kind", "revision", "assignee", "squadId"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?, kind?, revision?, assignee?, squadId?}");
     requireWriter();
     requireEventBudget();
+    // FIX-45 (COLLIDE-9): a claim that declares no files gets no file-lease
+    // collision protection, and the failure was silent (both sides 200/201).
+    // files is required on creation: absent or null is a 422 naming the
+    // requirement. An explicit [] is a deliberate "touches no files"
+    // declaration — visible, not silent — and stays allowed.
+    if (raw.files === undefined || raw.files === null) {
+      reject(422, "work_claim_files_required",
+        "files is required when creating a work claim: declare the exact repo-relative files the work will touch so the file-lease collision system can protect them. Pass files: [] only when the work truly touches no files.");
+    }
     const id = claimIdOf(reject, raw.id);
     const data = clientPullRequestInput(reject, boardTextFields(reject, raw, { title: {}, note: { multiline: true } }));
     assertDependsOnKnown(reject, data, { selfId: id, has: other => registry.has(roomId, other) });
@@ -973,6 +982,14 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (!shape(data, { optional: ["note", "leaseHours", "files", "advisory", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch"] })) invalidInput(reject, "{note?, leaseHours?, files?, advisory?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?}");
     if ("advisory" in data && typeof data.advisory !== "boolean") invalidInput(reject, "advisory true or false");
     const item = load(claimIdOf(reject, workClaimId));
+    // FIX-45 (COLLIDE-9): claiming a file-less item without declaring files
+    // was a silent 200 with no file-lease protection. When neither the claim
+    // request nor the item declares any files, refuse loudly. An item that
+    // already declares files is claimed without re-declaring (inherited).
+    if ((data.files === undefined || data.files === null) && (item.files ?? []).length === 0) {
+      reject(422, "work_claim_files_required",
+        `work "${item.id}" declares no files: pass files (the exact repo-relative files this claim will touch) to claim it, or files: [] when it touches none. Without declared files the claim gets no file-lease collision protection.`);
+    }
     // H4 (QA-200 2026-10-08): a failed claim's 409 must name the real recovery.
     // The old "release it first" advice destroyed your own claim on self
     // re-claim and was unactionable for a foreign holder (non-owners cannot
