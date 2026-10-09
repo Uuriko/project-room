@@ -418,6 +418,33 @@ const recoveryRevision = "a".repeat(40);
 const recoveryAllocation = id => ({ versions: [{ version_id: id, percentage: 100 }] });
 const previousWorker = schema => ({ known: true, versionId: recoveryOld, sourceRevision: recoveryRevision, codeSchemaVersion: schema });
 
+test("failed allocation subprocess exposes bounded API diagnostics without credentials and prevents snapshot", async t => {
+  const directory = tempDir(t, "recovery-command-");
+  const executable = join(directory, "pnpm");
+  writeFileSync(executable, `#!/usr/bin/env node
+process.stdout.write('allocation request account=' + process.env.CLOUDFLARE_ACCOUNT_ID + '\\n');
+process.stderr.write('Cloudflare API error 10000: Authentication error\\nBearer ' + process.env.CLOUDFLARE_API_TOKEN + '\\n' + 'x'.repeat(20000) + '\\nrequest trace: fixture-trace\\n');
+process.exit(17);
+`, { mode: 0o755 });
+  const cwd = fileURLToPath(new URL("..", import.meta.url));
+  const { stdout: revision } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd });
+  const snapshot = join(directory, "pre-deploy.json");
+  await assert.rejects(execFileAsync(process.execPath, ["scripts/deploy-recovery.mjs", "snapshot", snapshot], {
+    cwd, env: { ...process.env, PATH: `${directory}:${process.env.PATH}`, SHA: revision.trim(),
+      CLOUDFLARE_API_TOKEN: "fixture-sensitive-token", CLOUDFLARE_ACCOUNT_ID: "fixture-sensitive-account" }
+  }), error => {
+    assert.equal(error.code, 1);
+    assert.match(error.stderr, /wrangler deployments status --env production --json/);
+    assert.match(error.stderr, /failed \(17\)/);
+    assert.match(error.stderr, /Cloudflare API error 10000: Authentication error/);
+    assert.match(error.stderr, /fixture-trace/);
+    assert.doesNotMatch(error.stderr, /fixture-sensitive-token|fixture-sensitive-account/);
+    assert.ok(error.stderr.length < 12000, "subprocess diagnostics must be bounded");
+    return true;
+  });
+  assert.throws(() => readFileSync(snapshot), { code: "ENOENT" });
+});
+
 test("rollback schema gate rejects lower and unknown schemas without executing old code", async () => {
   for (const previous of [previousWorker(37), previousWorker(null), { ...previousWorker(38), known: false }, { ...previousWorker(38), sourceRevision: "unstamped" }]) {
     let calls = 0;
