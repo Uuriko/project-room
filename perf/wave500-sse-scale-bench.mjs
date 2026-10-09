@@ -30,6 +30,7 @@
 // Run (from the repo root):
 //   TMPDIR=~/workspace/pr-wave500-w1-scale/.tmp node perf/wave500-sse-scale-bench.mjs \
 //     --streams 100 --seconds 10 --runs 3 --out perf/wave500-sse-scale-results.jsonl
+//   Resume an interrupted series: --runs 2 --runBase 1  (emits runs 2..3)
 //
 // Label: SIM. Measurement only — implements nothing.
 import { monitorEventLoopDelay } from "node:perf_hooks";
@@ -51,6 +52,7 @@ for (let i = 0; i < rawArgs.length; i++) {
 const STREAMS = Number(args.streams ?? 100);
 const SECONDS = Number(args.seconds ?? 10);
 const RUNS = Number(args.runs ?? 3);
+const RUN_BASE = Number(args.runBase ?? 0); // resume offset: run numbers are RUN_BASE+1 .. RUN_BASE+RUNS
 const INTERVAL = Number(args.interval ?? 250);
 // Adaptive preload: every stream must still be pumping FULL 100-row pages
 // when the measurement window ends. Catch-up needs PRELOAD/100 ticks;
@@ -248,7 +250,7 @@ async function runOnce(runIdx, store) {
 const store = fakeStore();
 for (let r = 0; r < RUNS; r++) {
   if (r > 0) await sleep(SETTLE_MS);
-  const result = await runOnce(r, store);
+  const result = await runOnce(RUN_BASE + r, store);
   const line = JSON.stringify(result);
   console.log(line);
   if (OUT) appendFileSync(OUT, line + "\n"); // flush per run: restart-safe
