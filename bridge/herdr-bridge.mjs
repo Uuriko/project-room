@@ -16,14 +16,10 @@
  *   BRIDGE_AUDIT_LOG           default /var/log/herdr-bridge/audit.jsonl
  *   BRIDGE_PORT                default 8443
  *   BRIDGE_BIND                default 127.0.0.1
- *   BRIDGE_ALLOW_SYSTEMCTL     "1" to let the bridge bounce herdr@<tenant>
- *                              units via the scoped sudoers rule (default off)
  */
 import { createBridge, BRIDGE_VERSION } from './lib/bridge.mjs';
 
-const bridge = createBridge({
-  allowSystemctl: process.env.BRIDGE_ALLOW_SYSTEMCTL === '1',
-});
+const bridge = createBridge();
 
 process.on('SIGTERM', () => bridge.stop().then(() => process.exit(0)));
 process.on('SIGINT', () => bridge.stop().then(() => process.exit(0)));
