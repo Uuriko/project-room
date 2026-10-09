@@ -24,6 +24,7 @@ import { nextActionsForInviteRedeem } from "./discoverability.mjs";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { agentAccessProfiles } from "./agent-connections.mjs";
 import { assertAdmissibleMemberName } from "./display-name-guard.mjs";
+import { ROOM_TOKEN_CANNOT_JOIN, isRoomToken } from "./agent-api-keys.mjs";
 import { connectFields, starterFor } from "./routes/agent-connect.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
@@ -267,6 +268,7 @@ export class AgentInvites {
   // idempotency convention). Without a requestId the legacy behavior is
   // unchanged.
   redeem(code, { displayName, identitySecret = null, requestId = null } = {}) {
+    if (isRoomToken(identitySecret)) fail(401, "room_token_not_identity", ROOM_TOKEN_CANNOT_JOIN);
     const existingIdentity = identitySecret === null ? null : this.store.identities.resolveGlobalIdentitySecret(identitySecret);
     if (identitySecret !== null && !existingIdentity) fail(401, "unauthenticated", "Active identity credential required");
     if (requestId !== null && !validId(requestId)) fail(422, "invalid_invite", "Send a valid request id for retry-safe redemption.");
