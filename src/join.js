@@ -85,7 +85,7 @@ export function joinErrorMessage({ status, code, action = "join" } = {}) {
   const again = "Check your connection and try again.";
   // M-03: the join POST's own timeout (status 0, like a network failure)
   // names what happened — the room answered the preview, the redeem stalled.
-  if (code === "join_timeout") return { title: "The join timed out", message: "Check your connection and try again.", retry: true };
+  if (code === "join_timeout") return { title: uiText("join.timedOut"), message: again, retry: true };
   if (status === 0) return { title: "Couldn't reach the room", message: again, retry: true };
   switch (code) {
     case "invite_unavailable":
@@ -166,7 +166,7 @@ export function codeEntryHref(code, locationLike = globalThis.location) {
   if (!JOIN_CODE_PATTERN.test(upper)) return null;
   const origin = String(locationLike?.origin ?? "").replace(/\/$/, "");
   const door = String(locationLike?.pathname ?? "").startsWith("/room/") ? "/room" : "";
-  return `${origin}${door}/join/${upper}`;
+  return [origin, door, "/join/", upper].join("");
 }
 
 function show(section) {
@@ -272,7 +272,7 @@ async function boot() {
       const statusEl = $("join-code-status");
       const href = codeEntryHref(input?.value);
       if (!href) {
-        if (statusEl) { statusEl.textContent = "That doesn't look like an invite code — codes look like RM-XXXX."; statusEl.classList.add("visible"); }
+        if (statusEl) { statusEl.textContent = uiText("join.codeEntry.invalid"); statusEl.classList.add("visible"); }
         input?.focus();
         return;
       }
