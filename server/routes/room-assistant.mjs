@@ -27,7 +27,6 @@ export async function roomAssistantRoute(ctx) {
   ctx.rate(`read:${auth.credentialHash}`,600);
   if(write) ctx.rate(`write:${auth.credentialHash}`,60);
   const assistant=new RoomAssistant(ctx.store);
-  const value=write ? assistant.apply(roomId,await ctx.body(ctx.req),authorize) : assistant.list(roomId,authorize);
-  return ctx.json(ctx.res,200,value,ctx.req.method==='HEAD');
+  return ctx.json(ctx.res,200,write?assistant.apply(roomId,await ctx.body(ctx.req),authorize):assistant.list(roomId,authorize),ctx.req.method==='HEAD');
 }
 export const ROOM_ASSISTANT_ROUTES=Object.freeze(['GET','HEAD','POST'].map(method=>Object.freeze({id:`room-assistant-${method.toLowerCase()}`,method,path:'/api/rooms/{roomId}/assistant',auth:'room',capability:null,scope:'room',handler:roomAssistantRoute,schema:{params,...(method==='POST'?{body}:{}),response:{type:'object'}},events:[]})));

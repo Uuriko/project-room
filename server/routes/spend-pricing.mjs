@@ -12,14 +12,12 @@ function context(ctx) {
 
 export function getSpendPricing(ctx) {
   const { roomId, selected, fence } = context(ctx);
-  const result = readSpendPricing(ctx.store, selected.token, roomId, fence);
-  return ctx.json(ctx.res, 200, result);
+  return ctx.json(ctx.res, 200, readSpendPricing(ctx.store, selected.token, roomId, fence));
 }
 
 export async function setSpendPricingRoute(ctx) {
   const { roomId, selected, fence } = context(ctx);
-  const request = await ctx.body(ctx.req);
-  const result = setSpendPricing(ctx.store, selected.token, roomId, request, fence);
+  const result = setSpendPricing(ctx.store, selected.token, roomId, await ctx.body(ctx.req), fence);
   return ctx.json(ctx.res, result.duplicate ? 200 : 201, result);
 }
 
@@ -41,14 +39,15 @@ const pricingBody = Object.freeze({
 
 const response = Object.freeze({ type: "object" });
 
+// Local row builder: same frozen shape/keys as the hand-written rows; keeps the table one row per line.
+const row=(id,method,path,handler,schema)=>Object.freeze({id,method,path,auth:"room",capability:null,scope:"room",handler,schema,events:[]});
+
 export const SPEND_PRICING_ROUTES = Object.freeze([
   // capability is null like every other route row: the dispatcher never reads
   // it, and the real gate is the owner check inside setSpendPricing. A
   // non-null value here would imply an enforcement that does not exist.
-  Object.freeze({ id: "get-spend-pricing", method: "GET", path: "/api/rooms/{roomId}/spend-pricing",
-    auth: "room", capability: null, scope: "room", handler: getSpendPricing,
-    schema: { params: roomIdParam, response }, events: [] }),
-  Object.freeze({ id: "set-spend-pricing", method: "POST", path: "/api/rooms/{roomId}/spend-pricing",
-    auth: "room", capability: null, scope: "room", handler: setSpendPricingRoute,
-    schema: { params: roomIdParam, body: pricingBody, response }, events: [] }),
+  row("get-spend-pricing", "GET", "/api/rooms/{roomId}/spend-pricing", getSpendPricing,
+    { params: roomIdParam, response }),
+  row("set-spend-pricing", "POST", "/api/rooms/{roomId}/spend-pricing", setSpendPricingRoute,
+    { params: roomIdParam, body: pricingBody, response }),
 ]);

@@ -40,9 +40,8 @@ function unknownSchemaTypes(schema, out) {
     const types = Array.isArray(schema.type) ? schema.type : [schema.type];
     for (const t of types) if (!KNOWN_SCHEMA_TYPES.has(t)) out.push(t);
   }
-  if (schema.properties && typeof schema.properties === "object") {
+  if (schema.properties && typeof schema.properties === "object")
     for (const key of Object.keys(schema.properties)) unknownSchemaTypes(schema.properties[key], out);
-  }
   if (schema.items) unknownSchemaTypes(schema.items, out);
   return out;
 }
