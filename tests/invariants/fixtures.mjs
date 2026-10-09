@@ -101,6 +101,22 @@ export function completeWork(f, workItemId, { actor = f.keys.owner, summary = "I
   });
 }
 
+// Renew a claim's lease (T.CLAIM_RENEWED). Defaults are well-formed; pass
+// overrides to exercise validation failures. Returns the receipt on
+// success, or throws the refusal on failure.
+export function renewClaim(f, workItemId, { actor = f.keys.owner, overrides = {} } = {}) {
+  return f.store.command(actor, ROOM, {
+    id: randomUUID(),
+    type: T.CLAIM_RENEWED,
+    data: {
+      workItemId,
+      expectedRevision: workItemRevision(f, actor, workItemId),
+      expiresAt: new Date(Date.now() + 7200000).toISOString(),
+      ...overrides,
+    },
+  });
+}
+
 // Read a work item's current state.
 export function workItemState(f, actor, workItemId) {
   return f.store.snapshot(actor, ROOM).state.workItems[workItemId];
