@@ -30,6 +30,14 @@ function roomLike(registry, roomId) {
   return { workClaims: typeof registry.rawConfig === "function" ? registry.rawConfig(roomId) : {} };
 }
 
+const roomConfig = (registry, roomId) => typeof registry.configFor === "function"
+  ? registry.configFor(roomId)
+  : roomWorkClaimConfig(roomLike(registry, roomId));
+
+const withChainLink = (source, link) => ({
+  ...source, chain: Object.freeze([...(source.chain ?? []), link].slice(-20))
+});
+
 function commit(store, roomId, actorId, item, action, nowMs) {
   store.workClaims.set(roomId, item);
   emitWorkClaimEvent(store, roomId, { actorId, item, action, atMs: nowMs });
@@ -47,9 +55,7 @@ function claimBoard(store, roomId, actorId, id, data, nowMs) {
   };
   let item = registry.get(roomId, id);
   if (!item) {
-    const config = typeof registry.configFor === "function"
-      ? registry.configFor(roomId)
-      : roomWorkClaimConfig(roomLike(registry, roomId));
+    const config = roomConfig(registry, roomId);
     const open = registry.list(roomId).filter(entry => entry.state !== "done" && entry.state !== "closed").length;
     if (open >= config.maxOpenClaims) {
       const error = new Error(`This room already has ${config.maxOpenClaims} open claims. Close stale claims (close or cancel) before opening another.`);
@@ -65,9 +71,7 @@ function claimBoard(store, roomId, actorId, id, data, nowMs) {
   }
   if (item.state !== "unclaimed") return item;
   const held = registry.list(roomId).filter(entry => entry.owner === actorId && ACTIVE.has(entry.state)).length;
-  const config = typeof registry.configFor === "function"
-    ? registry.configFor(roomId)
-    : roomWorkClaimConfig(roomLike(registry, roomId));
+  const config = roomConfig(registry, roomId);
   if (held >= config.maxMemberOpenClaims) {
     const error = new Error(`You already hold ${config.maxMemberOpenClaims} open claims. Release or finish one before claiming another.`);
     error.status = 409;
@@ -80,7 +84,8 @@ function claimBoard(store, roomId, actorId, id, data, nowMs) {
 
 function successor(store, roomId, actorId, sourceId, nextId, title, nowMs) {
   const registry = store.workClaims;
-  if (registry.get(roomId, nextId)) return registry.get(roomId, nextId);
+  const existing = registry.get(roomId, nextId);
+  if (existing) return existing;
   const created = createWork({
     id: nextId, title: title || nextId, dependsOn: [sourceId], workItemId: nextId
   }, { now: nowMs, agentId: actorId });
@@ -113,12 +118,10 @@ export function mirrorProjectionClaim(store, roomId, actorId, incoming) {
     }), "released", nowMs);
   }
   if (incoming.type === "work.handoff_recorded") {
-    claimBoard(store, roomId, actorId, id, data, nowMs);
+    const source = claimBoard(store, roomId, actorId, id, data, nowMs);
     const nextId = boardClaimId(`${data.workItemId}-next`);
-    const source = registry.get(roomId, id);
     const link = { kind: "handoff", targetId: nextId, at: incoming.at, actorId, note: data.nextAction ?? null };
-    const chained = { ...source, chain: Object.freeze([...(source.chain ?? []), link].slice(-20)) };
-    commit(store, roomId, actorId, chained, "state_changed", nowMs);
+    commit(store, roomId, actorId, withChainLink(source, link), "state_changed", nowMs);
     return successor(store, roomId, actorId, id, nextId, data.nextAction, nowMs);
   }
   if (incoming.type === "work.superseded") {
@@ -126,11 +129,7 @@ export function mirrorProjectionClaim(store, roomId, actorId, incoming) {
     let source = registry.get(roomId, id);
     if (!source) source = commit(store, roomId, actorId, createWork({ id, title: data.workItemId, workItemId: data.workItemId }, { now: nowMs, agentId: actorId }), "created", nowMs);
     const link = { kind: "supersede", targetId: nextId, at: incoming.at, actorId, note: data.reason ?? null };
-    commit(store, roomId, actorId, {
-      ...source,
-      supersededBy: nextId,
-      chain: Object.freeze([...(source.chain ?? []), link].slice(-20))
-    }, "state_changed", nowMs);
+    commit(store, roomId, actorId, { ...withChainLink(source, link), supersededBy: nextId }, "state_changed", nowMs);
     return successor(store, roomId, actorId, id, nextId, data.supersededByWorkItemId, nowMs);
   }
   return null;

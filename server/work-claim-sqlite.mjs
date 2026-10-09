@@ -84,11 +84,12 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
   return {
     transaction,
     verifySchema({ allowAbsent = false } = {}) {
-      const normalize = sql => sql?.trim().replace(/;$/, "").replace(/IF NOT EXISTS /g, "").replace(/\s+/g, " ");
-      const definitions = workClaimSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean);
-      const shapes = definitions.map(sql => ({ sql, actual: db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(/CREATE TABLE IF NOT EXISTS ([a-z_]+)/.exec(sql)[1])?.sql }));
-      if (allowAbsent && shapes.every(shape => shape.actual === undefined)) return false;
-      if (shapes.some(shape => normalize(shape.sql) !== normalize(shape.actual))) throw new Error("Work-claim schema requires operator reconciliation");
+      const clean = sql => sql?.trim().replace(/;$/, "").replace(/IF NOT EXISTS /g, "").replace(/\s+/g, " ");
+      const tableOf = sql => /CREATE TABLE IF NOT EXISTS ([a-z_]+)/.exec(sql)[1];
+      const shapes = workClaimSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean)
+        .map(sql => [clean(sql), clean(db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(tableOf(sql))?.sql)]);
+      if (allowAbsent && shapes.every(([, actual]) => actual === undefined)) return false;
+      if (shapes.some(([expected, actual]) => expected !== actual)) throw new Error("Work-claim schema requires operator reconciliation");
       return true;
     },
     get(roomId, id) {
