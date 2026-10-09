@@ -115,6 +115,8 @@ lost after commit → user retries → second identity + second personal room`,
 with the first secret shown once and effectively orphaned. This matches B3's
 finding for `/api/agent-identities` (server rejects client keys).
 
+> **Server side now available:** a keyless `/join` accepts `recoverable: true` with the caller's own `pri_` secret as the bearer; a retry with the same secret returns the same identity and room (`duplicate: true`). The join page still needs to send it.
+
 **Fix for B11:** server-side: accept `requestId` on `POST /join` (relax
 `exact()`), keyed replay on identity-mint. Client-side: mint one `requestId`
 per join-page session in `src/join.js` and send it; keep the retry button
