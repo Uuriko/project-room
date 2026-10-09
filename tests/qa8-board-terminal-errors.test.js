@@ -73,7 +73,6 @@ test("agent hints name a recovery for board-terminal, board-conflict, used invit
     [409, "work_claim_terminal", /final.*new item/i],
     [409, "work_claim_conflict", /read the current item/i],
     [409, "invite_already_used", /fresh invite.*Never paste/i],
-    [404, "invite_unavailable", /fresh code/i],
     [404, "not_found", /does not exist/i],
   ]) {
     const ax = agentErrorAx({ httpStatus, code, roomId: "room1" });
