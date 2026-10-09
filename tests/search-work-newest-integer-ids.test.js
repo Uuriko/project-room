@@ -26,6 +26,11 @@ function fixture() {
 }
 
 function propose(store, ownerKey, workItemId) {
+  // createdAt has millisecond resolution, and the search orders by it (ties fall
+  // back to object key order, which is numeric for integer-like ids). Without a
+  // clock tick between proposals a fast machine stamps all three identically and
+  // the order under test is not defined.
+  const tick = Date.now(); while (Date.now() === tick);
   store.command(ownerKey, "commons", {
     id: randomUUID(),
     type: T.WORK_PROPOSED,
