@@ -19,6 +19,13 @@ export const ABUSE_RATE_FAMILIES = Object.freeze(new Set([
   "magic-consume",
   "passkey-auth-finish",
   "password-signup",
+  // Open identity-mint and admission doors (unauthenticated by design):
+  // identity-create 30/min per address (docs/history/AGENT-IDENTITIES.md),
+  // access-request 20/min per address, join 20/min per address (the one-URL
+  // machine door that mints an identity + first room). FIX-62.
+  "identity-create",
+  "access-request",
+  "join",
   "invite-redeem",
   "referral-invite-mint",
   "referral-invite-redeem",
