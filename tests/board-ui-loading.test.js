@@ -76,3 +76,10 @@ test("boardHtml default (no flags) keeps the existing empty-board behavior", () 
   const html = boardHtml([], null, shy, {}, NOW, { canWrite: false });
   assert.ok(html.includes("No work posted yet"), "empty copy preserved when not loading");
 });
+
+test("a failed refresh with a board already shown still says so, with retry", () => {
+  const html = boardHtml([claim("a")], null, viewer, {}, NOW, { loadError: true, canWrite: true });
+  assert.ok(html.includes("Could not load the board"));
+  assert.ok(html.includes("data-board-retry"));
+  assert.ok(html.includes('data-claim-id="a"') || html.includes("board-columns"), "stale board is kept");
+});
