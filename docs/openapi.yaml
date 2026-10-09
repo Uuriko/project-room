@@ -2510,6 +2510,7 @@ paths:
               properties:
                 displayName: { type: string, minLength: 1, maxLength: 80 }
                 inviteCode: { type: string }
+                recoverable: { type: boolean, enum: [true], description: "Keyless join only. Send your own pri_ secret as the bearer; a retry with the same secret returns the same identity and room (duplicate: true) instead of minting a second pair." }
       responses:
         '201':
           description: Identity minted (first room) or invite redeemed
