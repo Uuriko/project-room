@@ -166,7 +166,7 @@ export default {
   "human.decisionRationaleNotice": "<p class=\"form-hint\">Your reason will be posted to the room.</p>",
   "human.decisionReceiptUnknown": "Save receipt could not be confirmed",
   "human.decisionRationaleChanged": "Your reason was posted. Review the changed result before deciding.",
-  "human.cancelDeleted": "<button type=\"button\" class=\"text-button\" data-pause-run=\"{runId}\" data-cancel=\"true\" data-revision=\"{revision}\">Cancel</button>",
+  "human.stopRequest": "<button type=\"button\" class=\"text-button\" data-pause-run=\"{runId}\" data-cancel=\"true\" data-revision=\"{revision}\">Stop</button>",
   "human.deletedRequest": "Deleted request",
   "error.access_rejected": "That request was rejected. If you expected access, ask the room owner to review it.",
   "error.account_exists": "An account already exists here. Sign in instead of creating a new one.",

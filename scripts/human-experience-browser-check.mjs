@@ -180,6 +180,37 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   await peer.locator('#assistant-review').click(); await peer.locator('#assistant-retry').click();
   await peer.locator('#assistant-retry').waitFor({state:'hidden'});
   assert.equal((await api('producer')).runs.find(r=>r.id===recovery.id).inputs.length,2);
+  // Stop is available for ordinary requests, without deleting the prompt.
+  // Losing the committed response must preserve one exact cancellation for retry.
+  const ownerRun = owner.locator(`[data-assistant-run="${recovery.id}"]`);
+  const peerRun = peer.locator(`[data-assistant-run="${recovery.id}"]`);
+  await owner.locator('#assistant-activity').evaluate(n => { n.open = true; });
+  await ownerRun.getByRole('button', {name:'Stop', exact:true}).waitFor({timeout:3000});
+  assert.equal(await peerRun.getByRole('button', {name:'Stop', exact:true}).count(), 0);
+  recovery = (await api('producer')).runs.find(r => r.id === recovery.id);
+  await owner.waitForFunction(({id, revision}) => Number(document.querySelector(`[data-assistant-run="${id}"] [data-cancel]`)?.dataset.revision) === revision, {id:recovery.id, revision:recovery.revision});
+  const stops = [];
+  await owner.route('**/api/rooms/commons/assistant', async route => {
+    const payload = route.request().postDataJSON();
+    if (payload?.action !== 'cancel') { await route.continue(); return; }
+    stops.push(payload);
+    if (stops.length === 1) { await route.fetch(); await route.abort(); }
+    else await route.continue();
+  });
+  await ownerRun.getByRole('button', {name:'Stop', exact:true}).click();
+  await owner.locator('#assistant-retry').waitFor({state:'visible'});
+  recovery = (await api('producer')).runs.find(r => r.id === recovery.id);
+  assert.equal(recovery.status, 'cancel_requested');
+  await ownerRun.getByText('Stopping · waiting for confirmation', {exact:true}).waitFor();
+  assert.equal(await ownerRun.getByRole('button', {name:'Add context', exact:true}).count(), 0);
+  assert.equal(await ownerRun.getByRole('button', {name:'Stop', exact:true}).count(), 0);
+  await owner.locator('#assistant-retry').click();
+  await owner.locator('#assistant-retry').waitFor({state:'hidden'});
+  assert.equal(stops.length, 2);
+  assert.deepEqual(stops[1], stops[0]);
+  await api('producer', {action:'report', runId:recovery.id, attemptId:'recovery-host', expectedRevision:recovery.revision, state:'cancelled', summary:'Stopped.'});
+  await owner.waitForFunction(id => document.querySelector(`[data-assistant-run="${id}"]`).textContent.includes('Cancelled'), recovery.id);
+  assert.equal(await ownerRun.getByRole('button', {name:'Stop', exact:true}).count(), 0);
   // The result link returns to the exact public answer, rather than a different run.
   await peer.locator('[data-assistant-message="public-result"]').click();
   assert.equal(await peer.locator('[data-message-record-id="public-result"]').count(),1);
@@ -372,7 +403,7 @@ test('deleted assistant prompt shows only content-free stop controls and preserv
   await api('producer',{action:'report',runId:'deleted-browser-run',attemptId:'browser-host',expectedRevision:3,state:'paused',summary:'Stopped'});
   await panel.getByText('Paused',{exact:true}).waitFor();
   assert.equal(await panel.getByRole('button',{name:'Resume',exact:true}).count(),0);
-  await panel.getByRole('button',{name:'Cancel',exact:true}).click();
+  await panel.getByRole('button',{name:'Stop',exact:true}).click();
   await panel.getByText('Stopping · waiting for confirmation',{exact:true}).waitFor();
   await api('producer',{action:'report',runId:'deleted-browser-run',attemptId:'browser-host',expectedRevision:5,state:'cancelled',summary:'Cancelled'});
   await panel.getByText('Cancelled',{exact:true}).waitFor();
