@@ -4,24 +4,15 @@
 // cannot). Disposable rooms only - no real users or outside requests.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, rmSync } from "node:fs";
-import { chromium } from "playwright";
-import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
-import { createRoomServer } from "../server/http.mjs";
+import { readFileSync } from "node:fs";
+import { boot } from "./browser-harness.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 import { openSettings } from "./room-chrome.mjs";
 
 async function setup(t, { account = false } = {}) {
-  const f = createAcceptanceFixture({ managedProducer: false }), server = createRoomServer({ store: f.store, streamInterval: 40 });
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  const origin = `http://127.0.0.1:${server.address().port}`;
-  const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
-  t.after(async () => {
-    await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
-    f.store.close(); rmSync(f.directory, { recursive: true, force: true });
-  });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: "reduce", acceptDownloads: true }), errors = [], outside = [], exports = [];
-  page.setDefaultTimeout(8000); page.on("pageerror", error => errors.push(error.message));
+  const f = await boot(t, { fixture: { managedProducer: false }, streamInterval: 40, pageOptions: { acceptDownloads: true } }), { page, origin } = f;
+  const errors = [], outside = [], exports = [];
+  page.on("pageerror", error => errors.push(error.message));
   await page.route("**/*", route => {
     if (new URL(route.request().url()).origin !== origin) { outside.push(route.request().url()); return route.abort(); }
     if (/\/api\/rooms\/commons\/export/.test(route.request().url())) exports.push(route.request());

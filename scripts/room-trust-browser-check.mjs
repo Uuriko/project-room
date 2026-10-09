@@ -2,30 +2,14 @@
 // Synthetic fixture only. Trust starts on; one click turns it off; another turns it on.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
-import { chromium } from "playwright";
-import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
-import { createRoomServer } from "../server/http.mjs";
+import { boot } from "./browser-harness.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 import { openSettings } from "./room-chrome.mjs";
 import { roomTrust } from "../src/events.js";
 
 async function setup(t, viewport) {
-  const f = createAcceptanceFixture();
-  const server = createRoomServer({ store: f.store, streamInterval: 40 });
-  await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
-  const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
-  const errors = [];
-  t.after(async () => {
-    await browser.close();
-    server.closeStreams();
-    server.closeAllConnections();
-    await new Promise(resolve => server.close(resolve));
-    f.store.close();
-    rmSync(f.directory, { recursive: true, force: true });
-    assert.deepEqual(errors, []);
-  });
-  const origin = `http://127.0.0.1:${server.address().port}`;
+  const f = await boot(t, { makePage: false, streamInterval: 40 }), { browser, errors, origin } = f;
+  t.after(() => { assert.deepEqual(errors, []); });
   const open = async key => {
     const page = await browser.newPage({ viewport, reducedMotion: "reduce" });
     page.setDefaultTimeout(8000);

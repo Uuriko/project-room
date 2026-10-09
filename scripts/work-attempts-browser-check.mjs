@@ -1,29 +1,19 @@
 // Simulated human journeys against disposable first-party data, not human research.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, rmSync } from "node:fs";
-import { chromium } from "playwright";
-import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
-import { createRoomServer } from "../server/http.mjs";
+import { mkdirSync } from "node:fs";
+import { boot } from "./browser-harness.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
 
 async function setup(t) {
-  const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
-  t.after(async () => {
-    await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
-    f.store.close(); rmSync(f.directory, { recursive: true, force: true });
-  });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: "reduce" }), errors = [];
-  page.setDefaultTimeout(8000); page.on("pageerror", error => errors.push(error.message));
-  await page.goto(`http://127.0.0.1:${server.address().port}`);
+  const f = await boot(t, { streamInterval: 40 }), { page, origin } = f;
+  await page.goto(origin);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
   await signInFixture(page, f.keys.owner);
   await page.locator("#main").waitFor({ state: "visible" });
   const send = (type, data) => f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type, data });
-  return { ...f, page, errors, send };
+  return { ...f, page, errors: f.errors, send };
 }
 
 test("attempt ledger: a work card shows attributable attempts with environment and outcome", { timeout: 60000 }, async t => {

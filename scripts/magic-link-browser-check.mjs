@@ -8,25 +8,13 @@
 // tests never caught it.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
-import { chromium } from "playwright";
-import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
-import { createRoomServer } from "../server/http.mjs";
+import { boot } from "./browser-harness.mjs";
 import { createMagicLinkMailer } from "../server/magic-links.mjs";
 
 async function setup(t) {
-  const f = createAcceptanceFixture();
   const sent = [];
   const mailer = createMagicLinkMailer({ send: async payload => { sent.push(payload); }, baseUrl: null });
-  const server = createRoomServer({ store: f.store, magicLinkMailer: mailer });
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  const origin = `http://127.0.0.1:${server.address().port}`;
-  const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
-  t.after(async () => {
-    await browser.close(); server.closeStreams(); server.closeAllConnections();
-    await new Promise(resolve => server.close(resolve));
-    f.store.close(); rmSync(f.directory, { recursive: true, force: true });
-  });
+  const f = await boot(t, { makePage: false, server: { magicLinkMailer: mailer } }), { origin, browser } = f;
   // Issue a magic code the same way the UI does: boot a slot, POST request.
   const bootRes = await fetch(`${origin}/api/account-session`);
   const cookie = bootRes.headers.get("set-cookie").split(";")[0];

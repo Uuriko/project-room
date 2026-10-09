@@ -4,23 +4,15 @@
 // Regression control: baseline has no expandable preview. No production hooks.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, rmSync } from 'node:fs';
-import { chromium } from 'playwright';
-import { createAcceptanceFixture } from './acceptance-fixture.mjs';
-import { createRoomServer } from '../server/http.mjs';
+import { mkdirSync } from 'node:fs';
+import { boot } from './browser-harness.mjs';
 import { signInFixture } from './auth-signin.mjs';
 
 for (const mobile of [false, true]) test(`long message preview ${mobile ? 'mobile' : 'desktop'}: accessible expansion, complete safe text and retained reading state`, { timeout: 45000 }, async t => {
-  const f = createAcceptanceFixture();
+  const f = await boot(t, { streamInterval: 30, viewport: mobile ? { width: 390, height: 844 } : { width: 1280, height: 900 }, pageOptions: { isMobile: mobile, hasTouch: mobile }, reducedMotion: null, defaultTimeout: 7000 }), { page, errors, origin } = f;
   const body = 'A patch to review\n```diff\n' + Array.from({ length: 30 }, (_, i) => `+ line ${i}: <script>window.messageInjection = true</script>`).join('\n') + '\n```\nUNIQUE_END_OF_FULL_PATCH';
   f.store.command(f.keys.owner, 'commons', { id: 'long-patch', type: 'message.posted', data: { messageId: 'long-patch', body } });
-  const server = createRoomServer({ store: f.store, streamInterval: 30 });
-  const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
-  t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); if (server.listening) await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const page = await browser.newPage({ viewport: mobile ? { width: 390, height: 844 } : { width: 1280, height: 900 }, isMobile: mobile, hasTouch: mobile });
-  page.setDefaultTimeout(7000); const errors = []; page.on('pageerror', e => errors.push(e.message));
-  await page.goto(`http://127.0.0.1:${server.address().port}`); await signInFixture(page, f.keys.owner);
+  await page.goto(origin); await signInFixture(page, f.keys.owner);
   const message = page.locator('[data-message-record-id="long-patch"]');
   await message.waitFor();
   const details = message.locator('.message-expansion'), summary = details.locator(':scope > summary'), full = details.locator('.message-full');

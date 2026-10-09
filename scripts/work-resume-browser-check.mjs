@@ -1,33 +1,17 @@
 // Synthetic restart journey in a real browser; no real user data or agents.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { rmSync } from 'node:fs';
-import { chromium } from 'playwright';
-import { createAcceptanceFixture } from './acceptance-fixture.mjs';
-import { createRoomServer } from '../server/http.mjs';
+import { boot } from './browser-harness.mjs';
 import { EVENT_TYPES as T } from '../src/events.js';
 import { signInFixture } from './auth-signin.mjs';
 
 for (const mobile of [false, true]) test(`resume handoff ${mobile ? 'phone' : 'desktop'}: visible next step, opt-in export and no writes`, { timeout: 90000 }, async t => {
-  const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 60 });
-  let browser;
-  t.after(async () => {
-    await browser?.close(); server.closeStreams(); server.closeAllConnections();
-    if (server.listening) await new Promise(resolve => server.close(resolve));
-    f.store.close(); rmSync(f.directory, { recursive: true, force: true });
-  });
+  const f = await boot(t, { streamInterval: 60, context: true, viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 }, pageOptions: { isMobile: mobile, hasTouch: mobile }, abortOutside: true, defaultTimeout: 12000 }), { page, errors, origin } = f;
   const send = (type, data) => f.store.command(f.keys.producer, 'commons', { id: crypto.randomUUID(), type, data });
   send(T.WORK_ACCEPTED, { workItemId: 'test-handoff', expectedRevision: 0 });
   send(T.WORK_HANDOFF_RECORDED, { workItemId: 'test-handoff', expectedRevision: 1,
     doneSummary: 'Parser built; escaped separators still need testing.', nextAction: 'Check escaped separators.', limitReason: '<script>window.handoffExecuted=true</script>Session ended.' });
   const before = f.store.snapshot(f.keys.owner, 'commons');
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const origin = `http://127.0.0.1:${server.address().port}`;
-  browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
-  const context = await browser.newContext({ viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 }, isMobile: mobile, hasTouch: mobile, reducedMotion: 'reduce' });
-  await context.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
-  const page = await context.newPage(); page.setDefaultTimeout(12000);
-  const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto(origin); await signInFixture(page, f.keys.owner);
   const card = page.locator('[data-work-record-id="test-handoff"]');
   const handoff = card.locator('[data-work-handoff]'); await handoff.waitFor({ state: 'visible' });

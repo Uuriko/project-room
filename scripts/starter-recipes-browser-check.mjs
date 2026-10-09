@@ -1,29 +1,19 @@
 // Local qualification of the H1 recipe strip against disposable first-party data.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, rmSync } from "node:fs";
-import { chromium } from "playwright";
-import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
-import { createRoomServer } from "../server/http.mjs";
+import { mkdirSync } from "node:fs";
+import { boot } from "./browser-harness.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 import { openCatchUp, closeCatchUp, openSettings } from "./room-chrome.mjs";
 
 test("recipe strip: catch-up and next-work chips render from committed state; dismissal is local only", { timeout: 60000 }, async t => {
-  const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
-  t.after(async () => {
-    await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
-    f.store.close(); rmSync(f.directory, { recursive: true, force: true });
-  });
+  const f = await boot(t, { streamInterval: 40 }), { page, errors, origin } = f;
   const send = (type, data) => f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type, data });
   // Committed before login: one proposed item for the owner plus chatter, so the
   // owner returns to unseen activity and one actionable step.
   send("work.proposed", { workItemId: "recipe-target", title: "Sweep the weekly digest", definitionOfDone: "Digest notes filed.", accountableMemberId: "owner", mode: "read", independentVerificationRequired: false, ownerDecisionRequired: false });
   send("message.posted", { messageId: "recipe-chatter", body: "Notes from the morning." });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: "reduce" }), errors = [];
-  page.setDefaultTimeout(8000); page.on("pageerror", error => errors.push(error.message));
-  await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await page.goto(origin);
   await signInFixture(page, f.keys.owner);
   await page.locator("#main").waitFor({ state: "visible" });
   await openSettings(page, "room-tools");
