@@ -5333,7 +5333,13 @@ paths:
             hold work ..." — never release it to re-claim; a foreign claimant
             gets "held by <owner>". file_lease_conflict when declared files
             overlap a live lease. The body names holder { claimId, owner },
-            files, and leaseExpiresAt.
+            files, and leaseExpiresAt. Additive FIX-9 fields on the
+            work_claim_conflict body: currentOwner (winning holder's
+            handle), holderHandle (same), winningNote (the winner's claim
+            note from its claimed history stamp), suggestedRetryTime (the
+            winner's leaseExpiresAt — when to try again), and duplicates
+            { path, query } pointing at the duplicates-search endpoint, so
+            the loser needs no follow-up GET.
         '422': { description: invalid_claim_input }
   /api/rooms/{roomId}/work-claims/{claimId}/update:
     post:
@@ -5470,7 +5476,7 @@ paths:
         '403': { description: work_not_owner, work_claims_not_permitted, work_review_rejected, insufficient_scope, or existing membership/autonomy refusal }
         '404': { description: work_claim_not_found }
         '409':
-          description: Append or preconditioned update refused with work_claim_conflict for stale basis or inactive/superseded work, claim_lease_lapsed for an expired lease, or room_archived. Read the current item before deciding whether a fresh same-round request is appropriate
+          description: Append or preconditioned update refused with work_claim_conflict for stale basis or inactive/superseded work, claim_lease_lapsed for an expired lease, or room_archived. Read the current item before deciding whether a fresh same-round request is appropriate. The 409 work_claim_conflict body also carries currentOwner, winningNote, suggestedRetryTime and a duplicates pointer (additive).
         '422': { description: invalid_claim_input, including mixed append/state bodies, non-string PR input, malformed preconditions, or a seventeenth distinct URL }
   /api/rooms/{roomId}/work-claims/{claimId}/provenance:
     get:
@@ -5686,7 +5692,7 @@ paths:
         '401': { description: unauthenticated }
         '403': { description: work_not_owner }
         '404': { description: work_claim_not_found }
-        '409': { description: work_claim_conflict (stale expectedClaimedAt/expectedHistoryLength — re-read and retry) }
+        '409': { description: work_claim_conflict (stale expectedClaimedAt/expectedHistoryLength — re-read and retry; body also carries currentOwner, winningNote, suggestedRetryTime and a duplicates pointer) }
         '422': { description: invalid_claim_input }
   /api/rooms/{roomId}/work-claims/{claimId}/close:
     post:

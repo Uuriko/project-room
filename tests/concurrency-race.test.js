@@ -210,3 +210,70 @@ test("join race: concurrent joins for one member produce exactly one membership"
   assert.equal(Object.keys(members).length, before + 1, "exactly one membership added");
   assert.ok(Object.hasOwn(members, "race-joiner"), "the winner holds the membership");
 });
+
+// FIX-9 (WAVE-300): the 409 work_claim_conflict body must carry the answer
+// so a race loser skips the follow-up GET — currentOwner + winningNote must
+// match the actual winner, plus a retry time and a duplicates pointer.
+test("409 conflict body names the winner (FIX-9)", { timeout: 120000 }, async t => {
+  const { ownerKey, call, enroll } = await fixture(t);
+  const created = await call("POST", `/api/rooms/${ROOM}/work-claims`, ownerKey,
+    { id: "fix9-target", title: "FIX-9 target" });
+  assert.equal(created.status, 201, `seed claim create failed: ${JSON.stringify(created.value).slice(0, 200)}`);
+
+  const winner = await enroll("Fix9 Winner");
+  const loser = await enroll("Fix9 Loser");
+  const claimed = await call("POST", `/api/rooms/${ROOM}/work-claims/fix9-target/claim`, winner.key,
+    { note: "fix9-winner-note" });
+  assert.equal(claimed.status, 200, `winner claim failed: ${JSON.stringify(claimed.value).slice(0, 200)}`);
+
+  const read = await call("GET", `/api/rooms/${ROOM}/work-claims/fix9-target`, ownerKey);
+  assert.equal(read.status, 200);
+
+  const attempt = await call("POST", `/api/rooms/${ROOM}/work-claims/fix9-target/claim`, loser.key,
+    { note: "fix9-loser-note" });
+  assert.equal(attempt.status, 409, `loser must get 409, got ${attempt.status}`);
+  const body = attempt.value;
+  assert.equal(body?.error?.code, "work_claim_conflict");
+  assert.equal(body.currentOwner, winner.memberId,
+    `currentOwner must be the winner: ${JSON.stringify(body).slice(0, 400)}`);
+  assert.equal(body.holderHandle, winner.memberId,
+    `holderHandle must be the winner: ${JSON.stringify(body).slice(0, 400)}`);
+  assert.equal(body.winningNote, "fix9-winner-note",
+    `winningNote must be the winner's claim note: ${JSON.stringify(body).slice(0, 400)}`);
+  assert.equal(body.suggestedRetryTime, read.value.leaseExpiresAt,
+    `suggestedRetryTime must match the winner's lease expiry: ${JSON.stringify(body).slice(0, 400)}`);
+  assert.ok(body.suggestedRetryTime && Number.isFinite(Date.parse(body.suggestedRetryTime)),
+    "suggestedRetryTime must be a parseable timestamp");
+  assert.equal(body.duplicates?.path, `/api/rooms/${ROOM}/work-claims/duplicates`,
+    `duplicates pointer missing: ${JSON.stringify(body).slice(0, 400)}`);
+  // Additive only: the canonical envelope fields stay put.
+  assert.ok(body.error?.message, "error.message preserved");
+  assert.ok(body.hint, "hint preserved");
+  assert.ok(Array.isArray(body.next) && body.next.length > 0, "next preserved");
+});
+
+// FIX-9: the stale-update 409 (round precondition) carries the same nicety.
+test("409 stale-update body names the current holder (FIX-9)", { timeout: 120000 }, async t => {
+  const { ownerKey, call, enroll } = await fixture(t);
+  const created = await call("POST", `/api/rooms/${ROOM}/work-claims`, ownerKey,
+    { id: "fix9-stale", title: "FIX-9 stale target" });
+  assert.equal(created.status, 201);
+
+  const holder = await enroll("Fix9 Holder");
+  const claimed = await call("POST", `/api/rooms/${ROOM}/work-claims/fix9-stale/claim`, holder.key,
+    { note: "fix9-holder-note" });
+  assert.equal(claimed.status, 200);
+
+  // Someone else grabs the claim round in between (re-read by the loser is stale).
+  const read = await call("GET", `/api/rooms/${ROOM}/work-claims/fix9-stale`, ownerKey);
+  assert.equal(read.status, 200);
+
+  const stale = await call("POST", `/api/rooms/${ROOM}/work-claims/fix9-stale/update`, holder.key,
+    { note: "stale poke", expectedClaimedAt: "1970-01-01T00:00:00.000Z", expectedHistoryLength: 999 });
+  assert.equal(stale.status, 409, `stale update must get 409, got ${stale.status}`);
+  assert.equal(stale.value?.error?.code, "work_claim_conflict");
+  assert.equal(stale.value.currentOwner, holder.memberId,
+    `currentOwner must be the holder: ${JSON.stringify(stale.value).slice(0, 400)}`);
+  assert.equal(stale.value.winningNote, "fix9-holder-note",
+    `winningNote must be the holder's claim note: ${JSON.stringify(stale.value).slice(0, 400)}`);
+});

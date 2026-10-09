@@ -418,6 +418,41 @@ const runPure = (reject, fn) => {
   }
 };
 
+// FIX-9 (WAVE-300): 409-body nicety — when a claim attempt loses a race, the
+// conflict body carries the answer so the loser skips a follow-up GET. The
+// winner's holder (currentOwner / holderHandle), the winner's claim note
+// (winningNote, from the latest "claimed" history stamp), when to retry
+// (suggestedRetryTime, the winner's lease expiry), and the duplicates-search
+// pointer. Purely additive: every field may be null, and mergeErrorDetail
+// never lets these touch the reserved envelope keys (error/hint/next).
+function workClaimConflictDetail(item, { roomId, workItemId } = {}) {
+  const stamps = Array.isArray(item?.history) ? item.history : [];
+  const claimedStamp = [...stamps].reverse().find(stamp => stamp && stamp.action === "claimed");
+  const detail = {
+    currentOwner: item?.owner ?? null,
+    holderHandle: item?.owner ?? null,
+    winningNote: claimedStamp?.note ?? null,
+    suggestedRetryTime: item?.leaseExpiresAt ?? null,
+  };
+  if (roomId && workItemId) {
+    detail.duplicates = {
+      path: `/api/rooms/${encodeURIComponent(roomId)}/work-claims/duplicates`,
+      query: workItemId,
+    };
+  }
+  return detail;
+}
+
+// Throw a 409 work_claim_conflict whose body carries the FIX-9 detail. The
+// final envelope is built by server/http.mjs, which merges error.detail
+// onto the agent-error envelope.
+function rejectClaimConflict(item, message, { roomId, workItemId } = {}) {
+  const error = new ServiceError(409, "work_claim_conflict", message);
+  error.detail = workClaimConflictDetail(item, { roomId, workItemId });
+  throw error;
+}
+
+
 // Receipts (RC-2026-09-24-205): the "what has this room already solved"
 // surface. Done work items projected as receipts — `receiptId` is the
 // stable projection `"rc_" + workItemId` — searchable by exact tag (AND)
@@ -569,6 +604,7 @@ export function linkWorkClaimPullRequest({ store, roomId, auth, claimId, data, r
         const href = `/api/rooms/${encodeURIComponent(roomId)}/work-claims/${encodeURIComponent(claimId)}`;
         const hint = "Read the current claim and check its owner, round and URL before retrying. Do not release or reacquire it.";
         refusal.body = { ...agentErrorBody({ httpStatus: status, code: error.code, message: error.message, roomId, workItemId: claimId }),
+          ...(status === 409 ? workClaimConflictDetail(item, { roomId, workItemId: claimId }) : {}),
           hint, next: [{ path: href }, { command: hint }] };
       }
       throw refusal;
@@ -978,13 +1014,13 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // re-claim and was unactionable for a foreign holder (non-owners cannot
     // release it) — it also never named the holder.
     if (item.state !== "unclaimed") {
-      if (item.state !== "claimed") reject(409, "work_claim_conflict", `Work "${item.id}" is already ${item.state}`);
+      if (item.state !== "claimed") rejectClaimConflict(item, `Work "${item.id}" is already ${item.state}`, { roomId, workItemId: workClaimId });
       if (item.owner === caller) {
-        reject(409, "work_claim_conflict",
-          `You already hold work "${item.id}" — no new claim was saved; read the item to confirm`);
+        rejectClaimConflict(item,
+          `You already hold work "${item.id}" — no new claim was saved; read the item to confirm`, { roomId, workItemId: workClaimId });
       }
-      reject(409, "work_claim_conflict",
-        `Work "${item.id}" is held by ${item.owner ?? "someone else"} — ask them to reassign or release it`);
+      rejectClaimConflict(item,
+        `Work "${item.id}" is held by ${item.owner ?? "someone else"} — ask them to reassign or release it`, { roomId, workItemId: workClaimId });
     }
     requireWriter();
     requireEventBudget();
@@ -1066,6 +1102,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
         const refusal = new ServiceError(409, "work_claim_conflict",
           `Stale update basis for "${item.id}": the claim changed since this request was prepared.`);
         refusal.body = { ...agentErrorBody({ httpStatus: 409, code: "work_claim_conflict", message: refusal.message, roomId, workItemId: workClaimId }),
+          ...workClaimConflictDetail(item, { roomId, workItemId: workClaimId }),
           hint, next: [{ path: href }, { command: hint }] };
         throw refusal;
       }
@@ -1223,7 +1260,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       // runPure's mapping, plus 409 for a stale round (same as the update
       // route's round precondition).
       if (error instanceof ClaimError && error.code === "work_claim_conflict") {
-        reject(409, error.code, `${error.message} — re-read the claim and retry with the current round.`);
+        rejectClaimConflict(item, `${error.message} — re-read the claim and retry with the current round.`, { roomId, workItemId: workClaimId });
       }
       if (error instanceof ClaimError) reject(422, error.code, error.message);
       throw error;
