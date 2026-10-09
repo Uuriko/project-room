@@ -18,6 +18,14 @@ import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
+// Guests may read and chat but may not store room files. stage/commit/
+// discard authenticate directly and bypass store.command, so the RoomStore
+// guest scope gate never runs here — enforce the same denial explicitly.
+// Mirrors RC-2026-09-27-2716 (PR #1156).
+const denyGuestFiles = (auth, verb) => {
+  if (isGuestAgentMemberId(auth.member.id)) fail(403, "guest_scope_denied", `Guest members cannot ${verb} room files`);
+};
+
 const BLOCKED_MEDIA_TYPES = new Set([
   "application/x-msdownload",
   "application/x-msdos-program",
@@ -101,12 +109,7 @@ export class RoomAttachmentBytes {
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId);
       enforceAutonomyTierForAction({ db: this.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "room_put_file", fail });
-      // Guests may read and chat but may not store room files. stage()
-      // authenticates directly and bypasses store.command, so the RoomStore
-      // guest scope gate never runs here — enforce the same denial
-      // explicitly. Mirrors RC-2026-09-27-2716 (PR #1156).
-      if (isGuestAgentMemberId(auth.member.id))
-        fail(403, "guest_scope_denied", "Guest members cannot stage room files");
+      denyGuestFiles(auth, "stage");
       if (!validId(id)) fail(422, "invalid_attachment", "Attachment id is not valid");
       const now = this.store.now();
       this.expire(roomId, now);
@@ -139,7 +142,8 @@ export class RoomAttachmentBytes {
       ) VALUES(?,?,?,?,?,?,?,?,'staged',?,?,NULL)`).run(
         roomId, id, auth.member.id, file.filename, file.mediaType, bytes.length, sha, bytes, now, expiresAt
       );
-      const row = this.db.prepare("SELECT * FROM room_attachments WHERE room_id=? AND id=?").get(roomId, id);
+      const row = { id, filename: file.filename, media_type: file.mediaType, byte_length: bytes.length,
+        sha256: sha, state: "staged", uploader_id: auth.member.id, created_at: now, expires_at: expiresAt, message_id: null };
       return { status: "staged", duplicate: false, roomId, attachment: view(row) };
     });
   }
@@ -202,12 +206,7 @@ export class RoomAttachmentBytes {
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId);
       enforceAutonomyTierForAction({ db: this.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "room_discard_file", fail });
-      // Guests may read and chat but may not store room files. discard()
-      // authenticates directly and bypasses store.command, so the RoomStore
-      // guest scope gate never runs here — enforce the same denial
-      // explicitly. Mirrors RC-2026-09-27-2716 (PR #1156).
-      if (isGuestAgentMemberId(auth.member.id))
-        fail(403, "guest_scope_denied", "Guest members cannot discard room files");
+      denyGuestFiles(auth, "discard");
       if (!validId(id)) fail(422, "invalid_attachment", "Attachment id is not valid");
       const now = this.store.now();
       this.expire(roomId, now);
@@ -231,12 +230,7 @@ export class RoomAttachmentBytes {
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId);
       enforceAutonomyTierForAction({ db: this.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "room_commit_file", fail });
-      // Guests may read and chat but may not store room files. commit()
-      // authenticates directly and bypasses store.command, so the RoomStore
-      // guest scope gate never runs here — enforce the same denial
-      // explicitly. Mirrors RC-2026-09-27-2716 (PR #1156).
-      if (isGuestAgentMemberId(auth.member.id))
-        fail(403, "guest_scope_denied", "Guest members cannot commit room files");
+      denyGuestFiles(auth, "commit");
       if (!validId(id)) fail(422, "invalid_attachment", "Attachment id is not valid");
       if (!validId(messageId)) fail(422, "invalid_message", "Message id is not valid");
       this.expire(roomId, this.store.now());
