@@ -3654,6 +3654,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   identityLinkOf(roomId, memberId) {
     return this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?").get(roomId, memberId);
   }
+  // Authenticate the caller and load the room in one step. Almost every
+  // token-taking method starts with exactly these two calls — both pure
+  // reads, and authenticate throws before the room is loaded, as before.
+  authedRoom(token, roomId, expectedSessionBinding = null) {
+    const auth = this.authenticate(token, roomId, expectedSessionBinding);
+    return { auth, room: this.room(roomId) };
+  }
   // Join-flow browser session. After a successful self-serve join the new
   // agent member's browser needs a working session — the join page's "open
   // the room" link would otherwise strand them with a secret but no session.
@@ -3703,11 +3710,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   snapshot(token, roomId, expectedSessionBinding = null, view = "full", helpContext = false, offerContext = false) {
     // One read transaction keeps sequence, projection, and audit tail at the same commit.
     return this.readTransaction(() => {
-      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      const { auth, room } = this.authedRoom(token, roomId, expectedSessionBinding);
       if (!["full", "work"].includes(view)) fail(422, "invalid_snapshot_view", "Choose a supported snapshot view");
       if (typeof helpContext !== "boolean" || helpContext && view !== "work") fail(422, "invalid_help_context", "Help discovery requires the current work view");
       if (typeof offerContext !== "boolean" || offerContext && view !== "full") fail(422, "invalid_offer_context", "Browser offers require the full room view");
-      const room = this.room(roomId);
       if (view === "work") return { snapshotView: "work", snapshotVersion: 1, roomId, sequence: room.sequence,
         ...(helpContext ? { helpContextVersion: 1, evaluatedAt: new Date(this.now()).toISOString() } : {}),
         state: { room: room.state.room, members: room.state.members,
@@ -3723,8 +3729,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // F3: derived, read-time change list for one work item from its own revision
     // events. Never a write; the event log stays the only record.
     return this.readTransaction(() => {
-      this.authenticate(token, roomId, expectedSessionBinding);
-      const room = this.room(roomId);
+      const { room } = this.authedRoom(token, roomId, expectedSessionBinding);
       const item = room.state.workItems[workItemId];
       if (!item) fail(404, "work_not_found", "Choose an existing work item");
       if (since !== null && (!Number.isSafeInteger(since) || since < 0 || since > item.revision)) fail(422, "invalid_history_basis", "Choose a revision this work item has reached");
@@ -3737,7 +3742,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
 
   charter(token, roomId, { revision, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => {
-      const auth = this.authenticate(token, roomId, expectedSessionBinding), room = this.room(roomId);
+      const { auth, room } = this.authedRoom(token, roomId, expectedSessionBinding);
       if (revision !== undefined && (!Number.isSafeInteger(revision) || revision < 0)) fail(422, "invalid_charter_revision", "Choose an instructions version");
       const current = charterContext(room.state.room);
       const selected = revision ?? current.revision;
@@ -3758,9 +3763,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   }
   workSessions(token, roomId, { status = null, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => {
-      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      const { auth, room } = this.authedRoom(token, roomId, expectedSessionBinding);
       if (status != null && !isSessionStatus(status)) fail(422, "invalid_session_status", "Choose one session status");
-      const room = this.room(roomId);
       const sessions = listWorkItemSessions(room.state.workItems, status, { members: room.state.members, nowMs: this.now() });
       return {
         contractVersion: 1, roomId, evaluatedThrough: room.sequence, viewerId: auth.member.id,
@@ -3855,14 +3859,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (tripped?.kind === "rounds") fail(409, "round_limit_exceeded", "Session paused: the round limit was exceeded. The next mention or post resumes it");
     if (tripped?.kind === "budget") fail(409, "budget_exceeded", `Session budget exceeded (${tripped.limit}); the session was stopped`);
     return this.transaction(() => {
-      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      const { auth, room } = this.authedRoom(token, roomId, expectedSessionBinding);
       const prior = this.db.prepare("SELECT e.sequence,e.body FROM commands c JOIN events e ON e.room_id=c.room_id AND e.sequence=c.sequence WHERE c.room_id=? AND c.actor_id=? AND c.id=?").get(roomId, auth.member.id, request.requestId);
       if (prior) {
         const parsedEvent = JSON.parse(prior.body);
         if (!sessionEventMatchesRequest(parsedEvent, request)) fail(409, "idempotency_conflict", "Command ID already used for different content");
         return { sequence: prior.sequence, event: parsedEvent, duplicate: true };
       }
-      const roomState = this.room(roomId).state;
+      const roomState = room.state;
       const item = roomState.workItems[request.workItemId];
       if (!item) fail(404, "work_not_found", "Work item not found in this Room");
       // RC-2026-09-19-063: a round-limit pause resumes only with owner (or
@@ -3953,9 +3957,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // Derived from existing data — no new tables, no people-data store.
   presence(token, roomId, watcherMemberIds, expectedSessionBinding = null) {
     return this.readTransaction(() => {
-      this.authenticate(token, roomId, expectedSessionBinding);
+      const { room } = this.authedRoom(token, roomId, expectedSessionBinding);
       const { members, ownerId } = this.roomAuthority(roomId);
-      const room = this.room(roomId);
       const now = this.now();
       const timestamp = value => typeof value === "number" ? value : typeof value === "string" ? Date.parse(value) : NaN;
       const working = new Map();
@@ -3988,10 +3991,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // (null = no registered host); identityId is the linked agent identity.
       const hostStatusOf = memberId => {
         const host = this.agentHostPresence(roomId, members, memberId);
-        if (!host) return { identityId: null, status: null, lastSeenAt: null };
-        // Unregistered (no host) stays null so RC-051 clients keep the
-        // "no presence field or absent" contract. Roster still lists the member.
-        if (host.status === "unregistered") return { identityId: host.identityId, status: null, lastSeenAt: null };
+        if (!host || host.status === "unregistered") {
+          // Unregistered (no host) keeps status null so RC-051 clients keep
+          // the "no presence field or absent" contract. Roster still lists
+          // the member.
+          return { identityId: host?.identityId ?? null, status: null, lastSeenAt: null };
+        }
         return host;
       };
       const agentPresence = memberId => {
@@ -4080,8 +4085,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // Round-2 #106: JSONL event-log export for audit/portability. Streams
   // {sequence, event} lines; the consumer replays them in order for #107.
   *exportEvents(token, roomId, expectedSessionBinding = null) {
-    this.authenticate(token, roomId, expectedSessionBinding);
-    const sequence = this.room(roomId).sequence;
+    const { room } = this.authedRoom(token, roomId, expectedSessionBinding);
+    const sequence = room.sequence;
     const stmt = this.db.prepare("SELECT sequence,body FROM events WHERE room_id=? AND sequence>? ORDER BY sequence LIMIT 1000");
     let after = 0;
     for (;;) {
@@ -4099,10 +4104,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // fails before anything is written.
   importEvents(token, roomId, lines, expectedSessionBinding = null) {
     return this.transaction(() => {
-      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      const { auth, room } = this.authedRoom(token, roomId, expectedSessionBinding);
       const { ownerId } = this.roomAuthority(roomId);
       if (auth.member.id !== ownerId) fail(403, "owner_required", "Only the room owner can import history");
-      const previous = this.room(roomId).state;
+      const previous = room.state;
       refuseArchivedWrite(previous);
       if (!Array.isArray(lines) || !lines.length || lines.length > 10000) fail(422, "invalid_import", "Import is 1 to 10000 event lines");
       const events = lines.map((line, i) => {
@@ -4146,9 +4151,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // reply tree (messages whose replyToId chains back to the root).
   messageThread(token, roomId, messageId, expectedSessionBinding = null) {
     return this.readTransaction(() => {
-      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      const { auth, room } = this.authedRoom(token, roomId, expectedSessionBinding);
       const { members } = this.roomAuthority(roomId);
-      const room = this.room(roomId);
       // PRIV-2: a since_join reader sees no thread rooted before their join.
       const floor = this.historyFloor(roomId, auth.member.id);
       const root = room.state.messages.find(m => m.id === messageId);
@@ -4178,8 +4182,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (!["all", "messages", "work", "pinned"].includes(kind)) fail(422, "invalid_search", "kind is all, messages, work, or pinned");
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) fail(422, "invalid_search", "limit is 1 to 200");
     return this.readTransaction(() => {
-      const auth = this.authenticate(token, roomId, expectedSessionBinding);
-      const room = this.room(roomId);
+      const { auth, room } = this.authedRoom(token, roomId, expectedSessionBinding);
       const needle = query.trim().toLowerCase();
       const result = { roomId, query: query.trim(), messages: [], workItems: [], total: 0 };
       const floor = this.historyFloor(roomId, auth.member.id); // PRIV-2
@@ -4223,9 +4226,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // each provider is currently working on. Members-only read.
   providerHeartbeats(token, roomId, expectedSessionBinding = null) {
     return this.readTransaction(() => {
-      this.authenticate(token, roomId, expectedSessionBinding);
+      const { room } = this.authedRoom(token, roomId, expectedSessionBinding);
       const { members } = this.roomAuthority(roomId);
-      const room = this.room(roomId);
       const now = this.now();
       const providers = [];
       for (const member of Object.values(members)) {
@@ -4258,11 +4260,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // bodies are never part of either shape.
   roomContext(token, roomId, { sinceVersion = null, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => {
-      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      const { auth, room } = this.authedRoom(token, roomId, expectedSessionBinding);
       if (sinceVersion !== null && (typeof sinceVersion !== "string" || !/^[a-f0-9]{64}$/.test(sinceVersion))) {
         fail(422, "invalid_context_version", "since_version must be the previous context_version (64 lowercase hex characters), or omit it");
       }
-      const room = this.room(roomId);
       const caughtUp = this.caughtUpCursor(roomId, auth.member.id);
       const built = buildRoomContext({
         state: room.state, sequence: room.sequence, viewerId: auth.member.id, caughtUp, now: this.now()
@@ -4277,9 +4278,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   }
   workContext(token, roomId, workItemId, { includeSource = false, includeOffers = false, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => {
-      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      const { auth, room } = this.authedRoom(token, roomId, expectedSessionBinding);
       if (!validId(workItemId) || typeof includeSource !== "boolean" || typeof includeOffers !== "boolean") fail(422, "invalid_work_context", "Choose one work ID and boolean context options");
-      const room = this.room(roomId), now = this.now();
+      const now = this.now();
       if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
       return { ...selectedWorkContext({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence, now, includeSource, includeOffers }),
         ...viewerIdentity(auth) };
@@ -4287,9 +4288,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   }
   workDiscussion(token, roomId, workItemId, { cursor = null, since, limit, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => {
-      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      const { auth, room } = this.authedRoom(token, roomId, expectedSessionBinding);
       if (!validId(workItemId)) fail(422, "invalid_discussion", "Choose one work item");
-      const room = this.room(roomId);
       if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
       const window = discussionWindow({ sequence: room.sequence, roomId, workItemId, viewerId: auth.member.id, cursor, since, limit });
       const anchorId = this.db.prepare("SELECT id FROM events WHERE room_id=? AND sequence=?").get(roomId, window.horizon)?.id;
@@ -4301,10 +4301,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   }
   workResult(token, roomId, workItemId, { completionEventId = null, draftMessageId = null, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => {
-      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      const { auth, room } = this.authedRoom(token, roomId, expectedSessionBinding);
       if (!validId(workItemId) || [completionEventId, draftMessageId].some(id => id !== null && !validId(id))
         || completionEventId !== null && draftMessageId !== null) fail(422, "invalid_result_selection", "Choose current result, one completion, or one draft");
-      const room = this.room(roomId);
       if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
       let value;
       try { value = selectedWorkResult({ db: this.db, state: room.state, workItemId, sequence: room.sequence, now: this.now(), completionEventId, draftMessageId }); }
@@ -4404,11 +4403,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // Consent-bound DMs: incoming pending requests for the inbox. Read
     // outside the readTransaction below — the module wraps reads in a
     // write-capable transaction, which cannot nest inside a read-only one.
-    // authenticate() is a pure read, so calling it twice is harmless.
-    const preAuth = this.authenticate(token, roomId, expectedSessionBinding);
-    const dmRequests = this.dmConsents.pendingFor(roomId, preAuth.member.id);
+    const auth = this.authenticate(token, roomId, expectedSessionBinding);
+    const dmRequests = this.dmConsents.pendingFor(roomId, auth.member.id);
     return this.readTransaction(() => {
-      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      const room = this.room(roomId);
       const memberId = auth.member.id;
       const directMessages = this.db.prepare(
         `SELECT sequence, body FROM events WHERE room_id=?
@@ -4467,7 +4465,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         directMentions,
         bondProposals,
         peerMessages,
-        next: inboxNext(roomId, directMessages, assignments, mentions, directMentions, bondProposals, peerMessages, this.room(roomId).state.replyRequests),
+        next: inboxNext(roomId, directMessages, assignments, mentions, directMentions, bondProposals, peerMessages, room.state.replyRequests),
         dmRequests,
       }, memberId);
       for (const key of ["directMessages", "assignments", "mentions", "directMentions", "bondProposals", "peerMessages", "next", "dmRequests"]) {
@@ -4528,8 +4526,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // Fetching never acknowledges - only markCaughtUp does, explicitly.
   returnBrief(token, roomId, { horizon = null, after = null, cursor: frozenCursor = null, limit = RETURN_BRIEF_DEFAULT_LIMIT, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => {
-      const auth = this.authenticate(token, roomId, expectedSessionBinding);
-      const room = this.room(roomId);
+      const { auth, room } = this.authedRoom(token, roomId, expectedSessionBinding);
       const cursor = this.caughtUpCursor(roomId, auth.member.id);
       const { H, startAfter, C, limit: pageLimit } = resolveHistoryWindow({ sequence: room.sequence, storedCursor: cursor, horizon, after, continuationCursor: frozenCursor, limit });
       const rows = this.db.prepare("SELECT sequence, body FROM events WHERE room_id=? AND sequence>? AND sequence<=? ORDER BY sequence LIMIT ?").all(roomId, startAfter, H, pageLimit)
@@ -4549,8 +4546,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   }
   markCaughtUp(token, roomId, sequence, expectedSessionBinding = null) {
     return this.transaction(() => {
-      const auth = this.authenticate(token, roomId, expectedSessionBinding);
-      if (!Number.isSafeInteger(sequence) || sequence < 0 || sequence > this.room(roomId).sequence) fail(422, "invalid_cursor", "Invalid caught-up cursor");
+      const { auth, room } = this.authedRoom(token, roomId, expectedSessionBinding);
+      if (!Number.isSafeInteger(sequence) || sequence < 0 || sequence > room.sequence) fail(422, "invalid_cursor", "Invalid caught-up cursor");
       this.db.prepare("INSERT INTO cursors VALUES(?,?,?) ON CONFLICT(room_id,member_id) DO UPDATE SET sequence=max(cursors.sequence,excluded.sequence)").run(roomId, auth.member.id, sequence);
       return { cursor: this.caughtUpCursor(roomId, auth.member.id) };
     });
@@ -5107,8 +5104,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
 
   // #658: owner-only timeout override for a room.
   setMentionTimeout(token, roomId, timeoutMs, expectedSessionBinding = null) {
-    const auth = this.authenticate(token, roomId, expectedSessionBinding);
-    if (auth.member.id !== this.room(roomId).state.room.ownerId) fail(403, "owner_required", "Only the room owner can configure mention timeouts");
+    const { auth, room } = this.authedRoom(token, roomId, expectedSessionBinding);
+    if (auth.member.id !== room.state.room.ownerId) fail(403, "owner_required", "Only the room owner can configure mention timeouts");
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < MENTION_TIMEOUT_MS_MIN || timeoutMs > MENTION_TIMEOUT_MS_MAX) {
       fail(422, "invalid_mention_timeout", `timeoutMs must be an integer between ${MENTION_TIMEOUT_MS_MIN} and ${MENTION_TIMEOUT_MS_MAX}`);
     }
@@ -5184,7 +5181,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // owner may query another member's mentions (feeds the #662 attention
   // card's "N mentions unacknowledged"). Supports state and after filters.
   listMentions(token, roomId, { state = null, after = null, memberId = null } = {}, expectedSessionBinding = null) {
-    const auth = this.authenticate(token, roomId, expectedSessionBinding);
+    const { auth, room } = this.authedRoom(token, roomId, expectedSessionBinding);
     const target = memberId ?? auth.member.id;
     if (typeof target !== "string" || !target) fail(422, "invalid_mention_query", "memberId must be a non-empty string");
     if (state !== null && !["delivered", "acknowledged", "responded", "timed_out"].includes(state)) {
@@ -5193,7 +5190,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (after !== null && (typeof after !== "string" || Number.isNaN(Date.parse(after)))) {
       fail(422, "invalid_mention_query", "after must be an ISO timestamp");
     }
-    if (target !== auth.member.id && auth.member.id !== this.room(roomId).state.room.ownerId) {
+    if (target !== auth.member.id && auth.member.id !== room.state.room.ownerId) {
       fail(403, "mention_forbidden", "You can only list your own mentions");
     }
     return this.transaction(() => {
@@ -5210,7 +5207,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
                AND (json_extract(e.body,'$.data.toMemberId')=? OR json_extract(e.body,'$.actorId')=?)))
          ORDER BY m.created_at DESC LIMIT 200`
       ).all(roomId, target, state, state, after, after === null ? null : Date.parse(after), target, target, auth.member.id, auth.member.id);
-      const members = this.room(roomId).state.members ?? {};
+      const members = room.state.members ?? {};
       return {
         roomId, memberId: target,
         mentions: rows.map(r => this.serializeMentionRow(r, members, r.messageEventId, r.memberId)),
