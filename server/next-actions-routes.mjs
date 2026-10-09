@@ -50,21 +50,21 @@ export function createNextActionsRoutes({ store, json, reject, body, rate, roomC
     if (!selected.token) reject(401, "unauthenticated", "Authenticate: Authorization: Bearer <identitySecret>");
     const fence = selected.mode === "account" ? accountBinding(req) : expectedBinding(req);
     const memberKey = `next-actions:${roomId}:${selected.token.slice(0, 12)}`;
+    const writeKey = `next-actions-write:${roomId}:${selected.token.slice(0, 12)}`;
+    const needObject = (payload, hint) => { if (!payload || typeof payload !== "object" || Array.isArray(payload)) reject(422, "invalid_input", hint); return payload; };
     const na = nextActions();
 
     if (route === "next-actions" && req.method === "GET") {
       rate(memberKey, 120);
       const limit = url.searchParams.get("limit");
-      const kinds = url.searchParams.get("kinds");
       return json(res, 200, na.list(selected.token, roomId, {
         limit: limit === null ? 10 : Number(limit),
-        kinds, binding: fence,
+        kinds: url.searchParams.get("kinds"), binding: fence,
       }));
     }
     if (route === "next-actions-dismiss" && req.method === "POST") {
-      rate(`next-actions-write:${roomId}:${selected.token.slice(0, 12)}`, 60);
-      const payload = await body(req);
-      if (!payload || typeof payload !== "object" || Array.isArray(payload)) reject(422, "invalid_input", "Supply {actionId, expiresInDays?, forever?, reason?}");
+      rate(writeKey, 60);
+      const payload = needObject(await body(req), "Supply {actionId, expiresInDays?, forever?, reason?}");
       return json(res, 200, na.dismiss(selected.token, roomId, payload.actionId, {
         expiresInDays: payload.expiresInDays ?? null,
         forever: payload.forever ?? false,
@@ -77,9 +77,8 @@ export function createNextActionsRoutes({ store, json, reject, body, rate, roomC
       return json(res, 200, na.getSuppressions(selected.token, roomId, fence));
     }
     if (route === "next-actions-suppressions" && req.method === "PUT") {
-      rate(`next-actions-write:${roomId}:${selected.token.slice(0, 12)}`, 60);
-      const payload = await body(req);
-      if (!payload || typeof payload !== "object" || Array.isArray(payload)) reject(422, "invalid_input", "Supply {suppressions:[{kind, reason?}]}");
+      rate(writeKey, 60);
+      const payload = needObject(await body(req), "Supply {suppressions:[{kind, reason?}]}");
       return json(res, 200, na.putSuppressions(selected.token, roomId, { suppressions: payload.suppressions ?? [], binding: fence }));
     }
     if (route === "next-actions-dismissals" && req.method === "GET") {

@@ -28,7 +28,7 @@ export function createMatchmakingRegistry() {
   const rooms = new Map();
   const room = roomId => {
     let entry = rooms.get(roomId);
-    if (!entry) { entry = { seekers: new Map(), terms: new Map(), decisions: new Map(), lanes: new Map(), answers: new Map() }; rooms.set(roomId, entry); }
+    if (!entry) rooms.set(roomId, entry = { seekers: new Map(), terms: new Map(), decisions: new Map(), lanes: new Map(), answers: new Map() });
     return entry;
   };
   return {
@@ -64,11 +64,15 @@ export function handleMatchmakingCore({ req, store, roomId, auth, matchmakingRou
   const caller = auth.member.id;
   const nowIso = new Date(now).toISOString();
 
-  const invalid = error => reject(422, "invalid_matchmaking_input", error.message);
+  // reject() throws — the guarded pure calls below read like straight-line code.
   const guard = thunk => { try { return thunk(); } catch (error) {
-    if (error instanceof Error && !error.status) invalid(error);
+    if (error instanceof Error && !error.status) reject(422, "invalid_matchmaking_input", error.message);
     throw error;
   } };
+  const created = value => json(null, 201, { roomId, ...value });
+  // reject() throws, so ?? reject(...) reads as "or fail with 404".
+  const lookupDecision = () => registry.getDecision(roomId, matchmakingId)
+    ?? reject(404, "decision_not_found", `No decision "${matchmakingId}" in this room`);
 
   switch (matchmakingRoute) {
     // An agent says what it is here for. Motive, capabilities, appetite.
@@ -82,7 +86,7 @@ export function handleMatchmakingCore({ req, store, roomId, auth, matchmakingRou
         trustTier: input.trustTier ?? 0,
       }));
       const row = registry.putSeeker(roomId, seekerToRow(seeker, { now: () => now }));
-      return json(null, 201, { roomId, seeker: rowToSeeker(row) });
+      return created({ seeker: rowToSeeker(row) });
     }
 
     // A room says what an opening needs. Undeclared work stays claimable by
@@ -103,7 +107,7 @@ export function handleMatchmakingCore({ req, store, roomId, auth, matchmakingRou
         deadline: opening.deadline, title: opening.title, open: opening.open,
         declared_at: nowIso,
       });
-      return json(null, 201, { roomId, opening });
+      return created({ opening });
     }
 
     // The pairing itself. One match, up to three alternatives, and a coded
@@ -133,16 +137,13 @@ export function handleMatchmakingCore({ req, store, roomId, auth, matchmakingRou
         wakingHours: input.wakingHours ?? true,
       }));
       registry.putDecision(roomId, decision);
-      return json(null, 201, { roomId, decision,
-        chain: routed.chain, setAside: routed.setAside,
-        unreachable: routed.unreachable, expired: routed.expired,
-        opening: decisionAsOpening(decision) });
+      const { chain, setAside, unreachable, expired } = routed;
+      return created({ decision, chain, setAside, unreachable, expired, opening: decisionAsOpening(decision) });
     }
 
     case "decision-answer": {
       const input = body() ?? {};
-      const decision = registry.getDecision(roomId, matchmakingId);
-      if (!decision) reject(404, "decision_not_found", `No decision "${matchmakingId}" in this room`);
+      const decision = lookupDecision();
       // The caller has to be a registered courier in this room. A courier
       // relays; the author is the person named in the body, and the two can
       // never be the same agent.
@@ -157,13 +158,11 @@ export function handleMatchmakingCore({ req, store, roomId, auth, matchmakingRou
     }
 
     case "decision-read": {
-      const decision = registry.getDecision(roomId, matchmakingId);
-      if (!decision) reject(404, "decision_not_found", `No decision "${matchmakingId}" in this room`);
+      const decision = lookupDecision();
       return json(null, 200, { roomId, decision, answer: registry.getAnswer(roomId, matchmakingId) });
     }
 
     default:
       reject(404, "not_found", "Unknown matchmaking route");
   }
-  return json(null, 500, {});
 }
