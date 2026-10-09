@@ -103,6 +103,8 @@ export function walkExport(rows) {
     if (!work.has(id)) work.set(id, blankWork(id));
     return work.get(id);
   };
+  const addNote = (event, id, label, text) => workItem(id).notes.push({ at: event.at, actorId: event.actorId, label, text });
+  const addEvidence = (event, id, label, summary, url, version) => workItem(id).evidence.push({ at: event.at, actorId: event.actorId, label, summary, url, version });
   for (const row of rows) {
     const { sequence, event } = row;
     count += 1;
@@ -150,44 +152,30 @@ export function walkExport(rows) {
       }
       case T.WORK_ACCEPTED: workItem(data.workItemId).state = "accepted"; break;
       case T.WORK_STARTED: workItem(data.workItemId).state = "working"; break;
-      case T.WORK_BLOCKED: {
-        const item = workItem(data.workItemId);
-        item.state = "blocked";
-        item.notes.push({ at: event.at, actorId: event.actorId, label: "Blocked", text: data.reason });
+      case T.WORK_BLOCKED:
+        workItem(data.workItemId).state = "blocked";
+        addNote(event, data.workItemId, "Blocked", data.reason);
         break;
-      }
-      case T.WORK_BLOCKER_RESOLVED: {
-        const item = workItem(data.workItemId);
-        item.notes.push({ at: event.at, actorId: event.actorId, label: "Blocker resolved", text: data.resolution });
+      case T.WORK_BLOCKER_RESOLVED:
+        addNote(event, data.workItemId, "Blocker resolved", data.resolution);
         break;
-      }
-      case T.WORK_COMPLETED: {
-        const item = workItem(data.workItemId);
-        item.state = "completed";
-        item.evidence.push({ at: event.at, actorId: event.actorId, label: "Completion", summary: data.summary, url: data.evidenceUrl ?? null, version: data.evidenceVersion });
+      case T.WORK_COMPLETED:
+        workItem(data.workItemId).state = "completed";
+        addEvidence(event, data.workItemId, "Completion", data.summary, data.evidenceUrl ?? null, data.evidenceVersion);
         break;
-      }
-      case T.WORK_HANDOFF_RECORDED: {
-        const item = workItem(data.workItemId);
-        item.evidence.push({ at: event.at, actorId: event.actorId, label: "Handoff", summary: data.doneSummary, url: data.evidenceUrl ?? null, version: data.evidenceVersion ?? null });
+      case T.WORK_HANDOFF_RECORDED:
+        addEvidence(event, data.workItemId, "Handoff", data.doneSummary, data.evidenceUrl ?? null, data.evidenceVersion ?? null);
         break;
-      }
-      case T.VERIFICATION_RECORDED: {
-        const item = workItem(data.workItemId);
-        item.notes.push({ at: event.at, actorId: event.actorId, label: `Verification: ${data.result}`, text: data.summary });
+      case T.VERIFICATION_RECORDED:
+        addNote(event, data.workItemId, `Verification: ${data.result}`, data.summary);
         break;
-      }
-      case T.OWNER_DECISION_RECORDED: {
-        const item = workItem(data.workItemId);
-        item.notes.push({ at: event.at, actorId: event.actorId, label: `Decision: ${data.decision}`, text: data.reason });
+      case T.OWNER_DECISION_RECORDED:
+        addNote(event, data.workItemId, `Decision: ${data.decision}`, data.reason);
         break;
-      }
-      case T.WORK_SUPERSEDED: {
-        const item = workItem(data.workItemId);
-        item.state = "superseded";
-        item.notes.push({ at: event.at, actorId: event.actorId, label: "Superseded", text: data.reason });
+      case T.WORK_SUPERSEDED:
+        workItem(data.workItemId).state = "superseded";
+        addNote(event, data.workItemId, "Superseded", data.reason);
         break;
-      }
       default: break;
     }
   }
