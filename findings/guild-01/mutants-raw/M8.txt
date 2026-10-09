@@ -1,0 +1,29 @@
+MUTANT M8
+file: server/work-claims.mjs
+desc: wrong operator: closeWhenLive requires BOTH revision and head match (never closes)
+occurrences replaced: 1 of 1
+tests: tests/land-queue.test.js, tests/work-claims.test.js
+--- diff ---
+ server/work-claims.mjs | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+diff --git a/server/work-claims.mjs b/server/work-claims.mjs
+index 2968b5316..d1ce6cc06 100644
+--- a/server/work-claims.mjs
++++ b/server/work-claims.mjs
+@@ -854,7 +854,7 @@ export function closeWhenLive(work, liveRevision, now) {
+   if (item.kind !== "land" && item.kind !== "deploy") return null;
+   if (isTerminalClaimState(item.state) || typeof liveRevision !== "string" || liveRevision.length === 0) return null;
+   const head = item.ci?.headSha ?? null;
+-  if (item.revision !== liveRevision && head !== liveRevision) return null;
++  if (item.revision !== liveRevision || head !== liveRevision) return null;
+   const atMs = nowMsOf(now);
+   return withHistory({ ...item, state: "done", deliveryMode: item.deliveryMode ?? "production" }, atMs, item.owner ?? "system", "state:done",
+     `live revision matches ${liveRevision}`);
+--- tests ---
+PASS: tests/land-queue.test.js
+ℹ pass 21
+ℹ fail 0
+PASS: tests/work-claims.test.js
+ℹ pass 6
+ℹ fail 0
+VERDICT: SURVIVED (suite green)

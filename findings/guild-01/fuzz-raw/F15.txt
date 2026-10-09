@@ -1,0 +1,16 @@
+FUZZ F15
+file:///home/hatch/workspace/pr-wave1000-guild-01/findings/guild-01/tools/fuzz-g01.mjs:542
+  const rows = db.prepare("SELECT item_json FROM work_claims").all();
+                  ^
+
+Error: no such table: work_claims
+    at cases.F15 (file:///home/hatch/workspace/pr-wave1000-guild-01/findings/guild-01/tools/fuzz-g01.mjs:542:19)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file:///home/hatch/workspace/pr-wave1000-guild-01/findings/guild-01/tools/fuzz-g01.mjs:552:1 {
+  code: 'ERR_SQLITE_ERROR',
+  errcode: 1,
+  errstr: 'SQL logic error'
+}
+
+Node.js v24.20.0
+VERDICT: FINDINGS (exit 1)

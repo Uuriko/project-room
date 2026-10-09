@@ -1,0 +1,24 @@
+MUTANT M1
+file: server/work-claims.mjs
+desc: wrong operator/magnitude: lease hours *3600*100 instead of *3600*1000 (lease 10x short)
+occurrences replaced: 1 of 2
+tests: tests/work-claim-leases.test.js
+--- diff ---
+ server/work-claims.mjs | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+diff --git a/server/work-claims.mjs b/server/work-claims.mjs
+index 2968b5316..0af0b1d61 100644
+--- a/server/work-claims.mjs
++++ b/server/work-claims.mjs
+@@ -592,7 +592,7 @@ export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, p
+     repo: repo === undefined ? item.repo : repoOf(repo),
+     branch: branch === undefined ? item.branch : branchOf(branch),
+     leaseStartAt: effective === null ? null : isoOf(atMs),
+-    leaseExpiresAt: effective === null ? null : isoOf(atMs + effective * 3600 * 1000) };
++    leaseExpiresAt: effective === null ? null : isoOf(atMs + effective * 3600 * 100) };
+   return withHistory(claimed, atMs, agent, "claimed",
+     effective === null ? note : note ?? `lease: ${effective}h`);
+ }
+--- tests ---
+FAIL: tests/work-claim-leases.test.js
+VERDICT: KILLED (suite failed)

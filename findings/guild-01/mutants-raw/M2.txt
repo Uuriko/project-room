@@ -1,0 +1,29 @@
+MUTANT M2
+file: server/work-claims.mjs
+desc: boundary flip: renew allowed at the exact expiry millisecond
+occurrences replaced: 1 of 1
+tests: tests/work-claim-leases.test.js, tests/work-claim-renew-probes.test.js
+--- diff ---
+ server/work-claims.mjs | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+diff --git a/server/work-claims.mjs b/server/work-claims.mjs
+index 2968b5316..8cd9ec5a7 100644
+--- a/server/work-claims.mjs
++++ b/server/work-claims.mjs
+@@ -609,7 +609,7 @@ export function renewWork(work, agentId, { note, leaseHours, room, now } = {}) {
+   check(item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can renew it`);
+   check(ACTIVE_CLAIM_STATES.includes(item.state), `work "${item.id}" is ${item.state} — only active claims can be renewed`);
+   check(item.leaseExpiresAt !== null, `work "${item.id}" has no lease — nothing to renew`);
+-  check(Date.parse(item.leaseExpiresAt) > atMs, `work "${item.id}" lease already lapsed — claim it again instead`);
++  check(Date.parse(item.leaseExpiresAt) >= atMs, `work "${item.id}" lease already lapsed — claim it again instead`);
+   // QA D-1: same 4000-char bound as create — see claimWork.
+   if (note !== undefined && note !== null) check(typeof note === "string" && note.length <= 4000, "note must be a string of at most 4000 characters");
+   const wanted = leaseHoursOf(leaseHours);
+--- tests ---
+PASS: tests/work-claim-leases.test.js
+ℹ pass 19
+ℹ fail 0
+PASS: tests/work-claim-renew-probes.test.js
+ℹ pass 0
+ℹ fail 0
+VERDICT: SURVIVED (suite green)

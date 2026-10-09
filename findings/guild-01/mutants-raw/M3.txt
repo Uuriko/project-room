@@ -1,0 +1,24 @@
+MUTANT M3
+file: server/work-claims.mjs
+desc: boundary flip: isLeaseExpired false at exact expiry ms
+occurrences replaced: 1 of 1
+tests: tests/work-claim-leases.test.js
+--- diff ---
+ server/work-claims.mjs | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+diff --git a/server/work-claims.mjs b/server/work-claims.mjs
+index 2968b5316..39c5c758f 100644
+--- a/server/work-claims.mjs
++++ b/server/work-claims.mjs
+@@ -904,7 +904,7 @@ export function reassignWork(work, agentId, newOwner, { note, now, authority = f
+ export function isLeaseExpired(work, now) {
+   const item = workOf(work);
+   if (!ACTIVE_CLAIM_STATES.includes(item.state) || item.leaseExpiresAt === null) return false;
+-  return Date.parse(item.leaseExpiresAt) <= nowMsOf(now);
++  return Date.parse(item.leaseExpiresAt) < nowMsOf(now);
+ }
+ // Sweep a list: expired claims are auto-released to unclaimed (owner
+ // cleared, lease cleared, history stamped). Everything else passes through
+--- tests ---
+FAIL: tests/work-claim-leases.test.js
+VERDICT: KILLED (suite failed)

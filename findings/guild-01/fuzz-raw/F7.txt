@@ -1,0 +1,3 @@
+FUZZ F7
+F7: inputs=27 failures=0
+VERDICT: PASS (no invariant violations)

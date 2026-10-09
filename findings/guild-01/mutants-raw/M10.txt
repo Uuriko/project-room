@@ -1,0 +1,26 @@
+MUTANT M10
+file: server/claim-coordination.mjs
+desc: boundary flip: nextPullBackoff repeats current step instead of advancing
+occurrences replaced: 1 of 1
+tests: tests/work-claim-settle-retry.test.js
+--- diff ---
+ server/claim-coordination.mjs | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+diff --git a/server/claim-coordination.mjs b/server/claim-coordination.mjs
+index ab844443b..0951851a5 100644
+--- a/server/claim-coordination.mjs
++++ b/server/claim-coordination.mjs
+@@ -22,7 +22,7 @@ export function nextPullBackoff(currentMs, token) {
+   if (!token) return PULL_BACKOFF_ANON_MS;
+   const current = Number(currentMs) || 0;
+   for (const step of PULL_BACKOFF_STEPS_MS) {
+-    if (step > current) return step;
++    if (step >= current) return step;
+   }
+   return PULL_BACKOFF_STEPS_MS[PULL_BACKOFF_STEPS_MS.length - 1];
+ }
+--- tests ---
+PASS: tests/work-claim-settle-retry.test.js
+ℹ pass 2
+ℹ fail 0
+VERDICT: SURVIVED (suite green)

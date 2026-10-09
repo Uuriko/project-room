@@ -1,0 +1,3 @@
+FUZZ F14
+F14: inputs=6 failures=0
+VERDICT: PASS (no invariant violations)

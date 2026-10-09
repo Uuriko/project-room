@@ -1,0 +1,26 @@
+MUTANT M13
+file: server/work-claim-events.mjs
+desc: boundary flip: event coalescing holds for exactly 60s instead of under 60s
+occurrences replaced: 1 of 1
+tests: tests/work-claim-events.test.js
+--- diff ---
+ server/work-claim-events.mjs | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+diff --git a/server/work-claim-events.mjs b/server/work-claim-events.mjs
+index d2097dcf7..089f76021 100644
+--- a/server/work-claim-events.mjs
++++ b/server/work-claim-events.mjs
+@@ -158,7 +158,7 @@ const coalesceKey = (roomId, claimId, action) => `${roomId}\u0000${claimId}\u000
+ 
+ export function claimEventCoalesced(store, roomId, claimId, action, atMs) {
+   const at = store && typeof store === "object" ? lastClaimEvent.get(store)?.get(coalesceKey(roomId, claimId, action)) : undefined;
+-  return Number.isFinite(at) && atMs - at >= 0 && atMs - at < CLAIM_EVENT_COALESCE_MS;
++  return Number.isFinite(at) && atMs - at >= 0 && atMs - at <= CLAIM_EVENT_COALESCE_MS;
+ }
+ 
+ // Handler unit tests drive the routes with a registry-only store; events need
+--- tests ---
+PASS: tests/work-claim-events.test.js
+ℹ pass 8
+ℹ fail 0
+VERDICT: SURVIVED (suite green)

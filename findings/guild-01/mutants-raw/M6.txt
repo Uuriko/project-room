@@ -1,0 +1,29 @@
+MUTANT M6
+file: server/work-claims.mjs
+desc: dropped backstop: stale-outcome tie-break loses the two-claimed-stamps rule
+occurrences replaced: 1 of 1
+tests: tests/claim-settle-1526.test.js, tests/work-claim-settle-retry.test.js
+--- diff ---
+ server/work-claims.mjs | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+diff --git a/server/work-claims.mjs b/server/work-claims.mjs
+index 2968b5316..531ea1e63 100644
+--- a/server/work-claims.mjs
++++ b/server/work-claims.mjs
+@@ -674,7 +674,7 @@ export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClai
+   // reopened PR. The two-"claimed"-stamps check stays as a backstop.
+   const history = item.history ?? [];
+   const priorRoundRecorded = history.some(entry => ROUND_ENDED_ACTIONS.has(entry?.action))
+-    || history.filter(entry => entry?.action === "claimed").length >= 2;
++    || false;
+   const staleOutcome = Boolean(settledLink?.outcome)
+     && Number.isFinite(outcomeMs) && Number.isFinite(roundStartMs)
+     && (outcomeMs < roundStartMs || (outcomeMs === roundStartMs && priorRoundRecorded));
+--- tests ---
+PASS: tests/claim-settle-1526.test.js
+ℹ pass 5
+ℹ fail 0
+PASS: tests/work-claim-settle-retry.test.js
+ℹ pass 2
+ℹ fail 0
+VERDICT: SURVIVED (suite green)

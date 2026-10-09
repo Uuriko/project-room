@@ -1,0 +1,26 @@
+MUTANT M12
+file: server/claim-coordination.mjs
+desc: weakened check: truthy body.merged (e.g. "false") settles as merged
+occurrences replaced: 1 of 1
+tests: tests/claim-settle-1526.test.js
+--- diff ---
+ server/claim-coordination.mjs | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+diff --git a/server/claim-coordination.mjs b/server/claim-coordination.mjs
+index ab844443b..6262a89bb 100644
+--- a/server/claim-coordination.mjs
++++ b/server/claim-coordination.mjs
+@@ -85,7 +85,7 @@ export function pullRequestOutcomeFromWebhook(payload) {
+ // Polled GET /repos/{owner}/{repo}/pulls/{n} body. An open pull settles nothing.
+ export function pullRequestOutcomeFromApi(body) {
+   if (!body || typeof body !== "object" || Array.isArray(body)) return "open";
+-  if (body.merged === true) return "merged";
++  if (body.merged) return "merged";
+   if (body.state === "closed") return "closed";
+   return "open";
+ }
+--- tests ---
+PASS: tests/claim-settle-1526.test.js
+ℹ pass 5
+ℹ fail 0
+VERDICT: SURVIVED (suite green)

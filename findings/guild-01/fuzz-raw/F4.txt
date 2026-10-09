@@ -1,0 +1,3 @@
+FUZZ F4
+F4: inputs=49 failures=0
+VERDICT: PASS (no invariant violations)

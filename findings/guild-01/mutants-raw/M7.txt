@@ -1,0 +1,26 @@
+MUTANT M7
+file: server/work-claims.mjs
+desc: dropped check: stale review basis (old owner/revision) still closes work
+occurrences replaced: 1 of 1
+tests: tests/work-claims.test.js
+--- diff ---
+ server/work-claims.mjs | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+diff --git a/server/work-claims.mjs b/server/work-claims.mjs
+index 2968b5316..e7b7536f0 100644
+--- a/server/work-claims.mjs
++++ b/server/work-claims.mjs
+@@ -942,7 +942,7 @@ export function canCloseWork(work, reviewerId, { policy, verifyMembers, reviewMe
+   if (effective === "self_attested") return reviewerId === item.owner;
+   if (reviewerId === item.owner || item.supersededBy) return false;
+   const review = item.reviews.find(entry => entry.memberId === reviewerId);
+-  if (review?.verdict !== "approve" || !currentReviewBasis(review, item)) return false;
++  if (review?.verdict !== "approve") return false;
+   const attestation = item.attestations.find(entry => entry.memberId === reviewerId);
+   if (!attestation || attestation.at !== review.at) return false;
+   const reviewers = reviewMembers instanceof Set ? reviewMembers : new Set(reviewMembers ?? []);
+--- tests ---
+PASS: tests/work-claims.test.js
+ℹ pass 6
+ℹ fail 0
+VERDICT: SURVIVED (suite green)

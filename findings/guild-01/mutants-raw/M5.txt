@@ -1,0 +1,26 @@
+MUTANT M5
+file: server/work-claims.mjs
+desc: boundary flip: claimUpdatedAt prefers history stamp on ties
+occurrences replaced: 1 of 1
+tests: tests/work-claim-board.test.js
+--- diff ---
+ server/work-claims.mjs | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+diff --git a/server/work-claims.mjs b/server/work-claims.mjs
+index 2968b5316..9ec4052e8 100644
+--- a/server/work-claims.mjs
++++ b/server/work-claims.mjs
+@@ -485,7 +485,7 @@ export function claimUpdatedAt(item) {
+   const history = Array.isArray(item?.history) ? item.history : [];
+   const historyAt = history.length > 0 && typeof history[history.length - 1]?.at === "string" ? history[history.length - 1].at : "";
+   const stored = typeof item?.updatedAt === "string" ? item.updatedAt : "";
+-  return historyAt > stored ? historyAt : (stored || historyAt);
++  return historyAt >= stored ? historyAt : (stored || historyAt);
+ }
+ const positiveCap = (value, fallback) =>
+   Number.isSafeInteger(value) && value >= 1 && value <= CONFIG_CAP_CEILING ? value : fallback;
+--- tests ---
+PASS: tests/work-claim-board.test.js
+ℹ pass 26
+ℹ fail 0
+VERDICT: SURVIVED (suite green)

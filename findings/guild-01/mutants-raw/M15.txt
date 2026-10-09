@@ -1,0 +1,26 @@
+MUTANT M15
+file: server/claim-coordination.mjs
+desc: boundary flip: settlePullRequest settles a PR on a lease lapsed exactly now
+occurrences replaced: 1 of 1
+tests: tests/claim-settle-1526.test.js
+--- diff ---
+ server/claim-coordination.mjs | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+diff --git a/server/claim-coordination.mjs b/server/claim-coordination.mjs
+index ab844443b..093db8463 100644
+--- a/server/claim-coordination.mjs
++++ b/server/claim-coordination.mjs
+@@ -106,7 +106,7 @@ export function settlePullRequest(item, outcome, nowMs) {
+   // lease_expired event and its flake signal stand instead).
+   if (typeof item.leaseExpiresAt === "string"
+     && Number.isFinite(Date.parse(item.leaseExpiresAt))
+-    && Date.parse(item.leaseExpiresAt) <= nowMs) return null;
++    && Date.parse(item.leaseExpiresAt) < nowMs) return null;
+   if (!pullsReadyToSettle(item)) return null;
+   if (outcome !== "merged" && outcome !== "closed") return null;
+   const at = new Date(nowMs).toISOString();
+--- tests ---
+PASS: tests/claim-settle-1526.test.js
+ℹ pass 5
+ℹ fail 0
+VERDICT: SURVIVED (suite green)

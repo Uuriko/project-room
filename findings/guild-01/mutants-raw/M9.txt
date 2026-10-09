@@ -1,0 +1,29 @@
+MUTANT M9
+file: server/work-claims.mjs
+desc: boundary swap: updateWork TRANSITIONS now allows cancel (dedicated route bypassed)
+occurrences replaced: 1 of 1
+tests: tests/work-claims.test.js, tests/work-claim-board.test.js
+--- diff ---
+ server/work-claims.mjs | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+diff --git a/server/work-claims.mjs b/server/work-claims.mjs
+index 2968b5316..279c96276 100644
+--- a/server/work-claims.mjs
++++ b/server/work-claims.mjs
+@@ -62,7 +62,7 @@ function nextClaimState(state, verb) {
+ // The /update state moves, derived from the table (close and cancel have
+ // their own routes so a retire always records who and why).
+ const TRANSITIONS = Object.freeze(Object.fromEntries(Object.entries(CLAIM_LIFECYCLE).map(([state, row]) =>
+-  [state, Object.freeze(Object.entries(row).filter(([verb]) => verb !== "close" && verb !== "cancel").map(([, next]) => next))])));
++  [state, Object.freeze(Object.entries(row).filter(([verb]) => verb !== "close").map(([, next]) => next))])));
+ const DELIVERY_MODES = ["result", "merged", "production"];
+ const REVIEW_POLICIES = ["self_attested", "distinct_member", "independent_principal"];
+ // Receipt tags (RC-2026-09-24-205): free-form labels recorded when work is
+--- tests ---
+PASS: tests/work-claims.test.js
+ℹ pass 6
+ℹ fail 0
+PASS: tests/work-claim-board.test.js
+ℹ pass 26
+ℹ fail 0
+VERDICT: SURVIVED (suite green)

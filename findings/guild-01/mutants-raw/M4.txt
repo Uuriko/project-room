@@ -1,0 +1,29 @@
+MUTANT M4
+file: server/work-claims.mjs
+desc: dropped clear: release no longer clears attestations (round leaks to next owner)
+occurrences replaced: 1 of 1
+tests: tests/work-claim-board.test.js, tests/work-claim-guards.test.js
+--- diff ---
+ server/work-claims.mjs | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+diff --git a/server/work-claims.mjs b/server/work-claims.mjs
+index 2968b5316..dd2f2e199 100644
+--- a/server/work-claims.mjs
++++ b/server/work-claims.mjs
+@@ -746,7 +746,7 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
+     leaseExpiresAt: released ? null : item.leaseExpiresAt, // a released claim holds no lease
+     // a released claim drops its reviews too — attestations belong to the
+     // lapsed owner's round of work, never to whoever claims next
+-    attestations: released ? Object.freeze([]) : item.attestations,
++    attestations: item.attestations,
+     reviews: released ? Object.freeze([]) : item.reviews,
+     // declared files belong to the owner's round too — a re-claim must not
+     // inherit the previous owner's file declarations
+--- tests ---
+PASS: tests/work-claim-board.test.js
+ℹ pass 26
+ℹ fail 0
+PASS: tests/work-claim-guards.test.js
+ℹ pass 12
+ℹ fail 0
+VERDICT: SURVIVED (suite green)

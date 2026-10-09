@@ -1,0 +1,26 @@
+MUTANT M11
+file: server/claim-coordination.mjs
+desc: boundary flip: rate-limit reset exactly at now is not pushed to +60s
+occurrences replaced: 1 of 1
+tests: tests/work-claim-settle-retry.test.js
+--- diff ---
+ server/claim-coordination.mjs | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+diff --git a/server/claim-coordination.mjs b/server/claim-coordination.mjs
+index ab844443b..eba614d38 100644
+--- a/server/claim-coordination.mjs
++++ b/server/claim-coordination.mjs
+@@ -47,7 +47,7 @@ export function rateLimitUntil({ status, remaining, reset, retryAfter, message }
+   } else if (typeof retryAfter === "string" && /^\d+$/.test(retryAfter.trim())) {
+     until = nowMs + Number(retryAfter.trim()) * 1000;
+   }
+-  if (!until || until <= nowMs) until = nowMs + PULL_POLL_BACKOFF_MS;
++  if (!until || until < nowMs) until = nowMs + PULL_POLL_BACKOFF_MS;
+   return until;
+ }
+ 
+--- tests ---
+PASS: tests/work-claim-settle-retry.test.js
+ℹ pass 2
+ℹ fail 0
+VERDICT: SURVIVED (suite green)

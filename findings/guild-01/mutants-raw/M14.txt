@@ -1,0 +1,24 @@
+MUTANT M14
+file: server/work-claim-integrity.mjs
+desc: boundary flip: 0.25h lease rejected (documented minimum)
+occurrences replaced: 1 of 1
+tests: tests/work-claim-integrity.test.js
+--- diff ---
+ server/work-claim-integrity.mjs | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+diff --git a/server/work-claim-integrity.mjs b/server/work-claim-integrity.mjs
+index de4203e3a..577ac33be 100644
+--- a/server/work-claim-integrity.mjs
++++ b/server/work-claim-integrity.mjs
+@@ -62,7 +62,7 @@ export function boardTextFields(reject, data, fields) {
+ export function assertBoardLeaseHours(reject, data) {
+   if (!data || !Object.hasOwn(data, "leaseHours") || data.leaseHours === null) return;
+   const value = data.leaseHours;
+-  if (typeof value !== "number" || !Number.isFinite(value) || value < BOARD_LEASE_HOURS_MIN || value > BOARD_LEASE_HOURS_MAX) {
++  if (typeof value !== "number" || !Number.isFinite(value) || value <= BOARD_LEASE_HOURS_MIN || value > BOARD_LEASE_HOURS_MAX) {
+     invalid(reject, "leaseHours", `must be a number from ${BOARD_LEASE_HOURS_MIN} to ${BOARD_LEASE_HOURS_MAX}, or null where allowed`);
+   }
+ }
+--- tests ---
+FAIL: tests/work-claim-integrity.test.js
+VERDICT: KILLED (suite failed)
