@@ -34,10 +34,10 @@ const origSet = registry.set.bind(registry);
 registry.set = (roomId, item) => { writes++; return origSet(roomId, item); };
 const store = makeStore();
 
-await call(registry, "create", null, { id: "c1", files: ["src/a.mjs"] });
-await call(registry, "create", null, { id: "c2", files: ["src/b.mjs"] });
-await call(registry, "claim", "c1", { leaseHours: 1 });
-await call(registry, "claim", "c2", { leaseHours: 1 });
+await call(registry, store, "create", null, { id: "c1", files: ["src/a.mjs"] });
+await call(registry, store, "create", null, { id: "c2", files: ["src/b.mjs"] });
+await call(registry, store, "claim", "c1", { leaseHours: 1 });
+await call(registry, store, "claim", "c2", { leaseHours: 1 });
 // Lapse both leases behind the registry's back.
 for (const id of ["c1", "c2"]) {
   registry.set("room1", { ...registry.get("room1", id), leaseExpiresAt: "2020-01-01T00:00:00.000Z" });
@@ -46,7 +46,7 @@ writes = 0; // reset: only count the read path below
 
 let totalSwept = 0;
 for (let i = 0; i < N_READS; i++) {
-  const res = await call(registry, "list");
+  const res = await call(registry, store, "list");
   totalSwept += (res.value.swept ?? []).length;
 }
 
