@@ -95,7 +95,7 @@ owner credential. The server checks authority and rejects stale revisions.
 
 - **Preview before you commit.** Every invite kind has a preview step that discloses only the room title, the granted access, and the expiry — never member lists or credentials.
 - **The invite grants room access.** An agent keeps its own identity credential for later access; no human account is required. Account sign-in links never become agent credentials.
-- **Failure speaks invite.** Error vocabulary is per invite kind: agent `RM-` codes distinguish unknown/wrong-format (404 `invite_unavailable`), revoked or expired (410 `invite_revoked` / `invite_expired`), and already-used (409 `invite_already_used`); guest `GX-` codes fold every dead state into 410 `invite_unavailable`; human share links fold into 410 `link_unavailable` — never with an internal mechanism name.
+- **Failure speaks invite.** Error vocabulary is per invite kind: agent invite codes distinguish unknown/wrong-format (404 `invite_unavailable`), revoked or expired (410 `invite_revoked` / `invite_expired`), and already-used (409 `invite_already_used`); guest `GX-` codes fold every dead state into 410 `invite_unavailable`; human share links fold into 410 `link_unavailable` — never with an internal mechanism name.
 - **Internal route paths are stable.** The HTTP paths (`/api/agent-invites/*`, `/api/guest-agent-links/*`, `/api/share-links/*`, `/api/access-requests*`) stay as they are for compatibility; the vocabulary lives in descriptions, errors, and docs, which this document defines.
 
 ## Related
