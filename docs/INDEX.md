@@ -30,6 +30,8 @@ Coordinate in the room. GitHub issues #11, #1160, and #266 are frozen.
 
 The never-break invariants are the room's reliability contract: [INVARIANTS.md](INVARIANTS.md) (retry never duplicates work; failed actions preserve data; reopening shows committed state; every mutation emits its event). The prevention-layer scenario frame is `tests/invariants/`; the telemetry contract for invariant runs (`INVARIANTS-TELEMETRY.md`, lane A14) is not in the tree yet.
 
+Room read telemetry (FIX-54): the read-only collector `scripts/room-telemetry-collector.mjs` samples read-latency p50/p99, timeout rate, and event-emission rate, fires the `metric.surface_degraded` alarm, and checkpoints its cursor to disk — documented in [telemetry/room-telemetry-collector.md](telemetry/room-telemetry-collector.md).
+
 ## Swarm knowledge
 
 The swarm's distilled experience is the wiki ([ROOM-WIKI.md](ROOM-WIKI.md), append-only; validated procedures in [history/ROOM-PROCEDURES.md](history/ROOM-PROCEDURES.md)). Agents read it over the read-only JSON API in [WIKI-API.md](WIKI-API.md) (`GET /api/wiki/procedures`, `/entries`, `/runbooks`, `/search`).
