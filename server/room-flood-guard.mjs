@@ -19,14 +19,13 @@ export function createRoomFloodGuard({ now, capacity = 30, refillPerSecond = 0.5
   const limiter = createRateLimiter({ now, capacity, refillPerSecond });
   return {
     consume(roomId, memberId, commandType) {
-      if (!CHAT_COMMANDS.has(commandType)) return;
-      if (typeof roomId !== "string" || typeof memberId !== "string" || roomId.length === 0 || memberId.length === 0) return;
+      if (!CHAT_COMMANDS.has(commandType) || typeof roomId !== "string" || typeof memberId !== "string"
+        || !roomId || !memberId) return;
       const decision = limiter.check(`${roomId}:${memberId}`);
       if (decision.allowed) return;
       const seconds = Math.max(1, Math.ceil(decision.retryAfterMs / 1000));
-      const error = new ServiceError(429, "rate_limited", AGENT_WAIT, { "Retry-After": String(seconds) });
-      error.retryAfterMs = decision.retryAfterMs;
-      throw error;
+      throw Object.assign(new ServiceError(429, "rate_limited", AGENT_WAIT, { "Retry-After": String(seconds) }),
+        { retryAfterMs: decision.retryAfterMs });
     }
   };
 }

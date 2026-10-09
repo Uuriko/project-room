@@ -17,7 +17,9 @@ export function roomKeyPresenceAuth(store, secret) {
     refuse("room_key_heartbeat_refused", "A room access key can register pull-only presence only for its own agent member");
   }
   const identityId = store.identities.identityIdForMember(auth.roomId, auth.member.id);
-  if (!identityId || auth.member.identityId !== identityId) refuse("room_key_heartbeat_refused", "This room member is not a linked identity");
+  if (!identityId || auth.member.identityId !== identityId) {
+    refuse("room_key_heartbeat_refused", "This room member is not a linked identity");
+  }
   const rooms = store.identities.roomsForIdentity(identityId);
   if (rooms.length !== 1 || rooms[0].roomId !== auth.roomId || rooms[0].memberId !== auth.member.id) {
     refuse("room_key_heartbeat_refused", "A room access key can register presence only for an identity linked to this room alone");
@@ -33,7 +35,7 @@ export function assertRoomKeyPullOnly(store, identityId, data) {
   const existing = store.agentHeartbeats.statusOf(identityId).hosts.find(host => host.hostId === data.hostId);
   const push = store.db.prepare("SELECT push_url AS url FROM agent_push_configs WHERE agent_id=? AND host_id=?")
     .get(identityId, data.hostId);
-  if ((existing && existing.mode === "wakeable") || push?.url) {
+  if (existing?.mode === "wakeable" || push?.url) {
     refuse("room_key_wake_refused", "A room access key cannot replace a wakeable host");
   }
 }
@@ -48,9 +50,9 @@ export function roomKeyHostId(auth, hostId) {
 }
 
 export function roomKeyPresenceView(store, auth) {
-  const status = store.agentHeartbeats.statusOf(auth.identityId);
-  const hosts = status.hosts.filter(host => host.hostId.startsWith(auth.hostPrefix) && host.mode === "pull-only")
+  const hosts = store.agentHeartbeats.statusOf(auth.identityId).hosts
+    .filter(host => host.hostId.startsWith(auth.hostPrefix) && host.mode === "pull-only")
     .map(host => ({ ...host, wakeUrl: null }));
   return { agentId: auth.identityId, hosts, lastSeenAt: hosts[0]?.lastSeenAt ?? null,
-    status: hosts.some(host => host.state === "online") ? "online" : hosts.length ? "offline" : "unregistered" };
+    status: !hosts.length ? "unregistered" : hosts.some(host => host.state === "online") ? "online" : "offline" };
 }

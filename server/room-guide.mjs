@@ -17,12 +17,8 @@ export const STARTER_CLAIM_ID = "starter-receipt";
 const pending = new WeakMap();
 
 function noteGuideRoom(store, roomId) {
-  let rooms = pending.get(store);
-  if (!rooms) {
-    rooms = new Set();
-    pending.set(store, rooms);
-  }
-  rooms.add(roomId);
+  if (!pending.get(store)) pending.set(store, new Set());
+  pending.get(store).add(roomId);
 }
 
 // Installed on first seed and from the Durable Object constructor. The wrapper
@@ -84,8 +80,7 @@ function pickedChoice(state, choices) {
 function choiceIdFromItem(item) {
   const stamp = [...(item.history ?? [])].reverse().find(entry => entry.action === "state:done");
   if (typeof stamp?.note !== "string" || !stamp.note.startsWith("choice:")) return null;
-  const id = stamp.note.slice("choice:".length).split(" ")[0];
-  return id || null;
+  return stamp.note.slice("choice:".length).split(" ")[0] || null;
 }
 
 function firstJoinedAgent(state) {
@@ -100,13 +95,13 @@ function commitClaim(store, roomId, item, action, actorId, atMs) {
 }
 
 function step(store, roomId, now) {
-  const room = store.room(roomId);
-  const state = room.state;
+  const { state } = store.room(roomId);
   if (!state?.room?.starterSeeded || isRoomArchived(state)) return null;
   const guide = state.members?.[ROOM_GUIDE_ID];
   if (!guide || guide.active === false) return null;
   const registry = store.workClaims;
   if (!registry) return null;
+  const commit = (item, action) => commitClaim(store, roomId, item, action, ROOM_GUIDE_ID, now);
   const welcome = welcomeId(roomId);
   if (!state.messages?.some(message => message.id === welcome)) {
     const choices = choiceClaims(registry, roomId);
@@ -122,9 +117,7 @@ function step(store, roomId, now) {
       }
     });
     const starter = registry.get(roomId, STARTER_CLAIM_ID);
-    if (starter?.state === "unclaimed") {
-      commitClaim(store, roomId, claimWork(starter, ROOM_GUIDE_ID, { leaseHours: null, now }), "claimed", ROOM_GUIDE_ID, now);
-    }
+    if (starter?.state === "unclaimed") commit(claimWork(starter, ROOM_GUIDE_ID, { leaseHours: null, now }), "claimed");
     return "seeded";
   }
   const starter = registry.get(roomId, STARTER_CLAIM_ID);
@@ -133,15 +126,15 @@ function step(store, roomId, now) {
   if (choice && starter && starter.owner === ROOM_GUIDE_ID && starter.state !== "done") {
     let item = starter;
     if (item.state === "claimed") {
-      item = commitClaim(store, roomId, updateWork(item, ROOM_GUIDE_ID, { state: "in_progress", now }), "state_changed", ROOM_GUIDE_ID, now);
+      item = commit(updateWork(item, ROOM_GUIDE_ID, { state: "in_progress", now }), "state_changed");
     }
     if (item.state === "in_progress") {
-      commitClaim(store, roomId, updateWork(item, ROOM_GUIDE_ID, {
+      commit(updateWork(item, ROOM_GUIDE_ID, {
         state: "done",
         deliveryMode: "result",
         note: `choice:${choice.id} ${choice.title}`,
         now
-      }), "state_changed", ROOM_GUIDE_ID, now);
+      }), "state_changed");
     }
     return "choice_made";
   }
@@ -153,7 +146,7 @@ function step(store, roomId, now) {
     const messageId = stableEventId("ga", `${roomId}\0${agent.id}`);
     if (store.room(roomId).state.messages?.some(message => message.id === messageId)) return null;
     if (chosen.state === "unclaimed") {
-      commitClaim(store, roomId, claimWork(chosen, agent.id, { leaseHours: null, now, note: "Assigned by Room Guide" }), "claimed", ROOM_GUIDE_ID, now);
+      commit(claimWork(chosen, agent.id, { leaseHours: null, now, note: "Assigned by Room Guide" }), "claimed");
     }
     const name = agent.displayName || agent.id;
     appendRoomEvent(store, roomId, {

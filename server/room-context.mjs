@@ -13,6 +13,8 @@ export const ROOM_CONTEXT_OMITTED = Object.freeze([
   "handoff_done_summary", "decision_reason"
 ]);
 
+const byStringKey = key => (a, b) => a[key] < b[key] ? -1 : a[key] > b[key] ? 1 : 0;
+
 const canonical = value => Array.isArray(value)
   ? `[${value.map(canonical).join(",")}]`
   : value && typeof value === "object"
@@ -46,14 +48,13 @@ function liveSessions(items) {
       stopRequested: session.stop_requested_at != null,
     });
   }
-  rows.sort((a, b) => a.workItemId < b.workItemId ? -1 : a.workItemId > b.workItemId ? 1 : 0);
-  return rows;
+  return rows.sort(byStringKey("workItemId"));
 }
 
 // Latest open handoff whose triage member is the viewer. doneSummary is omitted.
 function handoffToYou(items, viewerId, ownerId) {
-  const open = items.filter(item => item.handoff?.open && (item.handoff.triageMemberId ?? ownerId) === viewerId);
-  open.sort((a, b) => (a.handoff.at < b.handoff.at ? 1 : a.handoff.at > b.handoff.at ? -1 : a.id < b.id ? -1 : 1));
+  const open = items.filter(item => item.handoff?.open && (item.handoff.triageMemberId ?? ownerId) === viewerId)
+    .sort((a, b) => a.handoff.at > b.handoff.at ? -1 : a.handoff.at < b.handoff.at ? 1 : a.id < b.id ? -1 : 1);
   const item = open[0];
   if (!item) return null;
   const handoff = item.handoff;
@@ -85,7 +86,7 @@ export function buildRoomContext({ state, sequence, viewerId, caughtUp, now }) {
       id: member.id, displayName: text(member.displayName), kind: text(member.kind),
       active: member.active !== false, permissions: list(member.permissions)
     }))
-    .sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+    .sort(byStringKey("id"));
   const focusWork = [];
   const locks = [];
   const deps = [];
@@ -122,9 +123,9 @@ export function buildRoomContext({ state, sequence, viewerId, caughtUp, now }) {
       if (ref) fileRefs.push(ref);
     }
   }
-  const byId = (a, b, key = "workItemId") => a[key] < b[key] ? -1 : a[key] > b[key] ? 1 : 0;
+  const byId = byStringKey("workItemId");
   const refKey = ref => [ref.workItemId, ref.kind, ref.record ?? "", ref.path ?? "", ref.url ?? ""].join("\0");
-  focusWork.sort((a, b) => byId(a, b, "id"));
+  focusWork.sort(byStringKey("id"));
   locks.sort(byId);
   deps.sort(byId);
   decisions.sort(byId);

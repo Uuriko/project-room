@@ -88,6 +88,8 @@ const OPEN_WORK_STATES = new Set([
   WORK_STATES.PROPOSED, WORK_STATES.ACCEPTED, WORK_STATES.WORKING, WORK_STATES.BLOCKED
 ]);
 
+const byStringKey = key => (a, b) => a[key] < b[key] ? -1 : a[key] > b[key] ? 1 : 0;
+
 // Coordination norms: the room's standing defaults. Frozen so callers cannot
 // mutate the shared reference; buildActivationPack copies them per pack.
 export const COORDINATION_NORMS = Object.freeze({
@@ -147,11 +149,11 @@ export function buildActivationPack(store, roomSlug, viewerId = null) {
   const now = new Date(store.now()).toISOString();
   const members = Object.values(state.members ?? {})
     .filter(member => member?.active !== false)
-    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .sort(byStringKey("id"))
     .map(memberOf);
   const openWork = Object.values(state.workItems ?? {})
     .filter(item => item && OPEN_WORK_STATES.has(item.state))
-    .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0))
+    .sort(byStringKey("createdAt"))
     .map(item => workOf(item, now));
   const floor = summaryHistoryFloor(store, roomSlug, viewerId, sequence); // QA4 Q4-SEC-1
   const pack = withContentTrust({
