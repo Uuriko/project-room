@@ -235,11 +235,17 @@ export async function handleAuthGroup(ctx) {
     checkOrigin(req, true);
     rate(`password-signup:${remoteAddress}`, 10);
     const data = await body(req);
-    const signupToken = signInSlotToken(req, data, ["email", "password", "sessionRevision"],
+    // An optional returnTo (same strict validation as magic sign-in) rides
+    // the signup mail, so an invitee who signs up from a #join/ or #invite/
+    // link lands back on that invitation from the email, not on a bare root.
+    const signupReturn = Object.hasOwn(data, "returnTo");
+    const signupToken = signInSlotToken(req, data, ["email", "password", "sessionRevision", ...(signupReturn ? ["returnTo"] : [])],
       { code: "invalid_signup", message: "An email, password, and current session are required" });
     if (typeof data.email !== "string" || typeof data.password !== "string") {
       reject(422, "invalid_signup", "An email, password, and current session are required");
     }
+    if (signupReturn && validateMagicReturnTo(data.returnTo) === null) reject(422, "invalid_return_target", "A valid local return target is required");
+    const signupLink = signupReturn ? { returnTo: data.returnTo } : {};
     const normalized = normalizeEmail(data.email);
     if (!normalized) reject(422, "invalid_email", "A valid email address is required");
     const policy = checkPasswordPolicy(data.password);
@@ -249,14 +255,14 @@ export async function handleAuthGroup(ctx) {
     const mailConfigured = magicMailer.isConfigured();
     const holding = store.accountLogins.findAccountHoldingEmail(normalized);
     if (holding) {
-      if (mailConfigured) await deliverSignupMail(() => magicMailer.sendMagicLink({ to: normalized, purpose: "signup-notice" }));
+      if (mailConfigured) await deliverSignupMail(() => magicMailer.sendMagicLink({ to: normalized, purpose: "signup-notice", ...signupLink }));
       return json(res, 202, signupReply());
     }
     const accountId = passwordAccountId(normalized);
     try { store.createAccount(accountId, "password-signup"); }
     catch (error) {
       if (!(error instanceof ServiceError) || error.status !== 409) throw error;
-      if (mailConfigured) await deliverSignupMail(() => magicMailer.sendMagicLink({ to: normalized, purpose: "signup-notice" }));
+      if (mailConfigured) await deliverSignupMail(() => magicMailer.sendMagicLink({ to: normalized, purpose: "signup-notice", ...signupLink }));
       return json(res, 202, signupReply());
     }
     const method = store.accountLogins.linkPasswordMethod(accountId, { email: normalized, verifier });
@@ -264,7 +270,7 @@ export async function handleAuthGroup(ctx) {
     if (mailConfigured) {
       const issued = store.accountLogins.issueEmailVerifyCode({ accountId, email: normalized });
       await deliverSignupMail(() => magicMailer.sendMagicLink({
-        to: normalized, code: issued.code, expiresAt: issued.expiresAt, purpose: "email-verify"
+        to: normalized, code: issued.code, expiresAt: issued.expiresAt, purpose: "email-verify", ...signupLink
       }));
     }
     finishPasswordSlot(signupToken, accountId, data.sessionRevision, method.id);
@@ -436,7 +442,7 @@ export const AUTH_ROUTES = Object.freeze([
     id: "auth.password.signup", method: "POST", path: "/api/auth/password/signup", auth: "account",
     rate: { key: "password-signup", max: 10 },
     schema: { body: { type: "object", required: ["email", "password", "sessionRevision"], additionalProperties: false, properties: {
-      email: { type: "string" }, password: { type: "string" }, ...slotFields,
+      email: { type: "string" }, password: { type: "string" }, returnTo: { type: "string" }, ...slotFields,
     } } },
   }),
   authRoute({
