@@ -379,3 +379,35 @@ test('deleted assistant prompt shows only content-free stop controls and preserv
   assert.equal(await panel.getByRole('button').count(),0);
   assert.equal(await page.locator('#message-input').inputValue(),'Keep my unsent conversation draft.');
 });
+
+test('Ask Room with no assistant connected says so and opens Connect for the owner', { timeout: 60000 }, async t => {
+  const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
+  await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`, browser = await chromium.launch({headless:true});
+  t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve=>server.close(resolve)); f.store.close(); rmSync(f.directory,{recursive:true,force:true}); });
+  const errors = [], pages = [];
+  for (const member of ['owner','guest']) {
+    const context = await browser.newContext({viewport:{width:1280,height:900}}), page = await context.newPage();
+    page.on('pageerror', e=>errors.push(e.message)); await page.goto(origin); await signInFixture(page,f.keys[member]);
+    await page.locator('#main').waitFor({state:'visible'}); await page.waitForFunction(()=>document.body.classList.contains('human-experience'));
+    await page.waitForFunction(()=>document.querySelector('#room-assistant-status')?.textContent==='Not connected'); pages.push(page);
+  }
+  const [owner,peer] = pages;
+  await peer.locator('#message-input').fill('what can you do?');
+  await peer.locator('#ask-room').click();
+  assert.equal(await peer.locator('#ask-room').getAttribute('aria-pressed'),'false','nothing to ask yet, so Ask Room does not arm');
+  assert.equal(await peer.locator('#assistant-error').textContent(),'No assistant is connected yet. Ask the room owner to connect one.');
+  assert.equal(await peer.locator('#room-assistant-setup').isVisible(),false);
+  assert.equal(await peer.locator('#message-input').inputValue(),'what can you do?','the draft stays');
+  await owner.locator('#ask-room').click();
+  await owner.locator('#room-assistant-setup').waitFor({state:'visible'});
+  assert.equal(await owner.locator('#ask-room').getAttribute('aria-pressed'),'false');
+  assert.match(await owner.locator('#assistant-error').textContent(),/^Connect an assistant first\./);
+  await owner.locator('#room-assistant-setup select').selectOption('producer');
+  await owner.locator('#room-assistant-setup button[type=submit]').click(); await owner.locator('#room-assistant-setup').waitFor({state:'hidden'});
+  await owner.waitForFunction(()=>document.querySelector('#room-assistant-status').textContent==='Waiting for connection');
+  assert.equal(await owner.locator('#assistant-error').textContent(),'','the hint clears once an assistant is chosen');
+  await owner.locator('#ask-room').click();
+  assert.equal(await owner.locator('#ask-room').getAttribute('aria-pressed'),'true','Ask Room arms as before');
+  assert.deepEqual(errors,[]);
+});

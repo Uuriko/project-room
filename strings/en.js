@@ -135,5 +135,7 @@ export default {
   "human.decisionReceiptUnknown": "Save receipt could not be confirmed",
   "human.decisionRationaleChanged": "Your reason was posted. Review the changed result before deciding.",
   "human.cancelDeleted": "<button type=\"button\" class=\"text-button\" data-pause-run=\"{runId}\" data-cancel=\"true\" data-revision=\"{revision}\">Cancel</button>",
-  "human.deletedRequest": "Deleted request"
+  "human.deletedRequest": "Deleted request",
+  "human.askNotConnectedOwner": "Connect an assistant first. Ask Room sends your message to the assistant you choose here.",
+  "human.askNotConnectedMember": "No assistant is connected yet. Ask the room owner to connect one."
 };

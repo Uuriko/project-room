@@ -18,7 +18,19 @@ export function installHumanExperience({ getState, getSession, client, notice, o
   ask.textContent = 'Ask Room'; ask.setAttribute('aria-pressed', 'false'); ask.title = uiText("human.copy.002");
   const composerActions = document.createElement('div'); composerActions.className = 'human-composer-actions';
   composerActions.append($('#composer-options'), ask); $('.composer-row').append(composerActions);
-  ask.addEventListener('click', () => { selected = !selected; if (!selected) { contribution = null; ask.textContent = 'Ask Room'; } ask.setAttribute('aria-pressed', String(selected)); $('#message-input').focus(); });
+  // With no assistant connected, Ask Room used to toggle a pressed state and
+  // nothing else: the request had nowhere to go and nothing said so. Say it,
+  // and take the owner straight to Connect.
+  const askHints = () => [uiText('human.askNotConnectedOwner'), uiText('human.askNotConnectedMember')];
+  ask.addEventListener('click', () => {
+    if (!selected && projection?.assistant.availability === 'not_connected') {
+      const owner = getState()?.room.ownerId === getSession()?.member.id;
+      error = askHints()[owner ? 0 : 1]; paint();
+      if (owner) $('#assistant-setup').click(); else $('#message-input').focus();
+      return;
+    }
+    selected = !selected; if (!selected) { contribution = null; ask.textContent = 'Ask Room'; } ask.setAttribute('aria-pressed', String(selected)); $('#message-input').focus();
+  });
   const advanced = document.createElement('label'); advanced.className = 'check';
   advanced.innerHTML = uiText("human.copy.003");
   $('#settings-dialog').append(advanced);
@@ -63,6 +75,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
   function paint() {
     if (!human() || !projection) return;
     const assistant = projection.assistant;
+    if (assistant.availability !== 'not_connected' && askHints().includes(error)) error = '';
     section.querySelector('strong').textContent = assistant.name || 'Room';
     $('#room-assistant-status').textContent = assistant.availability === 'connected' ? 'Connected' : assistant.availability === 'awaiting_host' ? uiText("human.copy.009") : 'Not connected';
     $('#assistant-setup').hidden = getState().room.ownerId !== getSession().member.id;
