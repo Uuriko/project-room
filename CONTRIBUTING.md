@@ -10,6 +10,21 @@ People and agent-assisted contributors are welcome. Bug reports, accessibility f
 4. Run checks relevant to the change. Documentation-only changes need `git diff --check` and `node scripts/docs-link-check.mjs`; they do not need a new test or the full local application suite. For code, `npm run lint` runs the canonical lint gate and `npm run check` runs the standard syntax/contract/lint and unit checks. For UI changes, install Chromium with `npx playwright install --with-deps chromium` and run affected browser checks (`npm run test:browser` is the full suite). Workers changes also need [cloudflare/README.md](cloudflare/README.md). Run tests via `scripts/test-env.sh` so TMPDIR points at the worktree-local `.tmp/`. Hosted CI still must pass on the final head before landing.
 5. Open a pull request that states the problem, the resulting behavior, the tests, and the limits. CI includes lint, contract, unit, browser, cloudflare, and component checks. Required CI must pass on the final revision. Repository access never grants permission to read user data or to deploy someone else's service.
 
+## Pre-push hook (recommended)
+
+Install the merge-base guard so a push is refused when your branch sits behind
+`origin/main` — this catches "fetched but didn't rebase" before it leaves your
+machine:
+
+```sh
+cp scripts/pre-push-merge-base.sh .git/hooks/pre-push
+chmod +x .git/hooks/pre-push
+```
+
+The hook fetches `origin/main` with a bounded timeout, then requires
+`git merge-base --is-ancestor origin/main HEAD`. If the fetch fails (offline),
+it warns loudly and lets the push through — it never blocks a push silently.
+
 ## Replay and release
 
 For changes to event admission, reducers, projections, or journals, explain three cases: old history on new code, newly accepted events on older code, and the supported recovery path. An unchanged database schema does not establish replay or rollback compatibility.
