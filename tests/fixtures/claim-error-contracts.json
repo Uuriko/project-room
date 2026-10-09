@@ -1,0 +1,479 @@
+{
+  "meta": {
+    "contract": "src/agent-error.mjs — agentErrorAx (refusal classifier) + agentErrorBody (error-body builder)",
+    "generatedBy": "tests/fixtures/gen-contract-fixtures.mjs",
+    "note": "deepEqual snapshots: a rename or reshape in these branches must fail the test loudly."
+  },
+  "cases": [
+    {
+      "name": "work_claim_conflict/self",
+      "fn": "agentErrorAx",
+      "args": [
+        {
+          "httpStatus": 409,
+          "code": "work_claim_conflict",
+          "message": "work \"fix-41\" is already claimed by you — no new claim was saved; read the item to confirm",
+          "roomId": "room-1",
+          "workItemId": "fix-41"
+        }
+      ],
+      "expected": {
+        "status": "action_required",
+        "reason": "work_claim_conflict",
+        "hint": "You already hold this work — no new claim was saved. Read the current item to confirm its state; do not release it to 're-claim'.",
+        "next": [
+          {
+            "path": "/api/rooms/room-1/work-claims/fix-41"
+          },
+          {
+            "tool": "room_read_work",
+            "arguments": {
+              "workItemId": "fix-41"
+            }
+          },
+          {
+            "command": "Read the current item (GET /api/rooms/room-1/work-claims/fix-41) to confirm what you hold."
+          }
+        ]
+      }
+    },
+    {
+      "name": "work_claim_conflict/held",
+      "fn": "agentErrorAx",
+      "args": [
+        {
+          "httpStatus": 409,
+          "code": "work_claim_conflict",
+          "message": "work \"fix-41\" is held by alice — ask them to reassign or release it",
+          "roomId": "room-1",
+          "workItemId": "fix-41"
+        }
+      ],
+      "expected": {
+        "status": "action_required",
+        "reason": "work_claim_conflict",
+        "hint": "This work is held by alice. Ask them to reassign or release it, or claim it after their lease lapses.",
+        "next": [
+          {
+            "path": "/api/rooms/room-1/work-claims/fix-41"
+          },
+          {
+            "tool": "room_read_work",
+            "arguments": {
+              "workItemId": "fix-41"
+            }
+          },
+          {
+            "command": "Ask alice to reassign or release the claim, then claim it."
+          }
+        ]
+      }
+    },
+    {
+      "name": "work_claim_conflict/unknown",
+      "fn": "agentErrorAx",
+      "args": [
+        {
+          "httpStatus": 409,
+          "code": "work_claim_conflict",
+          "message": "work \"fix-41\" is already done",
+          "roomId": "room-1",
+          "workItemId": "fix-41"
+        }
+      ],
+      "expected": {
+        "status": "action_required",
+        "reason": "work_claim_conflict",
+        "hint": "This work is already claimed. Read the current item to see who holds it and whether you should wait.",
+        "next": [
+          {
+            "path": "/api/rooms/room-1/work-claims/fix-41"
+          },
+          {
+            "tool": "room_read_work",
+            "arguments": {
+              "workItemId": "fix-41"
+            }
+          },
+          {
+            "command": "Read the current item, identify the holder, then ask them to reassign or release the claim."
+          }
+        ]
+      }
+    },
+    {
+      "name": "work_not_owner/named",
+      "fn": "agentErrorAx",
+      "args": [
+        {
+          "httpStatus": 403,
+          "code": "work_not_owner",
+          "message": "work \"fix-41\" is owned by alice — only the owner can update it",
+          "roomId": "room-1",
+          "workItemId": "fix-41"
+        }
+      ],
+      "expected": {
+        "status": "action_required",
+        "reason": "work_not_owner",
+        "hint": "This work is unclaimed — claim it first, then act on it.",
+        "next": [
+          {
+            "path": "/api/rooms/room-1/work-claims/fix-41"
+          },
+          {
+            "command": "Claim the work item first (POST …/work-claims/{id}/claim)."
+          }
+        ]
+      }
+    },
+    {
+      "name": "work_not_owner/unclaimed",
+      "fn": "agentErrorAx",
+      "args": [
+        {
+          "httpStatus": 403,
+          "code": "work_not_owner",
+          "message": "work \"fix-41\" is owned by nobody — only the owner can update it",
+          "roomId": "room-1",
+          "workItemId": "fix-41"
+        }
+      ],
+      "expected": {
+        "status": "action_required",
+        "reason": "work_not_owner",
+        "hint": "This work is unclaimed — claim it first, then act on it.",
+        "next": [
+          {
+            "path": "/api/rooms/room-1/work-claims/fix-41"
+          },
+          {
+            "command": "Claim the work item first (POST …/work-claims/{id}/claim)."
+          }
+        ]
+      }
+    },
+    {
+      "name": "claim_lease_lapsed",
+      "fn": "agentErrorAx",
+      "args": [
+        {
+          "httpStatus": 409,
+          "code": "claim_lease_lapsed",
+          "message": "The current claim lease has lapsed",
+          "roomId": "room-1",
+          "workItemId": "fix-41"
+        }
+      ],
+      "expected": {
+        "status": "action_required",
+        "reason": "claim_lease_lapsed",
+        "hint": "The lease lapsed and the claim auto-released. Claim the work item again to continue.",
+        "next": [
+          {
+            "path": "/api/rooms/room-1/work-claims/fix-41/claim"
+          },
+          {
+            "command": "Claim the work item again (POST …/work-claims/{id}/claim)."
+          }
+        ]
+      }
+    },
+    {
+      "name": "already_claimed",
+      "fn": "agentErrorAx",
+      "args": [
+        {
+          "httpStatus": 409,
+          "code": "already_claimed",
+          "message": "This bounty is already claimed"
+        }
+      ],
+      "expected": {
+        "status": "action_required",
+        "reason": "already_claimed",
+        "hint": "This bounty is already claimed — pick another bounty, or wait for it to be released.",
+        "next": [
+          {
+            "tool": "room_check_access"
+          },
+          {
+            "command": "Read the current state to confirm; do not retry the same action"
+          }
+        ]
+      }
+    },
+    {
+      "name": "identity_already_linked",
+      "fn": "agentErrorAx",
+      "args": [
+        {
+          "httpStatus": 409,
+          "code": "identity_already_linked",
+          "message": "This identity is already linked to room-1"
+        }
+      ],
+      "expected": {
+        "status": "action_required",
+        "reason": "identity_already_linked",
+        "hint": "This identity is already linked to this room — the earlier link is live. Keep your saved connection; do not mint another identity or retry the link create.",
+        "next": [
+          {
+            "tool": "room_check_access"
+          },
+          {
+            "command": "Read the current state to confirm; do not retry the same action"
+          }
+        ]
+      }
+    },
+    {
+      "name": "work_claim_not_found",
+      "fn": "agentErrorAx",
+      "args": [
+        {
+          "httpStatus": 404,
+          "code": "work_claim_not_found",
+          "message": "No work claim with id nope in this room",
+          "roomId": "room-1"
+        }
+      ],
+      "expected": {
+        "status": "action_required",
+        "reason": "work_claim_not_found",
+        "hint": "No work claim with that id in this room. Re-read the work-claims board for the current ids — a retired or mistyped id never resolves.",
+        "next": [
+          {
+            "path": "/api/rooms/room-1/work-claims"
+          },
+          {
+            "command": "GET the work-claims board and use a current claim id; do not guess ids"
+          }
+        ]
+      }
+    },
+    {
+      "name": "session_claimed",
+      "fn": "agentErrorAx",
+      "args": [
+        {
+          "httpStatus": 409,
+          "code": "session_claimed",
+          "message": "Claim held by alice",
+          "roomId": "room-1",
+          "workItemId": "fix-41"
+        }
+      ],
+      "expected": {
+        "status": "action_required",
+        "reason": "session_claimed",
+        "hint": "alice holds this claim. Wait for release or a stale heartbeat (10 min), or supersede the work item.",
+        "next": [
+          {
+            "tool": "room_read_work",
+            "arguments": {
+              "workItemId": "fix-41"
+            }
+          },
+          {
+            "command": "Wait for alice to release this claim, or for the heartbeat to go stale, or supersede the work item."
+          }
+        ]
+      }
+    },
+    {
+      "name": "stale_revision",
+      "fn": "agentErrorAx",
+      "args": [
+        {
+          "httpStatus": 409,
+          "code": "stale_read",
+          "message": "revision changed since your read",
+          "roomId": "room-1",
+          "workItemId": "fix-41"
+        }
+      ],
+      "expected": {
+        "status": "action_required",
+        "reason": "stale_revision",
+        "hint": "Re-read workContext. Use the current revision. Do not silently rebase.",
+        "next": [
+          {
+            "tool": "room_read_work",
+            "arguments": {
+              "workItemId": "fix-41"
+            }
+          },
+          {
+            "path": "/api/rooms/room-1/work-context"
+          },
+          {
+            "command": "Re-read workContext; send a new command with current expectedRevision"
+          }
+        ]
+      }
+    },
+    {
+      "name": "unauthenticated",
+      "fn": "agentErrorAx",
+      "args": [
+        {
+          "httpStatus": 401,
+          "code": "unauthenticated",
+          "message": "No credential"
+        }
+      ],
+      "expected": {
+        "status": "action_required",
+        "reason": "unauthenticated",
+        "hint": "Keep your saved connection. Check the service address and existing access before creating another identity.",
+        "next": [
+          {
+            "tool": "room_check_access"
+          },
+          {
+            "path": "/api/agent-rooms"
+          },
+          {
+            "path": "/api/session"
+          },
+          {
+            "command": "Keep the saved credential and intended room. Verify the configured origin. For an identity secret, GET /api/agent-rooms with the same Bearer credential; for a room key, check the existing room connection. Never send the secret to another host."
+          },
+          {
+            "command": "A successful identity read can distinguish a missing room link; a 401 alone cannot prove why access failed. Ask the room owner to verify membership and service health. Do not erase connection.json or automatically register a replacement."
+          },
+          {
+            "command": "If you have no saved connection, read /llms.txt for initial setup. Recoverable registration is a write that may create an identity, not a read-only access check."
+          }
+        ]
+      }
+    },
+    {
+      "name": "unmapped_code",
+      "fn": "agentErrorAx",
+      "args": [
+        {
+          "httpStatus": 400,
+          "code": "weird_new_code",
+          "message": "something happened"
+        }
+      ],
+      "expected": {
+        "status": "action_required",
+        "reason": "weird_new_code",
+        "hint": "Unknown error 'weird_new_code'. Re-check access and current work; if it repeats, report the code and full message to the room owner.",
+        "next": [
+          {
+            "tool": "room_check_access"
+          },
+          {
+            "tool": "room_list_work"
+          },
+          {
+            "command": "If it repeats, report error.code 'weird_new_code' with the full message to the room owner — this code has no known recovery."
+          }
+        ]
+      }
+    },
+    {
+      "name": "body/409_claim_conflict",
+      "fn": "agentErrorBody",
+      "args": [
+        {
+          "httpStatus": 409,
+          "code": "work_claim_conflict",
+          "message": "work \"fix-41\" is held by alice — ask them to reassign or release it",
+          "roomId": "room-1",
+          "workItemId": "fix-41"
+        }
+      ],
+      "expected": {
+        "error": {
+          "code": "work_claim_conflict",
+          "message": "work \"fix-41\" is held by alice — ask them to reassign or release it"
+        },
+        "status": "action_required",
+        "reason": "work_claim_conflict",
+        "hint": "This work is held by alice. Ask them to reassign or release it, or claim it after their lease lapses.",
+        "next": [
+          {
+            "path": "/api/rooms/room-1/work-claims/fix-41"
+          },
+          {
+            "tool": "room_read_work",
+            "arguments": {
+              "workItemId": "fix-41"
+            }
+          },
+          {
+            "command": "Ask alice to reassign or release the claim, then claim it."
+          }
+        ]
+      }
+    },
+    {
+      "name": "body/422_invalid_input",
+      "fn": "agentErrorBody",
+      "args": [
+        {
+          "httpStatus": 422,
+          "code": "invalid_claim_input",
+          "message": "title must be 1..512 characters",
+          "roomId": "room-1",
+          "workItemId": "fix-41"
+        }
+      ],
+      "expected": {
+        "error": {
+          "code": "invalid_claim_input",
+          "message": "title must be 1..512 characters"
+        },
+        "status": "action_required",
+        "reason": "input_refused",
+        "hint": "Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.",
+        "next": [
+          {
+            "command": "Correct the named fields and resend. Keep any earlier uncertain requestId."
+          }
+        ]
+      }
+    },
+    {
+      "name": "body/500_internal",
+      "fn": "agentErrorBody",
+      "args": [
+        {
+          "httpStatus": 500,
+          "code": "internal_error",
+          "message": "boom",
+          "roomId": "room-1",
+          "workItemId": "fix-41"
+        }
+      ],
+      "expected": {
+        "error": {
+          "code": "internal_error",
+          "message": "boom"
+        },
+        "status": "failed",
+        "reason": "internal_error",
+        "hint": "No success is claimed. Reconcile or retry the exact command.",
+        "next": [
+          {
+            "tool": "room_check_access"
+          },
+          {
+            "command": "Retry the exact same command after checking access"
+          }
+        ],
+        "errorId": "<redacted>",
+        "fingerprint": "<redacted>"
+      },
+      "redact": [
+        "errorId",
+        "fingerprint"
+      ]
+    }
+  ]
+}

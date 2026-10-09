@@ -1,0 +1,422 @@
+{
+  "meta": {
+    "contract": "server/work-claims.mjs — pure claim state machine (create/claim/update/release/close)",
+    "generatedBy": "tests/fixtures/gen-contract-fixtures.mjs",
+    "note": "deepEqual snapshots: args.$ref points at another case's expected output; refuses are captured as {name, code, message}."
+  },
+  "cases": [
+    {
+      "name": "createWork/success",
+      "fn": "createWork",
+      "args": [
+        {
+          "id": "fix-41",
+          "title": "contract fixtures",
+          "tags": [
+            "qa"
+          ]
+        },
+        {
+          "now": 1780000000000,
+          "agentId": "jill"
+        }
+      ],
+      "expected": {
+        "id": "fix-41",
+        "title": "contract fixtures",
+        "state": "unclaimed",
+        "owner": null,
+        "history": [
+          {
+            "at": "2026-05-28T20:26:40.000Z",
+            "agentId": "jill",
+            "action": "created",
+            "note": null
+          }
+        ],
+        "claimedAt": null,
+        "leaseStartAt": null,
+        "leaseExpiresAt": null,
+        "deliveryMode": null,
+        "reviewPolicy": null,
+        "reviewedBy": null,
+        "attestations": [],
+        "tags": [
+          "qa"
+        ],
+        "files": [],
+        "fileBlocks": {},
+        "blobs": [],
+        "dependsOn": [],
+        "parentClaimId": null,
+        "evidenceRefs": [],
+        "premiseFlag": null,
+        "pullRequest": null,
+        "pullRequests": [],
+        "repo": null,
+        "branch": null,
+        "chain": [],
+        "supersededBy": null,
+        "workItemId": null,
+        "squadId": null,
+        "kind": "work",
+        "revision": null,
+        "ci": null,
+        "reviews": [],
+        "updatedAt": "2026-05-28T20:26:40.000Z"
+      }
+    },
+    {
+      "name": "claimWork/success",
+      "fn": "claimWork",
+      "args": [
+        {
+          "$ref": "createWork/success"
+        },
+        "alice",
+        {
+          "leaseHours": 24,
+          "now": 1780000100000
+        }
+      ],
+      "expected": {
+        "id": "fix-41",
+        "title": "contract fixtures",
+        "state": "claimed",
+        "owner": "alice",
+        "history": [
+          {
+            "at": "2026-05-28T20:26:40.000Z",
+            "agentId": "jill",
+            "action": "created",
+            "note": null
+          },
+          {
+            "at": "2026-05-28T20:28:20.000Z",
+            "agentId": "alice",
+            "action": "claimed",
+            "note": "lease: 24h"
+          }
+        ],
+        "readingAcks": {},
+        "claimedAt": "2026-05-28T20:28:20.000Z",
+        "leaseStartAt": "2026-05-28T20:28:20.000Z",
+        "leaseExpiresAt": "2026-05-29T20:28:20.000Z",
+        "deliveryMode": null,
+        "reviewPolicy": null,
+        "reviewedBy": null,
+        "attestations": [],
+        "tags": [
+          "qa"
+        ],
+        "files": [],
+        "fileBlocks": {},
+        "blobs": [],
+        "dependsOn": [],
+        "pullRequest": null,
+        "pullRequests": [],
+        "parentClaimId": null,
+        "evidenceRefs": [],
+        "premiseFlag": null,
+        "repo": null,
+        "branch": null,
+        "chain": [],
+        "supersededBy": null,
+        "workItemId": null,
+        "squadId": null,
+        "kind": "work",
+        "revision": null,
+        "ci": null,
+        "reviews": [],
+        "updatedAt": "2026-05-28T20:28:20.000Z"
+      }
+    },
+    {
+      "name": "claimWork/refusal/double-claim",
+      "fn": "claimWork",
+      "args": [
+        {
+          "$ref": "claimWork/success"
+        },
+        "bob",
+        {
+          "now": 1780000200000
+        }
+      ],
+      "throws": {
+        "name": "ClaimError",
+        "code": "invalid_claim_input",
+        "message": "work \"fix-41\" is held by alice — ask them to reassign or release it"
+      }
+    },
+    {
+      "name": "updateWork/refusal/not-owner",
+      "fn": "updateWork",
+      "args": [
+        {
+          "$ref": "claimWork/success"
+        },
+        "bob",
+        {
+          "state": "in_progress",
+          "now": 1780000200000
+        }
+      ],
+      "throws": {
+        "name": "ClaimError",
+        "code": "invalid_claim_input",
+        "message": "work \"fix-41\" is owned by alice — only the owner can update it"
+      }
+    },
+    {
+      "name": "updateWork/success/start",
+      "fn": "updateWork",
+      "args": [
+        {
+          "$ref": "claimWork/success"
+        },
+        "alice",
+        {
+          "state": "in_progress",
+          "note": "starting",
+          "now": 1780000200000
+        }
+      ],
+      "expected": {
+        "id": "fix-41",
+        "title": "contract fixtures",
+        "state": "in_progress",
+        "owner": "alice",
+        "history": [
+          {
+            "at": "2026-05-28T20:26:40.000Z",
+            "agentId": "jill",
+            "action": "created",
+            "note": null
+          },
+          {
+            "at": "2026-05-28T20:28:20.000Z",
+            "agentId": "alice",
+            "action": "claimed",
+            "note": "lease: 24h"
+          },
+          {
+            "at": "2026-05-28T20:30:00.000Z",
+            "agentId": "alice",
+            "action": "state:in_progress",
+            "note": "starting"
+          }
+        ],
+        "readingAcks": {},
+        "claimedAt": "2026-05-28T20:28:20.000Z",
+        "leaseStartAt": "2026-05-28T20:28:20.000Z",
+        "leaseExpiresAt": "2026-05-29T20:28:20.000Z",
+        "deliveryMode": null,
+        "reviewPolicy": null,
+        "reviewedBy": null,
+        "attestations": [],
+        "tags": [
+          "qa"
+        ],
+        "files": [],
+        "fileBlocks": {},
+        "blobs": [],
+        "dependsOn": [],
+        "pullRequest": null,
+        "pullRequests": [],
+        "parentClaimId": null,
+        "evidenceRefs": [],
+        "premiseFlag": null,
+        "repo": null,
+        "branch": null,
+        "chain": [],
+        "supersededBy": null,
+        "workItemId": null,
+        "squadId": null,
+        "kind": "work",
+        "revision": null,
+        "ci": null,
+        "reviews": [],
+        "updatedAt": "2026-05-28T20:30:00.000Z"
+      }
+    },
+    {
+      "name": "releaseWork/refusal/stale",
+      "fn": "releaseWork",
+      "args": [
+        {
+          "$ref": "claimWork/success"
+        },
+        "alice",
+        {
+          "expectedClaimedAt": "1970-01-01T00:00:00.000Z",
+          "expectedHistoryLength": 2,
+          "now": 1780000300000
+        }
+      ],
+      "throws": {
+        "name": "ClaimError",
+        "code": "work_claim_conflict",
+        "message": "The claim changed since it was read"
+      }
+    },
+    {
+      "name": "releaseWork/success",
+      "fn": "releaseWork",
+      "args": [
+        {
+          "$ref": "claimWork/success"
+        },
+        "alice",
+        {
+          "expectedClaimedAt": "2026-05-28T20:28:20.000Z",
+          "expectedHistoryLength": 2,
+          "note": "handing off",
+          "now": 1780000300000
+        }
+      ],
+      "expected": {
+        "id": "fix-41",
+        "title": "contract fixtures",
+        "state": "unclaimed",
+        "owner": null,
+        "history": [
+          {
+            "at": "2026-05-28T20:26:40.000Z",
+            "agentId": "jill",
+            "action": "created",
+            "note": null
+          },
+          {
+            "at": "2026-05-28T20:28:20.000Z",
+            "agentId": "alice",
+            "action": "claimed",
+            "note": "lease: 24h"
+          },
+          {
+            "at": "2026-05-28T20:31:40.000Z",
+            "agentId": "alice",
+            "action": "state:unclaimed",
+            "note": "handing off"
+          }
+        ],
+        "readingAcks": {},
+        "claimedAt": "2026-05-28T20:28:20.000Z",
+        "leaseStartAt": null,
+        "leaseExpiresAt": null,
+        "deliveryMode": null,
+        "reviewPolicy": null,
+        "reviewedBy": null,
+        "attestations": [],
+        "tags": [
+          "qa"
+        ],
+        "files": [],
+        "fileBlocks": {},
+        "blobs": [],
+        "dependsOn": [],
+        "pullRequest": null,
+        "pullRequests": [],
+        "parentClaimId": null,
+        "evidenceRefs": [],
+        "premiseFlag": null,
+        "repo": null,
+        "branch": null,
+        "chain": [],
+        "supersededBy": null,
+        "workItemId": null,
+        "squadId": null,
+        "kind": "work",
+        "revision": null,
+        "ci": null,
+        "reviews": [],
+        "updatedAt": "2026-05-28T20:31:40.000Z"
+      }
+    },
+    {
+      "name": "closeWork/success/cancel",
+      "fn": "closeWork",
+      "args": [
+        {
+          "$ref": "createWork/success"
+        },
+        "jill",
+        {
+          "verb": "cancel",
+          "reason": "superseded by FIX-42",
+          "now": 1780000200000
+        }
+      ],
+      "expected": {
+        "id": "fix-41",
+        "title": "contract fixtures",
+        "state": "closed",
+        "owner": null,
+        "history": [
+          {
+            "at": "2026-05-28T20:26:40.000Z",
+            "agentId": "jill",
+            "action": "created",
+            "note": null
+          },
+          {
+            "at": "2026-05-28T20:30:00.000Z",
+            "agentId": "jill",
+            "action": "cancelled",
+            "note": "superseded by FIX-42"
+          }
+        ],
+        "readingAcks": {},
+        "claimedAt": null,
+        "leaseStartAt": null,
+        "leaseExpiresAt": null,
+        "deliveryMode": null,
+        "reviewPolicy": null,
+        "reviewedBy": null,
+        "attestations": [],
+        "tags": [
+          "qa"
+        ],
+        "files": [],
+        "fileBlocks": {},
+        "blobs": [],
+        "dependsOn": [],
+        "pullRequest": null,
+        "pullRequests": [],
+        "parentClaimId": null,
+        "evidenceRefs": [],
+        "premiseFlag": null,
+        "repo": null,
+        "branch": null,
+        "chain": [],
+        "supersededBy": null,
+        "workItemId": null,
+        "squadId": null,
+        "kind": "work",
+        "revision": null,
+        "ci": null,
+        "reviews": [],
+        "updatedAt": "2026-05-28T20:30:00.000Z"
+      }
+    },
+    {
+      "name": "closeWork/refusal/terminal",
+      "fn": "closeWork",
+      "args": [
+        {
+          "$ref": "closeWork/success/cancel"
+        },
+        "jill",
+        {
+          "verb": "close",
+          "now": 1780000300000
+        }
+      ],
+      "throws": {
+        "name": "ClaimError",
+        "code": "work_claim_terminal",
+        "message": "Cannot close \"fix-41\": it is already closed"
+      }
+    }
+  ]
+}
