@@ -392,6 +392,10 @@ export async function seedRecoveryCoverage(f) {
      mergeable, behind, checks_state, observed, created_at, updated_at)
     VALUES ('commons', 'lq_recovery', 'acme/widgets', 7, 'owner', 'owner', 'Recovery PR', ?, 'unknown', 0, 'pending', 1, ?, ?)`)
     .run("a".repeat(40), f.now(), f.now());
+  f.store.db.prepare(`INSERT INTO agent_invite_redeem_receipts
+    (request_id, code_hash, identity_id, room_id, member_id, display_name, permissions_json, created_at)
+    VALUES ('recovery-redeem-req', ?, ?, 'commons', 'owner', 'Recovery', '[]', ?)`)
+    .run("c".repeat(64), identityId, f.now());
   // telegram_live_status (durable Telegram live-delivery/send facts, task 10).
   // Synthetic data only: the recovery account received 3 updates and its last
   // send succeeded, so the capture covers the new table.
