@@ -103,6 +103,8 @@ export function walkExport(rows) {
     if (!work.has(id)) work.set(id, blankWork(id));
     return work.get(id);
   };
+  const addNote = (event, id, label, text) => workItem(id).notes.push({ at: event.at, actorId: event.actorId, label, text });
+  const addEvidence = (event, id, label, summary, url, version) => workItem(id).evidence.push({ at: event.at, actorId: event.actorId, label, summary, url, version });
   for (const row of rows) {
     const { sequence, event } = row;
     count += 1;
@@ -150,62 +152,42 @@ export function walkExport(rows) {
       }
       case T.WORK_ACCEPTED: workItem(data.workItemId).state = "accepted"; break;
       case T.WORK_STARTED: workItem(data.workItemId).state = "working"; break;
-      case T.WORK_BLOCKED: {
-        const item = workItem(data.workItemId);
-        item.state = "blocked";
-        item.notes.push({ at: event.at, actorId: event.actorId, label: "Blocked", text: data.reason });
+      case T.WORK_BLOCKED:
+        workItem(data.workItemId).state = "blocked";
+        addNote(event, data.workItemId, "Blocked", data.reason);
         break;
-      }
-      case T.WORK_BLOCKER_RESOLVED: {
-        const item = workItem(data.workItemId);
-        item.notes.push({ at: event.at, actorId: event.actorId, label: "Blocker resolved", text: data.resolution });
+      case T.WORK_BLOCKER_RESOLVED:
+        addNote(event, data.workItemId, "Blocker resolved", data.resolution);
         break;
-      }
-      case T.WORK_COMPLETED: {
-        const item = workItem(data.workItemId);
-        item.state = "completed";
-        item.evidence.push({ at: event.at, actorId: event.actorId, label: "Completion", summary: data.summary, url: data.evidenceUrl ?? null, version: data.evidenceVersion });
+      case T.WORK_COMPLETED:
+        workItem(data.workItemId).state = "completed";
+        addEvidence(event, data.workItemId, "Completion", data.summary, data.evidenceUrl ?? null, data.evidenceVersion);
         break;
-      }
-      case T.WORK_HANDOFF_RECORDED: {
-        const item = workItem(data.workItemId);
-        item.evidence.push({ at: event.at, actorId: event.actorId, label: "Handoff", summary: data.doneSummary, url: data.evidenceUrl ?? null, version: data.evidenceVersion ?? null });
+      case T.WORK_HANDOFF_RECORDED:
+        addEvidence(event, data.workItemId, "Handoff", data.doneSummary, data.evidenceUrl ?? null, data.evidenceVersion ?? null);
         break;
-      }
-      case T.VERIFICATION_RECORDED: {
-        const item = workItem(data.workItemId);
-        item.notes.push({ at: event.at, actorId: event.actorId, label: `Verification: ${data.result}`, text: data.summary });
+      case T.VERIFICATION_RECORDED:
+        addNote(event, data.workItemId, `Verification: ${data.result}`, data.summary);
         break;
-      }
-      case T.OWNER_DECISION_RECORDED: {
-        const item = workItem(data.workItemId);
-        item.notes.push({ at: event.at, actorId: event.actorId, label: `Decision: ${data.decision}`, text: data.reason });
+      case T.OWNER_DECISION_RECORDED:
+        addNote(event, data.workItemId, `Decision: ${data.decision}`, data.reason);
         break;
-      }
-      case T.WORK_SUPERSEDED: {
-        const item = workItem(data.workItemId);
-        item.state = "superseded";
-        item.notes.push({ at: event.at, actorId: event.actorId, label: "Superseded", text: data.reason });
+      case T.WORK_SUPERSEDED:
+        workItem(data.workItemId).state = "superseded";
+        addNote(event, data.workItemId, "Superseded", data.reason);
         break;
-      }
       default: break;
     }
   }
   return { room, members, messages, work, count, first, last, lastAt, name };
 }
 
-// Evidence entries and work notes share the same byline header.
-function headHtml(label, actorId, at, name) {
-  return `<span class="head"><span class="author">${esc(label)}</span> <span>${esc(name(actorId))}</span> <time datetime="${attr(at)}">${when(at)}</time></span>`;
-}
-
 function renderEvidence(entry, name) {
-  const head = headHtml(entry.label, entry.actorId, entry.at, name);
   const href = safeEvidenceHref(entry.url);
   const link = href ? `<a href="${attr(href)}" rel="noopener noreferrer nofollow">${esc(href)}</a>`
     : entry.url != null ? `<code>${esc(entry.url)}</code>` : "<em>evidence recorded in the room</em>";
   const version = entry.version != null ? ` <span class="flag">version ${esc(entry.version)}</span>` : "";
-  return `<li>${head}`
+  return `<li><span class="head"><span class="author">${esc(entry.label)}</span> <span>${esc(name(entry.actorId))}</span> <time datetime="${attr(entry.at)}">${when(entry.at)}</time></span>`
     + `<div class="body">${esc(entry.summary)}</div><div>${link}${version}</div></li>`;
 }
 
@@ -266,7 +248,7 @@ export function renderRoomExportHtml(rows, { roomId, generatedAt = new Date().to
     if (item.evidence.length) out.push("<ul class=\"evidence\">", ...item.evidence.map(entry => renderEvidence(entry, name)), "</ul>");
     if (item.notes.length) {
       out.push("<ul class=\"evidence\">");
-      for (const note of item.notes) out.push(`<li>${headHtml(note.label, note.actorId, note.at, name)}<div class="body">${esc(note.text)}</div></li>`);
+      for (const note of item.notes) out.push(`<li><span class="head"><span class="author">${esc(note.label)}</span> <span>${esc(name(note.actorId))}</span> <time datetime="${attr(note.at)}">${when(note.at)}</time></span><div class="body">${esc(note.text)}</div></li>`);
       out.push("</ul>");
     }
     out.push("</section>");
