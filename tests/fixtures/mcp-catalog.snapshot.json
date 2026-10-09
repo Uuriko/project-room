@@ -1175,7 +1175,7 @@
       }
     },
     "room_set_member_claim_cap": {
-      "inputSchema": "89443e3266bb36ac",
+      "inputSchema": "71e68b7f085196ab",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
