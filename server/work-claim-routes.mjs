@@ -876,8 +876,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // registry. Read-only — suggests candidates, never merges or closes.
     const params = url.searchParams;
     for (const key of params.keys()) {
-      if (!["q", "limit"].includes(key) || params.getAll(key).length !== 1) {
-        invalidInput(reject, "only single q and limit query parameters");
+      if (!["q", "limit", "files"].includes(key) || params.getAll(key).length !== 1) {
+        invalidInput(reject, "only single q, limit, and files query parameters");
       }
     }
     const q = params.get("q");
@@ -890,9 +890,22 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       if (!/^[1-9]\d*$/.test(raw) || Number(raw) > 20) invalidInput(reject, "limit as an integer 1..20");
       limit = Number(raw);
     }
+    // FIX-47: the new claim's declared files boost duplicate candidates that
+    // touch the same paths. Comma-separated, optional, capped for amplification.
+    let files = [];
+    if (params.has("files")) {
+      const raw = params.get("files");
+      if (typeof raw !== "string" || raw.length > 2048) {
+        invalidInput(reject, "files as a comma-separated list of at most 2048 characters");
+      }
+      files = raw.split(",").map(entry => entry.trim()).filter(entry => entry.length > 0);
+      for (const entry of files) {
+        if (entry.length > 300) invalidInput(reject, "each files entry at most 300 characters");
+      }
+    }
     let duplicates;
     try {
-      duplicates = findDuplicates(registry.list(roomId), q, { limit });
+      duplicates = findDuplicates(registry.list(roomId), q, { limit, files });
     } catch (error) {
       if (error instanceof DuplicateError) reject(422, error.code, error.message);
       throw error;

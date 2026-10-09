@@ -19,12 +19,44 @@ test("tokenize lowercases, splits on non-alphanumerics, strips stopwords", () =>
 
 // --- scoreItem ---
 
-test("scoreItem ranks title overlap above note overlap", () => {
+test("scoreItem ranks title overlap above file overlap", () => {
   const query = tokenize("repair checkout flow");
-  const titleHit = scoreItem({ id: "a", title: "repair checkout flow", note: "unrelated" }, query);
-  const noteHit = scoreItem({ id: "b", title: "unrelated", note: "repair checkout flow" }, query);
-  assert.ok(titleHit > noteHit);
-  assert.ok(titleHit <= 1 && noteHit >= 0);
+  const titleHit = scoreItem({ id: "a", title: "repair checkout flow", files: ["unrelated.mjs"] }, query, ["server/pay.mjs"]);
+  const fileHit = scoreItem({ id: "b", title: "unrelated work", files: ["server/pay.mjs"] }, query, ["server/pay.mjs"]);
+  assert.ok(titleHit > fileHit);
+  assert.ok(titleHit <= 1 && fileHit >= 0);
+});
+
+// FIX-47: the note weight was dead — createWork never sets a top-level
+// item.note (the create note lands on the "created" history stamp), so the
+// scorer is effectively title-only. The scorer must ignore item.note.
+test("scoreItem ignores the dead note field", () => {
+  const query = tokenize("repair checkout flow");
+  const withNote = scoreItem({ id: "a", title: "repair checkout flow", note: "repair checkout flow" }, query);
+  const withoutNote = scoreItem({ id: "b", title: "repair checkout flow" }, query);
+  assert.equal(withNote, withoutNote);
+});
+
+// FIX-47: overlapping files between the candidate and the new claim should
+// raise the duplicate score (collision-avoidance input for FIX-24/37).
+test("file overlap raises the score for the same title match", () => {
+  const query = tokenize("repair checkout flow");
+  const overlap = scoreItem({ id: "a", title: "repair checkout flow", files: ["server/pay.mjs"] }, query, ["server/pay.mjs"]);
+  const disjoint = scoreItem({ id: "b", title: "repair checkout flow", files: ["server/other.mjs"] }, query, ["server/pay.mjs"]);
+  const noFiles = scoreItem({ id: "c", title: "repair checkout flow" }, query, ["server/pay.mjs"]);
+  assert.ok(overlap > disjoint);
+  assert.equal(noFiles, disjoint); // no declared files is neutral, not a penalty
+  assert.ok(overlap <= 1);
+});
+
+test("findDuplicates boosts candidates that share files with the query", () => {
+  const candidates = [
+    { id: "x1", title: "repair checkout flow", files: ["server/other.mjs"] },
+    { id: "x2", title: "repair checkout flow", files: ["server/pay.mjs"] },
+  ];
+  const out = findDuplicates(candidates, "repair checkout flow", { files: ["server/pay.mjs"] });
+  assert.equal(out[0].id, "x2");
+  assert.ok(out[0].score > out[1].score);
 });
 
 test("scoreItem is 0 with no overlap, deterministic on ties", () => {
@@ -149,4 +181,28 @@ test("handler: duplicates validates q and limit", async () => {
   assert.equal(badLimit.code, "invalid_claim_input");
   const empty = await runDuplicates({ query: "zzz-no-such-thing", registry });
   assert.deepEqual(empty.value.duplicates, []);
+});
+
+test("handler: duplicates accepts a files query parameter that boosts file-overlapping claims", async () => {
+  const registry = createWorkClaimRegistry();
+  for (const item of [
+    { id: "f1", title: "Repair the checkout flow", files: ["server/other.mjs"], history: [], claimedAt: null, leaseExpiresAt: null },
+    { id: "f2", title: "Repair the checkout flow", files: ["server/pay.mjs"], history: [], claimedAt: null, leaseExpiresAt: null },
+  ]) registry.set("room1", item);
+  const helpers = fakeHelpers();
+  const params = new URLSearchParams({ q: "repair checkout flow", files: "server/pay.mjs" });
+  const url = new URL(`https://room.example/api/rooms/room1/work-claims/duplicates?${params}`);
+  const out = await handleWorkClaims({ req: { method: "GET", body: {} }, res: {}, url,
+    store: {}, roomId: "room1", auth: fakeAuth("quill"), workClaimRoute: "duplicates",
+    workClaimId: null, helpers, registry });
+  assert.equal(out.status, 200);
+  assert.equal(out.value.duplicates[0].id, "f2");
+  assert.ok(out.value.duplicates[0].score > out.value.duplicates[1].score);
+  // bad files values are rejected at the route layer
+  const badFiles = await handleWorkClaims({ req: { method: "GET", body: {} }, res: {}, url:
+    new URL("https://room.example/api/rooms/room1/work-claims/duplicates?q=checkout&files=" + "x".repeat(2049)),
+    store: {}, roomId: "room1", auth: fakeAuth("quill"), workClaimRoute: "duplicates",
+    workClaimId: null, helpers: fakeHelpers(), registry }).catch(error => error);
+  assert.equal(badFiles.code, "invalid_claim_input");
+  assert.equal(badFiles.status, 422);
 });

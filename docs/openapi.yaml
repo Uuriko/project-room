@@ -5125,18 +5125,26 @@ paths:
       description: |
         Fuzzy similarity search over the room's work-claim registry
         (Linear-style "similar issues"). Tokenizes the `q` text and ranks
-        claims by weighted Jaccard overlap (title x0.6, note x0.4); returns up
-        to `limit` candidates with scores in [0,1], best first. Read-only:
-        it suggests candidates, never merges or closes — the caller decides
-        whether anything is truly a duplicate. Any room member may read; API
-        keys need `rooms:read`.
+        claims by weighted Jaccard overlap (title x0.7, file-path overlap x0.3);
+        returns up to `limit` candidates with scores in [0,1], best first.
+        The note field is not scored — registry items never carry a top-level
+        note. Optional `files` (comma-separated paths of the new claim) boosts
+        candidates touching the same paths, feeding collision-avoidance.
+        Read-only: it suggests candidates, never merges or closes — the caller
+        decides whether anything is truly a duplicate. Any room member may
+        read; API keys need `rooms:read`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: q
           in: query
           required: true
           schema: { type: string, minLength: 1, maxLength: 512 }
-          description: Free text to match against claim titles and notes
+          description: Free text to match against claim titles
+        - name: files
+          in: query
+          required: false
+          schema: { type: string, maxLength: 2048 }
+          description: Comma-separated file paths of the new claim; candidates touching the same paths score higher
         - name: limit
           in: query
           required: false
