@@ -29,7 +29,9 @@ export function installAgentConnections({ client, getState }) {
     clearTimeout(expiryTimer);
     if (setup) expiryTimer = setTimeout(() => { if (checkExpiry()) armExpiry(); else render(); }, Math.max(1, Math.min(2e9, setupMeta.expiresAt - Date.now() + 1)));
   }
-  const accessDenied = error => [401, 403].includes(error?.status) || ["session_binding_changed", "session_binding_required", "invalid_session_binding"].includes(error?.code);
+  // An unverified email is a 403 on a valid session: ending access here signed the
+  // owner out of the room the moment they tried to add an agent.
+  const accessDenied = error => error?.code !== "email_unverified" && [401, 403].includes(error?.status) || ["session_binding_changed", "session_binding_required", "invalid_session_binding"].includes(error?.code);
   const catalogButtons = () => $("#agent-type-catalog")?.querySelectorAll("[data-agent-type], [data-roster]")
     ?? $("#agent-roster")?.querySelectorAll("[data-agent-type], [data-roster]")
     ?? [];
@@ -251,6 +253,7 @@ export function installAgentConnections({ client, getState }) {
       void load(); void client.refresh().catch(() => {});
     } catch (error) {
       if (!owns() || pending !== operation) return;
+      if (error?.code === "email_unverified") { status(error.message); return; } // keep the request: Retry works once verified
       if (accessDenied(error)) { reset(); client.handleFailure(error); return; }
       if (error.status === 409) {
         pending = null; status("Access changed. Review the current settings before trying again."); void load();

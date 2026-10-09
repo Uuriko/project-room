@@ -24,6 +24,25 @@ export function magicLinkUnavailable() {
   };
 }
 
+// Operator-facing description of a failed send, safe for logs: the provider's
+// status and error text (e.g. "domain is not verified") with any email address,
+// link or long token removed. Never carries the recipient, code or link.
+export function describeMailFailure(error) {
+  const text = String(error?.message ?? error ?? "unknown error")
+    .replace(/[^\s<>"']+@[^\s<>"']+/g, "[email]")
+    .replace(/https?:\/\/\S+/g, "[link]")
+    .replace(/[A-Za-z0-9_-]{24,}/g, "[token]")
+    .replace(/\s+/g, " ").trim();
+  return text.slice(0, 240);
+}
+
+// Run one mail send; a failure is logged (redacted) and reported as false so
+// callers can answer truthfully. Never throws.
+export async function attemptMailDelivery(fn, kind, warn = console.warn) {
+  try { await fn(); return true; }
+  catch (error) { warn(`mail delivery failed (${kind}): ${describeMailFailure(error)}`); return false; }
+}
+
 // createMagicLinkMailer({ send, baseUrl }) -> mailer.
 //
 // send: async ({ to, code, expiresAt, baseUrl }) => void. When omitted the

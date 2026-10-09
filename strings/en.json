@@ -211,6 +211,7 @@
   "error.dm_not_blocked": "That member isn't blocked. No change was needed.",
   "error.dm_nothing_to_revoke": "There's no DM consent to revoke. No change was needed.",
   "error.email_connection_changed": "That connection changed. Reconnect before importing.",
+  "error.email_unverified": "Verify your email first. Open Sign-in & security from the account menu to enter your code or send a new one.",
   "error.face_not_enabled": "The public page isn't enabled. Enable it before rotating its code.",
   "error.face_not_found": "That public page doesn't exist. Check the address and try again.",
   "error.grant_active": "That member already has membership administration. No change was needed.",
