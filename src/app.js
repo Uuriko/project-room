@@ -1572,6 +1572,8 @@ async function openInvitation(fragment) {
     setInvitationFeedback("Check the current acceptance result or close it explicitly before reviewing another invitation.", true);
     return;
   }
+  // One invitation dialog at a time: an open #join/ dialog gives way.
+  if (shareLinksUI && !shareLinksUI.yieldJoinDialog()) return;
   invitation.version += 1;
   const active = document.activeElement === document.body ? null : document.activeElement;
   const composer = $("#message-input");
@@ -7585,6 +7587,14 @@ document.addEventListener("visibilitychange", renderReturnBrief);
 shareLinksUI = installShareLinks({ client, accountClient,
   canLeaveAccountSignin: () => signinUI.canLeave(),
   onOAuthStart: stashInviteForOAuth,
+  // One invitation dialog at a time: a reviewed #invite/ gives way to a join
+  // link unless its acceptance is committing or its outcome is unknown.
+  beforeOpen: () => {
+    if (!$("#invitation-dialog").open) return true;
+    if (invitationIsCommitting() || invitation.phase === "unknown") return false;
+    closeInvitation({ returnFocus: false });
+    return !$("#invitation-dialog").open;
+  },
   onAccountSignin: mode => {
     // One sign-in controller and form, hosted in the invitation while needed.
     $(mode ? "#join-account-methods" : "#signin-controller").prepend($("#auth-signin-ui"));
