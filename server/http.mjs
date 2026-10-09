@@ -2946,7 +2946,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // diagnoseArguments pattern so the 422 names the offending field.
         const diagnosis = diagnoseArguments({
           required: ["code", "displayName"],
-          properties: { code: { type: "string" }, displayName: { type: "string" } },
+          properties: { code: { type: "string" }, displayName: { type: "string" }, requestId: { type: "string" } },
           additionalProperties: false,
         }, data);
         if (diagnosis) {
@@ -2954,9 +2954,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (diagnosis.missing.length) parts.push(`missing required field${diagnosis.missing.length > 1 ? "s" : ""}: ${diagnosis.missing.join(", ")}`);
           if (diagnosis.unexpected.length) parts.push(`unexpected field${diagnosis.unexpected.length > 1 ? "s" : ""}: ${diagnosis.unexpected.join(", ")}`);
           for (const [field, reason] of Object.entries(diagnosis.invalid)) parts.push(`${field}: ${reason}`);
-          reject(422, "invalid_invite", `Invalid invite redeem (${parts.join("; ")}). Send exactly {code, displayName}.`);
+          reject(422, "invalid_invite", `Invalid invite redeem (${parts.join("; ")}). Send exactly {code, displayName} with an optional requestId.`);
         }
-        const redeemedInvite = store.invites.redeem(data.code, { displayName: data.displayName, identitySecret: bearer(req) });
+        // G1 idempotent redeem (PRODUCT-200 D7): an opt-in client-kept
+        // requestId makes an uncertain retry safe — the retry replays the
+        // journaled redemption instead of 409ing on the burned code.
+        let requestId = null;
+        if (data.requestId !== undefined) {
+          if (!validId(data.requestId)) reject(422, "invalid_invite", "Send a valid request id for retry-safe redemption.");
+          requestId = data.requestId;
+        }
+        const redeemedInvite = store.invites.redeem(data.code, { displayName: data.displayName, identitySecret: bearer(req), requestId });
         // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md):
         // score the join, journal the would-be decision, admit anyway.
         jevShadowAdmission("agent-invite:redeem", { roomId: redeemedInvite.roomId, identityId: redeemedInvite.identityId,
