@@ -50,6 +50,20 @@ export function inviteLinksText(links) {
   return links.map(entry => entry.link).join("\n");
 }
 
+// Maps a failed mint call to human copy. The API's raw messages teach agent
+// vocabulary ("Invite grant required", "agent-safe permissions") — a human
+// minter needs the problem and the fix instead.
+export function inviteMintFailureMessage(error) {
+  const code = error?.code, status = error?.status;
+  if (code === "invite_scope_exceeded") return uiText("invite.copy.018");
+  if (code === "access_denied") return uiText("invite.copy.017");
+  if (code === "rate_limited" || status === 429) return uiText("invite.copy.019");
+  if (code === "pilot_limit") return uiText("invite.copy.020");
+  return typeof error?.message === "string" && error.message.length <= 180
+    ? error.message
+    : uiText("invite.copy.014");
+}
+
 export function installAgentInvites({ client, getState, getSession }) {
   const dialog = $("#agent-invite-dialog");
   const form = $("#agent-invite-form");
@@ -197,9 +211,7 @@ export function installAgentInvites({ client, getState, getSession }) {
         }
         status(uiText("invite.copy.013", { fragmentA: links.length, fragmentB: count, fragmentC: typeof error.message === "string" && error.message.length <= 120 ? error.message : "error" }));
       } else {
-        status(typeof error.message === "string" && error.message.length <= 180
-          ? error.message
-          : uiText("invite.copy.014"));
+        status(inviteMintFailureMessage(error));
       }
     } finally { if (owns()) { busy = false; render(); } }
   }

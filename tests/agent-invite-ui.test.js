@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { inviteMintBody, COLLABORATE_PERMISSIONS, agentInviteHandoff, agentInviteJoinLink, mintInviteLink, inviteLinksText, BULK_MINT_COUNTS } from "../src/agent-invite-ui.js";
+import { inviteMintBody, COLLABORATE_PERMISSIONS, agentInviteHandoff, agentInviteJoinLink, mintInviteLink, inviteLinksText, BULK_MINT_COUNTS, inviteMintFailureMessage } from "../src/agent-invite-ui.js";
 
 test("invite mint body: contribute/review use standing profiles", () => {
   assert.deepEqual(inviteMintBody("contribute"), { profile: "contribute" });
@@ -81,4 +81,27 @@ test("bulk mints call one request per invite with distinct display names", async
   assert.equal(links.length, 5);
   assert.ok(links.every(entry => entry.link.startsWith("https://room.example/join/RM-C")));
   assert.equal(new Set(links.map(entry => entry.code)).size, 5);
+});
+
+test("mint failures name the problem in human words, not server vocabulary", () => {
+  // 403 access_denied ("Invite grant required"): say who can fix it.
+  const denied = inviteMintFailureMessage(Object.assign(new Error("Invite grant required"), { status: 403, code: "access_denied" }));
+  assert.match(denied, /permission|owner/i);
+  assert.doesNotMatch(denied, /Invite grant required/);
+  // 403 invite_scope_exceeded: the dialog only offers standing profiles, so
+  // this hits non-owner minters on Collaborate — point at Contribute.
+  const scope = inviteMintFailureMessage(Object.assign(
+    new Error("invite_member can only grant standing agent-safe permissions"), { status: 403, code: "invite_scope_exceeded" }));
+  assert.match(scope, /Contribute|owner/i);
+  assert.doesNotMatch(scope, /agent-safe permissions/);
+  // 429 / rate_limited: say slow down, not "Request failed".
+  const limited = inviteMintFailureMessage(Object.assign(new Error("Request failed"), { status: 429, code: "rate_limited" }));
+  assert.match(limited, /wait|slow down|try again/i);
+  // 409 pilot_limit: the room is full — not a permissions problem.
+  const full = inviteMintFailureMessage(Object.assign(new Error("Bounded pilot capacity reached; no data was changed"), { status: 409, code: "pilot_limit" }));
+  assert.match(full, /full|member limit/i);
+  // Unknown errors keep the short server message; overlong ones fall back.
+  assert.equal(inviteMintFailureMessage(new Error("short server note")), "short server note");
+  assert.match(inviteMintFailureMessage(new Error("x".repeat(200))), /Could not create an invite/);
+  assert.match(inviteMintFailureMessage(null), /Could not create an invite/);
 });

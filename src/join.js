@@ -81,7 +81,9 @@ export function formatInviteExpiry(expiresAt, nowMs = Date.now()) {
 
 // Maps a failed preview/join call to a message with a next step.
 // Every branch names what happened and what to do — no dead ends.
-export function joinErrorMessage({ status, code, action = "join" } = {}) {
+// serverMessage carries the API's own message when it is human-readable
+// (display_name_unavailable embeds the suggested name).
+export function joinErrorMessage({ status, code, serverMessage = null, action = "join" } = {}) {
   const again = "Check your connection and try again.";
   if (status === 0) return { title: "Couldn't reach the room", message: again, retry: true };
   switch (code) {
@@ -95,10 +97,23 @@ export function joinErrorMessage({ status, code, action = "join" } = {}) {
       return { title: "Invite already used", message: "This invite link was already redeemed. Each link works once — ask the inviter for a new one.", retry: false };
     case "invite_authority_changed":
       return { title: "Invite no longer valid", message: "The inviter's permissions changed, so this link stopped working. Ask them for a new invite.", retry: false };
+    case "invite_rejected":
+      // The redeem was refused for a reason other than reuse — never label it "already used".
+      return { title: uiText("join.rejectedTitle"), message: uiText("join.rejectedMessage"), retry: false };
+    case "access_ended":
+      // The inviter's membership ended after the invite was minted.
+      return { title: uiText("join.accessEndedTitle"), message: uiText("join.accessEndedMessage"), retry: false };
     case "identity_already_linked":
       return { title: "Already joined", message: uiText("join.alreadyJoined"), retry: false };
     case "pilot_limit":
       return { title: "Room is full", message: "The room reached its member limit. Ask the room owner for help.", retry: false };
+    case "display_name_unavailable":
+      // The name is fine length-wise but taken or reserved — the 1–80
+      // guidance misdiagnoses it. The server message carries a suggested
+      // name; the user stays in the form and retries with another name.
+      return { title: uiText("join.checkNameTitle"),
+        message: typeof serverMessage === "string" && serverMessage ? serverMessage : uiText("join.nameTaken"),
+        retry: true };
     case "invalid_invite_name":
     case "invalid_join":
       return { title: "Check the name", message: "Enter a name of 1–80 characters to join.", retry: true };
@@ -240,7 +255,7 @@ async function boot() {
     if (!joined.ok) {
       if (button) button.disabled = false;
       // A dead code stays dead: surface the reason instead of a retry loop.
-      const mapped = joinErrorMessage({ status: joined.status, code: joined.error?.code, action: "join" });
+      const mapped = joinErrorMessage({ status: joined.status, code: joined.error?.code, serverMessage: joined.error?.message, action: "join" });
       if (["invite_unavailable", "invite_revoked", "invite_expired", "invite_already_used", "invite_authority_changed"].includes(joined.error?.code)) fail(mapped);
       else if (statusEl) statusEl.textContent = mapped.message;
       return;

@@ -92,6 +92,33 @@ test("join errors name the problem and the next step", () => {
   assert.match(joinErrorMessage({ status: 500 }).message, /hiccup|try again/i);
 });
 
+test("join errors map every server-side invite failure code, not just the common ones", () => {
+  // invite_rejected (409): the redeem was refused for a reason other than
+  // reuse — it must never wear the "already used" label.
+  const rejected = joinErrorMessage({ status: 409, code: "invite_rejected" });
+  assert.doesNotMatch(rejected.title, /already used/i);
+  assert.match(rejected.message, /fresh link|new invite/i);
+  assert.equal(rejected.retry, false);
+  // access_ended (403): the inviter is no longer a room member — the generic
+  // "check your connection" copy misdiagnoses it; say what ended and the step.
+  const ended = joinErrorMessage({ status: 403, code: "access_ended" });
+  assert.doesNotMatch(ended.message, /connection/i);
+  assert.match(ended.message, /no longer|current member/i);
+  assert.equal(ended.retry, false);
+  // display_name_unavailable (422): the name is fine length-wise but taken or
+  // reserved — the 1–80 guidance misdiagnoses it. Prefer the server's message
+  // (it carries the suggested name); the user stays in the form to retry.
+  const taken = joinErrorMessage({ status: 422, code: "display_name_unavailable",
+    serverMessage: "That display name is taken. Suggested name: Member 2.", action: "join" });
+  assert.equal(taken.retry, true);
+  assert.match(taken.message, /Member 2/);
+  assert.doesNotMatch(taken.message, /1–80/);
+  const takenFallback = joinErrorMessage({ status: 422, code: "display_name_unavailable", action: "join" });
+  assert.equal(takenFallback.retry, true);
+  assert.match(takenFallback.message, /taken|reserved|another name/i);
+  assert.doesNotMatch(takenFallback.message, /1–80/);
+});
+
 test("join names are 1–80 characters", () => {
   assert.equal(validateJoinName("  Muse  "), "Muse");
   assert.equal(validateJoinName(""), null);
