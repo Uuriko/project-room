@@ -4,11 +4,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { chromium } from "playwright";
 import AxeBuilder from "@axe-core/playwright";
+import { browserPage, contextPage, launchBrowser, listenOrigin, closeRoomServer, shot, signInTo } from "./browser-check-lib.mjs";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { signInFixture } from "./auth-signin.mjs";
 import { clickChrome, openSearch } from "./room-chrome.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
@@ -59,15 +58,14 @@ test("Board route cleanup drains a held callback and preserves the original fail
     response.writeHead(200, { "Content-Type": "text/html" });
     response.end(request.url === "/held" ? "held response" : "fixture");
   });
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = await listenOrigin(server);
   t.after(async () => {
     server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
   });
-  const browser = await chromium.launch({ headless: true });
+  const browser = await launchBrowser();
   t.after(() => browser.close());
-  const page = await browser.newPage();
-  const origin = `http://127.0.0.1:${server.address().port}`;
+  const page = await browserPage(browser);
   await page.goto(origin);
   const arrived = Promise.withResolvers(), release = Promise.withResolvers();
   const resumed = Promise.withResolvers(), finish = Promise.withResolvers();
@@ -124,31 +122,29 @@ async function axe(page) {
   assert.deepEqual(serious.map(item => `${item.impact} ${item.id}`), []);
 }
 
-test("board columns, keyboard claim, linked work returns, chat line, 390px, and axe", { timeout: 120000 }, async t => {
-  mkdirSync(shots, { recursive: true });
-  mkdirSync("test-results", { recursive: true });
-  const fixture = createAcceptanceFixture();
-  const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  const origin = `http://127.0.0.1:${server.address().port}`;
-  const errors = [];
+// Registers the room-server + fixture teardown every board test runs in t.after;
+// the page-error assertion runs only when `errors` is supplied. Browser close
+// keeps its own hook so a launch failure still tears the fixture down.
+function closeFixture(t, server, fixture, errors) {
   t.after(async () => {
-    server.closeStreams();
-    server.closeAllConnections();
-    await new Promise(resolve => server.close(resolve));
+    await closeRoomServer(server);
     fixture.store.close();
     rmSync(fixture.directory, { recursive: true, force: true });
-    assert.deepEqual(errors, []);
+    if (errors) assert.deepEqual(errors, []);
   });
-  const browser = await chromium.launch({ headless: true });
+}
+
+test("board columns, keyboard claim, linked work returns, chat line, 390px, and axe", { timeout: 120000 }, async t => {
+  mkdirSync(shots, { recursive: true });
+  const fixture = createAcceptanceFixture();
+  const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
+  const origin = await listenOrigin(server);
+  const errors = [];
+  closeFixture(t, server, fixture, errors);
+  const browser = await launchBrowser();
   t.after(async () => { await browser.close(); });
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
-  const page = await context.newPage();
-  page.setDefaultTimeout(8000);
-  page.on("pageerror", error => errors.push(error.message));
-  await page.goto(origin);
-  await signInFixture(page, fixture.keys.owner);
-  await page.locator("#main").waitFor({ state: "visible" });
+  const { page } = await contextPage(browser, { errors });
+  await signInTo(page, origin, fixture.keys.owner);
   await openBoard(page);
   await page.locator("#board-dialog").waitFor({ state: "visible" });
   await page.locator(".board-empty").waitFor();
@@ -161,8 +157,8 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
   await page.locator("article h4", { hasText: "Fix login copy" }).waitFor();
   assert.equal(await page.locator("#board-status").innerText(), "Opened 'Fix login copy'");
   assert.equal(await page.evaluate(() => document.activeElement?.closest("article")?.querySelector("h4")?.textContent), "Fix login copy");
-  await page.screenshot({ path: `${shots}/board-before.png` });
-  await page.screenshot({ path: "test-results/board-before.png" });
+  await shot(page, `${shots}/board-before.png`);
+  await shot(page, "test-results/board-before.png");
   await page.locator("#board-close").click();
 
   await post(page, origin, "/work-claims", { id: "notes", title: "Write the notes" }, 201);
@@ -224,17 +220,17 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
   await follow("notes", "done", "Done 'Write the notes'");
   assert.equal(await page.locator("article[data-claim-id='notes'] .claim-lease").count(), 0);
   await follow("copy", "release", "Released 'Write the copy'");
-  await page.screenshot({ path: `${shots}/board-after.png` });
-  await page.screenshot({ path: `${shots}/board-1280.png` });
-  await page.screenshot({ path: "test-results/board-after.png" });
+  await shot(page, `${shots}/board-after.png`);
+  await shot(page, `${shots}/board-1280.png`);
+  await shot(page, "test-results/board-after.png");
   await axe(page);
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.locator("#board-dialog").waitFor({ state: "visible" });
   assert.equal(await page.locator("#board-dialog").evaluate(node => node.scrollWidth <= node.clientWidth + 1), true);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), true);
-  await page.screenshot({ path: `${shots}/board-after-390.png` });
-  await page.screenshot({ path: "test-results/board-after-390.png" });
+  await shot(page, `${shots}/board-after-390.png`);
+  await shot(page, "test-results/board-after-390.png");
   await axe(page);
 
   await page.locator("#board-close").click();
@@ -333,7 +329,7 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
     await assertBoardReturn(boardUrl, scrollTop);
     assert.deepEqual(navigationState(), beforeNavigation, "Board/work navigation changes no Room events, work items, or claim rows");
     assert.equal(await dialog.evaluate(node => node.scrollWidth <= node.clientWidth + 1), true);
-    await page.screenshot({ path: `test-results/board-work-return-${viewport.width}.png` });
+    await shot(page, `test-results/board-work-return-${viewport.width}.png`);
     await axe(page);
     await page.locator("#board-close").click();
   }
@@ -476,19 +472,11 @@ function seedClaim(store, item) {
 // (`npm run test:quarantined`, QUARANTINE_RUN=1).
 const QUARANTINED_BOARD_FLAKES = process.env.QUARANTINE_RUN !== "1";
 test("waiting prerequisites stay visible, link by keyboard, and become claimable only when ready", { timeout: 120000, skip: QUARANTINED_BOARD_FLAKES ? "quarantined: tests/quarantine.json (browser timing flake; repair by 2026-10-20)" : false }, async t => {
-  mkdirSync("test-results", { recursive: true });
   const fixture = createAcceptanceFixture();
   const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  const origin = `http://127.0.0.1:${server.address().port}`;
+  const origin = await listenOrigin(server);
   const errors = [];
-  t.after(async () => {
-    server.closeStreams(); server.closeAllConnections();
-    await new Promise(resolve => server.close(resolve));
-    fixture.store.close();
-    rmSync(fixture.directory, { recursive: true, force: true });
-    assert.deepEqual(errors, []);
-  });
+  closeFixture(t, server, fixture, errors);
   const workId = "waiting:prerequisite", missingId = `unavailable-${"prerequisite-".repeat(7)}`;
   fixture.store.command(fixture.keys.owner, "commons", {
     id: crypto.randomUUID(), type: "work.proposed",
@@ -507,15 +495,10 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
     { id: "old-completion", title: "Earlier completed prerequisite", state: "done", owner: "owner",
       updatedAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString() }
   ]) seedClaim(fixture.store, { state: "unclaimed", updatedAt, ...item });
-  const browser = await chromium.launch({ headless: true });
+  const browser = await launchBrowser();
   t.after(async () => { await browser.close(); });
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
-  const page = await context.newPage();
-  page.setDefaultTimeout(8000);
-  page.on("pageerror", error => errors.push(error.message));
-  await page.goto(origin);
-  await signInFixture(page, fixture.keys.owner);
-  await page.locator("#main").waitFor({ state: "visible" });
+  const { page } = await contextPage(browser, { errors });
+  await signInTo(page, origin, fixture.keys.owner);
   const snapshot = () => ({
     sequence: fixture.store.room("commons").sequence,
     workItems: structuredClone(fixture.store.room("commons").state.workItems),
@@ -591,7 +574,7 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
     assert.equal(await dialog.evaluate(node => node.scrollWidth <= node.clientWidth + 1), true);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), true);
     await dependent.scrollIntoViewIfNeeded();
-    await page.screenshot({ path: `test-results/board-waiting-${width}.png` });
+    await shot(page, `test-results/board-waiting-${width}.png`);
     await axe(page);
     await page.locator("#board-close").click();
   }
@@ -699,7 +682,7 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
     assert.equal(fixture.store.workClaims.get("commons", "dependent").history.filter(item => item.action === "claimed").length, 1);
     assert.equal(fixture.store.workClaims.get("commons", "unknown").owner, null);
     assert.equal(await unknown.locator("[data-claim-action='claim']").count(), 0);
-    await page.screenshot({ path: "test-results/board-refresh-action.png" });
+    await shot(page, "test-results/board-refresh-action.png");
   } catch (error) {
     const diagnostic = { keyboardTarget, posts, responses,
       active: await page.evaluate(() => ({ id: document.activeElement?.id, tag: document.activeElement?.tagName,
@@ -718,7 +701,6 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
 // submit/readback lifecycle. Core/route tests own append preservation and CAS;
 // these checks add no render-only exports or fabricated successful responses.
 test("owners link a draft PR, reconcile held responses, and refresh a changed claim without resending", { timeout: 120000, skip: QUARANTINED_BOARD_FLAKES ? "quarantined: tests/quarantine.json (browser timing flake; repair by 2026-10-20)" : false }, async t => {
-  mkdirSync("test-results", { recursive: true });
   const fixture = createAcceptanceFixture();
   fixture.store.command(fixture.keys.owner, "commons", {
     id: crypto.randomUUID(), type: "member.added",
@@ -726,23 +708,13 @@ test("owners link a draft PR, reconcile held responses, and refresh a changed cl
   });
   const reviewerKey = fixture.store.issueAccessKey("commons", "pr-reviewer");
   const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  const origin = `http://127.0.0.1:${server.address().port}`;
-  const browser = await chromium.launch({ headless: true });
+  const origin = await listenOrigin(server);
+  const browser = await launchBrowser();
   const errors = [];
-  t.after(async () => {
-    await browser.close(); server.closeStreams(); server.closeAllConnections();
-    await new Promise(resolve => server.close(resolve));
-    fixture.store.close(); rmSync(fixture.directory, { recursive: true, force: true });
-    assert.deepEqual(errors, []);
-  });
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
-  const page = await context.newPage();
-  page.setDefaultTimeout(8000);
-  page.on("pageerror", error => errors.push(error.message));
-  await page.goto(origin);
-  await signInFixture(page, fixture.keys.owner);
-  await page.locator("#main").waitFor({ state: "visible" });
+  closeFixture(t, server, fixture, errors);
+  t.after(async () => { await browser.close(); });
+  const { page } = await contextPage(browser, { errors });
+  await signInTo(page, origin, fixture.keys.owner);
   await post(page, origin, "/work-claims", { id: "link-draft", title: "Attach the draft", files: ["draft.js"] }, 201);
   await post(page, origin, "/work-claims/link-draft/claim", {});
   await post(page, origin, "/work-claims/link-draft/update", { state: "in_progress" });
@@ -833,7 +805,7 @@ test("owners link a draft PR, reconcile held responses, and refresh a changed cl
       await card.scrollIntoViewIfNeeded();
       assert.equal(await page.locator("#board-dialog").evaluate(node => node.scrollWidth <= node.clientWidth + 1), true);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
-      await page.screenshot({ path: `test-results/board-link-pr-${width}.png` });
+      await shot(page, `test-results/board-link-pr-${width}.png`);
       await axe(page);
     }
   } finally {
@@ -909,14 +881,10 @@ test("held Board reads and mutations retire on room switch and sign-out", { time
     seedClaim(fixture.store, { id: `retirement-${index}`, title: `Retirement fixture ${index}`, state: "done", owner: "owner", updatedAt });
   }
   const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  const origin = `http://127.0.0.1:${server.address().port}`;
-  const browser = await chromium.launch({ headless: true });
-  t.after(async () => {
-    await browser.close(); server.closeStreams(); server.closeAllConnections();
-    await new Promise(resolve => server.close(resolve));
-    fixture.store.close(); rmSync(fixture.directory, { recursive: true, force: true });
-  });
+  const origin = await listenOrigin(server);
+  const browser = await launchBrowser();
+  closeFixture(t, server, fixture);
+  t.after(async () => { await browser.close(); });
   for (const boundary of ["room", "sign-out"]) for (const operation of ["read", "mutation", "link-pr"]) {
     const id = `retired-${boundary}-${operation}`;
     seedClaim(fixture.store, { id, title: `Original ${id}`, state: "unclaimed", updatedAt: new Date().toISOString() });
@@ -927,18 +895,13 @@ test("held Board reads and mutations retire on room switch and sign-out", { time
       });
       assert.equal(claimed.status, 200, await claimed.text());
     }
-    const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
-    const page = await context.newPage();
-    page.setDefaultTimeout(8000);
     const requests = [], errors = [];
-    page.on("pageerror", error => errors.push(error.message));
+    const { context, page } = await contextPage(browser, { errors });
     page.on("request", request => {
       const url = new URL(request.url());
       if (url.pathname.includes("/work-claims")) requests.push({ method: request.method(), path: url.pathname, search: url.search });
     });
-    await page.goto(`${origin}/?account=1`);
-    await signInFixture(page, accountKey);
-    await page.locator("#inbox-panel").waitFor({ state: "visible" });
+    await signInTo(page, `${origin}/?account=1`, accountKey, { ready: "#inbox-panel" });
     const chooseRoom = async roomId => {
       await clickChrome(page, await page.locator("#main").isVisible() ? "#choose-room" : "#nav-rooms");
       await page.locator(`[data-account-room="${roomId}"]`).click();
@@ -1030,30 +993,21 @@ test("held Board reads and mutations retire on room switch and sign-out", { time
 test("first board open requests at most two list pages when most claims are old", { timeout: 60000 }, async t => {
   const fixture = createAcceptanceFixture();
   const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  const origin = `http://127.0.0.1:${server.address().port}`;
+  const origin = await listenOrigin(server);
   const recent = new Date().toISOString();
   const old = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   for (let index = 0; index < 100; index += 1) seedClaim(fixture.store, { id: `open-${index}`, title: `Open ${index}`, state: "unclaimed", updatedAt: recent });
   for (let index = 0; index < 500; index += 1) seedClaim(fixture.store, { id: `old-${index}`, title: `Old ${index}`, state: "done", owner: "owner", updatedAt: old });
-  t.after(async () => {
-    server.closeStreams(); server.closeAllConnections();
-    await new Promise(resolve => server.close(resolve));
-    fixture.store.close();
-    rmSync(fixture.directory, { recursive: true, force: true });
-  });
-  const browser = await chromium.launch({ headless: true });
+  closeFixture(t, server, fixture);
+  const browser = await launchBrowser();
   t.after(async () => { await browser.close(); });
-  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
-  page.setDefaultTimeout(8000);
+  const page = await browserPage(browser, { viewport: { width: 1280, height: 800 }, timeout: 8000 });
   let lists = 0;
   page.on("request", request => {
     const url = new URL(request.url());
     if (request.method() === "GET" && /\/work-claims$/.test(url.pathname)) lists += 1;
   });
-  await page.goto(origin);
-  await signInFixture(page, fixture.keys.owner);
-  await page.locator("#main").waitFor({ state: "visible" });
+  await signInTo(page, origin, fixture.keys.owner);
   await openBoard(page);
   await page.locator(".board-older").waitFor();
   await page.locator("article[data-claim-id='open-0']").waitFor();
@@ -1071,21 +1025,12 @@ test("a read-only member does not see the new item form", { timeout: 60000 }, as
   seedClaim(fixture.store, { id: "reader-held", title: "Previously held work", state: "claimed", owner: "reader",
     claimedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), leaseExpiresAt: new Date(Date.now() + 3600000).toISOString() });
   const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  const origin = `http://127.0.0.1:${server.address().port}`;
-  t.after(async () => {
-    server.closeStreams(); server.closeAllConnections();
-    await new Promise(resolve => server.close(resolve));
-    fixture.store.close();
-    rmSync(fixture.directory, { recursive: true, force: true });
-  });
-  const browser = await chromium.launch({ headless: true });
+  const origin = await listenOrigin(server);
+  closeFixture(t, server, fixture);
+  const browser = await launchBrowser();
   t.after(async () => { await browser.close(); });
-  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
-  page.setDefaultTimeout(8000);
-  await page.goto(origin);
-  await signInFixture(page, reader);
-  await page.locator("#main").waitFor({ state: "visible" });
+  const page = await browserPage(browser, { viewport: { width: 1280, height: 800 }, timeout: 8000 });
+  await signInTo(page, origin, reader);
   await openBoard(page);
   await page.locator("#board-dialog").waitFor({ state: "visible" });
   await page.locator(".live-chip").waitFor();
