@@ -1781,7 +1781,18 @@ function recordWorkClaimDigest(state, incoming) {
     if (entry.previousOwnerId !== undefined && typeof entry.previousOwnerId !== "string") throw new Error("Event data invalid digest previousOwnerId");
     if (typeof entry.title !== "string" || !entry.title.trim() || entry.title.length > 4096) throw new Error("Event data missing digest title");
     if (typeof entry.at !== "string" || Number.isNaN(Date.parse(entry.at))) throw new Error("Event data missing digest at");
+    if (!(entry.actorId === null || typeof entry.actorId === "string")) throw new Error("Event data missing digest actorId");
+    if (entry.reason !== undefined && typeof entry.reason !== "string") throw new Error("Event data invalid digest reason");
     if (!Array.isArray(entry.paths) || entry.paths.length > 64 || entry.paths.some(v => typeof v !== "string" || !v.trim() || v.length > 512)) throw new Error("Event data missing digest paths");
+    if (entry.pullRequest !== undefined) {
+      const pull = entry.pullRequest;
+      const outcome = entry.action === "pr_merged" ? "merged" : entry.action === "pr_closed" ? "closed" : null;
+      if (!pull || typeof pull !== "object" || Array.isArray(pull) || typeof pull.url !== "string"
+        || !/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/[1-9]\d{0,9}$/.test(pull.url)
+        || (outcome !== null && pull.outcome !== outcome) || Object.keys(pull).some(key => key !== "url" && key !== "outcome")) {
+        throw new Error("Event data invalid digest pullRequest");
+      }
+    }
   }
 }
 

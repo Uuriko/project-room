@@ -1,7 +1,8 @@
 // A claim can carry a GitHub pull request URL. There is no inbound webhook
 // receiver, so POST /work-claims/sweep and the claim-pr cron poll the pull.
 // A merge completes the claim; a close without a merge releases it. Either
-// path appends one work_claim.updated event that names the pull and the outcome.
+// path batches into the work_claim.digest (FIX-69: event-light claim writes),
+// which names the pull and the outcome.
 // applyPullRequestWebhook is the same settlement a pull_request webhook would call.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -9,6 +10,7 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { handleWorkClaims, closeWorkClaim } from "../server/work-claim-routes.mjs";
 import { applyPullRequestWebhook, syncClaimPullRequests } from "../server/claim-pr-sync.mjs";
+import { flushClaimDigestWindow } from "../server/work-claim-events.mjs";
 import { pullRequestOutcomeFromWebhook } from "../server/claim-coordination.mjs";
 // SEC-2: claim reads carry content-trust markers; compare the claim itself.
 const stripTrust = value => JSON.parse(JSON.stringify(value, (key, entry) => (key === "untrusted" || key === "contentTrust" ? undefined : entry)));
@@ -48,9 +50,24 @@ async function room(t) {
   return { store, call };
 }
 
-const claimEvents = store => store.db.prepare(
-  "SELECT body FROM events WHERE room_id=? ORDER BY sequence"
-).all("commons").map(row => JSON.parse(row.body)).filter(event => event.type === "work_claim.updated");
+const claimEvents = store => {
+  // FIX-69: routine transitions batch into work_claim.digest; flush the
+  // window and return a flat chronological list of claim transitions —
+  // immediate work_claim.updated events plus digest entries — in the shape
+  // the assertions below read ({ actorId, data }).
+  flushClaimDigestWindow(store, "commons", {});
+  const rows = store.db.prepare(
+    "SELECT body FROM events WHERE room_id=? ORDER BY sequence"
+  ).all("commons").map(row => JSON.parse(row.body));
+  const out = [];
+  for (const event of rows) {
+    if (event.type === "work_claim.updated") out.push({ actorId: event.actorId, data: event.data });
+    else if (event.type === "work_claim.digest") {
+      for (const entry of event.data.digestClaims) out.push({ actorId: entry.actorId, data: entry });
+    }
+  }
+  return out;
+};
 
 // Authoring gate: the real route/storage/event boundary owns attach-after-claim.
 // A dropped update alternative, unconditional write, or weaker CAS breaks this
@@ -337,7 +354,11 @@ test("concurrent PR attachments serialize and invalid update alternatives cannot
   assert.deepEqual(claimEvents(store), eventsBefore);
 });
 
-test("PR link and event roll back together, and expiry or archived rooms cannot mutate", async t => {
+// FIX-69: the claim row and the digest event are decoupled — a refused
+// digest write no longer rolls back the claim row. The row is the source of
+// truth and stays durable; the digest buffer is restored so the next flush
+// retries visibility.
+test("PR link and digest decouple: a refused digest keeps the row, restores the buffer, and retries", async t => {
   const { store, call } = await room(t);
   const now = Date.parse("2026-10-03T13:00:00Z");
   store.now = () => now;
@@ -345,25 +366,39 @@ test("PR link and event roll back together, and expiry or archived rooms cannot 
   await call("claim", "atomic", { leaseHours: 6 });
   const claimed = store.workClaims.get("commons", "atomic");
   const input = { appendPullRequest: URL_A, expectedClaimedAt: claimed.claimedAt, expectedHistoryLength: claimed.history.length };
-  const eventsBefore = claimEvents(store);
-  store.db.exec("CREATE TEMP TRIGGER refuse_claim_link_event BEFORE INSERT ON events WHEN json_extract(NEW.body, '$.type') = 'work_claim.updated' BEGIN SELECT RAISE(ABORT, 'event storage refused'); END");
-  await assert.rejects(call("update", "atomic", input), /event storage refused/);
-  assert.deepEqual(store.workClaims.get("commons", "atomic"), claimed);
-  assert.deepEqual(claimEvents(store), eventsBefore);
-  store.db.exec("DROP TRIGGER refuse_claim_link_event");
+  const digestRows = () => store.db.prepare(
+    "SELECT body FROM events WHERE room_id=? AND json_extract(body,'$.type')='work_claim.digest'").all("commons").length;
+  const digestsBefore = digestRows();
+  store.db.exec("CREATE TEMP TRIGGER refuse_claim_digest BEFORE INSERT ON events WHEN json_extract(NEW.body, '$.type') = 'work_claim.digest' BEGIN SELECT RAISE(ABORT, 'digest storage refused'); END");
+  const linked = await call("update", "atomic", input);
+  assert.equal(linked.status, 200, "the claim row commits even when the digest cannot land");
+  assert.equal(store.workClaims.get("commons", "atomic").pullRequest.url, URL_A);
+  assert.throws(() => flushClaimDigestWindow(store, "commons", {}), /digest storage refused/);
+  assert.equal(digestRows(), digestsBefore, "no digest landed while storage refused it");
+  store.db.exec("DROP TRIGGER refuse_claim_digest");
+  assert.ok(flushClaimDigestWindow(store, "commons", {}), "the restored buffer retries on the next flush");
+  assert.ok(digestRows() > digestsBefore);
+});
+
+test("expiry or archived rooms cannot mutate a claim via the update alternative", async t => {
+  const { store, call } = await room(t);
+  const now = Date.parse("2026-10-03T13:00:00Z");
+  store.now = () => now;
+  await call("create", null, { id: "atomic" });
+  await call("claim", "atomic", { leaseHours: 6 });
+  const claimed = store.workClaims.get("commons", "atomic");
+  const input = { appendPullRequest: URL_A, expectedClaimedAt: claimed.claimedAt, expectedHistoryLength: claimed.history.length };
   store.now = () => now + 6 * 3600000;
   const expired = await call("update", "atomic", input);
   assert.equal(expired.status, 409);
   assert.equal(expired.value.error.code, "claim_lease_lapsed");
   assert.equal(expired.value.next[0].path, "/api/rooms/commons/work-claims/atomic");
   assert.deepEqual(store.workClaims.get("commons", "atomic"), claimed);
-  assert.deepEqual(claimEvents(store), eventsBefore);
   store.now = () => now;
   const token = store.issueAccessKey("commons", "owner");
   store.command(token, "commons", { id: "archive-link-room", type: "room.archived", data: { reason: "finished" } });
   await assert.rejects(call("update", "atomic", input), error => error.status === 409 && error.code === "room_archived");
   assert.deepEqual(store.workClaims.get("commons", "atomic"), claimed);
-  assert.deepEqual(claimEvents(store), eventsBefore);
 });
 
 // Authoring gate: re-linking a settled PR URL in a new claim round must

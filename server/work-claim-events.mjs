@@ -20,7 +20,7 @@ import { EVENT_TYPES, WORK_CLAIM_EVENT_ACTIONS, applyEvent, event, firstBlockedW
 import { getTier } from "./autonomy-tiers.mjs";
 import { postReceiptCard } from "./receipt-cards.mjs";
 import { resolveNamedReviewers, hasCurrentReview } from "./work-claims.mjs";
-import { accumulateClaimDigest, claimDigestDue, takeClaimDigest, claimDigestEventData } from "./work-claim-digest.mjs";
+import { accumulateClaimDigest, claimDigestDue, takeClaimDigest, restoreClaimDigest, claimDigestEventData } from "./work-claim-digest.mjs";
 
 export const WORK_CLAIM_ACTIONS = WORK_CLAIM_EVENT_ACTIONS;
 
@@ -215,17 +215,33 @@ export function emitClaimDigestEvent(store, roomId, { actorId = null, digest, at
 
 // FIX-69: flush one due digest window: append the digest event, then post
 // the batched in-room receipt cards (ACT-1a) for claims the window completed.
-// A receipt failure must not roll back the digest.
+// A receipt failure must not roll back the digest. If the digest event
+// itself cannot land, the buffer is restored so the next flush retries —
+// visibility is at-least-once, while the claim rows stay the source of truth.
 function flushClaimDigest(store, roomId, nowMs) {
   const digest = takeClaimDigest(store, roomId, nowMs);
   if (!digest) return null;
-  const receipt = emitClaimDigestEvent(store, roomId, { actorId: digest.actorId, digest, atMs: nowMs });
+  let receipt;
+  try {
+    receipt = emitClaimDigestEvent(store, roomId, { actorId: digest.actorId, digest, atMs: nowMs });
+  } catch (error) {
+    restoreClaimDigest(store, roomId, digest);
+    throw error;
+  }
   for (const entry of digest.claims) {
     if (entry.item?.state !== "done") continue;
     try { postReceiptCard(store, roomId, entry.item, entry.atMs); }
     catch (error) { console.error("work claim receipt card failed:", error?.message ?? error); }
   }
   return receipt;
+}
+
+// FIX-69: flush the current digest window now, even if it has not lapsed.
+// Tests and ops tooling use this for deterministic digest reads; the
+// request path only flushes lapsed windows.
+export function flushClaimDigestWindow(store, roomId, { nowMs = null } = {}) {
+  const stamp = Number.isFinite(nowMs) ? nowMs : (typeof store.now === "function" ? store.now() : Date.now());
+  return flushClaimDigest(store, roomId, stamp);
 }
 
 // FIX-69: the single choke point for claim-write visibility. Writes carrying
@@ -240,6 +256,6 @@ export function emitWorkClaimEventRouted(store, roomId, { actorId, item, action,
   // Flush a lapsed window before accumulating: each digest covers exactly
   // one window, and the write that crosses the boundary starts the next.
   if (claimDigestDue(store, roomId, stamp)) flushClaimDigest(store, roomId, stamp);
-  accumulateClaimDigest(store, roomId, { action, item, actorId, atMs: stamp, paths, previousOwnerId });
+  accumulateClaimDigest(store, roomId, { action, item, actorId, atMs: stamp, paths, previousOwnerId, pullRequest, reason });
   return { digested: true, sequence: null };
 }

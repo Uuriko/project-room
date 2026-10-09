@@ -12,6 +12,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { migrateLandQueueClaims } from "../server/land-queue.mjs";
 import { handleWorkClaims } from "../server/work-claim-routes.mjs";
+import { flushClaimDigestWindow } from "../server/work-claim-events.mjs";
 import { SOURCE_REVISION } from "../server/version.mjs";
 // SEC-2: claim reads carry content-trust markers; compare the claim itself.
 const stripTrust = value => JSON.parse(JSON.stringify(value, (key, entry) => (key === "untrusted" || key === "contentTrust" ? undefined : entry)));
@@ -200,10 +201,14 @@ test("CI state changes are stored, receipted, and wake the owner on failure", as
   const pendingItem = store.workClaims.get("commons", "ci-1");
   assert.equal(pendingItem.ci.state, "pending");
   assert.equal(pendingItem.ci.headSha, SHA);
-  const events = () => store.db.prepare("SELECT body FROM events WHERE room_id=?").all("commons")
+  // FIX-69: ci_changed is routine — it rides the digest, not a per-transition event.
+  const digests = () => store.db.prepare("SELECT body FROM events WHERE room_id=?").all("commons")
     .map(row => JSON.parse(row.body))
-    .filter(entry => entry.type === "work_claim.updated" && entry.data.workClaim === "ci-1");
-  assert.ok(events().some(entry => entry.data.reason === "ci_changed" && entry.data.ciState === "pending"));
+    .filter(entry => entry.type === "work_claim.digest");
+  const ciChanges = () => digests().flatMap(digest => digest.data.digestClaims)
+    .filter(entry => entry.workClaim === "ci-1" && entry.action === "ci_changed");
+  flushClaimDigestWindow(store, "commons", {});
+  assert.ok(ciChanges().some(entry => entry.claimState === pendingItem.state));
   assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM agent_wake_signals WHERE agent_id=?").get("coord").n, 0);
   phase.failure = true;
   store.workClaims.set("commons", {
@@ -215,7 +220,8 @@ test("CI state changes are stored, receipted, and wake the owner on failure", as
   const failedItem = store.workClaims.get("commons", "ci-1");
   assert.equal(failedItem.ci.state, "failure");
   assert.equal(failedItem.ci.url, "https://example.com/ci");
-  assert.ok(events().some(entry => entry.data.reason === "ci_changed" && entry.data.ciState === "failure"));
+  flushClaimDigestWindow(store, "commons", {});
+  assert.ok(ciChanges().length >= 2, "both the pending and failure polls surface in digests");
   const wake = store.db.prepare("SELECT kind, message_id FROM agent_wake_signals WHERE agent_id=?").get("coord");
   assert.equal(wake.kind, "mention");
   assert.match(wake.message_id, /ci-1:ci:failure/);

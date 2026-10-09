@@ -32,8 +32,8 @@ const bufferFor = (store, roomId) => {
 
 // Record one routine transition. Keeps per-action counts and the latest
 // transition per claim (id -> { action, item, actorId, atMs, paths,
-// previousOwnerId }).
-export function accumulateClaimDigest(store, roomId, { action, item, actorId = null, atMs = null, paths = undefined, previousOwnerId = null } = {}) {
+// previousOwnerId, pullRequest, reason }).
+export function accumulateClaimDigest(store, roomId, { action, item, actorId = null, atMs = null, paths = undefined, previousOwnerId = null, pullRequest = undefined, reason = undefined } = {}) {
   if (!store || typeof store !== "object" || typeof roomId !== "string") return;
   if (!WORK_CLAIM_EVENT_ACTIONS.includes(action)) throw new Error(`Unknown work claim action: ${action}`);
   const buffer = bufferFor(store, roomId);
@@ -42,7 +42,7 @@ export function accumulateClaimDigest(store, roomId, { action, item, actorId = n
   buffer.counts.set(action, (buffer.counts.get(action) ?? 0) + 1);
   // Latest action per claim wins; the digest is a visibility batch, not a journal.
   buffer.claims.delete(item.id);
-  buffer.claims.set(item.id, { action, item, actorId, atMs: stamp, previousOwnerId,
+  buffer.claims.set(item.id, { action, item, actorId, atMs: stamp, previousOwnerId, pullRequest, reason,
     paths: Array.isArray(paths) ? [...paths] : [...(item.files ?? [])] });
 }
 
@@ -67,19 +67,42 @@ export function takeClaimDigest(store, roomId, nowMs) {
     actorId: entries.length > 0 ? entries[entries.length - 1].actorId : null,
     counts: Object.fromEntries(buffer.counts),
     claims: entries,
+    restore: { windowStart: buffer.windowStart, counts: buffer.counts, claims: buffer.claims },
   };
 }
 
-// Thin per-claim entry for the digest event body.
-export const claimDigestEntryData = ({ action, item, atMs, paths, previousOwnerId }) => ({
+// Put a taken digest back (flush failed before the event landed): the next
+// flush retries the same window instead of dropping visibility.
+export function restoreClaimDigest(store, roomId, digest) {
+  if (!store || typeof store !== "object" || !digest?.restore) return;
+  const buffer = bufferFor(store, roomId);
+  if (buffer.windowStart === null) {
+    buffer.windowStart = digest.restore.windowStart;
+    buffer.counts = digest.restore.counts;
+    buffer.claims = digest.restore.claims;
+  } else {
+    for (const [action, count] of digest.restore.counts) buffer.counts.set(action, (buffer.counts.get(action) ?? 0) + count);
+    for (const [id, entry] of digest.restore.claims) { buffer.claims.delete(id); buffer.claims.set(id, entry); }
+  }
+}
+
+// Thin per-claim entry for the digest event body. The pullRequest outcome is
+// derived from the action, exactly like the retired per-transition event
+// (server/work-claim-events.mjs workClaimEventData): a pr_merged settlement
+// names the merged outcome even when the settling poll observed a close.
+export const claimDigestEntryData = ({ action, item, actorId, atMs, paths, previousOwnerId, pullRequest, reason }) => ({
   workClaim: item.id,
   action,
   claimState: item.state,
   ownerId: item.owner ?? null,
   ...(previousOwnerId ? { previousOwnerId } : {}),
+  actorId: actorId ?? null,
   title: typeof item.title === "string" && item.title.trim() ? item.title : item.id,
   at: new Date(atMs).toISOString(),
   paths: [...paths],
+  ...(pullRequest ? { pullRequest: { url: pullRequest.url,
+    outcome: action === "pr_merged" ? "merged" : action === "pr_closed" ? "closed" : pullRequest.outcome } } : {}),
+  ...(reason ? { reason } : {}),
 });
 
 export function claimDigestEventData(digest) {
