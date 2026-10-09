@@ -1,5 +1,6 @@
 import { enforceAutonomyTierForAction } from './autonomy-tiers.mjs';
-import { validId } from '../src/events.js';
+import { validId, messageChannelId } from '../src/events.js';
+import { conversationIndex } from '../src/conversation.js';
 import { isGuestAgentMemberId } from './guest-agent-links.mjs';
 import { historyFloor, messageInHistory, messageVisibleToViewer } from './history-visibility.mjs';
 
@@ -46,7 +47,9 @@ export class RoomAssistant {
       const config = this.config(roomId), coordinator = state.members[config.coordinatorMemberId];
       const floor = historyFloor(this.store.db, state, roomId, auth.member.id);
       const visible = id => messageVisibleToViewer(state.messages.find(m => m.id === id), auth.member.id, floor);
-      const runs = this.store.db.prepare('SELECT value FROM room_assistant_runs WHERE room_id=? ORDER BY rowid DESC LIMIT 100').all(roomId)
+      // Keep unfinished requests discoverable by their host and controllers;
+      // newer terminal history must not push pending work out of this window.
+      const runs = this.store.db.prepare("SELECT value FROM room_assistant_runs WHERE room_id=? ORDER BY json_extract(value,'$.status') IN ('done','cancelled','failed'), rowid DESC LIMIT 100").all(roomId)
         .map(row => JSON.parse(row.value)).flatMap(run => {
           if (visible(run.sourceMessageId)) return [run];
           const opening = state.messages.find(m => m.id === run.sourceMessageId);
@@ -89,6 +92,17 @@ export class RoomAssistant {
         const message = state.messages.find(m => m.id === id);
         if (!message || message.toMemberId || !messageVisibleToViewer(message, actor.id, floor) || message.authorId !== actor.id)
           fail('assistant_source_denied', 'Choose your own visible shared message', 403);
+        return message;
+      };
+      const conversationSource = (id, opening) => {
+        const message = source(id), { rootById } = conversationIndex(state.messages);
+        // A channel prompt may receive a channel reply or a thread rooted in
+        // that prompt. A prompt already inside a thread stays in that thread.
+        const sameThread = opening.replyToId
+          ? rootById.get(message.id) === rootById.get(opening.id)
+          : !message.replyToId || rootById.get(message.id) === opening.id;
+        if (messageChannelId(message) !== messageChannelId(opening) || !sameThread)
+          fail('assistant_conversation_mismatch', 'Choose a message in the request conversation');
         return message;
       };
       let result;
@@ -135,7 +149,7 @@ export class RoomAssistant {
           if (terminal.has(run.status)) fail('assistant_run_closed', 'This request has finished');
           if (['contribute', 'resolve'].includes(input.action)) {
             if (!isHuman) fail('assistant_denied', 'Shared inputs preserve human authorship', 403);
-            source(input.sourceMessageId);
+            conversationSource(input.sourceMessageId, opening);
             if (input.conflict !== undefined && typeof input.conflict !== 'boolean') fail('invalid_assistant_action', 'Conflict must be a boolean', 422);
             if (input.action === 'resolve' && !isOwner && actor.id !== run.initiatorId)
               fail('assistant_denied', 'The requester or room owner resolves conflicting scope', 403);
@@ -176,7 +190,7 @@ export class RoomAssistant {
                 || run.status === 'needs_input' && !['needs_input', 'paused', 'cancelled', 'failed'].includes(input.state)) fail('assistant_stop_pending', 'A stop or scope decision must be acknowledged first');
               if (input.state === 'done') {
                 if (!input.resultMessageId) fail('assistant_result_missing', 'Publish a shared result message before reporting done', 422);
-                source(input.resultMessageId); run.resultMessageId = input.resultMessageId;
+                conversationSource(input.resultMessageId, opening); run.resultMessageId = input.resultMessageId;
               }
               if (input.appliedInputMessageIds !== undefined) {
                 if (!Array.isArray(input.appliedInputMessageIds) || input.appliedInputMessageIds.length > 100

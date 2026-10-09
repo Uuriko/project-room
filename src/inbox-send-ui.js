@@ -433,6 +433,7 @@ export function directSendErrorText(code) {
     telegram_unavailable: "Telegram is unreachable right now. Nothing was confirmed sent.",
     gmail_unavailable: "Gmail is unreachable right now. Nothing was confirmed sent.",
     invalid_direct_send: "Check the recipient and message, then try again.",
+    direct_send_idempotency_conflict: "This send key already recorded a different message. Start a new send to try again.",
     rate_limited: "Too many sends — wait a minute and try again."
   }[code] || "Send failed. Nothing was confirmed sent.");
 }
@@ -472,7 +473,11 @@ export function installInboxDirectSend({ api, ownerKey, ids }) {
     event?.preventDefault?.();
     const gen = generation, owner = ownerKey();
     if (!owner || busy) return;
-    const data = { channel: el.channel.value, to: el.to.value.trim(), subject: el.subject.value, body: el.body.value };
+    // One idempotency key per user-initiated send: the server replays the
+    // journaled receipt for a repeated key instead of delivering twice, so an
+    // uncertain retry (dropped response, double submit) never double-sends.
+    const data = { channel: el.channel.value, to: el.to.value.trim(), subject: el.subject.value, body: el.body.value,
+      requestId: crypto.randomUUID() };
     const threadId = threadEl?.value.trim();
     if (threadId) data.threadId = threadId;
     busy = true; state = "pending"; render();

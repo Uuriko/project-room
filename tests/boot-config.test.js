@@ -109,3 +109,30 @@ test("agentCardSignatureState mirrors the serve path's revision gate", () => {
   assert.equal(state.signed, false);
   assert.equal(state.unsignedReason, null);
 });
+
+test("QA200-REG-14: bare validateCriticalConfig() (dev default path) warns loudly, never throws", () => {
+  // Regression guard for the `??` default: an absent cardSignature must
+  // degrade to the unsigned dev warning, never a fail-open clean pass.
+  const { warnings } = validateCriticalConfig();
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /UNSIGNED/i);
+  assert.match(warnings[0], /ROOM_AGENT_CARD_SIGNING_KEY|--allow-unsigned/);
+});
+
+test("QA200-REG-14: production with no cardSignature refuses boot (fail-loud default)", () => {
+  // Guards the defaulting logic against a fail-open regression where the
+  // absent card state is treated as signed.
+  assert.throws(
+    () => validateCriticalConfig({ production: true }),
+    error => {
+      assert.match(error.message, /Refusing to boot/);
+      assert.match(error.message, /UNSIGNED/i);
+      assert.match(error.message, /ROOM_AGENT_CARD_SIGNING_KEY/);
+      return true;
+    }
+  );
+  assert.throws(
+    () => validateCriticalConfig({ production: true, cardSignature: { signed: false } }),
+    /Refusing to boot/
+  );
+});

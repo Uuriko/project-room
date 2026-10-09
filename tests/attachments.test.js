@@ -42,3 +42,16 @@ test("validateAttachment reads the extension the way Windows saves the file (tra
   assert.equal(validateAttachment({ filename: "notes.txt.", sizeBytes: 1, mimeType: "text/plain" }).extension, "txt");
   assert.equal(validateAttachment({ filename: "plain", sizeBytes: 1, mimeType: "text/plain" }).extension, "");
 });
+
+test("QA200-REG-14: benign trailing dots/spaces are allowed with the normalized extension", () => {
+  // Regression guard for 0804d1525: the normalization must not turn a
+  // benign trailing dot/space into a rejection, and the reported
+  // extension must be the normalized one.
+  assert.equal(validateAttachment({ filename: "report.pdf ", sizeBytes: 1, mimeType: "application/pdf" }).extension, "pdf");
+  assert.equal(validateAttachment({ filename: "report.pdf.", sizeBytes: 1, mimeType: "application/pdf" }).extension, "pdf");
+  assert.equal(validateAttachment({ filename: "archive.tar.gz ", sizeBytes: 1, mimeType: "application/gzip" }).extension, "gz");
+  assert.equal(validateAttachment({ filename: "noext ", sizeBytes: 1, mimeType: "text/plain" }).extension, "");
+  // Non-breaking space is whitespace too: a blocked extension behind one
+  // must still be caught the way Windows saves it.
+  throwsCode(() => validateAttachment({ filename: "evil.exe ", sizeBytes: 1, mimeType: "text/plain" }), "blocked_extension");
+});

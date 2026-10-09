@@ -89,8 +89,9 @@ function main() {
       const m = line.match(p.re);
       if (!m) continue;
       const matched = m[0];
-      // AWS example keys and other documented placeholders are not secrets.
-      if (placeholderRe.test(matched) || placeholderRe.test(line)) continue;
+      // A documented example value is not a secret. A placeholder word
+      // elsewhere on the line must not hide a real provider key.
+      if (placeholderRe.test(matched)) continue;
       findings.push({ at, kind: p.name, line: line.trim().slice(0, 160) });
       break; // one finding per line is enough
     }

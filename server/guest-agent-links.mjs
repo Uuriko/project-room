@@ -4,6 +4,7 @@ import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { assessMemberDisplayName } from "./display-name-guard.mjs";
 // Read at call time (store.mjs imports this module): one source for capacity.
 import { PILOT_LIMITS } from "./store.mjs";
+import { guestHistoryAccessLead } from "./history-visibility.mjs";
 
 class GuestAgentLinkError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
@@ -154,7 +155,7 @@ export class GuestAgentLinks {
     const room = this.store.room(row.room_id).state.room;
     return {
       room: { id: room.id, title: room.title },
-      access: ACCESS,
+      access: `${guestHistoryAccessLead(room)}, post messages, and react. No membership administration or work approvals.`,
       kind: GUEST_AGENT_KIND,
       permissions: [...GUEST_AGENT_PERMISSIONS],
       expiresAt: row.expires_at,
