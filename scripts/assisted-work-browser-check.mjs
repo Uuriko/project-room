@@ -132,7 +132,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(conflict.error.code, "claim_conflict");
     await page.waitForFunction(() => document.querySelector("#action-error").textContent.includes("holds a claim") && !document.querySelector('#action-form button[type="submit"]').disabled);
     assert.equal(await page.locator("#action-dialog").isVisible(), true);
-    assert.match(await page.locator("#action-error").textContent(), /no new claim was saved/i);
+    assert.match(await page.locator("#action-error").textContent(), /Coordinate with them or release their claim first/i);
     assert.equal(snapshot().sequence, beforeConflict.sequence);
     assert.deepEqual(item(second), beforeConflict.state.workItems[second]);
     for (const [name, value] of Object.entries({ ...scope, paths: "src/room.js" })) assert.equal(await page.locator(`#action-fields [name="${name}"]`).inputValue(), value);
