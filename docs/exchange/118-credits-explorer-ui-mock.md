@@ -1,5 +1,10 @@
 # Credits Explorer UI Mock (hard task 118)
 
+> **Status note (2026-10-09):** the credits explorer CLI
+> (`scripts/exchange/credits-explorer.mjs`) lives on the unmerged branch
+> `feat/ht4-101-116-credits-ledger` (`75d288df8`) and is not on `main`; the
+> wireframes below describe that unmerged implementation.
+
 A read-only web UI for the credits explorer CLI
 (`scripts/exchange/credits-explorer.mjs`: `balance`, `search`, `trace`,
 `conservation`). Wireframes below are ASCII; the sample outputs are the

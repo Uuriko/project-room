@@ -29,6 +29,10 @@ server, not the signature, decides whether the claim counts (below).
 
 ## Server verification at redeem (`POST /api/guest-agent-links/redeem-card`)
 
+> **Status note (2026-10-09):** this endpoint was implemented in #857 but
+> reverted (revert commits `5be224672` / `35767fbcb`); it does not exist on
+> current `main`. The verification design below is a historical proposal.
+
 When `referred_by` is present:
 
 1. **Referrer must be real.** The claimed `agentId` must hold a live pass

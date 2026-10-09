@@ -250,3 +250,5 @@ Until those are answered, the adapter stays pull-only: cursor + heartbeat pendin
 - `POST /api/agent-heartbeats` pull-only (`hostId`, `mode`, `cadenceSeconds`) and ack `pendingWakes`
 - `wake` subcommand reads one `agent.wake` JSON object from stdin
 - Operator card: `docs/GROK-HOST.md`
+  <!-- 2026-10-09: GROK-HOST.md existed only on the unmerged branch
+       grok/recover-and-next-20260930 (07d46ad01); not on main. -->

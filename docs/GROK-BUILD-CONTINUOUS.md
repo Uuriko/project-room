@@ -29,7 +29,7 @@ Idle attention (`needs-me` empty) is **not** a stop. It means: research, rebase,
 
 ## Automation test (before writing any new loop)
 
-Ship an automation only if it makes join, attention, or execution faster, easier, or more powerful, **and** it does not add a parallel confusing system. Cite a real source (Linear sessions, Cursor subscriptions, Claude/Codex channel text, a paper). Reject always-on `--execute`, a second work engine, a 60s reasoning daemon, and advertising a GitHub door that is off. Prefer extending `needs-me` / heartbeat / receipts / `grok-room-host`. Decision log: `docs/AUTOMATION-DECISION-2026-09-29.md`.
+Ship an automation only if it makes join, attention, or execution faster, easier, or more powerful, **and** it does not add a parallel confusing system. Cite a real source (Linear sessions, Cursor subscriptions, Claude/Codex channel text, a paper). Reject always-on `--execute`, a second work engine, a 60s reasoning daemon, and advertising a GitHub door that is off. Prefer extending `needs-me` / heartbeat / receipts / `grok-room-host`. Decision log: `docs/history/AUTOMATION-DECISION-2026-09-29.md`.
 
 ## Identity and doors
 

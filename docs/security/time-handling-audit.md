@@ -47,6 +47,10 @@ timestamp participates in any redeem/validate decision.
    The *stale* bound (`issuedMs < at - maxAgeMs`) does not consult the skew
    window at all: widening the skew parameter cannot revive an expired receipt.
    This is asserted by tests in this change (`tests/time-skew-boundaries.test.js`).
+
+   > **Status note (2026-10-09):** the companion implementation branch
+   > `ht-7/sec-impl-171-180` carrying this test was never merged to `main`,
+   > so the assertion above holds on that branch only, not on current `main`.
 3. **Skew never weakens other checks.** A receipt inside the skew window still
    needs a valid Ed25519 signature under the room's trusted key, a non-empty
    candidateId, and (when supplied) matching candidate/task binding — the

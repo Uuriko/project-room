@@ -22,6 +22,13 @@ end to end in a room, on credits only, with no money anywhere.
    the claimant; refund returns them to the sponsor. All through
    `scripts/exchange/credits-ledger.mjs`.
 
+   > **Status note (2026-10-09):** the ledger implementation lives on the
+   > unmerged branch `feat/ht4-101-116-credits-ledger` (`75d288df8`); it is
+   > not on `main`, so `scripts/exchange/credits-ledger.mjs` and the
+   > `tests/exchange-bounty-lifecycle.test.js` /
+   > `tests/exchange-credits-ledger.test.js` extensions below do not exist
+   > on `main`.
+
 ## What's out
 
 - Partial payouts, multi-claimant bounties, milestone bounties.

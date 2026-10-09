@@ -187,6 +187,10 @@ Step 2 needs a small approval surface: `POST /api/guest-agent-links/:memberId/ap
 (lane/owner auth) → pass gains `propose` scope, TTL extends to 72h. Denial is
 silent-ish: the guest keeps read+chat, no error broadcast.
 
+> **Status note (2026-10-09):** this endpoint was never implemented — no
+> `approve-drafts` route exists in `server/` history. Step 2 remains a design
+> proposal, not a live API.
+
 ## Abuse controls
 
 - Rate limits: 5 requests/hour per IP, 3/day per card key. Counts are kept in

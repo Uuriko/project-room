@@ -4,6 +4,10 @@ Status: catalog for AN-1a. Written 1 October 2026 (America/Phoenix). Code refere
 
 This is the growth event catalog. Weekly snapshots land in `docs/analytics/weekly/`. The collector that writes these rows lives in `server/analytics/`.
 
+> **Status note (2026-10-09):** `docs/analytics/weekly/` was never created —
+> no weekly snapshots have landed there. The collector (`server/analytics/`)
+> exists and is documented below; the snapshot landing directory is aspirational.
+
 ---
 
 ## 1. Principles

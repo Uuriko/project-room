@@ -10,7 +10,7 @@ against what it replaces. The closest open-source analog is srlabs/skillforge
 (git-backed `skills/` + `wiki/` + immutable `raw/`, one skill change per
 iteration). We keep **three planes**: immutable raw traces
 (`docs/ROOM-TRACES.jsonl`, one line per merged slice), the distilled wiki (this
-file), and the validated procedures (`docs/ROOM-PROCEDURES.md`).
+file), and the validated procedures (`docs/history/ROOM-PROCEDURES.md`).
 
 **Two roles.**
 

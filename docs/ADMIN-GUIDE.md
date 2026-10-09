@@ -32,7 +32,7 @@ Key configuration surfaces:
 - `cloudflare/` — Worker build, checks, and compatibility shims.
 - `deploy/` — deployment descriptors, including `deploy/agent-discovery.mjs`
   (health aliases and key routes).
-- `docs/EMAIL-ROUTING-RUNBOOK.md` — inbound mail routing. **Activation is
+- `docs/history/EMAIL-ROUTING.md` — inbound mail routing. **Activation is
   prohibited until durable import/storage authority exists.**
 - `docs/ROUTE-AUTH-TABLE.md` — which routes require which credentials.
 - `docs/INVITE-ONLY-CHECKLIST.md` — invite-only boundary verification.

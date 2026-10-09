@@ -123,6 +123,10 @@ bump and writer-fence migration), `secret` (a new deployment binding),
 
 ### A1 — Sign-in through a maintained identity provider (OIDC)
 
+> **Status note (2026-10-09):** this alternative was never implemented — no
+> `server/oidc-login.mjs` and no `/api/auth/oidc/*` routes exist in `server/`
+> history. The design below is a triage proposal only.
+
 - Files: new `server/oidc-login.mjs` (authorization-code + PKCE, issuer/audience/nonce checks, no token storage beyond the hashed session slot); `server/http.mjs` routes `GET /api/auth/oidc/start`, `GET /api/auth/oidc/callback`; `server/store.mjs` account lookup by `(issuer, subject)`; `src/app.js` a "Sign in" button beside the key field; `docs/SERVICE.md`, `docs/openapi.yaml`, `docs/ROUTE-AUTH-TABLE.md`.
 - Approach: the callback binds the provider subject to an existing local account or creates one; it never grants room membership (A3 invitation acceptance stays the join path). Provisioned keys remain for the development pilot behind `ROOM_DEPLOYMENT`.
 - Tests: `tests/oidc-login.test.js` with a local mock issuer (state/nonce mismatch, wrong audience, expired token, replayed code, subject reuse across accounts all refused; happy path creates one session slot); `scripts/invitation-check.mjs` extended for the button.
