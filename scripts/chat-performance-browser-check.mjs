@@ -179,15 +179,12 @@ test('snapshot labels update duplicates while preserving focus and selection, an
   assert.deepEqual(errors, []);
 });
 
-// QA-2026-10-07: measurable regression target for the unbounded renderMessages
-// finding. Keep opt-in while the renderer is unwindowed; remove the gate when
-// the fix lands. Workload retains 2,000 total history records and about 1.7 MB
-// of body text, including ten patch-dump-sized messages.
+// QA-2026-10-07: regression target for the unbounded renderMessages finding,
+// on since the timeline renders a window of the newest rows. Workload retains
+// 2,000 total history records and about 1.7 MB of body text, including ten
+// patch-dump-sized messages.
 test('large room history completes initial render with a bounded live message DOM', {
-  timeout: 90000,
-  skip: process.env.ROOM_ENABLE_RENDER_WINDOW_REGRESSION !== '1'
-    ? 'TODO(QA-2026-10-07): enable when renderMessages windowing lands; finding: unbounded full-room DOM render.'
-    : false
+  timeout: 90000
 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), 'project-room-render-window-'));
   const store = new RoomStore(join(directory, 'room.sqlite'));
@@ -227,6 +224,73 @@ test('large room history completes initial render with a bounded live message DO
   assert.equal(store.snapshot(ownerKey, 'commons').state.messages.length, 2000, 'DOM windowing must not discard room history');
   assert.deepEqual(errors, [], 'initial render completes without browser errors');
   console.log(`render window workload: 2,000 messages, ~1.7 MB text, ${rendered} live nodes, ${initialRenderMs.toFixed(0)} ms until sentinel`);
+});
+
+// The window: older history is one click away, arrivals keep retained rows,
+// and links to old messages widen the window.
+test('windowed timeline shows earlier history on request and reveals linked old messages', { timeout: 60000 }, async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'project-room-window-'));
+  const store = new RoomStore(join(directory, 'room.sqlite'));
+  const start = Date.now() - 400 * 60000, events = [];
+  const at = minute => new Date(start + minute * 60000).toISOString();
+  const id = index => `window-message-${String(index).padStart(3, '0')}`;
+  for (let index = 0; index < 400; index++) events.push(event({ roomId: 'commons', actorId: 'owner', type: T.MESSAGE_POSTED, at: at(index),
+    data: { messageId: id(index), body: `Window history ${index}` } }));
+  for (const [claim, minute] of [['window-claim-new', 390.5]]) events.push(event({ roomId: 'commons', actorId: 'owner',
+    type: 'work_claim.updated', at: at(minute), data: { workClaim: claim, action: 'claimed', title: claim, claimState: 'claimed', ownerId: 'owner', leaseExpiresAt: null, paths: [] } }));
+  events.sort((a, b) => a.at.localeCompare(b.at));
+  store.initialize([...initialRoom('commons', 'owner'), ...events]);
+  const ownerKey = store.issueAccessKey('commons', 'owner');
+  const server = createRoomServer({ store, streamInterval: 50 });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+  t.after(async () => {
+    await browser.close(); server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    store.close(); rmSync(directory, { recursive: true, force: true });
+  });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  page.setDefaultTimeout(15000);
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await signInFixture(page, ownerKey);
+  await page.locator(`[data-message-record-id="${id(399)}"]`).waitFor();
+  const rows = () => page.locator('#message-list > .message').count();
+  const earlier = page.locator('#message-list > [data-timeline-earlier] button');
+  assert.equal(await rows(), 150);
+  assert.equal(await earlier.textContent(), 'Show earlier messages (250 more)');
+  assert.equal(await page.locator('[data-claim-update="window-claim-new"]').count(), 1);
+  // An arrival grows the window: the first rendered row stays the same node.
+  await page.evaluate(id => { globalThis.windowFirst = document.querySelector(`[data-message-record-id="${id}"]`); }, id(250));
+  store.command(ownerKey, 'commons', { id: 'window-arrival', type: 'message.posted', data: { messageId: 'window-arrival', body: 'Window arrival' } });
+  await page.locator('[data-message-record-id="window-arrival"]').waitFor();
+  assert.equal(await page.evaluate(id => globalThis.windowFirst === document.querySelector(`[data-message-record-id="${id}"]`), id(250)), true);
+  assert.equal(await rows(), 151);
+  // Earlier history is not counted as new, and the reader's row stays put.
+  await page.locator('#message-list').evaluate(list => { list.scrollTop = 0; });
+  const before = await page.locator(`[data-message-record-id="${id(250)}"]`).evaluate(node => node.getBoundingClientRect().top);
+  await earlier.click();
+  assert.equal(await rows(), 301);
+  assert.equal(await earlier.textContent(), 'Show earlier messages (100 more)');
+  const after = await page.locator(`[data-message-record-id="${id(250)}"]`).evaluate(node => node.getBoundingClientRect().top);
+  assert.ok(Math.abs(after - before) < 1, `reader's row moved from ${before} to ${after}`);
+  assert.equal(await page.locator('#new-messages-button').isHidden(), true);
+  await earlier.click();
+  assert.equal(await rows(), 401);
+  assert.equal(await page.locator('#message-list > [data-timeline-earlier]').count(), 0);
+  assert.equal(await page.evaluate(() => document.activeElement?.dataset.messageRecordId), 'window-message-000', 'focus stays in the timeline');
+  assert.equal(await page.locator('[data-claim-update="window-claim-new"]').count(), 1);
+  // A link to an old message in a fresh view widens the window to it.
+  const second = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  second.on('pageerror', error => errors.push(error.message));
+  await second.goto(`http://127.0.0.1:${server.address().port}`);
+  await signInFixture(second, ownerKey);
+  await second.locator(`[data-message-record-id="${id(399)}"]`).waitFor();
+  assert.equal(await second.locator(`[data-message-record-id="${id(30)}"]`).count(), 0);
+  await second.evaluate(id => { location.hash = `#pr-record/message/${id}`; }, id(30));
+  await second.locator(`[data-message-record-id="${id(30)}"]`).waitFor();
+  assert.equal(await second.evaluate(() => document.activeElement?.dataset.messageRecordId), id(30));
+  assert.deepEqual(errors, []);
 });
 
 test('typing in the composer leaves unchanged reply text untouched', { timeout: 30000 }, async t => {
