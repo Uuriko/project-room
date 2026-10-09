@@ -107,7 +107,9 @@ test("W2: release from in_progress pauses internally and returns the item to the
   const registry = await claimedRegistry();
   const started = await runRoute({ route: "update", id: "w1", body: { state: "in_progress" }, registry });
   assert.equal(started.error, null);
-  const { out, error } = await runRoute({ route: "release", id: "w1", body: { note: "done for now" }, registry });
+  const item = registry.get("room1", "w1");
+  const { out, error } = await runRoute({ route: "release", id: "w1", body: { note: "done for now",
+    expectedClaimedAt: item.claimedAt, expectedHistoryLength: item.history.length }, registry });
   assert.equal(error, null);
   assert.equal(out.status, 200);
   assert.equal(out.value.state, "unclaimed");
@@ -121,14 +123,18 @@ test("W2: release from blocked also routes through the pause transition", async 
   const registry = await claimedRegistry();
   const blocked = await runRoute({ route: "update", id: "w1", body: { state: "blocked" }, registry });
   assert.equal(blocked.error, null);
-  const { out, error } = await runRoute({ route: "release", id: "w1", body: {}, registry });
+  const item = registry.get("room1", "w1");
+  const { out, error } = await runRoute({ route: "release", id: "w1", body: {
+    expectedClaimedAt: item.claimedAt, expectedHistoryLength: item.history.length }, registry });
   assert.equal(error, null);
   assert.equal(out.value.state, "unclaimed");
 });
 
 test("W2: release from claimed still works as before", async () => {
   const registry = await claimedRegistry();
-  const { out, error } = await runRoute({ route: "release", id: "w1", body: {}, registry });
+  const item = registry.get("room1", "w1");
+  const { out, error } = await runRoute({ route: "release", id: "w1", body: {
+    expectedClaimedAt: item.claimedAt, expectedHistoryLength: item.history.length }, registry });
   assert.equal(error, null);
   assert.equal(out.value.state, "unclaimed");
   assert.equal(out.value.history.filter(entry => entry.action === "state:claimed").length, 0);
