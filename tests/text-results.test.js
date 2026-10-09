@@ -154,3 +154,16 @@ test("CLI reads native draft and result with mutually exclusive selectors", asyn
   }
   const refused = await call(["--completion", saved.event.id, "--draft", posted.event.data.messageId]); assert.equal(refused.code, 1); assert.equal(refused.out, "");
 });
+
+
+test("an already-stored lone-surrogate body cannot become completion evidence", async t => {
+  // #2106 refuses these at admission, so seed one the way a pre-#2106 store holds it.
+  const f = await setup(t), legacy = f.post("legacy MARK"), clean = f.post("A clean result");
+  assert.equal(f.store.db.prepare("UPDATE events SET body=replace(body, 'legacy MARK', 'legacy \\ud800') WHERE id=?").run(legacy.event.id).changes, 1);
+  assert.equal(JSON.parse(f.store.db.prepare("SELECT body FROM events WHERE id=?").get(legacy.event.id).body).data.body, "legacy \uD800", "the stored body really is malformed");
+  let rejection;
+  try { f.mutate(T.WORK_COMPLETED, { ...f.input(legacy), evidenceVersion: textVersion("legacy MARK") }); } catch (error) { rejection = error; }
+  assert.equal(rejection?.code, "command_rejected", "malformed stored text is refused as evidence");
+  // The same store still accepts a clean body, so the refusal is about the body.
+  assert.doesNotThrow(() => f.mutate(T.WORK_COMPLETED, f.input(clean)));
+});
