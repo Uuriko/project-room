@@ -14,13 +14,24 @@ name: visual-baselines
 
 on:
   workflow_dispatch:
+    inputs:
+      commit_baselines:
+        description: Commit the regenerated PNGs back to the dispatched branch (never main)
+        type: boolean
+        default: false
 
 jobs:
   capture:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: write
     steps:
+      # workflow_dispatch runs on the branch ref itself (not a detached PR
+      # merge ref), so a push below lands on that branch head.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.ref_name }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
@@ -34,3 +45,22 @@ jobs:
           name: visual-baselines
           path: scripts/visual-regression-baselines/
           if-no-files-found: error
+      - name: Commit regenerated baselines to the branch
+        if: ${{ inputs.commit_baselines }}
+        env:
+          TARGET_BRANCH: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [ "$TARGET_BRANCH" = "$DEFAULT_BRANCH" ]; then
+            echo "refusing to push baselines directly to $DEFAULT_BRANCH" >&2
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/visual-regression-baselines/*.png
+          if git diff --cached --quiet; then
+            echo "baselines unchanged; nothing to commit"
+            exit 0
+          fi
+          git commit -m "test(visual): regenerate CI-canonical baselines"
+          git push origin "HEAD:refs/heads/$TARGET_BRANCH"
