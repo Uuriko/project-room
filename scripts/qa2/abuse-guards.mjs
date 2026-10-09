@@ -266,7 +266,8 @@ try {
   }
   const heldMid = await readClaim(heldId);
   const midSame = heldMid.owner === heldBefore.owner && heldMid.state === heldBefore.state && heldMid.leaseExpiresAt === heldBefore.leaseExpiresAt;
-  must(await req("POST", `${roomPath}/work-claims/${heldId}/reassign`, owner.secret, { newOwner: chat.memberId, note: "handoff" }), "reassign");
+  must(await req("POST", `${roomPath}/work-claims/${heldId}/reassign`, owner.secret, { newOwner: chat.memberId, note: "handoff",
+    expectedClaimedAt: heldMid.claimedAt ?? null, expectedHistoryLength: (heldMid.history?.length ?? 0) + (heldMid.historyOmitted ?? 0) }), "reassign");
   const heldAtChat = await readClaim(heldId);
   const chatRenew = await req("POST", `${roomPath}/work-claims/${heldId}/renew`, chat.secret, { progressMessageId: randomUUID() });
   const heldAfter = await readClaim(heldId);
