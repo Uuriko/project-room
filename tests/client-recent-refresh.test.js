@@ -140,3 +140,49 @@ test("a mutation that joins a windowed read in flight gets its own full read", a
   release(); await f.settle();
   assert.deepEqual(f.reads.slice(opened), [RECENT, FULL]);
 });
+
+test("a stream open or error re-reads with the recent window once history is held", async t => {
+  const f = fixture(t, url => url === FULL ? full(9, history) : recent(9, [message("m3"), message("m4"), message("m5")], 2));
+  await f.client.refresh();
+  assert.deepEqual(f.reads, [FULL], "opening reads in full");
+  f.connect();
+  for (const type of ["open", "error"]) {
+    const before = f.reads.length;
+    f.client.stream.dispatchEvent(new Event(type)); await f.settle();
+    assert.deepEqual(f.reads.slice(before), [RECENT], type);
+    assert.deepEqual(ids(f.seen.at(-1).state.messages), ["m1", "m2", "m3", "m4", "m5"], type);
+  }
+  // A manual refresh still reads in full.
+  const before = f.reads.length;
+  await f.client.refresh();
+  assert.deepEqual(f.reads.slice(before), [FULL]);
+});
+
+test("after a failed read, the next read of any kind is full", async t => {
+  let fail = false;
+  const f = fixture(t, url => { if (fail) throw new Error("offline"); return url === FULL ? full(9, history) : recent(10, [message("m4"), message("m5"), message("m6")], 3); });
+  await f.client.refresh();
+  f.connect(); await f.settle();
+  // The edit's read fails; the stream will not replay that event.
+  fail = true;
+  await assert.rejects(f.client.refresh(hint(10, "message.edited", { messageId: "m1" })));
+  fail = false;
+  const before = f.reads.length;
+  f.client.stream.dispatchEvent(new Event("open")); await f.settle();
+  assert.deepEqual(f.reads.slice(before), [FULL]);
+});
+
+test("a replaced stream resumes from the last full read, so an edit a window read passed is replayed", async t => {
+  const urls = [];
+  let stream;
+  class Events extends EventTarget { constructor(url) { super(); urls.push(url); stream = this; this.readyState = 1; } close() {} }
+  const client = new RoomClient({ events: Events, onSnapshot: () => {}, fetcher: async url => response(url === FULL ? full(9, history)
+    : recent(12, [message("m4"), message("m5"), message("m6")], 3)) });
+  client.session = identity();
+  t.after(() => client.disconnect());
+  await client.refresh(); client.connect();
+  stream.dispatchEvent(new Event("open")); await client.flight?.promise;
+  stream.readyState = 2; stream.dispatchEvent(new Event("error")); await new Promise(resolve => setImmediate(resolve)); await client.flight?.promise;
+  await new Promise(resolve => setTimeout(resolve, 1500));
+  assert.match(urls.at(-1), /\/stream\?after=9(&|$)/, "resumes after the full read at 9, not the window read at 12");
+});
