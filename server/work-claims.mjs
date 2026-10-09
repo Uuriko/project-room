@@ -454,7 +454,7 @@ const workOf = value => {
   const requestOutcomes = requestOutcomesOf(value.requestOutcomes);
   return { id: value.id, title: value.title ?? value.id, state: value.state ?? "unclaimed",
     owner: value.owner ?? null, history: Array.isArray(value.history) ? value.history : [],
-    readingAcks,
+    readingAcks, blockedAttempts: blockedAttemptsOf(value.blockedAttempts),
     ...(requestOutcomes !== null ? { requestOutcomes } : {}),
     ...(historyOmitted > 0 ? { historyOmitted } : {}),
     claimedAt: value.claimedAt ?? null, leaseStartAt: value.leaseStartAt ?? null, leaseExpiresAt: value.leaseExpiresAt ?? null,
@@ -477,6 +477,10 @@ const stamp = (atMs, agentId, action, note) =>
 // still changes on every write (the PR-link concurrency check reads it).
 export const MAX_CLAIM_HISTORY = 200;
 const historyOmittedOf = value => (Number.isSafeInteger(value) && value > 0 ? value : 0);
+// FIX-46 (WAVE-300): holder-side contention counter. Non-negative integer,
+// default 0; corrupt values normalize to 0 rather than failing the read.
+const blockedAttemptsOf = value =>
+  (Number.isSafeInteger(value) && value >= 0 ? value : 0);
 export const claimHistoryLength = item =>
   (Array.isArray(item?.history) ? item.history.length : 0) + historyOmittedOf(item?.historyOmitted);
 const withHistory = (work, atMs, agentId, action, note) => {
@@ -578,7 +582,8 @@ export function createWork({ id, title, reviewPolicy, note, tags, files, depends
     repo: repoOf(repo), branch: branchOf(branch),
     chain: Object.freeze([]), supersededBy: null, workItemId: optionalId(workItemId, "workItemId"),
     squadId: optionalId(squadId, "squadId"), // plan-squads: work offer targeted at a squad
-    kind: claimKind, revision: claimRevision, ci: null, reviews: Object.freeze([]) };
+    kind: claimKind, revision: claimRevision, ci: null, reviews: Object.freeze([]),
+    blockedAttempts: 0 }; // FIX-46: a created item has seen no contention
   // The creating member when the route knows it; "system" for internal creates.
   return withHistory(item, atMs, agentId === undefined ? "system" : agentOf(agentId), "created", note);
 }
@@ -617,7 +622,11 @@ export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, p
     repo: repo === undefined ? item.repo : repoOf(repo),
     branch: branch === undefined ? item.branch : branchOf(branch),
     leaseStartAt: effective === null ? null : isoOf(atMs),
-    leaseExpiresAt: effective === null ? null : isoOf(atMs + effective * 3600 * 1000) };
+    leaseExpiresAt: effective === null ? null : isoOf(atMs + effective * 3600 * 1000),
+    // FIX-46: a fresh hold starts with no recorded contention — the counter
+    // measures contention against the current holder, so it resets on every
+    // new claim.
+    blockedAttempts: 0 };
   return withHistory(claimed, atMs, agent, "claimed",
     effective === null ? note : note ?? `lease: ${effective}h`);
 }
@@ -782,6 +791,9 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     // inherit the previous owner's file declarations
     files: released ? Object.freeze([]) : item.files,
     fileBlocks: released ? Object.freeze({}) : item.fileBlocks,
+    // FIX-46: the contention counter belongs to the holder's round — a
+    // released claim resets it, a kept hold preserves it.
+    blockedAttempts: released ? 0 : item.blockedAttempts,
     deliveryMode: state === "done" && deliveryMode != null ? deliveryMode : item.deliveryMode,
     reviewedBy: state === "done" && reviewedBy != null ? reviewedBy : item.reviewedBy,
     tags: state === "done" && tags != null ? tagsOf(tags) : item.tags,
@@ -834,7 +846,8 @@ export function closeWork(work, agentId, { verb = "close", reason, now, authorit
   }
   const closed = { ...item, state: next, owner: null, leaseStartAt: null, leaseExpiresAt: null,
     attestations: Object.freeze([]), reviews: Object.freeze([]),
-    files: Object.freeze([]), fileBlocks: Object.freeze({}) };
+    files: Object.freeze([]), fileBlocks: Object.freeze({}),
+    blockedAttempts: 0 }; // FIX-46: no holder left to read the counter
   return withHistory(closed, atMs, agent, verb === "cancel" ? "cancelled" : "closed", reason);
 }
 // The member who created the item, when the creation stamp is still in history.
@@ -962,7 +975,9 @@ export function reassignWork(work, agentId, newOwner, { expectedClaimedAt, expec
   const claim = fresh ? { state: "claimed", claimedAt: isoOf(atMs),
     leaseStartAt: hours === null ? null : isoOf(atMs),
     leaseExpiresAt: hours === null ? null : isoOf(atMs + hours * 3600 * 1000) } : {};
-  return withHistory({ ...item, ...claim, owner: target, attestations: Object.freeze([]), reviews: Object.freeze([]) }, atMs, agent, `reassigned:${target}`, note);
+  return withHistory({ ...item, ...claim, owner: target, attestations: Object.freeze([]), reviews: Object.freeze([]),
+    // FIX-46: the new holder's round starts with no recorded contention.
+    blockedAttempts: 0 }, atMs, agent, `reassigned:${target}`, note);
 }
 // True when the item holds an active claim whose lease has lapsed. Items
 // without a lease, and items not under claim, never expire.
@@ -986,7 +1001,8 @@ export function releaseExpired(items, now) {
     // released claim drops its reviews too (attestations belong to the
     // lapsed owner's round of work, never to whoever claims next).
     const released = { ...item, state: "unclaimed", owner: null, leaseStartAt: null, leaseExpiresAt: null,
-      files: Object.freeze([]), fileBlocks: Object.freeze({}), attestations: Object.freeze([]), reviews: Object.freeze([]) };
+      files: Object.freeze([]), fileBlocks: Object.freeze({}), attestations: Object.freeze([]), reviews: Object.freeze([]),
+      blockedAttempts: 0 }; // FIX-46: the lapsed hold's contention count does not carry over
     return withHistory(released, atMs, item.owner ?? "system", "lease_expired",
       `claim by ${item.owner ?? "nobody"} lapsed at ${item.leaseExpiresAt} — auto-released`);
   });

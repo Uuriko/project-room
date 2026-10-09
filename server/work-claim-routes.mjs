@@ -642,14 +642,38 @@ export async function handleWorkClaims(options) {
       });
     }
   }
+  // FIX-46 (WAVE-300): holder-side blockedAttempts. Contention 409s name the
+  // held claim(s) via noteBlockedAttempt before throwing; the 409 throws
+  // inside the request transaction, which rolls back, so the counter bump is
+  // applied here in a fresh transaction after the rollback — the failed
+  // attempt is not saved, but the contention signal is. A failed bump must
+  // never change the refusal the caller gets.
+  const blockedAttemptTargets = [];
+  const flushBlockedAttempts = () => {
+    if (blockedAttemptTargets.length === 0) return;
+    try {
+      const apply = () => {
+        for (const claimId of new Set(blockedAttemptTargets)) {
+          const held = registry.get(options.roomId, claimId);
+          if (held === null || held === undefined) continue;
+          const current = Number.isSafeInteger(held.blockedAttempts) && held.blockedAttempts >= 0
+            ? held.blockedAttempts : 0;
+          registry.set(options.roomId, { ...held, blockedAttempts: current + 1 });
+        }
+      };
+      if (registry.transaction) registry.transaction(apply); else apply();
+    } catch { /* contention telemetry is best-effort */ }
+  };
   const run = () => handleWorkClaimsCore({ ...options, registry, pullBatch, deployStatus,
     auth: reauthorize ? reauthorize() : options.auth,
     helpers: { ...helpers, body: () => requestData, json: (_res, status, value) => ({ status, value }) },
+    noteBlockedAttempt: claimId => { if (typeof claimId === "string") blockedAttemptTargets.push(claimId); },
   });
   try {
     const result = registry.transaction ? registry.transaction(run) : run();
     return helpers.json(res, result.status, result.value);
   } catch (error) {
+    flushBlockedAttempts();
     if (error?.code === "file_lease_conflict" && error.body) return helpers.json(res, 409, error.body);
     if (Number.isInteger(error?.status) && error.body && error.code) return helpers.json(res, error.status, error.body);
     throw error;
@@ -684,7 +708,7 @@ function memoizeList(registry) {
   });
 }
 
-function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRoute, workClaimId, helpers, registry: sourceRegistry, pullBatch = { results: [], rateLimitedUntil: null, skipped: false }, deployStatus = null }) {
+function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRoute, workClaimId, helpers, registry: sourceRegistry, pullBatch = { results: [], rateLimitedUntil: null, skipped: false }, deployStatus = null, noteBlockedAttempt = () => {} }) {
   const { json, reject, body } = helpers;
   const registry = memoizeList(sourceRegistry);
   if (req.method !== "GET" && req.method !== "HEAD") enforceAutonomyTierForAction({
@@ -781,10 +805,14 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   // the claim route. create-with-assignee and reassign are acquire paths
   // too — they must refuse overlapping leases with the same 409 body, or a
   // lease can be landed silently around the conflict check. fileLeaseConflicts
-  // already excludes the item itself by id.
-  const refuseFileLeaseConflict = item => {
-    const conflicts = fileLeaseConflicts(registry.list(roomId), item);
+  // already excludes the item itself by id. FIX-46 (WAVE-300): every 409 from
+  // this checker names the holding claims, so each holder's blockedAttempts
+  // counter is bumped — the holding side sees the contention the blocked side
+  // already saw in the 409 body. The bump itself is deferred to the wrapper
+  // (the 409 throws inside the request transaction and rolls it back).
+  const refuseFileLeaseConflict = (item, conflicts = fileLeaseConflicts(registry.list(roomId), item)) => {
     if (conflicts.length === 0) return;
+    for (const conflict of conflicts) noteBlockedAttempt(conflict?.holder?.claimId);
     const conflict = fileLeaseConflictBody(item, conflicts);
     const body = {
       ...agentErrorBody({ httpStatus: 409, code: "file_lease_conflict", message: conflict.error.message, roomId, workItemId: item.id }),
@@ -983,6 +1011,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
         reject(409, "work_claim_conflict",
           `You already hold work "${item.id}" — no new claim was saved; read the item to confirm`);
       }
+      // FIX-46: a foreign agent's blocked claim attempt is contention against
+      // the holder — bump their blockedAttempts. Self re-claims and terminal
+      // states are not contention and do not count.
+      noteBlockedAttempt(item.id);
       reject(409, "work_claim_conflict",
         `Work "${item.id}" is held by ${item.owner ?? "someone else"} — ask them to reassign or release it`);
     }
@@ -1006,19 +1038,11 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     }));
     // Exclusive file lease. Overlap with another live claim is a 409 that
     // names the holder, the files, and when that lease ends. advisory: true
-    // keeps the older warn-and-proceed behavior.
+    // keeps the older warn-and-proceed behavior. Uses the shared
+    // refuseFileLeaseConflict checker (FIX-46 bumps each holder's
+    // blockedAttempts), not a second inline copy.
     const conflicts = fileLeaseConflicts(registry.list(roomId), claimed);
-    if (conflicts.length > 0 && data.advisory !== true) {
-      const conflict = fileLeaseConflictBody(claimed, conflicts);
-      const body = {
-        ...agentErrorBody({ httpStatus: 409, code: "file_lease_conflict", message: conflict.error.message, roomId, workItemId: claimed.id }),
-        ...conflict
-      };
-      const error = new Error(body.error.message);
-      error.code = "file_lease_conflict";
-      error.body = body;
-      throw error;
-    }
+    if (data.advisory !== true) refuseFileLeaseConflict(claimed, conflicts);
     // Retention ack (research brief 2026-09-28, mechanic #2): every claim gets
     // the bot's immediate structured receipt, so no contribution sits at zero
     // replies from t=0. First-time contributors carry the 24h verdict SLA in

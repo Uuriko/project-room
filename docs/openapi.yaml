@@ -17395,6 +17395,10 @@ components:
           items: { type: string, pattern: '^sha256:[0-9a-f]{64}$' }
           maxItems: 10
           description: sha256 evidence pointers recorded on the done transition
+        blockedAttempts:
+          type: integer
+          minimum: 0
+          description: Blocked claim/lease attempts against the current holder (409 work_claim_conflict from a foreign claimant, 409 file_lease_conflict naming this claim's holder). The holding side's view of contention; resets to 0 when the hold ends (release, lease-expiry auto-release, close/cancel) or ownership moves (reassign, fresh claim).
     BoardV2Claim:
       description: |
         A board-v2 claim: a lane's typed write declaring intent to work on
