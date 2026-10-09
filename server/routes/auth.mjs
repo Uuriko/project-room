@@ -6,7 +6,7 @@
 
 import { createHash } from "node:crypto";
 import { ServiceError } from "../service-error.mjs";
-import { magicLinkUnavailable, validateMagicReturnTo } from "../magic-links.mjs";
+import { magicLinkUnavailable, validateMagicReturnTo, attemptMailDelivery } from "../magic-links.mjs";
 import { normalizeEmail } from "../account-login-methods.mjs";
 import { resolvePasskeyParams } from "../account-passkeys.mjs";
 import { hashPassword, verifyPassword, checkPasswordPolicy, DUMMY_PASSWORD_VERIFIER } from "../../src/password-auth.mjs";
@@ -62,9 +62,9 @@ export async function handleAuthGroup(ctx) {
     return loggedIn;
   };
   const signupReply = () => ({ status: "check_email", mailConfigured: magicMailer.isConfigured() });
-  const deliverSignupMail = async fn => {
-    try { await fn(); } catch { /* Delivery does not change the signup response. */ }
-  };
+  // Delivery does not change the signup response, but a failure is logged
+  // (redacted) so operators can see why mail is not arriving.
+  const deliverSignupMail = fn => attemptMailDelivery(fn, "signup");
   const passkeyUnavailable = () => json(res, 503, { status: "unavailable", reason: "passkey_not_configured" });
 
   // ---- Magic link auth (slice 3, RC-2026-09-17-012) ----
