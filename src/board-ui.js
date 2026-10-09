@@ -718,7 +718,12 @@ export function installWorkBoard({ client, getState, getSession }) {
     const id = form.dataset.claimReassign;
     const newOwner = new FormData(form).get("newOwner");
     if (typeof newOwner !== "string" || !newOwner) return;
-    flySubmit(form, () => client.request(client.path(`/work-claims/${encodeURIComponent(id)}/reassign`), { method: "POST", data: { newOwner } }), { id, status: outcome("reassign", id), pending: pendingOutcome("reassign", titleOf(id)) });
+    // The reassign binds the claim round the board read, like release, so a
+    // stale card cannot move a newer claim generation.
+    const round = items.find(entry => entry.id === id);
+    const data = { newOwner, ...(round ? { expectedClaimedAt: round.claimedAt ?? null,
+      expectedHistoryLength: (round.history?.length ?? 0) + (Number(round.historyOmitted) || 0) } : {}) };
+    flySubmit(form, () => client.request(client.path(`/work-claims/${encodeURIComponent(id)}/reassign`), { method: "POST", data }), { id, status: outcome("reassign", id), pending: pendingOutcome("reassign", titleOf(id)) });
   });
   root.addEventListener("submit", event => {
     const form = event.target.closest("[data-claim-cap]");
