@@ -9,7 +9,7 @@ import { validId } from "../../src/events.js";
 import { GmailSync } from "../gmail-sync.mjs";
 import { GmailActions } from "../gmail-actions.mjs";
 import { GmailSender, gmailCredentialsFor, sendTelegramDirect } from "../inbox-transport.mjs";
-import { validateDirectSend, recordDirectSend, completeDirectSend, publicDirectSend, getDirectSendByRequestId } from "../inbox-outbox.mjs";
+import { validateDirectSend, recordDirectSend, completeDirectSend, publicDirectSend, getDirectSend, getDirectSendByRequestId, markDirectSendDispatch } from "../inbox-outbox.mjs";
 import { channelSyncLimits, syncTelegramConnection } from "../channel-import.mjs";
 import { telegramLiveView } from "../channel-adapters/telegram-config.mjs";
 import { webhookAcceptsHash, webhookRotationDefaults } from "../channel-adapters/telegram-rotation.mjs";
@@ -319,14 +319,70 @@ export async function handleInboxMount(ctx) {
         // send without touching the provider or the send budget; same key +
         // different content is a 409 (mirrors private_inbox_commands). A
         // journaled failure is terminal for its key — retrying it replays the
-        // failure receipt instead of re-sending on uncertainty.
+        // failure receipt instead of re-sending on uncertainty. A journaled
+        // send whose dispatch never started (crash between journal and
+        // provider call) is resumed below; a send whose dispatch started has
+        // an unknown outcome and is never re-driven blindly.
         const sameContent = row => row.channel === data.channel && row.recipient === data.to
           && row.subject === data.subject && row.body_hash === bodyHash && (row.thread_id ?? null) === (data.threadId ?? null);
+        const fetchImpl = directSendFetch ?? fetch;
+        // The delivery drive: provider call bracketed by the atomic dispatch
+        // claim and the journal settle. Shared by the fresh path and the
+        // crash-recovery resume path — exactly one caller ever drives a send.
+        const driveDirectSend = async sendId => {
+          // R1 delivery-path tracing (RC-2026-09-26-966): delivery.bridge_send
+          // spans the provider send; delivery.receipt spans the journal settle
+          // that records the delivery confirmation. Only the channel, the send
+          // id, and outcomes are recorded — never bodies or recipients.
+          const tracer = getTracer();
+          const bridgeSpan = tracer.startSpan(SPAN_NAMES.BRIDGE_SEND, { attributes: {
+            [ATTR.CHANNEL]: data.channel, [ATTR.MESSAGE_ID]: sendId } });
+          let providerId = null, sendError = null;
+          try {
+            if (data.channel === "gmail") {
+              const sender = new GmailSender({ fetchImpl, credentialProvider: () => gmailCredentialsFor(store, auth.account.id) });
+              providerId = (await sender.send({ to: data.to, subject: data.subject, body: data.body })).id;
+            } else {
+              providerId = (await sendTelegramDirect({ config: telegram, to: data.to, text: data.body, fetchImpl })).messageId;
+              telegramStatus.sent(auth.account.id, null, { at: store.now(), outcome: "sent", code: "direct" });
+            }
+            bridgeSpan.setAttribute(ATTR.OUTCOME, "ok");
+            bridgeSpan.setStatusOk();
+          } catch (error) { sendError = error; bridgeSpan.recordException(error); }
+          finally { bridgeSpan.end(); }
+          const receiptSpan = tracer.startSpan(SPAN_NAMES.RECEIPT, { parent: bridgeSpan, attributes: {
+            [ATTR.CHANNEL]: data.channel, [ATTR.MESSAGE_ID]: sendId } });
+          try {
+            const settled = completeDirectSend(store.db, sendId, sendError
+              ? { status: "failed", errorCode: sendError instanceof ServiceError ? sendError.code : "channel_send_failed", at: store.now() }
+              : { status: "sent", providerId, at: store.now() });
+            receiptSpan.setAttribute(ATTR.OUTCOME, sendError ? "error" : "ok");
+            receiptSpan.setStatusOk();
+            if (sendError) throw sendError;
+            return json(res, 200, { contractVersion: 1, viewer, send: publicDirectSend(settled) });
+          } finally {
+            receiptSpan.end();
+          }
+        };
         if (typeof data.requestId === "string") {
           const prior = getDirectSendByRequestId(store.db, auth.account.id, data.requestId);
           if (prior) {
             if (!sameContent(prior)) reject(409, "direct_send_idempotency_conflict",
               "This request id already recorded a different direct send.");
+            // Crash recovery: the send was journaled but never dispatched,
+            // so no provider call ever happened — resuming is safe. The
+            // dispatch claim is atomic: if a racing caller won it, replay
+            // their journaled send instead of driving a second delivery.
+            if (prior.status === "pending" && prior.dispatch_started_at == null) {
+              // The resume is a real provider send: it spends the same budget
+              // as a fresh one.
+              if (data.channel === "telegram")
+                sendBudgets.check({ channel: "telegram", accountId: auth.account.id, connectionId: null });
+              if (markDirectSendDispatch(store.db, prior.id, store.now()) === 1)
+                return driveDirectSend(prior.id);
+              const raced = getDirectSend(store.db, prior.id);
+              return json(res, 200, { contractVersion: 1, viewer, send: publicDirectSend(raced ?? prior) });
+            }
             return json(res, 200, { contractVersion: 1, viewer, send: publicDirectSend(prior) });
           }
         }
@@ -338,7 +394,6 @@ export async function handleInboxMount(ctx) {
         // approval (see server/channel-send-budgets.mjs).
         if (data.channel === "telegram")
           sendBudgets.check({ channel: "telegram", accountId: auth.account.id, connectionId: null });
-        const fetchImpl = directSendFetch ?? fetch;
         const sendId = randomUUID();
         try {
           recordDirectSend(store.db, { id: sendId, accountId: auth.account.id, channel: data.channel,
@@ -355,39 +410,15 @@ export async function handleInboxMount(ctx) {
             "This request id already recorded a different direct send.");
           return json(res, 200, { contractVersion: 1, viewer, send: publicDirectSend(winner) });
         }
-        // R1 delivery-path tracing (RC-2026-09-26-966): delivery.bridge_send
-        // spans the provider send; delivery.receipt spans the journal settle
-        // that records the delivery confirmation. Only the channel, the send
-        // id, and outcomes are recorded — never bodies or recipients.
-        const tracer = getTracer();
-        const bridgeSpan = tracer.startSpan(SPAN_NAMES.BRIDGE_SEND, { attributes: {
-          [ATTR.CHANNEL]: data.channel, [ATTR.MESSAGE_ID]: sendId } });
-        let providerId = null, sendError = null;
-        try {
-          if (data.channel === "gmail") {
-            const sender = new GmailSender({ fetchImpl, credentialProvider: () => gmailCredentialsFor(store, auth.account.id) });
-            providerId = (await sender.send({ to: data.to, subject: data.subject, body: data.body })).id;
-          } else {
-            providerId = (await sendTelegramDirect({ config: telegram, to: data.to, text: data.body, fetchImpl })).messageId;
-            telegramStatus.sent(auth.account.id, null, { at: store.now(), outcome: "sent", code: "direct" });
-          }
-          bridgeSpan.setAttribute(ATTR.OUTCOME, "ok");
-          bridgeSpan.setStatusOk();
-        } catch (error) { sendError = error; bridgeSpan.recordException(error); }
-        finally { bridgeSpan.end(); }
-        const receiptSpan = tracer.startSpan(SPAN_NAMES.RECEIPT, { parent: bridgeSpan, attributes: {
-          [ATTR.CHANNEL]: data.channel, [ATTR.MESSAGE_ID]: sendId } });
-        try {
-          const settled = completeDirectSend(store.db, sendId, sendError
-            ? { status: "failed", errorCode: sendError instanceof ServiceError ? sendError.code : "channel_send_failed", at: store.now() }
-            : { status: "sent", providerId, at: store.now() });
-          receiptSpan.setAttribute(ATTR.OUTCOME, sendError ? "error" : "ok");
-          receiptSpan.setStatusOk();
-          if (sendError) throw sendError;
-          return json(res, 200, { contractVersion: 1, viewer, send: publicDirectSend(settled) });
-        } finally {
-          receiptSpan.end();
+        // Claim the dispatch before the provider call: the claim is atomic,
+        // so a retry racing a slow original can never double-drive this send.
+        // (No await separates the journal write from the claim, so the fresh
+        // path always wins it; the replay branch is defensive only.)
+        if (markDirectSendDispatch(store.db, sendId, store.now()) !== 1) {
+          const raced = getDirectSend(store.db, sendId);
+          return json(res, 200, { contractVersion: 1, viewer, send: publicDirectSend(raced) });
         }
+        return driveDirectSend(sendId);
       }
       if (!data || !exact(data, ["action", "sourceId", "sendId"]) || !["dispatch", "reconcile", "flush"].includes(data.action)
         || !validId(data.sourceId) || !validId(data.sendId)) reject(422, "invalid_inbox_send", "Choose the existing channel reply.");
