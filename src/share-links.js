@@ -284,7 +284,8 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     if (copyLink) copyLink.disabled = !url;
     if (copyMessage) copyMessage.disabled = !message;
     const kitStatus = $("#growth-kit-status");
-    if (kitStatus && invite && invite.status && invite.status !== "active") kitStatus.textContent = "This link has ended.";
+    if (kitStatus && data?.inviteBlocked === "email_unverified") kitStatus.textContent = "Verify your email to invite people. Open Sign-in & security from the account menu.";
+    else if (kitStatus && invite && invite.status && invite.status !== "active") kitStatus.textContent = "This link has ended.";
     else if (kitStatus && !kitStatus.textContent) kitStatus.textContent = "";
   }
   async function loadKit() {

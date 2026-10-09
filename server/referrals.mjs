@@ -169,9 +169,13 @@ export class Referrals {
           };
         }
       }
+      // An unverified account gets no personal link (share-links email gate); say
+      // why, so the Invite dialog does not just show an empty link field.
+      const inviteBlocked = !invite && auth.account && this.store.accountLogins.emailStatus(auth.account.id) === "unverified"
+        ? "email_unverified" : null;
       return {
         roomId, referrals, leaderboard, myReferralCount: myReferrals.length, myReferrals,
-        myActiveCount: reward.activeCount, reward, invite,
+        myActiveCount: reward.activeCount, reward, invite, ...(inviteBlocked ? { inviteBlocked } : {}),
       };
     });
   }

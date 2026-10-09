@@ -446,6 +446,7 @@
   "tests/invite-flow-abuse.test.js": 26500,
   "tests/invite-oauth-context.test.js": 4357,
   "tests/invite-only-boundary.test.js": 134327,
+  "tests/invite-unverified-notice.test.js": 1000,
   "tests/jev-admission.test.js": 5635,
   "tests/jev-receipts.test.js": 4424,
   "tests/jev-shadow-http.test.js": 62189,

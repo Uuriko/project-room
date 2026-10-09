@@ -41,7 +41,7 @@ export function installReferralBoard({ client, getState, getSession }) {
   const countChip = $("#referral-count");
   if (!panel || !board || !button) return { sync() {}, reset() {} };
 
-  let loaded = false, busy = false, generation = 0, lastInvite = null;
+  let loaded = false, busy = false, generation = 0, lastInvite = null, lastBlocked = null;
 
   // The same personal invite the Invite dialog copies. Every member in the
   // room has one; this button does not mint a second link.
@@ -63,7 +63,7 @@ export function installReferralBoard({ client, getState, getSession }) {
 
   function render(data) {
     const model = referralBoardModel(data);
-    lastInvite = data?.invite ?? null;
+    lastInvite = data?.invite ?? null; lastBlocked = data?.inviteBlocked ?? null;
     ensureProgress();
     const progress = $("#referral-progress");
     if (progress) progress.textContent = rewardLine(data?.reward);
@@ -103,7 +103,7 @@ export function installReferralBoard({ client, getState, getSession }) {
     if (!loaded) await load();
     if (!current()) return;
     const invite = lastInvite?.token;
-    if (!invite) { status("Your invite link is not ready yet."); return; }
+    if (!invite) { status(lastBlocked === "email_unverified" ? "Verify your email to invite people. Open Sign-in & security from the account menu." : "Your invite link is not ready yet."); return; }
     const url = humanJoinShareUrl(invite);
     try {
       await navigator.clipboard.writeText(url);
