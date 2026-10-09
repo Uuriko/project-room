@@ -55,6 +55,48 @@ export class SyntheticInboxTransport {
     catch { return this.current(token, sourceId, sendId, binding); }
     return this.observe(token, send, observed, binding);
   }
+  // Idempotent flush for the stuck-at-"unknown" gap (QA-200 ch-2039 liveness
+  // note; PRODUCT-200 anchor D6): a crash between the dispatch commit and the
+  // provider submit — or a lost observation after a successful submit — leaves
+  // the attempt at "unknown" forever. dispatch() only ever re-runs for
+  // "queued" attempts and reconcile() only settles from provider evidence, so
+  // the attempt is completed (past the point of no return) but unforwarded.
+  // flush() walks the source's outbox and, for every "unknown" attempt:
+  //   1. reconcile first: if the provider already holds a correlated record
+  //      (the submit ran and the observation was lost), settle from that
+  //      evidence — never submit again;
+  //   2. only when the provider has no record does it submit, with the SAME
+  //      correlation(operationId) the original dispatch would have used, then
+  //      observe the outcome. Adapters dedupe on operationId (FixtureChannel
+  //      -Sender, SyntheticMailFixture, TelegramTransport all key receipts on
+  //      it), so concurrent flushes racing this one collapse to a single
+  //      provider message.
+  // A submit that throws (provider down) leaves the attempt "unknown" for a
+  // later flush cycle — eventually, not immediately, exactly once.
+  // Write-only: flush never dispatches a "queued" attempt, never touches
+  // cancelled/rejected/bounced/delivered attempts, never resurrects to
+  // "queued" and never rewrites history — it only advances stuck "unknown"
+  // attempts toward settlement.
+  async flush(token, sourceId, binding) {
+    const summary = { settled: 0, stillUnknown: 0, ignored: 0 };
+    for (const listed of this.inbox.sends(token, sourceId, binding).sends) {
+      const send = this.current(token, sourceId, listed.id, binding);
+      if (send.status !== "unknown") { summary.ignored++; continue; }
+      const afterReconcile = await this.reconcile(token, sourceId, send.id, binding);
+      if (afterReconcile.status !== "unknown") { summary.settled++; continue; }
+      // The provider never saw this message: submit with the same
+      // operationId the original dispatch would have used, then settle from
+      // the observation. A racing flush submitting the same operationId
+      // collapses into the adapter's dedupe.
+      let observed;
+      try { observed = await this.adapter.submit({ operationId: this.correlation(send), envelope: structuredClone(send.envelope) }); }
+      catch { summary.stillUnknown++; continue; }
+      const current = this.current(token, sourceId, send.id, binding);
+      const settled = this.observe(token, current, observed, binding);
+      if (settled.status === "unknown") summary.stillUnknown++; else summary.settled++;
+    }
+    return summary;
+  }
   observe(token, send, observed, binding, parentSpan = null) {
     // Missing, uncorrelated and unsupported evidence leaves the attempt unknown;
     // "not found" cannot establish that another request was never accepted.

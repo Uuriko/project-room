@@ -251,3 +251,58 @@ test("a second send.dispatch for the same outbox entry is refused, never re-appl
   assert.equal(f.provider.submits, 0);
   assert.doesNotThrow(() => auditRecovery(f.store));
 });
+
+test("ANCHOR-D6a: flush repairs a dispatch committed before the provider call — one submit, then settled, never a second", async t => {
+  // QA-200 ch-2039 liveness note: a crash between the dispatch commit
+  // (status "unknown") and the provider submit leaves the outbox entry stuck
+  // forever — dispatch() only ever re-runs for "queued" entries and reconcile
+  // only settles from provider evidence. The entry is completed (dispatch
+  // journaled past the point of no return) but unforwarded (the provider
+  // never got the message). flush() must eventually forward it exactly once.
+  const f = setup(t), request = f.reserve(); f.apply(request);
+  f.transport(f.command("send.dispatch", f.read()[0]));
+  assert.equal(f.read()[0].status, "unknown");
+  assert.equal(f.provider.count(), 0);
+  const driver = f.driver();
+  await driver.flush(f.token, "note", f.session.sessionBinding);
+  assert.equal(f.read()[0].status, "accepted");
+  assert.equal(f.provider.count(), 1);
+  assert.equal(f.provider.submits, 1);
+  // A second flush is a no-op: settled entries are never touched again.
+  await driver.flush(f.token, "note", f.session.sessionBinding);
+  assert.equal(f.read()[0].status, "accepted");
+  assert.equal(f.provider.submits, 1);
+  assert.equal(f.provider.count(), 1);
+  assert.doesNotThrow(() => auditRecovery(f.store));
+});
+
+test("ANCHOR-D6b: flush never resubmits a message the provider already accepted — a lost observation settles from evidence", async t => {
+  // Mirror image of D6a: the submit ran and the observation was lost (mode
+  // "after"). Flush must reconcile first and settle from the provider's
+  // correlated record — not submit again.
+  const f = setup(t), request = f.reserve(); f.apply(request); f.provider.mode = "after";
+  assert.equal((await f.run(request.requestId)).status, "unknown");
+  assert.equal(f.provider.count(), 1);
+  assert.equal(f.provider.submits, 1);
+  await f.driver().flush(f.token, "note", f.session.sessionBinding);
+  assert.equal(f.read()[0].status, "accepted");
+  assert.equal(f.provider.submits, 1, "no second provider message");
+  assert.equal(f.provider.count(), 1);
+  assert.doesNotThrow(() => auditRecovery(f.store));
+});
+
+test("ANCHOR-D6c: flush ignores queued entries; concurrent flushes collapse to one provider message", async t => {
+  const f = setup(t), request = f.reserve(); f.apply(request);
+  await f.driver().flush(f.token, "note", f.session.sessionBinding);
+  assert.equal(f.read()[0].status, "queued", "flush never dispatches a queued entry");
+  assert.equal(f.provider.submits, 0);
+  f.transport(f.command("send.dispatch", f.read()[0]));
+  assert.equal(f.read()[0].status, "unknown");
+  await Promise.all([
+    f.driver().flush(f.token, "note", f.session.sessionBinding),
+    f.driver().flush(f.token, "note", f.session.sessionBinding),
+  ]);
+  assert.equal(f.provider.count(), 1, "exactly one provider message across the race");
+  assert.equal(f.read()[0].status, "accepted");
+  assert.doesNotThrow(() => auditRecovery(f.store));
+});
