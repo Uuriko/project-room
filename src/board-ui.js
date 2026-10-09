@@ -160,11 +160,12 @@ export function paintClaimChat(state, list) {
   list.querySelectorAll("[data-claim-update]").forEach(node => node.remove());
   if (!state) return;
   const groups = collapseClaimUpdates(state.eventLog);
-  const stamps = [...list.querySelectorAll(":scope > .message")].map(node => {
-    const id = node.dataset.messageRecordId;
-    const message = (state.messages ?? []).find(item => item.id === id);
-    return { node, at: message?.createdAt ?? "" };
-  });
+  if (!groups.length) return;
+  // One pass over the room's messages: a find() per rendered message was
+  // quadratic and ran on every chat render.
+  const createdAt = new Map();
+  for (const message of state.messages ?? []) createdAt.set(message.id, message.createdAt);
+  const stamps = [...list.querySelectorAll(":scope > .message")].map(node => ({ node, at: createdAt.get(node.dataset.messageRecordId) ?? "" }));
   for (const group of groups) {
     const line = document.createElement("li");
     line.className = "claim-update";
