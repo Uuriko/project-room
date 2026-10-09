@@ -37,7 +37,7 @@ import { agentErrorBody, errorCategory, mergeErrorDetail, ERROR_COMMAND_TYPE } f
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { redactEventPage, redactEventRows, redactMessageTree, redactSnapshotState } from "./redact-read.mjs";
-import { messageInHistory, eventInHistory, indexMessages as indexHistoryMessages, requireExportOwner, recordRoomExport } from "./history-visibility.mjs"; // PRIV-2
+import { messageInHistory, eventInHistory, rowInHistory, indexMessages as indexHistoryMessages, requireExportOwner, recordRoomExport } from "./history-visibility.mjs"; // PRIV-2
 import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
 import { noteIdentityMint } from "./growth-loop.mjs";
 import { createWikiReadApi } from "./wiki-read-api.mjs"; // W009: read-only wiki API for agents (prefix-delegated, no route literals here)
@@ -846,74 +846,170 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     try { const value = JSON.parse(text); if (!value || Array.isArray(value) || typeof value !== "object") throw new Error(); return value; }
     catch { reject(400, "invalid_json", "Expected a JSON object"); }
   }
+  // F1 (WAVE-300): one SSE pump interval per roomId instead of one per
+  // stream. Each tick fetches new events ONCE since the room's minimum
+  // stream cursor (capped at the 100-row page, so one far-behind stream
+  // can't blow the batch), redacts once, builds the room projection once,
+  // then fans out per stream: per-stream auth (401/403 → access-ended),
+  // the viewer visibility filter, socket writes, cursor advance, and
+  // typing-ephemeral diffs. Wire protocol unchanged.
+  const roomPumps = new Map(); // roomId -> { streams: Set, timer }
+  const removeStreamEntry = entry => {
+    streams.delete(entry);
+    const pump = roomPumps.get(entry.roomId);
+    if (!pump) return;
+    pump.streams.delete(entry);
+    if (pump.streams.size === 0) { clearInterval(pump.timer); roomPumps.delete(entry.roomId); }
+  };
+  const endStreamEntry = (entry, data) => {
+    removeStreamEntry(entry);
+    const { res } = entry;
+    if (!res.destroyed && !res.writableEnded) res.end(data);
+  };
+  const lagStreamEntry = entry => {
+    const { res, roomId, operationId } = entry;
+    diagnostics.record({ operationId, at: new Date().toISOString(), status: 200, code: "stream_lagging", category: "unavailable", route: "/api/rooms/:roomId/stream", roomId });
+    console.warn(`room diagnostic ${operationId} 200 stream_lagging unavailable /api/rooms/:roomId/stream`);
+    const drop = setTimeout(() => res.destroy(), STREAM_DRAIN_GRACE_MS);
+    drop.unref();
+    res.once("close", () => clearTimeout(drop));
+    endStreamEntry(entry, 'event: stream_lagging\ndata: {"message":"Client fell behind; reconnect with Last-Event-ID to resume"}\n\n');
+  };
+  // The viewer visibility filter the shared page is fanned out through, per
+  // stream. Mirrors store.eventsAfter's filter exactly (DM follow-ups,
+  // PRIV-2 history floor, peer-private events); the shared fetch runs with
+  // { includeInvisible: true } so the page holds the union of every
+  // stream's visible rows and this filter can only narrow it. `messages` is
+  // the projection already built once for the tick; `authority` carries the
+  // room head sequence and owner id.
+  const filterPageForViewer = (auth, roomId, rows, messages, authority) => {
+    const viewerId = auth.member.id;
+    const identityId = store.bonds.identityForMember(roomId, viewerId);
+    const isOwner = viewerId === authority.ownerId;
+    const floor = store.historyFloor(roomId, viewerId, authority.sequence);
+    const floorMessages = floor ? indexHistoryMessages(messages) : null;
+    const dmVisible = dmEventVisibility(viewerId, messages, rows);
+    return rows.filter(row => rowInHistory(row, floor, floorMessages) && dmVisible(row.event)
+      && peerEventVisible(row.event, { memberId: viewerId, identityId, isOwner }));
+  };
+  function pumpStreamEntry(entry, page, messages, authority) {
+    const { res, roomId, operationId } = entry;
+    if (res.destroyed || res.writableEnded) { removeStreamEntry(entry); return; }
+    // Per-connection send queue: a consumer whose unsent bytes exceed the cap
+    // gets one final stream_lagging event and, if it never drains, its socket
+    // dropped. Peers keep their own queues. Reconnecting with Last-Event-ID
+    // resumes from the last event the client actually processed.
+    const lagging = () => res.writableLength > streamQueueCap;
+    try {
+      // Per-stream auth every tick: a revoked credential ends only this
+      // stream with access-ended; peers are unaffected.
+      const auth = store.authenticate(entry.token, roomId, entry.sessionBinding);
+      const rows = filterPageForViewer(auth, roomId, page.events, messages, authority)
+        .filter(row => row.sequence > entry.cursor);
+      if (!rows.length) res.write(": connected transport only\n\n");
+      for (const item of rows) {
+        res.write(`id: ${item.sequence}\nevent: room-event\ndata: ${JSON.stringify(item)}\n\n`);
+        entry.cursor = item.sequence;
+        if (lagging()) break;
+      }
+      // Ephemeral typing indicators ride the stream as synthetic `typing`
+      // events with no `id:` — they never disturb Last-Event-ID resume.
+      // Emitted only when the visible typist set changes for this connection.
+      if (!lagging()) {
+        const typists = currentTypists(typingBeats, roomId, entry.memberId);
+        const key = typingKey(typists);
+        if (key !== entry.lastTypingKey) {
+          entry.lastTypingKey = key;
+          res.write(`event: typing\ndata: ${JSON.stringify({ typists })}\n\n`);
+        }
+      }
+      if (lagging()) lagStreamEntry(entry);
+      // Advance past invisible rows only after the complete visible batch
+      // was queued. A lagging stream must resume from its last sent event.
+      // max() because the shared page starts at the room's minimum cursor,
+      // which can sit behind this stream's own cursor.
+      else entry.cursor = Math.max(entry.cursor, page.next);
+    } catch (error) {
+      if ([401, 403].includes(error?.status) || error?.code === "session_binding_changed") {
+        endStreamEntry(entry, 'event: access-ended\ndata: {"message":"Access ended; sign in again"}\n\n');
+      } else {
+        diagnostics.record({ operationId, at: new Date().toISOString(), status: 503, code: "stream_unavailable", category: "unavailable", route: "/api/rooms/:roomId/stream", roomId });
+        endStreamEntry(entry, 'event: unavailable\ndata: {"message":"Connection interrupted; reconnect to recover"}\n\n');
+      }
+    }
+  }
+  function pumpRoom(roomId) {
+    const pump = roomPumps.get(roomId);
+    if (!pump) return;
+    for (const entry of [...pump.streams]) {
+      if (entry.res.destroyed || entry.res.writableEnded) removeStreamEntry(entry);
+    }
+    const entries = [...pump.streams];
+    if (entries.length === 0) {
+      clearInterval(pump.timer);
+      roomPumps.delete(roomId);
+      return;
+    }
+    // One fetch per room per tick, from the room's minimum stream cursor.
+    // The 100-row cap keeps one far-behind stream from blowing the batch;
+    // streams ahead of the fetched window wait for it to catch up. The
+    // fetch rides the leading stream's credential.
+    const minCursor = Math.min(...entries.map(entry => entry.cursor));
+    const leader = entries.find(entry => entry.cursor === minCursor) ?? entries[0];
+    let page, messages, authority;
+    try {
+      messages = projectionMessages(roomId);
+      authority = store.roomAuthority(roomId);
+      page = redactEventPage(store.eventsAfter(leader.token, roomId, minCursor, 100, leader.sessionBinding,
+        { includeInvisible: true }), messages);
+    } catch (error) {
+      if ([401, 403].includes(error?.status) || error?.code === "session_binding_changed") {
+        // The shared fetch rides the leading stream's credential, so its
+        // access ending ends that stream now; survivors elect a new leader
+        // on the next tick.
+        endStreamEntry(leader, 'event: access-ended\ndata: {"message":"Access ended; sign in again"}\n\n');
+      } else {
+        // A room-level fetch failure would have failed every stream's own
+        // pump the same way: end them all with `unavailable`, as before.
+        for (const entry of entries) {
+          diagnostics.record({ operationId: entry.operationId, at: new Date().toISOString(), status: 503, code: "stream_unavailable", category: "unavailable", route: "/api/rooms/:roomId/stream", roomId });
+          endStreamEntry(entry, 'event: unavailable\ndata: {"message":"Connection interrupted; reconnect to recover"}\n\n');
+        }
+      }
+      return;
+    }
+    for (const entry of entries) pumpStreamEntry(entry, page, messages, authority);
+  }
+  const ensureRoomPump = roomId => {
+    let pump = roomPumps.get(roomId);
+    if (!pump) {
+      pump = { streams: new Set(), timer: setInterval(() => pumpRoom(roomId), streamInterval) };
+      pump.timer.unref();
+      roomPumps.set(roomId, pump);
+    }
+    return pump;
+  };
   function stream(req, res, token, roomId, after, auth, operationId) {
     const binding = auth.sessionBinding;
     store.eventsAfter(token, roomId, after, 100, binding);
     if (streams.size >= 100 || [...streams].filter(item => item.credentialHash === auth.credentialHash).length >= 3) reject(429, "stream_limit", "Close another room connection before opening more");
     res.writeHead(200, { "Content-Type": "text/event-stream", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
     res.flushHeaders();
-    const entry = { credentialHash: auth.credentialHash, sessionBinding: binding, memberId: auth.member.id, roomId, res };
+    // The entry carries the per-stream state the shared room pump's fan-out
+    // needs: credential, cursor, and the last-sent typing key.
+    const entry = { credentialHash: auth.credentialHash, sessionBinding: binding, memberId: auth.member.id,
+      roomId, res, token, cursor: after, operationId };
     streams.add(entry);
-    let cursor = after;
-    let timer;
+    ensureRoomPump(roomId).streams.add(entry);
     const signal = resolveRequestSignal(req);
-    const cleanup = () => { clearInterval(timer); streams.delete(entry); signal?.removeEventListener("abort", abort); };
-    const end = data => { cleanup(); if (!res.destroyed && !res.writableEnded) res.end(data); };
-    const abort = () => end();
-    // Per-connection send queue: a consumer whose unsent bytes exceed the cap
-    // gets one final stream_lagging event and, if it never drains, its socket
-    // dropped. Peers keep their own queues. Reconnecting with Last-Event-ID
-    // resumes from the last event the client actually processed.
-    const lagging = () => res.writableLength > streamQueueCap;
-    const lag = () => {
-      diagnostics.record({ operationId, at: new Date().toISOString(), status: 200, code: "stream_lagging", category: "unavailable", route: "/api/rooms/:roomId/stream", roomId });
-      console.warn(`room diagnostic ${operationId} 200 stream_lagging unavailable /api/rooms/:roomId/stream`);
-      const drop = setTimeout(() => res.destroy(), STREAM_DRAIN_GRACE_MS);
-      drop.unref();
-      res.once("close", () => clearTimeout(drop));
-      end('event: stream_lagging\ndata: {"message":"Client fell behind; reconnect with Last-Event-ID to resume"}\n\n');
-    };
-    const pump = () => {
-      if (res.destroyed || res.writableEnded) { cleanup(); return; }
-      try {
-        const batch = redactEventPage(store.eventsAfter(token, roomId, cursor, 100, binding), projectionMessages(roomId));
-        if (!batch.events.length) res.write(": connected transport only\n\n");
-        for (const item of batch.events) {
-          res.write(`id: ${item.sequence}\nevent: room-event\ndata: ${JSON.stringify(item)}\n\n`);
-          cursor = item.sequence;
-          if (lagging()) break;
-        }
-        // Ephemeral typing indicators ride the stream as synthetic `typing`
-        // events with no `id:` — they never disturb Last-Event-ID resume.
-        // Emitted only when the visible typist set changes for this connection.
-        if (!lagging()) {
-          const typists = currentTypists(typingBeats, roomId, entry.memberId);
-          const key = typingKey(typists);
-          if (key !== entry.lastTypingKey) {
-            entry.lastTypingKey = key;
-            res.write(`event: typing\ndata: ${JSON.stringify({ typists })}\n\n`);
-          }
-        }
-        if (lagging()) lag();
-        // Advance past invisible rows only after the complete visible batch
-        // was queued. A lagging stream must resume from its last sent event.
-        else cursor = batch.next;
-      } catch (error) {
-        if ([401, 403].includes(error?.status) || error?.code === "session_binding_changed") {
-          end('event: access-ended\ndata: {"message":"Access ended; sign in again"}\n\n');
-        } else {
-          diagnostics.record({ operationId, at: new Date().toISOString(), status: 503, code: "stream_unavailable", category: "unavailable", route: "/api/rooms/:roomId/stream", roomId });
-          end('event: unavailable\ndata: {"message":"Connection interrupted; reconnect to recover"}\n\n');
-        }
-      }
-    };
-    timer = setInterval(pump, streamInterval);
-    timer.unref();
+    const cleanup = () => { removeStreamEntry(entry); signal?.removeEventListener("abort", abort); };
+    const abort = () => endStreamEntry(entry);
     res.once("close", cleanup); res.once("finish", cleanup); res.once("error", abort);
     // Workers' Node bridge does not emit close when a browser leaves. The
     // request-scoped platform signal releases only this stream and its timer.
     signal?.addEventListener("abort", abort, { once: true });
-    if (signal?.aborted) abort(); else pump();
+    // The first pump runs synchronously at open, as before.
+    if (signal?.aborted) abort(); else pumpRoom(roomId);
   }
   const server = createServer(async (req, res) => {
     const operationId = `op_${randomBytes(6).toString("base64url")}`;
