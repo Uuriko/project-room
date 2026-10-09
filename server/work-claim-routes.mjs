@@ -970,7 +970,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "claim" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { optional: ["note", "leaseHours", "files", "advisory", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch"] })) invalidInput(reject, "{note?, leaseHours?, files?, advisory?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?}");
+    if (!shape(data, { optional: ["note", "leaseHours", "files", "advisory", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch", "last_good"] })) invalidInput(reject, "{note?, leaseHours?, files?, advisory?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?, last_good?}");
     if ("advisory" in data && typeof data.advisory !== "boolean") invalidInput(reject, "advisory true or false");
     const item = load(claimIdOf(reject, workClaimId));
     // H4 (QA-200 2026-10-08): a failed claim's 409 must name the real recovery.
@@ -1002,7 +1002,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       note: data.note, leaseHours: leaseHoursOfBody(data), files: data.files,
       dependsOn: data.dependsOn, parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs,
       pullRequest: data.pullRequest, pullRequests: data.pullRequests,
-      repo: data.repo, branch: data.branch, room: roomLike, now: nowMs
+      repo: data.repo, branch: data.branch, lastGood: data.last_good, room: roomLike, now: nowMs
     }));
     // Exclusive file lease. Overlap with another live claim is a 409 that
     // names the holder, the files, and when that lease ends. advisory: true
@@ -1038,7 +1038,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "update" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs", "readingAck", "parentClaimId", "evidenceRefs", "requestId", "expectedClaimedAt", "expectedHistoryLength"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?, readingAck?, parentClaimId?, evidenceRefs?, requestId?, expectedClaimedAt?, expectedHistoryLength?}");
+    if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs", "readingAck", "parentClaimId", "evidenceRefs", "requestId", "expectedClaimedAt", "expectedHistoryLength", "last_good"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?, readingAck?, parentClaimId?, evidenceRefs?, requestId?, expectedClaimedAt?, expectedHistoryLength?, last_good?}");
     if (data.requestId !== undefined
       && (typeof data.requestId !== "string" || !CLAIM_ID_PATTERN.test(data.requestId))) {
       invalidInput(reject, "requestId must be 1..128 characters [A-Za-z0-9_-]");
@@ -1120,7 +1120,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const updated = runPure(reject, () => updateWork(item, caller,
       { state: data.state, note: data.note, deliveryMode: data.deliveryMode, reviewedBy: data.reviewedBy,
         tags: data.tags, blobs: data.blobs, parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs,
-        requestId: data.requestId, now: nowMs }));
+        requestId: data.requestId, lastGood: data.last_good, now: nowMs }));
     if (data.state === "done") {
       // Jev-harness receipt-acceptance gate, shadow mode (docs/JEV-GATES.md):
       // score the receipt, journal the would-be verdict (flagging
@@ -1305,7 +1305,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // the current lease window began. Renewals are discussed in the channel —
     // a stale holder can't hold work indefinitely without showing progress.
     const data = body(req);
-    if (!shape(data, { optional: ["progressMessageId", "note", "leaseHours"] })) invalidInput(reject, "{progressMessageId?, note?, leaseHours?}");
+    if (!shape(data, { optional: ["progressMessageId", "note", "leaseHours", "last_good"] })) invalidInput(reject, "{progressMessageId?, note?, leaseHours?, last_good?}");
     const item = load(claimIdOf(reject, workClaimId));
     // W4 (QA 2026-09-28): a lapsed lease auto-releases the claim (owner
     // cleared), so the ownership check below would misdiagnose it as an
@@ -1347,7 +1347,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       }
     }
     const renewed = runPure(reject, () => renewWork(item, caller,
-      { note: data.note, leaseHours: leaseHoursOfBody(data), room: roomLike, now: nowMs }));
+      { note: data.note, leaseHours: leaseHoursOfBody(data), lastGood: data.last_good, room: roomLike, now: nowMs }));
     commit(renewed, "renewed", { coalesce: true });
     return json(res, 200, renewed);
   }

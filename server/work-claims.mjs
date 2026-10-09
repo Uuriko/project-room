@@ -34,6 +34,7 @@
 // Note-only attestations remain caller-bound records but cannot approve work.
 // This does not gate automatic PR/land/deploy settlement or bind artifact bytes.
 import { parsePullRequestUrl } from "./claim-coordination.mjs";
+import { checkpointOf, lastGoodOf, stampClaimCheckpoint } from "./claim-checkpoint.mjs";
 const STATES = ["unclaimed", "claimed", "in_progress", "blocked", "done", "closed"];
 const CLAIM_KINDS = ["work", "land", "deploy"];
 const CI_STATES = ["pending", "success", "failure", "neutral"];
@@ -295,6 +296,17 @@ const ROUND_ENDED_ACTIONS = new Set(["pr_closed", "pr_merged", "state:unclaimed"
 class ClaimError extends Error { constructor(code, message) { super(message); this.name = "ClaimError"; this.code = code; } }
 const fail = (code, message) => { throw new ClaimError(code, message); };
 const check = (condition, message) => { if (!condition) fail("invalid_claim_input", message); };
+// FIX-21: checkpoint errors arrive as plain Errors from the checkpoint
+// module (it must not import the state machine back); map them to
+// invalid_claim_input at the machine boundary.
+const checkpointOfChecked = value => {
+  try { return checkpointOf(value); }
+  catch (error) { fail("invalid_claim_input", error.message); }
+};
+const lastGoodOfChecked = value => {
+  try { return lastGoodOf(value); }
+  catch (error) { fail("invalid_claim_input", error.message); }
+};
 
 const toMs = value => {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -466,7 +478,10 @@ const workOf = value => {
     chain: chainOf(value.chain), supersededBy: optionalId(value.supersededBy, "supersededBy"),
     workItemId: optionalId(value.workItemId, "workItemId"),
     squadId: optionalId(value.squadId, "squadId"), // plan-squads: work offer targeted at a squad
-    kind, revision, ci: ciOf(value.ci), reviews: reviewsOf(value.reviews) };
+    kind, revision, ci: ciOf(value.ci), reviews: reviewsOf(value.reviews),
+    // FIX-21: the ≤4KB resume checkpoint. Normalized on every read so a
+    // stored row can never smuggle a malformed checkpoint past the machine.
+    checkpoint: checkpointOfChecked(value.checkpoint) };
 };
 const agentOf = value => idOf(value, "agent id", 128);
 const stamp = (atMs, agentId, action, note) =>
@@ -585,8 +600,9 @@ export function createWork({ id, title, reviewPolicy, note, tags, files, depends
 // Claim unclaimed work. Refuses already-claimed work (the anti-collision rule).
 // leaseHours: hours until the claim lapses (default: the room's
 // defaultLeaseHours, else 24h); null opts out — the claim never expires.
-export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, parentClaimId, evidenceRefs, pullRequest, pullRequests, repo, branch, fileBlocks, room, now } = {}) {
+export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, parentClaimId, evidenceRefs, pullRequest, pullRequests, repo, branch, fileBlocks, room, lastGood, now } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  const pushed = lastGoodOfChecked(lastGood);
   // H4 (QA-200 2026-10-08): distinguish self re-claim from a foreign holder in
   // the message — "release it first" was destructive for the holder and
   // unactionable for anyone else, and it never named the holder. The code
@@ -618,8 +634,8 @@ export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, p
     branch: branch === undefined ? item.branch : branchOf(branch),
     leaseStartAt: effective === null ? null : isoOf(atMs),
     leaseExpiresAt: effective === null ? null : isoOf(atMs + effective * 3600 * 1000) };
-  return withHistory(claimed, atMs, agent, "claimed",
-    effective === null ? note : note ?? `lease: ${effective}h`);
+  return stampClaimCheckpoint(withHistory(claimed, atMs, agent, "claimed",
+    effective === null ? note : note ?? `lease: ${effective}h`), { atMs, lastGood: pushed, summary: note ?? null });
 }
 // Renew a claim's lease: starts a fresh lease window from now, extending
 // leaseExpiresAt by the lease duration (explicit leaseHours, else the
@@ -629,8 +645,9 @@ export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, p
 // The route layer requires the owner's public progress message — posted
 // in the room after the prior lease start — before calling this; the pure
 // machine records the renewal, never the message check.
-export function renewWork(work, agentId, { note, leaseHours, room, now } = {}) {
+export function renewWork(work, agentId, { note, leaseHours, room, lastGood, now } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  const pushed = lastGoodOfChecked(lastGood);
   check(item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can renew it`);
   check(ACTIVE_CLAIM_STATES.includes(item.state), `work "${item.id}" is ${item.state} — only active claims can be renewed`);
   check(item.leaseExpiresAt !== null, `work "${item.id}" has no lease — nothing to renew`);
@@ -645,8 +662,9 @@ export function renewWork(work, agentId, { note, leaseHours, room, now } = {}) {
   const renewed = { ...item,
     leaseStartAt: effective === null ? null : isoOf(atMs),
     leaseExpiresAt: effective === null ? null : isoOf(atMs + effective * 3600 * 1000) };
-  return withHistory(renewed, atMs, agent, "renewed",
-    note ?? (effective === null ? "lease removed" : `lease: ${effective}h`));
+  return stampClaimCheckpoint(withHistory(renewed, atMs, agent, "renewed",
+    note ?? (effective === null ? "lease removed" : `lease: ${effective}h`)),
+    { atMs, lastGood: pushed, summary: note ?? null });
 }
 // Append one URL to the current claim round without replacing its lease or
 // evidence. A fresh duplicate in the same round is a byte-identical no-op;
@@ -717,9 +735,10 @@ export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClai
   const links = settledLink
     ? Object.freeze(prior.map(entry => (canonicalUrl(entry) === parsed.url ? fresh : entry)))
     : Object.freeze([...prior, fresh]);
-  return withHistory({ ...work, pullRequests: links,
+  return stampClaimCheckpoint(withHistory({ ...work, pullRequests: links,
     pullRequest: links.find(pull => !pull.outcome) ?? links[links.length - 1],
-    ci: null, attestations: Object.freeze([]) }, atMs, agent, "pr_linked", `Linked pull request ${parsed.url}`);
+    ci: null, attestations: Object.freeze([]) }, atMs, agent, "pr_linked", `Linked pull request ${parsed.url}`),
+    { atMs, summary: `Linked pull request ${parsed.url}` });
 }
 // Update claimed work: move state or add a note. Only the owner may update.
 // The done transition accepts deliveryMode (how the work was delivered),
@@ -728,8 +747,15 @@ export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClai
 // four are recorded on the item and then frozen with the done state. tags
 // and blobs are only meaningful on the done transition and are refused
 // anywhere else.
-export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, requestId, now, authority = false } = {}) {
+export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, requestId, lastGood, now, authority = false } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  // FIX-21: last_good records a pushed sha on a transition. A note-only
+  // update writes no checkpoint, so a last_good there would be silently
+  // lost — refuse it instead of dropping the worker's push record.
+  if (state === undefined && lastGood !== undefined && lastGood !== null) {
+    fail("invalid_claim_input", "last_good is only recorded on a state transition");
+  }
+  const pushed = state === undefined ? null : lastGoodOfChecked(lastGood);
   // PRODUCT-200 A4 (QA-200 AQ-HI-06): idempotent retry. A requestId that
   // already landed on this claim replays the stored outcome — the update
   // applied exactly once, so the identical retry appends nothing.
@@ -787,9 +813,14 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     tags: state === "done" && tags != null ? tagsOf(tags) : item.tags,
     blobs: state === "done" && blobs != null ? blobsOf(blobs) : item.blobs,
     ...withProvenance };
-  return key === undefined ? withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note)
+  // FIX-21: a state move refreshes the checkpoint; a note-only update keeps
+  // the last transition's checkpoint (the 5-min cadence tier refreshes it on
+  // progress separately — see docs/WORK-CLAIMS.md).
+  const written = key === undefined ? withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note)
     : Object.freeze({ ...withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note),
       requestOutcomes: recordRequestOutcome(item.requestOutcomes, key, isoOf(atMs)) });
+  return state === undefined ? written
+    : stampClaimCheckpoint(written, { atMs, lastGood: pushed, summary: note ?? null });
 }
 // Release a claim, bound to the claim round the caller read (E5/D4, QA-200
 // 2026-10-08): expectedClaimedAt + expectedHistoryLength must match the
@@ -835,7 +866,10 @@ export function closeWork(work, agentId, { verb = "close", reason, now, authorit
   const closed = { ...item, state: next, owner: null, leaseStartAt: null, leaseExpiresAt: null,
     attestations: Object.freeze([]), reviews: Object.freeze([]),
     files: Object.freeze([]), fileBlocks: Object.freeze({}) };
-  return withHistory(closed, atMs, agent, verb === "cancel" ? "cancelled" : "closed", reason);
+  // FIX-21: the terminal transition writes the final checkpoint — a
+  // successor (or the expiry-freeze lane) reads the round's last state here.
+  return stampClaimCheckpoint(withHistory(closed, atMs, agent, verb === "cancel" ? "cancelled" : "closed", reason),
+    { atMs, summary: reason ?? null });
 }
 // The member who created the item, when the creation stamp is still in history.
 export function creatorOf(work) {
@@ -910,8 +944,11 @@ export function closeWhenLive(work, liveRevision, now) {
   const head = item.ci?.headSha ?? null;
   if (item.revision !== liveRevision && head !== liveRevision) return null;
   const atMs = nowMsOf(now);
-  return withHistory({ ...item, state: "done", deliveryMode: item.deliveryMode ?? "production" }, atMs, item.owner ?? "system", "state:done",
-    `live revision matches ${liveRevision}`);
+  // FIX-21: the live-settle transition stamps a checkpoint like any other.
+  return stampClaimCheckpoint(
+    withHistory({ ...item, state: "done", deliveryMode: item.deliveryMode ?? "production" }, atMs, item.owner ?? "system", "state:done",
+      `live revision matches ${liveRevision}`),
+    { atMs, summary: `live revision matches ${liveRevision}` });
 }
 // Store a CI rollup. A state change is the only thing that stamps history;
 // a repeat of the same state still refreshes the sha and the time.
@@ -962,7 +999,10 @@ export function reassignWork(work, agentId, newOwner, { expectedClaimedAt, expec
   const claim = fresh ? { state: "claimed", claimedAt: isoOf(atMs),
     leaseStartAt: hours === null ? null : isoOf(atMs),
     leaseExpiresAt: hours === null ? null : isoOf(atMs + hours * 3600 * 1000) } : {};
-  return withHistory({ ...item, ...claim, owner: target, attestations: Object.freeze([]), reviews: Object.freeze([]) }, atMs, agent, `reassigned:${target}`, note);
+  // FIX-21: the handoff is a round change — the new owner resumes from this checkpoint.
+  return stampClaimCheckpoint(
+    withHistory({ ...item, ...claim, owner: target, attestations: Object.freeze([]), reviews: Object.freeze([]) }, atMs, agent, `reassigned:${target}`, note),
+    { atMs, summary: note ?? null });
 }
 // True when the item holds an active claim whose lease has lapsed. Items
 // without a lease, and items not under claim, never expire.
@@ -987,8 +1027,12 @@ export function releaseExpired(items, now) {
     // lapsed owner's round of work, never to whoever claims next).
     const released = { ...item, state: "unclaimed", owner: null, leaseStartAt: null, leaseExpiresAt: null,
       files: Object.freeze([]), fileBlocks: Object.freeze({}), attestations: Object.freeze([]), reviews: Object.freeze([]) };
-    return withHistory(released, atMs, item.owner ?? "system", "lease_expired",
-      `claim by ${item.owner ?? "nobody"} lapsed at ${item.leaseExpiresAt} — auto-released`);
+    // FIX-21: the expiry transition stamps a checkpoint recording the ended
+    // round — the expiry-freeze lane (FIX-14) builds on this field.
+    return stampClaimCheckpoint(
+      withHistory(released, atMs, item.owner ?? "system", "lease_expired",
+        `claim by ${item.owner ?? "nobody"} lapsed at ${item.leaseExpiresAt} — auto-released`),
+      { atMs, summary: null });
   });
 }
 // Review-policy gate for the done transition. policy resolves from the

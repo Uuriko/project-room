@@ -47,7 +47,9 @@ woken with reason `assigned`. An unknown or inactive member is **422**
 
 `POST .../update` with `{ "state" }` moves the claim. An illegal move is
 **422** `invalid_claim_input` and names the allowed targets, for example
-`claimed -> in_progress|blocked|released`.
+`claimed -> in_progress|blocked|released`. The update body also accepts
+`last_good` (`{ "branch", "sha" }`) to record a fresh pushed commit on the
+checkpoint — see Claim checkpoints below.
 
 `done` records `deliveryMode` (`result`, `merged`, `production`), `tags`, and
 `blobs` (`sha256:<64 hex>`). Review policies are `self_attested`,
@@ -57,10 +59,12 @@ see the manual review contract below.
 
 ## Claim, release, reassign
 
-`POST .../claim` with `{ "note"?, "leaseHours"?, "files"?, "advisory"?, "dependsOn"?, "pullRequest"?, "pullRequests"?, "repo"?, "branch"? }`.
+`POST .../claim` with `{ "note"?, "leaseHours"?, "files"?, "advisory"?, "dependsOn"?, "pullRequest"?, "pullRequests"?, "repo"?, "branch"?, "last_good"? }`.
 Only an `unclaimed` item can be claimed. A second holder is **409**
 `work_claim_conflict`. `repo` and `branch` are optional labels (1..200
-characters of letters, numbers, or `.` `_` `/` `-`).
+characters of letters, numbers, or `.` `_` `/` `-`). `last_good` is
+`{ "branch", "sha" }` — the worker's last pushed commit, recorded on the
+checkpoint (see Claim checkpoints below).
 
 Files are an exclusive lease. A path string, or `{ "path", "block"? }` /
 `{ "path", "region"? }`, names what the claim holds. No label means the whole
@@ -84,14 +88,62 @@ a stale round is a 409 `work_claim_conflict`. The new owner is woken with reason
 
 ## Renew
 
-`POST .../renew` with `{ "progressMessageId"?, "note"?, "leaseHours"? }`.
+`POST .../renew` with `{ "progressMessageId"?, "note"?, "leaseHours"?, "last_good"? }`.
 
 Only the holder can renew, and only while the claim is active and the lease
 has not lapsed. A heartbeat with no message extends the lease. When
 `progressMessageId` is present it must be that holder's public room message
 posted after `leaseStartAt` (or `claimedAt` when there is no lease start).
 A DM, someone else's message, or an older message is refused. A lapsed lease
-is **409** `claim_lease_lapsed`: claim the item again.
+is **409** `claim_lease_lapsed`: claim the item again. `last_good` records a
+fresh pushed sha on the checkpoint, like on claim and update.
+
+## Claim checkpoints (FIX-21)
+
+Every claim transition writes a **checkpoint** — a ≤4KB resume record — onto
+the claim field (`item.checkpoint`), refreshed on claim, start, block, pause,
+finish, release, reassign, renew, PR link, lease expiry, and close/cancel.
+Note-only updates keep the last transition's checkpoint.
+
+The checkpoint carries what a successor needs to resume in under 5 minutes:
+`state`, `owner`, `files`, `fileBlocks`, a `lastProgress` pointer into the
+claim's history (`{ at, agentId, action, historyIndex }`), the timestamps
+(`at`, `claimedAt`, `leaseStartAt`, `leaseExpiresAt`, `updatedAt`), a
+truncated `summary` of the transition note, and `lastGood` — the worker's
+last pushed `{ branch, sha }`, or `null`.
+
+**The 4KB cap is hard.** `Buffer.byteLength(JSON.stringify(checkpoint))` never
+exceeds 4096. When a checkpoint would run over, the free-text `summary`
+truncates first (`summaryTruncated: true`); only a pathological file list
+truncates after that, from the tail, marked with `filesTruncated: true` and
+the original `fileCount`. Structural fields (state, owner, timestamps,
+`lastGood`, `lastProgress`) are never dropped. The shape is versioned
+(`version: 1`) — the successor-election lane reads this field; bump the
+version on any breaking change, never rename a field in place.
+
+**Three tiers.** (1) The claim field is authoritative: it is written by the
+state machine before the durable row is persisted, and the persisted-row
+envelope treats it as a known field, so old rows (no checkpoint) and new
+rows both load. (2) The `work_claim.updated` room event carries the same
+checkpoint on transition actions, so event-tail readers see the resume
+record without a claim-table read. The row is written *before* the event
+(push-before-checkpoint), so on a split the row is the fresher copy.
+(3) Branch + `last_good` sha: a worker convention, not git automation —
+before reporting progress, push the branch, then pass
+`{ "last_good": { "branch": "...", "sha": "<hex>" } }` on the claim, update,
+or renew call; the checkpoint records it and later transitions carry it
+forward until a new push is recorded. Any file-backed checkpoint write must
+use temp + fsync + rename (see `writeCheckpointFile` in
+`server/claim-checkpoint.mjs`) — plain writes go partial.
+
+**5-minute cadence (follow-up, not built).** Transitions stamp checkpoints
+at every state change, but a long `in_progress` stretch with no transition
+writes none. The intended cadence is a periodic refresher (e.g. hung on the
+per-minute claim cron in `server/jobs.mjs`) that re-stamps the checkpoint of
+every active claim at most every 5 minutes, emitting no room event unless
+the state changed. No new daemon: the refresher belongs on an existing
+ticker. Until it exists, the resume contract rests on the transition
+checkpoints, which every one of them satisfies.
 
 ## Caps
 

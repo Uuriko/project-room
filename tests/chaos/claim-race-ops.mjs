@@ -398,10 +398,16 @@ export async function loadWeakenedClaimModule(kind) {
     }
     source = source.replace(from, to);
   }
-  // The copy lives in tests/chaos/.weak/, so re-point the relative import.
+  // The copy lives in tests/chaos/.weak/, so re-point the relative imports.
   source = source.replace(
     `from "./claim-coordination.mjs"`,
     `from "../../../server/claim-coordination.mjs"`,
+  );
+  // FIX-21: work-claims.mjs now imports the checkpoint module too (both the
+  // import and the constant re-export need re-pointing).
+  source = source.replaceAll(
+    `from "./claim-checkpoint.mjs"`,
+    `from "../../../server/claim-checkpoint.mjs"`,
   );
   const weakDir = join(HERE, ".weak");
   await mkdir(weakDir, { recursive: true });

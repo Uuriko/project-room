@@ -17,6 +17,11 @@ import { resolveNamedReviewers, hasCurrentReview } from "./work-claims.mjs";
 
 export const WORK_CLAIM_ACTIONS = WORK_CLAIM_EVENT_ACTIONS;
 
+// FIX-21: actions that stamp a claim checkpoint. The event data carries the
+// checkpoint on exactly these actions — the claim row is written first, the
+// event carries the same checkpoint second.
+const CHECKPOINT_EVENT_ACTIONS = new Set(["claimed", "state_changed", "released", "reassigned", "renewed", "lease_expired", "pr_merged", "pr_closed", "closed"]);
+
 // A title of only whitespace is a legal claim (the state machine stores it)
 // but the event envelope rejects a blank string. Fall back to the id so the
 // claim write is not rolled back by its own receipt.
@@ -55,6 +60,12 @@ export function workClaimEventData(item, action, { previousOwnerId = null, paths
   // still gets the item; the wake below is what pause and autonomy skip.
   if (attention) data.attention = attention;
   if (attentionMemberId) data.attentionMemberId = attentionMemberId;
+  // FIX-21 (tier 2): transition actions carry the authoritative checkpoint
+  // so event-tail readers (digest, wake feeds, the successor-election lane)
+  // see the resume record without a claim-table read. The checkpoint is
+  // written to the claim row BEFORE this event is emitted (push-before-
+  // checkpoint), so the row is always the fresher copy on a split.
+  if (item?.checkpoint && CHECKPOINT_EVENT_ACTIONS.has(action)) data.checkpoint = item.checkpoint;
   return data;
 }
 
