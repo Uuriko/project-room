@@ -685,6 +685,10 @@ export class LandQueue {
         this.store.transaction(() => {
           this.db.prepare("UPDATE land_queue SET claimant_member_id=?, updated_at=? WHERE room_id=? AND item_id=?")
             .run(claimant, this.store.now(), roomId, existing.item_id);
+          // The claimant reassignment is a board write: it commits its
+          // land.updated receipt (changed ["reassigned"]) in the same
+          // transaction as the row, so the handoff is observable.
+          this.#emitBoardReceipt(roomId, viewFromRow(this.#row(roomId, existing.item_id)), ["reassigned"]);
         });
       }
       mirrorLandClaim(this.store, this.#row(roomId, existing.item_id));
@@ -703,6 +707,11 @@ export class LandQueue {
         VALUES (?,?,?,?,?,?,NULL,NULL,'unknown',0,'pending',NULL,NULL,NULL,NULL,0,?,?)`)
         .run(roomId, itemId, parsedRepo, parsedPr, claimant, memberId, now, now);
       mirrorLandClaim(this.store, this.#row(roomId, itemId));
+      // Every board write is observable: the add commits its land.updated
+      // receipt (changed ["added"]) in the same transaction as the row, so
+      // event-replay can reconstruct the board. The GitHub refresh below may
+      // still 503 on an unreachable forge, but the write already happened.
+      this.#emitBoardReceipt(roomId, viewFromRow(this.#row(roomId, itemId)), ["added"]);
     });
     const item = viewFromRow(this.#row(roomId, itemId));
     return this.#refreshRow(item, { duplicate: false });
@@ -724,12 +733,17 @@ export class LandQueue {
   #removeExecute(roomId, memberId, itemId) {
     const row = this.#row(roomId, itemId);
     if (!row) fail(404, "land_item_not_found", "Land queue item was not found");
+    const removed = viewFromRow(row);
     this.store.transaction(() => {
       const claim = typeof this.store.workClaims?.get === "function"
         ? this.store.workClaims.get(roomId, itemId)
         : null;
       const dependents = claim ? this.#dependentsOf(roomId, itemId) : [];
       this.db.prepare("DELETE FROM land_queue WHERE room_id=? AND item_id=?").run(roomId, itemId);
+      // Every board write is observable: the delete commits its land.updated
+      // receipt (changed ["removed"]) in the same transaction as the row, so
+      // a removal never lands silently in the event log.
+      this.#emitBoardReceipt(roomId, removed, ["removed"]);
       if (typeof this.store.workClaims.delete === "function") {
         this.store.workClaims.delete(roomId, itemId);
         // Issue #1527: the mirrored claim is gone, so any claim that depended
@@ -877,6 +891,9 @@ export class LandQueue {
             : null;
           const dependents = claim ? this.#dependentsOf(item.roomId, item.itemId) : [];
           this.db.prepare("DELETE FROM land_queue WHERE room_id=? AND item_id=?").run(item.roomId, item.itemId);
+          // Same board-write receipt as remove(): the auto-delete is a board
+          // mutation and commits its land.updated (changed ["removed"]) here.
+          this.#emitBoardReceipt(item.roomId, item, ["removed"]);
           if (typeof this.store.workClaims?.delete === "function") {
             this.store.workClaims.delete(item.roomId, item.itemId);
             // Issue #1527: same stranded-dependent receipt as remove().
@@ -1022,6 +1039,32 @@ export class LandQueue {
     try { this.wakeClaimant(roomId, item.claimantMemberId, incoming, payload); }
     catch (error) { console.error("land queue wake failed:", error?.message ?? error); }
     return incoming;
+  }
+
+  // Board-write receipts: a board write that records without waking anyone.
+  // Adding is the caller's own action and a removal needs no doorbell, so
+  // there is nobody to wake; the receipt exists so the write is observable
+  // in the event log. Runs inside the caller's board transaction so the row
+  // write and its event commit together.
+  #emitBoardReceipt(roomId, item, changed) {
+    const room = this.store.room(roomId);
+    if (isRoomArchived(room.state)) return null;
+    const claimant = room.state.members?.[item.claimantMemberId];
+    const incoming = event({
+      id: randomUUID(),
+      idempotencyKey: randomUUID(),
+      type: EVENT_TYPES.LAND_UPDATED,
+      actorId: claimant && claimant.active !== false ? item.claimantMemberId : room.state.room.ownerId,
+      roomId,
+      at: new Date(this.store.now()).toISOString(),
+      data: {
+        itemId: item.itemId,
+        repo: item.repo,
+        claimantMemberId: item.claimantMemberId,
+        ...landWakePayload(item, changed)
+      }
+    });
+    return this.#appendRoomEvent(roomId, incoming);
   }
 
   // Push the thin payload through the existing wake path: a pointer doorbell

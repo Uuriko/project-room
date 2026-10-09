@@ -643,8 +643,11 @@ function validateEnvelope(incoming) {
         || typeof segment.kind !== "string" || typeof segment.text !== "string"))) throw new Error(`Invalid ${key}`);
     // land.updated carries a thin wake payload: state is the check/behind
     // rollup and changed is which of green, red, behind, merged, or tip flipped.
-    if (key === "changed" && (!Array.isArray(value) || value.length < 1 || value.length > 5
-      || value.some(change => typeof change !== "string" || !["green", "red", "behind", "merged", "tip"].includes(change)))) throw new Error(`Invalid ${key}`);
+    // "added" covers the initial board write, "removed" a board delete and
+    // "reassigned" a claimant handoff, so every land-queue mutation is
+    // observable in the event log.
+    if (key === "changed" && (!Array.isArray(value) || value.length < 1 || value.length > 8
+      || value.some(change => typeof change !== "string" || !["green", "red", "behind", "merged", "tip", "added", "removed", "reassigned"].includes(change)))) throw new Error(`Invalid ${key}`);
     if (key === "state" && (!value || typeof value !== "object" || Array.isArray(value)
       || !["pending", "green", "red"].includes(value.checks)
       || typeof value.behind !== "boolean"
@@ -1683,7 +1686,9 @@ function recordPeerDm(state, incoming) {
 
 // Land-queue wake receipt. The land_queue table is the source of truth, so
 // this records nothing on the projection. It validates the thin payload the
-// claimant is woken with: pr, head, state, and what changed.
+// claimant is woken with: pr, head, state, and what changed. "added" covers
+// the initial board write, "removed" a board delete and "reassigned" a
+// claimant handoff, so every land-queue mutation is observable.
 function recordLandUpdate(state, incoming) {
   requireMember(state, incoming.actorId);
   const data = incoming.data ?? {};
@@ -1698,7 +1703,7 @@ function recordLandUpdate(state, incoming) {
   if (!["mergeable", "behind", "conflict", "unknown", "merged"].includes(stateFields.mergeable)) throw new Error("Event data missing state");
   if (typeof stateFields.merged !== "boolean") throw new Error("Event data missing state");
   if (!Array.isArray(data.changed) || data.changed.length === 0
-    || data.changed.some(change => !["green", "red", "behind", "merged", "tip"].includes(change))) {
+    || data.changed.some(change => !["green", "red", "behind", "merged", "tip", "added", "removed", "reassigned"].includes(change))) {
     throw new Error("Event data missing changed");
   }
 }
