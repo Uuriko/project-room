@@ -712,3 +712,11 @@ test("consent screen names the room, grant, profile and expiry before any prompt
     "consent names the expiry and the closed grant");
   assert.match(screen, /acts as itself, never as you/, "consent states no credential is shared");
 });
+
+test("served discovery copy states the invite TTL range without mangled characters", async () => {
+  const { llmsTxt, llmsFullTxt, skillMd } = await import("../deploy/agent-discovery.mjs");
+  for (const [name, body] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()], ["SKILL.md", skillMd()]]) {
+    assert.ok(!/minutes201330/.test(body), `${name}: no mangled en dash in the TTL range`);
+    if (name !== "SKILL.md") assert.match(body, /5 minutes to 30 days/, `${name}: names the 5 minute to 30 day range`);
+  }
+});
