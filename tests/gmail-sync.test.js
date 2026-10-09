@@ -7,6 +7,7 @@ import { GmailMailbox } from '../server/gmail-mailbox.mjs';
 import { GmailActions } from '../server/gmail-actions.mjs';
 import { GmailSync } from '../server/gmail-sync.mjs';
 import { gmailImportToken, gmailImportAuth } from '../server/gmail-import-authority.mjs';
+import { ServiceError } from '../server/store.mjs';
 async function setup(t) {
   const f = createAcceptanceFixture(), provider = gmailLiveFixture(), m = new GmailMailbox(f.store, provider.config);
   t.after(() => { f.store.close(); rmSync(f.directory, { force: true, recursive: true }); });
@@ -62,6 +63,15 @@ test('background import capability is unforgeable, account-bound, import-only an
   assert.throws(() => gmailImportAuth(f.store, token, { action: 'page.apply', connectionId: 'other' }), { code: 'gmail_import_authority' });
   f.m.disconnect(f.slot.token, f.session.sessionBinding, f.id);
   assert.throws(() => gmailImportAuth(f.store, token, { action: 'page.apply', connectionId: f.id }), { code: 'gmail_import_authority' });
+});
+test('import authority invokes the owner check on every authentication (wave1000-guild-15 M5)', async t => {
+  const f = await setup(t);
+  let calls = 0;
+  const token = gmailImportToken(f.store, f.account.id, f.id, () => { calls++; });
+  gmailImportAuth(f.store, token, { action: 'page.apply', connectionId: f.id });
+  assert.equal(calls, 1, 'the owner check must run on every gmailImportAuth');
+  const throwing = gmailImportToken(f.store, f.account.id, f.id, () => { throw new ServiceError(409, 'gmail_session_changed', 'changed'); });
+  assert.throws(() => gmailImportAuth(f.store, throwing, { action: 'page.apply', connectionId: f.id }), { code: 'gmail_session_changed' });
 });
 test('reset sync follows nextPageToken past the first 50 messages (H-8)', async t => {
   const f = await setup(t);
