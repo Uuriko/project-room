@@ -893,7 +893,6 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     error.body = body;
     throw error;
   };
-  };
 
   if (workClaimRoute === "status" && req.method === "GET") {
     const status = deployStatus ?? { live: SOURCE_REVISION, main: null, behind: null, checkedAt: null };
