@@ -24,6 +24,7 @@ scripts/.native-result-browser-check.*.generated.mjs
 scripts/.reconnect-collaboration-browser-check.*.generated.mjs
 scripts/.notification-feed-browser-check.*.generated.mjs
 scripts/.help-invitation-browser-check.*.generated.mjs
-# PRODUCT-200 C2 chaos properties: guard-weakened copies of work-claims.mjs,
-# generated at test time by tests/chaos/loadWeakenedClaimModule.
 tests/chaos/.weak/
+
+# Invariant harness CI results (per-run JSONL, INVARIANTS telemetry contract)
+results/

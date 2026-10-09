@@ -1,0 +1,79 @@
+# Invariant harness CI gate (PRODUCT-200 reliability, lane A12).
+#
+# Runs the permanent never-break product invariants in tests/invariants/ on
+# every PR and every push to main. The job:
+#   1. runs `node scripts/invariants-ci.mjs`, which executes the suite under
+#      `node --test`, emits one JSONL results file per the INVARIANTS
+#      telemetry contract (A14: docs/INVARIANTS-TELEMETRY.md,
+#      $INVARIANTS_RESULTS_FILE pointed at a per-SHA path), renders a markdown
+#      table, and exits 1 when any invariant fails or errors;
+#   2. uploads the JSONL as an artifact;
+#   3. posts the table as a PR comment (replacing the previous bot comment so
+#      one push = one comment).
+#
+# This is a standalone workflow so it stays fast and never waits on the slow
+# unit/browser suites. Promotion to a branch-protection "required" check is a
+# separate lane (John's lane) — this PR only makes the check exist and pass.
+name: invariants
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Same grouping discipline as `test`: PRs cancel their own older runs;
+# pushes to main and merge-group runs are never cancelled mid-flight.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') && github.event_name != 'merge_group' && github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  invariants:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write # PR comment with the results table.
+    env:
+      # Per-SHA results path per the INVARIANTS telemetry contract
+      # (docs/INVARIANTS-TELEMETRY.md, A14). results/ is gitignored.
+      INVARIANTS_RESULTS_FILE: results/invariants-${{ github.sha }}.jsonl
+      INVARIANTS_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Run invariant suite (gate)
+        id: invariants
+        run: node scripts/invariants-ci.mjs --report-out "$RUNNER_TEMP/invariants-report.md"
+      - name: Upload results JSONL
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: invariants-results-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: ${{ env.INVARIANTS_RESULTS_FILE }}
+          if-no-files-found: error
+      - name: Comment results on PR
+        if: always() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          # One push = one comment: remove this bot's previous invariants
+          # comment before posting the fresh table.
+          for id in $(gh api "repos/Uuriko/project-room/issues/$PR_NUMBER/comments" --paginate \
+              -q '.[] | select(.body | contains("<!-- invariants-ci -->")) | .id' 2>/dev/null); do
+            gh api -X DELETE "repos/Uuriko/project-room/issues/comments/$id" >/dev/null 2>&1 || true
+          done
+          gh pr comment "$PR_NUMBER" --repo Uuriko/project-room \
+            --body-file "$RUNNER_TEMP/invariants-report.md" || echo "comment failed"
