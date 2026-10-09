@@ -1,231 +1,137 @@
-# Design: public read-only face + machine door completion + consent-bound DMs
+# Project Room design direction
 
-Branch: `jill/room-public-dm-2026-09-20` (worktree `~/workspace/pr-public-dm`).
-Status: design 2026-09-20. Nothing pushed/PR'd/deployed.
+This file says what Room's human side should feel like. Read it before you
+change anything a person sees: a page, a control, an empty state, a message
+template, an email, or UI copy. Then check the work against the filter in
+[.agents/skills/room-antislop/SKILL.md](.agents/skills/room-antislop/SKILL.md).
 
-Product decisions (John's standing direction, kept):
-- DM existence/count/metadata visible only to participants (+ room owner for
-  moderation). No room-visible indicators of DM activity.
-- Consent-bound DMs: request + reason → approve / reject / block; owner sees
-  consent metadata only (never message contents); consent is directional;
-  revocation is unilateral and forward-looking.
-- Strangers may create a first room. Non-invite users enter a generated room.
-  Joining uses links, not codes.
-- Rooms are private by default. The public face is an explicit owner opt-in.
-- Synthetic identities visibly labeled; no impersonation (unchanged).
+Precedence, highest first:
+1. [AGENTS.md](AGENTS.md) and explicit owner instructions (John, Potter).
+2. Mechanical gates in `npm run lint`: the design-token ratchet, the i18n
+   harness, and the UI-strings catalog. If prose here disagrees with a gate,
+   the gate wins. Fix this file.
+3. This file.
+4. The room-antislop filter.
 
-## Part 1 — machine door completion
+The Sep 20 public-face and DM-consent engineering design that used to live at
+this path is now
+[docs/history/DESIGN-PUBLIC-FACE-DM-2026-09-20.md](docs/history/DESIGN-PUBLIC-FACE-DM-2026-09-20.md).
 
-Existing (deploy/agent-discovery.mjs + server/http.mjs): /llms.txt,
-/llms-full.txt, /join.txt, /kits.txt, /skill.md, /AGENTS.md, /skill, /agents,
-/room/* aliases, /.well-known/agent.json, A2A /.well-known/agent-card.json,
-public HTML door at /room + /room/. Missing pieces to add:
+## The test
 
-### 1a. POST /join (and /room/join alias on origin)
-One-shot agent join absorbing scripts/bootstrap-agent-room.mjs.
-Unauthenticated. Per-address rate limit (10/min, stricter than redeem's 20 —
-join mints an identity AND a room).
+A non-technical friend has an invite link and a phone. Within 30 seconds they
+understand what this is. Without help, they ask for something, see it being
+worked on, add to a friend's ask, and get a result they can use. Judge every
+human-facing change against that.
 
-Request: `{ displayName, inviteCode? }` (exact keys; displayName 1..80 chars).
-Behavior:
-1. `store.identities.create(displayName)` → `{ identityId, secret (pri_…, once) }`.
-2. If `inviteCode`: `store.invites.redeem(code, { displayName })` with the new
-   identity linked (redeem already mints identity+member atomically — so
-   instead: redeem first with displayName, return its identity; skip step 1
-   when inviteCode is present).
-3. If no `inviteCode`: create a personal room via the agent-rooms path
-   (owner = new identity) — "strangers may create a first room". Room title
-   defaults to `{displayName}'s room`.
-4. Response 201: `{ identityId, secret, memberId, roomId, roomTitle, next }`
-   where `next` is a short ordered list of first actions (fetch /llms.txt,
-   orient). The secret is returned ONCE.
-5. Identity + first-room creation run inside one `store.transaction` (nested
-   platform transactions share the outer one), so a room-side failure rolls
-   the identity insert back — no orphan identities from half-done joins.
+## Product direction (fixed; don't relitigate in a PR)
 
-Invite-code reconciliation (2026-09-20): `/join`'s `inviteCode` is the
-**agent-invite** code (`RM-` + 16 Crockford symbols, minted by
-`/api/rooms/{id}/agent-invites`) — the machine credential for an agent that
-was invited programmatically. Human joining stays link-based: share links
-(`#join/<token>`) and their short human aliases (`XXX-XXX-XXX`, the
-`share_link_codes` table) redeem through `/api/share-links/join`. The two
-code formats are disjoint by construction (`RM-…` never parses as a share
-code), so `/join` never confuses a human link code for an agent invite —
-a human code presented to `/join` simply 404s as an unknown agent invite.
+- **Chat is home.** Updates, Work, People, and Connections support the chat.
+  They don't replace it, and they don't add a second home.
+- **One assistant voice.** The humans see one Room assistant. Worker agents
+  sit behind it, visible on demand. Room speaks when asked (@Room or Ask
+  Room), and silence is a valid end of a turn.
+- **Minimal login.** The logo and name, Create account, Log in, and Agent sign
+  in. Proof, claims, protocols, and diagnostics stay in optional details.
+  `tests/landing-hero.test.mjs` pins this entry contract. Adding one line
+  that says what Room is would be the owner's call. It isn't a filter
+  finding.
+- **Shared things are visible by default.** An ask, its additions, and its
+  controls never sit behind a collapsed toggle. If no human saw it, it
+  doesn't exist.
+- **Agents fold. People and questions never do.** Run-linked status and
+  receipts fold under their own ask ("Room is working · N updates"). Human
+  messages, questions to a person, @mentions, alerts, and results always stay
+  visible. A message of unknown kind stays unfolded.
+- **Words stay with their author.** Additions are separate, attributed
+  messages. Nothing co-edits or rewrites another person's prompt.
+- **One owner per thing, shown on its face.** Every ask shows whose it is.
+- **One number, one source.** A badge equals the length of the list it opens.
+  "34 updates" next to "Nothing needs you" is a bug.
+- **Honest states, with a next step, before the commit.** Offline,
+  unverified, and no-reviewer states show before Send or Create, not after.
+  An empty state says what is hidden and why.
+- **Rollups obey the source's privacy.** A fold label, digest, notification,
+  or doorway page never shows text the viewer couldn't read raw.
+- **Web and Mac behave the same.** Every human control has the same REST and
+  MCP verb, and the UI never shows state that agents can't read.
 
-Why not reuse /api/agent-rooms: that needs the pri_ secret in a bearer
-header (two round trips + header handling). /join is the one-URL door.
+## Copy
 
-### 1b. GET /skills (JSON skills catalog)
-Machine-readable twin of /kits.txt. New `SKILLS_CATALOG` const in
-deploy/agent-discovery.mjs: array of `{ id, name, description, install }`
-frozen objects describing what an agent can pull (packet, mcp, kits…).
-Canonical path `/skills`, type `application/json; charset=utf-8`, aliases
-`/room/skills`, `/project-room/skills`. Added to KEY_ROUTES and to the agent
-card's `key_routes` (card test updated).
+- Use plain words, one per action. It's "Log in" everywhere. "Agent sign in"
+  is the one named exception.
+- Never invent numbers, testimonials, customers, or claims. Show a real count
+  from real data, or show nothing.
+- Money wording must agree with itself on every surface. If payment isn't
+  configured, no surface may show a price as if it were payable.
+- Never show `ai_`, `pri_`, raw member ids, or internal state names to a
+  person. Use display names and plain verbs.
+- Write for the person in front of the screen. Lane names, seq numbers,
+  receipts jargon, and QA vocabulary belong in docs and muse-room, not on
+  /offers or /receipts.
+- Every user-facing string goes in `strings/en.json` and is read by key. One
+  full sentence per entry, with named placeholders. The i18n harness enforces
+  this.
+- Don't add new em dashes to user-facing strings. Use a period, comma,
+  colon, or parentheses. Don't churn existing strings just to remove one.
 
-### 1c. Link: headers
-On every discovery-doc response and on the public face (HTML + JSON):
-```
-Link: </.well-known/agent-card.json>; rel="describedby",
-      </llms.txt>; rel="help",
-      </skills>; rel="service",
-      </room>; rel="alternate"
-```
-Single header, comma-joined, relative refs (RFC 8288). Also on the public
-door HTML response (/room). Cheap, useful for crawlers and agent fetchers.
+## Visual system
 
-## Part 2 — public read-only face
+Canonical values live in [src/design-tokens.js](src/design-tokens.js). The
+marked blocks in `src/styles.css` are generated by
+`node scripts/sync-design-tokens-css.mjs`, so don't hand-edit them. Dark is the
+product default, and light is opt-in through `[data-theme="light"]`. Don't
+auto-switch on `prefers-color-scheme`.
 
-### Model
-New table `room_public_settings`:
-```sql
-CREATE TABLE room_public_settings(
-  room_id TEXT PRIMARY KEY REFERENCES rooms(id) ON DELETE CASCADE,
-  enabled INTEGER NOT NULL DEFAULT 0,
-  public_code TEXT UNIQUE,          -- 'pub1.' + 32 base62 chars, null when disabled
-  created_at TEXT NOT NULL,
-  rotated_at TEXT
-);
-```
-- Owner-only toggle: `POST /api/rooms/{id}/public-face` `{ enabled: true|false }`
-  → enabling mints (or reuses) the code; disabling nulls the code.
-- `POST /api/rooms/{id}/public-face/rotate` → new code, old dies.
-- Both ride the existing room-route funnel (owner check via requireOwner in
-  the module, mirroring share-links create).
+| Role | Token | Dark | Light |
+|---|---|---|---|
+| Page background | `--bg` | `#202127` | `#f4f3f8` |
+| Panel / card | `--panel`, `--card` | `#191a20` | `#fffbff` |
+| Raised surface | `--panel-raised` | `#292b33` | `#e8e7ef` |
+| Rules and borders | `--line`, `--border` | `#393b45` | `#c9c8d4` |
+| Body text | `--text` | `#eeedf1` | `#1c1b22` |
+| Secondary text | `--muted` | `#aaaab7` | `#5c5b6a` |
+| Links and focus | `--blue` | `#a9b9ff` | `#33339a` |
+| Primary action fill | `--blue-strong` | `#5555bd` | `#3f3fad` |
+| Warning / stalled | `--amber` | `#ffbf69` | `#8a4b00` |
+| Success / included | `--green` | `#4fd09b` | `#0f6b45` |
+| Error / failed | `--red` | `#ff7b7b` | `#a32020` |
 
-### Public routes (unauthenticated — full open-route gates apply)
-- `GET /p/{code}` — HTML face; `Accept: application/json` → JSON face.
-- `GET /api/public/rooms/{code}` — JSON face (stable API twin).
-- `GET /api/public/rooms/{code}/feed?after=&limit=` — paginated public
-  messages (JSON). `limit` 1..100 default 50.
+- **Type:** `--font-sans` (Inter, then system UI). Sizes come from
+  `--text-xs` (.75rem), `--text-sm` (.875rem), `--text-md` (1rem), and
+  `--text-lg` (1.25rem), and the wordmark uses `--text-wordmark`.
+  `scripts/lint-design-tokens.mjs` fails on any new raw `font-size` or hex
+  literal.
+- **Space:** use `--space-1` through `--space-6` (.25rem to 2rem).
+- **Radius:** `--radius-sm` .35rem, `--radius-md` .45rem, `--radius-lg`
+  .85rem, `--radius-xl` 1rem. Not everything is a pill.
+- **Elevation:** use one `--shadow`, for overlays only.
+- **Accent discipline:** indigo marks the action and the link. Amber, green,
+  and red carry state, and never decoration. Pair state color with words,
+  because color alone isn't enough.
+- **Focus:** keep the 2px `--blue` outline from `src/styles.css`. Never remove
+  it without a visible replacement.
+- **Targets:** a primary control is at least 44px tall on touch screens, and
+  an inline link or disclosure has at least a 24px target (WCAG 2.5.8).
+- **Motion:** use motion only for state changes the person caused or must
+  notice. Nothing loops forever.
 
-Gates for each: `security: []` in docs/openapi.yaml + PROBES entry in
-tests/invite-only-boundary.test.js + docs/ROUTE-AUTH-TABLE.md +
-docs/INVITE-ONLY-CHECKLIST.md §1 + `scripts/open-routes.mjs --check`.
+## Slop we have already shipped (don't repeat it)
 
-### Sanitized face (strict rebuild, field-by-field — no passthrough)
-```json
-{
-  "room": { "title": "…", "purpose": "…", "openedAt": "…" },
-  "members": [ { "handle": "…" } ],          -- displayName only, sorted
-  "messages": [ { "at": "…", "from": "handle", "body": "…" } ],  -- newest 50
-  "face": { "code": "pub1.…", "fetchedAt": "…" }
-}
-```
-Rules:
-- DMs (`toMemberId`) NEVER appear. Not counted, not hinted.
-- Member list: handles only. No emails, no member ids, no identity links.
-- Message bodies: as written (owner opted in), but capped at 2000 chars with
-  truncation marker; attachments omitted v1.
-- Channel caveat (v1): the core projection carries no channel field, so the
-  face cannot distinguish channels. Every non-DM message with a body is
-  treated as public when the owner opts in. Per-channel public flags are
-  explicitly NOT in v1.
-- `X-Robots-Tag: noindex, nofollow` on the face (public-read ≠ SEO-indexed).
-- Rate: `public-face:{ip}` 60/min on feed; 20/min on HTML.
-- Link: headers (§1c) on every face response.
+From the Oct 9 QA and first-run click-through. Each item has a filter rule.
 
-HTML face: minimal readable page reusing the door's visual language
-(dark, system fonts), server-rendered from the same sanitizer. No JS.
+| Seen | Why it's slop | Do instead |
+|---|---|---|
+| /receipts and /offers read like internal QA output | Internal vocabulary on a public page | Say what a visitor can do there, in their words |
+| An offer shows a cash amount while the detail says payment isn't configured | Money wording contradicts itself | Show the amount only when it can be paid. Otherwise say plainly that it's unpaid |
+| Raw `ai_…` ids in the room assistant's answer (fixed in #2309) | Machine ids on a human surface | Use display names |
+| A guest sees "No messages yet" in a 35-message room | An empty state that lies | Say "Earlier messages aren't shared with guests here" |
+| "Log in" on the landing page, "Sign in" on the form (fixed in #2303) | Two words for one action | One word everywhere |
+| Links on the login and signup forms about 8px tall | Tap target too small | At least 24px for inline links, 44px for primary controls |
+| New work's Create silently does nothing without a reviewer | A dead control | Show the reason and the choice before Create |
+| A multiplayer ask hidden under a collapsed Activity toggle | Shared state behind a disclosure | Show the card in the stream |
 
-### Module
-`server/public-face.mjs`: `class PublicFace { constructor(store) }` with
-`enable(roomId, actorMemberId)`, `disable`, `rotate`, `faceByCode(code)`,
-`feedByCode(code, {after, limit})`. Owner check inside the module via
-store.room(roomId).state ownership — mirror how ShareLinks checks owner
-(owner/admin). Sanitizer `publicFaceJson(...)` is a pure function, unit-tested.
+## When this file is wrong
 
-## Part 3 — consent-bound DMs
-
-### Model
-New table `dm_consents`:
-```sql
-CREATE TABLE dm_consents(
-  room_id TEXT NOT NULL,
-  requester_id TEXT NOT NULL,   -- member id asking to DM
-  target_id TEXT NOT NULL,       -- member id being asked
-  status TEXT NOT NULL CHECK(status IN ('pending','approved','rejected','blocked','revoked')),
-  reason TEXT NOT NULL DEFAULT '',   -- ≤500 chars, requester's note
-  created_at TEXT NOT NULL,
-  decided_at TEXT,
-  PRIMARY KEY (room_id, requester_id, target_id)
-);
-```
-Directional: (A→B) and (B→A) are independent rows.
-
-State machine:
-- `request` (requester): none → `pending`. 409 if pending/approved exists.
-  If `blocked` → 403 `dm_blocked`. If `rejected`/`revoked` → new request
-  allowed (replaces row → `pending`, reason updated).
-- `decide` (target only): pending → `approved` | `rejected` | `blocked`.
-- `revoke` (either participant): approved → `revoked`. Forward-looking:
-  history stays readable; new DMs need a fresh request.
-- `unblock` (target only): blocked → `rejected` (history kept, new requests
-  allowed again).
-
-### Enforcement
-- In `store.command()` postMessage path, before `applyEventWithGrowth`:
-  if `data.toMemberId` and `toMemberId !== senderMemberId`:
-  `dmConsents.requireApproved(roomId, sender, target)` else
-  `fail(403, "dm_consent_required", "…request consent first…")`.
-- Self-DM (toMemberId === sender): allowed, no consent row needed.
-- `server/reply-requests.mjs` toMemberId validation: same helper.
-- Because the gate runs before event creation, unconsented DMs never persist
-  and never wake the target (maybeWakeOnMention untouched).
-- API-key scopes: DM send already needs rooms:write; consent routes need
-  rooms:write for mutations, rooms:read for listing.
-
-### Routes (authenticated room funnel — no new open surface)
-- `route === "dm-consents"`: GET list (participant sees own pairs; owner sees
-  all pairs' metadata), POST `{ targetMemberId, reason? }` → 201 pending.
-- `route === "dm-consent-decide"`: POST `{ requesterId, decision }`.
-- `route === "dm-consent-revoke"`: POST `{ otherMemberId }`.
-- `route === "dm-consent-unblock"`: POST `{ requesterId }` (target only).
-- `agentInbox`: incoming pending requests included as
-  `dmRequests: [{ requesterHandle, reason, at }]` — no ids beyond handles.
-
-### Visibility rules
-- Participants: full pair state both directions involving them.
-- Owner: `GET dm-consents` returns every pair `{ requesterHandle,
-  targetHandle, status, createdAt, decidedAt }` — metadata only.
-- Nobody else: pairs invisible. No room events for consent changes (side
-  table only) → no room-visible indicators, satisfying the product decision.
-- Handles plus the authoritative member ids in list outputs (display names
-  are not unique per room, so browser actions resolve by id; ids were already
-  visible to members via presence).
-
-### Migration
-On first gate check for a pair, seed `approved` for any direction that
-already has ≥1 persisted DM message in that direction (lazy, inside the
-write transaction). Past exchange implies consent; no conversation breaks.
-
-### Module
-`server/dm-consents.mjs`: `class DmConsents { constructor(store) }`,
-`request(roomId, requesterId, targetId, reason)`,
-`decide(roomId, targetId, requesterId, decision)`,
-`revoke(roomId, memberId, otherId)`, `unblock(...)`,
-`list(roomId, viewerId, isOwner)`, `requireApproved(roomId, from, to)`,
-`pendingFor(roomId, memberId)` (for agentInbox).
-Pure-ish, store-injected like AccessRequests/ShareLinks. All outputs frozen.
-
-## Build order
-1. `server/dm-consents.mjs` + `server/public-face.mjs` (pure modules, unit tests).
-2. `server/store.mjs` wiring: `this.dmConsents`, `this.publicFace`,
-   gate in command(), agentInbox dmRequests, lazy migration seed.
-3. `deploy/agent-discovery.mjs`: SKILLS_CATALOG, /skills canonical+aliases,
-   KEY_ROUTES, card key_routes.
-4. `server/http.mjs`: POST /join (+/room/join), /p/:code, /api/public/...,
-   room-funnel routes (dm-consents ×4, public-face ×2), Link: headers on
-   discovery + door + face.
-5. Runtime package: scripts/runtime-package.mjs + tests/runtime-package.test.js
-   count (+2 modules).
-6. Docs: docs/openapi.yaml, docs/ROUTE-AUTH-TABLE.md,
-   docs/INVITE-ONLY-CHECKLIST.md; `scripts/open-routes.mjs --check`.
-7. Tests: tests/dm-consents.test.js, tests/public-face.test.js,
-   tests/join-door.test.js; update tests/agent-discovery.test.js
-   (key_routes, /skills, Link headers).
-8. Full focused suites with TMPDIR in worktree.
-
-Explicitly NOT in v1: per-channel public flags, work-items on the face,
-attachments on the face, DM threads UI, unblock-by-requester, SEO indexing.
+If a product decision changes, update this file in the same PR as the change,
+and name who decided. Don't let a stale direction stand.
