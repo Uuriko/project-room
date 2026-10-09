@@ -2691,7 +2691,7 @@ function buildRows() {
   for (const line of ROW_DATA.split("\n")) {
     const [emoji, primary, extras, categoryIndex, description] = line.split("|");
     const category = CATEGORIES[Number(categoryIndex)];
-    const search = overrides.get(index) ?? `${description} ${primary} ${extras}`.replace(/\s+/g, " ").trim();
+    const search = overrides.get(index) ?? [description, primary, extras].join(" ").replace(/\s+/g, " ").trim();
     rows.push(Object.freeze([emoji, primary, extras, category, description, search]));
     index += 1;
   }
