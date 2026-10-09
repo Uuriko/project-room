@@ -64,6 +64,26 @@ export function ensureAgentRoomRequestIdColumn(db) {
     ON agent_room_ownership(identity_id, request_id) WHERE request_id IS NOT NULL`);
 }
 
+// FIX-3: the room-scoped onboarding MCP token's credential material is shown
+// once, in the original (non-duplicate) room-create response, to the
+// authenticated creating identity — who must persist it. Idempotent replays
+// answer with a redacted handle of the ORIGINAL issuance and never mint a
+// fresh key. That is the codebase's existing "<redacted>" convention
+// (guest-invites self-serve: the Bearer <redacted> is returned once, in the
+// original response; replays redact) and the scoped-keys rule ("the secret
+// shown once at issue/rotate; hash-only storage").
+export const REDACTED_CREDENTIAL = "<redacted>";
+
+// Additive migration for databases created before onboarding_key_id existed:
+// the table is purely additive (server/writer-fence.mjs), so an in-place
+// column is safe. Called from the store open path next to the schema exec.
+export function ensureAgentRoomOnboardingKeyColumn(db) {
+  try { db.exec("ALTER TABLE agent_room_ownership ADD COLUMN onboarding_key_id TEXT"); }
+  catch (error) {
+    if (!/duplicate column name/i.test(String(error?.message))) throw error;
+  }
+}
+
 const CREATE_FIELDS = Object.freeze(["roomId", "title", "purpose", "kind", "displayName", "starter", "requestId"]);
 const AGENT_STARTER_ID = "starter";
 const AGENT_STARTER_TITLE = "Post your plan, then close this task";
@@ -159,13 +179,30 @@ export class AgentRooms {
   }
 
   // Shared shape for both idempotency keys (client roomId, client requestId):
-  // the original room, a fresh onboarding token, and the duplicate flag so
-  // the HTTP layer answers 200 on a replay.
+  // the original room and the duplicate flag so the HTTP layer answers 200
+  // on a replay. The onboarding token was shown once, in the original
+  // response: the replay carries only its redacted handle, and mints no new
+  // key (a retry that minted one would strand live credentials the client
+  // never saw).
   #duplicateCreateResponse(roomId, memberId, identityId, displayName) {
     return { roomId, ownerMemberId: memberId, identityId, duplicate: true,
-      mcpToken: this.store.agentPlugin.issueOnboardingMcpToken({ identityId, roomId, label: displayName }),
+      mcpToken: this.#redactedOnboardingToken(identityId, roomId),
       starter: starterView(this.store, roomId),
       next: roomCreateNext(roomId), nextActions: nextActionsForRoomCreate(roomId) };
+  }
+
+  // The redacted handle for the onboarding token issued at first create:
+  // public metadata plus the "<redacted>" credential sentinel, so nothing
+  // secret-shaped crosses the wire on a replay.
+  #redactedOnboardingToken(identityId, roomId) {
+    const row = this.store.db.prepare(
+      "SELECT onboarding_key_id FROM agent_room_ownership WHERE identity_id=? AND room_id=?").get(identityId, roomId);
+    const keyId = row?.onboarding_key_id ?? null;
+    const record = keyId ? this.store.agentPlugin.keys.get(keyId) : null;
+    const meta = record
+      ? { keyId: record.keyId, scopes: [...record.scopes], expiresAt: record.expiresAt, label: record.label ?? null }
+      : { keyId };
+    return { ...meta, credential: REDACTED_CREDENTIAL };
   }
 
   // Self-serve room creation. secret is the caller's pri_ identity secret
@@ -255,15 +292,20 @@ export class AgentRooms {
       // Link the identity so its pri_ secret authenticates to the new room.
       this.store.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
         .run(roomId, identity.identityId, memberId, this.store.now());
-      this.store.db.prepare("INSERT INTO agent_room_ownership(identity_id,room_id,created_at,request_id) VALUES(?,?,?,?)")
-        .run(identity.identityId, roomId, this.store.now(), requestId);
+      // The onboarding MCP token is issued once here, and its credential is
+      // shown once in this response to the creating identity. The key id is
+      // recorded so idempotent replays can answer with the redacted handle.
+      const onboardingToken = this.store.agentPlugin.issueOnboardingMcpToken(
+        { identityId: identity.identityId, roomId, label: displayName });
+      this.store.db.prepare("INSERT INTO agent_room_ownership(identity_id,room_id,created_at,request_id,onboarding_key_id) VALUES(?,?,?,?,?)")
+        .run(identity.identityId, roomId, this.store.now(), requestId, onboardingToken.keyId);
       if (fundedByGrowth) {
         this.store.db.prepare("UPDATE agent_room_ownership SET funded_by=? WHERE identity_id=? AND room_id=?")
           .run(GROWTH_FUNDING, identity.identityId, roomId);
       }
       const starter = wantStarter ? ensureAgentStarter(this.store, roomId, memberId) : null;
       return { roomId, ownerMemberId: memberId, identityId: identity.identityId, duplicate: false, starter,
-        mcpToken: this.store.agentPlugin.issueOnboardingMcpToken({ identityId: identity.identityId, roomId, label: displayName }),
+        mcpToken: onboardingToken,
         next: roomCreateNext(roomId), nextActions: nextActionsForRoomCreate(roomId) };
     });
   }

@@ -9622,8 +9622,20 @@ paths:
                 starter: { type: boolean, default: true, description: "Optional. Whether to seed the room's starter work-claim task. Defaults to true." }
 
       responses:
-        '201': { description: "{ roomId, ownerMemberId, identityId, duplicate: false, next, nextActions }. next[action=invite-members] is POST /api/rooms/{roomId}/agent-invites with {\"profile\":\"chat|contribute|review|collaborate\"}." }
-        '200': { description: "Idempotent retry (duplicate:true)" }
+        '201':
+          description: >-
+            { roomId, ownerMemberId, identityId, duplicate: false, mcpToken, next, nextActions }.
+            mcpToken is a room-scoped MCP token (30-day expiry): { keyId, credential, scopes, expiresAt, label }.
+            The credential is shown ONCE, in this response, to the creating identity — persist it now; it is
+            never returned again. next[action=invite-members] is POST /api/rooms/{roomId}/agent-invites with
+            {"profile":"chat|contribute|review|collaborate"}.
+        '200':
+          description: >-
+            Idempotent retry (duplicate:true). The response repeats the original room's fields, but mcpToken
+            carries only a redacted handle: credential is "<redacted>" and keyId names the token issued with
+            the original create. No fresh credential is minted on a replay; replays never disclose token
+            material. The owner can mint further keys under its own control via the agent plug-in keys route
+            (credential shown once at issue).
         '401': { description: unauthenticated (unknown identity secret) }
         '409': { description: room_exists, request_conflict, or pilot_limit }
         '422': { description: invalid_room_request }
