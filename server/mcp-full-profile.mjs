@@ -279,13 +279,21 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
     const authority = store.roomAuthority(roomId);
     const ownerId = typeof authority?.ownerId === "string" ? authority.ownerId : "";
     if (!ownerId || ownerId !== auth.member.id) {
-      throw new ServiceError(403, "work_claims_not_permitted", "Only the room owner can set the per-member claim cap.");
+      throw new ServiceError(403, "work_claims_not_permitted", "Only the room owner can set the claim caps.");
     }
-    const cap = rest.maxMemberOpenClaims;
-    if (!Number.isSafeInteger(cap) || cap < 1 || cap > 10000) {
-      throw new ServiceError(422, "invalid_claim_input", "maxMemberOpenClaims must be an integer 1..10000.");
+    const patch = {};
+    for (const key of ["maxMemberOpenClaims", "maxOpenClaims"]) {
+      const value = rest[key];
+      if (value === undefined) continue;
+      if (!Number.isSafeInteger(value) || value < 1 || value > 10000) {
+        throw new ServiceError(422, "invalid_claim_input", `${key} must be an integer 1..10000.`);
+      }
+      patch[key] = value;
     }
-    return { value: { roomId, ...store.workClaims.configure(roomId, { maxMemberOpenClaims: cap }) }, isError: false };
+    if (Object.keys(patch).length === 0) {
+      throw new ServiceError(422, "invalid_claim_input", "Set maxMemberOpenClaims, maxOpenClaims, or both.");
+    }
+    return { value: { roomId, ...store.workClaims.configure(roomId, patch) }, isError: false };
   }
   if (isWorkTool(name)) {
     const command = buildWorkCommand(name, rest);
