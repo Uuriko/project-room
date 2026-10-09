@@ -240,6 +240,50 @@ function viewerOf(state, session) {
   return { id, manage, owner: Boolean(id && state?.room?.ownerId === id), write: canWriteClaims(state, session) };
 }
 
+// VERIFY step: who may record a verdict review from the board. Mirrors the
+// server's mayReviewWorkClaims (an active member with write rights or the
+// verify permission); the owner can never review their own claim, and only
+// owned, still-open claims — or ones with an open PR — are reviewable. The
+// review route re-checks on POST; this only decides whether the form renders.
+export function canReviewClaim(item, viewer, members) {
+  if (!item || !viewer?.id) return false;
+  const member = members?.[viewer.id];
+  if (!member || member.active === false) return false;
+  if (!item.owner || item.owner === viewer.id) return false;
+  const open = ["claimed", "in_progress", "blocked"].includes(item.state);
+  const openPr = Boolean(item.pullRequest?.url) && !item.pullRequest.outcome;
+  if (!open && !openPr) return false;
+  const permissions = new Set(member.permissions ?? []);
+  return viewer.write || permissions.has("verify");
+}
+
+// Review controls for a claim card. Every label comes from the strings
+// catalog via uiText, and each literal holds only complete HTML tags, so the
+// i18n harness sees no new hardcoded copy. The form posts to
+// POST /work-claims/:id/review through the board's submit handler.
+export function claimReviewForm(item) {
+  const id = escapeHtml(item.id);
+  return [
+    `<form class="board-new" data-claim-review="${id}">`,
+    "<span class=\"form-hint\">", uiText("board.review.legend"), "</span>",
+    "<label>",
+    uiText("board.review.verdict.label"),
+    " <select name=\"verdict\" required>",
+    "<option value=\"approve\">", uiText("board.review.verdict.approve"), "</option>",
+    "<option value=\"changes_requested\">", uiText("board.review.verdict.changes_requested"), "</option>",
+    "<option value=\"comment\">", uiText("board.review.verdict.comment"), "</option>",
+    "</select>",
+    "</label>",
+    "<label>",
+    uiText("board.review.summary.label"),
+    " <input name=\"summary\" required maxlength=\"2000\" autocomplete=\"off\">",
+    "</label>",
+    "<span class=\"form-hint\">", uiText("board.review.summary.placeholder"), "</span>",
+    "<button type=\"submit\" class=\"button secondary\">", uiText("board.review.submit"), "</button>",
+    "</form>"
+  ].join("");
+}
+
 function workLink(item, workItems, key, label) {
   const linked = typeof item?.workItemId === "string" && Object.hasOwn(workItems ?? {}, item.workItemId) && workItems[item.workItemId]?.id === item.workItemId;
   return linked ? `<a href="#pr-record/work/${encodeURIComponent(item.workItemId)}" data-open-work="${escapeHtml(item.workItemId)}" data-focus-key="${escapeHtml(key)}">${escapeHtml(label)}</a>` : escapeHtml(label);
@@ -312,6 +356,10 @@ function cardHtml(item, viewer, members, now, workItems, byId) {
   if (canLinkPullRequest(item, viewer, now)) {
     actions.push(`<form class="board-new" data-claim-link-pr="${escapeHtml(item.id)}"><label>Pull request URL <input name="pullRequest" type="url" size="1" maxlength="300" required autocomplete="off" placeholder="https://github.com/…/pull/…" aria-label="Pull request URL for ${escapeHtml(item.title || item.id)}" data-focus-key="link-pr:${escapeHtml(item.id)}"></label><button type="submit" class="button secondary">Link PR</button></form>`);
   }
+  // VERIFY step: the board used to render no review control at all — "What
+  // needs me › Review" only scrolled to the card (dead end). Eligible
+  // reviewers now get the verdict form right on the card.
+  if (canReviewClaim(item, viewer, members)) actions.push(claimReviewForm(item));
   if (item.state === "unclaimed" && !item.owner && !waiting) actions.push(button("claim", "Claim", "primary"));
   if (mine && ["claimed", "in_progress", "blocked"].includes(item.state)) actions.push(button("renew", "Renew", "secondary"));
   if (mine && (item.state === "claimed" || item.state === "blocked")) actions.push(button("progress", "Mark in progress", "secondary"));
@@ -690,6 +738,27 @@ export function installWorkBoard({ client, getState, getSession }) {
         linkForm.querySelector("input").readOnly = false;
         linkForm.querySelector("button").disabled = false;
       });
+      return;
+    }
+    const review = event.target.closest("[data-claim-review]");
+    if (review && root.contains(review)) {
+      event.preventDefault();
+      if (mutating) return;
+      const id = review.dataset.claimReview;
+      const state = getState();
+      const item = items.find(entry => entry.id === id);
+      if (!item || !canReviewClaim(item, viewerOf(state, getSession()), state?.members ?? {})) return;
+      const fields = new FormData(review);
+      const verdict = String(fields.get("verdict") ?? "");
+      const summary = String(fields.get("summary") ?? "").trim();
+      if (!["approve", "changes_requested", "comment"].includes(verdict) || !summary) {
+        note(uiText("board.review.invalid"));
+        return;
+      }
+      const title = item.title || id;
+      flySubmit(review,
+        () => client.request(client.path(`/work-claims/${encodeURIComponent(id)}/review`), { method: "POST", data: { verdict, summary } }),
+        { id, key: `review:${id}`, status: uiText("board.review.done", { title }), pending: uiText("board.review.pending") });
       return;
     }
     const created = event.target.closest("#board-new-item");
