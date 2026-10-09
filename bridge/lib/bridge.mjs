@@ -75,9 +75,18 @@ function backoffDelay(attempt) {
   return Math.random() * Math.min(2 ** attempt * 250, 4_000);
 }
 
-function stableHash(obj) {
-  const sorted = JSON.stringify(obj, Object.keys(obj).sort());
-  return createHash('sha256').update(sorted).digest('hex');
+// Recursive canonical form. (JSON.stringify with a key-array replacer applies
+// that whitelist at every depth and silently drops nested fields.)
+function canonical(v) {
+  if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`;
+  if (v && typeof v === 'object') {
+    return `{${Object.keys(v).filter((k) => v[k] !== undefined).sort()
+      .map((k) => `${JSON.stringify(k)}:${canonical(v[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(v) ?? 'null';
+}
+export function stableHash(obj) {
+  return createHash('sha256').update(canonical(obj)).digest('hex');
 }
 
 export function createBridge(opts = {}) {
@@ -470,22 +479,17 @@ export function createBridge(opts = {}) {
         }
         const cacheKey = `${tenantId}:${route}:${key}`;
         const inputHash = stableHash({ ...body, idempotencyKey: undefined });
-        const seen = idempotency.check(cacheKey, inputHash);
-        if (seen.hit) {
-          await audit.write({
-            tenant: tenantId, route, target: null, params: body,
-            result: 'deduplicated', status: 200, latencyMs: Date.now() - t0,
-            extra: { deduplicated: true },
-          });
-          sendJson(res, 200, seen.response);
-          return;
-        }
-        if (seen.conflict) throw bridgeError('idempotency_conflict', 'idempotency key reused with different input');
-        const response = await handleRoute(tenantId, route, body);
-        idempotency.store(cacheKey, inputHash, response);
+        let executed = false;
+        const out = await idempotency.run(cacheKey, inputHash, async () => {
+          executed = true;
+          return handleRoute(tenantId, route, body);
+        });
+        if (out.conflict) throw bridgeError('idempotency_conflict', 'idempotency key reused with different input');
+        const response = out.response;
         await audit.write({
           tenant: tenantId, route, target: null, params: body,
-          result: 'ok', status: 200, latencyMs: Date.now() - t0,
+          result: executed ? 'ok' : 'deduplicated', status: 200, latencyMs: Date.now() - t0,
+          ...(executed ? {} : { extra: { deduplicated: true } }),
         });
         sendJson(res, 200, response);
         return;
