@@ -50,6 +50,10 @@ actual API constraints and explicit task-specific holds still apply.
   [docs/SWARM-PLUG-IN.md](docs/SWARM-PLUG-IN.md).
 - Contribution/check commands: [CONTRIBUTING.md](CONTRIBUTING.md).
 - Test design help: [.agents/skills/test-audit/SKILL.md](.agents/skills/test-audit/SKILL.md).
+- Anything a person sees (UI, copy, empty states, emails) or code comments:
+  read [DESIGN.md](DESIGN.md) for direction, then
+  [.agents/skills/room-antislop/SKILL.md](.agents/skills/room-antislop/SKILL.md)
+  as the filter.
 - Live agent packet: <https://room.trydemigod.com/llms.txt>.
 - Hosted MCP: <https://room.trydemigod.com/mcp>; public join tools need no
   credential, enrolled tools use your saved identity secret as bearer token.
