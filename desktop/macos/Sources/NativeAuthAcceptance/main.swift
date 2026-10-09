@@ -8,6 +8,7 @@ import ProjectRoomKit
     weak var presentationContextProvider: ASWebAuthenticationPresentationContextProviding?
     let callback: (URL?, Error?) -> Void
     var started = 0
+    var cancelled = 0
     let startResult: Bool
     let state: String
     let browserStart: URL?
@@ -33,7 +34,7 @@ import ProjectRoomKit
         }
         return startResult
     }
-    func cancel() { callback(nil, NSError(domain: ASWebAuthenticationSessionErrorDomain, code: ASWebAuthenticationSessionError.Code.canceledLogin.rawValue)) }
+    func cancel() { cancelled += 1; callback(nil, NSError(domain: ASWebAuthenticationSessionErrorDomain, code: ASWebAuthenticationSessionError.Code.canceledLogin.rawValue)) }
 }
 @MainActor final class Acceptance: NSObject, NSApplicationDelegate {
     let url: URL
@@ -41,6 +42,8 @@ import ProjectRoomKit
     var sessions: [SyntheticAuthentication] = []
     var nextStartResult = true
     var completeWithRealBrowser = false
+    var cookieCommitInstalled = false
+    var releaseCookieCommit: CheckedContinuation<Void, Never>?
     init(url: URL) { self.url = url }
     func applicationDidFinishLaunching(_ notification: Notification) {
         room = RoomWindow(url: url, isolated: true, acceptanceAuthenticationFactory: { [unowned self] url, scheme, callback in
@@ -49,7 +52,11 @@ import ProjectRoomKit
             guard params.first(where: { $0.name == "state" })?.value?.count == 43,
                   params.first(where: { $0.name == "challenge" })?.value?.count == 43 else { fatalError("Missing state/PKCE proof") }
             let session = SyntheticAuthentication(state: params.first(where: { $0.name == "state" })!.value!, startResult: nextStartResult, browserStart: completeWithRealBrowser ? url : nil, provider: params.first(where: { $0.name == "provider" })?.value, callback: callback); sessions.append(session); return session
-        })
+        } , acceptanceCookieInstaller: { [unowned self] cookie, store in
+            await store.setCookie(cookie)
+            cookieCommitInstalled = true
+            await withCheckedContinuation { releaseCookieCommit = $0 }
+        }, acceptanceCookieCommitTimeoutNanoseconds: 1_000_000_000)
         room?.show()
         Task { @MainActor in
             do {
@@ -59,6 +66,16 @@ import ProjectRoomKit
                     if ready == true { break }
                     try await Task.sleep(nanoseconds: 50_000_000)
                 }
+                @MainActor func nativeBack() {
+                    func buttons(_ view: NSView) -> [NSButton] { ((view as? NSButton).map { [$0] } ?? []) + view.subviews.flatMap(buttons) }
+                    guard let root = room.window.contentView, let back = buttons(root).first(where: { $0.title == "Back" }) else { fatalError("Actual native Back control missing") }
+                    back.performClick(nil)
+                }
+                // Cancel before the asynchronous account-slot read can complete.
+                room.signIn(); nativeBack()
+                try await Task.sleep(nanoseconds: 500_000_000)
+                guard sessions.isEmpty, !room.webView.isHidden else { fatalError("Back during pending account read must prevent browser launch") }
+                print("NATIVE_AUTH_BACK_PRE_READ passed; actual toolbar cancels before async account read")
                 // Select the real minimal entrance choice and activate its provider link.
                 // A rapid menu invocation overlaps the actual WK navigation callback.
                 _ = try await room.webView.evaluateJavaScript("document.querySelector('#auth-signin-ui [data-password-mode=login]').click(); document.querySelector('#google-signin').click(); true")
@@ -67,12 +84,12 @@ import ProjectRoomKit
                 fputs("NATIVE_AUTH_ATTEMPTS \(sessions.count)\n", stderr)
                 guard sessions.count == 1, sessions[0].started == 1 else { fatalError("Overlapping browser authentication sessions") }
                 guard room.webView.isHidden else { fatalError("App must fence account changes during authentication") }
-                sessions[0].cancel()
+                nativeBack()
                 try await Task.sleep(nanoseconds: 100_000_000)
                 guard !room.webView.isHidden else { fatalError("Cancellation left the app hidden") }
                 @MainActor func labels(_ view: NSView) -> [String] { ((view as? NSTextField).map { [$0.stringValue] } ?? []) + view.subviews.flatMap(labels) }
                 guard let content = room.window.contentView, labels(content).contains("Sign-in cancelled. Your room is unchanged."), room.window.attachedSheet == nil else { fatalError("Actual canceledLogin must use cancellation copy without a failure dialog") }
-                print("NATIVE_AUTH_SINGLE_ATTEMPT passed; cancel restores visible app")
+                print("NATIVE_AUTH_SINGLE_ATTEMPT passed; actual Back cancels held browser and restores visible app")
                 _ = try await room.webView.evaluateJavaScript("document.querySelector('#google-signin').click(); true")
                 try await Task.sleep(nanoseconds: 500_000_000)
                 guard sessions.count == 2, sessions[1].provider == "google", room.webView.isHidden else { fatalError("Retry did not start a new isolated attempt") }
@@ -125,6 +142,32 @@ import ProjectRoomKit
                 print("NATIVE_AUTH_PROVIDER_INTENT passed; Google/GitHub preserved; generic menu omits provider")
                 completeWithRealBrowser = true
                 _ = try await room.webView.evaluateJavaScript("history.replaceState(null, '', '/?native_return=preserved&oauth=old&oauth=duplicate#pr-view/inbox'); document.querySelector('#google-signin').click(); true")
+                for _ in 0..<200 {
+                    if cookieCommitInstalled { break }
+                    try await Task.sleep(nanoseconds: 50_000_000)
+                }
+                guard cookieCommitInstalled, room.webView.isHidden else { fatalError("Held actual WK cookie commit must still fence the app") }
+                let savedHint = try await room.webView.evaluateJavaScript("localStorage.getItem('pr-had-account') === '1'")
+                guard savedHint as? Bool == true else { fatalError("Queued-cookie recovery must preserve non-secret startup probe hint") }
+                nativeBack(); room.signIn()
+                try await Task.sleep(nanoseconds: 100_000_000)
+                guard sessions.count == 7, room.webView.isHidden else { fatalError("Back during queued cookie commit must not retire it or start a replacement attempt") }
+                let committed = try await room.webView.callAsyncJavaScript("return (await (await fetch('/api/account-session')).json()).authenticated;", arguments: [:], in: nil, contentWorld: .page)
+                guard committed as? Bool == true else { fatalError("Cookie commit owner must use an actually installed WK account cookie") }
+                for _ in 0..<100 {
+                    if room.window.attachedSheet != nil { break }
+                    try await Task.sleep(nanoseconds: 50_000_000)
+                }
+                guard let uncertain = room.window.attachedSheet?.contentView else { fatalError("Held cookie callback must report bounded confirmation failure") }
+                let uncertainText = descendantViews(uncertain).compactMap { ($0 as? NSTextField)?.stringValue }.joined(separator: " ")
+                guard uncertainText.contains("couldn’t confirm"), !uncertainText.contains("unchanged"), !uncertainText.contains("cancelled") else { fatalError("Unknown cookie commit must not claim cancellation or unchanged account") }
+                guard let uncertainOK = descendantViews(uncertain).compactMap({ $0 as? NSButton }).first(where: { $0.keyEquivalent == "\r" || $0.title == "OK" }) else { fatalError("Cookie confirmation recovery acknowledgement missing") }
+                uncertainOK.performClick(nil)
+                nativeBack(); room.signIn()
+                guard room.webView.isHidden, sessions.count == 7 else { fatalError("Unknown queued cookie commit must keep replacement sign-in fenced") }
+                guard let release = releaseCookieCommit else { fatalError("Held real cookie completion missing") }
+                releaseCookieCommit = nil; release.resume()
+                print("NATIVE_AUTH_COOKIE_COMMIT passed; real cookie installed, Back fenced, bounded unknown report and late completion retained")
                 var nativeSession: [String: Any]?
                 for _ in 0..<200 {
                     try await Task.sleep(nanoseconds: 50_000_000)
@@ -153,6 +196,35 @@ import ProjectRoomKit
                 guard returnPreserved as? Bool == true else { fatalError("Native sign-in lost the original destination parameters") }
                 print("NATIVE_AUTH_VISIBLE_WORKSPACE passed; account signed in and welcome hidden; return parameters retained")
                 print("NATIVE_AUTH_REAL_GOOGLE_CALLBACK passed; actual PKCE201 and WK HttpOnly account readback")
+                for (limit, expectBrowser) in [(UInt64(20_000_000), false), (UInt64(450_000_000), true)] {
+                    var held: [SyntheticAuthentication] = []
+                    let timeoutRoom = RoomWindow(url: self.url, isolated: true, acceptanceAuthenticationFactory: { start, _, callback in
+                        let state = URLComponents(url: start, resolvingAgainstBaseURL: false)!.queryItems!.first(where: { $0.name == "state" })!.value!
+                        let session = SyntheticAuthentication(state: state, startResult: true, browserStart: nil, provider: nil, callback: callback)
+                        held.append(session); return session
+                    }, acceptanceAuthenticationTimeoutNanoseconds: limit)
+                    timeoutRoom.show()
+                    for _ in 0..<100 {
+                        let ready = try? await timeoutRoom.webView.evaluateJavaScript("document.querySelector('#auth-panel')?.hidden === false")
+                        if ready as? Bool == true { break }
+                        try await Task.sleep(nanoseconds: 50_000_000)
+                    }
+                    timeoutRoom.signIn()
+                    try await Task.sleep(nanoseconds: 800_000_000)
+                    guard !timeoutRoom.webView.isHidden, held.count == (expectBrowser ? 1 : 0), let sheet = timeoutRoom.window.attachedSheet?.contentView else { fatalError("Pending timeout must restore app and explain retry before or after browser launch") }
+                    let text = descendantViews(sheet).compactMap { ($0 as? NSTextField)?.stringValue }.joined(separator: " ")
+                    guard text.contains("took too long"), text.contains("email and password"), held.allSatisfy({ $0.cancelled == 1 }) else { fatalError("Timeout must cancel held browser once and offer email recovery") }
+                    guard let ok = descendantViews(sheet).compactMap({ $0 as? NSButton }).first(where: { $0.keyEquivalent == "\r" || $0.title == "OK" }) else { fatalError("Timeout recovery acknowledgement missing") }
+                    ok.performClick(nil)
+                    held.first?.callback(nil, NSError(domain: "stale timeout callback", code: 1))
+                    try await Task.sleep(nanoseconds: 50_000_000)
+                    guard timeoutRoom.window.attachedSheet == nil, !timeoutRoom.webView.isHidden else { fatalError("Stale callback resurrected timed-out attempt") }
+                    timeoutRoom.signIn(); timeoutRoom.back()
+                    try await Task.sleep(nanoseconds: 800_000_000)
+                    guard timeoutRoom.window.attachedSheet == nil, !timeoutRoom.webView.isHidden, held.count == (expectBrowser ? 1 : 0) else { fatalError("Retry/cancel did not retire its timer or pending read") }
+                    timeoutRoom.window.orderOut(nil)
+                    print("NATIVE_AUTH_TIMEOUT passed; browserStarted=\(expectBrowser); recovery, stale callback and retry cancellation")
+                }
                 exit(0)
             } catch { fputs("NATIVE_AUTH_FAILED \(error)\n", stderr); exit(1) }
         }

@@ -23,6 +23,8 @@ public enum RoomLocation {
 extension ASWebAuthenticationSession: RoomAuthenticationSession {}
 public typealias RoomAuthenticationFactory = @MainActor (URL, String, @escaping (URL?, Error?) -> Void) -> any RoomAuthenticationSession
 
+public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore) async -> Void
+
 @MainActor public final class RoomWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate, ASWebAuthenticationPresentationContextProviding {
     public let window: NSWindow
     public let webView: WKWebView
@@ -37,16 +39,28 @@ public typealias RoomAuthenticationFactory = @MainActor (URL, String, @escaping 
     private var signInAttempt: UUID?
     private var authenticationCallbackPending = false
     private var signInSlot: String?
+    private var authenticationTimeoutTask: Task<Void, Never>?
+    private let authenticationTimeoutNanoseconds: UInt64
+    private let cookieCommitTimeoutNanoseconds: UInt64
+    private let acceptanceCookieInstaller: RoomCookieInstaller?
+    private var cookieCommitPending = false
+    private var cookieCommitWaitExpired = false
     private var cancelledDownloads = Set<ObjectIdentifier>()
     private let acceptanceDownloadDestination: ((String) -> URL?)?
     public private(set) var completedDownloadCount = 0
     public private(set) var failedDownloadCount = 0
 
-    public init(url: URL, isolated: Bool = false, acceptanceDownloadDestination: ((String) -> URL?)? = nil, acceptanceAuthenticationFactory: RoomAuthenticationFactory? = nil) {
+    public init(url: URL, isolated: Bool = false, acceptanceDownloadDestination: ((String) -> URL?)? = nil, acceptanceAuthenticationFactory: RoomAuthenticationFactory? = nil, acceptanceAuthenticationTimeoutNanoseconds: UInt64? = nil, acceptanceCookieInstaller: RoomCookieInstaller? = nil, acceptanceCookieCommitTimeoutNanoseconds: UInt64? = nil) {
         precondition(RoomLocation.allowed(url))
         // Destination overrides are restricted to isolated loopback acceptance.
         precondition(acceptanceDownloadDestination == nil || (isolated && url.scheme == "http" && ["localhost", "127.0.0.1"].contains(url.host ?? "")))
         precondition(acceptanceAuthenticationFactory == nil || (isolated && url.scheme == "http" && ["localhost", "127.0.0.1"].contains(url.host ?? "")))
+        precondition(acceptanceAuthenticationTimeoutNanoseconds == nil || (isolated && url.scheme == "http" && ["localhost", "127.0.0.1"].contains(url.host ?? "") && acceptanceAuthenticationTimeoutNanoseconds! > 0 && acceptanceAuthenticationTimeoutNanoseconds! <= 300_000_000_000))
+        precondition(acceptanceCookieInstaller == nil || (isolated && url.scheme == "http" && ["localhost", "127.0.0.1"].contains(url.host ?? "")))
+        precondition(acceptanceCookieCommitTimeoutNanoseconds == nil || (isolated && url.scheme == "http" && ["localhost", "127.0.0.1"].contains(url.host ?? "") && acceptanceCookieCommitTimeoutNanoseconds! > 0 && acceptanceCookieCommitTimeoutNanoseconds! <= 10_000_000_000))
+        self.acceptanceCookieInstaller = acceptanceCookieInstaller
+        self.cookieCommitTimeoutNanoseconds = acceptanceCookieCommitTimeoutNanoseconds ?? 10_000_000_000
+        self.authenticationTimeoutNanoseconds = acceptanceAuthenticationTimeoutNanoseconds ?? 300_000_000_000
         self.acceptanceAuthenticationFactory = acceptanceAuthenticationFactory
         self.acceptanceDownloadDestination = acceptanceDownloadDestination
         self.origin = URL(string: "\(url.scheme!)://\(url.host!)\(url.port.map { ":\($0)" } ?? "")")!
@@ -99,7 +113,10 @@ public typealias RoomAuthenticationFactory = @MainActor (URL, String, @escaping 
         webView.load(URLRequest(url: url))
     }
     public func windowShouldClose(_ sender: NSWindow) -> Bool { window.orderOut(nil); return false }
-    @objc public func back() { if !signInPending { webView.goBack() } }
+    @objc public func back() {
+        if signInPending { cancelAuthentication(message: "Sign-in cancelled. Your room is unchanged.") }
+        else { webView.goBack() }
+    }
     @objc public func forward() { if !signInPending { webView.goForward() } }
     @objc public func reload() { if !signInPending { webView.reload() } }
     @objc public func goTo() {
@@ -115,6 +132,12 @@ public typealias RoomAuthenticationFactory = @MainActor (URL, String, @escaping 
         let attempt = UUID()
         signInAttempt = attempt
         signInPending = true
+        authenticationTimeoutTask = Task { @MainActor [weak self, timeout = authenticationTimeoutNanoseconds] in
+            do { try await Task.sleep(nanoseconds: timeout) } catch { return }
+            guard let self, self.currentAuthentication(attempt) else { return }
+            self.cancelAuthentication(message: "Browser sign-in timed out. Your room is unchanged.")
+            self.tell("Browser sign-in took too long. Try again, or use email and password in this window.")
+        }
         webView.evaluateJavaScript("document.querySelector('#auth-panel')?.hidden === false && document.querySelector('#auth-signin-ui')?.getAttribute('aria-busy') !== 'true'") { [weak self] value, _ in
             guard let self, self.currentAuthentication(attempt) else { return }
             guard value as? Bool == true else { self.endAuthentication(attempt); self.tell("Open Account and sign out before signing in with a different account."); return }
@@ -186,9 +209,25 @@ public typealias RoomAuthenticationFactory = @MainActor (URL, String, @escaping 
         if !session.start() { authentication = nil; endAuthentication(attempt); tell("The browser sign-in session could not open. Email and password sign-in are available in the window.") }
         else { status.stringValue = "Finish signing in in your browser…" }
     }
+    private func cancelAuthentication(message: String) {
+        guard let attempt = signInAttempt, currentAuthentication(attempt) else { return }
+        // Once the cookie write is queued, cancellation cannot undo its effect.
+        // Keep the attempt fenced until its completion, including a late callback.
+        if cookieCommitPending {
+            status.stringValue = cookieCommitWaitExpired ? "Sign-in outcome not confirmed. Wait or quit and reopen." : "Finishing sign-in…"
+            return
+        }
+        let session = authentication
+        // Retire the attempt before cancel(): cancellation callbacks can be synchronous.
+        endAuthentication(attempt)
+        session?.cancel()
+        status.stringValue = message
+    }
     private func endAuthentication(_ attempt: UUID) {
         guard currentAuthentication(attempt) else { return }
+        authenticationTimeoutTask?.cancel(); authenticationTimeoutTask = nil
         signInPending = false; signInAttempt = nil; authenticationCallbackPending = false
+        cookieCommitPending = false; cookieCommitWaitExpired = false
         signInSlot = nil; pendingDestination = nil; authentication = nil; webView.isHidden = false
     }
     private func completeAuthentication(code: String, verifier: String, attempt: UUID) async {
@@ -209,10 +248,29 @@ public typealias RoomAuthenticationFactory = @MainActor (URL, String, @escaping 
             let headers = http.allHeaderFields.reduce(into: [String: String]()) { result, entry in result[String(describing: entry.key)] = String(describing: entry.value) }
             let cookies = HTTPCookie.cookies(withResponseHeaderFields: headers, for: origin)
             guard let cookie = cookies.first(where: { $0.name == "account_session" || $0.name == "__Host-account_session" }), cookie.isHTTPOnly else { tell("Sign-in could not be installed securely. Start again."); return }
+            // A queued cookie may complete even if its confirmation is lost.
+            // Save only the existing non-secret hint so a later app launch probes it.
+            _ = try? await webView.evaluateJavaScript("localStorage.setItem('pr-had-account', '1')")
+            guard currentAuthentication(attempt) else { return }
             let slot = try await webView.callAsyncJavaScript("const s = await (await fetch('/api/account-session')).json(); return s.authenticated ? null : JSON.stringify([s.sessionBinding,s.sessionRevision]);", arguments: [:], in: nil, contentWorld: .page)
             guard currentAuthentication(attempt) else { return }
             guard let tuple = slot as? String, tuple == signInSlot else { tell("The account changed while signing in. Your current session was kept."); return }
-            await webView.configuration.websiteDataStore.httpCookieStore.setCookie(cookie)
+            cookieCommitPending = true
+            status.stringValue = "Finishing sign-in…"
+            authenticationTimeoutTask?.cancel()
+            authenticationTimeoutTask = Task { @MainActor [weak self, timeout = cookieCommitTimeoutNanoseconds] in
+                do { try await Task.sleep(nanoseconds: timeout) } catch { return }
+                guard let self, self.currentAuthentication(attempt), self.cookieCommitPending else { return }
+                self.cookieCommitWaitExpired = true
+                self.status.stringValue = "Sign-in outcome not confirmed. Wait or quit and reopen."
+                self.tell("Sign-in was sent to this app, but we couldn’t confirm it finished. Keep this window open; don’t start another sign-in. If it stays stuck, quit and reopen Project Room.")
+            }
+            let cookieStore = webView.configuration.websiteDataStore.httpCookieStore
+            if let acceptanceCookieInstaller { await acceptanceCookieInstaller(cookie, cookieStore) }
+            else { await cookieStore.setCookie(cookie) }
+            guard currentAuthentication(attempt) else { return }
+            authenticationTimeoutTask?.cancel(); authenticationTimeoutTask = nil
+            cookieCommitPending = false; cookieCommitWaitExpired = false
             status.stringValue = "Signed in"
             webView.isHidden = false
             // A new WK store has no browser account hint. Explicitly restore
