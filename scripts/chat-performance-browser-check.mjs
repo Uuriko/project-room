@@ -81,6 +81,54 @@ test('ordinary chat arrivals preserve historical DOM and fetch only changed requ
   assert.deepEqual(errors, []);
 });
 
+// Board claim lines ("X claimed Y") sit between messages and carry no data-key.
+// renderMessages used to keep every one of them but the last in place and then
+// move each message row after the first claim line, on every arrival.
+test('chat arrivals in a room with board claim lines move no message rows', { timeout: 30000 }, async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'project-room-claim-rows-'));
+  const store = new RoomStore(join(directory, 'room.sqlite'));
+  const start = Date.now() - 3600000, events = [];
+  const at = minute => new Date(start + minute * 60000).toISOString();
+  for (let index = 0; index < 40; index++) events.push(event({ roomId: 'commons', actorId: 'owner', type: T.MESSAGE_POSTED, at: at(index),
+    data: { messageId: `claim-row-history-${index}`, body: `History ${index}` } }));
+  for (const [index, minute] of [[0, 10.5], [1, 22.5], [2, 33.5]]) events.push(event({ roomId: 'commons', actorId: 'owner',
+    type: 'work_claim.updated', at: at(minute), data: { workClaim: `claim-row-${index}`, action: 'claimed', title: `Claim ${index}`, claimState: 'claimed', ownerId: 'owner', leaseExpiresAt: null, paths: [] } }));
+  events.sort((a, b) => a.at.localeCompare(b.at));
+  store.initialize([...initialRoom('commons', 'owner'), ...events]);
+  const ownerKey = store.issueAccessKey('commons', 'owner');
+  const server = createRoomServer({ store, streamInterval: 50 });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+  t.after(async () => {
+    await browser.close(); server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    store.close(); rmSync(directory, { recursive: true, force: true });
+  });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await signInFixture(page, ownerKey);
+  await page.locator('[data-message-record-id="claim-row-history-39"]').waitFor();
+  await page.locator('#message-list > [data-claim-update]').nth(2).waitFor({ state: 'attached' });
+  await page.evaluate(() => {
+    globalThis.claimRowMoves = 0;
+    new MutationObserver(rows => { for (const row of rows) for (const node of row.removedNodes) if (node.classList?.contains('message')) globalThis.claimRowMoves++; })
+      .observe(document.getElementById('message-list'), { childList: true });
+  });
+  for (const id of ['claim-row-arrival-1', 'claim-row-arrival-2']) {
+    store.command(ownerKey, 'commons', { id, type: 'message.posted', data: { messageId: id, body: `Arrival ${id}` } });
+    await page.locator(`[data-message-record-id="${id}"]`).waitFor();
+  }
+  await page.waitForTimeout(200);
+  assert.equal(await page.evaluate(() => globalThis.claimRowMoves), 0, 'message rows stay in place when board claim lines are in the timeline');
+  const order = await page.locator('#message-list > *').evaluateAll(nodes => nodes.map(node => node.dataset.claimUpdate ? `claim:${node.dataset.claimUpdate}` : node.dataset.messageRecordId).filter(Boolean));
+  const after = id => order[order.indexOf(id) + 1];
+  assert.deepEqual([after('claim-row-history-10'), after('claim-row-history-22'), after('claim-row-history-33')], ['claim:claim-row-0', 'claim:claim-row-1', 'claim:claim-row-2']);
+  assert.equal(order.filter(entry => entry.startsWith('claim:')).length, 3, 'each claim line is painted once');
+  assert.deepEqual(order.slice(-2), ['claim-row-arrival-1', 'claim-row-arrival-2']);
+  assert.deepEqual(errors, []);
+});
+
 test('snapshot labels update duplicates while preserving focus and selection, and late old-room data cannot replace new labels', { timeout: 45000 }, async t => {
   const f = createAcceptanceFixture(), other = initialRoom('other', 'owner');
   other[0].data.title = 'Another private room'; other[1].data.displayName = 'Another private owner';
@@ -179,4 +227,43 @@ test('large room history completes initial render with a bounded live message DO
   assert.equal(store.snapshot(ownerKey, 'commons').state.messages.length, 2000, 'DOM windowing must not discard room history');
   assert.deepEqual(errors, [], 'initial render completes without browser errors');
   console.log(`render window workload: 2,000 messages, ~1.7 MB text, ${rendered} live nodes, ${initialRenderMs.toFixed(0)} ms until sentinel`);
+});
+
+test('typing in the composer leaves unchanged reply text untouched', { timeout: 30000 }, async t => {
+  // Every keystroke runs updateReply(). Rewriting an unchanged text node there
+  // forced a layout of the whole timeline per key (~600 ms per key at 5,000
+  // messages on a throttled phone CPU), so typing lagged in big rooms.
+  const f = createAcceptanceFixture();
+  for (let i = 0; i < 20; i++) f.store.command(f.keys[i % 2 ? 'producer' : 'owner'], 'commons', { id: `typing-${i}`, type: 'message.posted', data: { messageId: `typing-${i}`, body: `Message ${i}` } });
+  const server = createRoomServer({ store: f.store, streamInterval: 50 });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+  t.after(async () => {
+    await browser.close(); server.closeStreams(); server.closeAllConnections();
+    if (server.listening) await new Promise(resolve => server.close(resolve));
+    f.store.close(); rmSync(f.directory, { recursive: true, force: true });
+  });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await signInFixture(page, f.keys.owner);
+  await page.locator('[data-message-record-id="typing-19"]').waitFor();
+  const watch = () => page.evaluate(() => {
+    globalThis.replyWrites = 0;
+    globalThis.replyObserver?.disconnect();
+    globalThis.replyObserver = new MutationObserver(rows => { globalThis.replyWrites += rows.length; });
+    for (const id of ['reply-context', 'reply-mention']) globalThis.replyObserver.observe(document.getElementById(id), { childList: true, characterData: true, subtree: true });
+  });
+  const writes = () => page.evaluate(() => globalThis.replyWrites);
+  const input = page.locator('#message-input');
+  await input.click(); await input.pressSequentially('a'); await watch();
+  await input.pressSequentially('nother thought', { delay: 5 });
+  assert.equal(await writes(), 0, 'no reply target: typing rewrites no reply text');
+  await page.locator('[data-message-record-id="typing-19"] [data-message-action="reply"]').evaluate(node => node.click());
+  await page.waitForFunction(() => document.getElementById('reply-mention').textContent.startsWith('Also @ '));
+  await input.pressSequentially(' x'); await watch();
+  await input.pressSequentially(' and more', { delay: 5 });
+  assert.equal(await writes(), 0, 'replying: plain typing rewrites no reply text');
+  assert.match(await page.locator('#reply-mention').textContent(), /^Also @ /);
+  assert.deepEqual(errors, []);
 });

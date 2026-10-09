@@ -8,6 +8,7 @@
 
 import { randomUUID } from "node:crypto";
 import { EVENT_TYPES as T } from "../../src/events.js";
+import { makeTestSigner } from "../../scripts/helpers/signed-evidence.mjs";
 
 const ROOM = "commons";
 
@@ -85,18 +86,45 @@ export function releaseClaim(f, workItemId, { actor = f.keys.owner } = {}) {
   });
 }
 
-// Complete a work item. Returns the receipt.
-export function completeWork(f, workItemId, { actor = f.keys.owner, summary = "Invariant scenario result" } = {}) {
+// Complete a work item. Returns the command receipt (the store's return,
+// whose event carries the completion). The live completion path requires
+// nextAction plus a signed evidence object, so the helper signs one with a
+// throwaway test identity on the scenario's store. `commandId` is exposed so
+// retry scenarios can replay the exact command id (the store's idempotency
+// key); a fresh id is used by default. `signedEvidence` is exposed for the
+// same reason: an honest retry replays byte-identical content, while a
+// fresh evidence object would (correctly) trip the store's
+// idempotency_conflict guard.
+export function completeWork(f, workItemId, { actor = f.keys.owner, summary = "Invariant scenario result", nextAction = "none", commandId = randomUUID(), signedEvidence, expectedRevision } = {}) {
+  const evidence = signedEvidence ?? makeTestSigner(f.store)();
   return f.store.command(actor, ROOM, {
-    id: randomUUID(),
+    id: commandId,
     type: T.WORK_COMPLETED,
     data: {
       workItemId,
-      expectedRevision: workItemRevision(f, actor, workItemId),
+      expectedRevision: expectedRevision ?? workItemRevision(f, actor, workItemId),
       summary,
+      nextAction,
       evidenceUrl: "https://example.invalid/invariant-result",
       evidenceVersion: "v1",
+      signedEvidence: evidence,
       producerId: "owner",
+    },
+  });
+}
+
+// Renew a claim's lease (T.CLAIM_RENEWED). Defaults are well-formed; pass
+// overrides to exercise validation failures. Returns the receipt on
+// success, or throws the refusal on failure.
+export function renewClaim(f, workItemId, { actor = f.keys.owner, overrides = {} } = {}) {
+  return f.store.command(actor, ROOM, {
+    id: randomUUID(),
+    type: T.CLAIM_RENEWED,
+    data: {
+      workItemId,
+      expectedRevision: workItemRevision(f, actor, workItemId),
+      expiresAt: new Date(Date.now() + 7200000).toISOString(),
+      ...overrides,
     },
   });
 }

@@ -100,9 +100,12 @@ export function messageVisibleToViewer(message, viewerId, floor) {
 // The floor for a summary read. Fails closed: if the floor cannot be read,
 // the viewer sees no message text rather than all of it.
 export function summaryHistoryFloor(store, roomId, viewerId, headSequence = null) {
-  if (typeof store?.historyFloor !== "function") return null;
+  // A store that cannot report a floor (a mock, a custom adapter) is the same
+  // "cannot be read" case as a floor that throws: deny all message text.
+  const denyAll = () => ({ sequence: Number.MAX_SAFE_INTEGER, at: "9999-12-31T23:59:59.999Z", sameInstant: new Set() });
+  if (typeof store?.historyFloor !== "function") return denyAll();
   try { return store.historyFloor(roomId, viewerId, headSequence); }
-  catch { return { sequence: Number.MAX_SAFE_INTEGER, at: "9999-12-31T23:59:59.999Z", sameInstant: new Set() }; }
+  catch { return denyAll(); }
 }
 
 // Later events can carry an earlier message's text or reference it (edits,

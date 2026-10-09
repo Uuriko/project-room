@@ -261,6 +261,8 @@ const JSON_BODY_BYTES = 16384;
 const rateHash = value => createHash("sha256").update(String(value)).digest("hex");
 // A lagging stream that still has not drained its final event by now is dropped.
 const STREAM_DRAIN_GRACE_MS = 5000;
+// Messages a `?messages=recent` room snapshot carries (the /conversation page maximum).
+const SNAPSHOT_RECENT_MESSAGES = 100;
 
 // Least-recently-used bookkeeping for small internal caches (channel senders).
 // Returns the cached value for key, marking it most-recently-used; when key is
@@ -2656,10 +2658,21 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const data = await body(req);
         const hasProof = Boolean(data) && Object.hasOwn(data, "proof");
         const hasInvite = Boolean(data) && Object.hasOwn(data, "inviteCode");
-        const joinFields = ["displayName", ...(hasInvite ? ["inviteCode"] : []), ...(hasProof ? ["proof"] : [])];
+        const hasRecoverable = Boolean(data) && Object.hasOwn(data, "recoverable");
+        const joinFields = ["displayName", ...(hasInvite ? ["inviteCode"] : []), ...(hasProof ? ["proof"] : []), ...(hasRecoverable ? ["recoverable"] : [])];
         if (!data || !exact(data, joinFields)) {
-          reject(422, "invalid_join", "displayName, an optional inviteCode, and an optional proof are the accepted fields");
+          reject(422, "invalid_join", "displayName, an optional inviteCode, an optional proof, and an optional recoverable flag are the accepted fields");
         }
+        // Retry-safe first-room join: `recoverable: true` with the caller's own
+        // generated pri_ secret as the bearer. The identity id derives from that
+        // secret, so a retry after a lost response returns the same identity and
+        // the same personal room (duplicate: true) instead of minting a second
+        // identity and room. The anonymous (no invite) branch only.
+        if (hasRecoverable && (data.recoverable !== true || hasInvite)) {
+          reject(422, "invalid_join", "recoverable must be true and applies only to a join without an inviteCode");
+        }
+        const recoverableSecret = hasRecoverable ? bearer(req) : undefined;
+        if (hasRecoverable && !recoverableSecret) reject(401, "unauthenticated", "Saved registration credential required");
         const name = typeof data.displayName === "string" ? data.displayName.trim() : "";
         if (!name || name.length > 80) reject(422, "invalid_join", "displayName must be 1-80 characters");
         if (hasProof && (typeof data.proof !== "string" || !/^[A-Za-z0-9_-]{1,43}$/.test(data.proof))) {
@@ -2706,9 +2719,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           // Atomic: a failed room creation rolls the identity insert back
           // with it, so no orphan identity can survive a half-done join.
           const createdIdentity = store.identities.create(name, {
+            secret: recoverableSecret,
             anonymous: { address: String(remoteAddress ?? ""), proof: data.proof },
           });
-          const createdRoom = agentRooms.create(createdIdentity.secret, {
+          const createdRoom = agentRooms.create(recoverableSecret ?? createdIdentity.secret, {
             roomId: `personal-${createdIdentity.identityId}`,
             title: `${name}'s room`,
             purpose: "A personal room for getting oriented and starting work.",
@@ -2737,8 +2751,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           sessionExpiresAt: firstJoined.expiresAt,
           next: [
             "You are signed in — open the room below",
-            "Save identitySecret too — it is shown once and never again, for agent tooling",
-            `Authenticate: Authorization: Bearer <identitySecret> on /api/rooms/${room.roomId}/…`,
+            recoverableSecret
+              ? "Your own pri_ secret is your credential; retry this call with the same secret and you get this identity and room back"
+              : "Save identitySecret too — it is shown once and never again, for agent tooling",
+            `Authenticate: Authorization: Bearer <${recoverableSecret ? "your pri_ secret" : "identitySecret"}> on /api/rooms/${room.roomId}/…`,
             `Orient: GET /api/rooms/${room.roomId}/activation-pack`,
             `Read the room: GET /api/rooms/${room.roomId}?view=work`
           ]
@@ -2974,13 +2990,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!secret) reject(401, "unauthenticated", "Sign in with an active room key or agent identity secret");
         const data = await body(req);
         const withCap = Object.hasOwn(data, "maxDepth");
-        if (!(exact(data, withCap ? ["roomId", "maxDepth"] : ["roomId"]))
+        const withKey = Object.hasOwn(data, "requestId");
+        if (!(exact(data, ["roomId", ...(withCap ? ["maxDepth"] : []), ...(withKey ? ["requestId"] : [])]))
             || typeof data.roomId !== "string"
             || (withCap && typeof data.maxDepth !== "number")) {
-          reject(422, "invalid_invite", "roomId and optional numeric maxDepth are the accepted fields");
+          reject(422, "invalid_invite", "roomId, optional numeric maxDepth and optional requestId are the accepted fields");
         }
         return json(res, 201, store.referralInvites.mint(secret, data.roomId,
-          withCap ? { maxDepth: data.maxDepth } : {}));
+          { ...(withCap ? { maxDepth: data.maxDepth } : {}), ...(withKey ? { requestId: data.requestId } : {}) }));
       }
       if (url.pathname === "/api/referral-invites/mint" && req.method !== "POST") {
         reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
@@ -3272,21 +3289,29 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (action === "add_land_item") {
             if (!data || typeof data !== "object" || Array.isArray(data)) reject(422, "invalid_land_item", "repo and prNumber are required");
             const claimant = Object.hasOwn(data, "claimantMemberId") ? data.claimantMemberId : null;
-            const allowed = claimant === null ? ["repo", "prNumber"] : ["repo", "prNumber", "claimantMemberId"];
+            // B6: requestId is the caller's idempotency key — a retry with the
+            // same key replays the stored response instead of re-executing.
+            // exact() matches the key set precisely, so the allowed list is
+            // built from the optional keys actually present.
+            const allowed = ["repo", "prNumber"];
+            if (claimant !== null) allowed.push("claimantMemberId");
+            if (data.requestId !== undefined) allowed.push("requestId");
             if (!exact(data, allowed) || typeof data.repo !== "string" || !Number.isSafeInteger(data.prNumber)) {
               reject(422, "invalid_land_item", "repo and prNumber are required");
             }
             const result = await store.landQueue.add(roomId, auth.member.id, {
-              repo: data.repo, prNumber: data.prNumber, claimantMemberId: claimant
+              repo: data.repo, prNumber: data.prNumber, claimantMemberId: claimant,
+              requestId: data.requestId ?? null
             });
             return json(res, result.duplicate ? 200 : 201, result);
           }
           if (action === "remove_land_item") {
-            if (!exact(data, ["itemId"]) || typeof data.itemId !== "string") reject(422, "invalid_land_item", "itemId is required");
-            return json(res, 200, store.landQueue.remove(roomId, auth.member.id, { itemId: data.itemId }));
+            const removeAllowed = data.requestId === undefined ? ["itemId"] : ["itemId", "requestId"];
+            if (!exact(data, removeAllowed) || typeof data.itemId !== "string") reject(422, "invalid_land_item", "itemId is required");
+            return json(res, 200, store.landQueue.remove(roomId, auth.member.id, { itemId: data.itemId, requestId: data.requestId ?? null }));
           }
           const tipKeys = Object.keys(data ?? {});
-          const tipAllowed = tipKeys.every(key => ["itemId", "sourceRevision", "buildId"].includes(key)) && tipKeys.includes("itemId");
+          const tipAllowed = tipKeys.every(key => ["itemId", "sourceRevision", "buildId", "requestId"].includes(key)) && tipKeys.includes("itemId");
           if (!tipAllowed || typeof data.itemId !== "string") reject(422, "invalid_land_tip", "itemId and a tip field are required");
           return json(res, 200, store.landQueue.reportTip(roomId, auth.member.id, data));
         } catch (error) {
@@ -3918,6 +3943,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (!route && req.method === "GET") {
         const params = url.searchParams;
+        // `?messages=recent`: the full snapshot with only the newest
+        // SNAPSHOT_RECENT_MESSAGES visible messages. A busy room's full
+        // history (muse-room: 5,300+ messages, ~5 MB) no longer has to ship
+        // on every open; older history pages through /conversation.
+        const recentMessages = params.has("messages");
+        if (recentMessages && (params.has("view") || params.get("messages") !== "recent"
+          || [...params.keys()].some(key => !["messages", "auth"].includes(key) || params.getAll(key).length !== 1))) {
+          reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
+        }
         if (params.has("view") && (params.getAll("view").length !== 1 || params.get("view") !== "work"
           || [...params.keys()].some(key => !["view", "auth"].includes(key) || params.getAll(key).length !== 1))) {
           reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
@@ -3937,12 +3971,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           // existence. The work view carries none of these.
           const visibleMessages = (snapshot.state.messages ?? []).filter(dmMessageVisible);
           const visibleIds = new Set(visibleMessages.map(message => message.id));
+          // The recent window trims after DM filtering, so hidden DMs never
+          // count toward it; pins still follow every visible message.
+          const windowed = recentMessages ? visibleMessages.slice(-SNAPSHOT_RECENT_MESSAGES) : visibleMessages;
           const nextState = { ...snapshot.state,
-            messages: visibleMessages,
+            messages: windowed,
             eventLog: (snapshot.state.eventLog ?? []).filter(roomEventVisible),
             pins: (snapshot.state.pins ?? []).filter(pin => visibleIds.has(pin.messageId)) };
           if (snapshot.state.bonds) nextState.bonds = visibleBonds(snapshot.state.bonds, peerContext);
           snapshot.state = redactSnapshotState(nextState);
+          if (recentMessages) snapshot.messagesWindow = { mode: "recent", limit: SNAPSHOT_RECENT_MESSAGES,
+            omitted: visibleMessages.length - windowed.length, older: "conversation" };
         }
         return json(res, 200, snapshot);
       }

@@ -439,6 +439,8 @@ export class MachineBot {
     while (this.active && !this.stopped) {
       if (this.isHalted()) return this.stopEarly("Halted by the operator. I stopped before the next step.");
       if (await this.isPaused(this.active.roomId)) return this.stopEarly("Paused. I stopped before the next step.");
+      const lost = await this.boardStop();
+      if (lost) return this.stopReleased(lost);
       const before = this.budgetReason();
       if (before) return this.stopEarly(before);
       const observations = this.active.observations;
@@ -449,11 +451,17 @@ export class MachineBot {
       if (turn.error && !(turn.actions ?? []).length) return this.stopEarly(turn.error);
       const after = this.budgetReason();
       if (after) return this.stopEarly(after);
-      if (!(turn.actions ?? []).length) return this.finish(turn.text || "Done.");
+      if (!(turn.actions ?? []).length) {
+        const gone = await this.boardStop();
+        if (gone) return this.stopReleased(gone);
+        return this.finish(turn.text || "Done.");
+      }
       for (const action of turn.actions) {
         if (this.stopped) return { stopped: true };
         if (this.isHalted()) return this.stopEarly("Halted by the operator. I stopped before the next step.");
         if (await this.isPaused(this.active.roomId)) return this.stopEarly("Paused. I stopped before the next step.");
+        const released = await this.boardStop();
+        if (released) return this.stopReleased(released);
         const reason = this.budgetReason();
         if (reason) return this.stopEarly(reason);
         const executed = await this.execute(action);
@@ -571,6 +579,40 @@ export class MachineBot {
       await this.sleep(40);
     }
     return { ok: false, message: "The approval expired before the owner replied." };
+  }
+
+  // Independent Stop for one task: the owner (or a claim manager) stops this
+  // bot's task by releasing, reassigning or closing its board item, without
+  // halting the machine. Re-read the item between steps; a transient read
+  // failure keeps working, a missing or no-longer-held item stops.
+  async boardStop() {
+    const active = this.active;
+    if (!active?.workId || typeof this.api?.claim !== "function") return null;
+    const read = await this.api.claim(active.roomId, active.workId);
+    if (!read.ok) {
+      return read.status === 404 || read.status === 410
+        ? "This item was removed from the board. I stopped before the next step."
+        : null;
+    }
+    const item = read.value ?? {};
+    const memberId = this.memberIds.get(active.roomId) ?? null;
+    if (item.state === "unclaimed") return "This item was released on the board. I stopped before the next step.";
+    if (item.state === "done" || item.state === "closed") return "This item was closed on the board. I stopped before the next step.";
+    if (memberId && item.owner && item.owner !== memberId) return "This item was reassigned on the board. I stopped before the next step.";
+    return null;
+  }
+
+  // Like stopEarly, but the work item is no longer ours: give back the slot
+  // lease and leave the item where its new holder (or the owner) put it.
+  async stopReleased(message) {
+    const active = this.active;
+    if (!active) return { stopped: true };
+    await this.reply(active.roomId, message, active.messageId, active.updateId, active.basisToken);
+    await this.api.updateClaim(active.roomId, active.leaseId, { state: "unclaimed", note: message.slice(0, 200) });
+    this.clearSlot(active);
+    this.active = null;
+    await this.saveState();
+    return { stopped: true, released: true, message };
   }
 
   async stopEarly(message) {

@@ -34,7 +34,7 @@
 // 409; unknown ids as 404. Unknown errors are rethrown for the generic 500
 // path — never wrapped, so no internal detail leaks.
 import {
-  createWork, claimWork, updateWork, appendWorkPullRequest, attestWork, recordReview, reassignWork, releaseExpired, canCloseWork,
+  createWork, claimWork, updateWork, releaseWork, appendWorkPullRequest, attestWork, recordReview, reassignWork, releaseExpired, canCloseWork,
   renewWork, roomWorkClaimConfig, closeWhenLive, isReceiptTag, ClaimError, REVIEW_POLICIES, CLAIM_KINDS,
   claimUpdatedAt, ACTIVE_CLAIM_STATES, MAX_LEASE_HOURS, STATES, summarizeClaimHistory, isHardWork,
   walkProvenance, flagPremiseInvalid, clearPremiseFlag, closeWork, isTerminalClaimState, claimHistoryLength,
@@ -1038,7 +1038,11 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "update" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs", "readingAck", "parentClaimId", "evidenceRefs", "expectedClaimedAt", "expectedHistoryLength"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?, readingAck?, parentClaimId?, evidenceRefs?, expectedClaimedAt?, expectedHistoryLength?}");
+    if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs", "readingAck", "parentClaimId", "evidenceRefs", "requestId", "expectedClaimedAt", "expectedHistoryLength"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?, readingAck?, parentClaimId?, evidenceRefs?, requestId?, expectedClaimedAt?, expectedHistoryLength?}");
+    if (data.requestId !== undefined
+      && (typeof data.requestId !== "string" || !CLAIM_ID_PATTERN.test(data.requestId))) {
+      invalidInput(reject, "requestId must be 1..128 characters [A-Za-z0-9_-]");
+    }
     if (data.state === undefined && data.note === undefined && data.readingAck === undefined) invalidInput(reject, "a state transition, a note, or a reading ack");
     // W012 required reading: the owner confirms they read the enrollment
     // reading list. { docs: [...] } is validated by the pure machine; a
@@ -1046,6 +1050,15 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (data.readingAck !== undefined && !shape(data.readingAck, { required: ["docs"] })) invalidInput(reject, "readingAck: {docs: [...]}");
     const item = load(claimIdOf(reject, workClaimId));
     if (item.owner !== caller) reject(403, "work_not_owner", `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
+    // PRODUCT-200 A4 (QA-200 AQ-HI-06): opt-in idempotency. A requestId
+    // that already landed on this claim replays the stored outcome (200,
+    // the current item) with no new write, no history entry and no room
+    // event — a timed-out retry cannot duplicate the update. It runs before
+    // the stale-basis precondition: the client already got its 200 for this
+    // request, so a retry carrying a now-stale basis is still a replay.
+    if (data.requestId !== undefined && Object.hasOwn(item.requestOutcomes ?? {}, data.requestId)) {
+      return json(res, 200, item);
+    }
     requireWriter();
     requireEventBudget();
     // QA-200 worker-13 (C3/E4): opt-in round precondition on plain note/state
@@ -1106,7 +1119,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     }
     const updated = runPure(reject, () => updateWork(item, caller,
       { state: data.state, note: data.note, deliveryMode: data.deliveryMode, reviewedBy: data.reviewedBy,
-        tags: data.tags, blobs: data.blobs, parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs, now: nowMs }));
+        tags: data.tags, blobs: data.blobs, parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs,
+        requestId: data.requestId, now: nowMs }));
     if (data.state === "done") {
       // Jev-harness receipt-acceptance gate, shadow mode (docs/JEV-GATES.md):
       // score the receipt, journal the would-be verdict (flagging
@@ -1197,26 +1211,44 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "release" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { optional: ["note", "reason"] })) invalidInput(reject, "{reason?, note?}");
-    let item = load(claimIdOf(reject, workClaimId));
+    const item = load(claimIdOf(reject, workClaimId));
     const authority = authorityOver(item);
+    // E5/D4 (QA-200 2026-10-08): ownership is checked before the body
+    // shape, so a non-holder is always refused with 403 work_not_owner
+    // (abuse-guards C2) regardless of what the body carries.
+    if (!shape(data, { required: ["expectedClaimedAt", "expectedHistoryLength"], optional: ["note", "reason"] }))
+      invalidInput(reject, "{expectedClaimedAt, expectedHistoryLength, reason?, note?}");
     requireEventBudget();
     const reason = text(Object.hasOwn(data, "reason") ? "reason" : "note", data.reason ?? data.note, { multiline: true });
-    // W2 (QA 2026-09-28): /release used to 422 on in_progress claims with no
-    // recovery path. The pure machine's release path is claimed -> unclaimed,
-    // so route an active claim through the pause transition internally —
-    // both steps are stamped in history — instead of refusing.
-    if (item.state === "in_progress" || item.state === "blocked") {
-      item = runPure(reject, () => updateWork(item, caller, { state: "claimed", note: "paused for release", now: nowMs, authority }));
-      registry.set(roomId, item);
+    // E5/D4 (QA-200 2026-10-08): a release binds the claim round the client
+    // read (claimedAt + history length). A stale replay or a delayed
+    // duplicate landing after an intervening re-claim is refused instead of
+    // silently destroying the fresh claim. releaseWork keeps the W2 pause
+    // transition for in_progress/blocked claims, stamped in history.
+    // A stale round is a 409 work_claim_conflict (same as the update
+    // route's round precondition), with a read-back hint.
+    let released;
+    try {
+      released = releaseWork(item, caller, {
+        expectedClaimedAt: data.expectedClaimedAt, expectedHistoryLength: data.expectedHistoryLength,
+        note: reason, now: nowMs, authority,
+      });
+    } catch (error) {
+      // runPure's mapping, plus 409 for a stale round (same as the update
+      // route's round precondition).
+      if (error instanceof ClaimError && error.code === "work_claim_conflict") {
+        reject(409, error.code, `${error.message} — re-read the claim and retry with the current round.`);
+      }
+      if (error instanceof ClaimError) reject(422, error.code, error.message);
+      throw error;
     }
-    const released = runPure(reject, () => updateWork(item, caller, { state: "unclaimed", note: reason, now: nowMs, authority }));
     commit(released, "released");
     return json(res, 200, released);
   }
   if (workClaimRoute === "reassign" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { required: ["newOwner"], optional: ["note"] })) invalidInput(reject, "{newOwner, note?}");
+    if (!shape(data, { required: ["newOwner", "expectedClaimedAt", "expectedHistoryLength"], optional: ["note"] }))
+      invalidInput(reject, "{newOwner, expectedClaimedAt, expectedHistoryLength, note?}");
     const item = load(claimIdOf(reject, workClaimId));
     const authority = authorityOver(item);
     // W3 (QA 2026-09-28): /reassign used to accept any newOwner string, so a
@@ -1243,7 +1275,19 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     requireEventBudget();
     const previousOwnerId = item.owner;
     const note = text("note", data.note, { multiline: true });
-    const reassigned = runPure(reject, () => reassignWork(item, caller, target, { note, now: nowMs, authority, room: roomLike }));
+    // A stale round is a 409 work_claim_conflict, same as /release.
+    let reassigned;
+    try {
+      reassigned = reassignWork(item, caller, target, {
+        expectedClaimedAt: data.expectedClaimedAt, expectedHistoryLength: data.expectedHistoryLength,
+        note, now: nowMs, authority, room: roomLike });
+    } catch (error) {
+      if (error instanceof ClaimError && error.code === "work_claim_conflict") {
+        reject(409, error.code, `${error.message} — re-read the claim and retry with the current round.`);
+      }
+      if (error instanceof ClaimError) reject(422, error.code, error.message);
+      throw error;
+    }
     // QA200 ch-2037: reassign moves a lease to a new holder (and a fresh
     // unclaimed item lands claimed) without touching the claim route — run
     // the exclusivity check here too.

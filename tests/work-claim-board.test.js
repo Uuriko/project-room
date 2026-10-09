@@ -125,7 +125,13 @@ test("a contribute-profile agent creates, renews, and releases a claim without w
   const renewed = await coord.renewWorkItem("coord-1", { progressMessageId: progress, leaseHours: 3 });
   assert.equal(renewed.state, "claimed");
   assert.ok(Date.parse(renewed.leaseExpiresAt) > Date.parse(claimed.leaseExpiresAt));
-  const released = await coord.releaseWorkItem("coord-1", { reason: "parked" });
+  const released = await (async () => {
+    // E5/D4 (QA-200 2026-10-08): /release binds the claim round the client read.
+    const held = await coord.workClaimGet("coord-1");
+    return coord.releaseWorkItem("coord-1", { reason: "parked",
+      expectedClaimedAt: held.claimedAt,
+      expectedHistoryLength: held.history.length + (held.historyOmitted ?? 0) });
+  })();
   assert.equal(released.state, "unclaimed");
   assert.equal(released.owner, null);
   const refused = await call(coordKey, "/work-claims", { id: "chat-cannot" });
@@ -514,6 +520,7 @@ test("hard work defaults to a distinct reviewer at create; an explicit policy st
   assert.equal(plain.value.reviewPolicy, null);
 });
 
+const roundOfItem = item => ({ expectedClaimedAt: item?.claimedAt ?? null, expectedHistoryLength: (item?.history?.length ?? 0) + (Number(item?.historyOmitted) || 0) });
 test("reassign honors the room's per-member open-claim cap", async t => {
   const f = await fixture(t);
   await f.call(f.ownerKey, "/work-claims/config", { maxMemberOpenClaims: 1 });
@@ -522,7 +529,7 @@ test("reassign honors the room's per-member open-claim cap", async t => {
   assert.equal((await f.call(f.ownerKey, "/work-claims", { id: "reassign-cap-2" })).status, 201);
   assert.equal((await f.call(f.ownerKey, "/work-claims/reassign-cap-2/claim", {})).status, 200);
   const sequence = f.store.room("commons").sequence;
-  const result = await f.call(f.ownerKey, "/work-claims/reassign-cap-2/reassign", { newOwner: "coord" });
+  const result = await f.call(f.ownerKey, "/work-claims/reassign-cap-2/reassign", { newOwner: "coord", ...roundOfItem(f.store.workClaims.get("commons", "reassign-cap-2")) });
   assert.equal(result.status, 409);
   assert.equal(result.value.error.code, "too_many_open_claims");
   assert.equal(f.store.room("commons").sequence, sequence, "a refused handoff writes nothing");

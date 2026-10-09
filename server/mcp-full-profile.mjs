@@ -460,9 +460,19 @@ function callBountyTool(store, secret, roomId, auth, name, rest) {
         return { roomId, bounty, action, receipt };
       });
     }
-    case "bounty_transfer":
+    case "bounty_transfer": {
+      // B4 audit: credit.transfer is the only money-moving op whose keyless
+      // fallback is silent double-spend — a lost-response retry re-moves
+      // payable credits. MCP has no headers, so the key must come from the
+      // tool input's idempotencyKey; require it so a client can never
+      // accidentally double-transfer. A keyed retry replays the stored
+      // receipt instead of moving credits again.
+      if (typeof rest.idempotencyKey !== "string" || rest.idempotencyKey.length === 0)
+        throw new ServiceError(422, "idempotency_key_required",
+          "bounty_transfer requires an idempotencyKey: a keyless retry would double-move payable credits");
       return idem("credit.transfer", 200, () =>
         ({ roomId, ...escrow.transfer(roomId, { from: caller, to: rest.to, amount: rest.amount, actor }) }));
+    }
     default: {
       const error = new Error(`Bounty tool ${name} is listed but has no dispatcher`);
       error.status = 500;

@@ -510,7 +510,15 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
         })()
       : action === "work-claim" ? await client.workClaim(checkpoint, workActionOptions)
       : action === "work-complete" ? await client.workComplete(checkpoint, workActionOptions)
-      : action === "work-release" ? await client.workRelease(checkpoint, workActionOptions)
+      : action === "work-release" ? await (async () => {
+          // E5/D4 (QA-200 2026-10-08): /release binds the claim round, so
+          // read the current item first and release exactly that round.
+          const record = await client.workClaimGet(checkpoint);
+          const held = record?.claim ?? record;
+          return client.workRelease(checkpoint, { ...workActionOptions,
+            expectedClaimedAt: held?.claimedAt,
+            expectedHistoryLength: (held?.history?.length ?? 0) + (held?.historyOmitted ?? 0) });
+        })()
       : await client.changes(Number(checkpoint));
     if (action === "export") process.stdout.write(result.ndjson);
     // redeem-invite returns undefined on consent abort (exit code already

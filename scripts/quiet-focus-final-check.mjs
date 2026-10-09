@@ -49,7 +49,7 @@ test("post-connect loss: Connected first, established stream killed, reconnect b
   });
   // 2. block any reconnect/refresh success, THEN terminate the established stream server-side
   await page.route("**/api/rooms/commons/stream**", route => route.abort("failed"));
-  await page.route("**/api/rooms/commons", route => route.abort("failed"));
+  await page.route(url => url.pathname === "/api/rooms/commons", route => route.abort("failed")); // any read, windowed or full
   server.closeStreams();
   // 3. observe the transition to a non-operational label
   await page.waitForFunction(() => /Reconnecting|interrupted/.test(document.querySelector("#connection-status").textContent), null, { timeout: 15000 });

@@ -183,6 +183,9 @@ test("channel sends: a Telegram reply dispatches through the fixture sender when
   assert.equal(value.sends.length, 1); assert.equal(value.sends[0].revision, 2);
   response = await bare.post(path, { action: "dispatch", sourceId: tgId, sendId: send.id }); value = await response.json(); assert.equal(value.send.status, "accepted", "a second dispatch never sends again");
   response = await bare.post(path, { action: "reconcile", sourceId: tgId, sendId: send.id }); value = await response.json(); assert.equal(value.send.status, "accepted");
+  // flush is a retry for stuck-at-unknown attempts only: on a settled attempt it is a no-op, never a second send.
+  response = await bare.post(path, { action: "flush", sourceId: tgId, sendId: send.id }); value = await response.json();
+  assert.equal(response.status, 200, JSON.stringify(value)); assert.equal(value.send.status, "accepted"); assert.equal(value.send.revision, 2);
   response = await bare.get("/api/inbox/connections/" + f.telegram.connection.id); value = await response.json();
   assert.deepEqual({ outcome: value.live.lastSendResult.outcome, code: value.live.lastSendResult.code }, { outcome: "accepted", code: "fixture" });
   // A disconnected connection offers no transport.

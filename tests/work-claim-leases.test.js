@@ -225,6 +225,7 @@ const fakeHelpers = () => {
   };
 };
 const fakeAuth = (memberId, permissions = []) => ({ member: { id: memberId, kind: "agent", permissions } });
+const roundOfItem = item => ({ expectedClaimedAt: item?.claimedAt ?? null, expectedHistoryLength: (item?.history?.length ?? 0) + (Number(item?.historyOmitted) || 0) });
 const runRoute = async ({ route, id = null, body: reqBody = {}, memberId = "quill", permissions = [], registry, storeMembers = {} }) => {
   const helpers = fakeHelpers();
   const store = {
@@ -261,8 +262,9 @@ test("handler: create → claim → complete with delivery mode → release cycl
   assert.equal(done.value.deliveryMode, "merged");
   // release the done item is impossible; release flow on a fresh claim works
   await runRoute({ route: "create", body: { id: "h2" }, registry });
-  await runRoute({ route: "claim", id: "h2", registry });
-  const { out: released } = await runRoute({ route: "release", id: "h2", registry });
+  const { out: claimed2 } = await runRoute({ route: "claim", id: "h2", registry });
+  const { out: released } = await runRoute({ route: "release", id: "h2", registry, body: {
+    expectedClaimedAt: claimed2.value.claimedAt, expectedHistoryLength: claimed2.value.history.length } });
   assert.equal(released.value.state, "unclaimed");
   assert.equal(released.value.owner, null);
 });
@@ -331,7 +333,7 @@ test("handler: review attestations are caller-bound and cleared on handoff", asy
   assert.equal(review2.value.attestations[0].note, "second look");
   // reassign drops attestations — reviews belong to the previous owner's round
   // ("instinct" is a live room member here, so W3's membership validation passes)
-  await runRoute({ route: "reassign", id: "a1", body: { newOwner: "instinct" }, registry,
+  await runRoute({ route: "reassign", id: "a1", body: { newOwner: "instinct", ...roundOfItem(registry.get("room1", "a1")) }, registry,
     storeMembers: { instinct: { id: "instinct", kind: "agent", active: true, permissions: [] } } });
   const { out: read } = await runRoute({ route: "read", id: "a1", registry });
   assert.deepEqual(read.value.attestations, []);
@@ -339,7 +341,9 @@ test("handler: review attestations are caller-bound and cleared on handoff", asy
   await runRoute({ route: "create", body: { id: "a2", reviewPolicy: "distinct_member" }, registry });
   await runRoute({ route: "claim", id: "a2", registry });
   await runRoute({ route: "review", id: "a2", memberId: "vera", registry });
-  await runRoute({ route: "release", id: "a2", registry });
+  const reviewed = registry.get("room1", "a2");
+  await runRoute({ route: "release", id: "a2", registry, body: {
+    expectedClaimedAt: reviewed.claimedAt, expectedHistoryLength: reviewed.history.length } });
   const { out: reread } = await runRoute({ route: "read", id: "a2", registry });
   assert.deepEqual(reread.value.attestations, []);
   // cannot attest unclaimed or done work
