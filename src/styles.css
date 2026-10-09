@@ -586,6 +586,8 @@ details[open] > .section-summary::before { transform: rotate(45deg); }
 .topbar-actions { flex-wrap: wrap; }
 .empty-note { padding: 1.25rem; color: var(--muted); font-size: 1rem; line-height: 1.6; }
 .empty-note .text-button { min-height: 44px; margin-top: .35rem; }
+.timeline-earlier { display: flex; justify-content: center; padding: .5rem 0; }
+.timeline-earlier .text-button { min-height: 44px; }
 #people-hint:empty { display: none; }
 .people-actions { display: flex; flex-wrap: wrap; gap: .45rem; margin: 0; padding: 0; }
 .people-actions .button { width: auto; }
