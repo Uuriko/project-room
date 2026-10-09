@@ -2271,38 +2271,34 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         store.accountLogins.touchMethod(session.account.id, method.id);
         return json(res, 201, { status: "ok", method: { id: method.id, type: "password" } });
       }
-      if (url.pathname === "/api/auth/github/link/start") {
+      // OAuth provider link start: auth first (anonymous callers get 401
+      // without learning whether the provider is configured — slice 7
+      // hardening), then the per-provider redirect URL builder.
+      const beginOAuthLink = (getProvider, rateKey, unavailableBody, buildUrl) => {
         if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
-        // Auth first: anonymous callers get 401 without learning whether
-        // GitHub is configured (slice 7 hardening).
         const session = requireAccountSession();
-        const oauth = github();
-        if (!oauth) return json(res, 503, { status: "unavailable", reason: "github_not_configured",
-          error: { code: "github_not_configured", message: "GitHub sign-in is not configured" } });
-        rate(`github-link-start:${remoteAddress}`, 10);
-        const slotToken = session.slotToken;
-        const expectedRevision = store.accountSessionSlot(slotToken).sessionRevision;
-        const { state, codeVerifier } = oauth.pending.create({ sessionToken: slotToken, sessionRevision: expectedRevision, link: true });
-        const authorizationUrl = buildGitHubAuthUrl({ clientId: oauth.clientId, redirectUri: oauth.redirectUri,
-          state, codeChallenge: codeChallengeFor(codeVerifier) });
+        const provider = getProvider();
+        if (!provider) return json(res, 503, unavailableBody);
+        rate(`${rateKey}:${remoteAddress}`, 10);
+        const expectedRevision = store.accountSessionSlot(session.slotToken).sessionRevision;
         res.statusCode = 302;
-        res.setHeader("Location", authorizationUrl);
+        res.setHeader("Location", buildUrl(provider, session.slotToken, expectedRevision));
         return res.end();
+      };
+      if (url.pathname === "/api/auth/github/link/start") {
+        return beginOAuthLink(() => github(), "github-link-start",
+          { status: "unavailable", reason: "github_not_configured",
+            error: { code: "github_not_configured", message: "GitHub sign-in is not configured" } },
+          (oauth, slotToken, expectedRevision) => {
+            const { state, codeVerifier } = oauth.pending.create({ sessionToken: slotToken, sessionRevision: expectedRevision, link: true });
+            return buildGitHubAuthUrl({ clientId: oauth.clientId, redirectUri: oauth.redirectUri,
+              state, codeChallenge: codeChallengeFor(codeVerifier) });
+          });
       }
       if (url.pathname === "/api/auth/google/link/start") {
-        if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
-        // Auth first: anonymous callers get 401 without learning whether
-        // Google is configured.
-        const session = requireAccountSession();
-        const signIn = google();
-        if (!signIn) return json(res, 503, { status: "unavailable", reason: "google_not_configured" });
-        rate(`google-link-start:${remoteAddress}`, 10);
-        const slotToken = session.slotToken;
-        const expectedRevision = store.accountSessionSlot(slotToken).sessionRevision;
-        const started = signIn.begin({ slotToken, expectedRevision, link: true });
-        res.statusCode = 302;
-        res.setHeader("Location", started.authorizationUrl);
-        return res.end();
+        return beginOAuthLink(() => google(), "google-link-start",
+          { status: "unavailable", reason: "google_not_configured" },
+          (signIn, slotToken, expectedRevision) => signIn.begin({ slotToken, expectedRevision, link: true }).authorizationUrl);
       }
       // ---- Account management (RC-2026-09-19-078) ----
       // Account-level profile (display name / avatar), first-run onboarding
