@@ -136,6 +136,15 @@ test("full self-serve flow: mint invite, preview the consent screen, join by cod
     assert.match(refusal.error.message, /room-scoped token/, path);
     assert.doesNotMatch(refusal.error.message, /self-mint/, path);
   }
+  // Joining another room by share link also needs a real identity secret; the
+  // room token gets the same honest refusal, not "Active agent identity required".
+  const linkJoin = await fetch(`${origin}/api/share-links/join-agent`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${joined.roomToken}` },
+    body: JSON.stringify({ linkToken: "x", displayName: "Second room agent" }),
+  });
+  assert.equal(linkJoin.status, 401);
+  assert.equal((await linkJoin.json()).error.code, "room_token_not_identity");
   const created = await fetch(`${origin}/api/agent-rooms`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${joined.roomToken}` },

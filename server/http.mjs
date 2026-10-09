@@ -2535,6 +2535,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         checkOrigin(req, !carriesBearer(req));
         rate(`link-agent-join:${remoteAddress}`, 20);
         const identitySecret = bearer(req);
+        if (identitySecret?.startsWith(API_KEY_PREFIX)) reject(401, "room_token_not_identity", ROOM_TOKEN_NOT_IDENTITY);
         if (!store.identities.resolveGlobalIdentitySecret(identitySecret)) reject(401, "unauthenticated", "Active agent identity required");
         const data = await body(req);
         if (!exact(data, ["linkToken", "displayName"])) reject(422, "invalid_join", "Invitation link and agent name required");
