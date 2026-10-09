@@ -363,6 +363,14 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
     const payload = await readPayload(reject, body, req);
     if (!shape(payload, { required: ["to", "amount"], optional: ["idempotencyKey"] }))
       invalidInput(reject, "{to, amount, idempotencyKey?}");
+    // B4 audit: credit.transfer is the only money-moving op whose keyless
+    // fallback is silent double-spend — a lost-response client retry re-moves
+    // payable credits. Require the key (Idempotency-Key header or the
+    // idempotencyKey body field) so a client can never accidentally
+    // double-transfer; a keyed retry replays the stored receipt instead.
+    if (key(payload) === null)
+      reject(422, "idempotency_key_required",
+        "credit.transfer requires an idempotency key (Idempotency-Key header or idempotencyKey body field): a keyless retry would double-move payable credits");
     return idem(payload, "credit.transfer", 200, () => {
       const result = escrow.transfer(roomId, { from: caller, to: payload.to, amount: payload.amount, actor });
       return { roomId, ...result };

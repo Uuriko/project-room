@@ -413,3 +413,46 @@ export async function loadWeakenedClaimModule(kind) {
 export async function cleanWeakenedClaimModules() {
   await rm(join(HERE, ".weak"), { recursive: true, force: true });
 }
+
+// ---------------------------------------------------------------------------
+// Fail-first for route-level properties (P4/P5): load a guard-weakened copy
+// of server/work-claim-routes.mjs. The weakened module is generated at test
+// time into tests/chaos/.weak/ (the same gitignored scratch dir) and
+// imported dynamically. Relative imports are re-pointed from the .weak/
+// directory back to the real server/ and src/ trees; the transform refuses
+// unless each anchor occurs exactly once.
+// ---------------------------------------------------------------------------
+const ROUTE_WEAKENINGS = {
+  // P4/P5: drop the stale-basis 409 on plain note/state updates — stale
+  // retries then apply silently, clobbering newer rounds, and every
+  // stale-basis property must fail.
+  p4: [
+    [`      if (item.claimedAt !== data.expectedClaimedAt || claimHistoryLength(item) !== data.expectedHistoryLength) {`,
+     `      if (false && (item.claimedAt !== data.expectedClaimedAt || claimHistoryLength(item) !== data.expectedHistoryLength)) {`],
+  ],
+};
+
+export async function loadWeakenedRouteModule(kind) {
+  const spec = ROUTE_WEAKENINGS[kind];
+  if (!spec) throw new Error(`unknown route weakening kind: ${kind}`);
+  const srcPath = join(HERE, "..", "..", "server", "work-claim-routes.mjs");
+  let source = await readFile(srcPath, "utf8");
+  for (const [from, to] of spec) {
+    const occurrences = source.split(from).length - 1;
+    if (occurrences !== 1) {
+      throw new Error(`route weakening ${kind}: expected exactly 1 occurrence of ${JSON.stringify(from)}, found ${occurrences} — source drifted, refusing`);
+    }
+    source = source.replace(from, to);
+  }
+  // The copy lives in tests/chaos/.weak/, three levels below the repo root's
+  // server/ and src/ trees — re-point every relative import. The "../"
+  // rewrite runs FIRST: "../../../" starts with "../", so running "./"
+  // first would double-rewrite the already-rewritten specifiers.
+  source = source.replaceAll(`from "../`, `from "../../../`);
+  source = source.replaceAll(`from "./`, `from "../../../server/`);
+  const weakDir = join(HERE, ".weak");
+  await mkdir(weakDir, { recursive: true });
+  const weakPath = join(weakDir, `work-claim-routes-${kind}.weak.mjs`);
+  await writeFile(weakPath, source);
+  return import(weakPath);
+}

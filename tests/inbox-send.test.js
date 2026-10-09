@@ -4,12 +4,12 @@
 // credentials, no message bodies in logs. Unconnected channels fail honestly.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { telegramConfig } from "../server/channel-adapters/telegram-config.mjs";
 import { GmailSender, buildGmailRawMessage, buildTelegramDirectRequest, sendTelegramDirect } from "../server/inbox-transport.mjs";
-import { validateDirectSend, recordDirectSend, completeDirectSend, getDirectSend } from "../server/inbox-outbox.mjs";
+import { validateDirectSend, recordDirectSend, completeDirectSend, getDirectSend, markDirectSendDispatch, ensureDirectSendTable } from "../server/inbox-outbox.mjs";
 
 const FAKE_BOT_TOKEN = "123456789:AAH-Fake-Token-For-Tests-Only-000";
 const FAKE_WEBHOOK_SECRET = "fake-webhook-secret-16min";
@@ -353,4 +353,131 @@ test("an invalid requestId is rejected before anything is journaled", async t =>
   assert.equal(res.status, 422);
   assert.equal((await res.json()).error.code, "invalid_direct_send");
   assert.equal(f.store.db.prepare("SELECT count(*) n FROM direct_channel_sends WHERE account_id=?").get(f.accountId).n, 0);
+});
+
+// Crash-recovery for direct sends (buildqa 2026-10-09 follow-up): a retry
+// with the same requestId must resume a send that was journaled but never
+// dispatched (crash between recordDirectSend and the provider call) instead
+// of returning the stuck "pending" row forever. A send whose dispatch
+// already started has an unknown outcome and is never re-driven blindly
+// (no double delivery).
+
+test("markDirectSendDispatch claims the dispatch exactly once", async t => {
+  const f = fixture(t);
+  const at = Date.now();
+  const row = recordDirectSend(f.store.db, { id: randomUUID(), accountId: f.accountId, channel: "telegram",
+    to: "123456", subject: "", bodyHash: createHash("sha256").update("claim", "utf8").digest("hex"),
+    threadId: null, requestId: randomUUID(), at });
+  assert.equal(row.dispatch_started_at, null, "a fresh journal entry has no dispatch marker");
+  assert.equal(markDirectSendDispatch(f.store.db, row.id, at + 1), 1, "first claim wins");
+  assert.equal(markDirectSendDispatch(f.store.db, row.id, at + 2), 0, "second claim loses, marker untouched");
+  assert.equal(getDirectSend(f.store.db, row.id).dispatch_started_at, at + 1);
+  assert.equal(markDirectSendDispatch(f.store.db, "no-such-send", at + 3), 0, "unknown send claims nothing");
+});
+
+test("ensureDirectSendTable backfills dispatch_started_at on a legacy table", async t => {
+  // Warm-wake convergence: a room whose table predates this change must gain
+  // the column without losing rows (the priced-tool-500 class of bug).
+  const f = fixture(t);
+  f.store.db.exec("DROP TABLE IF EXISTS direct_channel_sends");
+  f.store.db.exec(`CREATE TABLE direct_channel_sends (
+    id TEXT PRIMARY KEY, account_id TEXT NOT NULL, channel TEXT NOT NULL,
+    recipient TEXT NOT NULL, subject TEXT NOT NULL DEFAULT '',
+    body_hash TEXT NOT NULL, thread_id TEXT,
+    status TEXT NOT NULL, provider_id TEXT, error_code TEXT,
+    request_id TEXT,
+    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`);
+  const id = randomUUID();
+  f.store.db.prepare(`INSERT INTO direct_channel_sends
+    (id, account_id, channel, recipient, subject, body_hash, thread_id, status, provider_id, error_code, request_id, created_at, updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, f.accountId, "telegram", "1", "", "a".repeat(64),
+    null, "sent", "4242", null, null, 1000, 2000);
+  ensureDirectSendTable(f.store.db);
+  const cols = new Set(f.store.db.prepare("PRAGMA table_info(direct_channel_sends)").all().map(c => c.name));
+  assert.ok(cols.has("dispatch_started_at"), "migration adds the column to legacy tables");
+  const row = getDirectSend(f.store.db, id);
+  assert.equal(row.status, "sent", "existing rows survive the migration");
+  assert.equal(row.dispatch_started_at, null, "a settled legacy row needs no marker");
+  // Idempotent: a second run changes nothing.
+  ensureDirectSendTable(f.store.db);
+  assert.equal(getDirectSend(f.store.db, id).status, "sent");
+});
+
+test("a retry resumes a send that was journaled but never dispatched", async t => {
+  // The crashed state: recordDirectSend ran, the process died before the
+  // provider call, so no dispatch marker exists. The retry must drive the
+  // delivery instead of returning the stuck pending row forever.
+  const f = fixture(t);
+  let providerCalls = 0;
+  const { post } = await serve(t, f, telegramOptions(async () => {
+    providerCalls++;
+    return Response.json({ ok: true, result: { message_id: 4242 } });
+  }));
+  const requestId = randomUUID();
+  const body = "resume me";
+  const sendId = randomUUID();
+  recordDirectSend(f.store.db, { id: sendId, accountId: f.accountId, channel: "telegram",
+    to: "123456", subject: "", bodyHash: createHash("sha256").update(body, "utf8").digest("hex"),
+    threadId: null, requestId, at: Date.now() });
+  const retry = await post({ channel: "telegram", to: "123456", subject: "", body, requestId });
+  assert.equal(retry.status, 200);
+  const send = (await retry.json()).send;
+  assert.equal(send.id, sendId, "resume drives the original journaled send");
+  assert.equal(send.status, "sent");
+  assert.equal(send.providerId, "4242");
+  assert.equal(providerCalls, 1, "the resumed send delivers exactly once");
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM direct_channel_sends WHERE account_id=?").get(f.accountId).n, 1);
+});
+
+test("a retry never re-drives a send whose dispatch already started", async t => {
+  // Crash after the provider call began: the outcome is unknown. The retry
+  // must return the pending row as-is — re-driving could double-deliver.
+  const f = fixture(t);
+  let providerCalls = 0;
+  const { post } = await serve(t, f, telegramOptions(async () => {
+    providerCalls++;
+    return Response.json({ ok: true, result: { message_id: 4242 } });
+  }));
+  const requestId = randomUUID();
+  const body = "unknown outcome";
+  const sendId = randomUUID();
+  const at = Date.now();
+  recordDirectSend(f.store.db, { id: sendId, accountId: f.accountId, channel: "telegram",
+    to: "123456", subject: "", bodyHash: createHash("sha256").update(body, "utf8").digest("hex"),
+    threadId: null, requestId, at });
+  assert.equal(markDirectSendDispatch(f.store.db, sendId, at), 1, "dispatch had started before the crash");
+  const retry = await post({ channel: "telegram", to: "123456", subject: "", body, requestId });
+  assert.equal(retry.status, 200);
+  const send = (await retry.json()).send;
+  assert.equal(send.id, sendId);
+  assert.equal(send.status, "pending", "outcome-unknown stays pending, never silently resolved");
+  assert.equal(providerCalls, 0, "outcome-unknown sends are never re-driven");
+});
+
+test("a pending row that predates the dispatch marker is replayed, never re-driven", async t => {
+  // Old code left no marker, so a pending legacy row may already have reached
+  // the provider. The migration marks it started; a same-key retry replays the
+  // pending row and the provider is not called again.
+  const f = fixture(t);
+  let providerCalls = 0;
+  const { post } = await serve(t, f, telegramOptions(async () => {
+    providerCalls++;
+    return Response.json({ ok: true, result: { message_id: 4242 } });
+  }));
+  const requestId = randomUUID();
+  const body = "legacy pending";
+  const sendId = randomUUID();
+  recordDirectSend(f.store.db, { id: sendId, accountId: f.accountId, channel: "telegram",
+    to: "123456", subject: "", bodyHash: createHash("sha256").update(body, "utf8").digest("hex"),
+    threadId: null, requestId, at: Date.now() });
+  // Simulate a pre-migration table: no marker column, then migrate again.
+  f.store.db.exec("ALTER TABLE direct_channel_sends DROP COLUMN dispatch_started_at");
+  ensureDirectSendTable(f.store.db);
+  assert.notEqual(getDirectSend(f.store.db, sendId).dispatch_started_at, null, "migration marks the legacy pending row started");
+  const retry = await post({ channel: "telegram", to: "123456", subject: "", body, requestId });
+  assert.equal(retry.status, 200);
+  const send = (await retry.json()).send;
+  assert.equal(send.id, sendId);
+  assert.equal(send.status, "pending", "replayed as-is");
+  assert.equal(providerCalls, 0, "the provider is never called for a legacy pending row");
 });

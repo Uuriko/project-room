@@ -833,6 +833,16 @@ const ROWS = [
     }
   },
   {
+    "table": "land_queue_idempotency",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "member_accounts",
     "key": "room_id",
     "action": "delete",

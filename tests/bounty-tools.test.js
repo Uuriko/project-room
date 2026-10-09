@@ -57,11 +57,17 @@ test("unknown arguments are rejected rather than silently dropped", () => {
 });
 
 // An amount is the one field that moves credits, so a sign or type error here
-// must not reach the escrow.
+// must not reach the escrow. transfer also requires an idempotencyKey now —
+// a keyless call is refused so a lost-response retry can never
+// double-move payable credits.
 test("amounts must be positive finite numbers", () => {
-  assert.ok(validBountyToolArguments("bounty_transfer", { to: "lane-a", amount: 2.5 }));
+  assert.ok(validBountyToolArguments("bounty_transfer",
+    { to: "lane-a", amount: 2.5, idempotencyKey: "k1" }));
+  assert.ok(!validBountyToolArguments("bounty_transfer", { to: "lane-a", amount: 2.5 }),
+    "bounty_transfer without an idempotencyKey must be rejected");
   for (const bad of [-1, 0, "5", Number.NaN, Number.POSITIVE_INFINITY])
-    assert.ok(!validBountyToolArguments("bounty_transfer", { to: "lane-a", amount: bad }),
+    assert.ok(!validBountyToolArguments("bounty_transfer",
+      { to: "lane-a", amount: bad, idempotencyKey: "k1" }),
       `amount ${String(bad)} must be rejected`);
 });
 
@@ -108,11 +114,19 @@ test("no tool description promises money", () => {
   }
 });
 
+// Credit transfer requires its idempotency key (B4 audit: a keyless retry
+// double-moves payable credits), so it is the one write whose retry safety
+// holds for every legitimate call — each carries a key and a keyed retry
+// replays the stored receipt. All other writes keep the key optional and must
+// not promise unconditional retry safety.
 test("optional-key writes do not promise unconditional retry safety", () => {
   for (const entry of bountyTools) {
     assert.equal(entry.annotations.idempotentHint, entry.annotations.readOnlyHint);
-    if (!entry.annotations.readOnlyHint)
-      assert.ok(!entry.inputSchema.required.includes("idempotencyKey"));
+    if (!entry.annotations.readOnlyHint) {
+      const requiresKey = entry.inputSchema.required.includes("idempotencyKey");
+      assert.equal(requiresKey, entry.name === "bounty_transfer",
+        `${entry.name}: only bounty_transfer may require idempotencyKey`);
+    }
   }
 });
 

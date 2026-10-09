@@ -130,9 +130,9 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     const beforeConflict = snapshot();
     const conflict = await saveAction(page, 409);
     assert.equal(conflict.error.code, "claim_conflict");
-    await page.waitForFunction(() => document.querySelector("#action-error").textContent.includes("reserved") && !document.querySelector('#action-form button[type="submit"]').disabled);
+    await page.waitForFunction(() => document.querySelector("#action-error").textContent.includes("holds a claim") && !document.querySelector('#action-form button[type="submit"]').disabled);
     assert.equal(await page.locator("#action-dialog").isVisible(), true);
-    assert.match(await page.locator("#action-error").textContent(), /no new claim was saved/i);
+    assert.match(await page.locator("#action-error").textContent(), /Coordinate with them or release their claim first/i);
     assert.equal(snapshot().sequence, beforeConflict.sequence);
     assert.deepEqual(item(second), beforeConflict.state.workItems[second]);
     for (const [name, value] of Object.entries({ ...scope, paths: "src/room.js" })) assert.equal(await page.locator(`#action-fields [name="${name}"]`).inputValue(), value);
@@ -204,7 +204,10 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     const recorded = fixture.store.eventsAfter(fixture.keys.owner, "commons", baseline.sequence, 100).events;
     assert.deepEqual(recorded.map(({ event }) => event.type), [
       T.WORK_PROPOSED, T.WORK_ACCEPTED, T.WORK_PROPOSED, T.WORK_ACCEPTED,
-      T.CLAIM_ACQUIRED, T.WORK_CLAIM_UPDATED, T.CLAIM_RELEASED, T.WORK_CLAIM_UPDATED, T.CLAIM_ACQUIRED, T.WORK_CLAIM_UPDATED
+      // PRODUCT-200 D4: the first board write per work item emits its own
+      // work_claim.updated "created" event before the "claimed" one.
+      T.CLAIM_ACQUIRED, T.WORK_CLAIM_UPDATED, T.WORK_CLAIM_UPDATED, T.CLAIM_RELEASED, T.WORK_CLAIM_UPDATED,
+      T.CLAIM_ACQUIRED, T.WORK_CLAIM_UPDATED, T.WORK_CLAIM_UPDATED
     ]);
     assert.equal(recorded.some(({ event }) => [T.WORK_STARTED, T.WORK_COMPLETED].includes(event.type)), false, "coordination never claims automatic execution or completion");
     assert.equal(snapshot().cursor, baseline.cursor, "reading and disclosing a catch-up never acknowledges it");

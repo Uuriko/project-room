@@ -40,11 +40,21 @@ export function parseFailingTests(output) {
 }
 
 /**
+ * Names of deliberately failing fixture tests (tests/fixtures/unit-ci/
+ * fail-probe.mjs, run on purpose by tests/unit-ci-runner.test.js). Their
+ * output reaches the shard log, so the parser sees them; the PR comment must
+ * not list them as failures. parseFailingTests keeps them so the runner test
+ * can still assert on them.
+ */
+export const FIXTURE_FAILURE_NAMES = new Set(["probe fails deterministically"]);
+
+/**
  * Compose the PR comment body for a failed unit shard. When no failure names
  * were captured, falls back to the old "see the job log" pointer so the
  * comment never goes out empty.
  */
-export function formatFailureComment({ shard, total, failures, runUrl }) {
+export function formatFailureComment({ shard, total, failures: reported, runUrl }) {
+  const failures = Array.isArray(reported) ? reported.filter((f) => !FIXTURE_FAILURE_NAMES.has(f)) : reported;
   const head = `## Unit test failures, shard ${shard}/${total}\n`;
   if (!Array.isArray(failures) || failures.length === 0) {
     return (

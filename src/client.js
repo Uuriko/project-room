@@ -2,6 +2,7 @@ import { verifyWorkResult } from "./work-packet.js";
 import { validateCharterRead } from "./room-charter.js";
 import { DM_CONSENT_REFUSAL_CODES } from "./dm-consents.js";
 import { BOND_REFUSAL_CODES } from "./friend-bond.js";
+import { humanErrorMessage } from "./error-copy.js";
 
 // C2: the read-only "what this agent can access" preview must describe exactly the
 // selected work the browser asked about and repeat the server's own omission list;
@@ -88,7 +89,7 @@ export class AccountClient {
         headers: { ...(data === undefined ? {} : { "Content-Type": "application/json" }), ...(session?.csrf ? { "X-CSRF-Token": session.csrf } : {}), ...(session?.sessionBinding ? { "X-Session-Binding": session.sessionBinding } : {}) },
         ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
       const body = await response.json();
-      if (!response.ok) { const error = new Error(body.error?.message || "Request failed"); error.status = response.status; error.code = body.error?.code; throw error; }
+      if (!response.ok) { const serverError = body?.error ?? {}; const error = new Error(humanErrorMessage({ status: response.status, code: serverError.code, message: serverError.message })); error.status = response.status; error.code = serverError.code; throw error; }
       return body;
     } finally { clearTimeout(timer); }
   }
@@ -326,7 +327,7 @@ export class RoomClient {
           ...(authMode === "account" ? { "X-Project-Room-Auth": "account", ...(authSession?.sessionBinding ? { "X-Session-Binding": authSession.sessionBinding } : {}) } : {}) },
         ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
       const body = await response.json();
-      if (!response.ok) { const error = new Error(body.error?.message || "Request failed"); error.status = response.status; error.code = body.error?.code; throw error; }
+      if (!response.ok) { const serverError = body?.error ?? {}; const error = new Error(humanErrorMessage({ status: response.status, code: serverError.code, message: serverError.message })); error.status = response.status; error.code = serverError.code; throw error; }
       return body;
     } finally { clearTimeout(timer); }
   }

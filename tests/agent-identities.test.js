@@ -354,6 +354,45 @@ test("identity-link listing is membership administration: agents and plain membe
   assert.ok((await allowed.json()).links.some(row => row.identityId === identityId));
 });
 
+test("identity-links DELETE error contract: 403/404/422 match the documented responses", async t => {
+  // Docs pin these codes in docs/openapi.yaml; this test guards the pin.
+  // A refactor that relaxes the manage_members guard, drops the
+  // link-existence check, or loosens the exact-body shape check fails here.
+  const { store, origin, ownerCommons } = await serve(t);
+  const { identityId } = await createAgentIdentity(origin, "Unlink Guard Bot");
+  const unlink = (token, body) => fetch(`${origin}/api/rooms/commons/identity-links`, {
+    method: "DELETE", headers: { "Content-Type": "application/json", Origin: origin, Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body)
+  });
+  // A human member without manage_members cannot unlink (403 access_denied).
+  store.command(ownerCommons, "commons", { id: randomUUID(), type: "member.added",
+    data: { memberId: "reader", displayName: "Reader", kind: "human", permissions: ["steer"] } });
+  const readerKey = store.issueAccessKey("commons", "reader");
+  const denied = await unlink(readerKey, { identityId });
+  assert.equal(denied.status, 403);
+  assert.equal((await denied.json()).error.code, "access_denied");
+  // An identity never linked to this room is 404 identity_not_found, not a silent no-op.
+  const missing = await unlink(ownerCommons, { identityId });
+  assert.equal(missing.status, 404);
+  assert.equal((await missing.json()).error.code, "identity_not_found");
+  // The body must be exactly { identityId }: a missing key or an extra key is 422 invalid_identity.
+  const empty = await unlink(ownerCommons, {});
+  assert.equal(empty.status, 422);
+  assert.equal((await empty.json()).error.code, "invalid_identity");
+  const extra = await unlink(ownerCommons, { identityId, referredBy: "someone" });
+  assert.equal(extra.status, 422);
+  assert.equal((await extra.json()).error.code, "invalid_identity");
+  // Positive control: the owner unlinks a linked identity with 200.
+  const link = await fetch(`${origin}/api/rooms/commons/identity-links`, {
+    method: "POST", headers: { "Content-Type": "application/json", Origin: origin, Authorization: `Bearer ${ownerCommons}` },
+    body: JSON.stringify({ identityId, permissions: ["accept_work"] })
+  });
+  assert.equal(link.status, 201);
+  const ok = await unlink(ownerCommons, { identityId });
+  assert.equal(ok.status, 200);
+  assert.equal((await ok.json()).unlinked, true);
+});
+
 test("identity link/unlink/list honour the session-binding fence", async t => {
   const { store, ownerCommons } = await serve(t);
   const { identityId } = store.identities.create("Fenced Bot");

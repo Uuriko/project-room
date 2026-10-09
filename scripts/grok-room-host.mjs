@@ -622,9 +622,15 @@ export async function reassignClaim({ env = process.env, fetchImpl = fetch, work
   if (typeof newOwner !== "string" || newOwner.length < 1) fail("invalid_attention_item", "newOwner required");
   const room = claimRoom(connection, roomId);
   const path = `/api/rooms/${encodeURIComponent(room)}/work-claims/${encodeURIComponent(workItemId)}/reassign`;
+  // Bind the claim round we just read, so a stale reassign cannot move a
+  // newer claim generation (same rule as /release).
+  const current = await jsonRequest(connection, `/api/rooms/${encodeURIComponent(room)}/work-claims/${encodeURIComponent(workItemId)}`, { fetchImpl });
+  const round = current?.claim ?? current;
   const parsed = await jsonRequest(connection, path, {
     fetchImpl, method: "POST",
-    body: { newOwner, ...(note === undefined ? {} : { note }) },
+    body: { newOwner, ...(note === undefined ? {} : { note }),
+      expectedClaimedAt: round?.claimedAt ?? null,
+      expectedHistoryLength: (round?.history?.length ?? 0) + (Number(round?.historyOmitted) || 0) },
   });
   return safeClaimResult(parsed, connection.token, workItemId, room);
 }

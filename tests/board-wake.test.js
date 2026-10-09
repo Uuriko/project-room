@@ -24,6 +24,9 @@ import { setTier } from "../server/autonomy-tiers.mjs";
 import { verifyDeliverySignature } from "../server/webhook-dispatch.mjs";
 import { installFakeWebhookDns } from "./helpers/fake-webhook-dns.mjs";
 
+// /reassign binds the claim round the caller read (expectedClaimedAt + expectedHistoryLength).
+const roundOf = c => ({ expectedClaimedAt: (c.claim ?? c).claimedAt, expectedHistoryLength: ((c.claim ?? c).history?.length ?? 0) + ((c.claim ?? c).historyOmitted ?? 0) });
+
 const SIGNING_SECRET = "board-wake-signing-secret-012345";
 
 async function fixture(t) {
@@ -81,7 +84,7 @@ test("reassign to a pull-mode agent is the next wake, with reason assigned", asy
   assert.equal(beat.status, 200);
   await owner.workClaimCreate({ id: "lane-a", title: "Lane A" });
   await owner.claimWorkItem("lane-a");
-  const reassigned = await owner.reassignWorkItem("lane-a", { newOwner: agent.memberId, note: "yours" });
+  const reassigned = await owner.reassignWorkItem("lane-a", { newOwner: agent.memberId, note: "yours", ...roundOf(await owner.workClaimGet("lane-a")) });
   assert.equal(reassigned.owner, agent.memberId);
   const woken = await poll(agent.secret);
   assert.equal(woken.status, 200);
@@ -115,7 +118,7 @@ test("a webhook-mode agent gets one signed delivery for the assignment", async t
   assert.equal(subscribed.status, 201);
   await owner.workClaimCreate({ id: "lane-c", title: "Lane C" });
   await owner.claimWorkItem("lane-c");
-  await owner.reassignWorkItem("lane-c", { newOwner: agent.memberId });
+  await owner.reassignWorkItem("lane-c", { newOwner: agent.memberId, ...roundOf(await owner.workClaimGet("lane-c")) });
   const rows = store.db.prepare(
     "SELECT payload_json, signature, created_at, event_type FROM agent_webhook_deliveries WHERE agent_id=?"
   ).all(agent.identityId);
@@ -166,7 +169,7 @@ test("a paused agent gets no wake and still gets an Updates attention item", asy
   await owner.workClaimCreate({ id: "lane-e", title: "Lane E" });
   await owner.claimWorkItem("lane-e");
   store.wakeQueue.pause(ownerKey, "commons", { requestId: randomUUID(), reason: "away" }, null, { memberId: agent.memberId });
-  await owner.reassignWorkItem("lane-e", { newOwner: agent.memberId });
+  await owner.reassignWorkItem("lane-e", { newOwner: agent.memberId, ...roundOf(await owner.workClaimGet("lane-e")) });
   const woken = await poll(agent.secret);
   assert.equal(woken.value.pendingWakes.length, 0);
   const items = await attention();
@@ -183,7 +186,7 @@ test("a read-only agent gets no assignment wake and still gets the attention ite
   setTier(store.db, "commons", agent.memberId, "t1_readonly", { updatedBy: "owner", nowMs: store.now() });
   await owner.workClaimCreate({ id: "lane-f", title: "Lane F" });
   await owner.claimWorkItem("lane-f");
-  await owner.reassignWorkItem("lane-f", { newOwner: agent.memberId });
+  await owner.reassignWorkItem("lane-f", { newOwner: agent.memberId, ...roundOf(await owner.workClaimGet("lane-f")) });
   const woken = await poll(agent.secret);
   assert.equal(woken.value.pendingWakes.length, 0);
   const items = await attention();

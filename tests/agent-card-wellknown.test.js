@@ -75,9 +75,19 @@ test("capabilities carry the discovery capability flags and security is declared
   assert.equal(card.capabilities.webhooks, true, "custom webhook delivery stays advertised");
   // A2A v1.0 removed the v0.3 stateTransitionHistory capability (#A2A-card-audit 2026-09-24).
   assert.equal(card.capabilities.stateTransitionHistory, undefined, "v0.3 stateTransitionHistory must be dropped");
-  assert.ok(card.securitySchemes.digestAuth, "digestAuth scheme declared");
+  // Auth-honesty (PRODUCT-200 D2): the room speaks Authorization: Bearer for
+  // every credential (server/http.mjs auth funnel; mcp-http.mjs challenges
+  // WWW-Authenticate: Bearer realm="project-room"). It never speaks HTTP
+  // Digest auth (RFC 7616), so no digestAuth scheme may be advertised, and
+  // securityRequirements must only name declared schemes.
+  assert.equal(card.securitySchemes.digestAuth, undefined, "no digestAuth scheme — the room never speaks HTTP Digest auth");
   assert.ok(card.securitySchemes.guestLinkAuth, "guestLinkAuth scheme declared");
   assert.ok(card.securitySchemes.bearerAuth, "bearerAuth scheme declared");
+  assert.match(card.securitySchemes.bearerAuth.description, /rak_/i, "bearerAuth documents the enrolled agent API key");
+  const declared = new Set(Object.keys(card.securitySchemes));
+  for (const req of card.securityRequirements) {
+    for (const name of Object.keys(req)) assert.ok(declared.has(name), `securityRequirements names undeclared scheme: ${name}`);
+  }
   assert.ok(Array.isArray(card.securityRequirements) && card.securityRequirements.length > 0);
 });
 

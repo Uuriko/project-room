@@ -103,3 +103,57 @@ test("tools.md read/write table tools all resolve in the served catalog", () => 
   const unknown = [...names].filter(n => !served.has(n));
   assert.deepEqual(unknown, [], `tools.md table names not in the served catalog: ${unknown.join(", ")}`);
 });
+
+// A9 (PRODUCT-200 docs, sibling-variant consistency): the repo skill files'
+// no-credential catalog sentence drifted when room_identity_mint joined the
+// anonymous catalog — the served packet and the server/packet tests were
+// updated, the skill prose was not. Pin the skill enumerations against the
+// catalog the server actually serves, so the next anonymous-tool change fails
+// here instead of stranding agents on a stale count.
+// Gate answers (see .agents/skills/test-audit/SKILL.md):
+// 1. Contract: the skill files' no-credential count and enumerated names
+//    equal the live anonymous MCP catalog.
+// 2. Regression: a lane adds/removes an anonymous tool, updates the packet,
+//    but leaves skills/ prose stale (this file was created after exactly
+//    that drift: room_identity_mint served live, packet updated, both skill
+//    files still saying "six tools").
+// 3. Existing coverage does not catch it: agent-discovery.test.js and
+//    llms-accuracy.test.js pin the server catalog and the packet copy but
+//    never read these two skill files.
+// 4. No production seam: file reads plus the existing server exports.
+import { livePublicMcpTools } from "../server/mcp-discovery.mjs";
+import { MCP_JOIN_TOOLS } from "../server/mcp-http.mjs";
+
+const COUNT_WORDS = { four: 4, six: 6, seven: 7 };
+
+function anonCatalogFromSkill(text, rel) {
+  // Sentence shapes seen: "... serves six tools when no credential is sent: ..."
+  // and "Without a credential the tool list is six tools: ...".
+  const m =
+    text.match(/(six|seven|four|\d+)\s+tools[^.\n]*?credential[^:]*:([^\n.]+)\./i) ||
+    text.match(/credential[^.\n]*?(six|seven|four|\d+)\s+tools[^:]*:([^\n.]+)\./i);
+  assert.ok(m, `${rel} states the no-credential tool count with an enumeration`);
+  const count = COUNT_WORDS[m[1].toLowerCase()] ?? Number(m[1]);
+  const names = new Set(toolTokens(m[2]));
+  if (/four public join tools/i.test(m[2])) {
+    for (const t of MCP_JOIN_TOOLS) names.add(t.name);
+  }
+  return { count, names: [...names] };
+}
+
+test("skill files' no-credential catalog sentence matches the live anonymous catalog", () => {
+  const live = livePublicMcpTools().map((t) => t.name);
+  assert.ok(live.includes("room_identity_mint"), "live anonymous catalog includes room_identity_mint");
+  for (const rel of ["skills/project-room/references/tools.md", "skills/ProjectRoom/SKILL.md"]) {
+    const { count, names } = anonCatalogFromSkill(read(rel), rel);
+    assert.equal(count, live.length, `${rel}: stated no-credential count matches live (${live.length})`);
+    assertSetEqual(names, live, `${rel}: enumerated no-credential names match live catalog`);
+  }
+});
+
+test("ProjectRoom/SKILL.md core-profile sentence matches the live core profile", () => {
+  const text = read("skills/ProjectRoom/SKILL.md");
+  const m = text.match(/default `tools\/list` is the core profile[^:]*:([^\n.]+)\./);
+  assert.ok(m, "ProjectRoom/SKILL.md states the default tools/list core profile");
+  assertSetEqual(toolTokens(m[1]), core, "ProjectRoom/SKILL.md core profile == live CORE_MCP_TOOLS");
+});

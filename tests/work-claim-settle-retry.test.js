@@ -95,3 +95,41 @@ test("retry-after-timeout: a stale-item retry of the same closed lookup releases
   assert.equal(closed.length, 1, "exactly one pr_closed room event may be emitted");
   assert.equal(store.workClaims.get(ROOM, "retry-closed").state, "unclaimed");
 });
+
+test("ANCHOR-D8: settle → retry settle with the same payload records exactly one settlement, never a double", async t => {
+  // PRODUCT-200 D8 regression anchor for QA-200 MUT-15 (bug present in
+  // QA-200, fixed by #2086 — this PR is anchors-only, no fix): the
+  // settlement path both the cron tick and the webhook call. A caller
+  // retrying after a lost response re-submits the same lookup payload with
+  // its stale pre-settle item; before the fix that applied a SECOND
+  // pr_merged (duplicate room event + duplicate pr_merged history stamp on
+  // the row). The commit now settles against the freshest registered row,
+  // so the retry is a no-op: exactly one settlement recorded, no double
+  // event, no double history stamp, no second journal movement.
+  const store = new RoomStore(":memory:");
+  store.initialize(initialRoom(ROOM));
+  t.after(() => store.close());
+
+  const item = openClaim("anchor-d8");
+  store.workClaims.set(ROOM, item);
+  const payload = { claimId: "anchor-d8", url: PR, kind: "merged" };
+
+  assert.equal(commitPullRequestLookup(store, store.workClaims, ROOM, item, payload, NOW), true,
+    "the first commit settles");
+  const historyAfterFirst = claimHistoryLength(store.workClaims.get(ROOM, "anchor-d8"));
+  assert.equal(prMergedEvents(store).length, 1);
+
+  // The retry: same payload, same stale pre-settle item (lost response).
+  assert.equal(commitPullRequestLookup(store, store.workClaims, ROOM, item, payload, NOW + 1000), false,
+    "the stale retry must not settle again");
+  // Repeated retries stay no-ops.
+  assert.equal(commitPullRequestLookup(store, store.workClaims, ROOM, item, payload, NOW + 2000), false,
+    "a third attempt must not settle either");
+
+  assert.equal(prMergedEvents(store).length, 1, "exactly one settlement event recorded");
+  const final = store.workClaims.get(ROOM, "anchor-d8");
+  assert.equal(final.state, "done", "terminal state reached once");
+  assert.equal(claimHistoryLength(final), historyAfterFirst, "no second history stamp on retry");
+  assert.equal(final.history.filter(step => step?.action === "pr_merged").length, 1,
+    "the row carries exactly one pr_merged stamp");
+});

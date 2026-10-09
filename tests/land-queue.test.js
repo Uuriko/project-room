@@ -163,7 +163,7 @@ test("githubAccessToken reads an existing env token and nothing else", () => {
   assert.equal(githubAccessToken({ GITHUB_TOKEN: "first", GH_TOKEN: "second" }), "first");
 });
 
-test("first observation records state and does not emit or wake", async t => {
+test("first observation records state and emits the added receipt without waking", async t => {
   const { store, ownerKey } = fixture(t);
   const wake = spyWake(t, store);
   const { memberId } = linkOffline(store, ownerKey);
@@ -175,7 +175,12 @@ test("first observation records state and does not emit or wake", async t => {
   assert.equal(added.item.checks, "green");
   assert.equal(added.item.headSha, SHA);
   assert.equal(added.item.claimantMemberId, memberId);
-  assert.equal(landEvents(store).length, 0);
+  // The board write is observable: exactly the added receipt, and it is a
+  // receipt, not a wake — adding is the caller's own action.
+  const events = landEvents(store);
+  assert.equal(events.length, 1);
+  assert.deepEqual(events[0].data.changed, ["added"]);
+  assert.equal(events[0].data.itemId, added.item.itemId);
   assert.equal(wake.pushes.length, 0);
   assert.equal(wake.pings.length, 0);
   assert.equal(github.calls.every(call => call.authorization === `Bearer ${TOKEN}`), true);
@@ -191,7 +196,9 @@ test("green, behind, red, merged, and tip wake only an offline claimant", async 
   const github = mockGitHub(() => scene);
   store.landQueue.configure({ token: TOKEN, fetchImpl: github.fetchImpl });
   const added = await store.landQueue.add("commons", memberId, { repo: "acme/demo", prNumber: 969 });
-  assert.equal(landEvents(store).length, 0);
+  // The add receipt lands first; the transitions below append after it.
+  assert.equal(landEvents(store).length, 1);
+  assert.deepEqual(landEvents(store)[0].data.changed, ["added"]);
   const itemId = added.item.itemId;
   const due = () => store.landQueue.refreshDue({ now: clock.now + 120_000 });
 
@@ -199,12 +206,12 @@ test("green, behind, red, merged, and tip wake only an offline claimant", async 
   const green = await due();
   assert.equal(green.updated, 1);
   let events = landEvents(store);
-  assert.equal(events.length, 1);
-  assert.equal(events[0].data.pr, 969);
-  assert.equal(events[0].data.head, SHA);
-  assert.deepEqual(events[0].data.changed, ["green"]);
-  assert.deepEqual(events[0].data.state, { checks: "green", behind: false, mergeable: "mergeable", merged: false });
-  assert.equal(events[0].actorId, memberId);
+  assert.equal(events.length, 2);
+  assert.equal(events[1].data.pr, 969);
+  assert.equal(events[1].data.head, SHA);
+  assert.deepEqual(events[1].data.changed, ["green"]);
+  assert.deepEqual(events[1].data.state, { checks: "green", behind: false, mergeable: "mergeable", merged: false });
+  assert.equal(events[1].actorId, memberId);
   assert.equal(wake.pushes.length, 1);
   assert.equal(wake.pushes[0].eventType, "land.updated");
   assert.equal(wake.pushes[0].identityId, identity.identityId);
@@ -253,7 +260,7 @@ test("green, behind, red, merged, and tip wake only an offline claimant", async 
   assert.deepEqual(landEvents(store).at(-1).data.changed, ["tip"]);
   const same = store.landQueue.reportTip("commons", memberId, { itemId, sourceRevision: "src-1" });
   assert.deepEqual(same.changed, []);
-  assert.equal(landEvents(store).length, 5);
+  assert.equal(landEvents(store).length, 6);
   assert.throws(
     () => store.landQueue.reportTip("commons", memberId, { itemId }),
     error => error.status === 422 && error.code === "invalid_land_tip"
@@ -279,7 +286,10 @@ test("a missing token is 503 github_unconfigured and is not logged", async t => 
   assert.equal(summary.unconfigured, 1);
   assert.match(wake.warnings.join("\n"), /github_unconfigured/);
   assert.equal(wake.warnings.some(line => /token|bearer|authorization/i.test(line)), false);
-  assert.equal(landEvents(store).length, 0);
+  // The row write already committed its added receipt before the refresh
+  // threw; only the poll failed, not the board mutation.
+  assert.equal(landEvents(store).length, 1);
+  assert.deepEqual(landEvents(store)[0].data.changed, ["added"]);
 });
 
 test("a rejected token is github_unconfigured and a missing pull request is pr_not_found", async t => {
@@ -376,7 +386,8 @@ test("an unchanged poll sends If-None-Match, backs off, and skips merged and clo
   const added = await store.landQueue.add("commons", "owner", { repo: "acme/demo", prNumber: 41 });
   assert.equal(added.item.checks, "pending");
   assert.equal(added.changed.length, 0);
-  assert.equal(landEvents(store).length, 0);
+  assert.equal(landEvents(store).length, 1);
+  assert.deepEqual(landEvents(store)[0].data.changed, ["added"]);
   assert.equal(github.calls.some(call => call.url.includes("/check-runs") && call.url.includes("filter=latest")), true);
 
   current = open;
@@ -404,7 +415,7 @@ test("an unchanged poll sends If-None-Match, backs off, and skips merged and clo
   assert.equal(row.backoff_ms, 120_000);
   assert.equal(row.checks_state, "green");
   assert.equal(row.next_poll_at, clock.now + 120_000);
-  assert.equal(landEvents(store).length, 1);
+  assert.equal(landEvents(store).length, 2);
 
   clock.now += 60_000;
   summary = await store.landQueue.refreshDue();
@@ -528,6 +539,10 @@ test("re-adding a pull request keeps one row and can move the claimant", async t
   assert.equal(second.item.itemId, first.item.itemId);
   assert.equal(second.item.claimantMemberId, memberId);
   assert.equal(store.landQueue.list("commons", "owner").items.length, 1);
+  // The claimant handoff is a board write: it commits its reassigned receipt.
+  const events = landEvents(store);
+  assert.deepEqual(events.map(event => event.data.changed), [["added"], ["reassigned"]]);
+  assert.equal(events[1].data.claimantMemberId, memberId);
 });
 
 async function listen(t, store) {
