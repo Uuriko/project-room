@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { validId } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
 import { toCsv, toJsonExport } from "./csv-export.mjs";
+import { chaosFaultPoint } from "./chaos-fault.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 const exact = (v, fields) => v && typeof v === "object" && !Array.isArray(v)
@@ -146,9 +147,15 @@ export function recordDirectSend(db, { id, accountId, channel, to, subject, body
     || typeof bodyHash !== "string" || !/^[a-f0-9]{64}$/.test(bodyHash) || !Number.isSafeInteger(at)
     || (requestId !== null && !validId(requestId)))
     fail(422, "invalid_direct_send", "Send channel, recipient and body are required.");
+  // TEST-ONLY chaos hook (server/chaos-fault.mjs): no-op unless a test armed
+  // it. before-record simulates a crash before the idempotency key is
+  // journaled; after-record simulates a crash after the key row commits but
+  // before the provider delivery / settlement (the "apply").
+  chaosFaultPoint("direct-send:before-record", { id, accountId, requestId });
   db.prepare(`INSERT INTO direct_channel_sends
     (id, account_id, channel, recipient, subject, body_hash, thread_id, status, provider_id, error_code, request_id, created_at, updated_at)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, accountId, channel, to, subject, bodyHash, threadId ?? null, "pending", null, null, requestId, at, at);
+  chaosFaultPoint("direct-send:after-record", { id, accountId, requestId });
   return getDirectSend(db, id);
 }
 
@@ -167,10 +174,28 @@ export function completeDirectSend(db, id, { status, providerId = null, errorCod
   const row = getDirectSend(db, id);
   if (!row) fail(404, "direct_send_not_found", "Send attempt not found.");
   if (row.status !== "pending") fail(409, "direct_send_settled", "This send attempt already settled.");
+  // TEST-ONLY chaos hook (server/chaos-fault.mjs): no-op unless a test armed
+  // it. before-complete simulates a crash after the provider delivery but
+  // before the settlement UPDATE commits; after-complete simulates a crash
+  // right after it commits.
+  chaosFaultPoint("direct-send:before-complete", { id, status });
   db.prepare(`UPDATE direct_channel_sends SET status=?, provider_id=?, error_code=?, updated_at=? WHERE id=?`)
     .run(status, providerId, errorCode, at, id);
+  chaosFaultPoint("direct-send:after-complete", { id, status });
   return getDirectSend(db, id);
 }
+
+// True when a journal write failed because the (account_id, request_id)
+// UNIQUE index rejected a duplicate idempotency key — i.e. a concurrent
+// request with the same key won the race. Driver-agnostic: better-sqlite3
+// reports SQLITE_CONSTRAINT_UNIQUE; node:sqlite (the production driver,
+// server/store.mjs) reports ERR_SQLITE_ERROR with a UNIQUE-constraint
+// message naming the index columns.
+export const isDirectSendKeyConflict = error =>
+  error?.code === "SQLITE_CONSTRAINT_UNIQUE"
+  || (error?.code === "ERR_SQLITE_ERROR"
+    && /UNIQUE constraint failed: direct_channel_sends\.account_id, direct_channel_sends\.request_id/i
+      .test(error?.message ?? ""));
 
 export function getDirectSend(db, id) {
   ensureDirectSendTable(db);
