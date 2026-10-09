@@ -48,7 +48,14 @@ test("g14-crash: reopen after crash keeps conservation and committed state", () 
   // "kill -9": drop the handle without closing; reopen a fresh one.
   escrow = openOn(file);
   escrow.ensureGenesis(ROOM); // no-op, must not double-issue
-  assert.equal(escrow.balances(ROOM, JILL).payable, 100);
+  // The award moved to the claimant's attributed lot on accept: JILL keeps
+  // 75, GROK holds 25 attributed + 1 locked (claim bond). Genesis total (400)
+  // is what must not be double-issued.
+  assert.equal(escrow.balances(ROOM, JILL).payable, 75);
+  assert.equal(escrow.balances(ROOM, GROK).approved, 25, "award vested in claimant's approved lot");
+  const genesisTotal = ["id:agent/jill", "id:agent/grokbot", "id:agent/instinct", "id:agent/codex"]
+    .reduce((s, l) => s + escrow.balances(ROOM, l).total, 0) + escrow.balances(ROOM, "pool").total;
+  assert.equal(genesisTotal, 400, "genesis must not double-issue on reopen");
   const b = escrow.getBounty(ROOM, id);
   assert.equal(b.state, "approved");
   const c = escrow.verifyConservation(ROOM);
@@ -60,7 +67,8 @@ test("g14-crash: reopen after crash keeps conservation and committed state", () 
   const after = escrow.balances(ROOM, GROK).payable;
   const gross = 25 * MILLIS_PER_CREDIT;
   const expectNet = (gross - Math.floor(gross / 100)) / MILLIS_PER_CREDIT;
-  assert.equal(after - before, expectNet);
+  // Worker gets the net award PLUS the 1-credit claim bond returned.
+  assert.ok(Math.abs((after - before) - (expectNet + 1)) < 1e-9, `expected ${expectNet + 1}, got ${after - before}`);
   tick(3 * 24 * 3600 * 1000 + 1);
   escrow.closeEpoch(ROOM, {}); // second sweep: must be a no-op
   assert.equal(escrow.balances(ROOM, GROK).payable, after, "double sweep detected");

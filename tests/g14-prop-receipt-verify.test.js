@@ -31,7 +31,7 @@ test("g14-receipt: forgery classes are rejected", () => {
   const r = issueBountyReceipt(issueArgs("escrow-locked"));
   // Wrong key signs a lookalike receipt: expectedPubkey must fail it.
   const { seedHex: otherSeed, pubkeyHex: otherPub } = generateReceiptKeyPair();
-  const forged = issueBountyReceipt(issueArgs("escrow-locked", { seedHex: otherSeed, issuer: { pubkey: otherPub, role: "x", ref: "y" } }));
+  const forged = issueBountyReceipt(issueArgs("escrow-locked", { seedHex: otherSeed, issuer: { pubkey: otherPub, role: "escrow-keeper", ref: "forger" } }));
   assert.equal(verifyBountyReceipt(forged, { expectedPubkey: PUBKEY }).ok, false, "forged-key receipt accepted");
   // Zeroed signature rejected.
   const zeroed = { ...r, signature: "0".repeat(128) };

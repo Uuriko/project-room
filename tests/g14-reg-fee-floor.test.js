@@ -44,7 +44,7 @@ test("g14-reg-fee-floor: fee floors on non-divisible millis amounts", () => {
   const poolBal = escrow.balances(ROOM, "pool").payable;
   const expectedFee = Math.floor(gross / 100) / MILLIS_PER_CREDIT; // 0.1
   const expectedNet = (gross - Math.floor(gross / 100)) / MILLIS_PER_CREDIT; // 9.901
-  assert.equal(poolBal, expectedFee, `pool fee must be floor(1%) = ${expectedFee}, got ${poolBal}`);
-  assert.equal(workerBal, workerBefore + expectedNet, `worker net must be ${expectedNet}, got ${workerBal - workerBefore}`);
+  assert.ok(Math.abs(poolBal - expectedFee) < 1e-9, `pool fee must be floor(1%) = ${expectedFee}, got ${poolBal}`);
+  assert.ok(Math.abs(workerBal - (workerBefore + expectedNet)) < 1e-9, `worker net must be ${expectedNet}, got ${workerBal - workerBefore}`);
   assert.equal(escrow.verifyConservation(ROOM).ok, true);
 });

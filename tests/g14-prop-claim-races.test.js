@@ -58,6 +58,7 @@ test("g14-races: double finalize / double epoch close cannot double-pay", () => 
   escrow.closeEpoch(ROOM, {});
   escrow.closeEpoch(ROOM, {});
   escrow.closeEpoch(ROOM, {});
-  assert.equal(escrow.balances(ROOM, LANES[0]).payable - before, 19.8, "worker must be paid exactly once (20 - 1%)");
+  const delta = escrow.balances(ROOM, LANES[0]).payable - before;
+  assert.ok(Math.abs(delta - 20.8) < 1e-9, `worker must be paid exactly once (20 - 1% fee + 1-credit bond returned), got ${delta}`);
   assert.equal(escrow.verifyConservation(ROOM).ok, true);
 });

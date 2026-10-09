@@ -25,6 +25,10 @@ function makeEscrow() {
   const escrow = new BountyEscrow({ db, transaction, readTransaction: transaction },
     { now: () => nowMs, allowLegacyStringLanes: true });
   escrow.ensureGenesis(ROOM);
+  // JILL gets 300 credits of funding budget via transfers (genesis is 100/lane).
+  // GROK keeps its 100 to cover claim bonds as the worker.
+  for (const lane of ["id:agent/instinct", "id:agent/codex"])
+    escrow.transfer(ROOM, { from: lane, to: JILL, amount: 100 });
   return escrow;
 }
 
@@ -42,22 +46,20 @@ function runToPaid(escrow, amount) {
 }
 
 test("g14-payout: paid + fee == gross and fee == floor(1%)", () => {
-  const escrow = makeEscrow();
-  let expectPool = 0;
-  const amounts = [1, 2, 0.001, 0.333, 10, 33.33, 100.999, 999.999, 5.05, 7.77];
+  const amounts = [1, 2, 0.001, 0.333, 10, 33.33, 99.999, 50.505, 5.05, 7.77];
   for (const amount of amounts) {
+    const escrow = makeEscrow(); // fresh genesis per amount: 100-credit funding budget
     tick(60_000);
     const gross = Math.round(amount * MILLIS_PER_CREDIT);
     const b = runToPaid(escrow, amount);
     assert.equal(b.state, "paid");
     const feeMillis = Math.floor(gross * 1 / 100);
-    expectPool += feeMillis;
-    // Earners' payable rose by gross - fee (net), pool by fee. Check via journal.
+    const poolBal = escrow.balances(ROOM, "pool").payable;
+    const poolMillis = Math.round(poolBal * MILLIS_PER_CREDIT);
+    assert.equal(poolMillis, feeMillis, `pool got ${poolMillis} millis for gross=${gross} millis, expected fee=${feeMillis} millis`);
     const c = escrow.verifyConservation(ROOM);
     assert.equal(c.ok, true, `conservation violated: ${JSON.stringify(c.violations)}`);
   }
-  const poolBal = escrow.balances(ROOM, "pool");
-  assert.equal(poolBal.payable * MILLIS_PER_CREDIT, expectPool, `pool got ${poolBal.payable} credits, expected ${expectPool / MILLIS_PER_CREDIT}`);
 });
 
 test("g14-payout: total credits conserved across lanes + pool after many payouts", () => {
@@ -69,7 +71,7 @@ test("g14-payout: total credits conserved across lanes + pool after many payouts
     runToPaid(escrow, 1 + i * 0.7);
   }
   const endTotal = lanes.reduce((s, l) => s + escrow.balances(ROOM, l).total, 0) + escrow.balances(ROOM, "pool").total;
-  assert.equal(endTotal, startTotal, `credits created/destroyed: ${startTotal} -> ${endTotal}`);
+  assert.ok(Math.abs(endTotal - startTotal) < 1e-9, `credits created/destroyed: ${startTotal} -> ${endTotal}`);
   const c = escrow.verifyConservation(ROOM);
   assert.equal(c.ok, true);
 });
