@@ -846,10 +846,43 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     try { const value = JSON.parse(text); if (!value || Array.isArray(value) || typeof value !== "object") throw new Error(); return value; }
     catch { reject(400, "invalid_json", "Expected a JSON object"); }
   }
+  // Per-stream bounded write queue. Every byte a stream emits goes through
+  // this queue; the socket write itself is always fire-and-forget — the pump
+  // NEVER awaits a write — so one slow consumer can never stall the room or
+  // its peers. When the pending bytes exceed the cap the queue reports
+  // lagging and the stream is closed alone with a final `stream_lagging`
+  // event (wire protocol unchanged; the client resumes with Last-Event-ID).
+  // The F1 shared pump (wave300-fanout-perf) reuses this queue per stream in
+  // its fan-out step: check queue.lagging() before writing each event, skip
+  // the stream for the rest of the tick when it trips, and run the same lag
+  // close path. The shared fetch never waits on a stream's socket.
+  function createStreamWriteQueue(target, capBytes) {
+    const queue = {
+      capBytes,
+      pendingBytes: () => target.writableLength,
+      lagging: () => target.writableLength > capBytes,
+      // Writes one chunk; returns false when the write pushed the queue over
+      // the cap (or the socket is gone) — the caller must stop feeding this
+      // stream and run the lag close path instead of writing more.
+      write(chunk) {
+        if (target.destroyed || target.writableEnded) return false;
+        target.write(chunk);
+        return !queue.lagging();
+      },
+    };
+    return queue;
+  }
   function stream(req, res, token, roomId, after, auth, operationId) {
     const binding = auth.sessionBinding;
     store.eventsAfter(token, roomId, after, 100, binding);
-    if (streams.size >= 100 || [...streams].filter(item => item.credentialHash === auth.credentialHash).length >= 3) reject(429, "stream_limit", "Close another room connection before opening more");
+    // Stream admission follows the honest-backpressure refusal semantics
+    // (wave300/honest-backpressure lane): 429 means *you* are over your quota
+    // — close one of your own streams (the route catch-all adds Retry-After);
+    // 503 shed_load means the *server* is shedding — back off and honor the
+    // Retry-After delay.
+    const ownStreams = [...streams].filter(item => item.credentialHash === auth.credentialHash).length;
+    if (ownStreams >= 3) reject(429, "stream_limit", "Close another room connection before opening more");
+    if (streams.size >= 100) reject(503, "shed_load", "The server is shedding load; retry after the Retry-After delay", { "Retry-After": "5" });
     res.writeHead(200, { "Content-Type": "text/event-stream", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
     res.flushHeaders();
     const entry = { credentialHash: auth.credentialHash, sessionBinding: binding, memberId: auth.member.id, roomId, res };
@@ -860,11 +893,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     const cleanup = () => { clearInterval(timer); streams.delete(entry); signal?.removeEventListener("abort", abort); };
     const end = data => { cleanup(); if (!res.destroyed && !res.writableEnded) res.end(data); };
     const abort = () => end();
-    // Per-connection send queue: a consumer whose unsent bytes exceed the cap
-    // gets one final stream_lagging event and, if it never drains, its socket
-    // dropped. Peers keep their own queues. Reconnecting with Last-Event-ID
-    // resumes from the last event the client actually processed.
-    const lagging = () => res.writableLength > streamQueueCap;
+    // A consumer whose unsent bytes exceed the cap gets one final
+    // stream_lagging event and, if it never drains, its socket dropped.
+    // Peers keep their own queues. Reconnecting with Last-Event-ID resumes
+    // from the last event the client actually processed.
+    const queue = createStreamWriteQueue(res, streamQueueCap);
+    entry.queue = queue;
     const lag = () => {
       diagnostics.record({ operationId, at: new Date().toISOString(), status: 200, code: "stream_lagging", category: "unavailable", route: "/api/rooms/:roomId/stream", roomId });
       console.warn(`room diagnostic ${operationId} 200 stream_lagging unavailable /api/rooms/:roomId/stream`);
@@ -877,24 +911,28 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (res.destroyed || res.writableEnded) { cleanup(); return; }
       try {
         const batch = redactEventPage(store.eventsAfter(token, roomId, cursor, 100, binding), projectionMessages(roomId));
-        if (!batch.events.length) res.write(": connected transport only\n\n");
+        // Every write goes through the bounded queue: when one write pushes
+        // the queue over the cap, flowing goes false and this stream stops
+        // being fed for the rest of the tick — the pump never awaits a
+        // socket write, so a slow stream cannot stall the room or its peers.
+        let flowing = batch.events.length === 0 ? queue.write(": connected transport only\n\n") : true;
         for (const item of batch.events) {
-          res.write(`id: ${item.sequence}\nevent: room-event\ndata: ${JSON.stringify(item)}\n\n`);
+          if (!flowing) break;
+          flowing = queue.write(`id: ${item.sequence}\nevent: room-event\ndata: ${JSON.stringify(item)}\n\n`);
           cursor = item.sequence;
-          if (lagging()) break;
         }
         // Ephemeral typing indicators ride the stream as synthetic `typing`
         // events with no `id:` — they never disturb Last-Event-ID resume.
         // Emitted only when the visible typist set changes for this connection.
-        if (!lagging()) {
+        if (flowing) {
           const typists = currentTypists(typingBeats, roomId, entry.memberId);
           const key = typingKey(typists);
           if (key !== entry.lastTypingKey) {
             entry.lastTypingKey = key;
-            res.write(`event: typing\ndata: ${JSON.stringify({ typists })}\n\n`);
+            flowing = queue.write(`event: typing\ndata: ${JSON.stringify({ typists })}\n\n`);
           }
         }
-        if (lagging()) lag();
+        if (!flowing) lag();
         // Advance past invisible rows only after the complete visible batch
         // was queued. A lagging stream must resume from its last sent event.
         else cursor = batch.next;

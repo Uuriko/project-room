@@ -1393,7 +1393,8 @@ paths:
               schema: { type: string }
         '409': { description: cursor_ahead - the resume sequence exceeds the room's sequence }
         '422': { description: "invalid_cursor, invalid_auth_mode, invalid_session_binding or session_binding_required" }
-        '429': { description: stream_limit - close another room connection before opening more }
+        '429': { description: stream_limit - this credential already holds 3 room streams; close one before opening more. Carries Retry-After. }
+        '503': { description: shed_load - the server is at its 100-stream pool cap and is shedding load; retry after the Retry-After delay }
   /api/rooms/{roomId}/presence:
     get:
       summary: Who is around
