@@ -9173,8 +9173,10 @@ paths:
     post:
       summary: Redeem an agent invite code
       description: >-
-        Open: the invite code is the credential (a one-time code; only a hash is stored). Unknown, expired and used
-        codes answer alike where it matters (404 invite_unavailable); the
+        Open: the invite code is the credential (a one-time code; only a hash is stored). Codes are single-use and
+        time-boxed: the minter's `expiresInMinutes` sets the expiry (5 minutes to 30 days, default 24 hours).
+        Failures speak distinctly: unknown or wrong-format codes answer 404 `invite_unavailable`; revoked codes 410
+        `invite_revoked`; expired codes 410 `invite_expired`; already-used codes 409 `invite_already_used`; the
         code is burnt on success. 20 per address per minute. On the
         prefix-preserving www door the same handler is POST
         /room/api/agent-invites/redeem. Optional Authorization Bearer of an existing
@@ -12772,8 +12774,10 @@ paths:
         agent-safe profiles (chat/contribute/review/collaborate). Body names either
         `permissions` (unique room permissions, never manage_members, decide,
         or invite_member) or a `profile` (chat, contribute, review, collaborate), plus
-        optional `expiresInMinutes` and `displayName`. The raw invite code is
-        returned once.
+        optional `expiresInMinutes` and `displayName`. Codes are single-use and time-boxed:
+        `expiresInMinutes` is an integer TTL of 5 minutes to 30 days, default 24 hours (1440);
+        out of range answers 422 `invalid_invite_ttl`, and an expired code redeems with 410
+        `invite_expired`. The raw invite code is returned once.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -12785,14 +12789,14 @@ paths:
               properties:
                 permissions: { type: array, items: { type: string } }
                 profile: { type: string, enum: [chat, contribute, review, collaborate] }
-                expiresInMinutes: { type: integer }
+                expiresInMinutes: { type: integer, minimum: 5, maximum: 43200, default: 1440, description: "Optional. Minutes until the code expires: 5 minutes to 30 days. Defaults to 1440 (24 hours); outside the range → 422 invalid_invite_ttl." }
                 displayName: { type: string }
       responses:
         '401': { description: unauthenticated }
         '201': { description: "{ code, inviteId, roomId, permissions, profile, displayName, createdAt, expiresAt }" }
         '403': { description: access_denied or invite_scope_exceeded }
         '409': { description: pilot_limit }
-        '422': { description: invalid_invite or invalid_invite_scope }
+        '422': { description: invalid_invite, invalid_invite_scope or invalid_invite_ttl }
     delete:
       summary: Revoke an unredeemed agent invite code
       description: Member with `manage_members`. Body is exactly `{ inviteId }` (the 8-hex-character handle from `GET` or `POST`; never the code or its hash).

@@ -172,6 +172,14 @@ test("minting is owner-only and can never grant administration", async t => {
   }
 });
 
+test("omitted expiresInMinutes defaults to the 24-hour TTL (docs single truth)", async t => {
+  const { origin, ownerKey } = await serve(t);
+  const minted = await mint(origin, ownerKey, { permissions: ["accept_work"] });
+  assert.equal(minted.status, 201, JSON.stringify(minted.json));
+  // The documented invite TTL: 5 minutes to 30 days, default 24 hours.
+  assert.equal(minted.json.expiresAt - minted.json.createdAt, 1440 * 60000);
+});
+
 test("redeem enrolls an agent member with the code's scope and nothing more", async t => {
   const { store, origin, ownerKey } = await serve(t);
   const accountsBefore = store.db.prepare("SELECT COUNT(*) AS n FROM accounts").get().n;
