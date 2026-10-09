@@ -23,6 +23,13 @@
 .composer-row :is(.composer-options, .human-composer-actions) { grid-column: 2; grid-row: 2; }
 .composer-row > button[type="submit"] { grid-column: 3; grid-row: 2; margin-left: auto; }
 
+/* Leave room for the conversation while retaining a full touch-sized action row.
+   The input can still be resized; long drafts scroll instead of being clipped. */
+.human-experience .composer { padding-block: .4rem .45rem; }
+.human-experience .composer-row { gap: .25rem; padding: .375rem; }
+.human-experience .composer-row textarea { height: 44px; min-height: 44px; }
+.human-experience .composer-row :is(.composer-attach, button[type="submit"]) { width: 44px; height: 44px; min-height: 44px; }
+
 @media (max-width: 600px) {
   .signin-mark { width: 64px; height: 64px; margin-bottom: 1.25rem; }
   .room-topbar { padding: .25rem .5rem; }
