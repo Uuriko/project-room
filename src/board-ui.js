@@ -646,7 +646,7 @@ export function installWorkBoard({ client, getState, getSession }) {
     else if (action === "renew") {
       // FIX-11: renew requires proof of progress — prompt for the progress
       // message id instead of posting a bare renew (the server 422s it).
-      const progressMessageId = window.prompt("Progress message id for this renewal (post a progress update in the room first):");
+      const progressMessageId = window.prompt(uiText("board.renew.prompt"));
       if (progressMessageId === null || !progressMessageId.trim()) return;
       flyButton(button, () => client.request(`${path}/renew`,
         { method: "POST", data: { progressMessageId: progressMessageId.trim() } }), focus);

@@ -120,6 +120,7 @@
   "board.loading.005": "Saving…",
   "board.action.pending.claim": "Claiming '{title}'…",
   "board.action.pending.renew": "Renewing '{title}'…",
+  "board.renew.prompt": "Progress message id for this renewal (post a progress update in the room first):",
   "board.action.pending.progress": "Marking '{title}' in progress…",
   "board.action.pending.done": "Marking '{title}' done…",
   "board.action.pending.release": "Releasing '{title}'…",
