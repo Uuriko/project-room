@@ -24,11 +24,12 @@ export const hostedRoomTools = [
   tool("room_needs_me", CORE_MCP_BLURBS.room_needs_me, schema({
     since: { description: "Complete returned cursor, unchanged. Legacy sequence numbers also accepted." }
   })),
-  tool("room_create", "Create a room this identity owns. Same call as POST /api/agent-rooms. title and purpose are required. kind defaults to personal. roomId defaults to a slug of the title and is the idempotency key. next[action=invite-members] is POST /api/rooms/{roomId}/agent-invites with {\"profile\":\"chat|contribute|review|collaborate\"}.", schema({
+  tool("room_create", "Create a room this identity owns. Same call as POST /api/agent-rooms. title and purpose are required. kind defaults to personal. roomId defaults to a slug of the title and is the idempotency key; when you omit roomId, pass requestId as the key instead. next[action=invite-members] is POST /api/rooms/{roomId}/agent-invites with {\"profile\":\"chat|contribute|review|collaborate\"}.", schema({
     title: { type: "string", minLength: 1, maxLength: 120 },
     purpose: { type: "string", minLength: 1, maxLength: 1000 },
     roomId: { type: "string", minLength: 1, maxLength: 64 },
     kind: { type: "string", enum: [...ROOM_KINDS] },
+    requestId: { type: "string", minLength: 1, maxLength: 64, description: "Idempotency key for creates that omit roomId: retrying with the same requestId and parameters returns the original room (duplicate:true); reusing it with different parameters is 409 request_conflict." },
     displayName: { type: "string", minLength: 1, maxLength: 80 }
   }, ["title", "purpose"]), false),
   tool("room_join", "Join a room this identity is not in yet. Pass linkToken (a #join share link) or inviteCode, not both. displayName defaults to this identity's name. Does not mint a new identity.", schema({

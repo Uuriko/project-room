@@ -80,7 +80,7 @@ import { accessRequestSchema } from "./access-requests.mjs";
 import { membershipDelegationJournalSchema, MembershipDelegationJournal } from "./membership-delegation-journal.mjs";
 import { membershipDelegationSchema, MembershipDelegation } from "./membership-delegation.mjs";
 import { ownerDelegateSchema, OwnerDelegates } from "./owner-delegates.mjs";
-import { agentRoomSchema } from "./agent-rooms.mjs";
+import { agentRoomSchema, ensureAgentRoomRequestIdColumn } from "./agent-rooms.mjs";
 import { directSendSchema, ensureDirectSendTable } from "./inbox-outbox.mjs";
 import { inboxStitchSchema } from "./inbox-stitch-store.mjs";
 import { ensureAttachmentSchema, verifyAttachmentSchema } from "./attachment-schema.mjs";
@@ -1725,6 +1725,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const rollbackChanges = this.delegationJournal.reconcileRollback();
       if (rollbackChanges) console.warn(`Imported ${rollbackChanges} unattributed membership-delegation changes from a rollback-era writer`);
       this.db.exec(agentRoomSchema);
+      ensureAgentRoomRequestIdColumn(this.db);
       // Multi-method login tables (slice 1): purely additive, intentionally
       // outside the writer fence like access_requests above — older writers
       // have no code path to them, and method rows are always scoped to an

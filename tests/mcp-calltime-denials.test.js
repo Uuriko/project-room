@@ -277,6 +277,11 @@ test("unrestricted agent keeps every gapped tool (no regression)", async t => {
   await ok("inbox_put_attachment", { id: "o1", filename: "note.txt", mediaType: "text/plain", data: Buffer.from("hi").toString("base64") });
   const created = await ok("room_create", { title: "Owner room", purpose: "regression probe" });
   assert.ok(created.roomId, "room_create should return a room id");
+  // requestId is the idempotency key for creates without a roomId (and is exposed by the tool).
+  const keyed = await ok("room_create", { title: "Keyed room", purpose: "retry probe", requestId: "mcp-req-1" });
+  const retried = await ok("room_create", { title: "Keyed room", purpose: "retry probe", requestId: "mcp-req-1" });
+  assert.equal(retried.roomId, keyed.roomId, "same requestId returns the original room");
+  assert.equal(retried.duplicate, true);
   await ok("wake_pause", { roomId, requestId: randomUUID() });
   await ok("wake_resume", { roomId, requestId: randomUUID() });
 });
