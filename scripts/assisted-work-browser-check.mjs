@@ -130,7 +130,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     const beforeConflict = snapshot();
     const conflict = await saveAction(page, 409);
     assert.equal(conflict.error.code, "claim_conflict");
-    await page.waitForFunction(() => document.querySelector("#action-error").textContent.includes("reserved") && !document.querySelector('#action-form button[type="submit"]').disabled);
+    await page.waitForFunction(() => document.querySelector("#action-error").textContent.includes("holds a claim") && !document.querySelector('#action-form button[type="submit"]').disabled);
     assert.equal(await page.locator("#action-dialog").isVisible(), true);
     assert.match(await page.locator("#action-error").textContent(), /no new claim was saved/i);
     assert.equal(snapshot().sequence, beforeConflict.sequence);
