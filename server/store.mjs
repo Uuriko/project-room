@@ -1852,16 +1852,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return this.transaction(() => {
       const exists = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='referral_chain_members'").get();
       if (!exists) return 0;
-      const rows = this.db.prepare("SELECT rowid FROM referral_chain_members WHERE max_depth IS NULL LIMIT ?").all(limit);
-      const update = this.db.prepare(`UPDATE referral_chain_members SET max_depth = (
+      return this.db.prepare(`UPDATE referral_chain_members SET max_depth = (
         SELECT ri.max_depth FROM referral_invites ri
         WHERE ri.room_id = referral_chain_members.room_id
           AND ri.redeemed_member_id = referral_chain_members.member_id
           AND ri.status = 'redeemed' LIMIT 1
-      ) WHERE rowid = ? AND max_depth IS NULL`);
-      let updated = 0;
-      for (const row of rows) updated += update.run(row.rowid).changes;
-      return updated;
+      ) WHERE rowid IN (
+        SELECT rowid FROM referral_chain_members WHERE max_depth IS NULL LIMIT ?
+      )`).run(limit).changes;
     });
   }
 
@@ -1892,8 +1890,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.prepare(`INSERT INTO integrity_job_cursor (singleton, step) VALUES (1, ?)
         ON CONFLICT(singleton) DO UPDATE SET step=excluded.step`).run(next);
     });
-    let ran = 0;
-    while (ran < 2) {
+    for (let ran = 0; ran < 2; ran++) {
       if (Date.now() > deadline) {
         // A step that finished is not run again on the next tick.
         if (ran > 0) remember(step);
@@ -1901,11 +1898,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
       steps[step]();
       step = (step + 1) % steps.length;
-      ran += 1;
       await yieldBetween();
     }
     remember(step);
-    return { ran, next: step };
+    return { ran: 2, next: step };
   }
 
   ensureIntegrityRoomState() {
@@ -2009,49 +2005,53 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       LIMIT 1
     `).get()));
   }
+  // verifyRoomIntegrity's deadline-expired return shape; overrides specialize the stage.
+  _overBudget(overrides = {}) {
+    return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, ...overrides };
+  }
   // Full invitation, help, and provenance check. Yields between invitations so
   // a cron tick can open the input gate. A matching snapshot returns without
   // reading event bodies. The constructor does not call this.
   async verifyRoomIntegrity({ yieldBetween = async () => {}, deadline = Infinity } = {}) {
     if (this.readOnly) throw new Error("Read-only stores do not run the integrity job");
     if (typeof yieldBetween !== "function") throw new TypeError("yieldBetween must be a function");
-    if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, checked: 0, swept: 0 };
+    if (Date.now() > deadline) return this._overBudget({ checked: 0, swept: 0 });
     const incremental = this.incrementalIntegrityCheck();
     if (incremental.ok) {
       await yieldBetween();
-      if (Date.now() > deadline) return { matched: 1, skipped: 1, verified: 0, invitations: incremental.invitations, checked: incremental.checked, swept: incremental.swept, budgetExceeded: 1 };
+      if (Date.now() > deadline) return this._overBudget({ matched: 1, skipped: 1, invitations: incremental.invitations, checked: incremental.checked, swept: incremental.swept });
       const deferred = await this.runDeferredIntegrityBatch({ deadline, yieldBetween });
       return { matched: 1, skipped: 1, verified: 0, invitations: incremental.invitations, checked: incremental.checked, swept: incremental.swept, deferred };
     }
     const before = this.integrityChecksum();
     if (this.readIntegritySnapshot() === before.text) {
       await yieldBetween();
-      if (Date.now() > deadline) return { matched: 1, skipped: 1, verified: 0, invitations: before.invitations, budgetExceeded: 1 };
+      if (Date.now() > deadline) return this._overBudget({ matched: 1, skipped: 1, invitations: before.invitations });
       const deferred = await this.runDeferredIntegrityBatch({ deadline, yieldBetween });
       return { matched: 1, skipped: 1, verified: 0, invitations: before.invitations, deferred };
     }
     await yieldBetween();
-    if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1 };
+    if (Date.now() > deadline) return this._overBudget();
     const orphan = this.readTransaction(() => this.db.prepare("SELECT 1 FROM membership_invitation_journal j LEFT JOIN membership_invitations i ON i.id=j.invitation_id WHERE i.id IS NULL LIMIT 1").get());
     if (orphan) fail(503, "invitation_integrity_error", "Invitation record requires operator reconciliation");
     const ids = this.readTransaction(() => this.db.prepare("SELECT id FROM membership_invitations ORDER BY id").all().map(row => row.id));
     for (const id of ids) {
-      if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1 };
+      if (Date.now() > deadline) return this._overBudget();
       this.verifyInvitationRecord(id);
       await yieldBetween();
     }
     if (this.helpProjectionPresent()) {
-      if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1 };
+      if (Date.now() > deadline) return this._overBudget();
       this.verifyHelpHistory();
       await yieldBetween();
     }
-    if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1 };
+    if (Date.now() > deadline) return this._overBudget();
     this.repairProjectionProvenance({ upgradeV1: false, ensureIndex: false });
     await yieldBetween();
     const after = this.integrityChecksum();
     this.writeIntegritySnapshot(after.text);
     this.rememberIntegrityRoomState();
-    if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 1, invitations: after.invitations, budgetExceeded: 1 };
+    if (Date.now() > deadline) return this._overBudget({ verified: 1, invitations: after.invitations });
     const deferred = await this.runDeferredIntegrityBatch({ deadline, yieldBetween });
     return { matched: 0, skipped: 0, verified: 1, invitations: after.invitations, deferred };
   }
@@ -2387,10 +2387,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const cutoff = nowMs - days * 24 * 60 * 60 * 1000;
       // Event `at` values are ISO strings; parse to ms for comparison.
       const asMs = value => {
-        if (typeof value === "number" && Number.isFinite(value)) return value;
-        if (typeof value === "string") { const ms = Date.parse(value); return Number.isFinite(ms) ? ms : 0; }
-        return 0;
+        const ms = typeof value === "number" ? value : typeof value === "string" ? Date.parse(value) : NaN;
+        return Number.isFinite(ms) ? ms : 0;
       };
+      // Latest activity timestamp per event actor/member.
+      const activityMap = (sql, ...args) => new Map(this.db.prepare(sql).all(...args)
+        .filter(row => row.key).map(row => [row.key, asMs(row.at)]));
       const heartbeats = new Map();
       for (const item of Object.values(room.state.workItems ?? {})) {
         const session = sessionRecord(item);
@@ -2400,14 +2402,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           if (ms > prev) heartbeats.set(session.worker_member_id, ms);
         }
       }
-      const lastCommandAt = new Map(this.db.prepare(
-        `SELECT json_extract(body,'$.actorId') AS actor, max(json_extract(body,'$.at')) AS at
-         FROM events WHERE room_id=? GROUP BY actor`
-      ).all(roomId).filter(row => row.actor).map(row => [row.actor, asMs(row.at)]));
-      const addedAt = new Map(this.db.prepare(
-        `SELECT json_extract(body,'$.data.memberId') AS member, MIN(json_extract(body,'$.at')) AS at
-         FROM events WHERE room_id=? AND json_extract(body,'$.type')='member.added' GROUP BY member`
-      ).all(roomId).filter(row => row.member).map(row => [row.member, asMs(row.at)]));
+      const lastCommandAt = activityMap(
+        `SELECT json_extract(body,'$.actorId') AS key, max(json_extract(body,'$.at')) AS at
+         FROM events WHERE room_id=? GROUP BY key`, roomId);
+      const addedAt = activityMap(
+        `SELECT json_extract(body,'$.data.memberId') AS key, MIN(json_extract(body,'$.at')) AS at
+         FROM events WHERE room_id=? AND json_extract(body,'$.type')='member.added' GROUP BY key`, roomId);
       const stale = [];
       for (const [memberId, member] of Object.entries(members)) {
         if (member.active === false) continue;
@@ -2515,9 +2515,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       WHERE json_type(projection, '$.room') = 'object'
         AND (json_type(projection, '$.channels.${DEFAULT_CHANNEL_ID}') IS NULL
           OR json_type(projection, '$.channels.${DEFAULT_CHANNEL_ID}') = 'null')
-    `).all();
+    `).all().filter(row => !skipIds.has(row.id));
     for (const row of missingChannel) {
-      if (skipIds.has(row.id)) continue;
       const state = JSON.parse(row.projection);
       if (!ensureDefaultChannelState(state)) continue;
       update.run(this.storedProjection(row.id, state), row.id);
@@ -2530,11 +2529,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         WHERE json_extract(item.value, '$.state') = 'superseded'
           AND json_type(item.value, '$.supersededBy') = 'text'
       )
-    `).all();
+    `).all().filter(row => !skipIds.has(row.id));
+    const projectionOf = this.db.prepare("SELECT projection FROM rooms WHERE id=?");
     for (const row of linked) {
-      if (skipIds.has(row.id)) continue;
       if (!repairInvalidSupersessions({ workItems: parseStoredJson(row.workItems, {}) })) continue;
-      const state = JSON.parse(this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(row.id).projection);
+      const state = JSON.parse(projectionOf.get(row.id).projection);
       if (repairInvalidSupersessions(state)) update.run(this.storedProjection(row.id, state), row.id);
     }
   }
@@ -2660,9 +2659,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   rehydrateAllProjections() {
     return this.transaction(() => {
       let count = 0;
+      const update = this.db.prepare("UPDATE rooms SET projection=? WHERE id=?");
       for (const { id } of this.db.prepare("SELECT id FROM rooms WHERE projection LIKE '%\"bodyRef\"%'").all()) {
         const state = this.room(id).state;
-        this.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(storedProjection(this.db, id, state, { enabled: false }), id);
+        update.run(storedProjection(this.db, id, state, { enabled: false }), id);
         this._projectionCache?.clear?.();
         count += 1;
       }
@@ -2814,13 +2814,27 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return this.onboardingState(accountId);
     });
   }
+  // Retire an account's access keys and clear its browser session slots; the
+  // keep*Hash options preserve one freshly delivered key/slot (deliver-then-commit).
+  _revokeAccountKeysAndSlots(accountId, { keepCredentialHash = null, keepSlotHash = null } = {}) {
+    this.db.prepare(`UPDATE account_credentials SET revoked=1 WHERE account_id=?${keepCredentialHash ? " AND hash != ?" : ""}`)
+      .run(...(keepCredentialHash ? [accountId, keepCredentialHash] : [accountId]));
+    this.db.prepare(`UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,parent_credential_hash=NULL,authenticated_until=NULL
+      WHERE account_id=?${keepSlotHash ? " AND hash != ?" : ""}`)
+      .run(...(keepSlotHash ? [accountId, keepSlotHash] : [accountId]));
+  }
+  // Retire room credentials bound to the account, directly or via membership.
+  _revokeAccountRoomCredentials(accountId) {
+    this.db.prepare(`UPDATE credentials SET revoked=1 WHERE account_id=? OR EXISTS
+      (SELECT 1 FROM member_accounts m WHERE m.account_id=? AND m.room_id=credentials.room_id AND m.member_id=credentials.member_id)`)
+      .run(accountId, accountId);
+  }
   issueAccountAccessKey(accountId, lifetimeMs = 7 * 86400000) {
     return this.transaction(() => {
       const account = this.account(accountId);
       if (!account.active) fail(403, "access_denied", "Active account required");
       if (!Number.isSafeInteger(lifetimeMs) || lifetimeMs <= 0 || lifetimeMs > 30 * 86400000) fail(422, "invalid_expiry", "Account access keys expire within 30 days");
-      this.db.prepare("UPDATE account_credentials SET revoked=1 WHERE account_id=?").run(accountId);
-      this.db.prepare("UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,parent_credential_hash=NULL,authenticated_until=NULL WHERE account_id=?").run(accountId);
+      this._revokeAccountKeysAndSlots(accountId);
       return this.insertAccountCredential(accountId, this.now() + lifetimeMs);
     });
   }
@@ -2830,30 +2844,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   revokeUnverifiedPasswordSessions(accountId, preserveSlotToken = null) {
     return this.transaction(() => {
       this.account(accountId);
-      this.db.prepare("UPDATE account_credentials SET revoked=1 WHERE account_id=?").run(accountId);
-      this.db.prepare(`UPDATE credentials SET revoked=1 WHERE account_id=? OR EXISTS
-        (SELECT 1 FROM member_accounts m WHERE m.account_id=? AND m.room_id=credentials.room_id AND m.member_id=credentials.member_id)`)
-        .run(accountId, accountId);
+      this._revokeAccountRoomCredentials(accountId);
       const preserve = typeof preserveSlotToken === "string" && tokenPattern.test(preserveSlotToken) ? hash(preserveSlotToken) : null;
-      if (preserve) {
-        this.db.prepare(`UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,
-          parent_credential_hash=NULL,authenticated_until=NULL WHERE account_id=? AND hash != ?`).run(accountId, preserve);
-      } else {
-        this.db.prepare(`UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,
-          parent_credential_hash=NULL,authenticated_until=NULL WHERE account_id=?`).run(accountId);
-      }
+      this._revokeAccountKeysAndSlots(accountId, { keepSlotHash: preserve });
     });
   }
   invalidateHumanAccountCredentials(accountId) {
     return this.transaction(() => {
       this.account(accountId);
-      this.db.prepare("UPDATE account_credentials SET revoked=1 WHERE account_id=?").run(accountId);
-      this.db.prepare(`UPDATE credentials SET revoked=1 WHERE account_id=? OR EXISTS
-        (SELECT 1 FROM member_accounts m WHERE m.account_id=? AND m.room_id=credentials.room_id AND m.member_id=credentials.member_id)`)
-        .run(accountId, accountId);
+      this._revokeAccountRoomCredentials(accountId);
       // Retain slot tombstones referenced by immutable invitation receipts.
-      this.db.prepare(`UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,
-        parent_credential_hash=NULL,authenticated_until=NULL WHERE account_id=?`).run(accountId);
+      this._revokeAccountKeysAndSlots(accountId);
     });
   }
   insertAccountCredential(accountId, expiresAt) {
@@ -2874,10 +2875,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   revokeStaleAccountKeys(accountId, keepToken) {
     return this.transaction(() => {
       this.account(accountId);
-      this.db.prepare("UPDATE account_credentials SET revoked=1 WHERE account_id=? AND hash != ?")
-        .run(accountId, hash(keepToken));
-      this.db.prepare(`UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,
-        parent_credential_hash=NULL,authenticated_until=NULL WHERE account_id=?`).run(accountId);
+      this._revokeAccountKeysAndSlots(accountId, { keepCredentialHash: hash(keepToken) });
     });
   }
   // Revoke one specific account key (used to retire a minted-but-undelivered key).
@@ -2930,7 +2928,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const row = this.db.prepare("SELECT * FROM oauth_pending_states WHERE provider=? AND state_hash=?").get(provider, stateHash);
     if (!row) return null;
     if (row.used || row.expires_at <= this.now()) {
-      this.db.prepare("DELETE FROM oauth_pending_states WHERE provider=? AND state_hash=?").run(provider, stateHash);
+      this.oauthPendingStateDelete(provider, stateHash);
       return null;
     }
     return {
@@ -2971,6 +2969,37 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       expiresAt: auth.expiresAt
     };
   }
+  // Retire the former Room credential in the same commit as the identity switch.
+  _revokePriorRoomCredential(revokeRoomToken) {
+    if (revokeRoomToken === null) return;
+    if (typeof revokeRoomToken !== "string" || !tokenPattern.test(revokeRoomToken)) fail(422, "invalid_credential", "Invalid prior Room credential");
+    this.revoke(revokeRoomToken);
+  }
+  // Point a session slot at its authenticated account; a concurrent logout/login wins the revision race.
+  _promoteSessionSlot(slotCredentialHash, expectedRevision, revision, accountId, authEpoch, parentCredentialHash, authenticatedUntil) {
+    this.db.prepare(`UPDATE account_session_slots SET revision=?,account_id=?,account_auth_epoch=?,parent_credential_hash=?,authenticated_until=?
+      WHERE hash=? AND revision=?`).run(revision, accountId, authEpoch, parentCredentialHash, authenticatedUntil, slotCredentialHash, expectedRevision);
+  }
+  // Shared core of the credential-minting logins (login method, Google).
+  // resolveAccount runs after the revision check, preserving error precedence.
+  _loginWithAccountCredential(slotToken, expectedRevision, resolveAccount, { revokeRoomToken = null, rotateSlot = false } = {}) {
+    return this.transaction(() => {
+      const slot = this.accountSessionSlot(slotToken);
+      if (slot.sessionRevision !== expectedRevision) fail(409, "stale_session_revision", "Account session changed; refresh before signing in");
+      const { accountId, authEpoch } = resolveAccount();
+      const revision = expectedRevision + 1;
+      const authenticatedUntil = Math.min(slot.expiresAt, this.now() + 8 * 3600000);
+      const parentCredentialHash = hash(this.insertAccountCredential(accountId, authenticatedUntil));
+      this._promoteSessionSlot(slot.credentialHash, expectedRevision, revision, accountId, authEpoch, parentCredentialHash, authenticatedUntil);
+      this._revokePriorRoomCredential(revokeRoomToken);
+      // QAS-702 (RC-2026-09-19-069): session-fixation rotation, atomic with
+      // the login (same transaction). Either the fresh token carries the
+      // authenticated session and the old token is dead, or the login fails
+      // and nothing is upgraded.
+      if (rotateSlot) return this.rotateAccountSessionSlot(slotToken);
+      return this.authenticateAccountSession(slotToken);
+    });
+  }
   loginAccountSession(slotToken, accountAccessKey, expectedRevision, { revokeRoomToken = null, rotateSlot = false } = {}) {
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) fail(422, "invalid_session_revision", "A current account session revision is required");
     return this.transaction(() => {
@@ -2978,14 +3007,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (slot.sessionRevision !== expectedRevision) fail(409, "stale_session_revision", "Account session changed; refresh before signing in");
       const access = this.authenticateAccountAccessKey(accountAccessKey);
       const revision = expectedRevision + 1;
-      this.db.prepare(`UPDATE account_session_slots SET revision=?,account_id=?,account_auth_epoch=?,parent_credential_hash=?,authenticated_until=?
-        WHERE hash=? AND revision=?`).run(revision, access.account.id, access.account.authEpoch, access.credentialHash, Math.min(slot.expiresAt, access.expiresAt, this.now() + 8 * 3600000), slot.credentialHash, expectedRevision);
-      // Switching browser identity and retiring its former Room credential are one
-      // commit. A storage failure must not report a rejected login after switching.
-      if (revokeRoomToken !== null) {
-        if (typeof revokeRoomToken !== "string" || !tokenPattern.test(revokeRoomToken)) fail(422, "invalid_credential", "Invalid prior Room credential");
-        this.revoke(revokeRoomToken);
-      }
+      this._promoteSessionSlot(slot.credentialHash, expectedRevision, revision, access.account.id, access.account.authEpoch,
+        access.credentialHash, Math.min(slot.expiresAt, access.expiresAt, this.now() + 8 * 3600000));
+      this._revokePriorRoomCredential(revokeRoomToken);
       // QAS-702 (RC-2026-09-19-069): session-fixation rotation, atomic with
       // the login (same transaction). Either the fresh token carries the
       // authenticated session and the pre-login token is dead, or the login
@@ -3003,27 +3027,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) fail(422, "invalid_session_revision", "A current account session revision is required");
     if (method == null || typeof method !== "object" || typeof method.kind !== "string" || method.kind.trim() === "") fail(422, "invalid_login_method", "A verified login method is required");
     if (typeof accountId !== "string" || !validId(accountId)) fail(422, "invalid_account_id", "A valid account is required");
-    return this.transaction(() => {
-      const slot = this.accountSessionSlot(slotToken);
-      if (slot.sessionRevision !== expectedRevision) fail(409, "stale_session_revision", "Account session changed; refresh before signing in");
+    return this._loginWithAccountCredential(slotToken, expectedRevision, () => {
       const account = this.account(accountId);
       if (!account.active) fail(403, "access_denied", "Active account required");
-      const revision = expectedRevision + 1;
-      const authenticatedUntil = Math.min(slot.expiresAt, this.now() + 8 * 3600000);
-      const parentCredentialHash = hash(this.insertAccountCredential(accountId, authenticatedUntil));
-      this.db.prepare(`UPDATE account_session_slots SET revision=?,account_id=?,account_auth_epoch=?,parent_credential_hash=?,authenticated_until=?
-        WHERE hash=? AND revision=?`).run(revision, accountId, account.authEpoch, parentCredentialHash, authenticatedUntil, slot.credentialHash, expectedRevision);
-      if (revokeRoomToken !== null) {
-        if (typeof revokeRoomToken !== "string" || !tokenPattern.test(revokeRoomToken)) fail(422, "invalid_credential", "Invalid prior Room credential");
-        this.revoke(revokeRoomToken);
-      }
-      // QAS-702 (RC-2026-09-19-069): session-fixation rotation. The login
-      // and the rotation commit atomically: either the fresh token carries
-      // the authenticated session and the old token is dead, or the login
-      // fails and nothing is upgraded.
-      if (rotateSlot) return this.rotateAccountSessionSlot(slotToken);
-      return this.authenticateAccountSession(slotToken);
-    });
+      return { accountId, authEpoch: account.authEpoch };
+    }, { revokeRoomToken, rotateSlot });
   }
   // QAS-702 (RC-2026-09-19-069): mint a fresh account-session slot token
   // carrying the slot's current state and invalidate the old token, so a
@@ -3062,34 +3070,19 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   loginAccountSessionWithGoogle(slotToken, googleSub, expectedRevision, { revokeRoomToken = null } = {}) {
     if (typeof googleSub !== "string" || !/^[1-9][0-9]{0,254}$/.test(googleSub)) fail(422, "invalid_google_subject", "A verified Google subject is required");
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) fail(422, "invalid_session_revision", "A current account session revision is required");
-    return this.transaction(() => {
-      const slot = this.accountSessionSlot(slotToken);
-      if (slot.sessionRevision !== expectedRevision) fail(409, "stale_session_revision", "Account session changed; refresh before signing in");
-      const accountId = `google:${googleSub}`;
+    const accountId = `google:${googleSub}`;
+    // The slot table requires a parent credential when an account is set.
+    // Record the Google login as an account credential (the token is never
+    // exposed; the verified Google subject is the credential).
+    return this._loginWithAccountCredential(slotToken, expectedRevision, () => {
       const existing = this.db.prepare("SELECT id, active, auth_epoch FROM accounts WHERE id=?").get(accountId);
-      let accountAuthEpoch;
       if (!existing) {
         this.createAccount(accountId, "google");
-        accountAuthEpoch = 0;
-      } else {
-        if (existing.active !== 1) fail(403, "access_denied", "Active account required");
-        accountAuthEpoch = existing.auth_epoch;
+        return { accountId, authEpoch: 0 };
       }
-      const revision = expectedRevision + 1;
-      // The slot table requires a parent credential when an account is set.
-      // Record the Google login as an account credential (the token is never
-      // exposed; the verified Google subject is the credential).
-      const authenticatedUntil = Math.min(slot.expiresAt, this.now() + 8 * 3600000);
-      const parentCredentialHash = hash(this.insertAccountCredential(accountId, authenticatedUntil));
-      this.db.prepare(`UPDATE account_session_slots SET revision=?,account_id=?,account_auth_epoch=?,parent_credential_hash=?,authenticated_until=?
-        WHERE hash=? AND revision=?`).run(revision, accountId, accountAuthEpoch, parentCredentialHash,
-        authenticatedUntil, slot.credentialHash, expectedRevision);
-      if (revokeRoomToken !== null) {
-        if (typeof revokeRoomToken !== "string" || !tokenPattern.test(revokeRoomToken)) fail(422, "invalid_credential", "Invalid prior Room credential");
-        this.revoke(revokeRoomToken);
-      }
-      return this.authenticateAccountSession(slotToken);
-    });
+      if (existing.active !== 1) fail(403, "access_denied", "Active account required");
+      return { accountId, authEpoch: existing.auth_epoch };
+    }, { revokeRoomToken });
   }
   logoutAccountSession(slotToken, expectedRevision) {
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) fail(422, "invalid_session_revision", "A current account session revision is required");
@@ -3136,11 +3129,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const auth = this.authenticateAccountSession(token, null, binding);
       const rows = this.db.prepare("SELECT room_id FROM member_accounts WHERE account_id=? AND room_id>? ORDER BY room_id LIMIT 51")
         .all(auth.account.id, after ?? "");
+      const select = this.db.prepare(ACCOUNT_ROOM_SELECT);
       const rooms = [];
       for (const row of rows.slice(0, 50)) {
         try {
           const access = this.authenticateAccountSession(token, row.room_id, binding);
-          rooms.push(accountRoomEntry(this.db.prepare(ACCOUNT_ROOM_SELECT).get(row.room_id), access.member.id));
+          rooms.push(accountRoomEntry(select.get(row.room_id), access.member.id));
         } catch (error) { if (error.status !== 403) throw error; }
       }
       return { contractVersion: 1, viewer: { accountId: auth.account.id, authEpoch: auth.account.authEpoch,
@@ -3156,9 +3150,24 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   markAccountHadRoom(accountId) {
     this.db.prepare("UPDATE accounts SET ever_had_room=1 WHERE id=?").run(accountId);
   }
-  ensureHumanAccountBinding(roomId, memberId, requestedAccountId = null, origin = "local-provisioning") {
+  // Resolve a room member object; falsy when the id is invalid or unknown.
+  _roomMember(roomId, memberId) {
     const members = this.room(roomId).state.members;
-    const member = validId(memberId) && Object.hasOwn(members, memberId) && members[memberId];
+    return validId(memberId) && Object.hasOwn(members, memberId) ? members[memberId] : false;
+  }
+  // issueAccessKey/mintAccessKey prelude: resolve the member, enforce lifetime + account binding.
+  _resolveAccessKeyMember(roomId, memberId, lifetimeMs, accountId) {
+    const member = this._roomMember(roomId, memberId);
+    if (!member || member.active === false) fail(403, "access_denied", "Active member required");
+    if (!Number.isSafeInteger(lifetimeMs) || lifetimeMs <= 0 || lifetimeMs > 30 * 86400000) fail(422, "invalid_expiry", "Access keys expire within 30 days");
+    if (member.kind === "human") {
+      const account = this.ensureHumanAccountBinding(roomId, memberId, accountId);
+      if (!account.active) fail(403, "access_denied", "Active account required");
+    } else if (accountId !== null) fail(422, "invalid_account_binding", "Agent credentials are not human account credentials");
+    return member;
+  }
+  ensureHumanAccountBinding(roomId, memberId, requestedAccountId = null, origin = "local-provisioning") {
+    const member = this._roomMember(roomId, memberId);
     if (!member || member.kind !== "human") fail(422, "invalid_account_binding", "Only a human Room member can bind to an account");
     if (requestedAccountId !== null && !validId(requestedAccountId)) fail(422, "invalid_account", "Invalid account id");
     const existing = this.db.prepare("SELECT account_id FROM member_accounts WHERE room_id=? AND member_id=?").get(roomId, memberId);
@@ -3193,6 +3202,24 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (!auth.account || auth.kind !== "session") fail(403, "account_session_required", "Invitation administration requires an account browser session");
     return auth;
   }
+  // Validate an account-session binding (64-hex fingerprint): optional on
+  // issue/revoke, required on accept.
+  _checkSessionBinding(expectedSessionBinding, { required = false } = {}) {
+    if (expectedSessionBinding == null) {
+      if (required) fail(422, "invalid_session_binding", "Current account session binding required");
+      return;
+    }
+    if (typeof expectedSessionBinding !== "string" || !/^[a-f0-9]{64}$/.test(expectedSessionBinding)) fail(422, "invalid_session_binding", "Current account session binding required");
+  }
+  // The invitation issuer's authority still holds: the issuer account's
+  // activity/epoch/binding, or (accountless owner) the active unrevised room owner.
+  _issuerAuthorityHolds(row, { issuerAccount, issuerBinding, issuerMember, ownerId }) {
+    return row.issuer_account_id === null
+      ? Boolean(issuerMember) && issuerMember.active !== false && issuerMember.revision === row.issuer_member_revision
+        && ownerId === row.issuer_member_id
+      : Boolean(issuerAccount) && issuerAccount.active === 1 && issuerAccount.auth_epoch === row.issuer_account_auth_epoch
+        && issuerBinding?.account_id === row.issuer_account_id;
+  }
   issueInvitation(accountSessionToken, roomId, details) {
     const {
       requestId, token, intendedAccountId, intendedMemberId, displayName, role, expiresAt,
@@ -3209,7 +3236,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
     // The session binding is required for account sessions; an accountless
     // owner bearer carries no session to bind.
-    if (expectedSessionBinding != null && (typeof expectedSessionBinding !== "string" || !/^[a-f0-9]{64}$/.test(expectedSessionBinding))) fail(422, "invalid_session_binding", "Current account session binding required");
+    this._checkSessionBinding(expectedSessionBinding);
     const tokenHash = hash(token);
     const permissions = [...INVITATION_ROLES[role]];
     const fingerprint = hash(canonical({ roomId, requestId, tokenHash, intendedAccountId, intendedMemberId, displayName: displayName.trim(), role, permissions, expiresAt, expectedIssuerMemberRevision }));
@@ -3285,22 +3312,18 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // owner's identity bearer, so authority rests on the member still
         // being active, unrevised, and still the room owner. Ordinary
         // invitations keep the account checks.
-        const issuerOk = row.issuer_account_id === null
-          ? Boolean(issuerMember) && issuerMember.active !== false && issuerMember.revision === row.issuer_member_revision
-            && room.room?.ownerId === row.issuer_member_id
-          : Boolean(issuerAccount) && issuerAccount.active === 1 && issuerAccount.auth_epoch === row.issuer_account_auth_epoch
-            && issuerBinding?.account_id === row.issuer_account_id;
+        const issuerOk = this._issuerAuthorityHolds(row, { issuerAccount, issuerBinding, issuerMember, ownerId: room.room?.ownerId });
         const issuerPrivileged = room.room?.ownerId === row.issuer_member_id || issuerMember?.permissions.includes("manage_members");
         if (!issuerOk || targetAccount?.active !== 1 || !issuerMember || issuerMember.active === false
           || issuerMember.revision !== row.issuer_member_revision || !issuerPrivileged) status = "stale";
       }
       // Onboarding Slice 4: pre-auth preview answers "is this worth an
       // account?" — human+agent member counts, no identity data.
-      const roster = Object.values(room.members ?? {});
-      const memberCounts = {
-        humans: roster.filter(member => member?.kind === "human").length,
-        agents: roster.filter(member => member?.kind === "agent").length,
-      };
+      const memberCounts = { humans: 0, agents: 0 };
+      for (const member of Object.values(room.members ?? {})) {
+        if (member?.kind === "human") memberCounts.humans += 1;
+        else if (member?.kind === "agent") memberCounts.agents += 1;
+      }
       return {
         ...invitationView(row, this.now()),
         status,
@@ -3342,7 +3365,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
     // The session binding is required for account sessions; an accountless
     // owner bearer carries no session to bind.
-    if (expectedSessionBinding != null && (typeof expectedSessionBinding !== "string" || !/^[a-f0-9]{64}$/.test(expectedSessionBinding))) fail(422, "invalid_session_binding", "Current account session binding required");
+    this._checkSessionBinding(expectedSessionBinding);
     if (expectedRoomId !== null && !validId(expectedRoomId)) fail(422, "invalid_room", "Invalid Room id");
     return this.transaction(() => {
       const row = this.db.prepare("SELECT * FROM membership_invitations WHERE id=?").get(invitationId);
@@ -3373,7 +3396,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (typeof token !== "string" || !tokenPattern.test(token) || typeof redemptionId !== "string" || !redemptionPattern.test(redemptionId) || expectedRevision !== 0) {
       fail(422, "invalid_invitation_acceptance", "Invitation acceptance requires its token, redemption ID, and expected revision zero");
     }
-    if (typeof expectedSessionBinding !== "string" || !/^[a-f0-9]{64}$/.test(expectedSessionBinding)) fail(422, "invalid_session_binding", "Current account session binding required");
+    this._checkSessionBinding(expectedSessionBinding, { required: true });
     return this.transaction(() => {
       const accountSession = this.authenticateAccountSession(accountSessionToken, null, expectedSessionBinding);
       const row = this.db.prepare("SELECT * FROM membership_invitations WHERE token_hash=?").get(hash(token));
@@ -3400,11 +3423,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // member still being active, unrevised, and still the room owner
       // (see previewInvitation). Ordinary invitations keep the account
       // checks.
-      const issuerOk = row.issuer_account_id === null
-        ? Boolean(issuerMember) && issuerMember.active !== false && issuerMember.revision === row.issuer_member_revision
-          && room.state.room.ownerId === row.issuer_member_id
-        : Boolean(issuerAccount) && issuerAccount.active === 1 && issuerAccount.auth_epoch === row.issuer_account_auth_epoch
-          && issuerBinding?.account_id === row.issuer_account_id;
+      const issuerOk = this._issuerAuthorityHolds(row, { issuerAccount, issuerBinding, issuerMember, ownerId: room.state.room.ownerId });
       if (!issuerOk || !issuerMember || issuerMember.active === false
         || issuerMember.revision !== row.issuer_member_revision
         || !(room.state.room.ownerId === row.issuer_member_id || issuerMember.permissions.includes("manage_members"))) {
@@ -3440,10 +3459,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.prepare(`INSERT INTO membership_invitation_events(
         invitation_id,sequence,type,actor_account_id,actor_member_id,actor_auth_epoch,actor_session_revision,invitation_revision,at,room_event_id,reason
       ) VALUES(?,2,'accepted',?,?,?,?,1,?,?,NULL)`).run(row.id, accountSession.account.id, row.intended_member_id, accountSession.account.authEpoch, accountSession.sessionRevision, now, incoming.id);
-      this.appendInvitationJournal(this.db.prepare("SELECT * FROM membership_invitations WHERE id=?").get(row.id), "accepted");
+      const accepted = this.db.prepare("SELECT * FROM membership_invitations WHERE id=?").get(row.id);
+      this.appendInvitationJournal(accepted, "accepted");
       const authorized = this.authenticateAccountSession(accountSessionToken, row.room_id, expectedSessionBinding);
       return {
-        invitation: invitationView(this.db.prepare("SELECT * FROM membership_invitations WHERE id=?").get(row.id), now, { includeScope: true }),
+        invitation: invitationView(accepted, now, { includeScope: true }),
         sequence, event: incoming, session: this.sessionOwnership(authorized), duplicate: false
       };
     });
@@ -3460,8 +3480,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.prepare("UPDATE accounts SET active=?,revision=?,auth_epoch=? WHERE id=?").run(active ? 1 : 0, revision, authEpoch, accountId);
       this.db.prepare("UPDATE credentials SET revoked=1 WHERE account_id=?").run(accountId);
       this.agentConnections.revokeAccount(accountId);
-      this.db.prepare("UPDATE account_credentials SET revoked=1 WHERE account_id=?").run(accountId);
-      this.db.prepare("UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,parent_credential_hash=NULL,authenticated_until=NULL WHERE account_id=?").run(accountId);
+      this._revokeAccountKeysAndSlots(accountId);
       this.db.prepare("INSERT INTO account_access_events(account_id,revision,active,auth_epoch,reason,at) VALUES(?,?,?,?,?,?)").run(accountId, revision, active ? 1 : 0, authEpoch, reason.trim(), at);
       if (!active) this.reminders.retireAccount(accountId);
       return this.account(accountId);
@@ -3469,14 +3488,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   }
   issueAccessKey(roomId, memberId, lifetimeMs = 7 * 86400000, accountId = null) {
     return this.transaction(() => {
-      const members = this.room(roomId).state.members;
-      const member = validId(memberId) && Object.hasOwn(members, memberId) && members[memberId];
-      if (!member || member.active === false) fail(403, "access_denied", "Active member required");
-      if (!Number.isSafeInteger(lifetimeMs) || lifetimeMs <= 0 || lifetimeMs > 30 * 86400000) fail(422, "invalid_expiry", "Access keys expire within 30 days");
-      if (member.kind === "human") {
-        const account = this.ensureHumanAccountBinding(roomId, memberId, accountId);
-        if (!account.active) fail(403, "access_denied", "Active account required");
-      } else if (accountId !== null) fail(422, "invalid_account_binding", "Agent credentials are not human account credentials");
+      this._resolveAccessKeyMember(roomId, memberId, lifetimeMs, accountId);
       this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, memberId);
       return this.insertCredential(roomId, memberId, "access", null, this.now() + lifetimeMs);
     });
@@ -3487,14 +3499,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // atomic revoke+issue ordering stays load-bearing for every other caller.
   mintAccessKey(roomId, memberId, lifetimeMs = 7 * 86400000, accountId = null) {
     return this.transaction(() => {
-      const members = this.room(roomId).state.members;
-      const member = validId(memberId) && Object.hasOwn(members, memberId) && members[memberId];
-      if (!member || member.active === false) fail(403, "access_denied", "Active member required");
-      if (!Number.isSafeInteger(lifetimeMs) || lifetimeMs <= 0 || lifetimeMs > 30 * 86400000) fail(422, "invalid_expiry", "Access keys expire within 30 days");
-      if (member.kind === "human") {
-        const account = this.ensureHumanAccountBinding(roomId, memberId, accountId);
-        if (!account.active) fail(403, "access_denied", "Active account required");
-      } else if (accountId !== null) fail(422, "invalid_account_binding", "Agent credentials are not human account credentials");
+      this._resolveAccessKeyMember(roomId, memberId, lifetimeMs, accountId);
       return this.insertCredential(roomId, memberId, "access", null, this.now() + lifetimeMs);
     });
   }
