@@ -6,6 +6,7 @@
  * against bypassing pane processes (threat-model §4).
  */
 import { resolve as resolvePath, sep } from 'node:path';
+import { realpathSync } from 'node:fs';
 import { bridgeError } from './errors.mjs';
 
 /** Pinned herdr socket protocol version (REDESIGN.md §2.3). */
@@ -67,9 +68,12 @@ const PINNED_PATH = '/usr/local/bin:/usr/bin:/bin';
 
 function clampWorkspaceRoot(workspaceRoot, allowedRoots) {
   if (workspaceRoot == null) return null;
-  const resolved = resolvePath(String(workspaceRoot));
+  // realpath both sides when they exist so a symlink inside the root cannot
+  // point the cwd outside it; a path that does not exist yet keeps resolve().
+  const real = (p) => { try { return realpathSync(p); } catch { return p; } };
+  const resolved = real(resolvePath(String(workspaceRoot)));
   const ok = (allowedRoots ?? []).some((root) => {
-    const r = resolvePath(String(root));
+    const r = real(resolvePath(String(root)));
     return resolved === r || resolved.startsWith(r + sep);
   });
   if (!ok) throw bridgeError('input', 'workspaceRoot is outside the allowlisted roots');
