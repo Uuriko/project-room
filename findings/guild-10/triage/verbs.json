@@ -1,0 +1,88 @@
+{
+ "check": "verbs",
+ "confirmed": 9,
+ "false_positive": 20,
+ "items": [
+  {
+   "doc": "docs/CONNECT-RECEIVE.md",
+   "line": 20,
+   "type": "UNKNOWN_ROOM_FLAG",
+   "detail": "flag --mode near scripts/room not matched in scripts/room source",
+   "text": "node scripts/room-listen.mjs --mode channel --host claude-room --cadence-seconds 60",
+   "_unit": "r02",
+   "flag": "--mode"
+  },
+  {
+   "doc": "docs/ROOM-PROTOCOL.md",
+   "line": 623,
+   "type": "UNKNOWN_ROOM_FLAG",
+   "detail": "flag --db near scripts/room not matched in scripts/room source",
+   "text": "- **Digest**: `node scripts/room-hygiene.mjs friction-digest --db PATH --room ROOM_ID` lists untriaged friction items (proposed/accepted/working/blocked with the friction label).",
+   "_unit": "r03",
+   "flag": "--db"
+  },
+  {
+   "doc": "docs/ROOM-COORDINATION.md",
+   "line": 169,
+   "type": "UNKNOWN_ROOM_FLAG",
+   "detail": "flag --base near scripts/room not matched in scripts/room source",
+   "text": "node scripts/room-guard.mjs --base origin/main --strict",
+   "_unit": "r05",
+   "flag": "--base"
+  },
+  {
+   "doc": "docs/history/ROOM-MUTATION-TESTING.md",
+   "line": 62,
+   "type": "UNKNOWN_ROOM_FLAG",
+   "detail": "flag --run near scripts/room not matched in scripts/room source",
+   "text": "TMPDIR=$PWD/.tmp node scripts/room-mutate.mjs --run M21 --workdir $PWD/.tmp/room-mutate",
+   "_unit": "r05",
+   "flag": "--run"
+  },
+  {
+   "doc": "docs/history/ROOM-MUTATION-TESTING.md",
+   "line": 65,
+   "type": "UNKNOWN_ROOM_FLAG",
+   "detail": "flag --run-all near scripts/room not matched in scripts/room source",
+   "text": "TMPDIR=$PWD/.tmp node scripts/room-mutate.mjs --run-all --jobs 4 --workdir $PWD/.tmp/room-mutate",
+   "_unit": "r05",
+   "flag": "--run-all"
+  },
+  {
+   "doc": "docs/history/ROOM-MUTATION-TESTING.md",
+   "line": 68,
+   "type": "UNKNOWN_ROOM_FLAG",
+   "detail": "flag --list near scripts/room not matched in scripts/room source",
+   "text": "node scripts/room-mutate.mjs --list",
+   "_unit": "r05",
+   "flag": "--list"
+  },
+  {
+   "doc": "docs/history/ROOM-WATCH.md",
+   "line": 94,
+   "type": "UNKNOWN_ROOM_FLAG",
+   "detail": "flag --staged near scripts/room not matched in scripts/room source",
+   "text": "scripts/room`, run the verb, then `git restore --staged scripts/room",
+   "_unit": "r06",
+   "flag": "--staged"
+  },
+  {
+   "doc": "docs/ROOM-ROSTER.md",
+   "line": 20,
+   "type": "UNKNOWN_ROOM_FLAG",
+   "detail": "flag --snippet near scripts/room not matched in scripts/room source",
+   "text": "node scripts/room-roster.mjs grok-build --snippet",
+   "_unit": "r07",
+   "flag": "--snippet"
+  },
+  {
+   "doc": "docs/history/kb/decisions/merge-queue-native.md",
+   "line": 10,
+   "type": "DEAD_ROOM_VERB",
+   "detail": "scripts/room verb 'merge-queue' not found in scripts/room dispatch",
+   "text": "**Why not a lane-run bot:** a `scripts/room merge-queue` verb + cron would",
+   "_unit": "r07",
+   "verb": "merge-queue"
+  }
+ ]
+}

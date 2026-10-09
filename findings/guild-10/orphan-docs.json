@@ -1,0 +1,737 @@
+{
+ "total_docs": 510,
+ "orphans": [
+  {
+   "doc": "docs/BUG-BOUNTY.md",
+   "lines": 66
+  },
+  {
+   "doc": "docs/CODE-DROPS.md",
+   "lines": 72
+  },
+  {
+   "doc": "docs/DEMIGOD-BUYER-OFFER.md",
+   "lines": 45
+  },
+  {
+   "doc": "docs/FLAKY-QUARANTINE.md",
+   "lines": 32
+  },
+  {
+   "doc": "docs/I18N-HARNESS.md",
+   "lines": 73
+  },
+  {
+   "doc": "docs/MATCHMAKING.md",
+   "lines": 113
+  },
+  {
+   "doc": "docs/OAUTH-PROVIDER-SECURITY-REVIEW.md",
+   "lines": 117
+  },
+  {
+   "doc": "docs/PERF-BUDGET.md",
+   "lines": 53
+  },
+  {
+   "doc": "docs/PRIVACY-POLICY-TEMPLATE.md",
+   "lines": 165
+  },
+  {
+   "doc": "docs/PRODUCT-CONSOLIDATION-PLAN-2026-09-30.md",
+   "lines": 190
+  },
+  {
+   "doc": "docs/QA-MUTATION-PROBES.md",
+   "lines": 191
+  },
+  {
+   "doc": "docs/SIGNED-AGENT-CARDS.md",
+   "lines": 76
+  },
+  {
+   "doc": "docs/SOAK-TEST.md",
+   "lines": 107
+  },
+  {
+   "doc": "docs/SPEC.md",
+   "lines": 7
+  },
+  {
+   "doc": "docs/SPEND-PRIMITIVE.md",
+   "lines": 188
+  },
+  {
+   "doc": "docs/TERMS-OF-SERVICE-TEMPLATE.md",
+   "lines": 132
+  },
+  {
+   "doc": "docs/a2a-receipt-extension.md",
+   "lines": 139
+  },
+  {
+   "doc": "docs/examples/handoff.md",
+   "lines": 65
+  },
+  {
+   "doc": "docs/exchange/103-reviewer-advisory-flow.md",
+   "lines": 83
+  },
+  {
+   "doc": "docs/exchange/104-exchange-slice-2-spec.md",
+   "lines": 89
+  },
+  {
+   "doc": "docs/exchange/105-credits-faucet-anti-farming.md",
+   "lines": 48
+  },
+  {
+   "doc": "docs/exchange/106-bounty-pricing-guide.md",
+   "lines": 64
+  },
+  {
+   "doc": "docs/exchange/117-exchange-incident-runbook.md",
+   "lines": 94
+  },
+  {
+   "doc": "docs/exchange/118-credits-explorer-ui-mock.md",
+   "lines": 117
+  },
+  {
+   "doc": "docs/history/ACTION-RECOVERY-CHECKPOINT-2026-09-08.md",
+   "lines": 101
+  },
+  {
+   "doc": "docs/history/ACTUAL-HELPER-ACCEPTANCE-2026-09-09.md",
+   "lines": 48
+  },
+  {
+   "doc": "docs/history/AGENT-API-STRATEGY-2026-09-30.md",
+   "lines": 58
+  },
+  {
+   "doc": "docs/history/AGENT-ASSISTED-REPLY-2026-09-08.md",
+   "lines": 30
+  },
+  {
+   "doc": "docs/history/AGENT-COLLABORATION-VALUE-2026-09-23.md",
+   "lines": 40
+  },
+  {
+   "doc": "docs/history/AGENT-CONNECTION-CHECKPOINT-2026-09-07.md",
+   "lines": 128
+  },
+  {
+   "doc": "docs/history/AGENT-EMPOWERMENT-ROADMAP.md",
+   "lines": 253
+  },
+  {
+   "doc": "docs/history/AGENT-ENROLLMENT-CHECKPOINT-2026-09-08.md",
+   "lines": 142
+  },
+  {
+   "doc": "docs/history/AGENT-HANDOFF-PROTOCOL.md",
+   "lines": 109
+  },
+  {
+   "doc": "docs/history/AGENT-HANDOFF.md",
+   "lines": 69
+  },
+  {
+   "doc": "docs/history/AGENT-OFFER-CHECKPOINT-2026-09-08.md",
+   "lines": 72
+  },
+  {
+   "doc": "docs/history/AGENT-WORK-PREFLIGHT.md",
+   "lines": 35
+  },
+  {
+   "doc": "docs/history/AGENT-WORK-SEARCH-2026-09-08.md",
+   "lines": 97
+  },
+  {
+   "doc": "docs/history/ARTIFACT-TAGS.md",
+   "lines": 55
+  },
+  {
+   "doc": "docs/history/ASK-CLARIFY-DELIVER-PLAN-2026-09-08.md",
+   "lines": 118
+  },
+  {
+   "doc": "docs/history/ASSISTED-WORK-CHECKPOINT-2026-09-07.md",
+   "lines": 136
+  },
+  {
+   "doc": "docs/history/ASYNC-CONTINUITY-2026-09-19.md",
+   "lines": 27
+  },
+  {
+   "doc": "docs/history/BOARD-ROTATION-READINESS.md",
+   "lines": 253
+  },
+  {
+   "doc": "docs/history/BROWSER-CI.md",
+   "lines": 68
+  },
+  {
+   "doc": "docs/history/CAPABILITY-REGISTRY.md",
+   "lines": 92
+  },
+  {
+   "doc": "docs/history/CHANNELS-CONTRACT.md",
+   "lines": 23
+  },
+  {
+   "doc": "docs/history/CHAT-FUN.md",
+   "lines": 55
+  },
+  {
+   "doc": "docs/history/CHAT-REDESIGN-2026-09-21.md",
+   "lines": 89
+  },
+  {
+   "doc": "docs/history/CODE-SIMPLIFICATION-REVIEW.md",
+   "lines": 53
+  },
+  {
+   "doc": "docs/history/COHESIVE-SHIPPING-PLAN.md",
+   "lines": 87
+  },
+  {
+   "doc": "docs/history/CONTRIBUTED-DRAFT-RETURN-2026-09-08.md",
+   "lines": 139
+  },
+  {
+   "doc": "docs/history/CORE-USABILITY-FOLLOWUP-2026-09-22.md",
+   "lines": 30
+  },
+  {
+   "doc": "docs/history/CROWDED-ROOM-REVIEW-2026-09-08.md",
+   "lines": 121
+  },
+  {
+   "doc": "docs/history/CURRENT-RECOVERY-CHECKPOINT-2026-09-08.md",
+   "lines": 80
+  },
+  {
+   "doc": "docs/history/DESIGN-LAYOUT-IMPLEMENTATION-2026-09-22.md",
+   "lines": 17
+  },
+  {
+   "doc": "docs/history/DETERMINISTIC-UX-2026-09-22.md",
+   "lines": 16
+  },
+  {
+   "doc": "docs/history/DISCOVERABILITY.md",
+   "lines": 60
+  },
+  {
+   "doc": "docs/history/DURABLE-REPLY-ATTEMPTS-2026-09-08.md",
+   "lines": 83
+  },
+  {
+   "doc": "docs/history/DURABLE-REPLY-UPDATES-2026-09-08.md",
+   "lines": 49
+  },
+  {
+   "doc": "docs/history/EMAIL-IMPORT-CONTRACT-2026-09-08.md",
+   "lines": 63
+  },
+  {
+   "doc": "docs/history/EMAIL-ROUTING-RUNBOOK.md",
+   "lines": 43
+  },
+  {
+   "doc": "docs/history/ESCAPE-CHAT.md",
+   "lines": 49
+  },
+  {
+   "doc": "docs/history/FOCUSED-AGENT-ORIENTATION-2026-09-08.md",
+   "lines": 112
+  },
+  {
+   "doc": "docs/history/FREE-MISS-SETTLEMENT.md",
+   "lines": 146
+  },
+  {
+   "doc": "docs/history/FREE-PATH.md",
+   "lines": 37
+  },
+  {
+   "doc": "docs/history/GETONE-ONE-STEALS.md",
+   "lines": 77
+  },
+  {
+   "doc": "docs/history/GOAL-AGENT-HUMAN-FIRST-2026-09-06.md",
+   "lines": 166
+  },
+  {
+   "doc": "docs/history/GOOGLE-SIGNIN-RELEASE-2026-09-20.md",
+   "lines": 17
+  },
+  {
+   "doc": "docs/history/GROK-BUILD-GOAL-2026-09-29.md",
+   "lines": 43
+  },
+  {
+   "doc": "docs/history/GROK-NEXT-PLAN-2026-09-30.md",
+   "lines": 21
+  },
+  {
+   "doc": "docs/history/GROWTH-ANALYTICS.md",
+   "lines": 192
+  },
+  {
+   "doc": "docs/history/HELP-WANTED-AND-CONTRIBUTIONS-2026-09-08.md",
+   "lines": 307
+  },
+  {
+   "doc": "docs/history/HUMAN-HELP-PLAN-2026-09-08.md",
+   "lines": 37
+  },
+  {
+   "doc": "docs/history/INBOX-BROWSER-INTEGRATION-2026-09-08.md",
+   "lines": 103
+  },
+  {
+   "doc": "docs/history/INBOX-ROOMS-DESIGN-PREVIEW-2026-09-08.md",
+   "lines": 143
+  },
+  {
+   "doc": "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+   "lines": 335
+  },
+  {
+   "doc": "docs/history/JEV-GATES.md",
+   "lines": 152
+  },
+  {
+   "doc": "docs/history/JOB-BOT.md",
+   "lines": 65
+  },
+  {
+   "doc": "docs/history/LINKED-DRAFT-REFINEMENT-2026-09-09.md",
+   "lines": 51
+  },
+  {
+   "doc": "docs/history/LOAD-TEST-2026-09-14.md",
+   "lines": 148
+  },
+  {
+   "doc": "docs/history/LOCAL-HANDOFF-MILESTONE.md",
+   "lines": 60
+  },
+  {
+   "doc": "docs/history/LOCAL-RELEASE-CHECKPOINT-2026-09-08.md",
+   "lines": 106
+  },
+  {
+   "doc": "docs/history/LOST-WORK-INVENTORY-2026-09-30.md",
+   "lines": 34
+  },
+  {
+   "doc": "docs/history/MANUAL-PROMPT-RECOVERY-2026-09-09.md",
+   "lines": 31
+  },
+  {
+   "doc": "docs/history/MATCHMAKING-AND-CONTRIBUTION-PLAN-2026-09-30.md",
+   "lines": 189
+  },
+  {
+   "doc": "docs/history/MCP-INSTALL.md",
+   "lines": 56
+  },
+  {
+   "doc": "docs/history/MERGE-QUEUE-DESIGN.md",
+   "lines": 460
+  },
+  {
+   "doc": "docs/history/MORNING-DIGEST-SLA.md",
+   "lines": 93
+  },
+  {
+   "doc": "docs/history/MULTI-METHOD-LOGIN.md",
+   "lines": 56
+  },
+  {
+   "doc": "docs/history/NEXT-CONTRIBUTION-WORK-PLAN-2026-09-30.md",
+   "lines": 92
+  },
+  {
+   "doc": "docs/history/OFFER-CONTEXT-CHECKPOINT-2026-09-08.md",
+   "lines": 61
+  },
+  {
+   "doc": "docs/history/OPEN-SOURCE-LAUNCH-PLAN.md",
+   "lines": 79
+  },
+  {
+   "doc": "docs/history/OUTSIDE-CONTRIBUTOR-CREDIT-2026-09-09.md",
+   "lines": 72
+  },
+  {
+   "doc": "docs/history/PAID-WORK-PILOT.md",
+   "lines": 112
+  },
+  {
+   "doc": "docs/history/POINT-IN-TIME-RECOVERY.md",
+   "lines": 190
+  },
+  {
+   "doc": "docs/history/PORTABLE-WORK-CHECKPOINT-2026-09-07.md",
+   "lines": 44
+  },
+  {
+   "doc": "docs/history/PRIVATE-INBOX-FOUNDATION-2026-09-08.md",
+   "lines": 111
+  },
+  {
+   "doc": "docs/history/PRIVATE-OUTBOX-CONTRACT-2026-09-08.md",
+   "lines": 68
+  },
+  {
+   "doc": "docs/history/PRIVATE-REMINDERS-CHECKPOINT-2026-09-07.md",
+   "lines": 110
+  },
+  {
+   "doc": "docs/history/PRIVATE-REMINDERS-PLAN-2026-09-07.md",
+   "lines": 123
+  },
+  {
+   "doc": "docs/history/PRIVATE-REPLY-UI-2026-09-08.md",
+   "lines": 53
+  },
+  {
+   "doc": "docs/history/PRODUCT-SIMPLIFICATION-2026-09-22.md",
+   "lines": 119
+  },
+  {
+   "doc": "docs/history/PRODUCTION-QUALIFICATION-2026-09-19.md",
+   "lines": 42
+  },
+  {
+   "doc": "docs/history/PUBLIC-CLAIM-EXECUTION-PLAN-2026-09-30.md",
+   "lines": 73
+  },
+  {
+   "doc": "docs/history/QUIET-ATTRIBUTION-CHECKPOINT-2026-09-08.md",
+   "lines": 73
+  },
+  {
+   "doc": "docs/history/RALPH-BURNDOWN.md",
+   "lines": 161
+  },
+  {
+   "doc": "docs/history/RECONNECT-COLLABORATION-2026-09-08.md",
+   "lines": 94
+  },
+  {
+   "doc": "docs/history/REFERRAL-TREE-DESIGN.md",
+   "lines": 131
+  },
+  {
+   "doc": "docs/history/RELEASE-CHECKPOINT.md",
+   "lines": 38
+  },
+  {
+   "doc": "docs/history/REPLY-COMPARISON-2026-09-09.md",
+   "lines": 43
+  },
+  {
+   "doc": "docs/history/REPLY-LATEST-PREVIEW-2026-09-09.md",
+   "lines": 37
+  },
+  {
+   "doc": "docs/history/REPLY-REQUESTS-FOUNDATION-CHECKPOINT-2026-09-08.md",
+   "lines": 80
+  },
+  {
+   "doc": "docs/history/REPLY-UPDATE-ACKNOWLEDGMENT-2026-09-09.md",
+   "lines": 59
+  },
+  {
+   "doc": "docs/history/REPLY-UPDATE-QUALIFICATION-2026-09-08.md",
+   "lines": 71
+  },
+  {
+   "doc": "docs/history/REPLY-UPDATE-REVIEW-2026-09-09.md",
+   "lines": 43
+  },
+  {
+   "doc": "docs/history/REQUEST-ATTENTION-CHECKPOINT-2026-09-08.md",
+   "lines": 72
+  },
+  {
+   "doc": "docs/history/RESEARCH-AGENDA-METHOD-2026-09-06.md",
+   "lines": 111
+  },
+  {
+   "doc": "docs/history/RESEARCH-AGENT-HUMAN-FIRST-2026-09-06.md",
+   "lines": 237
+  },
+  {
+   "doc": "docs/history/RESEARCH-ALTERNATIVES-VALUE-2026-09-06.md",
+   "lines": 162
+  },
+  {
+   "doc": "docs/history/RESEARCH-COMMUNITY-ADOPTION-2026-09-06.md",
+   "lines": 203
+  },
+  {
+   "doc": "docs/history/RESEARCH-PROMPT-AGENT-HUMAN-FIRST-2026-09-06.md",
+   "lines": 99
+  },
+  {
+   "doc": "docs/history/REVIEWED-PRIVATE-REPLY-2026-09-08.md",
+   "lines": 51
+  },
+  {
+   "doc": "docs/history/ROOM-ACTION-POLICY.md",
+   "lines": 85
+  },
+  {
+   "doc": "docs/history/ROOM-ACTIONS-2026-09-08.md",
+   "lines": 67
+  },
+  {
+   "doc": "docs/history/ROOM-ADAPTIVE-EXPERIENCE.md",
+   "lines": 70
+  },
+  {
+   "doc": "docs/history/ROOM-AUTH-SESSION-FRICTION-20260918.md",
+   "lines": 222
+  },
+  {
+   "doc": "docs/history/ROOM-COHESIVE-UX-PLAN-20260927.md",
+   "lines": 109
+  },
+  {
+   "doc": "docs/history/ROOM-DOOR-STATES-SPEC.md",
+   "lines": 51
+  },
+  {
+   "doc": "docs/history/ROOM-EFFICIENCY-EXECUTION-20260927.md",
+   "lines": 115
+  },
+  {
+   "doc": "docs/history/ROOM-FAST-CHAT-RELEASE.md",
+   "lines": 30
+  },
+  {
+   "doc": "docs/history/ROOM-INBOX-DISCOVERY-20260927.md",
+   "lines": 48
+  },
+  {
+   "doc": "docs/history/ROOM-INSTRUCTIONS.md",
+   "lines": 88
+  },
+  {
+   "doc": "docs/history/ROOM-LESS-NOISE-20260927.md",
+   "lines": 299
+  },
+  {
+   "doc": "docs/history/ROOM-MUTATION-TESTING.md",
+   "lines": 182
+  },
+  {
+   "doc": "docs/history/ROOM-OVERVIEW-2026-09-19.md",
+   "lines": 35
+  },
+  {
+   "doc": "docs/history/ROOM-RELIABILITY-FOLLOWTHROUGH.md",
+   "lines": 21
+  },
+  {
+   "doc": "docs/history/ROOM-RELIABLE-EVENTS-20260927.md",
+   "lines": 47
+  },
+  {
+   "doc": "docs/history/ROOM-RESULTS-2026-09-08.md",
+   "lines": 62
+  },
+  {
+   "doc": "docs/history/ROOM-TESTED-JOURNEY-ROADMAP.md",
+   "lines": 57
+  },
+  {
+   "doc": "docs/history/ROOM-USEFUL-HANDOFFS-20260927.md",
+   "lines": 154
+  },
+  {
+   "doc": "docs/history/SAVED-AGENT-RECOVERY.md",
+   "lines": 45
+  },
+  {
+   "doc": "docs/history/SHADOW-REPORT-2026-09-18.md",
+   "lines": 112
+  },
+  {
+   "doc": "docs/history/SHARED-ARRIVAL-RELEASE.md",
+   "lines": 30
+  },
+  {
+   "doc": "docs/history/SHARED-IMPROVEMENT-PLAN-2026-09-30.md",
+   "lines": 90
+  },
+  {
+   "doc": "docs/history/SIGNIN-USABILITY-2026-09-21.md",
+   "lines": 19
+  },
+  {
+   "doc": "docs/history/SIMPLE-EXECUTION-PLAN.md",
+   "lines": 32
+  },
+  {
+   "doc": "docs/history/SIMPLE-EXECUTION-RESULTS.md",
+   "lines": 52
+  },
+  {
+   "doc": "docs/history/SIMPLICITY-IMPLEMENTATION-2026-09-22.md",
+   "lines": 24
+  },
+  {
+   "doc": "docs/history/SIMPLIFICATION-PLAN-2026-09-25.md",
+   "lines": 46
+  },
+  {
+   "doc": "docs/history/SIMULTANEOUS-ATTENTION-2026-09-08.md",
+   "lines": 112
+  },
+  {
+   "doc": "docs/history/SLA-DASHBOARD.md",
+   "lines": 67
+  },
+  {
+   "doc": "docs/history/TELEGRAM-BUSINESS-API-SPIKE.md",
+   "lines": 220
+  },
+  {
+   "doc": "docs/history/THREAD-REPLY.md",
+   "lines": 57
+  },
+  {
+   "doc": "docs/history/UNWIRED-MODULES-2026-09-26.md",
+   "lines": 86
+  },
+  {
+   "doc": "docs/history/USER-TESTING-CHECKLIST.md",
+   "lines": 25
+  },
+  {
+   "doc": "docs/history/VOLUNTEER-USABILITY-PILOT.md",
+   "lines": 45
+  },
+  {
+   "doc": "docs/history/WORK-DISCUSSION-CHECKPOINT-2026-09-08.md",
+   "lines": 106
+  },
+  {
+   "doc": "docs/history/WORKFLOW-REFINEMENT-2026-09-07.md",
+   "lines": 120
+  },
+  {
+   "doc": "docs/history/WORKSPACE-CONTINUITY-2026-09-19.md",
+   "lines": 37
+  },
+  {
+   "doc": "docs/history/bounty-receipts.md",
+   "lines": 111
+  },
+  {
+   "doc": "docs/history/delivery-tracing.md",
+   "lines": 110
+  },
+  {
+   "doc": "docs/history/erc8004-binding.md",
+   "lines": 82
+  },
+  {
+   "doc": "docs/history/feedback-endpoint.md",
+   "lines": 281
+  },
+  {
+   "doc": "docs/history/mcp-receipt-binding.md",
+   "lines": 102
+  },
+  {
+   "doc": "docs/history/oauth-provider.md",
+   "lines": 75
+  },
+  {
+   "doc": "docs/history/self-serve-join.md",
+   "lines": 251
+  },
+  {
+   "doc": "docs/history/telegram-live-status.md",
+   "lines": 93
+  },
+  {
+   "doc": "docs/history/traceseal-interop.md",
+   "lines": 64
+  },
+  {
+   "doc": "docs/history/verified-state-transition-ledger.md",
+   "lines": 457
+  },
+  {
+   "doc": "docs/legal/acceptable-use.md",
+   "lines": 22
+  },
+  {
+   "doc": "docs/legal/privacy.md",
+   "lines": 61
+  },
+  {
+   "doc": "docs/legal/terms.md",
+   "lines": 47
+  },
+  {
+   "doc": "docs/lesson-scorer.md",
+   "lines": 60
+  },
+  {
+   "doc": "docs/procedures/claim-protocol.md",
+   "lines": 41
+  },
+  {
+   "doc": "docs/procedures/incident-triage.md",
+   "lines": 47
+  },
+  {
+   "doc": "docs/procedures/merge-checklist.md",
+   "lines": 40
+  },
+  {
+   "doc": "docs/security/data-retention-policy.md",
+   "lines": 111
+  },
+  {
+   "doc": "docs/security/deploy-pipeline-supply-chain-audit.md",
+   "lines": 126
+  },
+  {
+   "doc": "docs/security/monitoring-coverage-audit.md",
+   "lines": 91
+  },
+  {
+   "doc": "docs/security/pentest-run-2026-10-07.md",
+   "lines": 75
+  },
+  {
+   "doc": "docs/security/time-handling-audit.md",
+   "lines": 111
+  },
+  {
+   "doc": "docs/security/webhook-security-review.md",
+   "lines": 111
+  },
+  {
+   "doc": "docs/video-walkthrough-script.md",
+   "lines": 276
+  },
+  {
+   "doc": "docs/weekly-learnings-cron.md",
+   "lines": 57
+  }
+ ]
+}

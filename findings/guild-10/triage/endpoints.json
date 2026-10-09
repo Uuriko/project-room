@@ -1,0 +1,79 @@
+{
+ "check": "endpoints",
+ "confirmed": 9,
+ "false_positive": 114,
+ "items": [
+  {
+   "doc": "docs/history/self-serve-join.md",
+   "line": 186,
+   "type": "ENDPOINT_NOT_IN_CODE",
+   "detail": "POST /api/guest-agent-links/:memberId/approve-drafts: no matching route literal found in server/",
+   "text": "Step 2 needs a small approval surface: `POST /api/guest-agent-links/:memberId/approve-drafts`",
+   "_unit": "c10"
+  },
+  {
+   "doc": "docs/history/PRIVATE-OUTBOX-CONTRACT-2026-09-08.md",
+   "line": 41,
+   "type": "ENDPOINT_NOT_IN_CODE",
+   "detail": "GET /api/inbox/sources/:id/send-context:: no matching route literal found in server/",
+   "text": "- GET /api/inbox/sources/:id/send-context: exact current preview.",
+   "_unit": "c10"
+  },
+  {
+   "doc": "docs/history/REFERRAL-TREE-DESIGN.md",
+   "line": 30,
+   "type": "ENDPOINT_NOT_IN_CODE",
+   "detail": "POST /api/guest-agent-links/redeem-card: no matching route literal found in server/",
+   "text": "## Server verification at redeem (`POST /api/guest-agent-links/redeem-card`)",
+   "_unit": "c14"
+  },
+  {
+   "doc": "docs/AGENT-ACCOUNT-LINK.md",
+   "line": 73,
+   "type": "ENDPOINT_NOT_IN_CODE",
+   "detail": "POST /api/account-bind: no matching route literal found in server/",
+   "text": "reachable stub: request + owner link. Do not add `POST /api/account-bind`",
+   "_unit": "c15"
+  },
+  {
+   "doc": "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+   "line": 126,
+   "type": "ENDPOINT_NOT_IN_CODE",
+   "detail": "GET /api/auth/oidc/start: no matching route literal found in server/",
+   "text": "- Files: new `server/oidc-login.mjs` (authorization-code + PKCE, issuer/audience/nonce checks, no token storage beyond the hashed session slot); `server/http.mjs` routes `GET /api/auth/oidc/start`, `GET /api/auth/oidc/ca",
+   "_unit": "c16"
+  },
+  {
+   "doc": "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+   "line": 126,
+   "type": "ENDPOINT_NOT_IN_CODE",
+   "detail": "GET /api/auth/oidc/callback: no matching route literal found in server/",
+   "text": "- Files: new `server/oidc-login.mjs` (authorization-code + PKCE, issuer/audience/nonce checks, no token storage beyond the hashed session slot); `server/http.mjs` routes `GET /api/auth/oidc/start`, `GET /api/auth/oidc/ca",
+   "_unit": "c16"
+  },
+  {
+   "doc": "docs/history/DISCOVERABILITY.md",
+   "line": 25,
+   "type": "ENDPOINT_NOT_IN_CODE",
+   "detail": "GET /.well-known/ai-catalog.json: no matching route literal found in server/",
+   "text": "- `GET /.well-known/ai-catalog.json` \u2014 Agentic Resource Discovery catalog.",
+   "_unit": "c17"
+  },
+  {
+   "doc": "docs/ROUTE-AUTH-TABLE.md",
+   "line": 228,
+   "type": "ENDPOINT_NOT_IN_CODE",
+   "detail": "GET /api/healthz: no matching route literal found in server/",
+   "text": "| `GET /api/health`, `GET /api/healthz`, `GET /healthz`, `GET /api/version`, `GET /api/ready` (and `HEAD`) | none | operational metadata only |",
+   "_unit": "c21"
+  },
+  {
+   "doc": "docs/ROUTE-AUTH-TABLE.md",
+   "line": 228,
+   "type": "ENDPOINT_NOT_IN_CODE",
+   "detail": "GET /healthz: no matching route literal found in server/",
+   "text": "| `GET /api/health`, `GET /api/healthz`, `GET /healthz`, `GET /api/version`, `GET /api/ready` (and `HEAD`) | none | operational metadata only |",
+   "_unit": "t-test"
+  }
+ ]
+}

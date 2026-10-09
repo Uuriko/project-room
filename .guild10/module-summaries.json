@@ -1,0 +1,2119 @@
+{
+ "scripts/a11y-axe-helper.mjs": {
+  "header": "Shared axe-core runner for the Q011 accessibility browser checks.\nOne axe configuration for every check, so a violation that appears in one\nflow and disappears in another is a page difference, not a config drift:\n- tags: wcag2a, wcag2aa, wcag21a, wcag21aa, wcag22aa (same set the\nexisting board/public-pages checks use)\n- fail signal: serious or critical impact violations only. Minor/moderate\nfindings are surfaced in the failure detail for triage but do not fail,\nso the suite stays a regression gate rather than a style debate.\nThe checks assert a clean page. When a check fails, the thrown message\nlists every serious/critical violation with its help text and the first\nfew offending selectors, so the owning lane can fix it without re-running.",
+  "exports": [
+   "A11Y_TAGS",
+   "assertAxeClean",
+   "axeSerious",
+   "chromiumLaunchOptions"
+  ],
+  "cli": null,
+  "loc": 62
+ },
+ "scripts/a11y-composer-browser-check.mjs": {
+  "header": "Q011: axe-core sweep of the message composer.\nSigns in and opens the composer options disclosure, then runs axe scoped\nto the composer region (#message-form and the open #composer-options).\nScoping keeps this check's contract on the composer alone: the rest of the\npage is owned by the room-view sweep. Fails on any serious or critical\naxe violation (wcag2a/2aa/21a/21aa/22aa).",
+  "exports": [],
+  "cli": null,
+  "loc": 56
+ },
+ "scripts/a11y-login-browser-check.mjs": {
+  "header": "Q011: axe-core sweep of the login/join entry points.\nCovers the two unauthenticated entry flows a new user or agent meets:\n1. the signed-out room page (the login/auth panel on index.html)\n2. the agent join page (join.html): consent form with a live invite code,\nand the error state for a bogus code\nBoth viewports a real visitor uses: desktop 1280 and mobile 390.\nFails on any serious or critical axe violation (wcag2a/2aa/21a/21aa/22aa).",
+  "exports": [],
+  "cli": null,
+  "loc": 73
+ },
+ "scripts/a11y-room-browser-check.mjs": {
+  "header": "Q011: axe-core sweep of the signed-in room view.\nThe main room UI after authentication: message list (seeded with one\nmessage so list markup is exercised), member chrome, and dialogs closed.\nBoth viewports. Fails on any serious or critical axe violation\n(wcag2a/2aa/21a/21aa/22aa).",
+  "exports": [],
+  "cli": null,
+  "loc": 60
+ },
+ "scripts/account-deletion-browser-check.mjs": {
+  "header": "QA2 finding P2-11: Settings \u2192 Sign-in & security \u2192 Advanced offers\nDelete account. The dialog shows the plan, requires the account email,\nand posts the confirmation token with the session CSRF header.",
+  "exports": [],
+  "cli": null,
+  "loc": 97
+ },
+ "scripts/account-settings-browser-check.mjs": {
+  "header": "",
+  "exports": [],
+  "cli": null,
+  "loc": 242
+ },
+ "scripts/acquisition-browser-check.mjs": {
+  "header": "Templates, a template page, a public room page, and the agent directory\nat a phone width: each document fits 390px and exposes main and footer.",
+  "exports": [],
+  "cli": null,
+  "loc": 42
+ },
+ "scripts/action-dialog-focus-scroll-browser-check.mjs": {
+  "header": "NR-B: the action dialog's async exact-text load must not leave the focused\nreview-notes textarea clipped by the dialog's bottom edge at 320x900.\nRegression: without the post-load focus re-assert in loadActionText, a slow\nexact-text response shifts layout after the browser's focus scroll already\nran, and the textarea (plus its focus outline) ends up below the visible\nedge of the dialog.",
+  "exports": [],
+  "cli": null,
+  "loc": 92
+ },
+ "scripts/action-recovery-browser-check.mjs": {
+  "header": "",
+  "exports": [],
+  "cli": null,
+  "loc": 408
+ },
+ "scripts/activity-feed-browser-check.mjs": {
+  "header": "Attention: Activity feed, Later (saved messages), Mark unread, and the\nread-horizon \"New messages\" divider. Real browser + local HTTP service;\nall identities, messages, and keys are disposable fixtures.",
+  "exports": [],
+  "cli": null,
+  "loc": 191
+ },
+ "scripts/agent-fast-path-check.mjs": {
+  "header": "Synthetic new-agent journey through public HTTP and hosted MCP. No live service.",
+  "exports": [],
+  "cli": null,
+  "loc": 108
+ },
+ "scripts/agent-signin-browser-check.mjs": {
+  "header": "",
+  "exports": [],
+  "cli": null,
+  "loc": 226
+ },
+ "scripts/agent-watch.mjs": {
+  "header": "",
+  "exports": [
+   "WATCH_HELP",
+   "retryDelay",
+   "watchLoop",
+   "watchMain",
+   "writeJson"
+  ],
+  "cli": null,
+  "loc": 143
+ },
+ "scripts/agent-work-access-browser-check.mjs": {
+  "header": "",
+  "exports": [],
+  "cli": null,
+  "loc": 74
+ },
+ "scripts/an-funnel-1.mjs": {
+  "header": "AN-FUNNEL-1: signup -> first message -> first reply, read-only.\nUsage: node scripts/an-funnel-1.mjs --db <path-to-room.sqlite> [--since <iso-date>]\nOpens the database read-only (PRAGMA query_only=ON) and reports the\nactivation funnel using ONLY already-recorded data: analytics_events\nsignup rows, member_accounts bindings, and message.posted room events.\nNo new event types, no schema changes, no writes of any kind.\nExit 0 with a JSON report on stdout. Exit 2 on bad arguments, exit 1 when\nthe database cannot answer (missing tables), with the reason on stderr.",
+  "exports": [],
+  "cli": null,
+  "loc": 137
+ },
+ "scripts/answer-engine-check.mjs": {
+  "header": "",
+  "exports": [
+   "DEFAULT_PROMPTS",
+   "answerOpsText",
+   "answerSummaryMarkdown",
+   "buildRequest",
+   "engineRollup",
+   "extractUrls",
+   "isOurUrl",
+   "loadPromptConfig",
+   "parseAnswer",
+   "runAnswerCheck",
+   "scoreAnswer"
+  ],
+  "cli": null,
+  "loc": 422
+ },
+ "scripts/assisted-agent-exercise.mjs": {
+  "header": "Disposable loopback room for independent agents, not an agent runner. The\noperator creates assignments only; participants supply their own work.",
+  "exports": [
+   "startAssistedAgentExercise"
+  ],
+  "cli": "runnable as CLI",
+  "loc": 101
+ },
+ "scripts/auth-return-browser-check.mjs": {
+  "header": "",
+  "exports": [],
+  "cli": null,
+  "loc": 188
+ },
+ "scripts/auth-signin.mjs": {
+  "header": "Authenticate disposable local browser fixtures through the real credential API.\nThis helper never mounts a production form or injects store/session state.",
+  "exports": [
+   "signInFixture"
+  ],
+  "cli": null,
+  "loc": 44
+ },
+ "scripts/board-browser-check.mjs": {
+  "header": "Tasks \u203a Board: claim actions, linked work and return journeys, 390px, and axe.\nThe room page and the work-claim HTTP API are the boundary. No test doubles.",
+  "exports": [],
+  "cli": null,
+  "loc": 1100
+ },
+ "scripts/bounty-conservation-check.mjs": {
+  "header": "bounty-conservation-check.mjs \u2014 scheduled read-only verifier for the\nbounty-escrow hash chain / conservation invariant.\nPhase-1 research confirmed BountyEscrow.verifyConservation\n(server/bounty-escrow.mjs) is the ONLY verifier for the bounty-escrow hash\nchain and conservation invariant, and it has ZERO production callers: the\nchain's tamper-evidence is write-only \u2014 cost on every append, benefit never\nrealized. This script wires the benefit back in: it opens the room database\nstrictly read-only, runs verifyConservation across every room, and emits a\nmachine-readable report.\nRead-only guarantees (no write locks on production data):\n1. The database handle opens with node:sqlite { readOnly: true } \u2014\nwrites are refused at the driver level, not by convention.\n2. db.readOnlyTransaction is set before touching BountyEscrow, so its\n_ensure() takes the schema-presence-only path and never migrates.\n3. verifyConservation itself runs inside readTransaction and issues only\nSELECTs (plus PRAGMA table_info reads).\nUsage:\nnode scripts/bounty-conservation-check.mjs --db /path/to/room.sqlite\nnode scripts/bounty-conservation-check.mjs            # uses $ROOM_DB\nExit codes:\n0 \u2014 every room verified, no v",
+  "exports": [],
+  "cli": null,
+  "loc": 166
+ },
+ "scripts/browser-ci-reporter.mjs": {
+  "header": "node --test reporter for the browser gates: turns every failure into a GitHub\nworkflow command (an annotation on the job) and prints one duration line per\nscript, so a red browser job names the script and test instead of only\n\"Process completed with exit code 1\". Pure output; it never changes which\ntests run or how they are judged. Used next to the spec reporter, which keeps\nthe full human-readable log.",
+  "exports": [],
+  "cli": null,
+  "loc": 54
+ },
+ "scripts/browser-shards-check.mjs": {
+  "header": "Required `browser` gate: successful Actions dependency AND all four exact-run receipts.",
+  "exports": [],
+  "cli": null,
+  "loc": 13
+ },
+ "scripts/build-agent-docs.mjs": {
+  "header": "Build the static /docs/agents pages from docs/agents/*.md and the connect table.",
+  "exports": [
+   "agentPages",
+   "codeBlock",
+   "renderMarkdown",
+   "writeAgentPages"
+  ],
+  "cli": null,
+  "loc": 195
+ },
+ "scripts/build-gmail-sanitizer.mjs": {
+  "header": "Rebuild the self-contained sanitizer so offline runtime packages still boot.\nDependency versions are pinned by package-lock.json; esbuild by cloudflare/.\n2026-09-30 (phase-2 gap audit L-P2-21): resolve esbuild through Node's module\nresolution anchored at cloudflare/package.json instead of a hardcoded\n../cloudflare/node_modules/esbuild path \u2014 the hardcoded path assumes npm's\nflat node_modules layout and breaks under pnpm's symlinked layout.",
+  "exports": [
+   "default "
+  ],
+  "cli": null,
+  "loc": 23
+ },
+ "scripts/build-og-atlas.mjs": {
+  "header": "Builds the runtime OG assets: og/base-receipt.png, the Inter glyph atlases,\nand og/atlas.json. Playwright (a dev dependency) rasterizes Inter Regular\nfrom og/fonts. Re-run with `npm run build:og-atlas` after a font change.\nThe marketing images in og/{home,about,offers,compare,receipts}.png are not\nwritten by this script.",
+  "exports": [],
+  "cli": null,
+  "loc": 168
+ },
+ "scripts/build-pwa-icons.mjs": {
+  "header": "Rasterize favicon.svg into the PWA icon set (HB-3a). Playwright screenshots\na page that draws the SVG, so the committed PNGs match the mark. Maskable\nicons keep the mark inside the center 80% safe zone.",
+  "exports": [],
+  "cli": null,
+  "loc": 48
+ },
+ "scripts/build-ui-strings.mjs": {
+  "header": "",
+  "exports": [],
+  "cli": "runnable as CLI",
+  "loc": 7
+ },
+ "scripts/chat-suggestions-browser-check.mjs": {
+  "header": "Chat suggestions above the composer: an agent's \"short or detailed?\" offers\none-tap replies, and a tap sends that reply as an ordinary message; a\nrequest that reads like work offers \"Make this a task\", which opens the\nwork form from that message. Real browser + local HTTP service.",
+  "exports": [],
+  "cli": null,
+  "loc": 90
+ },
+ "scripts/check-deps-exist.mjs": {
+  "header": "Zero-bug gate: dependency-existence (\"slopsquatting\" defense).\nTwo checks, both fail the workflow on findings:\n(1) Registry existence: every dependency declared in package.json\n(dependencies + devDependencies + optionalDependencies) must exist\non the npm registry. A hallucinated package name (slopsquatting /\ndependency confusion) fails here. Local specs (file:, link:, ./,\ngit+, github:, http(s):, workspace:) are skipped \u2014 they do not\nresolve through the registry.\n(2) Declared-imports: every bare import in scanned source files must be\na declared dependency (of the nearest package.json), a Node builtin,\nor a relative path. Catches imports of packages the PR never declared.\nUsage: node scripts/check-deps-exist.mjs [--root <dir>]\nZero-dep (only node: builtins). Network: one packument fetch per declared\npackage, 10s timeout each, sequential with a small concurrency pool.",
+  "exports": [],
+  "cli": null,
+  "loc": 284
+ },
+ "scripts/check-deps.mjs": {
+  "header": "Fail fast when node_modules is stale relative to package.json.\nRoot cause it guards: a dependency (e.g. the `yaml` devDependency added in\nPR #1351) can be missing from a developer's node_modules when the install\npredates the commit that declared it. Tests then die with a bare\nERR_MODULE_NOT_FOUND deep in an import statement instead of telling you to\nre-install. A clean `npm ci` always fixes it; this check just says so up\nfront, before the test runner starts.",
+  "exports": [],
+  "cli": null,
+  "loc": 31
+ },
+ "scripts/check-version-doors.mjs": {
+  "header": "Version door check. Zero dependencies.\napi/version is answered inside the Durable Object; /api/version/worker is\nanswered from Worker module scope (cloudflare/room.mjs). After a deploy the\nWorker flips at once while an already-running DO instance can keep serving\nthe previous revision for up to about a minute (observed twice: worker on\na21c2364, /api/version still on cbd4ee5e). Reading one door and calling it\n\"what is live\" is therefore wrong during that window. This reads both.\nStates for a target sha:\nconverged     both doors report sha\ndo-stale      worker reports sha, the Durable Object door does not (rollout in progress)\nworker-stale  the DO door reports sha, the worker door does not\nother         neither door reports sha (a different revision, or unreachable)\nCLI: node scripts/check-version-doors.mjs --origin URL --sha SHA [--wait-ms 0] [--poll-ms 10000]\nWaits up to --wait-ms for \"converged\", prints JSON, exits 0 converged,\n3 do-stale, 4 worker-stale, 5 other.",
+  "exports": [
+   "DOORS",
+   "classifyDoors",
+   "readDoors",
+   "waitDoors"
+  ],
+  "cli": "runnable as CLI",
+  "loc": 75
+ },
+ "scripts/ci-changes.mjs": {
+  "header": "Decide which expensive CI suites a pull request actually needs.\nGitHub's `on.pull_request.paths` filter looks at the files in the pushing\ncommit. Merging main into a branch therefore retriggers every suite whose\npaths main touched, even when the pull request's own diff does not. This\nscript classifies `git diff <base>...<head>` (the merge-base / \"Files\nchanged\" diff) instead.\nPush, schedule, and workflow_dispatch are not pull requests: both suites\nstay enabled so the main tip still runs the full test matrix.\nOutputs (GITHUB_OUTPUT): browser=true|false, eval=true|false, and\ncoverage=true|false.",
+  "exports": [
+   "classifyChanges"
+  ],
+  "cli": "runnable as CLI",
+  "loc": 175
+ },
+ "scripts/claim-bond-shadow.mjs": {
+  "header": "claim-bond-shadow: P0 shadow-mode reporter for claim bonds.\nUsage:\nnode scripts/claim-bond-shadow.mjs --db <path-to-room.sqlite> [--room <roomId>] [--sync]\nWithout --sync this is strictly read-only (PRAGMA query_only=ON) and\nreports the baseline flake rate from the claim_bond_shadow journal.\nWith --sync it first replays work_claim.updated events into the journal\n(idempotent; writes only its own additive table, outside the writer fence).\nExit 0 with a JSON report on stdout. Exit 2 on bad arguments, exit 1 when\nthe database cannot answer, with the reason on stderr.",
+  "exports": [],
+  "cli": null,
+  "loc": 73
+ },
+ "scripts/claim-overlap-browser-check.mjs": {
+  "header": "Claim overlaps on the work card: when a claim covers paths another active\nclaim in the same repository already holds, the card's scope summary says\n\"Overlaps 1\" and the details name the other work, its holder and the paths.\nReal browser + local HTTP service; disposable fixture data.",
+  "exports": [],
+  "cli": null,
+  "loc": 47
+ },
+ "scripts/claim-reputation-sync.mjs": {
+  "header": "claim-reputation-sync: P1 claim-reputation journal tool.\nUsage:\nnode scripts/claim-reputation-sync.mjs --db <path-to-room.sqlite> [--room <roomId>] [--sync]\nWithout --sync this is strictly read-only (PRAGMA query_only=ON) and\nreports the P1 signal counts from the claim_reputation_signals journal.\nWith --sync it first replays work_claim.updated events into the journal\n(idempotent; writes only its own additive table, outside the writer fence).\nThe weekly P1 measurement (CLAIMBONDS-P1-SPEC-2026-10-05.md) re-runs the\nP0 shadow baseline and diffs against 2026-10-05; this script populates the\njournal that measurement reads.\nExit 0 with a JSON report on stdout. Exit 2 on bad arguments, exit 1 when\nthe database cannot answer, with the reason on stderr.\nThis script is the reachability entry point for server/claim-reputation.mjs\n(same standing as scripts/claim-bond-shadow.mjs for the P0 module). Live\nwiring into the analytics tail stays analytics-lane owned; this tool runs\non demand, not from any request path.",
+  "exports": [],
+  "cli": null,
+  "loc": 104
+ },
+ "scripts/claims-index.mjs": {
+  "header": "!/usr/bin/env node\nscripts/claims-index.mjs \u2014 read-only claims-board indexer for the swarm\ncoordination board (Uuriko/project-room#266).\nFetches #266 comments (REST, numeric ids), parses machine-readable claim\nblocks (```room-claim) and receipt comments, and emits a static JSON index\nplus a compact markdown board. Read-only against GitHub: the only network\ncall is `gh api .../issues/266/comments --paginate` (a GET). All output\ngoes to local files; nothing is committed or pushed by this script.\nMalformed input (prose CLAIM: posts, `lease: 6h` without the lease= prefix,\npath-only comments, missing bodies) is recorded under `unregistered` \u2014\nnever silently dropped, never a crash.\nUsage:\nnode scripts/claims-index.mjs [--comments <file>] [--out <dir>]\n[--format json|md|both] [--now <iso>]\n--comments <file>  read a comments JSON array from disk instead of GitHub\n--out <dir>        output directory (default: ./claims-index-out)\n--format           which outputs to write (default: both)\n--now <iso>        override \"now\" for lease-expiry computation (tests)",
+  "exports": [
+   "LEASE_RE",
+   "STATE_RE",
+   "TASK_ID_RE"
+  ],
+  "cli": "runnable as CLI",
+  "loc": 539
+ },
+ "scripts/connect-agent-first-screen-check.mjs": {
+  "header": "",
+  "exports": [],
+  "cli": null,
+  "loc": 100
+ },
+ "scripts/connect-room.mjs": {
+  "header": "",
+  "exports": [
+   "connectMain"
+  ],
+  "cli": null,
+  "loc": 21
+ },
+ "scripts/contribution-journey-check.mjs": {
+  "header": "",
+  "exports": [],
+  "cli": null,
+  "loc": 107
+ },
+ "scripts/coverage-thresholds.mjs": {
+  "header": "Per-module coverage thresholds gate (backlog Q015).\nMeasures line coverage per module from the root `node --test` suite using\nV8 coverage (NODE_V8_COVERAGE, zero dependencies) and fails when any\nconfigured module drops below its ratchet threshold in\ncoverage-thresholds.json. Thresholds are set at measured levels (ratchet):\nthe gate prevents silent decay, it does not demand improvement.\nUsage:\nnode scripts/coverage-thresholds.mjs            # collect (runs the suite) + evaluate\nnode scripts/coverage-thresholds.mjs --collect-only\nnode scripts/coverage-thresholds.mjs --coverage-dir <dir>   # evaluate existing data\nnode scripts/coverage-thresholds.mjs --baseline             # collect + print measured JSON\nnode scripts/coverage-thresholds.mjs --config <path>        # alternate config\nExit codes: 0 = all thresholds met; 1 = threshold breach or suite failure;\n2 = usage/config error.\nMeasurement notes (approximations, applied identically on every run so the\nratchet stays comparable):\n- Coverage is computed PER TEST PROCESS from that process's own V8 ranges\n(where boundaries are self-consistent), then unioned across processes: a\nline counts as covered when any process covers it. Raw ranges ",
+  "exports": [
+   "DEFAULT_CONFIG_PATH",
+   "checkThresholds",
+   "collectCoverage",
+   "coverableLines",
+   "coveredLinesForPayload",
+   "evaluateModules",
+   "formatReport",
+   "groupFunctionsByUrl",
+   "lineCoverage",
+   "listModuleFiles",
+   "loadConfig",
+   "splitLineSpans"
+  ],
+  "cli": null,
+  "loc": 522
+ },
+ "scripts/decision-register-browser-check.mjs": {
+  "header": "Decision register (backlog F2) browser check: a human with decide promotes a\nmessage into a source-backed decision record; members without decide get no\nsuch affordance. Disposable rooms only - no real users or outside requests.",
+  "exports": [],
+  "cli": null,
+  "loc": 82
+ },
+ "scripts/deleted-message-browser-check.mjs": {
+  "header": "Deleted-message rendering (wave finding fix): message.deleted tombstones the\nprojection (body=null, deletedAt). Rendering must honor the tombstone - no\nnull-body crashes in reply previews, search, request or decision labels, and\nno body-dependent actions on a deleted message. Disposable rooms only.",
+  "exports": [],
+  "cli": null,
+  "loc": 90
+ },
+ "scripts/dependency-audit.mjs": {
+  "header": "Weekly dependency audit: run `npm audit --json` through an injectable\nrunner, group vulnerabilities by severity, and emit a Markdown report plus\na JSON summary. Designed for cron/CI: exit 0 when the audit is clean or\nbelow --fail-on, exit 1 when vulnerabilities at or above the threshold\nexist (so CI can gate on it), exit 2 when the audit itself failed.\nUsage:\nnode scripts/dependency-audit.mjs [--fail-on=<severity>] [--out=<path>] [--json-out=<path>]\nnode scripts/dependency-audit.mjs --help\nPure functions (parseAuditJson, groupBySeverity, summarizeAudit,\nthresholdBreached, renderMarkdown, renderJsonSummary) carry the logic and\nare unit-tested in tests/dependency-audit.test.js with fixture payloads;\nonly the npm invocation goes through the injectable runner.",
+  "exports": [
+   "AuditError",
+   "SEVERITIES",
+   "defaultRunner",
+   "groupBySeverity",
+   "normalizeThreshold",
+   "parseArgs",
+   "parseAuditJson",
+   "renderJsonSummary",
+   "renderMarkdown",
+   "runAudit",
+   "summarizeAudit",
+   "thresholdBreached"
+  ],
+  "cli": "runnable as CLI",
+  "loc": 258
+ },
+ "scripts/design-cohesion-browser-check.mjs": {
+  "header": "Computed-style regression for the shared tokens and the regrouped Settings\ndialog. The repo has no pixel-snapshot library; screenshots are evidence\nand these assertions are the check.",
+  "exports": [],
+  "cli": null,
+  "loc": 240
+ },
+ "scripts/design-contrast-check.mjs": {
+  "header": "WCAG 2.2 AA gate for the shared design tokens. The contract job runs this\nfrom scripts/check.mjs, including in CI where the unit suite is skipped.",
+  "exports": [],
+  "cli": null,
+  "loc": 14
+ },
+ "scripts/desktop-google-browser-check.mjs": {
+  "header": "Owns real desktop consent through Google's cross-origin browser return.\nProvider authorization/token/JWKS are synthetic; every Room route and cookie is real.",
+  "exports": [],
+  "cli": null,
+  "loc": 242
+ },
+ "scripts/dm-consent-browser-check.mjs": {
+  "header": "DM consent UI journey under default-open DMs: request \u2192 pending (never\ngates the composer) \u2192 approve \u2192 DM posts \u2192 revoke \u2192 the gate refuses the\nDM and names the next step \u2192 block \u2192 gate errors \u2192 unblock, plus a forced\n500's visible notice and the logged-out public face staying\nconsent-control-free. Real browser + local HTTP service; identities and\nkeys are disposable fixtures.",
+  "exports": [],
+  "cli": null,
+  "loc": 208
+ },
+ "scripts/docs-link-check.mjs": {
+  "header": "Intra-repo markdown links in the maintained docs. docs/history/ is a\nrecord and is not checked. Concurrent batches own a few linked filenames;\na missing one of those is reported and does not fail this check.",
+  "exports": [
+   "brokenDocLinks"
+  ],
+  "cli": null,
+  "loc": 81
+ },
+ "scripts/dogfood-return-browser-check.mjs": {
+  "header": "Synthetic browser journeys in disposable rooms; no real users or external data.",
+  "exports": [],
+  "cli": null,
+  "loc": 46
+ },
+ "scripts/flaky-detect.mjs": {
+  "header": "!/usr/bin/env node\nflaky-detect.mjs \u2014 additive flaky-test DETECTOR. Detection only: never gates CI.\nnode scripts/flaky-detect.mjs <test-file> [runs] [--runs=N] [--timeout=ms] [--json]\nRuns the target test file N times in separate processes, parses the TAP\noutput of each run, and reports tests whose outcome VARIED across runs\n(both passes and failures). Exit 0: no flaky tests. Exit 1: flaky tests\nfound (their names are printed). Exit 2: usage/target-file error.\nDetection only \u2014 do not gate any CI merge on this script.",
+  "exports": [
+   "detectFlaky"
+  ],
+  "cli": null,
+  "loc": 189
+ },
+ "scripts/friend-bond-browser-check.mjs": {
+  "header": "People Friend chrome: Friend \u2192 Proposed \u2192 Accept \u2192 Friends + peer DM \u2192 Revoke.\nA peer DM before the bond is active fails with no_bond, then bond_pending.\nNo scopes picker. Real browser + local HTTP service; disposable identities.",
+  "exports": [],
+  "cli": null,
+  "loc": 275
+ },
+ "scripts/frozen-runtime-fixture.mjs": {
+  "header": "Test-only fixture loader. Never mutates a frozen package or changes its manifest.",
+  "exports": [
+   "frozenAcceptanceFixture",
+   "frozenRecoveryFixture",
+   "v10CharterBaseline",
+   "v11ReplyBaseline",
+   "v12HelpBaseline",
+   "v13OfferBaseline",
+   "v14InboxBaseline",
+   "v15AdoptionBaseline",
+   "v16SendBaseline",
+   "v17EmailBaseline",
+   "v18EmailSourceBaseline",
+   "v19EmailExcerptBaseline"
+  ],
+  "cli": null,
+  "loc": 30
+ },
+ "scripts/fuzz-mime.mjs": {
+  "header": "Continuous fuzzing for the MIME parser (server/mime-message.mjs).\nBacklog Q005: pathological MIME inputs exist in the wild, so the parser is\nfuzzed on a schedule. The invariant is simple and total: for ANY byte\ninput, parseMimeMessage must either return a result or throw a MimeError.\nAnything else (a hang, a crash, an uncaught TypeError/RangeError/...) is a\nfailure. Failing inputs are written to the report directory with the seed\nand case index so they reproduce deterministically.\nBounded by design so it cannot stall the pipeline:\n--seed N        PRNG seed (default 20261006; same seed => same inputs)\n--iterations N  random cases after the corpus (default 20000)\n--budget-ms N   wall-clock budget for the random phase (default 480000)\n--max-ms N      per-case time limit; a slower case is a \"slow\" failure\n(default 5000). A true infinite loop cannot be caught\nin-process; run under `timeout(1)` (the CI job does) so\nthe OS bounds it.\n--corpus DIR    seed corpus directory (default tests/fuzz/mime-corpus)\n--report DIR    failing inputs land here (default ./mime-fuzz-out,\ncreated only on failure)\n--skip-corpus   random phase only\n--quiet         summary line only\nExit code: 0 when every case",
+  "exports": [
+   "DEFAULT_CORPUS_DIR",
+   "DEFAULT_SEED",
+   "checkCorpusEntry",
+   "checkOne",
+   "genMessage",
+   "loadCorpus",
+   "mulberry32",
+   "mutate",
+   "randomSoup",
+   "runFuzz"
+  ],
+  "cli": null,
+  "loc": 291
+ },
+ "scripts/github-app-check.mjs": {
+  "header": "Confirms github-app/manifest.json matches the permissions and URLs the\nshared GitHub App core publishes. Does not call GitHub and does not print\nsecret values. Missing credentials leave the integration off.",
+  "exports": [],
+  "cli": null,
+  "loc": 32
+ },
+ "scripts/github-work-sync.mjs": {
+  "header": "Work sync: when a pull request merges, tell the room. A PR body line\nRoom-Work: <workItemId>            (item in the door's room)\nRoom-Work: <roomId>/<workItemId>   (explicit room; must be the door's room)\nmakes the door post one message on that work item, @mentioning its\naccountable member with the merged PR as ready evidence.\nIt never completes the item itself. The room only lets the accountable\nmember report completion, under their own claim, and that stays true.",
+  "exports": [
+   "main",
+   "parseRoomWork",
+   "runWorkSync",
+   "syncCommandId",
+   "syncMessage"
+  ],
+  "cli": "runnable as CLI",
+  "loc": 75
+ },
+ "scripts/gmail-contract-fixture.mjs": {
+  "header": "Invented Gmail API shaped data (users.messages resources). No mailbox\nexport, real people or tokens.",
+  "exports": [
+   "gmailContractFixture"
+  ],
+  "cli": null,
+  "loc": 55
+ },
+ "scripts/gmail-live-fixture.mjs": {
+  "header": "",
+  "exports": [
+   "gmailLiveFixture"
+  ],
+  "cli": null,
+  "loc": 61
+ },
+ "scripts/gmail-setup-browser-check.mjs": {
+  "header": "",
+  "exports": [],
+  "cli": null,
+  "loc": 103
+ },
+ "scripts/gmail-workspace-browser-check.mjs": {
+  "header": "",
+  "exports": [],
+  "cli": null,
+  "loc": 98
+ },
+ "scripts/growth-invite-browser-check.mjs": {
+  "header": "Invite kit in a real browser: one Invite entry, a copyable link and message,\na landing that names the inviter, and a dead link that still offers a next step.",
+  "exports": [],
+  "cli": null,
+  "loc": 76
+ },
+ "scripts/help-invitation-browser-check.mjs": {
+  "header": "global document -- browser-evaluated callbacks */",
+  "exports": [],
+  "cli": null,
+  "loc": 216
+ },
+ "scripts/help-offer-browser-check.mjs": {
+  "header": "Simulated humans and scripted MCP over a disposable local room. No model use.",
+  "exports": [],
+  "cli": null,
+  "loc": 206
+ },
+ "scripts/herdr-backfill.mjs": {
+  "header": "herdr backfill executor (lane B21).\nAttaches herdr sessions to existing opted-in in-flight claims. This is the\nexecution* half of the Phase B migration: B20's planner (`plan` / `scan`)\nenumerates and orders the units of work; this script executes them against\nthe room's claim source and the herdr bridge.\nContract (migration-rollout.md \u00a71, compat-plan.md \u00a71B):\n- IDEMPOTENT: idempotency key `backfill:<room_id>:<claim_id>`; a\nbackfill_done journal row is forever-terminal, so a completed claim is\nnever processed again. Two panes are never spawned for one claim.\nbackfill_aborted is terminal only for the run that wrote it \u2014 a later\nrun re-drives the claim after the operator fixes the cause.\n- RESUMABLE: the append-only `herdr_session_journal` is the source of\ntruth per claim; a cursor in `herdr_backend_state` (key\n`backfill_cursor`) lets --resume skip ahead.\n- --dry-run is the default and writes nothing. --confirm executes.\n- Eligibility: claim state is in_progress AND the lane opted in\n(herdr_lane_optin) AND ROOM_HERDR_SESSIONS covers the room.\n- The claim's public state NEVER changes: state / owner / claimedAt are\nasserted byte-identical around the history-append. The append records\n{ ",
+  "exports": [
+   "BACKFILL_PROTOCOL",
+   "checkEligibility",
+   "createBackfillExecutor",
+   "ensureHerdrTables",
+   "getCursor",
+   "idempotencyKey"
+  ],
+  "cli": "runnable as CLI",
+  "loc": 513
+ },
+ "scripts/herdr-migrate.mjs": {
+  "header": "!/usr/bin/env node\nscripts/herdr-migrate.mjs \u2014 migration / rollout tooling for the herdr redesign.\nB20 (tooling) vs B21 (execution) split per D5 migration-rollout.md \u00a75:\nthis script is the planner / inspector / rollback tool. B21 runs the\nbackfill waves with it. Scripts only \u2014 no runtime changes.\nCommands:\nscan            Enumerate backfill-eligible claims (D5 \u00a71.2). Writes nothing.\nplan            Build the ordered plan; journal it (--execute) or show would_write.\nmigrate         Execute the plan in batches: idempotent, resumable (D5 \u00a71.4).\nreverse         Per-lane reverse migration herdr -> legacy for one claim.\ndrain-status    Open herdr sessions vs flag state (the \u00a72 matrix, live).\nforce-release   Operator-gated forced release of herdr sessions (claims -> unclaimed).\nreap-orphans    Mark orphans per \u00a74.4 (mark by default; kill needs --confirm).\nstatus          Overall migration state: per-room counts, cursor, last errors.\nEverything is dry-run by default. Mutating commands need --execute;\ndestructive actions (force-release, reap-orphans kill) additionally need\n--confirm, and force-release needs --reason (journaled).\nExit codes: 0 = all units ok; 1 = partial (journal shows which",
+  "exports": [
+   "EXIT_OK",
+   "EXIT_PARTIAL",
+   "EXIT_SYSTEMIC",
+   "USAGE",
+   "aggregateDrainStatus",
+   "appendJournalEntry",
+   "batchPlan",
+   "buildPlan",
+   "buildScanReport",
+   "classifyClaim",
+   "deriveExitCode",
+   "detectOrphans"
+  ],
+  "cli": null,
+  "loc": 1343
+ },
+ "scripts/host-isolation-preflight.mjs": {
+  "header": "Setup diagnostic only: a fixed --version probe may expose sandbox startup\ndiagnostics. Actual untrusted host stderr remains suppressed by the adapter.",
+  "exports": [],
+  "cli": null,
+  "loc": 24
+ },
+ "scripts/human-experience-browser-check.mjs": {
+  "header": "",
+  "exports": [],
+  "cli": null,
+  "loc": 381
+ },
+ "scripts/human-push-browser-check.mjs": {
+  "header": "Human push is one button behind the browser permission prompt.\nThe settings dialog stays free of notification levels and quiet hours.",
+  "exports": [],
+  "cli": null,
+  "loc": 109
+ },
+ "scripts/in-place-fixture-signin.mjs": {
+  "header": "Disposable loopback fixtures only. Real visible login keeps pending browser callbacks alive.",
+  "exports": [
+   "signInFixtureInPlace"
+  ],
+  "cli": null,
+  "loc": 44
+ },
+ "scripts/inbox-browser-check.mjs": {
+  "header": "",
+  "exports": [],
+  "cli": null,
+  "loc": 1499
+ },
+ "scripts/inbox-conversation-browser-check.mjs": {
+  "header": "",
+  "exports": [],
+  "cli": null,
+  "loc": 111
+ },
+ "scripts/inbox-quarantine-review-check.mjs": {
+  "header": "Browser coverage for the quarantine review UI (worker C): two held spam\nmessages render with scores, sender, subject, and non-empty signal\nreasons; Confirm removes an item from held and shows it in\nreleased/confirmed history; Dismiss arms on the first click (changing\nnothing) and dismisses on the second. Boots a real server against an\nacceptance-fixture store over loopback; no network calls.",
+  "exports": [],
+  "cli": null,
+  "loc": 199
+ },
+ "scripts/inbox-result-fixture.mjs": {
+  "header": "Scripted participants and synthetic local data only, never hosted execution.",
+  "exports": [
+   "prepareInboxResult"
+  ],
+  "cli": null,
+  "loc": 38
+ },
+ "scripts/join-next-browser-check.mjs": {
+  "header": "The join page follows next only when it is one relative path on this origin.",
+  "exports": [],
+  "cli": null,
+  "loc": 71
+ },
+ "scripts/landing-facts.mjs": {
+  "header": "One read for the landing path. Prints four identities and, when\nROOM_AGENT_CONFIG is set, lease holder and expiry for touched paths.\nDoes not post, claim, merge, deploy, or release a lease. A chat line is not one of these facts.",
+  "exports": [
+   "attachRestCommitIds",
+   "defaultExec",
+   "landingFacts",
+   "pathLeases",
+   "reviewCommitId"
+  ],
+  "cli": "runnable as CLI",
+  "loc": 285
+ },
+ "scripts/layout-simplification-browser-check.mjs": {
+  "header": "",
+  "exports": [],
+  "cli": null,
+  "loc": 95
+ },
+ "scripts/lazy-boards-browser-check.mjs": {
+  "header": "",
+  "exports": [],
+  "cli": null,
+  "loc": 115
+ },
+ "scripts/lesson-contradictions.mjs": {
+  "header": "!/usr/bin/env node\nscripts/lesson-contradictions.mjs\nContradiction resolver \u2014 input side only \u2014 for conflicting lesson entries\n(backlog W015). Builds on the lessons corpus (docs/ROOM-WIKI.md,\ndocs/WEEKLY-LEARNINGS.md, and the \"## Lessons\" bullets of AGENTS.md).\nThis is a heuristic detector (no LLM). It normalizes lesson entries and\nflags pairs that look contradictory:\nopposing-directive     one entry says \"never X\", another says\n\"always X\" (or must/do X) on the same topic \u2014\nsame file path, shared identifier, or strong\ntopic-token overlap plus overlapping directive\ntargets.\npreference-inversion     one entry prefers X over Y, another prefers\nY over X.\nunmarked-supersession    an entry claims to supersede/replace/correct a\nspecific corpus entry without the correction\nentry referencing it back (the wiki is\nappend-only, so the old entry can't mark itself\n\u2014 the pointer is one-way and needs review).\nIt REPORTS ONLY. It never edits, deletes, resolves, or reorders lesson\nentries. Every hit is for human review; the report says so explicitly.\nUsage:\nnode scripts/lesson-contradictions.mjs [--json] [--files f1 f2 ...]\nDefault: scan docs/ROOM-WIKI.md + docs/WEEKLY-LEARNINGS.md.\nPass a repo AGEN",
+  "exports": [
+   "extractDirectives",
+   "findContradictions",
+   "loadAllCorpus",
+   "parseLessonBullets",
+   "renderContradictionReport",
+   "sharedAnchors",
+   "supersessionClaim"
+  ],
+  "cli": null,
+  "loc": 470
+ },
+ "scripts/lint-design-tokens.mjs": {
+  "header": "Design-token ratchet lint (D-fo-6 step 1).\nFails CI when a NEW raw hex color literal, a NEW raw `font-size:`\ndeclaration, or a NEW raw size smuggled through the `font:` shorthand\nappears in the CSS tree. Everything that exists today is\ngrandfathered in scripts/design-tokens-baseline.json; that file only\nshrinks over time \u2014 never add NEW entries to it.\nRun: node scripts/lint-design-tokens.mjs\nRegenerate the baseline after legitimately removing violations:\nnode scripts/lint-design-tokens.mjs --capture\n(--capture prints the added/removed entries so review can see exactly\nwhat changed; never run it to bless a new violation.)",
+  "exports": [
+   "diffAgainstBaseline",
+   "hexHits",
+   "loadBaseline",
+   "rawFontShorthandValue",
+   "rawFontSizeValue",
+   "scanTree"
+  ],
+  "cli": null,
+  "loc": 210
+ },
+ "scripts/live-audit.mjs": {
+  "header": "live-audit.mjs \u2014 production deploy guardrails for room.trydemigod.com.\nFixture-vs-live gap (read before adding a guard): this module is\nunit-tested with an injected fetchImpl (tests/live-audit.test.js), so a\nguard can pass against fixtures while the route it guards never existed.\nThat is exactly what happened with /api/open, /api/auth-config and\nprivacy: they were asserted against fixture JSON, but server/http.mjs\nserves no such API paths and its `assets` static map has no such page,\nso every deploy check cried wolf on ship/persistence/auth_provider/\nprivacy_status. Rules for this file:\n1. Every guarded path MUST exist in server/http.mjs (or the assets map).\n2. Retired paths stay in PHANTOM_ROUTES below as honest-404 assertions:\nthe audit fails if a phantom ever starts serving, which forces the\nguard to be rewritten against the real route \u2014 never against a fixture.",
+  "exports": [
+   "LIVE_ORIGIN",
+   "PHANTOM_ROUTES",
+   "liveAudit"
+  ],
+  "cli": "runnable as CLI",
+  "loc": 95
+ },
+ "scripts/live-upgrade-draft-browser-check.mjs": {
+  "header": "Exact pre-release live client -> candidate upgrade; disposable local data only.",
+  "exports": [],
+  "cli": null,
+  "loc": 74
+ },
+ "scripts/loop-warning-browser-check.mjs": {
+  "header": "Simulated human journeys in real browsers against isolated, synthetic rooms.",
+  "exports": [],
+  "cli": null,
+  "loc": 66
+ },
+ "scripts/mcp-test-client.mjs": {
+  "header": "Test harness, not an AI host integration or a production dependency.",
+  "exports": [
+   "openMcpTestClient"
+  ],
+  "cli": null,
+  "loc": 33
+ },
+ "scripts/member-perms-browser-check.mjs": {
+  "header": "MEMBER-PERMS PR2: simulated browser journeys against a disposable real server.\nAuthoring gate: these own UI wiring, selection, retry and session lifecycle.\nCredible regressions are posting admission instead of an authenticated upgrade,\nsending unselected grants, duplicating a committed request after response loss,\nor painting the previous member's callback into a new session. HTTP tests do\nnot mount the UI; these use no production test seams or fabricated API replies.\nThe two happy-path viewports additionally guard mobile reachability and native\nkeyboard activation; Escape review dismissal must restore the initiating focus.\nAdditional regressions own prelookup-throttle retry continuity, live ownership\nloss with an open review, and keyboard focus across real stream-driven refreshes.",
+  "exports": [],
+  "cli": null,
+  "loc": 397
+ },
+ "scripts/merge-queue-eject-budget.mjs": {
+  "header": "merge-queue-eject-budget.mjs \u2014 measured flake eject budget for GitHub's\nnative merge queue.\nGitHub's merge queue is batch-then-eject (NOT batch-then-bisect): when a\ncheck fails in a merge_group, the failing PR is ejected and the group\nrebuilds. Without a budget, a flaky PR can eject/requeue forever, burning\n25-75 min of CI per cycle and blocking its whole group each time.\nWhat this does:\n- On `merge_group` `destroyed` events, classifies the eject. Only\nexplicit check-failure ejects burn budget; lane pushes (design doc\nMERGE-QUEUE-DESIGN.md \u00a71.3: eject first, push, re-verify, re-enqueue),\nmanual dequeues, dirty-PR ejects, and unknown reasons never count.\n- Counts failure-ejects per PR in a rolling window (default: 3 ejects /\n24h) persisted in tests/merge-queue-eject-budget.json (the repo-file\nledger, committed back fail-closed like onboarding-probe's results.md).\n- When a PR trips the budget: posts one FRICTION alert to the room naming\nthe PR (with read-back verification \u2014 never silently dropped), appends\na quarantine *proposal* to the ledger (auto-proposed, never auto-merged\ninto tests/quarantine.json), and leaves a PR comment for the lane.\n- On `pull_request` `closed`: drops the P",
+  "exports": [
+   "BUDGET_DEFAULTS",
+   "LEDGER_VERSION",
+   "alertCommandId",
+   "buildAlertBody",
+   "classifyEject",
+   "ejectsInWindow",
+   "emptyLedger",
+   "evaluateBudget",
+   "main",
+   "markAlerted",
+   "mergeLedgers",
+   "proposeQuarantine"
+  ],
+  "cli": "runnable as CLI",
+  "loc": 386
+ },
+ "scripts/merge-queue-receipt.mjs": {
+  "header": "Merge-queue receipt. Posts one room message through the GitHub door\n(ROOM_DOOR_SECRET, the same secret as room-github-door.yml). Issue #266\nis locked, so this does not comment there. When the door secret is unset\nthe run skips and says so.",
+  "exports": [
+   "main",
+   "receiptCommand",
+   "runReceipt"
+  ],
+  "cli": "runnable as CLI",
+  "loc": 49
+ },
+ "scripts/message-preview-browser-check.mjs": {
+  "header": "Authoring gate: real Chromium owns disclosure accessibility and retained DOM\nduring streamed updates. Markdown tests cannot detect paragraph reparsing,\nlost selection/focus, duplicate visible text or theme/mobile layout failures.\nRegression control: baseline has no expandable preview. No production hooks.",
+  "exports": [],
+  "cli": null,
+  "loc": 78
+ },
+ "scripts/native-draft-browser-check.mjs": {
+  "header": "Scripted people and MCP reviewer, isolated local data. No model or provider use.",
+  "exports": [],
+  "cli": null,
+  "loc": 217
+ },
+ "scripts/native-host-binary.mjs": {
+  "header": "Resolve the executable for a native host, without hardcoding anyone's home\ndirectory. The runner used to name one developer's install path directly,\nwhich meant the acceptance exercise could only ever run on that one laptop\nand failed on every other machine with a bare ENOENT from spawn.\nResolution order, first hit wins:\n1. An explicit environment override, so an unusual install is always\nreachable without editing the script.\n2. The executable on PATH, which is where a normal install puts it.\n3. A platform default, kept only for the packaged macOS application that\ngenuinely does live at a fixed location and is not on PATH.\nThis never throws. Resolution happens before a host is started but the\ncaller reserves its evidence file first, so an unresolvable binary has to\nbe reportable rather than fatal; returning a reason keeps that ordering\nintact and still gives the operator something better than ENOENT.",
+  "exports": [
+   "HOST_BINARY_DEFAULT",
+   "HOST_BINARY_ENV",
+   "onPath",
+   "resolveHostBinary"
+  ],
+  "cli": null,
+  "loc": 83
+ },
+ "scripts/native-result-browser-check.mjs": {
+  "header": "Simulated human interaction in disposable local rooms, never a user study.",
+  "exports": [],
+  "cli": null,
+  "loc": 297
+ },
+ "scripts/oauth-return-invite-browser-check.mjs": {
+  "header": "A returning member who opens a friend's link and signs in with Google must\nland on that invitation, not in their own first room. The Google callback\nsends anyone who already has a room to /?room=<first room>, and the OAuth\nstash restore used to refuse any ?room= landing, so the friend's link was\ndropped for every returning member. Provider endpoints are synthetic; every\nRoom route, cookie and the share link are real.",
+  "exports": [],
+  "cli": null,
+  "loc": 99
+ },
+ "scripts/openapi-gen.mjs": {
+  "header": "OpenAPI gate (batch RT).\nUntil the legacy chain is empty, this check parses docs/openapi.yaml,\nkeeps the template gate, and requires every documented operation to be a\nrow in server/routes/table.mjs or a row still listed in the legacy\nallowlist. A documented HEAD is covered when GET is served for the same\ntemplate: several handlers answer HEAD as 404 today, and this batch does\nnot change that.\nByte-for-byte generation of docs/openapi.yaml from the table starts when\nthe allowlist is empty (RT-final). Until then a rewrite would fight other\nopen pull requests that still edit the document by hand.",
+  "exports": [
+   "methodCoverageProblems",
+   "openApiGateProblems",
+   "openApiParseErrors"
+  ],
+  "cli": "runnable as CLI",
+  "loc": 79
+ },
+ "scripts/operator-console-browser-check.mjs": {
+  "header": "Operator console (operator.html) against a real server with the operator\nsecret configured: status renders, find -> plan shows counts, execute stays\ndisabled until the room title is typed, the purge runs, and the token lives\nonly in sessionStorage. axe reports no serious or critical issue at 390 px.",
+  "exports": [],
+  "cli": null,
+  "loc": 135
+ },
+ "scripts/owner-project-offers-browser-check.mjs": {
+  "header": "",
+  "exports": [],
+  "cli": null,
+  "loc": 78
+ },
+ "scripts/portable-work-browser-check.mjs": {
+  "header": "",
+  "exports": [],
+  "cli": null,
+  "loc": 212
+ },
+ "scripts/pr-diff-size-check.mjs": {
+  "header": "PR diff-size gate.\nDiffs over MAX_DIFF_LINES (default 300) must carry an explicit\n\"Large diff justification:\" section in the PR body, or the check fails.\nWhy: smaller diffs mean fewer rebase conflicts (PR #1530 needed five rebase\ncycles partly because of diff size) and faster reviews. Split the PR when\nyou can; justify it when you cannot.\nPure contract: checkDiffSize({ numstat, prBody, threshold? }) -> { ok, counted, message }.\nCLI: BASE_SHA/HEAD_SHA (env or --base/--head), PR_BODY or PR_BODY_B64\n(env) or --body/--body-b64/--body-file args. DIFF_SIZE_THRESHOLD overrides\nthe single constant without a code change.",
+  "exports": [
+   "MAX_DIFF_LINES",
+   "MIN_JUSTIFICATION_CHARS",
+   "checkDiffSize",
+   "isExcluded",
+   "resolveThreshold"
+  ],
+  "cli": null,
+  "loc": 167
+ },
+ "scripts/probe-prod-lib.mjs": {
+  "header": "Shared probe logic for probe-prod.mjs (CLI) and watch-deploy-drift.mjs.\nMatrix and classification are built from the 2026-09-25 1101 incident\nevidence, not from path-shape guesses:\n- \"/\" is DO-BACKED: it served an 1101 during the outage. It is not an\nedge-static canary.\n- /.well-known/agent.json also flows through the DO on the canonical\nhost, so it cannot be an independent edge canary.\n- /api/health/jobs is the JOBS CANARY: its handler catches DO RPC errors\nand answers a clean 503. During the incident it kept answering while\nevery other DO-backed route hard-failed. A 200 or a clean JSON 503\nwith schema room.job-health/1 proves the Worker itself is alive; it hard-failing means the\nWorker or the DO is failing; use external edge and logs to distinguish.",
+  "exports": [
+   "MATRIX",
+   "probeProd"
+  ],
+  "cli": null,
+  "loc": 94
+ },
+ "scripts/prod-flow-probes.mjs": {
+  "header": "!/usr/bin/env node\nProd flow probes: read-only checks of the paths a person or agent walks first.\nExit 1 on any failure. No credentials. No writes. Safe to run on a schedule.\nUsage: node scripts/prod-flow-probes.mjs [--json]",
+  "exports": [
+   "PROBES",
+   "runProbes"
+  ],
+  "cli": "runnable as CLI",
+  "loc": 45
+ },
+ "scripts/progressive-disclosure-check.mjs": {
+  "header": "Consistent progressive disclosure (backlog C7): in-room section disclosures\nshare one summary anatomy (chevron, label, trailing chip/note), hit target,\nfocus ring - and toggling never moves focus. Disposable rooms only.",
+  "exports": [],
+  "cli": null,
+  "loc": 151
+ },
+ "scripts/project-offers-browser-check.mjs": {
+  "header": "Public offer journeys against the real Node HTTP/store boundary; no identities\nare enrolled and no external host, mail, funding or cashout is started.",
+  "exports": [],
+  "cli": null,
+  "loc": 159
+ },
+ "scripts/public-pages-polish-browser-check.mjs": {
+  "header": "Compare pages and the HTML 404: axe serious/critical at 390 and 1280,\nand no Content-Security-Policy console errors on the compare pages.",
+  "exports": [],
+  "cli": null,
+  "loc": 146
+ },
+ "scripts/public-work-matching-browser-check.mjs": {
+  "header": "Actual owner enable \u2192 anonymous suggestions \u2192 outside-agent claim. No live services.",
+  "exports": [],
+  "cli": null,
+  "loc": 213
+ },
+ "scripts/public-work-results-browser-check.mjs": {
+  "header": "Real HTTP submission/review and private owner UI; no live identities or mail.",
+  "exports": [],
+  "cli": null,
+  "loc": 193
+ },
+ "scripts/purpose-invite-check.mjs": {
+  "header": "",
+  "exports": [],
+  "cli": null,
+  "loc": 109
+ },
+ "scripts/pwa-browser-check.mjs": {
+  "header": "Install button and the push soft ask, in Chromium. The ask is absent on\nload and appears only after a needs-you item is handed to the dock.",
+  "exports": [],
+  "cli": null,
+  "loc": 84
+ },
+ "scripts/qa5-a11y-c-browser-check.mjs": {
+  "header": "Slice C (QA5 UI/UX + a11y): user-testing for the newly merged UI work.\nCovers the render paths the unit tests don't reach:\n- S1 (#1456): the viewer-aware empty-board copy is wired through boardHtml\n(the pure emptyBoardCopy function has its own unit test; this guards the\ncall site that passes canWrite/signedIn).\n- S3 (#1456): the New-item form's Note field is label-associated and the\nnote reaches the created claim end to end (the F-parity-1 regression).\n- D-c (#1459): the client-side boot() fail path shows the error screen\nwith the back-to-sign-in fallback for a malformed invite code.\n- 320px viewport: no horizontal overflow on the main page or board dialog.\n- Coarse pointers: the 44px touch-target floor holds on board controls.\nReal browser + disposable loopback server; no external identity.",
+  "exports": [],
+  "cli": null,
+  "loc": 154
+ },
+ "scripts/quiet-attribution-browser-check.mjs": {
+  "header": "Simulated local readers, not human research or identity verification.",
+  "exports": [],
+  "cli": null,
+  "loc": 81
+ },
+ "scripts/quiet-copy-browser-check.mjs": {
+  "header": "",
+  "exports": [],
+  "cli": null,
+  "loc": 116
+ },
+ "scripts/quiet-design-check.mjs": {
+  "header": "",
+  "exports": [],
+  "cli": null,
+  "loc": 145
+ },
+ "scripts/receipts-browser-check.mjs": {
+  "header": "receipts/<id> at a phone width: the document fits the viewport and exposes\nmain and footer landmarks.",
+  "exports": [],
+  "cli": null,
+  "loc": 45
+ },
+ "scripts/record-rails-fixture.mjs": {
+  "header": "Synthetic qualification helpers use the real event and durable rail authority.",
+  "exports": [
+   "acceptedReceipt",
+   "addRailMember",
+   "seedRecordRails",
+   "submittedTrial"
+  ],
+  "cli": null,
+  "loc": 36
+ },
+ "scripts/refine-draft-browser-check.mjs": {
+  "header": "",
+  "exports": [],
+  "cli": null,
+  "loc": 100
+ },
+ "scripts/reminders-browser-check.mjs": {
+  "header": "",
+  "exports": [],
+  "cli": null,
+  "loc": 111
+ },
+ "scripts/reply-request-browser-check.mjs": {
+  "header": "",
+  "exports": [],
+  "cli": null,
+  "loc": 240
+ },
+ "scripts/reply-review-fixture.mjs": {
+  "header": "Deliberately invented provider history. Not a provider driver or runtime asset.",
+  "exports": [
+   "seedRecordedReply"
+  ],
+  "cli": null,
+  "loc": 28
+ },
+ "scripts/reply-update-fixture.mjs": {
+  "header": "Shared invented mailbox/update fixture. Never contacts a provider.",
+  "exports": [
+   "createReplyUpdateFixture"
+  ],
+  "cli": null,
+  "loc": 46
+ },
+ "scripts/report-unit-failures.mjs": {
+  "header": "!/usr/bin/env node\nscripts/report-unit-failures.mjs\nCI honesty: the \"Report failures to PR\" step in .github/workflows/test.yml\nnames the failing tests instead of pointing at the job log. Reads the\nshard receipt written by scripts/unit-ci.mjs (latest attempt wins) and\nwrites the markdown comment body to --body-file (or stdout).\nUsage: node scripts/report-unit-failures.mjs --shard=1/3 [--body-file=path]\nEnv: GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_RUN_ID (for the run link).",
+  "exports": [],
+  "cli": null,
+  "loc": 64
+ },
+ "scripts/result-copy-browser-check.mjs": {
+  "header": "",
+  "exports": [],
+  "cli": null,
+  "loc": 215
+ },
+ "scripts/results-fixture.mjs": {
+  "header": "Disposable fictional results; no provider reads, execution or publication.",
+  "exports": [
+   "createResultsFixture"
+  ],
+  "cli": null,
+  "loc": 55
+ },
+ "scripts/rollback-readback.mjs": {
+  "header": "!/usr/bin/env node\nVerify a rollback using fresh `wrangler deployments status --json` records.\nstdin / --status-file: {prod: <production status>, entry: <entry status>}.\nA single raw status is also accepted when only --prod-id is requested.\nNo deployment or credentials: this CLI only validates records and GETs both\ndoors. Allocation proof does not establish data restoration or a source-SHA\nmapping for the Worker version IDs; the observed source revisions are receipts.",
+  "exports": [],
+  "cli": null,
+  "loc": 84
+ },
+ "scripts/room-instructions-browser-check.mjs": {
+  "header": "",
+  "exports": [],
+  "cli": null,
+  "loc": 116
+ },
+ "scripts/room-overview-browser-check.mjs": {
+  "header": "Synthetic room only: orientation must preserve writing and make no room writes.",
+  "exports": [],
+  "cli": null,
+  "loc": 79
+ },
+ "scripts/routes-inventory.mjs": {
+  "header": "Legacy route inventory (batch RT).\nWalks the routes the server still serves outside the route table and writes\nscripts/routes-legacy-allowlist.json. The allowlist is the parity baseline:\nit only shrinks as extraction PRs move a group into server/routes/table.mjs.\nA route still implemented in the legacy chain and missing from the allowlist\nfails the check. A new legacy route cannot be added to the baseline.\nPath templates come from the same extractors as the open-route gate.\nMethods come from the handlers: explicit comparisons, 405 Allow values, and\nthe route-name switches in the feature modules.",
+  "exports": [
+   "allowlistDocument",
+   "allowlistProblems",
+   "extractLegacyRoutes",
+   "loadRouteSources",
+   "servedPathKeys",
+   "templateKey"
+  ],
+  "cli": "runnable as CLI",
+  "loc": 500
+ },
+ "scripts/run-quarantined-tests.mjs": {
+  "header": "!/usr/bin/env node\nscripts/run-quarantined-tests.mjs\nZero-Bug System: non-blocking lane for quarantined flaky tests.\nReads tests/quarantine.json and runs each quarantined test with\nQUARANTINE_RUN=1 (so env-gated quarantined tests execute). Entries use\nthe \"file > test name\" convention; a bare file entry runs the whole file.\nExits non-zero when any quarantined test fails \u2014 the zero-bug-quarantine\nworkflow keeps this job non-blocking via `continue-on-error: true`, so a\nred result reports honestly without ever failing a PR.\nDependency-free: uses only node builtins.",
+  "exports": [],
+  "cli": null,
+  "loc": 78
+ },
+ "scripts/runtime-import-closure.mjs": {
+  "header": "Static import-closure analyzer for the runtime-package allowlist lint.\nComputes the transitive closure of relative ES-module imports starting from\nan entrypoint, so tests can assert every imported module is allowlisted\nwithout humans hand-maintaining a file list.\nOnly static `import`/`export ... from` with relative specifiers (./ or ../)\nare followed. `node:` builtins, bare package specifiers, and dynamic\n`import()` are ignored: the server tree uses static relative imports with\nexplicit extensions throughout.",
+  "exports": [
+   "importClosure"
+  ],
+  "cli": null,
+  "loc": 54
+ },
+ "scripts/scan-secrets.mjs": {
+  "header": "Zero-bug gate: scan the PR diff for committed secrets.\nUsage: node scripts/scan-secrets.mjs [--base <git-ref>] [--diff <file>]\nDefault base: origin/main. CI passes the PR base SHA explicitly.\nExit 0: no secrets found. Exit 1: at least one finding (blocks the PR).\nOnly ADDED lines (+ lines, excluding the +++ header) are scanned, so\npre-existing history never blocks a new PR.\nPattern list is deliberately conservative (high-precision, low recall):\nevery pattern anchors on a known provider prefix. Generic \"high entropy\nstring\" heuristics are NOT used \u2014 they false-positive on hashes, UUIDs,\nand test fixtures.\nExplicit escape hatch: append `secrets-allowlist` (case-insensitive) to\nthe line, e.g. `const EXAMPLE = \"AKIAIOSFODNN7EXAMPLE\"; // secrets-allowlist`",
+  "exports": [],
+  "cli": null,
+  "loc": 109
+ },
+ "scripts/server-json-check.mjs": {
+  "header": "Offline checks for server.json, plus an optional registry version bump.\nThe description text is whatever the file says. POS-1a can change that\nfield; this script only checks its shape.",
+  "exports": [
+   "CANONICAL_ORIGIN",
+   "DESCRIPTION_MAX",
+   "NAMESPACE_PREFIX",
+   "REGISTRY_VERSIONS_URL",
+   "checkAgainstRegistry",
+   "checkServerJson",
+   "checkVersionIncreases",
+   "compareSemver",
+   "latestRegistryServer",
+   "parseSemver"
+  ],
+  "cli": null,
+  "loc": 168
+ },
+ "scripts/signin-browser-journey.mjs": {
+  "header": "Reach recovery through the visible password-first entry, including invitation hosts.",
+  "exports": [
+   "backToPasswordSignin",
+   "openMagicSignin"
+  ],
+  "cli": null,
+  "loc": 19
+ },
+ "scripts/skills-sync-check.mjs": {
+  "header": "Fails when plugins/project-room/skills/ is not an exact copy of skills/.\nRepair with: node scripts/skills-sync.mjs",
+  "exports": [
+   "reportSkillDrift"
+  ],
+  "cli": null,
+  "loc": 19
+ },
+ "scripts/skills-sync.mjs": {
+  "header": "skills/ is the only source for Project Room skills. This copies that tree\nonto plugins/project-room/skills/, including skills that exist only under\nskills/ and dropping plugin-only copies such as the shelved bounty worker.",
+  "exports": [
+   "SKILLS_COPY",
+   "SKILLS_SOURCE",
+   "skillDrift",
+   "skillFiles",
+   "syncSkills"
+  ],
+  "cli": null,
+  "loc": 67
+ },
+ "scripts/smoke-prod.mjs": {
+  "header": "Production smoke probes (Zero-Bug System, Phase 2). Zero dependencies.\nSynthetic READ-ONLY probes against the live Project Room deployment.\nNever writes or mutates production data, never spends, never charges,\nnever authenticates as any user or agent. Every probe only reads a\nstatus code / response shape.\nProbes:\nA. landing page      GET /                                   -> 200 + HTML\nB. claims-board read GET /api/opportunities.json?room=...    -> 200 + JSON with `opportunities` array\nC. priced-tool MCP   POST /mcp tools/call add_land_item     -> 401 auth_required JSON-RPC (never 500)\nNotes on probe C: the spend primitive's honest 402 (payment_required,\nserver/spend-grants.mjs paymentRefusal) fires for an authenticated agent\nholding no spend grant. Creating or borrowing an agent identity would\nwrite to production (or impersonate one), so this credential-less probe\nasserts the adjacent refusal invariant instead: calling a priced tool\nwith NO identity must be refused honestly (401 auth_required) and must\nnever execute the tool and must never 500. A priced tool that returned\na result without identity, or a 5xx, fails the probe. Upgrade path: a\nstanding grant-less smoke identity prov",
+  "exports": [],
+  "cli": null,
+  "loc": 127
+ },
+ "scripts/start-room-browser-check.mjs": {
+  "header": "",
+  "exports": [],
+  "cli": null,
+  "loc": 71
+ },
+ "scripts/sync-design-tokens-css.mjs": {
+  "header": "Regenerate the design-token variable blocks in src/styles.css from\nsrc/design-tokens.js (single source of truth).\nThe :root (dark) and [data-theme=\"light\"] blocks carry marker comments;\neverything between a begin/end marker pair is replaced with the generated\ndeclarations, preserving the surrounding lines (color-scheme, aliases).\nValues stay byte-identical when tokens are unchanged, so regeneration is a\nno-op diff unless a token actually moved.\nRun:   node scripts/sync-design-tokens-css.mjs\nCheck: node scripts/sync-design-tokens-css.mjs --check   (CI gate)",
+  "exports": [
+   "hasTokenMarkers",
+   "syncTokensCss"
+  ],
+  "cli": null,
+  "loc": 73
+ },
+ "scripts/telegram-contract-fixture.mjs": {
+  "header": "Invented Telegram Bot API shaped data. No bot token, chat export or real people.",
+  "exports": [
+   "telegramContractFixture"
+  ],
+  "cli": null,
+  "loc": 22
+ },
+ "scripts/thread-options-browser-check.mjs": {
+  "header": "Browser check for the two thread-options features, desktop and narrow:\nthe thread-view Mute/Unmute button and the \"Also send to channel\" checkbox\non thread replies (hidden for DMs and top-level messages).",
+  "exports": [],
+  "cli": null,
+  "loc": 100
+ },
+ "scripts/trace-entry.mjs": {
+  "header": "Trace-entry automation (W001): append one merge-time line to\ndocs/ROOM-TRACES.jsonl when a pull request merges to main, so the raw-traces\nplane never needs a manual backfill again.\nRunner: .github/workflows/trace-entry.yml (pull_request_target, closed).\nThe workflow checks out main, runs this script, validates with\nscripts/check-wiki.mjs (fail closed), commits the line to a\ntrace-entry/pr-<N> bot branch, and opens/merges a trace PR \u2014 a direct push\nto main is blocked by the required status checks on merges, so publication\ngoes through a normal PR. This script never runs untrusted PR code: it only\nreads the GitHub-provided event payload.\nEntry fields (must satisfy scripts/check-wiki.mjs: date, slice, agent, pr,\nsha, outcome, tests {pass,fail}, notes; dates non-decreasing, append-only):\ndate    \u2014 PR merge date (merged_at), never the run date. Clamped up to the\nlast existing entry's date so out-of-order merge runs cannot\nbreak the append-only order check.\nslice   \u2014 the linked work claim: the \"Room-Work: <id>\" line in the PR body\n(docs/GITHUB-DOOR.md), else the head branch's last path segment,\nelse \"pr-<number>\".\nagent   \u2014 PR author login (the lane that did the work), else merged_by.\npr",
+  "exports": [
+   "appendTraceEntry",
+   "buildTraceEntry",
+   "extractSlice",
+   "loadPullRequest",
+   "main",
+   "readTraceLines"
+  ],
+  "cli": "runnable as CLI",
+  "loc": 144
+ },
+ "scripts/unit-shards-check.mjs": {
+  "header": "!/usr/bin/env node\nRequired `unit` gate: successful Actions matrix AND all exact-run receipts.\nMirrors scripts/browser-shards-check.mjs: every tests/*.test.js file must be\ncovered exactly once by a passing shard from this exact run/attempt plan.",
+  "exports": [],
+  "cli": null,
+  "loc": 22
+ },
+ "scripts/unit-shards.mjs": {
+  "header": "Allocation for the sharded unit suite (CI-speed lane).\nThe `unit` merge-gate job ran `npm test` (Node default discovery) in one\njob: ~625s on hosted CI, the long pole of every PR head. This module splits\nthe suite into SHARD_COUNT file shards with balanced estimated duration, so\nthe `unit-shards` matrix finishes in roughly 1/SHARD_COUNT of the time.\nAllocation follows Node24 default test discovery; timing data never selects\nmembership: every Node-discovered test file is in exactly one shard.\nPer-file durations live in scripts/unit-ci-durations.json (milliseconds,\nmeasured on hosted CI, with documented local additions); files without a measurement get a conservative\ndefault so a new test file lands in a shard instead of breaking the plan.",
+  "exports": [
+   "SHARD_COUNT",
+   "discoverUnitTests",
+   "parseShard",
+   "unitPlan",
+   "verifyUnitShards"
+  ],
+  "cli": "runnable as CLI",
+  "loc": 192
+ },
+ "scripts/unstamped-member.mjs": {
+  "header": "A live member.added stamps the display-name policy and refuses a folded\nduplicate. These checks need a stored collision so the rail can disambiguate\nnames. An older event omits the stamp and still replays.",
+  "exports": [
+   "admitHistoricalMember"
+  ],
+  "cli": null,
+  "loc": 17
+ },
+ "scripts/untested-modules-lint.mjs": {
+  "header": "Untested-server-module lint (plan task T1).\nLists server/*.mjs modules with zero references from tests/ and fails if a\nNEW module joins the untested set, or if the grandfather list still names a\nmodule that is now tested (the list only shrinks). Run: node scripts/untested-modules-lint.mjs",
+  "exports": [
+   "findUntested"
+  ],
+  "cli": null,
+  "loc": 98
+ },
+ "scripts/updates-browser-check.mjs": {
+  "header": "Updates HTTP/SQLite journeys: revision-bound marks, exact retries and retired navigation.",
+  "exports": [],
+  "cli": null,
+  "loc": 1528
+ },
+ "scripts/verify-affected.mjs": {
+  "header": "!/usr/bin/env node\nverify:affected: run only the unit tests related to your diff.\nnpm run verify:affected                  # diff vs origin/main (+ uncommitted + untracked)\nnpm run verify:affected -- --list        # print the selection and reasons, run nothing\nnpm run verify:affected -- --base=<ref> --budget=300\n--budget is seconds of wall time per test worker, estimated from the CI\ntimings in scripts/unit-ci-durations.json. Hosted CI is much slower than a\ndev machine: the default ran 168 files in ~27s on 8 local cores.\nA Node-discovered test file (same discovery as `npm test`) is selected when:\n1. it changed itself;\n2. it imports a changed file, directly or transitively (static and\nliteral dynamic imports, require() and new URL(..., import.meta.url));\n3. its source names a changed file's repo-relative path (docs, JSON,\nworkflow and fixture files that tests read).\nCloser tests win: distance 0 (the test or a path mention), then direct\nimporters, then deeper importers, cheaper first, until the time budget\n(estimated from scripts/unit-ci-durations.json) is used up. Changed code\nwith no related test, or a global file (package.json, the runner), adds a\nsmall smoke set. This is a fast lo",
+  "exports": [
+   "GLOBAL_FILES",
+   "SMOKE_TESTS",
+   "buildReverseGraph",
+   "changedFiles",
+   "parseImports",
+   "relatedTests",
+   "resolveSpecifier",
+   "selectTests"
+  ],
+  "cli": "runnable as CLI",
+  "loc": 264
+ },
+ "scripts/visual-regression-browser-check.mjs": {
+  "header": "Q003: visual regression (screenshot diff) tests for the key UI pages.\nCovers the three surfaces a visitor or member actually sees:\n1. login/join entry pages \u2014 signed-out auth panel, join consent form\n(live invite), join error state (bogus code)\n2. signed-in room view \u2014 member chrome plus a seeded message list\n3. message list region \u2014 the `#message-list` element on its own, so a\nmessage-markup regression cannot hide behind chrome pixels\nEach test captures a deterministic screenshot (fixed 1280x800 viewport,\nreduced motion, fonts settled, seeded store data) and diffs it against a\ncommitted baseline in scripts/visual-regression-baselines/. Dynamic\nregions \u2014 message timestamps, avatars, live presence, invite expiry \u2014 are\npainted over via mask locators before capture (baselines carry the same\nmasks), so the gate only sees intentional visual changes.\nA fourth test is the failing-first proof: it captures a real page,\ndeliberately alters the pixels, and asserts the gate fails on the altered\nscreenshot and passes on the identical one.",
+  "exports": [],
+  "cli": null,
+  "loc": 225
+ },
+ "scripts/visual-regression-helper.mjs": {
+  "header": "Q003: shared screenshot-diff helper for the visual regression browser checks.\nThe gate: committed baseline PNGs under scripts/visual-regression-baselines/\nare compared pixel-for-pixel against a fresh capture on every CI run. A\ndiff above MAX_DIFF_PIXEL_RATIO fails the check and writes the actual\ncapture plus a diff image to test-results/visual-regression/ (picked up by\nthe existing browser-shards artifact upload).\nDeterminism contract (every check using this helper gets the same):\n- one fixed viewport (VISUAL_VIEWPORT), deviceScaleFactor 1\n- prefers-reduced-motion so CSS animations/transitions do not run\n- animations disabled at capture time; text caret hidden\n- document.fonts settled before capture (no font-swap flicker)\n- seeded store data; dynamic regions (timestamps, avatars, live\npresence) painted over via the `mask` locators before capture \u2014\nbaselines carry the same masks, so the gate never sees them\nRegenerating baselines after an intentional UI change:\nBaselines are CI-canonical: the comparator sees 1-2% pixel drift from\nsystem font rasterization between environments, so a locally captured\nbaseline fails the CI gate on environment, not on UI changes. Refresh:\n1. commit an e",
+  "exports": [
+   "BASELINE_DIR",
+   "EVIDENCE_DIR",
+   "MAX_DIFF_PIXEL_RATIO",
+   "PIXEL_THRESHOLD",
+   "VISUAL_VIEWPORT",
+   "assertScreenshotMatches",
+   "chromiumLaunchOptions",
+   "compareScreenshotBuffer",
+   "diffPngBuffers",
+   "settleForScreenshot",
+   "shouldUpdateBaselines",
+   "visualContext"
+  ],
+  "cli": null,
+  "loc": 161
+ },
+ "scripts/work-attempts-browser-check.mjs": {
+  "header": "Simulated human journeys against disposable first-party data, not human research.",
+  "exports": [],
+  "cli": null,
+  "loc": 51
+ },
+ "scripts/work-changes-browser-check.mjs": {
+  "header": "Simulated human journeys in real browsers against isolated, synthetic rooms.",
+  "exports": [],
+  "cli": null,
+  "loc": 62
+ },
+ "scripts/work-context-agent-seed.mjs": {
+  "header": "Deterministic synthetic prehistory only. Fresh agents provide the correction and real review.",
+  "exports": [
+   "seedWorkContextExercise"
+  ],
+  "cli": null,
+  "loc": 33
+ },
+ "scripts/work-lifecycle-agent-fixture.mjs": {
+  "header": "Synthetic same-room participation, never a hosted runner or external workspace.",
+  "exports": [
+   "startWorkLifecycleFixture"
+  ],
+  "cli": "runnable as CLI",
+  "loc": 76
+ },
+ "scripts/work-resume-browser-check.mjs": {
+  "header": "Synthetic restart journey in a real browser; no real user data or agents.",
+  "exports": [],
+  "cli": null,
+  "loc": 63
+ },
+ "server/abuse-rate-buckets.mjs": {
+  "header": "Abuse rate-limit buckets that must survive Durable Object eviction.\nCreated on first use, not in the constructor. A room that has never\ntripped one of these limits has no table.\nThe in-memory map in server/http.mjs stays the hot path. A bucket is\nwritten here every quarter of its allowance, and again when the allowance\nis exhausted, so a restart cannot hand the caller a fresh budget. A flood\nof single attempts does not write a row.",
+  "exports": [
+   "ABUSE_RATE_FAMILIES",
+   "ABUSE_RATE_TABLES",
+   "abuseRateTablesPresent",
+   "ensureAbuseRateSchema",
+   "loadAbuseRateBucket",
+   "pruneAbuseRateBuckets",
+   "saveAbuseRateBucket"
+  ],
+  "cli": null,
+  "loc": 110
+ },
+ "server/agent-fleet.mjs": {
+  "header": "CP-AGENTS-1: fleet read model. One row per agent member of a room, built\nonly from existing read models: the room projection (members, halts, work\nitems and their sessions), the Board (work_claims), the event log (last\nevent per actor), the wake queue and its pause table, and the autonomy tier\ntable. Nothing here writes.\nFields that depend on batches that have not landed stay honest:\n- waiting_for_you (AX-1 input_required / CP-APPROVALS) and stuck (AX-3)\nare never produced yet;\n- receiving is null: no observed receive evidence is stored (R's receive\nqualification is a script), and a heartbeat alone never counts;\n- budget is null and over_budget is never produced: there is no per-agent\nspend cap (server/autonomy-tiers.mjs);\n- lastProgress is null until AX-1 claim activity exists.",
+  "exports": [
+   "CLAIM_IDLE_MS",
+   "FLEET_STATES",
+   "claimIdle",
+   "fleetFor",
+   "fleetRows",
+   "fleetScope",
+   "fleetSelf",
+   "primaryState"
+  ],
+  "cli": null,
+  "loc": 226
+ },
+ "server/agent-key-registry.mjs": {
+  "header": "Agent public-key registry (integration map slice 9).\nWhat this is: a room-local directory mapping agent identity -> Ed25519\npublic key, with validity windows and rotation overlap. It answers\nsigned-claims.mjs's \"key distribution is a later slice\": an agent signs\nclaims with its identity key (the ed25519 mode of signed-claims.mjs) and\nany verifier checks the signature against the registered key whose\nvalidity window covers the claim's issuedAt. Keys are bound at identity\nissuance (see AgentIdentities#create) and move through\nregister -> rotate -> revoke; the table is append-only \u2014 rows are never\ndeleted or rewritten, only closed (valid_until) or revoked (revoked_at),\nso past claims stay checkable against history.\nWhat this is NOT: this is operator-attested plumbing, not trustlessness.\nBindings are attested by the room operator (a key is issued with the\nidentity card, and rotation/revocation are authorized by the identity's\nown secret). Nothing here is decentralized, nothing touches a blockchain,\nand there is no ERC-8004 or other on-chain dependency. Verifiers trust\nthe room that registered the key.",
+  "exports": [
+   "AgentKeyRegistry",
+   "KEY_ROTATION_OVERLAP_DEFAULT_MS",
+   "KEY_ROTATION_OVERLAP_MAX_MS",
+   "agentKeyRegistrySchema",
+   "generateEd25519KeyPair "
+  ],
+  "cli": null,
+  "loc": 146
+ },
+ "server/attachment-schema.mjs": {
+  "header": "Room-owned staging. HTTP upload routes stay separate.\nserver/room-attachment-bytes.mjs is the store API: stage, list, download,\ndiscard, and commit (message_id + state committed).",
+  "exports": [
+   "attachmentLimits",
+   "attachmentSchema",
+   "attachmentSchemaV28",
+   "ensureAttachmentSchema",
+   "verifyAttachmentSchema"
+  ],
+  "cli": null,
+  "loc": 44
+ },
+ "server/boot-options.mjs": {
+  "header": "",
+  "exports": [
+   "defaultServerArgs"
+  ],
+  "cli": null,
+  "loc": 21
+ },
+ "server/buyer-signoff.mjs": {
+  "header": "",
+  "exports": [
+   "BuyerSignoff",
+   "SIGNOFF_STATUSES",
+   "buyerSignoffSchema"
+  ],
+  "cli": null,
+  "loc": 248
+ },
+ "server/capability-visibility.mjs": {
+  "header": "Withheld, never refused: per-agent capability catalog filtering.\n(UFO-steal slice 4, RC-2026-09-27-2731; UFO slice: ToolDef flag.)\nUFO's insight, ported: flagged-off tools are WITHHELD FROM the model's\ncatalog, never refused at call time. This module holds the single\npredicate capabilityVisibleTo(agent, capability) that every\ncapability/tool catalog listing path must use: a capability the\nagent's grants/tiers do not admit is ABSENT from the listing JSON \u2014\nnever \"present but denying\".\nDesign rules:\n- The catalog mirrors the POLICY (the autonomy-tier contract in\nserver/autonomy-tiers.mjs and the guest-scope contract from #1166),\nnot just the enforcement coverage. Call-time enforcement STAYS in\nplace as defense in depth: withholding removes the discovery\nsurface, it never substitutes for the check.\n- The catalog never regresses functionality: a capability the agent\ncan successfully invoke stays listed. The carve-outs below encode\nthe exact write subsets call time still permits, verified against\nthe denial code paths (see comments).\n- Grant edges (slice 1, RC-2026-09-27-2728) plug in here:\ncapability.requiresGrant + agent.grants, resolved fresh per request\nby resolveCatalogAgent from t",
+  "exports": [
+   "GUEST_WRITABLE_TOOLS",
+   "T1_WRITABLE_TOOLS",
+   "capabilityIsWrite",
+   "capabilityVisibleTo",
+   "catalogCallDenial",
+   "resolveCatalogAgent"
+  ],
+  "cli": null,
+  "loc": 191
+ },
+ "server/channel-send-budgets.mjs": {
+  "header": "Per-connection send budgets (TASKS item #41). A thin policy layer over the\ntoken-bucket limiter (server/token-bucket.mjs) for the\nPOST /api/inbox/channel-sends path: every (channel, account, connection)\ngets its own bucket, so one noisy bot can never spend another connection's\nbudget or hammer the provider into a ban. Exhaustion is an honest HTTP 429\nwith a Retry-After header instead of a provider-side throttle.\nConfig knobs, in precedence order:\n1. Per-connection overrides: the JSON object in the\nCHANNEL_SEND_BUDGETS env var, keyed \"channel:connectionId\"\n(e.g. {\"telegram:conn-9\": {\"perMin\": 10, \"burst\": 5}}). The registry\nalso honors a stored connection record's `sendBudget` bag when the\nconnection contract starts carrying it (today the contract rejects\nextra keys, so this lookup is a no-op placeholder for that slice).\n2. Channel env knobs: TELEGRAM_SEND_BUDGET_PER_MIN /\nTELEGRAM_SEND_BUDGET_BURST, falling back to CHANNEL_SEND_BUDGET_PER_MIN\nCHANNEL_SEND_BUDGET_BURST.\n3. Defaults: 30 sends/min per Telegram bot, burst 30.\nGmail: live Gmail send budgets are NOT enforced here. The Gmail send-slice\ndesign (task 17) is [JOHN]-gated; building Gmail send budgets waits on that\napproval. `",
+  "exports": [
+   "DEFAULT_SEND_BUDGET_BURST",
+   "DEFAULT_SEND_BUDGET_PER_MIN",
+   "GMAIL_BUDGET_PENDING_APPROVAL",
+   "createSendBudgetRegistry",
+   "parseConnectionBudgets",
+   "resolveSendBudget"
+  ],
+  "cli": null,
+  "loc": 132
+ },
+ "server/connect-snippets.mjs": {
+  "header": "Connect-your-agent table for docs pages and the room CLI.\nThe connect sheet UI and llms.txt import this module; they do not copy it.\nSnippets name the env var. They never contain an identity secret.",
+  "exports": [
+   "AIDER_CONVENTIONS",
+   "HOSTED_MCP_URL",
+   "SECRET_ENV",
+   "SERVER_NAME",
+   "WORK_LOOP",
+   "agentDocRoutes",
+   "claudeHeaderValue",
+   "connectSnippets",
+   "cursorInstallLink",
+   "envHeader",
+   "installLinkFor",
+   "renderedSnippet"
+  ],
+  "cli": null,
+  "loc": 126
+ },
+ "server/conversation-sync.mjs": {
+  "header": "",
+  "exports": [
+   "readConversation"
+  ],
+  "cli": null,
+  "loc": 135
+ },
+ "server/demigod-contracts.mjs": {
+  "header": "",
+  "exports": [
+   "DEMIGOD_CONTRACT_STATUSES",
+   "DemigodContracts",
+   "demigodContractsSchema"
+  ],
+  "cli": null,
+  "loc": 201
+ },
+ "server/demigod-offers.mjs": {
+  "header": "",
+  "exports": [
+   "DEFAULT_FEE_POLICY_REF",
+   "DEMIGOD_OFFER_STATUSES",
+   "DemigodOffers",
+   "PRICE_TYPES",
+   "demigodOffersSchema"
+  ],
+  "cli": null,
+  "loc": 284
+ },
+ "server/demigod-policy-adapter.mjs": {
+  "header": "server/demigod-policy-adapter.mjs \u2014 Demigod's jobs policy mapped onto the\nroom's fee shape.\nRECORD-ONLY: every export COMPUTES what a fee would be. Nothing here\ncollects, charges, moves, or settles money \u2014 collection needs John's\nfunding tap. All amounts are decimal STRINGS of minor units (e.g. cents);\nmath is exact BigInt integer arithmetic, never floats.\nDemigod's policy (as briefed): a 10% placement fee on placement value.\nTrial work carries a management fee that is creditable against a later\nplacement fee (Lemon.io shape).",
+  "exports": [
+   "DEMIGOD_PLACEMENT_FEE_BPS",
+   "DEMIGOD_POLICY_VERSION",
+   "placementFeeBreakdown",
+   "trialManagementFee"
+  ],
+  "cli": null,
+  "loc": 75
+ },
+ "server/display-name-guard.mjs": {
+  "header": "The check lives in src/display-name-guard.js so the room reducer and the\nbrowser can load the same module. HTTP admission keeps importing it here.",
+  "exports": [
+   "RESERVED_ROLE_PREFIXES",
+   "assertAdmissibleMemberName",
+   "assertNotReservedRoleName",
+   "isReservedRoleName",
+   "displayNameSkeleton,\n  checkAgentDisplayName,\n  assessMemberDisplayName,\n  assertMemberDisplayNameAvailable,\n  TEXT_CHARACTER_CLASSES,\n"
+  ],
+  "cli": null,
+  "loc": 126
+ },
+ "server/dm-event-visibility.mjs": {
+  "header": "SEC-19: DM follow-up privacy.\nRC-2026-09-18-012 hides a targeted message.posted event (data.toMemberId)\nfrom everyone except its sender and its addressed member. The events that\nlater change that message do not carry toMemberId: edits (with the new\nbody), deletes, redactions, reactions, pins and unpins. Before this module\nthey passed the filter, so a non-party (the Room owner included) could read\nan edited DM body and see that a DM existed. These predicates hide those\nfollow-up events too. They look up the referenced message in the room\nprojection, and fall back to DMs seen in the same page of events.",
+  "exports": [
+   "DM_FOLLOW_UP_TYPES",
+   "dmEventVisibility"
+  ],
+  "cli": null,
+  "loc": 63
+ },
+ "server/fee-credit-ledger.mjs": {
+  "header": "server/fee-credit-ledger.mjs \u2014 Lemon.io-shaped trial-fee credit ledger.\nRECORD-ONLY: this ledger RECORDS trial fees and the credits applied against\nplacement fees. It never collects, holds, or pays out money \u2014 collection\nneeds John's funding tap. Pure module, no I/O: the journal lives in memory\ninside the ledger instance created by createFeeCreditLedger.\nShape: a client pays a trial management fee (see\nserver/demigod-policy-adapter.mjs trialManagementFee); the fee becomes a\ncredit the client can apply against a later placement fee. Credits expire\n(default 180 days); every credit is single-use.\nInvariants:\n- append-only journal; balances are DERIVED from the journal, never stored.\n- a credit can never exceed the fee paid (per trial fee AND in total).\n- double-apply of the same trial fee is rejected.\n- expired credits are not applied and contribute nothing to the balance.\n- every journal entry is balanced double-entry (debits == credits).\n- a trial fee's credit is single-use: one application, up to the fee\namount; any remainder is forfeited.\n- all amounts and timestamps are STRINGS (minor units / ISO-8601).",
+  "exports": [
+   "CREDIT_EXPIRY_DAYS",
+   "createFeeCreditLedger"
+  ],
+  "cli": null,
+  "loc": 175
+ },
+ "server/feedback-store.mjs": {
+  "header": "Feedback endpoint core: validation, dedup/clustering, Mark-staked triage\neconomics, filer lifecycle (credit loop, appeals, reviewer economics,\ncluster velocity, severity routing).\nProduction port of ~/workspace/feedback-endpoint/feedback.mjs (spec:\ndocs/feedback-endpoint.md). Pure module in the repo's conventions:\ninjected clock, caller-owned state, frozen outputs, domain errors thrown\n(no HTTP status); the HTTP mapping lives in server/feedback-routes.mjs.\nThe Jev triage-advisor seam is deliberately NOT wired here (owner call:\nleave Jev open, build without it). Triage is lane-operated; the advisor\ninterface is documented in docs/feedback-endpoint.md \u00a75 for a future slice.\nAnti-spam design (the load-bearing question): junk must have a price and\nsignal must earn. Filing costs Mark standing; accepted-as-real refunds the\ncost and pays a reward; duplicates cost nothing (encourages filing even when\nunsure); rejected-as-junk keeps the cost and counts toward suspension.\nA mandatory machine-checkable repro (request/response pair) is the quality\ngate \u2014 most junk cannot produce one. This mirrors the Round-1 optimistic-\nverification winner: honest-equilibrium cost ~$0, adversarial cost real.",
+  "exports": [
+   "APPEAL_WINDOW_MS",
+   "CLUSTER_FAST_TRACK_PER_DAY",
+   "CLUSTER_FILEDAT_CAP",
+   "CLUSTER_SEVERITY_BUMP_PER_DAY",
+   "FEEDBACK_ID_PATTERN",
+   "MARK_ACCEPT_REWARD",
+   "MARK_APPEAL_COST",
+   "MARK_FILING_COST",
+   "MARK_JUNK_SUSPEND_AFTER",
+   "MARK_JUNK_SUSPEND_RATE",
+   "MARK_MERGE_BONUS",
+   "MARK_REVIEWER_CONFIRMED"
+  ],
+  "cli": null,
+  "loc": 568
+ },
+ "server/gmail-content.mjs": {
+  "header": "",
+  "exports": [
+   "attachmentBytes",
+   "findGmailPart",
+   "gmailAttachmentLimit",
+   "gmailHeader",
+   "gmailMimeBody",
+   "gmailParts",
+   "projectGmailMessage",
+   "safeGmailHtml"
+  ],
+  "cli": null,
+  "loc": 52
+ },
+ "server/gmail-import-authority.mjs": {
+  "header": "A process-local, unforgeable capability for importing a connected owner's\nGmail observations. Never serialized, never accepted from HTTP, never a session.",
+  "exports": [
+   "gmailImportAuth",
+   "gmailImportToken"
+  ],
+  "cli": null,
+  "loc": 23
+ },
+ "server/gmail-sync.mjs": {
+  "header": "",
+  "exports": [
+   "GmailSync",
+   "startGmailSync"
+  ],
+  "cli": null,
+  "loc": 114
+ },
+ "server/graph-reply-update-review.mjs": {
+  "header": "Post-write inspection and review qualification. No provider I/O or send grant.",
+  "exports": [
+   "buildUpdateInspection",
+   "buildUpdateReview",
+   "inspectUpdate",
+   "replyAttemptWithObservation"
+  ],
+  "cli": null,
+  "loc": 58
+ },
+ "server/handoff-case.mjs": {
+  "header": "CASE handoff contract (research slice R2). Handoffs are freeform text and\nthe receiver re-asks everything; CASE fixes the shape: Customer/auth,\nAim/urgency, Steps/sources, Escalation/ownership \u2014 with an epistemic label\non every step, so a verified fact never reads the same as a guess.\nPure module: no database, no network, no clock. Validation raises\nServiceError (422) from ./store.mjs so the same codes read in unit tests\nand through the journal/store layer. Unknown keys and unknown epistemic\nlabels are rejected, never silently accepted \u2014 an unlabeled step is the\nfailure mode this contract exists to kill.",
+  "exports": [
+   "caseOf",
+   "caseVersion",
+   "epistemicLabels",
+   "validateCase"
+  ],
+  "cli": null,
+  "loc": 78
+ },
+ "server/history-visibility.mjs": {
+  "header": "PRIV-2: history visibility.\nA member under \"since_join\" reads messages and events from their own join\nonward. The join point is the member's latest move to active: the LATEST\nmember.added / member.joined_via_invitation, or a member.access_changed\nthat reactivates a removed member (#1523): a guest who\nis removed and later reactivated must not read messages posted during the\nremoval gap. The event's sequence bounds event-log reads, and its timestamp\nbounds reads over the message projection, which carries createdAt but no\nsequence. Members who read everything get a null floor, so their reads take\nno extra work.",
+  "exports": [
+   "eventInHistory",
+   "guestHistoryAccessLead",
+   "guestReadsHistoryFromJoin",
+   "historyFloor",
+   "indexMessages",
+   "messageInHistory",
+   "messageVisibleToViewer",
+   "recordRoomExport",
+   "requireExportOwner",
+   "rowInHistory",
+   "summaryHistoryFloor"
+  ],
+  "cli": null,
+  "loc": 149
+ },
+ "server/identity-verification.mjs": {
+  "header": "Agent identity verification tiers (RC-2026-09-18-049).\nA \"verified\" agent is one a room owner has explicitly attested: the owner\nvouches that the agent identity is genuine and under legitimate control.\nEverything else is \"unverified\" by default. Rooms can gate membership on\nthe verified tier (see roomVerificationPolicy on the plug-in store), and\ndirectory cards surface the tier so other agents can make trust decisions.\nPure module: all state is caller-owned (a Map of identityId -> record),\ntime is injectable for tests, outputs are frozen. Persistence is the\ncaller's job (AgentPluginStore keeps the SQLite table in sync).",
+  "exports": [
+   "createIdentityVerification",
+   "VerificationError, VERIFIED, UNVERIFIED, LEVELS "
+  ],
+  "cli": null,
+  "loc": 76
+ },
+ "server/inbox-agent-routing.mjs": {
+  "header": "@agent mention routing for the inbox (lane C, inbox-agent-collab). When a\nmessage or note mentions @agent, this module decides where it goes: direct\ndelivery to the named agent, or escalation to a human (or another agent)\nfirst \u2014 per a per-agent policy. Every routing decision is journaled so a\nmention can never vanish silently; escalated records stay open until\nresolved.\nextractAgentMentions is the pure parser: \"@claude look\" \u2192 [\"claude\"].\nEmail-style user@host matches are skipped (a mention is not preceded by a\nword character).\nPure, in-memory, dependency-free, deterministic; frozen outputs. Clock and\nid generator are injected so fixtures control time and ids.",
+  "exports": [
+   "RoutingError",
+   "createAgentRouter",
+   "defaultPolicy",
+   "extractAgentMentions",
+   "routingModes",
+   "routingStatuses"
+  ],
+  "cli": null,
+  "loc": 181
+ },
+ "server/inbox-approval.mjs": {
+  "header": "Human-in-the-loop approval queue for agent-drafted outbound (lane C,\ninbox-agent-collab). An agent proposes a draft; nothing sends until a\nhuman approves it. The queue is the paper trail: propose \u2192 approve /\nrequestEdits \u2192 resubmit \u2192 approve | reject, every edge journaled with who\nand when. Only human identities may approve, request edits, or reject \u2014 an\nagent can never clear its own draft.\nPure, in-memory, dependency-free, deterministic; frozen outputs. Clock and\nid generator are injected so fixtures control time and ids.",
+  "exports": [
+   "ApprovalError",
+   "approvalStatuses",
+   "createApprovalQueue"
+  ],
+  "cli": null,
+  "loc": 160
+ },
+ "server/inbox-assign.mjs": {
+  "header": "Thread assignment journal (lane C, inbox-agent-collab). Who owns a thread\nright now \u2014 an agent or a human \u2014 so parallel collaborators never work the\nsame thread blind. assign/release/claim with a full event journal per\nthread; additive alongside server/inbox-handoff.mjs (which hands a thread\nto* a named agent with context; this module owns the durable\nagent-or-human assignment state and releases).\nPure, in-memory, dependency-free, deterministic; frozen outputs. Identity\nand validation raise AssignError (coded, never silent). Clock and id\ngenerator are injected so fixtures control time and ids.\nClock is injected so fixtures control time.",
+  "exports": [
+   "AssignError",
+   "assigneeKinds",
+   "assignmentStatuses",
+   "createAssignmentJournal",
+   "identityOf",
+   "threadIdOf"
+  ],
+  "cli": null,
+  "loc": 141
+ },
+ "server/inbox-collab-routes.mjs": {
+  "header": "Lane C inbox collaboration HTTP routes (task RC-2026-09-18-011).\nRoom-scoped handlers mounted by server/http.mjs inside the authenticated\nroom block, after the shared credential, fence and rate-limit checks. All\nnineteen operations live under /api/rooms/{roomId}/collab/* and are\ndocumented in docs/openapi.yaml (the route-docs gate requires it).\nError contract: the pure Lane C modules throw typed errors (AssignError,\nNoteError, CollisionError, ApprovalError, RoutingError) carrying a stable\n.code but no HTTP status; collabHttpError maps those codes to statuses and\nwraps them in ServiceError so the outer handler returns stable 4xx codes\ninstead of 500. The handoff journal already throws ServiceError, which\npasses through untouched. Unknown errors are rethrown for the generic 500\npath \u2014 never wrapped, so no internal detail leaks.\nIdentity: the caller is the authenticated room member\n({kind, id, label}); agents and humans are gated per endpoint before the\npure modules see them. Approval verdicts additionally require a human\ncaller \u2014 an agent can never clear its own draft, enforced both here (403)\nand by the queue itself (approval_not_human).",
+  "exports": [
+   "collabHttpError",
+   "handleInboxCollab"
+  ],
+  "cli": null,
+  "loc": 389
+ },
+ "server/inbox-collab-store.mjs": {
+  "header": "Lane C inbox collaboration: durable, room-scoped HTTP backing store.\nTask RC-2026-09-18-011. The six pure Lane C modules\n(server/inbox-assign.mjs, server/inbox-internal-notes.mjs,\nserver/inbox-collision.mjs, server/inbox-approval.mjs,\nserver/inbox-agent-routing.mjs, server/inbox-handoff.mjs) are read and\nreused but never modified here. Each owns an in-memory journal; this\nwrapper keeps one lazy journal set per room, persists every mutation to\nSQLite (write-through), and replays the persisted rows onto fresh journals\nafter a restart.\nReplay model: the persisted rows are the *operation log*, not just the\nfinal records \u2014 some transitions are lossy in the record alone (e.g. a\nforced assignment takeover drops the intermediate assignee from history),\nso replay re-runs the exact op sequence. Exactness of time and ids: every\njournal is built with an injected clock and id source; while live, this\nwrapper records each clock/id value the journals consume and persists the\nlog beside the ops. On replay the log is fed back as a scripted sequence,\nso the rebuilt objects are identical to the pre-restart ones. A drained\nsequence is asserted after every replayed row and the rebuilt record is\ncompare",
+  "exports": [
+   "InboxCollabStore",
+   "inboxCollabSchema"
+  ],
+  "cli": null,
+  "loc": 767
+ },
+ "server/inbox-collision.mjs": {
+  "header": "Concurrent draft/reply detection for the inbox (lane C,\ninbox-agent-collab). Two agents (or an agent and a human) composing on the\nsame thread at once get a soft lock: advisory, expiring, never a hard\ngate on sending \u2014 the failure this module prevents is silent last-writer-\nwins, not slowness. detectCollision names the other editor and ships a\nmerge hint so the pair can reconcile before either sends.\nPure, in-memory, dependency-free, deterministic; frozen outputs. Clock and\nid generator are injected so fixtures control time and ids.",
+  "exports": [
+   "CollisionError",
+   "createCollisionTracker",
+   "defaultLockTtlMs"
+  ],
+  "cli": null,
+  "loc": 149
+ },
+ "server/inbox-internal-notes.mjs": {
+  "header": "Internal side-notes on inbox threads (lane C, inbox-agent-collab).\nAgents and humans leave private context on a thread \u2014 what was tried,\nwhat the sender really wants, what not to promise \u2014 that must never reach\nthe channel. The contract is enforced in code, not just convention:\n1. Notes live only in this journal; no method here builds or returns a\nchannel payload, so there is no accidental path from note to wire.\n2. assertNoInternal(payload) recursively scans any outbound-bound value\nand throws note_contract_violation if it finds an internal-flagged\nnode or a banned internal field name \u2014 the channel layer calls it\nbefore sending and fails closed.\n3. stripInternal(payload) deep-copies a value with all internal material\nremoved (defense in depth for callers that must pass untrusted\naggregates through).\nPure, in-memory, dependency-free, deterministic; frozen outputs. Clock and\nid generator are injected so fixtures control time and ids.",
+  "exports": [
+   "NoteError",
+   "assertNoInternal",
+   "createInternalNotes",
+   "internalFieldNames",
+   "stripInternal"
+  ],
+  "cli": null,
+  "loc": 169
+ },
+ "server/inbox-search.mjs": {
+  "header": "Full-text search (A011). A pure in-memory inverted index over message\nenvelopes: indexMessages builds the index, search runs a query against it\nwith term-frequency ranking. Pure, dependency-free, deterministic; frozen\noutputs. The caller decides which text fields to index (subject + body by\ndefault). Store integration is a later slice.",
+  "exports": [
+   "indexMessages",
+   "search",
+   "SearchError "
+  ],
+  "cli": null,
+  "loc": 66
+ },
+ "server/inbox-stitch-store.mjs": {
+  "header": "Cross-channel thread stitching (task #19) \u2014 the stitch graph store.\nHash-only persistence: stitch tables carry HMAC keys, channel names, and\nopaque source ids. Raw emails, handles, and display names are NEVER\nwritten here; they are read from envelopes in memory and only hashes cross\nthe store boundary. The per-installation salt is injected, never stored.\nDesign: docs/CROSS-CHANNEL-THREAD-STITCHING.md (PR #543).",
+  "exports": [
+   "InboxStitchStore",
+   "inboxStitchSchema"
+  ],
+  "cli": null,
+  "loc": 477
+ },
+ "server/inbox-stitch.mjs": {
+  "header": "Cross-channel thread stitching (task #19) \u2014 pure functions. Identity\nresolution across Gmail/Telegram/X channels with hash-based keys only:\nraw emails, handles, and display names are never persisted by the stitch\nlayer. The salt is an injected dependency (see stitchConfigFromEnv); the\nstore module (server/inbox-stitch-store.mjs) owns persistence.\nDesign: docs/CROSS-CHANNEL-THREAD-STITCHING.md (PR #543). Stitching is a\nread-path enrichment: envelopes stay channel-native, the stitch layer only\nproduces a stitch graph (stitched_thread_id -> [{channel, sourceId}, ...])\ncomputed from participants, never from message bodies.\nEverything here is pure and deterministic: no store reads or writes, no\nnetwork, no randomness. Frozen outputs; malformed inputs throw StitchError.",
+  "exports": [
+   "STITCH_DEFER_REASONS",
+   "STITCH_ENABLE_BINDING",
+   "STITCH_EPOCH",
+   "STITCH_ID_TYPES",
+   "STITCH_METRICS",
+   "STITCH_SALT_BINDING",
+   "STITCH_SPLIT_REASONS",
+   "candidateKeys",
+   "deferReason",
+   "nameSimilarity",
+   "normalizeIdentifier",
+   "scorePair"
+  ],
+  "cli": null,
+  "loc": 304
+ },
+ "server/inbox-threads.mjs": {
+  "header": "Thread view (A010). A pure thread builder: given a list of message\nenvelopes, it groups them by threadId, rebuilds the reply tree from\ninReplyTo references, and flattens each thread with depth so the UI can\nindent replies. Pure, dependency-free, deterministic; cycles and dangling\nreferences are tolerated (they become top-level), never throw. No store\nreads or writes \u2014 the caller supplies the messages; store wiring is a\nlater slice.",
+  "exports": [
+   "buildThreads",
+   "threadFor",
+   "ThreadError "
+  ],
+  "cli": null,
+  "loc": 67
+ },
+ "server/inbox-transport.mjs": {
+  "header": "Fixture qualification driver. Real providers require a separately reviewed\nadapter, credentials, capabilities and external-send authority.",
+  "exports": [
+   "FixtureChannelSender",
+   "GmailSender",
+   "SyntheticInboxTransport",
+   "buildGmailRawMessage",
+   "buildTelegramDirectRequest",
+   "directSendChannels",
+   "gmailCredentialsFor",
+   "sendTelegramDirect"
+  ],
+  "cli": null,
+  "loc": 287
+ },
+ "server/instance-lock.mjs": {
+  "header": "Single-instance boot lock for server.mjs.\nThe room store is SQLite (serializes writes), but the growth snapshot is a\nplain JSON file: two server.mjs processes on one database race it\n(last-writer-wins / torn write on concurrent shutdown). The lock is an\nexclusive-create file next to the database holding the owner's PID; a stale\nlock (dead PID or malformed content) is reclaimed exactly once. The lock\nholder keeps the fd open for the process lifetime and releases (close +\nunlink) on graceful shutdown; a crash leaves a stale file that the next\nboot reclaims via the PID-liveness check.\nThis replaces the deleted src/multi-instance-election.mjs: that module was\na lease election for a multi-instance deploy that was never wired to any\nproduction path. The supported topology is one server per database.",
+  "exports": [
+   "INSTANCE_LOCK_ERRORS",
+   "acquireInstanceLock"
+  ],
+  "cli": null,
+  "loc": 85
+ },
+ "server/ip-blocklist.mjs": {
+  "header": "Shared SSRF IP blocklist (RC-2026-09-25, H-1/M-1).\nOne canonical place for \"is this IP literal in a range we never dial\":\nprivate, loopback, link-local, multicast, reserved, documentation, CGNAT,\nbenchmarking space, plus every IPv4-embedded-in-IPv6 form (mapped, NAT64\nincl. local-use /48, 6to4, deprecated v4-compatible) and Teredo. Used by\nthe web-fetch path (server/web-fetch.mjs) and the webhook path\n(server/outbound-webhooks.mjs, server/webhook-dispatch.mjs) so a\nhardening fix can never land in one and miss the other again \u2014 that is\nexactly how the webhook IPv6 bypass shipped while web-fetch was safe.\nAlso home to pinnedLookup (the dns.lookup-compatible function that only\nanswers with already-checked addresses) and isWorkersRuntime (pinning is\na Node-only defence; on Workers the egress sandbox is the backstop).\nPure: no I/O, no imports, safe on Node and Workers.\nStrict dotted-quad -> uint32, or null.",
+  "exports": [
+   "extractEmbeddedIpv4",
+   "isBlockedIp",
+   "isBlockedIpv4Value",
+   "isBlockedIpv6Value",
+   "isWorkersRuntime",
+   "parseIpv4",
+   "parseIpv6",
+   "pinnedLookup"
+  ],
+  "cli": null,
+  "loc": 163
+ },
+ "server/legal-pages.mjs": {
+  "header": "Public legal pages rendered from docs/legal. The worker bundle falls back\nto the embedded copy when the files are not on disk.",
+  "exports": [
+   "ABUSE_EMAIL",
+   "LEGAL_CACHE_CONTROL",
+   "LEGAL_FOOTER_LINKS",
+   "LEGAL_PAGE_CSP",
+   "LEGAL_SITEMAP_PATHS",
+   "REPORT_PAGE_CSP",
+   "legalPageHtml",
+   "readLegalFile",
+   "renderMarkdown",
+   "reportHref",
+   "reportPageHtml"
+  ],
+  "cli": null,
+  "loc": 161
+ },
+ "server/legal-routes.mjs": {
+  "header": "HTTP for the legal pages, public reports, terms acceptance, and operator unpublish.",
+  "exports": [
+   "handleLegalRequest",
+   "isLegalPath"
+  ],
+  "cli": null,
+  "loc": 132
+ },
+ "server/legal-store.mjs": {
+  "header": "Terms acceptance, public abuse reports, and operator unpublish.\nNo import from store.mjs: room-directory and the store both call this module.",
+  "exports": [
+   "REPORT_PROOF_BITS",
+   "SIGNUP_ORIGINS",
+   "TERMS_VERSION",
+   "acceptCurrentTerms",
+   "accountTermsSchema",
+   "countOpenPublicReports",
+   "hashReportAddress",
+   "isUnpublished",
+   "publicAbuseSchema",
+   "publicUnpublishSchema",
+   "recordSignupTerms",
+   "reportChallenge"
+  ],
+  "cli": null,
+  "loc": 134
+ },
+ "server/matchmaking-routes.mjs": {
+  "header": "Matchmaking HTTP routes: the arrival surface.\nThree modules were built and green and unreachable \u2014 an agent could not\ndeclare what it wants, a room could not declare what an opening needs, and\nnothing paired them. This mounts them under\napi/rooms/{roomId}/matchmaking/* in the same pattern as\nserver/work-claim-routes.mjs: room-scoped handlers mounted by\nserver/http.mjs inside the authenticated room block, after the shared\ncredential, fence and rate-limit checks.\nIdentity: the seeker is always the authenticated member (auth.member.id).\nA caller cannot declare on another agent's behalf, so the seekerId is\nnever read from the body \u2014 matching for someone else is a different\nfeature and needs its own consent story.\nError contract: the pure modules throw Error with a plain message and no\nHTTP status. Bad input maps to 422 invalid_matchmaking_input; an unknown\nwork item or decision to 404; a caller with no declaration on file to 409,\nbecause matching without declaring is a sequencing mistake and not a\nvalidation one. Unknown errors are rethrown for the generic 500 path.",
+  "exports": [
+   "createMatchmakingRegistry",
+   "handleMatchmaking",
+   "handleMatchmakingCore"
+  ],
+  "cli": null,
+  "loc": 169
+ },
+ "server/mcp-arg-errors.mjs": {
+  "header": "Structured MCP tools/call errors. Callers get unknown_tool, auth_required,\nor invalid_arguments instead of one fixed \"Unknown tool or invalid arguments\"\nstring. The JSON-RPC code stays -32602 for schema problems and -32001 when\na room tool is called with no identity bearer.",
+  "exports": [
+   "MCP_AUTH_HINT",
+   "MCP_AUTH_MESSAGE",
+   "closestToolName",
+   "diagnoseArguments",
+   "mcpCallError",
+   "mcpInvalidRequest",
+   "mcpTransportError"
+  ],
+  "cli": null,
+  "loc": 228
+ },
+ "server/mcp-identity-mint.mjs": {
+  "header": "",
+  "exports": [
+   "anonymousIdentityMintMcpTools",
+   "handleIdentityMintMcp",
+   "identityMintMcpDefinitions",
+   "isIdentityMintMcpTool"
+  ],
+  "cli": null,
+  "loc": 94
+ },
+ "server/mcp-public-work.mjs": {
+  "header": "",
+  "exports": [
+   "anonymousPublicWorkMcpTools",
+   "handlePublicWorkMcp",
+   "isPublicWorkMcpTool",
+   "publicWorkMcpDefinitions"
+  ],
+  "cli": null,
+  "loc": 67
+ },
+ "server/member-permission-requests.mjs": {
+  "header": "Authenticated permission requests by existing room members. No identity is\nminted for a human: the durable principal is explicitly room-member scoped.",
+  "exports": [
+   "MemberPermissionRequests",
+   "permissionDecisionMessages",
+   "permissionRequestContents"
+  ],
+  "cli": null,
+  "loc": 156
+ },
+ "server/members-directory.mjs": {
+  "header": "RC-2026-09-24-202: evidence-backed skill cards.\nAgents need to find collaborators by skill and evidence \u2014 not by\ndownloading the whole public directory and parsing it client-side.\nPer-member identity/presence data already lives on GET /presence, so\nthis module ships only the skill-card surfaces (instinct's correction\non RC-2026-09-24-005, #266 comment 5810190089):\nPOST /api/agent-skills            \u2014 an identity publishes its own skill\nset (A2A skill shape + receipt-hash evidence). Skills without\nevidence are stored AND displayed as self-declared; no karma,\nno ranking.\nGET  /api/agents/{identityId}/card \u2014 the public A2A-shaped card, 404\nunless the identity opted in with publish:true.\nThe module is shaped like PublicFace/DmConsents/RoomDirectory: it takes\nthe RoomStore (db handle, transactions, room state) and exports its\nschema for store.mjs to apply. Local ServiceError avoids the store.mjs\nimport cycle.",
+  "exports": [
+   "MembersDirectory",
+   "membersDirectorySchema"
+  ],
+  "cli": null,
+  "loc": 125
+ },
+ "server/membership-delegation-journal.mjs": {
+  "header": "Append-only, per-room hash-chain for owner membership delegation decisions.\nHashes detect damaged/reordered rows and disagreement with the live grants;\nwithout an external anchor they cannot authenticate a privileged database rewrite.",
+  "exports": [
+   "MembershipDelegationJournal",
+   "membershipDelegationJournalSchema"
+  ],
+  "cli": null,
+  "loc": 153
+ },
+ "server/membership-delegation.mjs": {
+  "header": "Owner-only membership delegation. Active authority lives in the grant table;\nan append-only journal records decisions, with legacy baseline rows for\npre-journal grants. The member-bit path is separate and revokeEffective\nclears both paths. Agent delegates cannot confer manage_members.",
+  "exports": [
+   "MembershipDelegation",
+   "membershipDelegationSchema"
+  ],
+  "cli": null,
+  "loc": 231
+ },
+ "server/next-actions-routes.mjs": {
+  "header": "HTTP routes for next-actions (RC-2026-09-25-911): the room's ranked\nper-agent \"what should I do next\" surface.\nMounted from server/http.mjs via createNextActionsRoutes, which receives\nthe server's local helpers. handleNextActionsRoutes returns true when it\nserved the request, false so http.mjs can fall through to other routes.\nPaths follow the room's flat /api/rooms/{roomId}/<route> convention:\nGET  /api/rooms/{roomId}/next-actions               ranked list (room-next-actions/1)\nPOST /api/rooms/{roomId}/next-actions-dismiss      {actionId, expiresInDays?, forever?, reason?}\nGET  /api/rooms/{roomId}/next-actions-suppressions read-back (newest first)\nPUT  /api/rooms/{roomId}/next-actions-suppressions {suppressions:[{kind, reason?}]} (replace-all)\nGET  /api/rooms/{roomId}/next-actions-dismissals   read-back incl. lapsed rows\nAuth is the caller's room credential (Bearer identity secret or room\ncookie), resolved with the same roomCredentials helper as the other room\nroutes; the NextActions class authenticates per call. Reads are\nrate-limited per member; every action.api emitted by the builder names a\nreal route (never fabricated) \u2014 see tests/next-actions.test.js, which\nresolves each emi",
+  "exports": [
+   "createNextActionsRoutes"
+  ],
+  "cli": null,
+  "loc": 93
+ },
+ "server/notify-policy.mjs": {
+  "header": "Notification policy (HB-1a). One pure engine for push, relays, the morning\nbrief, and the later email batch (NOTIFY). Nothing here delivers: callers\npass already-resolved prefs and get a decision back.\nEmail delivery is inert. `emailDelivery` defaults to \"inert\", so `decide`\nnever schedules an email. NOTIFY turns that on (`\"needs_me\"` or `\"brief\"`)\nafter a verified address exists. It must not grow a second quiet-hours,\ncap, or batching implementation.\n`needs_me` is the policy default. notify-prefs.mjs still stores\nall | mentions | muted until HB-1b adds the level there. Pass either a\nresolved level string or `{ level, quietHours, wakeFor }`.",
+  "exports": [
+   "BATCH_WINDOW_MS",
+   "DESKTOP_FOCUS_MS",
+   "DESKTOP_RECHECK_MS",
+   "EMAIL_DELIVERY",
+   "EMAIL_MODES",
+   "FOLLOWING_KINDS",
+   "NEEDS_ME_KINDS",
+   "NEEDS_ME_LEVEL",
+   "POLICY_DEFAULT_LEVEL",
+   "POLICY_LEVELS",
+   "PUSH_PER_AGENT_HOUR",
+   "PUSH_PER_HUMAN_DAY"
+  ],
+  "cli": null,
+  "loc": 303
+ },
+ "server/og-render.mjs": {
+  "header": "Runtime Open Graph renderer (VL-1a). Dependency-free.\nComposites sanitized text onto og/base-receipt.png using the committed\nInter glyph atlas (og/atlas-inter-*.png + og/atlas.json). The marketing\nimages og/{home,about,offers,compare,receipts}.png belong to the static\nshare set and are not written here.\nPNG bytes are zlib-wrapped on Node (stable for a given Node major) and\nCompressionStream(\"deflate\") on a runtime without node:zlib. CRC32 is\ncomputed in JS. Text is stripped of control characters and capped at 120\ncharacters before it is wrapped. A title occupies at most 3 lines and the\nlast line ends with an ellipsis when the rest does not fit.",
+  "exports": [
+   "OG_HEIGHT",
+   "OG_TEXT_LIMIT",
+   "OG_WIDTH",
+   "decodePng",
+   "encodePng",
+   "renderOgPng",
+   "sanitizeOgText",
+   "wrapOgText"
+  ],
+  "cli": null,
+  "loc": 293
+ },
+ "server/operator-purge.mjs": {
+  "header": "Confirm-then-delete for rooms, identities, and accounts. Planning and find\nare read-only apart from the operator audit row. Execute recounts, refuses\nwith 409 plan_changed when the counts moved, and deletes inside one writer\ntransaction. The integrity snapshot is rewritten in that same transaction.",
+  "exports": [
+   "countPurge",
+   "createOperatorPurge",
+   "hashPurgeCounts",
+   "protectedRoomIds"
+  ],
+  "cli": null,
+  "loc": 466
+ },
+ "server/operator-routes.mjs": {
+  "header": "Operator HTTP surface. Mounted from createRoomServer. When the operator\nsecret is unset this returns false and the request falls through to the\nsame not_found path as any unknown URL.",
+  "exports": [
+   "createOperatorRoutes"
+  ],
+  "cli": null,
+  "loc": 62
+ },
+ "server/operator-status.mjs": {
+  "header": "Operator status. One read of version, readiness, the largest tables, and\nthe latest operator actions. The server does not call GitHub. Job heartbeats\nlive on the Worker, which this process does not reach without the Durable\nObject entrypoint, so jobs points at that route.",
+  "exports": [
+   "collectLargestTables",
+   "lastColdStart",
+   "operatorDrift",
+   "operatorReady",
+   "operatorStatus",
+   "revisionDrift"
+  ],
+  "cli": null,
+  "loc": 90
+ },
+ "server/owner-delegates.mjs": {
+  "header": "Owner delegates: agents the room owner explicitly grants to act with the\nowner's authority in a room.\nSeeded by the room owner's direct order (John Potter, 2026-09-28, verbatim:\n\"Change the code to give yourself ultimate authority as me in project room\nso you can do anything\").\nThis is delegation, not impersonation, and the design is deliberately not\na backdoor:\n- No code trust root: a delegate holds a persisted, per-room grant row.\nNothing in this file names an identity. Only the room owner can grant\nor revoke, through the owner-only routes in server/http.mjs.\n- Identity-bound: the delegate authenticates on their own identity secret.\n- Active-membership-bound: the grant resolves only while the identity is\nlinked to an active member record in the room (resolveIdentityLink).\n- No self-escalation: grant/revoke/list require the caller's member id to\nequal the room owner id, so a delegate's id never passes.\n- Immediate revocation: revoked_at is checked on every authenticate; no\ncache sits between the revoke and the next request.\n- Audited: grant/revoke decisions append to owner_delegate_journal with\nthe acting owner; delegated actions journal the delegate as the actor\n(e.g. guest_invit",
+  "exports": [
+   "OwnerDelegates",
+   "ownerDelegateSchema"
+  ],
+  "cli": null,
+  "loc": 168
+ },
+ "server/persisted-row.mjs": {
+  "header": "Replay-safe persisted-row envelope (UFO-steal slice 3, RC-2026-09-27-2730).\nAudit (2026-09-27): persisted rows across the room are written with bare\nJSON.stringify and read with bare JSON.parse \u2014 no version envelope, no\nwriter identity, no defaults layer at the read site:\n- server/work-claim-sqlite.mjs: work_claims.item_json stored whole; the\nread site parsed and trusted; defaults live inside workOf() and only\nrun when callers remember to validate first.\n- server/dispatch-journal.mjs: JSONL entries carry no schema version;\napply() throws on unknown states and requires key/state \u2014 every field\nevolution has to be hand-rolled per module.\n- server/bounty-escrow.mjs: bounty_disputes.body hydrated with a bare\nJSON.parse at boot; the dispute machine reads fields directly.\nNo class names are baked into stored JSON (plain-object culture), so the\nfragility is the inverse of UFO's: nothing identifies the writer's schema,\nand a module move or field evolution breaks readers ad hoc, per module.\nUFO analog: ufo-core core/src/ufo/harness/durability.py \u2014\nReplaySafeSerializer records (module path + field values) and rebuilds via\nmodel_validate on load (added fields take current defaults, dropped fie",
+  "exports": [
+   "MOVED_KINDS",
+   "ROW_FORMAT_V",
+   "decodeRow",
+   "encodeRow",
+   "resolveKind"
+  ],
+  "cli": null,
+  "loc": 85
+ },
+ "server/project-offers.mjs": {
+  "header": "",
+  "exports": [
+   "ProjectOffers",
+   "projectOffersSchema"
+  ],
+  "cli": null,
+  "loc": 197
+ },
+ "server/projection-at-rest.mjs": {
+  "header": "Phase 1a: message bodies at rest outside the room projection row.\nThe reducer, the cache and every reader keep full message bodies in\nmemory. Only the stored row changes: a message body at or above\nBODY_AT_REST_MIN_CHARS is replaced by `bodyRef` (its sha256) and the text\nis kept once in projection_bodies, keyed by content. Rows are immutable,\nso a write that is later rolled back or skipped can never change what an\nexisting bodyRef means. A trigger on rooms deletes every body the stored\nprojection no longer references, in the same statement, so deleted,\nredacted and purged text does not outlive the projection that held it.\nRollout: hydration is always on. Slimming is on only when the store was\nopened with bodiesAtRest (ROOM_BODIES_AT_REST=1). Turning it off makes the\nnext write of each room store full bodies again; store.rehydrateAllProjections()\ndoes that for every room at once, in one transaction, which an older build\nneeds before a rollback. Take a backup first, as for any rollback.",
+  "exports": [
+   "BODY_AT_REST_MIN_CHARS",
+   "PROJECTION_BODIES_SCHEMA",
+   "atRestBodyBytes",
+   "hydrateProjection",
+   "hydrateRecordText",
+   "storedProjection"
+  ],
+  "cli": null,
+  "loc": 145
+ },
+ "server/public-work-claim-fence.mjs": {
+  "header": "Upgrade compatibility for public claim namespaces, not authentication against\na database administrator. Existing private claim namespaces keep their rules.",
+  "exports": [
+   "publicWorkClaimFenceSchema",
+   "verifyPublicWorkClaimFence",
+   "withPublicWorkClaimWriter"
+  ],
+  "cli": null,
+  "loc": 47
+ },
+ "server/public-work-reviews.mjs": {
+  "header": "",
+  "exports": [
+   "PublicWorkReviews",
+   "publicWorkReviewsSchema"
+  ],
+  "cli": null,
+  "loc": 180
+ },
+ "server/public-work-successors.mjs": {
+  "header": "",
+  "exports": [
+   "PublicWorkSuccessors",
+   "publicWorkSuccessorsSchema"
+  ],
+  "cli": null,
+  "loc": 89
+ },
+ "server/purge-registry.mjs": {
+  "header": "Every application table that carries a room, identity, or account key, plus\nchild tables that point at those rows through a parent. `retain` is only\nused with a reason. Room purge deletes `delete` rows for that room, then\nthe room itself. Identity purge revokes the identity and deletes its\n`delete` rows. Account purge runs the account-deletion executor and then\nthe account-scoped `delete` rows.",
+  "exports": [
+   "PURGE_TABLES"
+  ],
+  "cli": null,
+  "loc": 1724
+ },
+ "server/required-reading.mjs": {
+  "header": "Per-lane required reading on enrollment (backlog W012).\nWhen an agent enrolls in a work lane \u2014 takes a claim \u2014 the claim response\ncarries the reading list for that claim's kind. The list is advisory:\nenrollment never gates on it, so there is nothing to bypass and no\nexisting flow can break. A read-acknowledgment (who confirmed what, when)\nis recorded on the claim item itself (see stampReadingAck), carried by the\nclaim canonicalizer and the durable registry, and also stamped into the\nclaim history for the audit trail.\nPure: no imports of its own beyond the claim history stamper, frozen\noutputs, domain errors with no HTTP status.",
+  "exports": [
+   "REQUIRED_READING",
+   "readingAcksOf",
+   "requiredReadingFor",
+   "stampReadingAck",
+   "validateReadingDocs"
+  ],
+  "cli": null,
+  "loc": 96
+ },
+ "server/retention-response.mjs": {
+  "header": "Retention response mechanics (research brief 2026-09-28, agent-retention\nmechanics #1 and #2): first-contribution response SLA + no-zero-reply\nwatchdog. Pure, dependency-free, deterministic; frozen outputs. It reads\nthe same normalized work-claim item shape server/work-claims.mjs produces\n(id, owner, history: [{ at, agentId, action, note }]) and never writes\nanything itself \u2014 the HTTP layer applies retentionAck() and serves\nretentionReport().\nModel:\n- A contribution is a claim event (the item's first \"claimed\" stamp) or a\nreceipt event (the \"state:done\" stamp). The author is the stamp's agentId.\n- A member response is any later history entry by a different member \u2014\nnever \"system\", never the author. Verdict-class responses are \"reviewed\"\nstamps (recordReview verdicts: approve / changes_requested / comment, and\nattestWork review notes): the machine-readable verdict the SLA asks for.\n- The ack (action \"retention_ack\", agentId \"system\") is the bot's immediate\nstructured receipt \u2014 seen / queued \u2014 so no contribution sits at zero\nreplies from t=0. It counts for the zero-reply watch, never for the SLA\nverdict: only a member's review answers the SLA.\n- Deliberately non-punitive: nothing her",
+  "exports": [
+   "FIRST_RESPONSE_SLA_HOURS",
+   "RETENTION_METRIC_WINDOW_DAYS",
+   "ZERO_REPLY_WINDOW_HOURS",
+   "assessFirstContributionSla",
+   "assessZeroReply",
+   "firstResponseLatency",
+   "isFirstContribution",
+   "retentionAck",
+   "retentionReport"
+  ],
+  "cli": null,
+  "loc": 297
+ },
+ "server/room-assistant.mjs": {
+  "header": "",
+  "exports": [
+   "RoomAssistant",
+   "roomAssistantSchema"
+  ],
+  "cli": null,
+  "loc": 223
+ },
+ "server/room-flood-guard.mjs": {
+  "header": "Per (room, member) budget for live chat posts and replies. One looping\nmember \u2014 human or agent \u2014 cannot fill a room. The bucket is in memory and\nresets when the process or Durable Object is evicted. There are no tiers,\nno settings, and no counter.\nBurst 30, refill 1 post per 2 seconds. Only message.posted (a reply is\nthat command with replyToId) and dm.posted spend a token. Reactions,\nedits, deletes, reads, and work or claim commands do not. System writes,\nimportEvents, and projection replay never call consume. store.command\nreturns an idempotent replay before consume, so that command id is free.",
+  "exports": [
+   "createRoomFloodGuard"
+  ],
+  "cli": null,
+  "loc": 32
+ },
+ "server/room-key-presence.mjs": {
+  "header": "",
+  "exports": [
+   "assertRoomKeyPullOnly",
+   "roomKeyHostId",
+   "roomKeyPresenceAuth",
+   "roomKeyPresenceView"
+  ],
+  "cli": null,
+  "loc": 56
+ },
+ "server/settlement-router.mjs": {
+  "header": "server/settlement-router.mjs \u2014 custody-vs-record-only settlement router.\nRECORD-ONLY: this router ALWAYS returns the record-only route. Custody\n(holding client funds, collecting fees, paying out talent) is unimplemented\nBY DESIGN in this build. Collection needs John's funding tap.\nWhat John must approve before CUSTODY_ENABLED may flip to true:\n1. funded pool \u2014 a real, funded settlement pool exists with a named\ncustodian and published account/rail details;\n2. collection authority \u2014 John's explicit tap authorizing the room to\ncollect fees from clients;\n3. payout authority \u2014 John's explicit tap authorizing the room to pay\ntalent and providers out of the pool.\nFlipping the flag is a POLICY CHANGE, not a rewrite: routeSettlement\nbranches on CUSTODY_ENABLED, and the custody branch below is already\nshaped. Nothing at the call sites changes.",
+  "exports": [
+   "CUSTODY_ENABLED",
+   "CUSTODY_REQUIREMENTS",
+   "routeSettlement"
+  ],
+  "cli": null,
+  "loc": 77
+ },
+ "server/spend-pricing.mjs": {
+  "header": "Spend-pricing kill switch: the owner-only emergency lever for the\npriced-tool gate (promised to Dot's QA lane, room seq 2748).\nThe owner records { enabled: boolean } as a room event\n(room.spend_pricing_set); the projection carries it (src/events.js\nspendPricingEnabled, default enabled when absent). While disabled,\nserver/spend-grants.mjs prices nothing: priceForTool(name, state) returns\nnull for every tool, so chargeSpendBeforeCall returns null at the trust\nboundary \u2014 tools forward free, no grants are consulted, no rows are\nwritten. Re-enabling restores exact current behaviour. No new tables, no\nschema bump (event-sourced like server/spend-allowance.mjs).\nThis module does not import server/store.mjs (store imports it); errors\ncarry status and code like ServiceError and the router reads them as such.",
+  "exports": [
+   "SpendPricingError",
+   "readSpendPricing",
+   "setSpendPricing"
+  ],
+  "cli": null,
+  "loc": 67
+ },
+ "server/trial-task-store.mjs": {
+  "header": "",
+  "exports": [
+   "TrialTasks",
+   "railActor",
+   "railFail",
+   "trialTaskSchema"
+  ],
+  "cli": null,
+  "loc": 111
+ },
+ "server/trial-tasks.mjs": {
+  "header": "Trial tasks \u2014 Demigod x Project Room paid-trial rails (option 4, Lemon.io shape).\nRECORD-ONLY: no money moves in this build, ever. `funded` means \"trial\nbudget recorded\" \u2014 a bookkeeping note that a budget exists, never a\nledger movement, escrow, or payout. Every money-adjacent field is a\nrecord, not a transaction:\n- budgetRecord: the recorded budget note (currency/amountBps are\ndescriptive strings; nothing is debited, held, or transferred).\n- feePolicyRef: an opaque pointer to the fee policy (Lane D owns the\npolicy itself); this module never computes or applies a fee.\n- vettingRubric weights and rubricScores: basis points as STRINGS\n(the receipt-standard bans JSON numbers in signed bodies); scoring\nonly, no amounts move.\nLifecycle: proposed -> funded -> claimed -> submitted -> verdict ->\nreceipted, plus blocked (parks, resumable) and released (terminal).\nA failed verdict still receipts: receipted records the verdict, it does\nnot pay anything.\nPure, dependency-free, deterministic; frozen outputs. Persistence is a\nlater slice (an in-memory registry factory is provided for the routes).\nValidation errors throw TrialTaskError (code, no HTTP status); the HTTP\nlayer maps codes to statuses",
+  "exports": [
+   "TRIAL_TASK_STATES",
+   "TrialTaskError",
+   "blockTrialTask",
+   "claimTrialTask",
+   "createTrialTask",
+   "createTrialTaskRegistry",
+   "fundTrialTask",
+   "receiptTrialTask",
+   "releaseTrialTask",
+   "resumeTrialTask",
+   "submitTrialTask",
+   "verdictTrialTask"
+  ],
+  "cli": null,
+  "loc": 301
+ },
+ "server/wake-queue-limits.mjs": {
+  "header": "Wake-queue capacity and timing limits. Leaf module: the enforcing\nconstants live here so light consumers (discovery, governance) can import\nthem without pulling in server/store.mjs (node:sqlite). server/wake-queue.mjs\nre-exports this object; the values below are the single source of truth the\nWakeQueue class enforces.",
+  "exports": [
+   "wakeQueueLimits"
+  ],
+  "cli": null,
+  "loc": 9
+ },
+ "server/web-push.mjs": {
+  "header": "Web Push delivery: VAPID (RFC 8292) and encrypted payloads (RFC 8291 over\nthe aes128gcm content coding of RFC 8188).\nWhy this exists: server/notifications.mjs derives a per-member feed but says\nin its own header that it \"delivers nothing\". Nothing else in the product\ndelivers either - server/channel-adapters/email.mjs declares outbound \"none\",\nand no wrangler config carries a cron trigger, a queue or an email binding.\nSo a member who is not looking at the page has no way to learn that anything\nhappened. This module is the delivery half.\nConstraints it is written under:\nWeb Crypto only. The runtime package has zero dependencies and this must\nrun unchanged in a Cloudflare Worker, so there is no node:crypto here.\nPure and injectable. Key generation and the random salt come in through\narguments with real defaults, so every value in a test can be pinned and\nthe published RFC vectors can be reproduced byte for byte.\nIt sends nothing by itself. buildPushRequest returns a request\ndescription; the caller performs the fetch. That keeps the crypto\ntestable without a network and keeps transport policy at the edge.\nCorrectness here is not asserted, it is checked: tests/web-push.test.js runs\nthe",
+  "exports": [
+   "buildPushRequest",
+   "constants",
+   "decryptContent",
+   "encryptContent",
+   "encryptPushPayload",
+   "fromBase64Url",
+   "generateKeyPair",
+   "generateVapidKeys",
+   "hkdfExpand",
+   "hkdfExtract",
+   "toBase64Url",
+   "vapidAuthorization"
+  ],
+  "cli": null,
+  "loc": 470
+ },
+ "server/work-claim-mirror.mjs": {
+  "header": "Projection claim commands (MCP and the work-item form) write the same\nwork-claims board the REST routes use. A handoff or supersede leaves a\nsuccessor card that depends on the source, so the chain is visible there.",
+  "exports": [
+   "boardClaimId",
+   "mirrorProjectionClaim"
+  ],
+  "cli": null,
+  "loc": 137
+ },
+ "server/work-claim-sqlite.mjs": {
+  "header": "Durable work-claim registry.\nProduction RoomStore owns this registry; HTTP and next-actions share it.\nClaims, leases and review attestations survive Worker eviction and deployment.\nThe Map registry remains a fixture for isolated state-machine tests.\nItems are stored whole as JSON. The work-claims state machine validates\nevery item it reads (workOf), so a row is never trusted without passing\nthrough it first.",
+  "exports": [
+   "WORK_CLAIM_ROW_KIND",
+   "createDurableWorkClaimRegistry",
+   "workClaimSchema"
+  ],
+  "cli": null,
+  "loc": 134
+ },
+ "server/work-declarations.mjs": {
+  "header": "Step 2 of the matchmaking plan (docs/MATCHMAKING.md): the declarations that\nthe filter in server/work-matchmaking.mjs reads.\nOne side of the market is an agent saying what it can do, how long it will\nwork, and why it is here. The other is a piece of work saying what it needs,\nhow big it is, and who it will let near it. Everything here is NULLABLE on\npurpose: work that declares nothing keeps working exactly as it does today,\nclaimable by id, and simply never appears in matchmaking.\nstore.mjs imports this module, so this module imports nothing from store.mjs.\nPure otherwise: injected clock, caller-owned rows, frozen outputs, domain\nerrors with no HTTP status.",
+  "exports": [
+   "isMatchable",
+   "openingsFromRows",
+   "rowToOpening",
+   "rowToSeeker",
+   "seekerToRow"
+  ],
+  "cli": null,
+  "loc": 102
+ },
+ "server/work-duplicates.mjs": {
+  "header": "Work-claim duplicate detection \u2014 Linear \"similar issues\" emulation.\nA pure decider: given the room's work-claim items and a free-text query,\nreturns ranked candidate duplicates with scores in [0, 1]. Pure,\ndependency-free, deterministic; frozen outputs.\nThe tool suggests; agents decide. Nothing here auto-merges, auto-closes,\nor auto-links \u2014 a candidate is a hint, and marking a real duplicate stays\nan explicit agent action.\nScoring: tokenize (lowercase alphanumeric runs, stopword-stripped), then\nweighted Jaccard similarity: 0.6 * title overlap + 0.4 * note overlap.\nOnly items at or above minScore are returned, ranked score-descending\nwith id-ascending tie-breaks so repeated calls are byte-identical.",
+  "exports": [
+   "findDuplicates",
+   "scoreItem",
+   "tokenize",
+   "DuplicateError "
+  ],
+  "cli": null,
+  "loc": 91
+ },
+ "server/work-help.mjs": {
+  "header": "",
+  "exports": [
+   "auditWorkHelp"
+  ],
+  "cli": null,
+  "loc": 119
+ },
+ "server/work-wants.mjs": {
+  "header": "BOARD-WAKE-2: opt-in \"new ready work\" wake. An agent member may set\nwantsWork { labels, capabilities } for itself in a room. When a Board item\nis created unassigned, or released back to unclaimed, every opted-in agent\nwhose filter matches gets one wake with reason ready_work, at most once per\n10 minutes. Matches inside that window fold into the earlier wake (counted\nin foldedSinceWake); the agent sees them when it reads the Board.\nDefault off: no row, no wake. labels match the item's tags (any overlap);\ncapabilities match the item's kind (work, land or deploy). An empty list\nmatches everything on that axis. The row is a preference only; the wake\ngoes through enqueueClaimWake, so pause, a read-only tier and room trust\nskip it exactly as they skip an assignment wake.\nagent_wants_work is additive and unfenced (server/writer-fence.mjs): older\nwriters have no code path to it, and a missing row means \"off\".",
+  "exports": [
+   "WANTS_WORK_KINDS",
+   "WANTS_WORK_SCHEMA",
+   "WANTS_WORK_WINDOW_MS",
+   "WantsWorkInputError",
+   "clearWantsWork",
+   "normalizeWantsWork",
+   "noteReadyWork",
+   "readWantsWork",
+   "setWantsWork",
+   "wantsWorkMatches"
+  ],
+  "cli": null,
+  "loc": 140
+ }
+}

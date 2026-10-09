@@ -1,0 +1,1015 @@
+{
+ "check": "links",
+ "confirmed": 112,
+ "false_positive": 6,
+ "items": [
+  {
+   "doc": "docs/history/ASK-MODEL-CMDK-SPEC-2026-09-17.md",
+   "line": 9,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md does not exist (resolved docs/research/ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md)",
+   "text": "**Plan refs:** T032 (this spec) \u00b7 T033 (implement PR after tip live) \u00b7 T071 (Speed/Mid/Quality ladder \u2014 [ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md](../research/ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-",
+   "_unit": "x01",
+   "tgt": "../research/ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/ASK-MODEL-CMDK-SPEC-2026-09-17.md",
+   "line": 9,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md does not exist (resolved docs/research/ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md)",
+   "text": "**Plan refs:** T032 (this spec) \u00b7 T033 (implement PR after tip live) \u00b7 T071 (Speed/Mid/Quality ladder \u2014 [ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md](../research/ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-",
+   "_unit": "x01",
+   "tgt": "../research/ASK-ADVANCED-LADDER-UX-BRIEF-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/ASK-MODEL-CMDK-SPEC-2026-09-17.md",
+   "line": 9,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md does not exist (resolved docs/research/ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md)",
+   "text": "**Plan refs:** T032 (this spec) \u00b7 T033 (implement PR after tip live) \u00b7 T071 (Speed/Mid/Quality ladder \u2014 [ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md](../research/ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-",
+   "_unit": "x01",
+   "tgt": "../research/ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/ROOM-CUA-DESKTOP.md",
+   "line": 114,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/CUA-FLEET-SPIKE-2026-09-17.md does not exist (resolved docs/research/CUA-FLEET-SPIKE-2026-09-17.md)",
+   "text": "| **2 Fleet claim on Work Item** | Optional Room \u2192 Fleet claim for a seated Work Item. Credentials in Room secrets. Sandbox URL + last screenshot on the thread. Session join / leave + Done chip + Receipt. | Spike only: [",
+   "_unit": "x01",
+   "tgt": "../research/CUA-FLEET-SPIKE-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/ROOM-RECEIPT-GRAPH-V0.md",
+   "line": 15,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-NOVEL-SYNTHESIS-2026-09-17.md does not exist (resolved docs/research/ROOM-NOVEL-SYNTHESIS-2026-09-17.md)",
+   "text": "Research: [ROOM-NOVEL-SYNTHESIS-2026-09-17.md](../research/ROOM-NOVEL-SYNTHESIS-2026-09-17.md)",
+   "_unit": "x01",
+   "tgt": "../research/ROOM-NOVEL-SYNTHESIS-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/ROOM-RECEIPT-GRAPH-V0.md",
+   "line": 19,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md does not exist (resolved docs/research/ROOM-STEALS-FULL-BUILD-2026-09-17.md)",
+   "text": "Master plan: [ROOM-STEALS-FULL-BUILD-2026-09-17.md](../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md).",
+   "_unit": "x01",
+   "tgt": "../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/ROOM-RECEIPT-GRAPH-V0.md",
+   "line": 78,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md does not exist (resolved docs/research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md)",
+   "text": "Research: [ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md](../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md).",
+   "_unit": "x01",
+   "tgt": "../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/RESEARCH.md",
+   "line": 4,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/README.md does not exist (resolved docs/research/README.md)",
+   "text": "[`research/`](../research/README.md). Adjacent 2026 products (Gemini Rooms,",
+   "_unit": "x01",
+   "tgt": "../research/README.md"
+  },
+  {
+   "doc": "docs/history/ROOM-PLAN-TREE-V0.md",
+   "line": 14,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/NOVEL-PLANNING-THINKING-BUILDS-2026-09-17.md does not exist (resolved docs/research/NOVEL-PLANNING-THINKING-BUILDS-2026-09-17.md)",
+   "text": "[NOVEL-PLANNING-THINKING-BUILDS-2026-09-17.md](../research/NOVEL-PLANNING-THINKING-BUILDS-2026-09-17.md)",
+   "_unit": "x02",
+   "tgt": "../research/NOVEL-PLANNING-THINKING-BUILDS-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/ASK-QUIET-SHELL-V3.md",
+   "line": 20,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/UX-CLEAN-LESS-NOISE-2026-09-17.md does not exist (resolved docs/research/UX-CLEAN-LESS-NOISE-2026-09-17.md)",
+   "text": "[UX-CLEAN-LESS-NOISE-2026-09-17.md](../research/UX-CLEAN-LESS-NOISE-2026-09-17.md).",
+   "_unit": "x02",
+   "tgt": "../research/UX-CLEAN-LESS-NOISE-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/ASK-QUIET-SHELL-V3.md",
+   "line": 22,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ASK-ARTIFACTS-LITE-2026-09-18.md does not exist (resolved docs/research/ASK-ARTIFACTS-LITE-2026-09-18.md)",
+   "text": "[ASK-ARTIFACTS-LITE-2026-09-18.md](../research/ASK-ARTIFACTS-LITE-2026-09-18.md).",
+   "_unit": "x02",
+   "tgt": "../research/ASK-ARTIFACTS-LITE-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/ASK-QUIET-SHELL-V3.md",
+   "line": 24,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ASK-ARTIFACTS-LITE-IMPLEMENT-GATE-2026-09-18.md does not exist (resolved docs/research/ASK-ARTIFACTS-LITE-IMPLEMENT-GATE-2026-09-18.md)",
+   "text": "[ASK-ARTIFACTS-LITE-IMPLEMENT-GATE-2026-09-18.md](../research/ASK-ARTIFACTS-LITE-IMPLEMENT-GATE-2026-09-18.md).",
+   "_unit": "x02",
+   "tgt": "../research/ASK-ARTIFACTS-LITE-IMPLEMENT-GATE-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/ASK-QUIET-SHELL-V3.md",
+   "line": 27,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/PROJECT-ROOM-DESIGN-GUIDE.md does not exist (resolved docs/research/PROJECT-ROOM-DESIGN-GUIDE.md)",
+   "text": "[PROJECT-ROOM-DESIGN-GUIDE.md](../research/PROJECT-ROOM-DESIGN-GUIDE.md).",
+   "_unit": "x02",
+   "tgt": "../research/PROJECT-ROOM-DESIGN-GUIDE.md"
+  },
+  {
+   "doc": "docs/history/ASK-QUIET-SHELL-V3.md",
+   "line": 97,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md does not exist (resolved docs/research/ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md)",
+   "text": "[ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md](../research/ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md)",
+   "_unit": "x02",
+   "tgt": "../research/ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/ASK-QUIET-SHELL-V3.md",
+   "line": 125,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ASK-NEW-CHAT-CLEAR-THREAD-BRIEF-2026-09-18.md does not exist (resolved docs/research/ASK-NEW-CHAT-CLEAR-THREAD-BRIEF-2026-09-18.md)",
+   "text": "| New chat | Quiet top-right (`#clear-chat` / New from #249). Confirm if turns: [ASK-NEW-CHAT-CLEAR-THREAD-BRIEF-2026-09-18.md](../research/ASK-NEW-CHAT-CLEAR-THREAD-BRIEF-2026-09-18.md) (T084) |",
+   "_unit": "x02",
+   "tgt": "../research/ASK-NEW-CHAT-CLEAR-THREAD-BRIEF-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/ASK-QUIET-SHELL-V3.md",
+   "line": 149,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ASK-MARKDOWN-RENDER-SCOPE-BRIEF-2026-09-18.md does not exist (resolved docs/research/ASK-MARKDOWN-RENDER-SCOPE-BRIEF-2026-09-18.md)",
+   "text": "(GFM subset: [ASK-MARKDOWN-RENDER-SCOPE-BRIEF-2026-09-18.md](../research/ASK-MARKDOWN-RENDER-SCOPE-BRIEF-2026-09-18.md)",
+   "_unit": "x02",
+   "tgt": "../research/ASK-MARKDOWN-RENDER-SCOPE-BRIEF-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/ASK-QUIET-SHELL-V3.md",
+   "line": 178,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md does not exist (resolved docs/research/ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md)",
+   "text": "| 11 | Provide as secondary door (keep off Ask canvas) | Compute P1 \u2014 boundary: [ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md](../research/ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md) (T074; T073 lobby canary spinning",
+   "_unit": "x02",
+   "tgt": "../research/ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/ASK-QUIET-SHELL-V3.md",
+   "line": 179,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md does not exist (resolved docs/research/ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md)",
+   "text": "| 12 | Network honesty strip `N Macs \u00b7 models` | Compute P1 \u2014 spec: [ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md](../research/ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md) (T072) |",
+   "_unit": "x02",
+   "tgt": "../research/ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/ASK-QUIET-SHELL-V3.md",
+   "line": 180,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md does not exist (resolved docs/research/ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md)",
+   "text": "| 13 | Speed / Mid / Quality ladder labels | Compute P1 \u2014 grouping: [ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md](../research/ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md) (T071; Advanced empty until #",
+   "_unit": "x02",
+   "tgt": "../research/ASK-ADVANCED-LADDER-UX-BRIEF-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/ASK-QUIET-SHELL-V3.md",
+   "line": 182,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ask/T044-quiet-export-transcript.md does not exist (resolved docs/research/ask/T044-quiet-export-transcript.md)",
+   "text": "| T044 | Quiet export transcript JSON/MD (thread chrome; not empty-canvas) | Ask follow-on \u2014 [research/ask/T044-quiet-export-transcript.md](../research/ask/T044-quiet-export-transcript.md) |",
+   "_unit": "x02",
+   "tgt": "../research/ask/T044-quiet-export-transcript.md"
+  },
+  {
+   "doc": "docs/history/ASK-QUIET-SHELL-V3.md",
+   "line": 183,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ASK-EXPORT-THREAD-FORMAT-BRIEF-2026-09-18.md does not exist (resolved docs/research/ASK-EXPORT-THREAD-FORMAT-BRIEF-2026-09-18.md)",
+   "text": "| T086 | Export thread format (MD download vs copy; headers / model / receipt lines) | Ask follow-on \u2014 [research/ASK-EXPORT-THREAD-FORMAT-BRIEF-2026-09-18.md](../research/ASK-EXPORT-THREAD-FORMAT-BRIEF-2026-09-18.md) (ci",
+   "_unit": "x02",
+   "tgt": "../research/ASK-EXPORT-THREAD-FORMAT-BRIEF-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/ASK-QUIET-SHELL-V3.md",
+   "line": 184,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ask/T045-receipt-collapse.md does not exist (resolved docs/research/ask/T045-receipt-collapse.md)",
+   "text": "| T045 | Honesty receipt folds after complete; hover expand | Ask follow-on \u2014 [research/ask/T045-receipt-collapse.md](../research/ask/T045-receipt-collapse.md) |",
+   "_unit": "x02",
+   "tgt": "../research/ask/T045-receipt-collapse.md"
+  },
+  {
+   "doc": "docs/history/ASK-QUIET-SHELL-V3.md",
+   "line": 185,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ASK-RECEIPT-LASTPAID-WHISPER-BRIEF-2026-09-18.md does not exist (resolved docs/research/ASK-RECEIPT-LASTPAID-WHISPER-BRIEF-2026-09-18.md)",
+   "text": "| T087 | lastPaidReceipt Job whisper (`#ask-receipt` shows Job id; never a capacity dash) | Ask follow-on \u2014 [research/ASK-RECEIPT-LASTPAID-WHISPER-BRIEF-2026-09-18.md](../research/ASK-RECEIPT-LASTPAID-WHISPER-BRIEF-2026-",
+   "_unit": "x02",
+   "tgt": "../research/ASK-RECEIPT-LASTPAID-WHISPER-BRIEF-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/ASK-QUIET-SHELL-V3.md",
+   "line": 186,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ask/T046-no-midstream-toks.md does not exist (resolved docs/research/ask/T046-no-midstream-toks.md)",
+   "text": "| T046 | No mid-stream tok/s essay (lint/test rule) | Ask follow-on \u2014 [research/ask/T046-no-midstream-toks.md](../research/ask/T046-no-midstream-toks.md) |",
+   "_unit": "x02",
+   "tgt": "../research/ask/T046-no-midstream-toks.md"
+  },
+  {
+   "doc": "docs/history/USABILITY-PLAN.md",
+   "line": 157,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/EMAIL-QUALIFICATION-NEXT.md does not exist (resolved docs/research/EMAIL-QUALIFICATION-NEXT.md)",
+   "text": "- Real mailbox / send \u2014 [EMAIL-QUALIFICATION-NEXT.md](../research/EMAIL-QUALIFICATION-NEXT.md)",
+   "_unit": "x02",
+   "tgt": "../research/EMAIL-QUALIFICATION-NEXT.md"
+  },
+  {
+   "doc": "docs/history/WORK-ITEM-SESSION.md",
+   "line": 14,
+   "type": "BROKEN_LINK",
+   "detail": "link target HERDR-SESSIONS-AGENTS.md does not exist (resolved docs/history/HERDR-SESSIONS-AGENTS.md)",
+   "text": "[HERDR-SESSIONS-AGENTS.md](HERDR-SESSIONS-AGENTS.md); endpoint reference:",
+   "_unit": "x02",
+   "tgt": "HERDR-SESSIONS-AGENTS.md"
+  },
+  {
+   "doc": "docs/history/WORK-ITEM-SESSION.md",
+   "line": 15,
+   "type": "BROKEN_LINK",
+   "detail": "link target SESSION-API.md does not exist (resolved docs/history/SESSION-API.md)",
+   "text": "[SESSION-API.md](SESSION-API.md).",
+   "_unit": "x02",
+   "tgt": "SESSION-API.md"
+  },
+  {
+   "doc": "docs/history/ROOM-TRUST-HANDOFF-V0.md",
+   "line": 12,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-INTERLATERAL-RESEARCH-2026-09-17.md does not exist (resolved docs/research/ROOM-INTERLATERAL-RESEARCH-2026-09-17.md)",
+   "text": "[ROOM-INTERLATERAL-RESEARCH-2026-09-17.md](../research/ROOM-INTERLATERAL-RESEARCH-2026-09-17.md).",
+   "_unit": "x02",
+   "tgt": "../research/ROOM-INTERLATERAL-RESEARCH-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/ROOM-TRUST-HANDOFF-V0.md",
+   "line": 19,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md does not exist (resolved docs/research/ROOM-STEALS-FULL-BUILD-2026-09-17.md)",
+   "text": "[ROOM-STEALS-FULL-BUILD-2026-09-17.md](../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md).",
+   "_unit": "x02",
+   "tgt": "../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/SHARED-IMPROVEMENT-PLAN-2026-09-30.md",
+   "line": 17,
+   "type": "BROKEN_LINK",
+   "detail": "link target /Users/johnpotter/src/PROJECT-ROOM-COLLABORATIVE-RESEARCH-AND-BUILD-PLAN-2026-09-29.md does not exist (resolved /Users/johnpotter/src/PROJECT-ROOM-COLLABORATIVE-RESEARCH-AND-BUILD-PLAN-2026-09-29.md)",
+   "text": "- Codex collab plan: mention \u2260 mandatory task; Request reply is the obligation; prove communication before removing GitHub fallbacks. [file](/Users/johnpotter/src/PROJECT-ROOM-COLLABORATIVE-RESEARCH-AND-BUILD-PLAN-2026-0",
+   "_unit": "x02",
+   "tgt": "/Users/johnpotter/src/PROJECT-ROOM-COLLABORATIVE-RESEARCH-AND-BUILD-PLAN-2026-09-29.md"
+  },
+  {
+   "doc": "docs/history/SHARED-IMPROVEMENT-PLAN-2026-09-30.md",
+   "line": 18,
+   "type": "BROKEN_LINK",
+   "detail": "link target /Users/johnpotter/src/PROJECT-ROOM-NEXT-WORK-PLAN-2026-09-29.md does not exist (resolved /Users/johnpotter/src/PROJECT-ROOM-NEXT-WORK-PLAN-2026-09-29.md)",
+   "text": "- Codex next-work: recover before inventing; 1223 overlaps 1225 on `grok-host`; one trustworthy needs-me view; human admission 1222 merged, 1148 held. [file](/Users/johnpotter/src/PROJECT-ROOM-NEXT-WORK-PLAN-2026-09-29.m",
+   "_unit": "x02",
+   "tgt": "/Users/johnpotter/src/PROJECT-ROOM-NEXT-WORK-PLAN-2026-09-29.md"
+  },
+  {
+   "doc": "docs/history/lanes/REGISTRY.md",
+   "line": 61,
+   "type": "BROKEN_LINK",
+   "detail": "link target quill.md does not exist (resolved docs/history/lanes/quill.md)",
+   "text": "| quill | [lanes/quill.md](quill.md) | bugs + quality + growth | elevated |",
+   "_unit": "x02",
+   "tgt": "quill.md"
+  },
+  {
+   "doc": "docs/history/lanes/REGISTRY.md",
+   "line": 62,
+   "type": "BROKEN_LINK",
+   "detail": "link target quill-s2.md does not exist (resolved docs/history/lanes/quill-s2.md)",
+   "text": "| quill-s2 | [lanes/quill-s2.md](quill-s2.md) | Rowboat-port + room-protocol workstream | standard |",
+   "_unit": "x02",
+   "tgt": "quill-s2.md"
+  },
+  {
+   "doc": "docs/history/lanes/REGISTRY.md",
+   "line": 63,
+   "type": "BROKEN_LINK",
+   "detail": "link target instinct.md does not exist (resolved docs/history/lanes/instinct.md)",
+   "text": "| instinct | [lanes/instinct.md](instinct.md) | verify + infra | elevated |",
+   "_unit": "x02",
+   "tgt": "instinct.md"
+  },
+  {
+   "doc": "docs/history/lanes/REGISTRY.md",
+   "line": 64,
+   "type": "BROKEN_LINK",
+   "detail": "link target grokbot.md does not exist (resolved docs/history/lanes/grokbot.md)",
+   "text": "| grokbot | [lanes/grokbot.md](grokbot.md) | merge + deploy | elevated |",
+   "_unit": "x02",
+   "tgt": "grokbot.md"
+  },
+  {
+   "doc": "docs/history/lanes/REGISTRY.md",
+   "line": 65,
+   "type": "BROKEN_LINK",
+   "detail": "link target codex.md does not exist (resolved docs/history/lanes/codex.md)",
+   "text": "| codex | [lanes/codex.md](codex.md) | design | standard |",
+   "_unit": "x02",
+   "tgt": "codex.md"
+  },
+  {
+   "doc": "docs/history/lanes/REGISTRY.md",
+   "line": 66,
+   "type": "BROKEN_LINK",
+   "detail": "link target Jillian.md does not exist (resolved docs/history/lanes/Jillian.md)",
+   "text": "| Jillian | [lanes/Jillian.md](Jillian.md) | documentation | standard |",
+   "_unit": "x02",
+   "tgt": "Jillian.md"
+  },
+  {
+   "doc": "docs/history/ROOM-ARTIFACT-MATURITY.md",
+   "line": 10,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-INTERLATERAL-RESEARCH-2026-09-17.md does not exist (resolved docs/research/ROOM-INTERLATERAL-RESEARCH-2026-09-17.md)",
+   "text": "[ROOM-INTERLATERAL-RESEARCH-2026-09-17.md](../research/ROOM-INTERLATERAL-RESEARCH-2026-09-17.md).",
+   "_unit": "x02",
+   "tgt": "../research/ROOM-INTERLATERAL-RESEARCH-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/ROOM-ARTIFACT-MATURITY.md",
+   "line": 13,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md does not exist (resolved docs/research/ROOM-STEALS-FULL-BUILD-2026-09-17.md)",
+   "text": "[ROOM-STEALS-FULL-BUILD-2026-09-17.md](../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md).",
+   "_unit": "x02",
+   "tgt": "../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/ROOM-COHESIVE-ARCHITECTURE.md",
+   "line": 8,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-COHESIVE-ARCHITECTURE-2026-09-17.md does not exist (resolved docs/research/ROOM-COHESIVE-ARCHITECTURE-2026-09-17.md)",
+   "text": "[ROOM-COHESIVE-ARCHITECTURE-2026-09-17.md](../research/ROOM-COHESIVE-ARCHITECTURE-2026-09-17.md).",
+   "_unit": "x03",
+   "tgt": "../research/ROOM-COHESIVE-ARCHITECTURE-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/ROOM-COHESIVE-ARCHITECTURE.md",
+   "line": 190,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md does not exist (resolved docs/research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md)",
+   "text": "| `delegation.spawn` | Named specialist `room` seat (same-rung allowed). Cites parent. Never a second Second; never Genie. [ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md](../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md) ",
+   "_unit": "x03",
+   "tgt": "../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/ROOM-COHESIVE-ARCHITECTURE.md",
+   "line": 240,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md does not exist (resolved docs/research/ROOM-STEALS-FULL-BUILD-2026-09-17.md)",
+   "text": "Related contracts on disk: steal specs under `docs/`, [ROOM-STEALS-FULL-BUILD-2026-09-17.md](../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md), [ROOM-NOVEL-SYNTHESIS-2026-09-17.md](../research/ROOM-NOVEL-SYNTHESIS-2026-0",
+   "_unit": "x03",
+   "tgt": "../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/ROOM-COHESIVE-ARCHITECTURE.md",
+   "line": 240,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md does not exist (resolved docs/research/ROOM-STEALS-FULL-BUILD-2026-09-17.md)",
+   "text": "Related contracts on disk: steal specs under `docs/`, [ROOM-STEALS-FULL-BUILD-2026-09-17.md](../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md), [ROOM-NOVEL-SYNTHESIS-2026-09-17.md](../research/ROOM-NOVEL-SYNTHESIS-2026-0",
+   "_unit": "x03",
+   "tgt": "../research/ROOM-NOVEL-SYNTHESIS-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/ROOM-COHESIVE-ARCHITECTURE.md",
+   "line": 240,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md does not exist (resolved docs/research/ROOM-STEALS-FULL-BUILD-2026-09-17.md)",
+   "text": "Related contracts on disk: steal specs under `docs/`, [ROOM-STEALS-FULL-BUILD-2026-09-17.md](../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md), [ROOM-NOVEL-SYNTHESIS-2026-09-17.md](../research/ROOM-NOVEL-SYNTHESIS-2026-0",
+   "_unit": "x03",
+   "tgt": "../research/ROOM-INTERLATERAL-RESEARCH-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 33,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/DEMIGOD-E2E-AUTOMATION-2026-09-18.md does not exist (resolved docs/research/DEMIGOD-E2E-AUTOMATION-2026-09-18.md)",
+   "text": "| [DEMIGOD-E2E-AUTOMATION-2026-09-18.md](../research/DEMIGOD-E2E-AUTOMATION-2026-09-18.md) | Fully automated matching desk; Lightfield packet \u2192 brief \u2192 blocked sends; measure one Lightfield hire |",
+   "_unit": "x03",
+   "tgt": "../research/DEMIGOD-E2E-AUTOMATION-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 34,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/DEMIGOD-E2E-SLICE-CLI-2026-09-18.md does not exist (resolved docs/research/DEMIGOD-E2E-SLICE-CLI-2026-09-18.md)",
+   "text": "| [DEMIGOD-E2E-SLICE-CLI-2026-09-18.md](../research/DEMIGOD-E2E-SLICE-CLI-2026-09-18.md) | Now-slice CLI map (`die-packet-brief-status`); scripts + kill-switches; local prototype only |",
+   "_unit": "x03",
+   "tgt": "../research/DEMIGOD-E2E-SLICE-CLI-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 35,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/DEMIGOD-E2E-KILL-SWITCHES-2026-09-18.md does not exist (resolved docs/research/DEMIGOD-E2E-KILL-SWITCHES-2026-09-18.md)",
+   "text": "| [DEMIGOD-E2E-KILL-SWITCHES-2026-09-18.md](../research/DEMIGOD-E2E-KILL-SWITCHES-2026-09-18.md) | Six human kill-switches + freeze-band ack; blocked send_* enforcement; Shipped \u2260 Measured (one Lightfield hire) |",
+   "_unit": "x03",
+   "tgt": "../research/DEMIGOD-E2E-KILL-SWITCHES-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 36,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/DEMIGOD-E2E-NEXT-OPERATOR-2026-09-18.md does not exist (resolved docs/research/DEMIGOD-E2E-NEXT-OPERATOR-2026-09-18.md)",
+   "text": "| [DEMIGOD-E2E-NEXT-OPERATOR-2026-09-18.md](../research/DEMIGOD-E2E-NEXT-OPERATOR-2026-09-18.md) | Next operator desk: ticket-draft (KILL_SWITCH send_ticket; no people fields); freeze-band ack; drafts until kill-switch; ",
+   "_unit": "x03",
+   "tgt": "../research/DEMIGOD-E2E-NEXT-OPERATOR-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 37,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/DEMIGOD-E2E-OPTIMIZE-2026-09-18.md does not exist (resolved docs/research/DEMIGOD-E2E-OPTIMIZE-2026-09-18.md)",
+   "text": "| [DEMIGOD-E2E-OPTIMIZE-2026-09-18.md](../research/DEMIGOD-E2E-OPTIMIZE-2026-09-18.md) | Optimize steals (HumanLayer, Factory blocklist, Horton queue, company waterfall, Stripe draft\u2192send); stage allow/ask/block; Lightfi",
+   "_unit": "x03",
+   "tgt": "../research/DEMIGOD-E2E-OPTIMIZE-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 38,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/DIE-DEMIGOD-OPTIMIZE-PLAN-2026-09-18.md does not exist (resolved docs/research/DIE-DEMIGOD-OPTIMIZE-PLAN-2026-09-18.md)",
+   "text": "| [DIE-DEMIGOD-OPTIMIZE-PLAN-2026-09-18.md](../research/DIE-DEMIGOD-OPTIMIZE-PLAN-2026-09-18.md) | DIE+Demigod optimize plan: Wave 1 ATS/techStack/auto-ticket; Wave 2 opt-in/dual-yes; Wave 3 Lightfield measure; no people",
+   "_unit": "x03",
+   "tgt": "../research/DIE-DEMIGOD-OPTIMIZE-PLAN-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 39,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/DUAL-YES-CONSENT-2026-09-18.md does not exist (resolved docs/research/DUAL-YES-CONSENT-2026-09-18.md)",
+   "text": "| [DUAL-YES-CONSENT-2026-09-18.md](../research/DUAL-YES-CONSENT-2026-09-18.md) | Dual-yes consent ledger (local SoR); Lightfield SYNTHETIC `intro_unlocked`; opaque handleRef only; no people CRM |",
+   "_unit": "x03",
+   "tgt": "../research/DUAL-YES-CONSENT-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 40,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/OPT-IN-FORM-SHIP-PLAN-2026-09-18.md does not exist (resolved docs/research/OPT-IN-FORM-SHIP-PLAN-2026-09-18.md)",
+   "text": "| [OPT-IN-FORM-SHIP-PLAN-2026-09-18.md](../research/OPT-IN-FORM-SHIP-PLAN-2026-09-18.md) | trydemigod first-party opt-in form; Worker/static path stub; FIRST_PARTY **empty** (`live: false`); **not deployed** |",
+   "_unit": "x03",
+   "tgt": "../research/OPT-IN-FORM-SHIP-PLAN-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 41,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/DIE-DEMIGOD-WAVE2-PROGRESS-2026-09-18.md does not exist (resolved docs/research/DIE-DEMIGOD-WAVE2-PROGRESS-2026-09-18.md)",
+   "text": "| [DIE-DEMIGOD-WAVE2-PROGRESS-2026-09-18.md](../research/DIE-DEMIGOD-WAVE2-PROGRESS-2026-09-18.md) | Wave 2 START: dual-yes + Gmail draft.create dry-run (0 live API) + opt-in plan; honesty ~47/100; W1 openRoles 16 / tech",
+   "_unit": "x03",
+   "tgt": "../research/DIE-DEMIGOD-WAVE2-PROGRESS-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 42,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/DIE-DEMIGOD-WAVE3-PROGRESS-2026-09-18.md does not exist (resolved docs/research/DIE-DEMIGOD-WAVE3-PROGRESS-2026-09-18.md)",
+   "text": "| [DIE-DEMIGOD-WAVE3-PROGRESS-2026-09-18.md](../research/DIE-DEMIGOD-WAVE3-PROGRESS-2026-09-18.md) | Wave 3 land: MATCH_STATES proposals (`dieSoRMutation: false`); Stripe draft\u2192`finalize_local`; `send_invoice` blocked; h",
+   "_unit": "x03",
+   "tgt": "../research/DIE-DEMIGOD-WAVE3-PROGRESS-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 43,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/MATCH-STATE-PROPOSALS-2026-09-18.md does not exist (resolved docs/research/MATCH-STATE-PROPOSALS-2026-09-18.md)",
+   "text": "| [MATCH-STATE-PROPOSALS-2026-09-18.md](../research/MATCH-STATE-PROPOSALS-2026-09-18.md) | W3.3 local MATCH_STATES proposals only; `status=proposed`; never live DIE SoR |",
+   "_unit": "x03",
+   "tgt": "../research/MATCH-STATE-PROPOSALS-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 44,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/STRIPE-INVOICE-KILL-SWITCH-2026-09-18.md does not exist (resolved docs/research/STRIPE-INVOICE-KILL-SWITCH-2026-09-18.md)",
+   "text": "| [STRIPE-INVOICE-KILL-SWITCH-2026-09-18.md](../research/STRIPE-INVOICE-KILL-SWITCH-2026-09-18.md) | W3.2 local invoice draft\u2192`finalize_local`; `send_invoice` stays blocked; no live Stripe |",
+   "_unit": "x03",
+   "tgt": "../research/STRIPE-INVOICE-KILL-SWITCH-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 45,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/WATCHLIST-OBSERVE-NEVER-RUN-2026-09-18.md does not exist (resolved docs/research/WATCHLIST-OBSERVE-NEVER-RUN-2026-09-18.md)",
+   "text": "| [WATCHLIST-OBSERVE-NEVER-RUN-2026-09-18.md](../research/WATCHLIST-OBSERVE-NEVER-RUN-2026-09-18.md) | Observe CLI \u2260 cron; routine `demigod-watchlist-observe` never-run until first scheduled 9:25 PT fire |",
+   "_unit": "x03",
+   "tgt": "../research/WATCHLIST-OBSERVE-NEVER-RUN-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 46,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/DIE-DEMIGOD-NEXT-AUTOMATION-2026-09-18.md does not exist (resolved docs/research/DIE-DEMIGOD-NEXT-AUTOMATION-2026-09-18.md)",
+   "text": "| [DIE-DEMIGOD-NEXT-AUTOMATION-2026-09-18.md](../research/DIE-DEMIGOD-NEXT-AUTOMATION-2026-09-18.md) | Next automation list after Wave 3: live opt-in, prove cron, Lightfield measure, hosted desk; honesty ~55/100; FIRST_P",
+   "_unit": "x03",
+   "tgt": "../research/DIE-DEMIGOD-NEXT-AUTOMATION-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 52,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-COHESIVE-ARCHITECTURE-2026-09-17.md does not exist (resolved docs/research/ROOM-COHESIVE-ARCHITECTURE-2026-09-17.md)",
+   "text": "[ROOM-COHESIVE-ARCHITECTURE-2026-09-17.md](../research/ROOM-COHESIVE-ARCHITECTURE-2026-09-17.md).",
+   "_unit": "x03",
+   "tgt": "../research/ROOM-COHESIVE-ARCHITECTURE-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 82,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ASK-EXPORT-THREAD-FORMAT-BRIEF-2026-09-18.md does not exist (resolved docs/research/ASK-EXPORT-THREAD-FORMAT-BRIEF-2026-09-18.md)",
+   "text": "| [ASK-EXPORT-THREAD-FORMAT-BRIEF-2026-09-18.md](../research/ASK-EXPORT-THREAD-FORMAT-BRIEF-2026-09-18.md) | T086 \u2014 Ask Export thread format (cite T044 #496); markdown download vs copy; headers / model / receipt lines th",
+   "_unit": "x03",
+   "tgt": "../research/ASK-EXPORT-THREAD-FORMAT-BRIEF-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 83,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ASK-RECEIPT-LASTPAID-WHISPER-BRIEF-2026-09-18.md does not exist (resolved docs/research/ASK-RECEIPT-LASTPAID-WHISPER-BRIEF-2026-09-18.md)",
+   "text": "| [ASK-RECEIPT-LASTPAID-WHISPER-BRIEF-2026-09-18.md](../research/ASK-RECEIPT-LASTPAID-WHISPER-BRIEF-2026-09-18.md) | T087 \u2014 Ask receipt / lastPaidReceipt whisper (cite T045 #496); when `#ask-receipt` shows Job id; never ",
+   "_unit": "x03",
+   "tgt": "../research/ASK-RECEIPT-LASTPAID-WHISPER-BRIEF-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 87,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md does not exist (resolved docs/research/ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md)",
+   "text": "| [ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md](../research/ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md) | T082 \u2014 Stop / Regen / Copy / Edit keyboard map (Esc / R / C / E); cite Ask v2 #249 + quiet-shell \u00a73.4; picker keys ",
+   "_unit": "x03",
+   "tgt": "../research/ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 88,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ASK-NEW-CHAT-CLEAR-THREAD-BRIEF-2026-09-18.md does not exist (resolved docs/research/ASK-NEW-CHAT-CLEAR-THREAD-BRIEF-2026-09-18.md)",
+   "text": "| [ASK-NEW-CHAT-CLEAR-THREAD-BRIEF-2026-09-18.md](../research/ASK-NEW-CHAT-CLEAR-THREAD-BRIEF-2026-09-18.md) | T084 \u2014 New chat / Clear thread confirm (cite Ask v2 #249 A7); quiet confirm if thread has turns; never wipe w",
+   "_unit": "x03",
+   "tgt": "../research/ASK-NEW-CHAT-CLEAR-THREAD-BRIEF-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 89,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ASK-ARTIFACTS-LITE-2026-09-18.md does not exist (resolved docs/research/ASK-ARTIFACTS-LITE-2026-09-18.md)",
+   "text": "| [ASK-ARTIFACTS-LITE-2026-09-18.md](../research/ASK-ARTIFACTS-LITE-2026-09-18.md) | Ask Artifacts-lite P0 \u2014 collapse long fences \u2192 opt-in side/bottom panel (research; implement later on dasha-lobby) |",
+   "_unit": "x03",
+   "tgt": "../research/ASK-ARTIFACTS-LITE-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 90,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ASK-MARKDOWN-RENDER-SCOPE-BRIEF-2026-09-18.md does not exist (resolved docs/research/ASK-MARKDOWN-RENDER-SCOPE-BRIEF-2026-09-18.md)",
+   "text": "| [ASK-MARKDOWN-RENDER-SCOPE-BRIEF-2026-09-18.md](../research/ASK-MARKDOWN-RENDER-SCOPE-BRIEF-2026-09-18.md) | T085 \u2014 `#ask-thread` GFM subset (fences, lists, bold, inline code); links stay plain; cite T041 tip canary #2",
+   "_unit": "x03",
+   "tgt": "../research/ASK-MARKDOWN-RENDER-SCOPE-BRIEF-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 94,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md does not exist (resolved docs/research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md)",
+   "text": "Jev + Codex same-rung spawn (research): [ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md](../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md).",
+   "_unit": "x03",
+   "tgt": "../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 95,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-JEV-COMPACTION-REFLEX-STEAL-2026-09-18.md does not exist (resolved docs/research/ROOM-JEV-COMPACTION-REFLEX-STEAL-2026-09-18.md)",
+   "text": "Jev compaction + Reflex on-device (research; sibling of #477): [ROOM-JEV-COMPACTION-REFLEX-STEAL-2026-09-18.md](../research/ROOM-JEV-COMPACTION-REFLEX-STEAL-2026-09-18.md).",
+   "_unit": "x03",
+   "tgt": "../research/ROOM-JEV-COMPACTION-REFLEX-STEAL-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 96,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md does not exist (resolved docs/research/ROOM-STEALS-FULL-BUILD-2026-09-17.md)",
+   "text": "Master plan: [ROOM-STEALS-FULL-BUILD-2026-09-17.md](../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md).",
+   "_unit": "x03",
+   "tgt": "../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 97,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-NOVEL-SYNTHESIS-2026-09-17.md does not exist (resolved docs/research/ROOM-NOVEL-SYNTHESIS-2026-09-17.md)",
+   "text": "Novel synthesis (pre-collapse): [ROOM-NOVEL-SYNTHESIS-2026-09-17.md](../research/ROOM-NOVEL-SYNTHESIS-2026-09-17.md)",
+   "_unit": "x03",
+   "tgt": "../research/ROOM-NOVEL-SYNTHESIS-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 102,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/NOVEL-PLANNING-THINKING-BUILDS-2026-09-17.md does not exist (resolved docs/research/NOVEL-PLANNING-THINKING-BUILDS-2026-09-17.md)",
+   "text": "Planning / thinking cousin pass: [NOVEL-PLANNING-THINKING-BUILDS-2026-09-17.md](../research/NOVEL-PLANNING-THINKING-BUILDS-2026-09-17.md)",
+   "_unit": "x03",
+   "tgt": "../research/NOVEL-PLANNING-THINKING-BUILDS-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 104,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-COMPUTE-NEEDLE-STEAL-2026-09-17.md does not exist (resolved docs/research/ROOM-COMPUTE-NEEDLE-STEAL-2026-09-17.md)",
+   "text": "Needle steal (tool/extract, not Ask chat): [ROOM-COMPUTE-NEEDLE-STEAL-2026-09-17.md](../research/ROOM-COMPUTE-NEEDLE-STEAL-2026-09-17.md).",
+   "_unit": "x03",
+   "tgt": "../research/ROOM-COMPUTE-NEEDLE-STEAL-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 105,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/UX-CLEAN-LESS-NOISE-2026-09-17.md does not exist (resolved docs/research/UX-CLEAN-LESS-NOISE-2026-09-17.md)",
+   "text": "Ask / Compute / Room anti-noise: [UX-CLEAN-LESS-NOISE-2026-09-17.md](../research/UX-CLEAN-LESS-NOISE-2026-09-17.md).",
+   "_unit": "x03",
+   "tgt": "../research/UX-CLEAN-LESS-NOISE-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 108,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ASK-ARTIFACTS-LITE-IMPLEMENT-GATE-2026-09-18.md does not exist (resolved docs/research/ASK-ARTIFACTS-LITE-IMPLEMENT-GATE-2026-09-18.md)",
+   "text": "[ASK-ARTIFACTS-LITE-IMPLEMENT-GATE-2026-09-18.md](../research/ASK-ARTIFACTS-LITE-IMPLEMENT-GATE-2026-09-18.md).",
+   "_unit": "x03",
+   "tgt": "../research/ASK-ARTIFACTS-LITE-IMPLEMENT-GATE-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 112,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ASK-BONSAI-MAC24-AND-GEMMA-LADDER-2026-09-18.md does not exist (resolved docs/research/ASK-BONSAI-MAC24-AND-GEMMA-LADDER-2026-09-18.md)",
+   "text": "[ASK-BONSAI-MAC24-AND-GEMMA-LADDER-2026-09-18.md](../research/ASK-BONSAI-MAC24-AND-GEMMA-LADDER-2026-09-18.md).",
+   "_unit": "x03",
+   "tgt": "../research/ASK-BONSAI-MAC24-AND-GEMMA-LADDER-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 114,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ASK-BONSAI-PROVIDER-OPENAI-ERROR-PATHS-2026-09-18.md does not exist (resolved docs/research/ASK-BONSAI-PROVIDER-OPENAI-ERROR-PATHS-2026-09-18.md)",
+   "text": "[ASK-BONSAI-PROVIDER-OPENAI-ERROR-PATHS-2026-09-18.md](../research/ASK-BONSAI-PROVIDER-OPENAI-ERROR-PATHS-2026-09-18.md).",
+   "_unit": "x03",
+   "tgt": "../research/ASK-BONSAI-PROVIDER-OPENAI-ERROR-PATHS-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 116,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ASK-PROVIDE-BATTERY-PREFER-AC-2026-09-18.md does not exist (resolved docs/research/ASK-PROVIDE-BATTERY-PREFER-AC-2026-09-18.md)",
+   "text": "[ASK-PROVIDE-BATTERY-PREFER-AC-2026-09-18.md](../research/ASK-PROVIDE-BATTERY-PREFER-AC-2026-09-18.md).",
+   "_unit": "x03",
+   "tgt": "../research/ASK-PROVIDE-BATTERY-PREFER-AC-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 118,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ASK-PROVIDE-SOFT-BATTERY-UX-COPY-2026-09-18.md does not exist (resolved docs/research/ASK-PROVIDE-SOFT-BATTERY-UX-COPY-2026-09-18.md)",
+   "text": "[ASK-PROVIDE-SOFT-BATTERY-UX-COPY-2026-09-18.md](../research/ASK-PROVIDE-SOFT-BATTERY-UX-COPY-2026-09-18.md).",
+   "_unit": "x03",
+   "tgt": "../research/ASK-PROVIDE-SOFT-BATTERY-UX-COPY-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 120,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ASK-PRISMML-BONSAI-ID-MAP-2026-09-18.md does not exist (resolved docs/research/ASK-PRISMML-BONSAI-ID-MAP-2026-09-18.md)",
+   "text": "[ASK-PRISMML-BONSAI-ID-MAP-2026-09-18.md](../research/ASK-PRISMML-BONSAI-ID-MAP-2026-09-18.md).",
+   "_unit": "x03",
+   "tgt": "../research/ASK-PRISMML-BONSAI-ID-MAP-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 122,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md does not exist (resolved docs/research/ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md)",
+   "text": "[ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md](../research/ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md).",
+   "_unit": "x03",
+   "tgt": "../research/ASK-LADDER-ADVANCED-AND-NETWORK-HONESTY-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 124,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md does not exist (resolved docs/research/ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md)",
+   "text": "[ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md](../research/ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md).",
+   "_unit": "x03",
+   "tgt": "../research/ASK-VS-PROVIDE-SURFACE-BOUNDARY-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 125,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ask/ does not exist (resolved docs/research/ask)",
+   "text": "Ask quiet-shell follow-ons (T044\u2013T046, distinct from Artifacts-lite / regen / Bonsai RAM): [research/ask/](../research/ask/).",
+   "_unit": "x03",
+   "tgt": "../research/ask/"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 131,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ASK-ADVANCED-LADDER-UX-BRIEF-2026-09-18.md does not exist (resolved docs/research/ASK-ADVANCED-LADDER-UX-BRIEF-2026-09-18.md)",
+   "text": "[ASK-ADVANCED-LADDER-UX-BRIEF-2026-09-18.md](../research/ASK-ADVANCED-LADDER-UX-BRIEF-2026-09-18.md).",
+   "_unit": "x03",
+   "tgt": "../research/ASK-ADVANCED-LADDER-UX-BRIEF-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/legacy-docs-README.md",
+   "line": 143,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/README.md does not exist (resolved docs/research/README.md)",
+   "text": "Design research, inspiration atlases, and decision records. See [research/README.md](../research/README.md).",
+   "_unit": "x03",
+   "tgt": "../research/README.md"
+  },
+  {
+   "doc": "docs/history/ROOM-KITS-HARNESS-JEV-ROY.md",
+   "line": 12,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md does not exist (resolved docs/research/ROOM-STEALS-FULL-BUILD-2026-09-17.md)",
+   "text": "[ROOM-STEALS-FULL-BUILD-2026-09-17.md](../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md).",
+   "_unit": "x03",
+   "tgt": "../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/ROOM-KITS-HARNESS-JEV-ROY.md",
+   "line": 73,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md does not exist (resolved docs/research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md)",
+   "text": "[ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md](../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md)",
+   "_unit": "x03",
+   "tgt": "../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/ROOM-KITS-HARNESS-JEV-ROY.md",
+   "line": 75,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-JEV-COMPACTION-REFLEX-STEAL-2026-09-18.md does not exist (resolved docs/research/ROOM-JEV-COMPACTION-REFLEX-STEAL-2026-09-18.md)",
+   "text": "[ROOM-JEV-COMPACTION-REFLEX-STEAL-2026-09-18.md](../research/ROOM-JEV-COMPACTION-REFLEX-STEAL-2026-09-18.md)",
+   "_unit": "x03",
+   "tgt": "../research/ROOM-JEV-COMPACTION-REFLEX-STEAL-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/ROOM-PERSONAS-FACTORY.md",
+   "line": 11,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md does not exist (resolved docs/research/ROOM-STEALS-FULL-BUILD-2026-09-17.md)",
+   "text": "[ROOM-STEALS-FULL-BUILD-2026-09-17.md](../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md).",
+   "_unit": "x03",
+   "tgt": "../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/ROOM-PERSONAS-FACTORY.md",
+   "line": 14,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-HRANESS-STEAL-2026-09-17.md does not exist (resolved docs/research/ROOM-HRANESS-STEAL-2026-09-17.md)",
+   "text": "[ROOM-HRANESS-STEAL-2026-09-17.md](../research/ROOM-HRANESS-STEAL-2026-09-17.md).",
+   "_unit": "x03",
+   "tgt": "../research/ROOM-HRANESS-STEAL-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/ROOM-PERSONAS-FACTORY.md",
+   "line": 16,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md does not exist (resolved docs/research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md)",
+   "text": "[ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md](../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md).",
+   "_unit": "x03",
+   "tgt": "../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/ROOM-NEEDLE-CONFIDENCE-TRIGGERS-V0.md",
+   "line": 14,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-COMPUTE-NEEDLE-STEAL-2026-09-17.md does not exist (resolved docs/research/ROOM-COMPUTE-NEEDLE-STEAL-2026-09-17.md)",
+   "text": "[ROOM-COMPUTE-NEEDLE-STEAL-2026-09-17.md](../research/ROOM-COMPUTE-NEEDLE-STEAL-2026-09-17.md)",
+   "_unit": "x04",
+   "tgt": "../research/ROOM-COMPUTE-NEEDLE-STEAL-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/ROOM-NEEDLE-CONFIDENCE-TRIGGERS-V0.md",
+   "line": 124,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md does not exist (resolved docs/research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md)",
+   "text": "([ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md](../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md)).",
+   "_unit": "x04",
+   "tgt": "../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/ROOM-SECOND-V0.md",
+   "line": 163,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md does not exist (resolved docs/research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md)",
+   "text": "| `delegation.spawn` | Second or factory `foreman` mints a named specialist `room` seat (same-rung allowed). Cites parent receipt. Not a second personal agent. Never Genie. Research: [ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-1",
+   "_unit": "x04",
+   "tgt": "../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/ROOM-SECOND-V0.md",
+   "line": 215,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-NAUTILO-DEEP-AND-COUSINS-2026-09-17.md does not exist (resolved docs/research/ROOM-NAUTILO-DEEP-AND-COUSINS-2026-09-17.md)",
+   "text": "- [ROOM-NAUTILO-DEEP-AND-COUSINS-2026-09-17.md](../research/ROOM-NAUTILO-DEEP-AND-COUSINS-2026-09-17.md) \u2014 research + JSON shapes",
+   "_unit": "x04",
+   "tgt": "../research/ROOM-NAUTILO-DEEP-AND-COUSINS-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/SESSION-BUDGETS.md",
+   "line": 10,
+   "type": "BROKEN_LINK",
+   "detail": "link target HERDR-SESSIONS-AGENTS.md does not exist (resolved docs/history/HERDR-SESSIONS-AGENTS.md)",
+   "text": "[HERDR-SESSIONS-AGENTS.md](HERDR-SESSIONS-AGENTS.md).",
+   "_unit": "x04",
+   "tgt": "HERDR-SESSIONS-AGENTS.md"
+  },
+  {
+   "doc": "docs/history/ROOM-SCORER.md",
+   "line": 11,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md does not exist (resolved docs/research/ROOM-STEALS-FULL-BUILD-2026-09-17.md)",
+   "text": "[ROOM-STEALS-FULL-BUILD-2026-09-17.md](../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md).",
+   "_unit": "x04",
+   "tgt": "../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/ROOM-SCORER.md",
+   "line": 28,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md does not exist (resolved docs/research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md)",
+   "text": "[ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md](../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md).",
+   "_unit": "x04",
+   "tgt": "../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/ROOM-NAUTILO-STEAL.md",
+   "line": 9,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-NAUTILO-DEEP-AND-COUSINS-2026-09-17.md does not exist (resolved docs/research/ROOM-NAUTILO-DEEP-AND-COUSINS-2026-09-17.md)",
+   "text": "Room product language is **Second** (never Genie). `seat.kind = personal` is a Second. Spec: [ROOM-SECOND-V0.md](ROOM-SECOND-V0.md). Deep architecture + new cousins: [ROOM-NAUTILO-DEEP-AND-COUSINS-2026-09-17.md](../resea",
+   "_unit": "x04",
+   "tgt": "../research/ROOM-NAUTILO-DEEP-AND-COUSINS-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/AGENT-WORK-LIFECYCLE.md",
+   "line": 63,
+   "type": "BROKEN_LINK",
+   "detail": "link target HERDR-SESSIONS-AGENTS.md does not exist (resolved docs/history/HERDR-SESSIONS-AGENTS.md)",
+   "text": "or handing off (see [HERDR-SESSIONS-AGENTS.md](HERDR-SESSIONS-AGENTS.md)).",
+   "_unit": "x04",
+   "tgt": "HERDR-SESSIONS-AGENTS.md"
+  },
+  {
+   "doc": "docs/history/ROOM-ATTENTION-PRESENCE-V0.md",
+   "line": 15,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md does not exist (resolved docs/research/ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md)",
+   "text": "[ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md](../research/ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md)",
+   "_unit": "x04",
+   "tgt": "../research/ROOM-COMPETITIVE-LANDSCAPE-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/ROOM-ATTENTION-PRESENCE-V0.md",
+   "line": 18,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md does not exist (resolved docs/research/ROOM-STEALS-FULL-BUILD-2026-09-17.md)",
+   "text": "[ROOM-STEALS-FULL-BUILD-2026-09-17.md](../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md).",
+   "_unit": "x04",
+   "tgt": "../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/AGENT-WAKE-SETUP.md",
+   "line": 56,
+   "type": "BROKEN_LINK",
+   "detail": "link target openapi.yaml does not exist (resolved docs/history/openapi.yaml)",
+   "text": "See [the API contract](openapi.yaml), [Grok host setup](history/GROK-HOST.md), and [read-only agent resume](history/AGENT-RESUME.md). These host commands require a source checkout; the server runtime package is not a com",
+   "_unit": "x04",
+   "tgt": "openapi.yaml"
+  },
+  {
+   "doc": "docs/history/AGENT-WAKE-SETUP.md",
+   "line": 56,
+   "type": "BROKEN_LINK",
+   "detail": "link target openapi.yaml does not exist (resolved docs/history/openapi.yaml)",
+   "text": "See [the API contract](openapi.yaml), [Grok host setup](history/GROK-HOST.md), and [read-only agent resume](history/AGENT-RESUME.md). These host commands require a source checkout; the server runtime package is not a com",
+   "_unit": "x04",
+   "tgt": "history/GROK-HOST.md"
+  },
+  {
+   "doc": "docs/history/AGENT-WAKE-SETUP.md",
+   "line": 56,
+   "type": "BROKEN_LINK",
+   "detail": "link target openapi.yaml does not exist (resolved docs/history/openapi.yaml)",
+   "text": "See [the API contract](openapi.yaml), [Grok host setup](history/GROK-HOST.md), and [read-only agent resume](history/AGENT-RESUME.md). These host commands require a source checkout; the server runtime package is not a com",
+   "_unit": "x04",
+   "tgt": "history/AGENT-RESUME.md"
+  },
+  {
+   "doc": "docs/history/ROOM-DEBATE-MODE-V0.md",
+   "line": 14,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/NOVEL-PLANNING-THINKING-BUILDS-2026-09-17.md does not exist (resolved docs/research/NOVEL-PLANNING-THINKING-BUILDS-2026-09-17.md)",
+   "text": "[NOVEL-PLANNING-THINKING-BUILDS-2026-09-17.md](../research/NOVEL-PLANNING-THINKING-BUILDS-2026-09-17.md)",
+   "_unit": "x05",
+   "tgt": "../research/NOVEL-PLANNING-THINKING-BUILDS-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/ROOM-RECEIPT-V1.md",
+   "line": 10,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md does not exist (resolved docs/research/ROOM-STEALS-FULL-BUILD-2026-09-17.md)",
+   "text": "[ROOM-STEALS-FULL-BUILD-2026-09-17.md](../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md).",
+   "_unit": "x05",
+   "tgt": "../research/ROOM-STEALS-FULL-BUILD-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/ROOM-RECEIPT-V1.md",
+   "line": 17,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/CUA-FLEET-SPIKE-2026-09-17.md does not exist (resolved docs/research/CUA-FLEET-SPIKE-2026-09-17.md)",
+   "text": "[CUA-FLEET-SPIKE-2026-09-17.md](../research/CUA-FLEET-SPIKE-2026-09-17.md)",
+   "_unit": "x05",
+   "tgt": "../research/CUA-FLEET-SPIKE-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/ROOM-RECEIPT-V1.md",
+   "line": 25,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-INTERLATERAL-RESEARCH-2026-09-17.md does not exist (resolved docs/research/ROOM-INTERLATERAL-RESEARCH-2026-09-17.md)",
+   "text": "[ROOM-INTERLATERAL-RESEARCH-2026-09-17.md](../research/ROOM-INTERLATERAL-RESEARCH-2026-09-17.md).",
+   "_unit": "x05",
+   "tgt": "../research/ROOM-INTERLATERAL-RESEARCH-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/ROOM-RECEIPT-V1.md",
+   "line": 154,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md does not exist (resolved docs/research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md)",
+   "text": "`parentReceiptId` \u2014 [ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md](../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md).",
+   "_unit": "x05",
+   "tgt": "../research/ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md"
+  },
+  {
+   "doc": "docs/history/ASK-REGEN-ALT-MODEL-SPEC-2026-09-18.md",
+   "line": 8,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md does not exist (resolved docs/research/ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md)",
+   "text": "**Cousins:** [ASK-QUIET-SHELL-V3.md](ASK-QUIET-SHELL-V3.md) \u00b7 [ASK-MODEL-CMDK-SPEC-2026-09-17.md](ASK-MODEL-CMDK-SPEC-2026-09-17.md) \u00b7 [ASK-CONTINUE-AFTER-STOP-SPEC-2026-09-18.md](ASK-CONTINUE-AFTER-STOP-SPEC-2026-09-18.",
+   "_unit": "x05",
+   "tgt": "../research/ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/ASK-CONTINUE-AFTER-STOP-SPEC-2026-09-18.md",
+   "line": 8,
+   "type": "BROKEN_LINK",
+   "detail": "link target ../research/ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md does not exist (resolved docs/research/ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md)",
+   "text": "**Cousins:** [ASK-QUIET-SHELL-V3.md](ASK-QUIET-SHELL-V3.md) \u00b7 [ASK-REGEN-ALT-MODEL-SPEC-2026-09-18.md](ASK-REGEN-ALT-MODEL-SPEC-2026-09-18.md) \u00b7 T082 action keys [ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md](../research/A",
+   "_unit": "x05",
+   "tgt": "../research/ASK-KEYBOARD-SHORTCUTS-BRIEF-2026-09-18.md"
+  },
+  {
+   "doc": "docs/history/HOW-TO-TEST.md",
+   "line": 58,
+   "type": "BROKEN_LINK",
+   "detail": "link target ROOM-ROSTER.md does not exist (resolved docs/history/ROOM-ROSTER.md)",
+   "text": "[ROOM-ROSTER.md](ROOM-ROSTER.md))",
+   "_unit": "x05",
+   "tgt": "ROOM-ROSTER.md"
+  },
+  {
+   "doc": "docs/history/HOW-TO-TEST.md",
+   "line": 66,
+   "type": "BROKEN_LINK",
+   "detail": "link target CURRENT-ROOM.md does not exist (resolved docs/history/CURRENT-ROOM.md)",
+   "text": "Current map: [CURRENT-ROOM.md](CURRENT-ROOM.md)",
+   "_unit": "x05",
+   "tgt": "CURRENT-ROOM.md"
+  }
+ ]
+}

@@ -1,0 +1,1222 @@
+{
+ "check": "paths",
+ "confirmed": 135,
+ "false_positive": 0,
+ "items": [
+  {
+   "doc": "docs/SWARM-PLUG-IN.md",
+   "line": 751,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path agents/DAY-TWO.md does not exist",
+   "text": "`AGENT-CONNECTION.md`, `AGENT-HOSTS.md`, `AGENT-PLUG.md`, `agents/DAY-TWO.md`,",
+   "_unit": "c01",
+   "path": "agents/DAY-TWO.md"
+  },
+  {
+   "doc": "docs/SWARM-PLUG-IN.md",
+   "line": 752,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path agents/FAQ.md does not exist",
+   "text": "`agents/FAQ.md`, `agents/TROUBLESHOOTING.md`, `DISCOVERY-FOR-AGENTS.md`.",
+   "_unit": "c01",
+   "path": "agents/FAQ.md"
+  },
+  {
+   "doc": "docs/SWARM-PLUG-IN.md",
+   "line": 752,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path agents/TROUBLESHOOTING.md does not exist",
+   "text": "`agents/FAQ.md`, `agents/TROUBLESHOOTING.md`, `DISCOVERY-FOR-AGENTS.md`.",
+   "_unit": "c01",
+   "path": "agents/TROUBLESHOOTING.md"
+  },
+  {
+   "doc": "docs/SWARM-PLUG-IN.md",
+   "line": 1631,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path server/discover does not exist",
+   "text": "`server/discover`, allowing a dual-era client to fall back, but a",
+   "_unit": "c01",
+   "path": "server/discover"
+  },
+  {
+   "doc": "docs/history/ROOM-AUTH-SESSION-FRICTION-20260918.md",
+   "line": 134,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/AGENT-CONNECTION.md does not exist",
+   "text": "- `docs/AGENT-CONNECTION.md`, `docs/AGENT-QUICKSTART.md`, and",
+   "_unit": "c01",
+   "path": "docs/AGENT-CONNECTION.md"
+  },
+  {
+   "doc": "docs/history/ROOM-AUTH-SESSION-FRICTION-20260918.md",
+   "line": 135,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/agents/TROUBLESHOOTING.md does not exist",
+   "text": "`docs/agents/TROUBLESHOOTING.md` distinguish doctor vs check.",
+   "_unit": "c01",
+   "path": "docs/agents/TROUBLESHOOTING.md"
+  },
+  {
+   "doc": "docs/history/AGENTIC-UX-PRINCIPLES.md",
+   "line": 43,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/AGENT-IDENTITIES.md does not exist",
+   "text": "active, paused, or revoked. See `docs/AGENT-IDENTITIES.md`.",
+   "_unit": "c01",
+   "path": "docs/AGENT-IDENTITIES.md"
+  },
+  {
+   "doc": "docs/exchange/117-exchange-incident-runbook.md",
+   "line": 5,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path tests/exchange-ledger-chaos.test.js does not exist",
+   "text": "`tests/exchange-ledger-chaos.test.js` (on the ledger branch) proves",
+   "_unit": "c01",
+   "path": "tests/exchange-ledger-chaos.test.js"
+  },
+  {
+   "doc": "docs/history/SAFE-DIAGNOSTICS.md",
+   "line": 64,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/INVITE-ONLY-DEPLOYMENT.md does not exist",
+   "text": "repository (`docs/INVITE-ONLY-DEPLOYMENT.md`), so the consumer column names",
+   "_unit": "c01",
+   "path": "docs/INVITE-ONLY-DEPLOYMENT.md"
+  },
+  {
+   "doc": "docs/history/SAFE-DIAGNOSTICS.md",
+   "line": 66,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/EXECUTION-PLAN.md does not exist",
+   "text": "alert (`docs/EXECUTION-PLAN.md`: a consumer and sustained thresholds come",
+   "_unit": "c01",
+   "path": "docs/EXECUTION-PLAN.md"
+  },
+  {
+   "doc": "docs/history/JOB-BOT.md",
+   "line": 10,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path server/job-bot.mjs does not exist",
+   "text": "`server/job-bot.mjs` implements the full job lifecycle against an **in-memory",
+   "_unit": "c01",
+   "path": "server/job-bot.mjs"
+  },
+  {
+   "doc": "docs/SESSION-ADAPTER.md",
+   "line": 261,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path server/supervision-sqlite.mjs does not exist",
+   "text": "- Supervision backend: `server/supervision.mjs`, `server/supervision-sqlite.mjs`,",
+   "_unit": "c02",
+   "path": "server/supervision-sqlite.mjs"
+  },
+  {
+   "doc": "docs/history/TELEGRAM-BUSINESS-API-SPIKE.md",
+   "line": 11,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/TELEGRAM-INBOUND-DECISION.md does not exist",
+   "text": "Terminology follows the merged decision doc `docs/TELEGRAM-INBOUND-DECISION.md` (PR #529):",
+   "_unit": "c02",
+   "path": "docs/TELEGRAM-INBOUND-DECISION.md"
+  },
+  {
+   "doc": "docs/history/USABILITY-PLAN.md",
+   "line": 124,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/HOW-TO-TEST.md does not exist",
+   "text": "`scripts/room-results-browser-check.mjs`, `docs/HOW-TO-TEST.md`.",
+   "_unit": "c02",
+   "path": "docs/HOW-TO-TEST.md"
+  },
+  {
+   "doc": "docs/history/USABILITY-PLAN.md",
+   "line": 174,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/USABILITY-PLAN.md does not exist",
+   "text": "| A | Usability plan + Phase 1 UX | `docs/USABILITY-PLAN.md`, `index.html`, `src/app.js`, `src/styles.css`, `docs/HOW-TO-TEST.md`, tests | none |",
+   "_unit": "c02",
+   "path": "docs/USABILITY-PLAN.md"
+  },
+  {
+   "doc": "docs/history/LOAD-TEST-2026-09-14.md",
+   "line": 3,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/LOAD-TEST-2026-09-12.md does not exist",
+   "text": "BUILD-01 issue #6, item E1. The 2026-09-12 run (`docs/LOAD-TEST-2026-09-12.md`)",
+   "_unit": "c02",
+   "path": "docs/LOAD-TEST-2026-09-12.md"
+  },
+  {
+   "doc": "docs/ROOM-PROTOCOL.md",
+   "line": 21,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/AGENT-LANES.md does not exist",
+   "text": "codex, Jillian \u2014 see `docs/AGENT-LANES.md`) must use to claim work, report",
+   "_unit": "c03",
+   "path": "docs/AGENT-LANES.md"
+  },
+  {
+   "doc": "docs/analytics/EVENTS.md",
+   "line": 5,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/analytics/weekly/ does not exist",
+   "text": "This is the growth event catalog. Weekly snapshots land in `docs/analytics/weekly/`. The collector that writes these rows lives in `server/analytics/`.",
+   "_unit": "c03",
+   "path": "docs/analytics/weekly/"
+  },
+  {
+   "doc": "docs/SERVICE.md",
+   "line": 99,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/CONVERSATION.md does not exist",
+   "text": "`message.pinned` and `message.unpinned` accept `{messageId}` from any active member. The message must already belong to this room and, for a pin, must not be deleted; the room holds at most 50 pins, in pin order. Both ar",
+   "_unit": "c03",
+   "path": "docs/CONVERSATION.md"
+  },
+  {
+   "doc": "docs/GROK-BUILD-CONTINUOUS.md",
+   "line": 32,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/AUTOMATION-DECISION-2026-09-29.md does not exist",
+   "text": "Ship an automation only if it makes join, attention, or execution faster, easier, or more powerful, **and** it does not add a parallel confusing system. Cite a real source (Linear sessions, Cursor subscriptions, Claude/C",
+   "_unit": "c03",
+   "path": "docs/AUTOMATION-DECISION-2026-09-29.md"
+  },
+  {
+   "doc": "docs/history/UNIFIED-INBOX.md",
+   "line": 270,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/EMAIL-ROUTING.md does not exist",
+   "text": "| Email inbound | Recorded Graph fixtures; cards read \"Inbound: fixture mailbox \u00b7 not yet routed\" | Cloudflare Email Routing hands mail to the Worker (#144: `server/mime-message.mjs`, `server/email-routing-inbound.mjs`, ",
+   "_unit": "c04",
+   "path": "docs/EMAIL-ROUTING.md"
+  },
+  {
+   "doc": "docs/history/TRUST-PACKET.md",
+   "line": 18,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/SAFE-DIAGNOSTICS.md does not exist",
+   "text": "| What to send | The `X-Operation-Id` from the failing response, or the owner-only support export (`docs/SAFE-DIAGNOSTICS.md`). Never send keys, invitation links or message bodies. |",
+   "_unit": "c06",
+   "path": "docs/SAFE-DIAGNOSTICS.md"
+  },
+  {
+   "doc": "docs/history/TRUST-PACKET.md",
+   "line": 28,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/V8-RECOVERY-RUNBOOK.md does not exist",
+   "text": "Drawn from `docs/V8-RECOVERY-RUNBOOK.md` and `docs/SAFE-DIAGNOSTICS.md`. The",
+   "_unit": "c06",
+   "path": "docs/V8-RECOVERY-RUNBOOK.md"
+  },
+  {
+   "doc": "docs/history/TRUST-PACKET.md",
+   "line": 75,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/RE-AUDIT-2026-09-14.md does not exist",
+   "text": "- `docs/RE-AUDIT-2026-09-14.md`: re-audit after BUILD-01 Phases 0 to 2",
+   "_unit": "c06",
+   "path": "docs/RE-AUDIT-2026-09-14.md"
+  },
+  {
+   "doc": "docs/history/TRUST-PACKET.md",
+   "line": 84,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/DATA-BOUNDARIES.md does not exist",
+   "text": "`docs/DATA-BOUNDARIES.md`: what is encrypted where (TLS at the edge, hashed",
+   "_unit": "c06",
+   "path": "docs/DATA-BOUNDARIES.md"
+  },
+  {
+   "doc": "docs/history/TRUST-PACKET.md",
+   "line": 93,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/EXPORT-RETENTION-DELETION.md does not exist",
+   "text": "From `docs/EXPORT-RETENTION-DELETION.md`:",
+   "_unit": "c06",
+   "path": "docs/EXPORT-RETENTION-DELETION.md"
+  },
+  {
+   "doc": "docs/history/NOTIFICATIONS.md",
+   "line": 178,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/UNIFIED-INBOX.md does not exist",
+   "text": "the account inbox (`docs/UNIFIED-INBOX.md`) is the place a roll-up would go.",
+   "_unit": "c07",
+   "path": "docs/UNIFIED-INBOX.md"
+  },
+  {
+   "doc": "docs/history/NOTIFICATIONS.md",
+   "line": 218,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path server/notify-classifier.mjs does not exist",
+   "text": "- **The predicate is owned by lane B19** in `server/notify-classifier.mjs`:",
+   "_unit": "c07",
+   "path": "server/notify-classifier.mjs"
+  },
+  {
+   "doc": "docs/security/data-retention-policy.md",
+   "line": 92,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path scripts/retention-plan.mjs does not exist",
+   "text": "`scripts/retention-plan.mjs` (ships in the companion implementation PR) wraps",
+   "_unit": "c07",
+   "path": "scripts/retention-plan.mjs"
+  },
+  {
+   "doc": "docs/security/data-retention-policy.md",
+   "line": 106,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path tests/retention-plan.test.js does not exist",
+   "text": "**Fixture tests** (`tests/retention-plan.test.js`): build a scratch sqlite DB",
+   "_unit": "c07",
+   "path": "tests/retention-plan.test.js"
+  },
+  {
+   "doc": "docs/history/MORNING-DIGEST-SLA.md",
+   "line": 4,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path server/morning-digest.mjs does not exist",
+   "text": "> callers). The pure digest builder (`server/morning-digest.mjs`) and the",
+   "_unit": "c07",
+   "path": "server/morning-digest.mjs"
+  },
+  {
+   "doc": "docs/history/MORNING-DIGEST-SLA.md",
+   "line": 79,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path server/sla-sweep-hooks.mjs does not exist",
+   "text": "`server/sla-sweep-hooks.mjs` wire the sweep's injected authorities:",
+   "_unit": "c07",
+   "path": "server/sla-sweep-hooks.mjs"
+  },
+  {
+   "doc": "docs/GROK-DEEP-PLUG-PLAN-2026-09-29.md",
+   "line": 252,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/GROK-HOST.md does not exist",
+   "text": "- Operator card: `docs/GROK-HOST.md`",
+   "_unit": "c08",
+   "path": "docs/GROK-HOST.md"
+  },
+  {
+   "doc": "docs/history/telegram-live-status.md",
+   "line": 62,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path server/channel-adapters/telegram-poller.mjs does not exist",
+   "text": "- `server/channel-adapters/telegram-poller.mjs` \u2014 poller records fresh updates received.",
+   "_unit": "c08",
+   "path": "server/channel-adapters/telegram-poller.mjs"
+  },
+  {
+   "doc": "docs/history/ROOM-NAUTILO-STEAL.md",
+   "line": 39,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/progressive-tool-activation.md does not exist",
+   "text": "6. **Progressive tool activation** (`docs/progressive-tool-activation.md`)",
+   "_unit": "c09",
+   "path": "docs/progressive-tool-activation.md"
+  },
+  {
+   "doc": "docs/history/ROOM-NAUTILO-STEAL.md",
+   "line": 43,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/quiet-events.md does not exist",
+   "text": "7. **Quiet events** (`docs/quiet-events.md`)",
+   "_unit": "c09",
+   "path": "docs/quiet-events.md"
+  },
+  {
+   "doc": "docs/history/ROOM-NAUTILO-STEAL.md",
+   "line": 47,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/genie-application-bridge.md does not exist",
+   "text": "8. **Nautilo Genie Application Bridge** (`docs/genie-application-bridge.md`)",
+   "_unit": "c09",
+   "path": "docs/genie-application-bridge.md"
+  },
+  {
+   "doc": "docs/history/ROOM-NAUTILO-STEAL.md",
+   "line": 96,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/ROOM-NAUTILO-STEAL.md does not exist",
+   "text": "1. Spec: `docs/ROOM-NAUTILO-STEAL.md` + `docs/ROOM-SECOND-V0.md` (Second = personal vs room vs synthesis).",
+   "_unit": "c09",
+   "path": "docs/ROOM-NAUTILO-STEAL.md"
+  },
+  {
+   "doc": "docs/history/ROOM-NAUTILO-STEAL.md",
+   "line": 96,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/ROOM-SECOND-V0.md does not exist",
+   "text": "1. Spec: `docs/ROOM-NAUTILO-STEAL.md` + `docs/ROOM-SECOND-V0.md` (Second = personal vs room vs synthesis).",
+   "_unit": "c09",
+   "path": "docs/ROOM-SECOND-V0.md"
+  },
+  {
+   "doc": "docs/history/CAPABILITY-REGISTRY.md",
+   "line": 3,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path server/capability-registry.mjs does not exist",
+   "text": "**Module:** `server/capability-registry.mjs` \u00b7 **Tests:** `tests/capability-registry.test.js` (38 tests)",
+   "_unit": "c09",
+   "path": "server/capability-registry.mjs"
+  },
+  {
+   "doc": "docs/history/CAPABILITY-REGISTRY.md",
+   "line": 3,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path tests/capability-registry.test.js does not exist",
+   "text": "**Module:** `server/capability-registry.mjs` \u00b7 **Tests:** `tests/capability-registry.test.js` (38 tests)",
+   "_unit": "c09",
+   "path": "tests/capability-registry.test.js"
+  },
+  {
+   "doc": "docs/history/MCP-INSTALL.md",
+   "line": 4,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path server/mcp-install-script.mjs does not exist",
+   "text": "> removed: `server/mcp-install-script.mjs` \u2014 the module that generated the",
+   "_unit": "c09",
+   "path": "server/mcp-install-script.mjs"
+  },
+  {
+   "doc": "docs/history/MERGE-QUEUE-DESIGN.md",
+   "line": 77,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/GITHUB-HYGIENE.md does not exist",
+   "text": "`docs/GITHUB-HYGIENE.md`). Reorder churn is visible on the board as",
+   "_unit": "c10",
+   "path": "docs/GITHUB-HYGIENE.md"
+  },
+  {
+   "doc": "docs/history/self-serve-join.md",
+   "line": 237,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path server/guest-join.mjs does not exist",
+   "text": "2. `server/guest-join.mjs` (new): the v2 policy module, kept separate from the",
+   "_unit": "c10",
+   "path": "server/guest-join.mjs"
+  },
+  {
+   "doc": "docs/history/verified-state-transition-ledger.md",
+   "line": 418,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/verified-state-transition-ledger.md does not exist",
+   "text": "Suggested future repo path after a clean public claim: `docs/verified-state-transition-ledger.md`. This path was claimed on the Project Room coordination board before publication.",
+   "_unit": "c11",
+   "path": "docs/verified-state-transition-ledger.md"
+  },
+  {
+   "doc": "docs/history/ASK-MODEL-CMDK-SPEC-2026-09-17.md",
+   "line": 8,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/ASK-QUIET-SHELL-V3.md does not exist",
+   "text": "**Companions:** box `UX-CLEAN-LESS-NOISE-2026-09-17.md` \u00b7 `docs/ASK-QUIET-SHELL-V3.md` \u00b7 box `GEMMA27-DEMOTE-AFTER-BONSAI.md` (dasha-lobby #258 draft)",
+   "_unit": "c11",
+   "path": "docs/ASK-QUIET-SHELL-V3.md"
+  },
+  {
+   "doc": "docs/ADMIN-GUIDE.md",
+   "line": 35,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/EMAIL-ROUTING-RUNBOOK.md does not exist",
+   "text": "- `docs/EMAIL-ROUTING-RUNBOOK.md` \u2014 inbound mail routing. **Activation is",
+   "_unit": "c11",
+   "path": "docs/EMAIL-ROUTING-RUNBOOK.md"
+  },
+  {
+   "doc": "docs/TROUBLESHOOTING.md",
+   "line": 300,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path server/wake-webhook-dispatch.mjs does not exist",
+   "text": "- There is no `server/wake-webhook-dispatch.mjs` and no `room_wake_hooks`",
+   "_unit": "c13",
+   "path": "server/wake-webhook-dispatch.mjs"
+  },
+  {
+   "doc": "docs/security/monitoring-coverage-audit.md",
+   "line": 45,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path scripts/projection-size-check.mjs does not exist",
+   "text": "or a new `scripts/projection-size-check.mjs` run by the room-watch tick. Alert",
+   "_unit": "c13",
+   "path": "scripts/projection-size-check.mjs"
+  },
+  {
+   "doc": "docs/history/ARTIFACT-TAGS.md",
+   "line": 6,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path server/room-reports.mjs does not exist",
+   "text": "(`server/room-reports.mjs`) extracts them into typed artifacts and composes a",
+   "_unit": "c13",
+   "path": "server/room-reports.mjs"
+  },
+  {
+   "doc": "docs/history/GO-LIVE-CHECKLIST.md",
+   "line": 234,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/TRUST-PACKET.md does not exist",
+   "text": "From `docs/TRUST-PACKET.md` \"Owner to confirm\":",
+   "_unit": "c14",
+   "path": "docs/TRUST-PACKET.md"
+  },
+  {
+   "doc": "docs/history/GO-LIVE-CHECKLIST.md",
+   "line": 294,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/WORKER-LIMITS.md does not exist",
+   "text": "`.github/workflows/test.yml`. `docs/WORKER-LIMITS.md` (from PR #160)",
+   "_unit": "c14",
+   "path": "docs/WORKER-LIMITS.md"
+  },
+  {
+   "doc": "docs/history/DATA-BOUNDARIES.md",
+   "line": 36,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/MODERATION.md does not exist",
+   "text": "display preference, not authority (`docs/MODERATION.md`).",
+   "_unit": "c14",
+   "path": "docs/MODERATION.md"
+  },
+  {
+   "doc": "docs/history/DATA-BOUNDARIES.md",
+   "line": 167,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/PRODUCTION-PLAN.md does not exist",
+   "text": "claim, and `docs/PRODUCTION-PLAN.md` explicitly rules out a multi-region",
+   "_unit": "c14",
+   "path": "docs/PRODUCTION-PLAN.md"
+  },
+  {
+   "doc": "docs/history/DATA-BOUNDARIES.md",
+   "line": 195,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/DASHA-ADAPTER-CONTRACT-2026-09-13.md does not exist",
+   "text": "submission-reconciliation gate (`docs/DASHA-ADAPTER-CONTRACT-2026-09-13.md`",
+   "_unit": "c14",
+   "path": "docs/DASHA-ADAPTER-CONTRACT-2026-09-13.md"
+  },
+  {
+   "doc": "docs/ROOM-WIKI.md",
+   "line": 13,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/ROOM-PROCEDURES.md does not exist",
+   "text": "file), and the validated procedures (`docs/ROOM-PROCEDURES.md`).",
+   "_unit": "c14",
+   "path": "docs/ROOM-PROCEDURES.md"
+  },
+  {
+   "doc": "docs/history/BOARD-V2-DESIGN.md",
+   "line": 24,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path server/board-v2-sqlite.mjs does not exist",
+   "text": "`boardV2Schema` from `server/board-v2-sqlite.mjs`), and RC-2026-09-27-2720",
+   "_unit": "c15",
+   "path": "server/board-v2-sqlite.mjs"
+  },
+  {
+   "doc": "docs/history/BOARD-V2-DESIGN.md",
+   "line": 105,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path server/board-v2.mjs does not exist",
+   "text": "- **Prototype scope:** `server/board-v2.mjs` implements the board logic +",
+   "_unit": "c15",
+   "path": "server/board-v2.mjs"
+  },
+  {
+   "doc": "docs/history/BOARD-V2-DESIGN.md",
+   "line": 327,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path tests/board-v2.test.js does not exist",
+   "text": "Covers (`server/board-v2.mjs` + `tests/board-v2.test.js`):",
+   "_unit": "c15",
+   "path": "tests/board-v2.test.js"
+  },
+  {
+   "doc": "docs/ADOPTION.md",
+   "line": 29,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path server/analytics-ingest.mjs does not exist",
+   "text": "When `ROOM_OPS_POST_TOKEN` and `ROOM_OPS_ROOM_ID` are set, the summary is posted to that room. When `server/analytics-ingest.mjs` exports `INGEST_PATH` and `ANALYTICS_INGEST_TOKEN` is set, the same totals are posted as a",
+   "_unit": "c15",
+   "path": "server/analytics-ingest.mjs"
+  },
+  {
+   "doc": "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+   "line": 17,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/SHARED-ROADMAP.md does not exist",
+   "text": "carries: draft PR #7 (`docs/SHARED-ROADMAP.md`, never merged, so it is not",
+   "_unit": "c16",
+   "path": "docs/SHARED-ROADMAP.md"
+  },
+  {
+   "doc": "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+   "line": 25,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/RELEASE-INVENTORY.md does not exist",
+   "text": "`docs/EXECUTION-PLAN.md`, `docs/RELEASE-INVENTORY.md`,",
+   "_unit": "c16",
+   "path": "docs/RELEASE-INVENTORY.md"
+  },
+  {
+   "doc": "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+   "line": 26,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/SESSION-BUDGETS.md does not exist",
+   "text": "`docs/EXPORT-RETENTION-DELETION.md`, `docs/SESSION-BUDGETS.md`,",
+   "_unit": "c16",
+   "path": "docs/SESSION-BUDGETS.md"
+  },
+  {
+   "doc": "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+   "line": 27,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/MANUAL-AT.md does not exist",
+   "text": "`docs/MANUAL-AT.md`, `docs/INVITE-ONLY-CHECKLIST.md`, `docs/HOST-MATRIX.md`,",
+   "_unit": "c16",
+   "path": "docs/MANUAL-AT.md"
+  },
+  {
+   "doc": "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+   "line": 60,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/FIRST-USE-TESTING-2026-09-07.md does not exist",
+   "text": "| A6 Welcoming first room | open \u2014 partial | Room charter (`tests/room-charter.test.js:25`), first-use browser check (`scripts/first-use-check.mjs`), dismissible guide (`src/app.js:528`), people rail (`scripts/people-rai",
+   "_unit": "c16",
+   "path": "docs/FIRST-USE-TESTING-2026-09-07.md"
+  },
+  {
+   "doc": "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+   "line": 68,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/HONEST-EMPTY.md does not exist",
+   "text": "| B3 Unread and catch-up | **done** | Return brief: fetching never acknowledges, explicit cursor per member (`server/return-brief.mjs:10,29`; `tests/return-brief.test.js:64,234`), unresolved work survives catch-up (`:93`",
+   "_unit": "c16",
+   "path": "docs/HONEST-EMPTY.md"
+  },
+  {
+   "doc": "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+   "line": 91,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/MEMBER-CAPABILITIES.md does not exist",
+   "text": "| D4 Guests and least-privilege administration | open \u2014 partial | Time-bounded guests: links \u22647 days and \u226425 joins (`server/share-links.mjs:18,102`), guest and room sessions \u22648 h (`server/store.mjs:810,1198`; `server/sha",
+   "_unit": "c16",
+   "path": "docs/MEMBER-CAPABILITIES.md"
+  },
+  {
+   "doc": "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+   "line": 110,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/BUILD-PLAN.md does not exist",
+   "text": "| F1 Import without authority laundering | open \u2014 partial | Room import replays only the room's own export (`server/http.mjs:682`; `tests/room-export.test.js:100,145`). Channel import (email, Telegram fixtures) keeps sou",
+   "_unit": "c16",
+   "path": "docs/BUILD-PLAN.md"
+  },
+  {
+   "doc": "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+   "line": 126,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path server/oidc-login.mjs does not exist",
+   "text": "- Files: new `server/oidc-login.mjs` (authorization-code + PKCE, issuer/audience/nonce checks, no token storage beyond the hashed session slot); `server/http.mjs` routes `GET /api/auth/oidc/start`, `GET /api/auth/oidc/ca",
+   "_unit": "c16",
+   "path": "server/oidc-login.mjs"
+  },
+  {
+   "doc": "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+   "line": 128,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path tests/oidc-login.test.js does not exist",
+   "text": "- Tests: `tests/oidc-login.test.js` with a local mock issuer (state/nonce mismatch, wrong audience, expired token, replayed code, subject reuse across accounts all refused; happy path creates one session slot); `scripts/",
+   "_unit": "c16",
+   "path": "tests/oidc-login.test.js"
+  },
+  {
+   "doc": "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+   "line": 140,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/WORK-ITEM-SESSION.md does not exist",
+   "text": "- Files: `server/store.mjs` (room `policy.requireIndependentReview`, `policy.requireOwnerDecision` set via a `ROOM_POLICY_SET` owner event; `WORK_PROPOSED` handler overrides client fields when policy is on); `src/events.",
+   "_unit": "c16",
+   "path": "docs/WORK-ITEM-SESSION.md"
+  },
+  {
+   "doc": "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+   "line": 147,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/evidence/first-room-human-2026-09-XX.md does not exist",
+   "text": "- Files: `docs/evidence/first-room-human-2026-09-XX.md`; fixes discovered land as separate small PRs.",
+   "_unit": "c16",
+   "path": "docs/evidence/first-room-human-2026-09-XX.md"
+  },
+  {
+   "doc": "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+   "line": 154,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/MOBILE-COMPOSER-CHECKLIST.md does not exist",
+   "text": "- Files: `docs/MOBILE-COMPOSER-CHECKLIST.md` (iPhone Safari + Home Screen, Android Chrome; keyboard, dictation, long paste, rotation, offline, background); `scripts/composer-browser-check.mjs` add Playwright emulation fo",
+   "_unit": "c16",
+   "path": "docs/MOBILE-COMPOSER-CHECKLIST.md"
+  },
+  {
+   "doc": "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+   "line": 168,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/NOTIFICATIONS.md does not exist",
+   "text": "- Files: `server/notifications.mjs` (derive per-member notifications from the event tail using `notificationPreferences`; dedupe by `(member, messageId|workItemId, kind)`; expire with the room cursor), `server/http.mjs` ",
+   "_unit": "c16",
+   "path": "docs/NOTIFICATIONS.md"
+  },
+  {
+   "doc": "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+   "line": 177,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path tests/private-conversations.test.js does not exist",
+   "text": "- Tests: `tests/private-conversations.test.js` covering history, search, stream, export, agent context and notifications across the boundary; recovery comparison updated for the new table.",
+   "_unit": "c16",
+   "path": "tests/private-conversations.test.js"
+  },
+  {
+   "doc": "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+   "line": 189,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path server/runtime-adapter.mjs does not exist",
+   "text": "- Files: `server/runtime-adapter.mjs` implementing `docs/DASHA-ADAPTER-CONTRACT-2026-09-13.md` \u00a73 (submission key `dasha:<workItemId>:<attempt>`, intent before submit via `server/dispatch-journal.mjs`), `scripts/agent-in",
+   "_unit": "c16",
+   "path": "server/runtime-adapter.mjs"
+  },
+  {
+   "doc": "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+   "line": 189,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path server/dispatch-journal.mjs does not exist",
+   "text": "- Files: `server/runtime-adapter.mjs` implementing `docs/DASHA-ADAPTER-CONTRACT-2026-09-13.md` \u00a73 (submission key `dasha:<workItemId>:<attempt>`, intent before submit via `server/dispatch-journal.mjs`), `scripts/agent-in",
+   "_unit": "c16",
+   "path": "server/dispatch-journal.mjs"
+  },
+  {
+   "doc": "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+   "line": 191,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path tests/runtime-adapter.test.js does not exist",
+   "text": "- Tests: `tests/runtime-adapter.test.js` with a local HTTP stub provider (lost response reconciles, duplicate delivery no second run, cancel-vs-complete race yields one terminal state); hosted evidence recorded separatel",
+   "_unit": "c16",
+   "path": "tests/runtime-adapter.test.js"
+  },
+  {
+   "doc": "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+   "line": 217,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/ORGANIZATION-BOUNDARY.md does not exist",
+   "text": "- Files: `docs/ORGANIZATION-BOUNDARY.md` (decision: keep SQLite-per-workspace Durable Objects with one organization per object, or move to PostgreSQL with RLS as `docs/PRODUCTION-PLAN.md` slice 11 says; the issue's D1 te",
+   "_unit": "c16",
+   "path": "docs/ORGANIZATION-BOUNDARY.md"
+  },
+  {
+   "doc": "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+   "line": 219,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path tests/organizations.test.js does not exist",
+   "text": "- Tests: `tests/organizations.test.js` (two organisations with similar names cannot read each other's rooms, search, exports, invitations or agent context).",
+   "_unit": "c16",
+   "path": "tests/organizations.test.js"
+  },
+  {
+   "doc": "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+   "line": 231,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path server/scim.mjs does not exist",
+   "text": "- Files: `server/scim.mjs` (Users/Groups endpoints, bearer per organisation, idempotent sync, group-to-role map), `server/http.mjs`, `docs/SCIM.md`.",
+   "_unit": "c16",
+   "path": "server/scim.mjs"
+  },
+  {
+   "doc": "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+   "line": 231,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/SCIM.md does not exist",
+   "text": "- Files: `server/scim.mjs` (Users/Groups endpoints, bearer per organisation, idempotent sync, group-to-role map), `server/http.mjs`, `docs/SCIM.md`.",
+   "_unit": "c16",
+   "path": "docs/SCIM.md"
+  },
+  {
+   "doc": "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+   "line": 233,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path tests/scim.test.js does not exist",
+   "text": "- Tests: `tests/scim.test.js` (create, patch, deactivate, reactivate, group change, replayed request).",
+   "_unit": "c16",
+   "path": "tests/scim.test.js"
+  },
+  {
+   "doc": "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+   "line": 245,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path server/audit-export.mjs does not exist",
+   "text": "- Files: `server/audit-export.mjs` (merge room events, `membership_invitation_events`, `share_links`, `agent_connections`, `wake_queue` dead-letters into one actor/operation/target/time/result/provenance shape), `server/",
+   "_unit": "c16",
+   "path": "server/audit-export.mjs"
+  },
+  {
+   "doc": "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+   "line": 246,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path tests/audit-export.test.js does not exist",
+   "text": "- Tests: `tests/audit-export.test.js` (denied action recorded without content; filter scoping; export completeness after a storage failure; owner-only).",
+   "_unit": "c16",
+   "path": "tests/audit-export.test.js"
+  },
+  {
+   "doc": "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+   "line": 258,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/LOAD-TEST-2026-09-XX.md does not exist",
+   "text": "- Files: `scripts/load-test.mjs` add N open SSE streams and wake-queue enqueue/lease lag histograms; `docs/LOAD-TEST-2026-09-XX.md`.",
+   "_unit": "c16",
+   "path": "docs/LOAD-TEST-2026-09-XX.md"
+  },
+  {
+   "doc": "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+   "line": 266,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path tests/backup-encrypt.test.js does not exist",
+   "text": "- Tests: `tests/backup-encrypt.test.js` (wrong key refused, tampered ciphertext refused, round-trip equal on all 36 tables).",
+   "_unit": "c16",
+   "path": "tests/backup-encrypt.test.js"
+  },
+  {
+   "doc": "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+   "line": 290,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/evidence/at-2026-09-XX.md does not exist",
+   "text": "- Files: `docs/MANUAL-AT.md` result columns filled for VoiceOver + Safari and NVDA + Chrome at the exact revision; add a TalkBack row set and a second-engine (Firefox) pass; `docs/evidence/at-2026-09-XX.md`.",
+   "_unit": "c16",
+   "path": "docs/evidence/at-2026-09-XX.md"
+  },
+  {
+   "doc": "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+   "line": 296,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path server/github-import.mjs does not exist",
+   "text": "- Files: `server/github-import.mjs` (fetch issue/PR/commit/check metadata with a least-privilege App installation token; store immutable references, author as provenance label not a member; delivery-id dedupe), `server/h",
+   "_unit": "c16",
+   "path": "server/github-import.mjs"
+  },
+  {
+   "doc": "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+   "line": 298,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path tests/github-import.test.js does not exist",
+   "text": "- Tests: `tests/github-import.test.js` with recorded fixtures (dedupe, renamed repo, deleted source, rate limit, edited comment).",
+   "_unit": "c16",
+   "path": "tests/github-import.test.js"
+  },
+  {
+   "doc": "docs/history/GROWTH-ANALYTICS.md",
+   "line": 8,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/GROWTH-EVENT-CONTRACT.md does not exist",
+   "text": "The vocabulary and privacy rules live in `docs/GROWTH-EVENT-CONTRACT.md`.",
+   "_unit": "c16",
+   "path": "docs/GROWTH-EVENT-CONTRACT.md"
+  },
+  {
+   "doc": "docs/history/RE-AUDIT-2026-09-14.md",
+   "line": 204,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/TESTING.md does not exist",
+   "text": "| Scripts | Every `npm run` and `node scripts/*.mjs` referenced in README, `docs/TESTING.md`, `docs/SERVICE.md`, `docs/INVITE-ONLY-CHECKLIST.md` and `docs/V8-RECOVERY-RUNBOOK.md` exists in `package.json` or `scripts/`. `",
+   "_unit": "c18",
+   "path": "docs/TESTING.md"
+  },
+  {
+   "doc": "docs/PRODUCT-CONSOLIDATION-PLAN-2026-09-30.md",
+   "line": 28,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path server/public-claims.mjs does not exist",
+   "text": "- `server/public-claims.mjs` and `server/public-claim-routes.mjs` contain an unmounted in-memory alternative to the maintained public-work implementation. `server/receipt-payout.mjs` builds instructions rather than provi",
+   "_unit": "c18",
+   "path": "server/public-claims.mjs"
+  },
+  {
+   "doc": "docs/PRODUCT-CONSOLIDATION-PLAN-2026-09-30.md",
+   "line": 28,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path server/public-claim-routes.mjs does not exist",
+   "text": "- `server/public-claims.mjs` and `server/public-claim-routes.mjs` contain an unmounted in-memory alternative to the maintained public-work implementation. `server/receipt-payout.mjs` builds instructions rather than provi",
+   "_unit": "c18",
+   "path": "server/public-claim-routes.mjs"
+  },
+  {
+   "doc": "docs/PRODUCT-CONSOLIDATION-PLAN-2026-09-30.md",
+   "line": 28,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path server/receipt-payout.mjs does not exist",
+   "text": "- `server/public-claims.mjs` and `server/public-claim-routes.mjs` contain an unmounted in-memory alternative to the maintained public-work implementation. `server/receipt-payout.mjs` builds instructions rather than provi",
+   "_unit": "c18",
+   "path": "server/receipt-payout.mjs"
+  },
+  {
+   "doc": "docs/security/deploy-pipeline-supply-chain-audit.md",
+   "line": 90,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path scripts/verify-build-artifacts.mjs does not exist",
+   "text": "`scripts/verify-build-artifacts.mjs`, wired into the wrangler `build.command`",
+   "_unit": "c18",
+   "path": "scripts/verify-build-artifacts.mjs"
+  },
+  {
+   "doc": "docs/exchange/104-exchange-slice-2-spec.md",
+   "line": 23,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path scripts/exchange/credits-ledger.mjs does not exist",
+   "text": "`scripts/exchange/credits-ledger.mjs`.",
+   "_unit": "c18",
+   "path": "scripts/exchange/credits-ledger.mjs"
+  },
+  {
+   "doc": "docs/exchange/104-exchange-slice-2-spec.md",
+   "line": 69,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path tests/exchange-bounty-lifecycle.test.js does not exist",
+   "text": "`tests/exchange-bounty-lifecycle.test.js`).",
+   "_unit": "c18",
+   "path": "tests/exchange-bounty-lifecycle.test.js"
+  },
+  {
+   "doc": "docs/exchange/104-exchange-slice-2-spec.md",
+   "line": 71,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path tests/exchange-credits-ledger.test.js does not exist",
+   "text": "holds across the full flow (extends `tests/exchange-credits-ledger.test.js`).",
+   "_unit": "c18",
+   "path": "tests/exchange-credits-ledger.test.js"
+  },
+  {
+   "doc": "docs/exchange/118-credits-explorer-ui-mock.md",
+   "line": 4,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path scripts/exchange/credits-explorer.mjs does not exist",
+   "text": "(`scripts/exchange/credits-explorer.mjs`: `balance`, `search`, `trace`,",
+   "_unit": "c20",
+   "path": "scripts/exchange/credits-explorer.mjs"
+  },
+  {
+   "doc": "docs/security/time-handling-audit.md",
+   "line": 49,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path tests/time-skew-boundaries.test.js does not exist",
+   "text": "This is asserted by tests in this change (`tests/time-skew-boundaries.test.js`).",
+   "_unit": "c22",
+   "path": "tests/time-skew-boundaries.test.js"
+  },
+  {
+   "doc": "docs/history/PAID-WORK-PILOT.md",
+   "line": 71,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path server/usdc-payouts.mjs does not exist",
+   "text": "`server/usdc-payouts.mjs` is a separate pure module. Repository searches found no production caller of `createUsdcRail` yet \u2014 the agent tool surface (in build) will be its first caller. It uses a caller-owned `Map`, is l",
+   "_unit": "c23",
+   "path": "server/usdc-payouts.mjs"
+  },
+  {
+   "doc": "docs/history/AGENT-IDENTITIES.md",
+   "line": 96,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/AGENTIC-UX-PRINCIPLES.md does not exist",
+   "text": "`docs/AGENTIC-UX-PRINCIPLES.md` \u00a73.",
+   "_unit": "c23",
+   "path": "docs/AGENTIC-UX-PRINCIPLES.md"
+  },
+  {
+   "doc": "docs/HERDR-OPERATOR-RUNBOOK.md",
+   "line": 183,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/FORK-AUDIT.md does not exist",
+   "text": "the fork-audit lane (`docs/FORK-AUDIT.md` in the fork \u2014 pending B10).",
+   "_unit": "c24",
+   "path": "docs/FORK-AUDIT.md"
+  },
+  {
+   "doc": "docs/history/CORE-USABILITY-STUDY-2026-09-22.md",
+   "line": 15,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/core-usability-evidence-20260922/ does not exist",
+   "text": "Evidence: `docs/core-usability-evidence-20260922/` contains the run log and the inspected Add agent screenshot. Relevant source: `index.html` Results at line 444, agent dialog at line 699; `scripts/first-result-journey-c",
+   "_unit": "c24",
+   "path": "docs/core-usability-evidence-20260922/"
+  },
+  {
+   "doc": "docs/history/SHADOW-REPORT-2026-09-18.md",
+   "line": 5,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path docs/AUTO-QUARANTINE-POLICY.md does not exist",
+   "text": "**Policy:** `docs/AUTO-QUARANTINE-POLICY.md` v1, \u00a75 (the 14-day shadow period + weight-tuning loop)",
+   "_unit": "c25",
+   "path": "docs/AUTO-QUARANTINE-POLICY.md"
+  },
+  {
+   "doc": "docs/GITHUB-APP.md",
+   "line": 49,
+   "type": "REPO_PATH_MISSING",
+   "detail": "backticked path .github/project-room.yml does not exist",
+   "text": "Add `.github/project-room.yml` at the repository root:",
+   "_unit": "c25",
+   "path": ".github/project-room.yml"
+  },
+  {
+   "doc": "docs/SWARM-PLUG-IN.md",
+   "line": 702,
+   "type": "DEAD_FILE_REF",
+   "detail": "prose reference to missing file docs/your-file.md",
+   "text": "files:      docs/your-file.md",
+   "_unit": "r01",
+   "path": "docs/your-file.md"
+  },
+  {
+   "doc": "docs/history/verified-state-transition-ledger.md",
+   "line": 455,
+   "type": "DEAD_FILE_REF",
+   "detail": "prose reference to missing file docs/COORDINATION.md",
+   "text": "- Cumora coordination: https://github.com/yetone/cumora/blob/main/docs/COORDINATION.md",
+   "_unit": "r01",
+   "path": "docs/COORDINATION.md"
+  },
+  {
+   "doc": "docs/REVIEW-PARALLELISM.md",
+   "line": 59,
+   "type": "DEAD_FILE_REF",
+   "detail": "prose reference to missing file server/a.mjs",
+   "text": "<!-- claim-files: server/a.mjs, tests/a.test.js -->",
+   "_unit": "r01",
+   "path": "server/a.mjs"
+  },
+  {
+   "doc": "docs/REVIEW-PARALLELISM.md",
+   "line": 59,
+   "type": "DEAD_FILE_REF",
+   "detail": "prose reference to missing file tests/a.test.js",
+   "text": "<!-- claim-files: server/a.mjs, tests/a.test.js -->",
+   "_unit": "r01",
+   "path": "tests/a.test.js"
+  },
+  {
+   "doc": "docs/AGENT-QUICKSTART.md",
+   "line": 680,
+   "type": "DEAD_FILE_REF",
+   "detail": "prose reference to missing file tests/parser.test.js",
+   "text": "\"checks\": [{ \"command\": \"node --test tests/parser.test.js\", \"outcome\": \"passed\" }]",
+   "_unit": "r02",
+   "path": "tests/parser.test.js"
+  },
+  {
+   "doc": "docs/history/INBOX-ROOMS-DESIGN-PREVIEW-2026-09-08.md",
+   "line": 97,
+   "type": "DEAD_FILE_REF",
+   "detail": "prose reference to missing file scripts/inbox-prototype-server.mjs",
+   "text": "Run `node scripts/inbox-prototype-server.mjs` with the repository's supported",
+   "_unit": "r02",
+   "path": "scripts/inbox-prototype-server.mjs"
+  },
+  {
+   "doc": "docs/history/INBOX-ROOMS-DESIGN-PREVIEW-2026-09-08.md",
+   "line": 100,
+   "type": "DEAD_FILE_REF",
+   "detail": "prose reference to missing file scripts/inbox-prototype-browser-check.mjs",
+   "text": "Run `node --test scripts/inbox-prototype-browser-check.mjs` for screenshots and",
+   "_unit": "r02",
+   "path": "scripts/inbox-prototype-browser-check.mjs"
+  },
+  {
+   "doc": "docs/history/DASHA-ADAPTER-CONTRACT-2026-09-13.md",
+   "line": 19,
+   "type": "DEAD_FILE_REF",
+   "detail": "prose reference to missing file docs/DASHA-PROVIDER-COORDINATION.md",
+   "text": "docs/DASHA-PROVIDER-COORDINATION.md):",
+   "_unit": "r02",
+   "path": "docs/DASHA-PROVIDER-COORDINATION.md"
+  },
+  {
+   "doc": "docs/ROOM-PROTOCOL.md",
+   "line": 13,
+   "type": "DEAD_FILE_REF",
+   "detail": "prose reference to missing file server/src/mcp.ts",
+   "text": "> `packages/protocol/src/changeset.ts`, `packages/server/src/mcp.ts`,",
+   "_unit": "r03",
+   "path": "server/src/mcp.ts"
+  },
+  {
+   "doc": "docs/FLAKY-QUARANTINE.md",
+   "line": 11,
+   "type": "DEAD_FILE_REF",
+   "detail": "prose reference to missing file tests/worker-pool.test.js",
+   "text": "\"test\": \"tests/worker-pool.test.js > drains on SIGTERM\",",
+   "_unit": "r03",
+   "path": "tests/worker-pool.test.js"
+  },
+  {
+   "doc": "docs/history/V8-RECOVERY-PLAN-2026-09-07.md",
+   "line": 27,
+   "type": "DEAD_FILE_REF",
+   "detail": "prose reference to missing file docs/api/sqlite.html",
+   "text": "- [Node 24 SQLite](https://nodejs.org/download/release/latest-v24.x/docs/api/sqlite.html):",
+   "_unit": "r04",
+   "path": "docs/api/sqlite.html"
+  },
+  {
+   "doc": "docs/history/CHANNELS-CONTRACT.md",
+   "line": 23,
+   "type": "DEAD_FILE_REF",
+   "detail": "prose reference to missing file tests/channels.test.js",
+   "text": "Run `node --test tests/channels.test.js`. The test vectors cover normalization, deterministic ordering, duplicate and vocabulary denial, stable sidebar selection, canonical DMs, self/oversized denial, modifier extraction",
+   "_unit": "r04",
+   "path": "tests/channels.test.js"
+  },
+  {
+   "doc": "docs/history/BUILD-PLAN.md",
+   "line": 72,
+   "type": "DEAD_FILE_REF",
+   "detail": "prose reference to missing file docs/current/ddl-rowsecurity.html",
+   "text": "PostgreSQL [row security policies](https://www.postgresql.org/docs/current/ddl-rowsecurity.html) provide default-deny, row-level enforcement for Room data. They are useful defense in depth after application authorization",
+   "_unit": "r06",
+   "path": "docs/current/ddl-rowsecurity.html"
+  },
+  {
+   "doc": "docs/history/DARKBLOOM-COMPUTE-ROOM-2026-09-07.md",
+   "line": 57,
+   "type": "DEAD_FILE_REF",
+   "detail": "prose reference to missing file docs/provider/self-route.md",
+   "text": "[operator contract](https://github.com/Layr-Labs/d-inference/blob/0b46b1618d43cae3ae3d8e0fde1a9cc6d974e9d0/docs/provider/self-route.md)",
+   "_unit": "r06",
+   "path": "docs/provider/self-route.md"
+  },
+  {
+   "doc": "docs/history/DARKBLOOM-COMPUTE-ROOM-2026-09-07.md",
+   "line": 81,
+   "type": "DEAD_FILE_REF",
+   "detail": "prose reference to missing file docs/architecture/model-registry.md",
+   "text": "[Model registry](https://github.com/Layr-Labs/d-inference/blob/0b46b1618d43cae3ae3d8e0fde1a9cc6d974e9d0/docs/architecture/model-registry.md),",
+   "_unit": "r06",
+   "path": "docs/architecture/model-registry.md"
+  },
+  {
+   "doc": "docs/history/DARKBLOOM-COMPUTE-ROOM-2026-09-07.md",
+   "line": 82,
+   "type": "DEAD_FILE_REF",
+   "detail": "prose reference to missing file docs/architecture/telemetry.md",
+   "text": "[telemetry](https://github.com/Layr-Labs/d-inference/blob/0b46b1618d43cae3ae3d8e0fde1a9cc6d974e9d0/docs/architecture/telemetry.md)",
+   "_unit": "r06",
+   "path": "docs/architecture/telemetry.md"
+  },
+  {
+   "doc": "docs/history/DARKBLOOM-COMPUTE-ROOM-2026-09-07.md",
+   "line": 118,
+   "type": "DEAD_FILE_REF",
+   "detail": "prose reference to missing file docs/architecture/security/encryption.md",
+   "text": "[Darkbloom privacy boundaries](https://github.com/Layr-Labs/d-inference/blob/0b46b1618d43cae3ae3d8e0fde1a9cc6d974e9d0/docs/architecture/security/encryption.md)",
+   "_unit": "r06",
+   "path": "docs/architecture/security/encryption.md"
+  },
+  {
+   "doc": "docs/history/DARKBLOOM-COMPUTE-ROOM-2026-09-07.md",
+   "line": 173,
+   "type": "DEAD_FILE_REF",
+   "detail": "prose reference to missing file docs/developer/test.md",
+   "text": "[Test guide](https://github.com/Layr-Labs/d-inference/blob/0b46b1618d43cae3ae3d8e0fde1a9cc6d974e9d0/docs/developer/test.md),",
+   "_unit": "r06",
+   "path": "docs/developer/test.md"
+  },
+  {
+   "doc": "docs/history/NEXT-CONTRIBUTION-WORK-PLAN-2026-09-30.md",
+   "line": 27,
+   "type": "DEAD_FILE_REF",
+   "detail": "prose reference to missing file docs/blob/main/content/pull-requests/concepts/resolving-reviews.md",
+   "text": "GitHub's documented review workflow carries requested changes into further commits and review. Project Room's submitted receipt is immutable, so the corresponding design inference is to keep that historical receipt and e",
+   "_unit": "r06",
+   "path": "docs/blob/main/content/pull-requests/concepts/resolving-reviews.md"
+  },
+  {
+   "doc": "docs/history/ASSIGNMENT-WATCHER-PLAN-2026-09-07.md",
+   "line": 123,
+   "type": "DEAD_FILE_REF",
+   "detail": "prose reference to missing file docs/latest-v24.x/api/sqlite.html",
+   "text": "- [Node 24 SQLite](https://nodejs.org/docs/latest-v24.x/api/sqlite.html): built-in",
+   "_unit": "r09",
+   "path": "docs/latest-v24.x/api/sqlite.html"
+  },
+  {
+   "doc": "docs/history/ASSIGNMENT-WATCHER-PLAN-2026-09-07.md",
+   "line": 128,
+   "type": "DEAD_FILE_REF",
+   "detail": "prose reference to missing file docs/latest-v24.x/api/stream.html",
+   "text": "- [Node writable streams](https://nodejs.org/docs/latest-v24.x/api/stream.html#writablewritechunk-encoding-callback):",
+   "_unit": "r09",
+   "path": "docs/latest-v24.x/api/stream.html"
+  },
+  {
+   "doc": "docs/history/TESTING.md",
+   "line": 43,
+   "type": "DEAD_FILE_REF",
+   "detail": "prose reference to missing file scripts/a-check.mjs",
+   "text": "--test-concurrency=1 scripts/a-check.mjs scripts/b-check.mjs \u2026` with no",
+   "_unit": "r09",
+   "path": "scripts/a-check.mjs"
+  },
+  {
+   "doc": "docs/history/TESTING.md",
+   "line": 43,
+   "type": "DEAD_FILE_REF",
+   "detail": "prose reference to missing file scripts/b-check.mjs",
+   "text": "--test-concurrency=1 scripts/a-check.mjs scripts/b-check.mjs \u2026` with no",
+   "_unit": "r09",
+   "path": "scripts/b-check.mjs"
+  },
+  {
+   "doc": "docs/history/BROWSER-CI.md",
+   "line": 19,
+   "type": "DEAD_FILE_REF",
+   "detail": "prose reference to missing file docs/api/cli.html",
+   "text": "Node's built-in [`--test-shard`](https://nodejs.org/download/release/v24.19.0/docs/api/cli.html#--test-shard)",
+   "_unit": "r09",
+   "path": "docs/api/cli.html"
+  },
+  {
+   "doc": "docs/history/GITHUB-HYGIENE.md",
+   "line": 35,
+   "type": "DEAD_FILE_REF",
+   "detail": "prose reference to missing file docs/README.md",
+   "text": "- `docs/` canonical docs are listed in [docs/README.md](legacy-docs-README.md). New",
+   "_unit": "r09",
+   "path": "docs/README.md"
+  },
+  {
+   "doc": "docs/a2a-receipt-extension.md",
+   "line": 28,
+   "type": "DEAD_FILE_REF",
+   "detail": "prose reference to missing file docs/specification.md",
+   "text": "(<https://github.com/a2a-events/a2a-events/blob/HEAD/docs/specification.md>)",
+   "_unit": "r10",
+   "path": "docs/specification.md"
+  },
+  {
+   "doc": "docs/a2a-receipt-extension.md",
+   "line": 31,
+   "type": "DEAD_FILE_REF",
+   "detail": "prose reference to missing file docs/a2a-extension/wire-identity-v1.md",
+   "text": "(<https://github.com/slanchaai/wire/blob/HEAD/docs/a2a-extension/wire-identity-v1.md>)",
+   "_unit": "r10",
+   "path": "docs/a2a-extension/wire-identity-v1.md"
+  },
+  {
+   "doc": "docs/a2a-receipt-extension.md",
+   "line": 34,
+   "type": "DEAD_FILE_REF",
+   "detail": "prose reference to missing file docs/specs/08-a2a-binding.md",
+   "text": "(<https://github.com/openagentgovernance/agent-decision-protocol/blob/HEAD/docs/specs/08-a2a-binding.md>)",
+   "_unit": "r10",
+   "path": "docs/specs/08-a2a-binding.md"
+  }
+ ]
+}

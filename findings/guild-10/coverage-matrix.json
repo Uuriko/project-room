@@ -1,0 +1,5673 @@
+{
+ "total": 611,
+ "covered": 382,
+ "undocumented": [
+  {
+   "module": "scripts/a11y-axe-helper.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/a11y-composer-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/a11y-login-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/a11y-room-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/account-deletion-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/account-settings-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/acquisition-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/action-dialog-focus-scroll-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/action-recovery-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/activity-feed-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/agent-fast-path-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/agent-signin-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/agent-watch.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/agent-work-access-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/an-funnel-1.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/answer-engine-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/assisted-agent-exercise.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/auth-return-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/auth-signin.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/board-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/bounty-conservation-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/browser-ci-reporter.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/browser-shards-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/build-agent-docs.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/build-gmail-sanitizer.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/build-og-atlas.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/build-pwa-icons.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/build-ui-strings.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/chat-suggestions-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/check-deps-exist.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/check-deps.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/check-version-doors.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/ci-changes.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/claim-bond-shadow.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/claim-overlap-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/claim-reputation-sync.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/claims-index.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/connect-agent-first-screen-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/connect-room.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/contribution-journey-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/coverage-thresholds.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/decision-register-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/deleted-message-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/dependency-audit.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/design-cohesion-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/design-contrast-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/desktop-google-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/dm-consent-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/docs-link-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/dogfood-return-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/flaky-detect.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/friend-bond-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/frozen-runtime-fixture.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/fuzz-mime.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/github-app-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/github-work-sync.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/gmail-contract-fixture.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/gmail-live-fixture.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/gmail-setup-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/gmail-workspace-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/growth-invite-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/help-invitation-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/help-offer-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/herdr-backfill.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/herdr-migrate.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/host-isolation-preflight.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/human-experience-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/human-push-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/in-place-fixture-signin.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/inbox-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/inbox-conversation-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/inbox-quarantine-review-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/inbox-result-fixture.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/join-next-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/landing-facts.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/layout-simplification-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/lazy-boards-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/lesson-contradictions.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/lint-design-tokens.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/live-audit.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/live-upgrade-draft-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/loop-warning-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/mcp-test-client.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/member-perms-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/merge-queue-eject-budget.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/merge-queue-receipt.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/message-preview-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/native-draft-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/native-host-binary.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/native-result-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/oauth-return-invite-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/openapi-gen.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/operator-console-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/owner-project-offers-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/portable-work-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/pr-diff-size-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/probe-prod-lib.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/prod-flow-probes.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/progressive-disclosure-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/project-offers-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/public-pages-polish-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/public-work-matching-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/public-work-results-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/purpose-invite-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/pwa-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/qa5-a11y-c-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/quiet-attribution-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/quiet-copy-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/quiet-design-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/receipts-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/record-rails-fixture.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/refine-draft-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/reminders-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/reply-request-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/reply-review-fixture.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/reply-update-fixture.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/report-unit-failures.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/result-copy-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/results-fixture.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/rollback-readback.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/room-instructions-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/room-overview-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/routes-inventory.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/run-quarantined-tests.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/runtime-import-closure.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/scan-secrets.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/server-json-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/signin-browser-journey.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/skills-sync-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/skills-sync.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/smoke-prod.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/start-room-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/sync-design-tokens-css.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/telegram-contract-fixture.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/thread-options-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/trace-entry.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/unit-shards-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/unit-shards.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/unstamped-member.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/untested-modules-lint.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/updates-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/verify-affected.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/visual-regression-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/visual-regression-helper.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/work-attempts-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/work-changes-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/work-context-agent-seed.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/work-lifecycle-agent-fixture.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/work-resume-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/abuse-rate-buckets.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/agent-fleet.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/agent-key-registry.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/attachment-schema.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/boot-options.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/buyer-signoff.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/capability-visibility.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/channel-send-budgets.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/connect-snippets.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/conversation-sync.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/demigod-contracts.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/demigod-offers.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/demigod-policy-adapter.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/display-name-guard.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/dm-event-visibility.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/fee-credit-ledger.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/feedback-store.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/gmail-content.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/gmail-import-authority.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/gmail-sync.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/graph-reply-update-review.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/handoff-case.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/history-visibility.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/identity-verification.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/inbox-agent-routing.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/inbox-approval.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/inbox-assign.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/inbox-collab-routes.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/inbox-collab-store.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/inbox-collision.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/inbox-internal-notes.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/inbox-search.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/inbox-stitch-store.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/inbox-stitch.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/inbox-threads.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/inbox-transport.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/instance-lock.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/ip-blocklist.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/legal-pages.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/legal-routes.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/legal-store.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/matchmaking-routes.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/mcp-arg-errors.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/mcp-identity-mint.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/mcp-public-work.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/member-permission-requests.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/members-directory.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/membership-delegation-journal.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/membership-delegation.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/next-actions-routes.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/notify-policy.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/og-render.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/operator-purge.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/operator-routes.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/operator-status.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/owner-delegates.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/persisted-row.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/project-offers.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/projection-at-rest.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/public-work-claim-fence.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/public-work-reviews.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/public-work-successors.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/purge-registry.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/required-reading.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/retention-response.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/room-assistant.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/room-flood-guard.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/room-key-presence.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/settlement-router.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/spend-pricing.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/trial-task-store.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/trial-tasks.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/wake-queue-limits.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/web-push.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/work-claim-mirror.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/work-claim-sqlite.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/work-declarations.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/work-duplicates.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/work-help.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/work-wants.mjs",
+   "covered": false,
+   "docs": []
+  }
+ ],
+ "all": [
+  {
+   "module": "scripts/a11y-axe-helper.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/a11y-composer-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/a11y-login-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/a11y-room-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/acceptance-fixture.mjs",
+   "covered": true,
+   "docs": [
+    "docs/SELF-HOSTING.md",
+    "docs/history/ASK-CLARIFY-DELIVER-PLAN-2026-09-08.md",
+    "docs/history/BROWSER-CHECKPOINT-2026-09-07.md",
+    "docs/history/DISCOVERY-STORAGE-READS-2026-09-08.md",
+    "docs/history/FINAL-LOCAL-ACCEPTANCE-2026-09-07.md",
+    "docs/history/STOPPING-POINT-2026-09-07.md"
+   ]
+  },
+  {
+   "module": "scripts/acceptance-handoff.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/BROWSER-CHECKPOINT-2026-09-07.md",
+    "docs/history/FINAL-LOCAL-ACCEPTANCE-2026-09-07.md"
+   ]
+  },
+  {
+   "module": "scripts/access-preview-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/JOURNEY-COVERAGE-MAP.md"
+   ]
+  },
+  {
+   "module": "scripts/access-review.mjs",
+   "covered": true,
+   "docs": [
+    "docs/INVITE-ONLY-CHECKLIST.md",
+    "docs/JOURNEY-COVERAGE-MAP.md",
+    "docs/ROUTE-AUTH-TABLE.md",
+    "docs/SWARM-PLUG-IN.md",
+    "docs/history/AGENT-EMPOWERMENT-ROADMAP.md",
+    "docs/history/ISSUE-6-TRIAGE-2026-09-14.md"
+   ]
+  },
+  {
+   "module": "scripts/accessibility-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/INVITATION-CHECKPOINT.md",
+    "docs/history/ISSUE-6-TRIAGE-2026-09-14.md"
+   ]
+  },
+  {
+   "module": "scripts/account-deletion-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/account-settings-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/account-workspace-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/ONBOARDING-EXECUTION-PLAN.md"
+   ]
+  },
+  {
+   "module": "scripts/accountless-join-restore-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/JOURNEY-COVERAGE-MAP.md"
+   ]
+  },
+  {
+   "module": "scripts/acquisition-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/action-dialog-focus-scroll-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/action-recovery-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/activity-feed-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/agent-claude-channel.mjs",
+   "covered": true,
+   "docs": [
+    "docs/CLAUDE-CHANNEL.md",
+    "docs/CONNECT-RECEIVE.md"
+   ]
+  },
+  {
+   "module": "scripts/agent-connect-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/CORE-USABILITY-STUDY-2026-09-22.md"
+   ]
+  },
+  {
+   "module": "scripts/agent-doctor.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/RELEASE-INVENTORY.md"
+   ]
+  },
+  {
+   "module": "scripts/agent-fast-path-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/agent-inbox.mjs",
+   "covered": true,
+   "docs": [
+    "docs/AGENT-ACCOUNT-LINK.md",
+    "docs/COLD-AGENT-WALKTHROUGH.md",
+    "docs/CONNECT-AGENT-QUICKSTART.md",
+    "docs/CURRENT-ROOM.md",
+    "docs/GROK-DEEP-PLUG-PLAN-2026-09-29.md",
+    "docs/HOST-MATRIX.md"
+   ]
+  },
+  {
+   "module": "scripts/agent-mcp.mjs",
+   "covered": true,
+   "docs": [
+    "docs/AGENT-HOST-PLAN-2026-09-29.md",
+    "docs/CLAUDE-CHANNEL.md",
+    "docs/HOST-MATRIX.md",
+    "docs/SWARM-PLUG-IN.md",
+    "docs/history/DOORS.md",
+    "docs/history/kb/notes/fleet-join.md"
+   ]
+  },
+  {
+   "module": "scripts/agent-onboard.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ARCHITECTURE.md",
+    "docs/JOURNEY-COVERAGE-MAP.md",
+    "docs/ONBOARDING-PROBE.md",
+    "docs/SWARM-PLUG-IN.md",
+    "docs/INDEX.md",
+    "docs/history/AGENT-ONBOARDING-JOURNEY.md"
+   ]
+  },
+  {
+   "module": "scripts/agent-pause-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/JOURNEY-COVERAGE-MAP.md"
+   ]
+  },
+  {
+   "module": "scripts/agent-replies.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/PRODUCTION-PLAN.md"
+   ]
+  },
+  {
+   "module": "scripts/agent-resume.mjs",
+   "covered": true,
+   "docs": [
+    "docs/HOST-MATRIX.md",
+    "docs/PRODUCT-CONSOLIDATION-PLAN-2026-09-30.md",
+    "docs/history/AGENT-RESUME.md",
+    "docs/history/AGENT-WAKE-SETUP.md",
+    "docs/history/CROWDED-ROOM-REVIEW-2026-09-08.md",
+    "docs/history/ROOM-USEFUL-HANDOFFS-20260927.md"
+   ]
+  },
+  {
+   "module": "scripts/agent-signin-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/agent-wake.mjs",
+   "covered": true,
+   "docs": [
+    "docs/CONNECT-WAKE.md",
+    "docs/HOST-MATRIX.md",
+    "docs/PRODUCT-CONSOLIDATION-PLAN-2026-09-30.md",
+    "docs/AGENT-QUICKSTART.md",
+    "docs/history/ACTIVITY-FIRST-SLICE-2026-09-19.md",
+    "docs/history/AGENT-WAKE-SETUP.md"
+   ]
+  },
+  {
+   "module": "scripts/agent-watch.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/agent-work-access-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/agent-work-preflight.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/AGENT-WORK-PREFLIGHT.md"
+   ]
+  },
+  {
+   "module": "scripts/an-funnel-1.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/analytics-backfill.mjs",
+   "covered": true,
+   "docs": [
+    "docs/analytics/EVENTS.md"
+   ]
+  },
+  {
+   "module": "scripts/answer-engine-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/assisted-agent-exercise.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/assisted-work-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/JOURNEY-COVERAGE-MAP.md"
+   ]
+  },
+  {
+   "module": "scripts/audit-invitations.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/FINAL-LOCAL-ACCEPTANCE-2026-09-07.md",
+    "docs/history/INVITE-ONLY-DEPLOYMENT.md"
+   ]
+  },
+  {
+   "module": "scripts/audit-native-request-evidence.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/NATIVE-HOST-REQUEST-CHECKPOINT-2026-09-08.md"
+   ]
+  },
+  {
+   "module": "scripts/auth-return-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/auth-signin.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/backup-drill.mjs",
+   "covered": true,
+   "docs": [
+    "docs/BACKUPS.md",
+    "docs/SELF-HOSTING.md",
+    "docs/history/BACKUP-AUTOMATION.md",
+    "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+    "docs/history/TESTING.md"
+   ]
+  },
+  {
+   "module": "scripts/backup-room.mjs",
+   "covered": true,
+   "docs": [
+    "docs/BACKUPS.md",
+    "docs/INVITE-ONLY-CHECKLIST.md",
+    "docs/ROOM-DEPLOYMENT.md",
+    "docs/history/INVITE-ONLY-DEPLOYMENT.md",
+    "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+    "docs/history/V8-RECOVERY-RUNBOOK.md"
+   ]
+  },
+  {
+   "module": "scripts/backup-verify.mjs",
+   "covered": true,
+   "docs": [
+    "docs/BACKUPS.md",
+    "docs/QA-MUTATION-PROBES.md",
+    "docs/SELF-HOSTING.md",
+    "docs/history/BACKUP-AUTOMATION.md",
+    "docs/history/POINT-IN-TIME-RECOVERY.md"
+   ]
+  },
+  {
+   "module": "scripts/board-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/bootstrap-agent-room.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/ONBOARDING-EXECUTION-PLAN.md"
+   ]
+  },
+  {
+   "module": "scripts/bounty-conservation-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/JOURNEY-COVERAGE-MAP.md",
+    "docs/SERVICE.md",
+    "docs/SWARM-PLUG-IN.md",
+    "docs/a2a-receipt-extension.md",
+    "docs/history/ACCEPTANCE-AUDIT-2026-09-07.md",
+    "docs/history/ACTION-RECOVERY-CHECKPOINT-2026-09-08.md"
+   ]
+  },
+  {
+   "module": "scripts/browser-ci-reporter.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/browser-ci.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/BROWSER-CI.md",
+    "docs/history/HUMAN-AGENT-EXECUTION-PLAN.md",
+    "docs/history/ROOM-EFFICIENCY-EXECUTION-20260927.md",
+    "docs/history/ROOM-OVERVIEW-2026-09-19.md",
+    "docs/history/TESTING.md"
+   ]
+  },
+  {
+   "module": "scripts/browser-shards-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/browser-shards.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/BROWSER-CI.md"
+   ]
+  },
+  {
+   "module": "scripts/build-agent-docs.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/build-capabilities.mjs",
+   "covered": true,
+   "docs": [
+    "docs/security/deploy-pipeline-supply-chain-audit.md"
+   ]
+  },
+  {
+   "module": "scripts/build-gmail-sanitizer.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/build-og-atlas.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/build-push-sw.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/NOTIFICATIONS.md"
+   ]
+  },
+  {
+   "module": "scripts/build-pwa-icons.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/build-ui-strings.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/calm-return-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/JOURNEY-COVERAGE-MAP.md",
+    "docs/history/CORE-USABILITY-STUDY-2026-09-22.md"
+   ]
+  },
+  {
+   "module": "scripts/candidate-manifest.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/WHOLE-PROJECT-RESEARCH-BACKLOG-2026-09-08.md"
+   ]
+  },
+  {
+   "module": "scripts/candidate-runtime-fixture.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/AGENT-HANDOFF-PROTOCOL.md",
+    "docs/history/UNIFIED-INBOX.md"
+   ]
+  },
+  {
+   "module": "scripts/channels-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/JOURNEY-COVERAGE-MAP.md"
+   ]
+  },
+  {
+   "module": "scripts/chat-performance-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/JOURNEY-COVERAGE-MAP.md"
+   ]
+  },
+  {
+   "module": "scripts/chat-suggestions-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/check-deps-exist.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/check-deps.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/check-no-shadow-imports.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/AGENT-WORK-PREFLIGHT.md",
+    "docs/history/CONTRACT.md"
+   ]
+  },
+  {
+   "module": "scripts/check-schema-version.mjs",
+   "covered": true,
+   "docs": [
+    "docs/SECURITY-REVIEW-2026-09-14.md",
+    "docs/SERVICE.md",
+    "docs/history/CONTRACT.md",
+    "docs/history/RE-AUDIT-2026-09-14.md"
+   ]
+  },
+  {
+   "module": "scripts/check-version-doors.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/check-wiki.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ROOM-WIKI.md",
+    "docs/WIKI-API.md"
+   ]
+  },
+  {
+   "module": "scripts/check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ADMIN-GUIDE.md",
+    "docs/AGENT-CARD-CUSTODY.md",
+    "docs/AGENT-HOST-PLAN-2026-09-29.md",
+    "docs/AGENT-SEO.md",
+    "docs/AGENT-START-HERE.md",
+    "docs/ARCHITECTURE.md"
+   ]
+  },
+  {
+   "module": "scripts/ci-changes.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/claim-bond-shadow.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/claim-overlap-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/claim-reputation-sync.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/claims-index.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/cold-start-probe.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ROOM-DEPLOYMENT.md"
+   ]
+  },
+  {
+   "module": "scripts/compare-recovery.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/CAPTURE-RECONCILIATION-2026-09-08.md",
+    "docs/history/RECOVERY-AUTHORITY-CONTRACT-2026-09-08.md"
+   ]
+  },
+  {
+   "module": "scripts/composer-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/ISSUE-6-TRIAGE-2026-09-14.md"
+   ]
+  },
+  {
+   "module": "scripts/connect-agent-first-screen-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/connect-room.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/contribution-journey-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/coverage-thresholds.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/credit-question-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/INTEGRATION-BASELINE-2026-09-19.md",
+    "docs/history/SIMPLE-EXECUTION-RESULTS.md"
+   ]
+  },
+  {
+   "module": "scripts/dasha-bridge.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/AGENT-ONBOARDING-TESTING-2026-09-07.md",
+    "docs/history/DATA-BOUNDARIES.md",
+    "docs/history/GO-LIVE-CHECKLIST.md"
+   ]
+  },
+  {
+   "module": "scripts/decision-register-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/deleted-message-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/dependency-audit.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/deploy-checks.mjs",
+   "covered": true,
+   "docs": [
+    "docs/security/deploy-pipeline-supply-chain-audit.md",
+    "docs/security/pentest-checklist.md",
+    "docs/security/pentest-run-2026-10-07.md"
+   ]
+  },
+  {
+   "module": "scripts/deploy-recovery.mjs",
+   "covered": true,
+   "docs": [
+    "docs/security/deploy-pipeline-supply-chain-audit.md",
+    "docs/security/monitoring-coverage-audit.md"
+   ]
+  },
+  {
+   "module": "scripts/design-cohesion-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/design-contrast-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/desktop-google-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/disclosure-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/INVITATION-CHECKPOINT.md"
+   ]
+  },
+  {
+   "module": "scripts/discovery-contribution-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/DISCOVERY-CONTRIBUTION-2026-09-08.md"
+   ]
+  },
+  {
+   "module": "scripts/discovery-profile.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/DISCOVERY-STORAGE-READS-2026-09-08.md",
+    "docs/history/DISCOVERY-TRANSFER-2026-09-08.md"
+   ]
+  },
+  {
+   "module": "scripts/disk-door.mjs",
+   "covered": true,
+   "docs": [
+    "docs/AGENT-HOST-PLAN-2026-09-29.md",
+    "docs/GROK-BUILD-CONTINUOUS.md",
+    "docs/HOST-MATRIX.md",
+    "docs/history/AUTOMATION-DECISION-2026-09-29.md",
+    "docs/history/DOORS.md",
+    "docs/history/GROK-HOST.md"
+   ]
+  },
+  {
+   "module": "scripts/dm-consent-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/docs-link-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/dogfood-return-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/draft-return-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/JOURNEY-COVERAGE-MAP.md",
+    "docs/history/SIMPLE-EXECUTION-RESULTS.md"
+   ]
+  },
+  {
+   "module": "scripts/email-contract-fixture.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/EMAIL-IMPORT-CONTRACT-2026-09-08.md"
+   ]
+  },
+  {
+   "module": "scripts/email-password-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/JOURNEY-COVERAGE-MAP.md"
+   ]
+  },
+  {
+   "module": "scripts/failing-tests.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/INTEGRATION-BASELINE-2026-09-19.md"
+   ]
+  },
+  {
+   "module": "scripts/fake-runner.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/AGENT-CHARTERS-NEXT-2026-09-08.md",
+    "docs/history/WHOLE-PROJECT-RESEARCH-BACKLOG-2026-09-08.md"
+   ]
+  },
+  {
+   "module": "scripts/fallback-draft-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/FALLBACK-DRAFT-CHECKPOINT-2026-09-08.md",
+    "docs/history/QUIET-ATTRIBUTION-CHECKPOINT-2026-09-08.md"
+   ]
+  },
+  {
+   "module": "scripts/first-result-journey-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/CORE-USABILITY-STUDY-2026-09-22.md"
+   ]
+  },
+  {
+   "module": "scripts/first-use-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/FIRST-USE-TESTING-2026-09-07.md",
+    "docs/history/ISSUE-6-TRIAGE-2026-09-14.md"
+   ]
+  },
+  {
+   "module": "scripts/flaky-detect.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/friend-bond-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/frozen-runtime-fixture.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/fuzz-mime.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/github-app-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/github-door.mjs",
+   "covered": true,
+   "docs": [
+    "docs/AGENT-HOST-PLAN-2026-09-29.md",
+    "docs/GITHUB-DOOR.md",
+    "docs/GROK-BUILD-CONTINUOUS.md",
+    "docs/HOST-MATRIX.md",
+    "docs/INDEX.md",
+    "docs/history/AUTOMATION-DECISION-2026-09-29.md"
+   ]
+  },
+  {
+   "module": "scripts/github-work-sync.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/gmail-contract-fixture.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/gmail-live-fixture.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/gmail-setup-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/gmail-workspace-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/grok-room-host.mjs",
+   "covered": true,
+   "docs": [
+    "docs/AGENT-HOST-PLAN-2026-09-29.md",
+    "docs/GROK-BUILD-CONTINUOUS.md",
+    "docs/GROK-DEEP-PLUG-PLAN-2026-09-29.md",
+    "docs/JOIN-ANY-AGENT.md",
+    "docs/history/AGENT-WAKE-SETUP.md",
+    "docs/history/AUTOMATION-DECISION-2026-09-29.md"
+   ]
+  },
+  {
+   "module": "scripts/growth-invite-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/help-contribution-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/INTEGRATION-BASELINE-2026-09-19.md",
+    "docs/history/SIMPLE-EXECUTION-RESULTS.md"
+   ]
+  },
+  {
+   "module": "scripts/help-invitation-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/help-offer-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/helper-agent-exercise.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/ACTUAL-HELPER-ACCEPTANCE-2026-09-09.md"
+   ]
+  },
+  {
+   "module": "scripts/helper-owner-exercise.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/ACTUAL-HELPER-ACCEPTANCE-2026-09-09.md"
+   ]
+  },
+  {
+   "module": "scripts/herdr-backfill.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/herdr-migrate.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/host-isolation-preflight.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/human-experience-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/human-push-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/i18n-harness.mjs",
+   "covered": true,
+   "docs": [
+    "docs/I18N-HARNESS.md"
+   ]
+  },
+  {
+   "module": "scripts/in-place-fixture-signin.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/inbox-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/inbox-collaboration-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/AGENT-ASSISTED-REPLY-2026-09-08.md"
+   ]
+  },
+  {
+   "module": "scripts/inbox-collaboration-journey.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/AGENT-ASSISTED-REPLY-2026-09-08.md"
+   ]
+  },
+  {
+   "module": "scripts/inbox-conversation-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/inbox-quarantine-review-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/inbox-result-fixture.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/inbox-sandbox.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/PRIVATE-REPLY-UI-2026-09-08.md"
+   ]
+  },
+  {
+   "module": "scripts/inbox-telegram-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/JOURNEY-COVERAGE-MAP.md",
+    "docs/history/RE-AUDIT-2026-09-14.md",
+    "docs/history/SIMPLE-EXECUTION-RESULTS.md",
+    "docs/security/monitoring-coverage-audit.md",
+    "docs/security/webhook-security-review.md"
+   ]
+  },
+  {
+   "module": "scripts/inbox-unified-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/JOURNEY-COVERAGE-MAP.md",
+    "docs/history/GITHUB-HYGIENE.md",
+    "docs/security/monitoring-coverage-audit.md",
+    "docs/security/webhook-security-review.md"
+   ]
+  },
+  {
+   "module": "scripts/invitation-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/BACKUPS.md",
+    "docs/JOURNEY-COVERAGE-MAP.md",
+    "docs/SERVICE.md",
+    "docs/history/HUMAN-HELP-CHECKPOINT-2026-09-08.md",
+    "docs/history/INTEGRATION-BASELINE-2026-09-19.md",
+    "docs/history/INVITATION-AUDIT.md"
+   ]
+  },
+  {
+   "module": "scripts/invitation-note-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/evidence/invitation-note-2026-09-07.md"
+   ]
+  },
+  {
+   "module": "scripts/invitation-recovery-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/JOURNEY-COVERAGE-MAP.md"
+   ]
+  },
+  {
+   "module": "scripts/join-next-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/journey-coverage.mjs",
+   "covered": true,
+   "docs": [
+    "docs/JOURNEY-COVERAGE-MAP.md",
+    "docs/history/CONTRACT.md",
+    "docs/history/RE-AUDIT-2026-09-14.md",
+    "docs/history/RELEASE-INVENTORY.md",
+    "docs/history/RELIABILITY-GATE-2026-09-19.md",
+    "docs/history/WHOLE-PROJECT-RESEARCH-BACKLOG-2026-09-08.md"
+   ]
+  },
+  {
+   "module": "scripts/landing-facts.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/layout-simplification-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/lazy-boards-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/lesson-contradictions.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/lesson-scorer.mjs",
+   "covered": true,
+   "docs": [
+    "docs/lesson-scorer.md"
+   ]
+  },
+  {
+   "module": "scripts/lint-design-tokens.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/lint.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ADMIN-GUIDE.md",
+    "docs/I18N-HARNESS.md",
+    "docs/QA-SYSTEM.md",
+    "docs/REVIEW-PARALLELISM.md",
+    "docs/SWARM-PLUG-IN.md",
+    "docs/lesson-scorer.md"
+   ]
+  },
+  {
+   "module": "scripts/listing-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/LISTINGS.md"
+   ]
+  },
+  {
+   "module": "scripts/live-audit.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/live-codex-host-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/AGENT-QUICKSTART.md",
+    "docs/history/HUMAN-AGENT-EXECUTION-PLAN.md"
+   ]
+  },
+  {
+   "module": "scripts/live-smoke.mjs",
+   "covered": true,
+   "docs": [
+    "docs/DEPLOY-LANE.md",
+    "docs/QA-SYSTEM.md",
+    "docs/ROOM-DEPLOYMENT.md",
+    "docs/STAGING.md",
+    "docs/security/monitoring-coverage-audit.md"
+   ]
+  },
+  {
+   "module": "scripts/live-upgrade-draft-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/load-test.mjs",
+   "covered": true,
+   "docs": [
+    "docs/SERVICE.md",
+    "docs/history/CROWDED-ROOM-REVIEW-2026-09-08.md",
+    "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+    "docs/history/LOAD-TEST-2026-09-12.md",
+    "docs/history/LOAD-TEST-2026-09-14.md",
+    "docs/history/ROOM-LIST-CONTINUITY-2026-09-19.md"
+   ]
+  },
+  {
+   "module": "scripts/loop-warning-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/magic-link-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/JOURNEY-COVERAGE-MAP.md"
+   ]
+  },
+  {
+   "module": "scripts/manual-owner-exercise-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/ACTUAL-MANUAL-ACCEPTANCE-2026-09-09.md"
+   ]
+  },
+  {
+   "module": "scripts/manual-owner-exercise.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/ACTUAL-MANUAL-ACCEPTANCE-2026-09-09.md"
+   ]
+  },
+  {
+   "module": "scripts/mcp-test-client.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/measure-cold-start.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/RE-AUDIT-2026-09-14.md",
+    "docs/history/TESTING.md",
+    "docs/history/WORKER-LIMITS.md"
+   ]
+  },
+  {
+   "module": "scripts/member-perms-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/merge-hold.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ROOM-PROTOCOL.md"
+   ]
+  },
+  {
+   "module": "scripts/merge-queue-dryrun.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/MERGE-QUEUE-DESIGN.md"
+   ]
+  },
+  {
+   "module": "scripts/merge-queue-eject-budget.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/merge-queue-receipt.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/merge-queue-worker.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/MERGE-QUEUE-DESIGN.md"
+   ]
+  },
+  {
+   "module": "scripts/message-preview-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/mobile-header-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/ISSUE-6-TRIAGE-2026-09-14.md"
+   ]
+  },
+  {
+   "module": "scripts/mobile-signin-history-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/JOURNEY-COVERAGE-MAP.md"
+   ]
+  },
+  {
+   "module": "scripts/moderation-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/JOURNEY-COVERAGE-MAP.md"
+   ]
+  },
+  {
+   "module": "scripts/native-draft-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/native-host-binary.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/native-host-request-run.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/NATIVE-HOST-REQUEST-CHECKPOINT-2026-09-08.md"
+   ]
+  },
+  {
+   "module": "scripts/native-result-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/notification-feed-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/JOURNEY-COVERAGE-MAP.md",
+    "docs/history/NOTIFICATIONS.md",
+    "docs/history/SIMPLE-EXECUTION-RESULTS.md"
+   ]
+  },
+  {
+   "module": "scripts/oauth-return-invite-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/open-routes.mjs",
+   "covered": true,
+   "docs": [
+    "docs/INVITE-ONLY-CHECKLIST.md",
+    "docs/QA-SYSTEM.md",
+    "docs/ROUTE-AUTH-TABLE.md",
+    "docs/SECURITY-MODEL.md",
+    "docs/SECURITY-REVIEW-2026-09-14.md",
+    "docs/SECURITY-REVIEW-IDENTITIES-2026-09-12.md"
+   ]
+  },
+  {
+   "module": "scripts/openapi-gen.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/openapi-method-accuracy.mjs",
+   "covered": true,
+   "docs": [
+    "docs/OPENAPI-CONTRACT-REPORT.md"
+   ]
+  },
+  {
+   "module": "scripts/operator-console-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/outside-agents.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ARCHITECTURE.md"
+   ]
+  },
+  {
+   "module": "scripts/owner-project-offers-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/paid-work.mjs",
+   "covered": true,
+   "docs": [
+    "docs/MATCHMAKING.md",
+    "docs/PRODUCT-CONSOLIDATION-PLAN-2026-09-30.md",
+    "docs/history/BEYOND-INBOX-PRODUCT-INSPIRATION-2026-09-08.md",
+    "docs/history/BOUNTIES-DESIGN-2026-09-07.md",
+    "docs/history/GOAL-AGENT-HUMAN-FIRST-2026-09-06.md",
+    "docs/history/MATCHMAKING-AND-CONTRIBUTION-PLAN-2026-09-30.md"
+   ]
+  },
+  {
+   "module": "scripts/password-reset-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/JOURNEY-COVERAGE-MAP.md"
+   ]
+  },
+  {
+   "module": "scripts/people-rail-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/ISSUE-6-TRIAGE-2026-09-14.md"
+   ]
+  },
+  {
+   "module": "scripts/perf-budget.mjs",
+   "covered": true,
+   "docs": [
+    "docs/PERF-BUDGET.md"
+   ]
+  },
+  {
+   "module": "scripts/pinned-messages-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/JOURNEY-COVERAGE-MAP.md"
+   ]
+  },
+  {
+   "module": "scripts/portable-work-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/pr-diff-size-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/pr-overlap.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ROOM-PROTOCOL.md"
+   ]
+  },
+  {
+   "module": "scripts/probe-prod-lib.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/probe-prod.mjs",
+   "covered": true,
+   "docs": [
+    "docs/INCIDENT-1101-RUNBOOK.md",
+    "docs/ROOM-DEPLOYMENT.md"
+   ]
+  },
+  {
+   "module": "scripts/procedures-index.mjs",
+   "covered": true,
+   "docs": [
+    "docs/procedures/README.md"
+   ]
+  },
+  {
+   "module": "scripts/prod-deploy-smoke.mjs",
+   "covered": true,
+   "docs": [
+    "docs/DEPLOY-LANE.md",
+    "docs/security/deploy-pipeline-supply-chain-audit.md",
+    "docs/security/monitoring-coverage-audit.md"
+   ]
+  },
+  {
+   "module": "scripts/prod-flow-probes.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/progressive-disclosure-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/project-offers-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/provision.mjs",
+   "covered": true,
+   "docs": [
+    "docs/INCIDENT-RUNBOOK.md",
+    "docs/INVITE-ONLY-CHECKLIST.md",
+    "docs/ROOM-PROTOCOL.md",
+    "docs/ROUTE-AUTH-TABLE.md",
+    "docs/SECRETS-ROTATION.md",
+    "docs/SELF-HOSTING.md"
+   ]
+  },
+  {
+   "module": "scripts/public-pages-polish-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/public-work-matching-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/public-work-mcp-journey-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/HOST-MATRIX.md"
+   ]
+  },
+  {
+   "module": "scripts/public-work-results-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/purpose-invite-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/push-doctor.mjs",
+   "covered": true,
+   "docs": [
+    "docs/PUSH-VAPID-KEYS.md"
+   ]
+  },
+  {
+   "module": "scripts/pwa-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/qa5-a11y-c-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/quarantine-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/FLAKY-QUARANTINE.md"
+   ]
+  },
+  {
+   "module": "scripts/quarantine-review-coverage.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/AUTO-QUARANTINE-POLICY.md"
+   ]
+  },
+  {
+   "module": "scripts/quiet-attribution-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/quiet-copy-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/quiet-design-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/quiet-focus-a34-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/INVITATION-CHECKPOINT.md"
+   ]
+  },
+  {
+   "module": "scripts/quiet-focus-final-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/INVITATION-CHECKPOINT.md"
+   ]
+  },
+  {
+   "module": "scripts/quiet-invites-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/JOURNEY-COVERAGE-MAP.md"
+   ]
+  },
+  {
+   "module": "scripts/ralph-loop.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/RALPH-BURNDOWN.md"
+   ]
+  },
+  {
+   "module": "scripts/reachability.mjs",
+   "covered": true,
+   "docs": [
+    "docs/CLAUDE-CHANNEL.md",
+    "docs/CONNECT-RECEIVE.md",
+    "docs/PRODUCT-CONSOLIDATION-PLAN-2026-09-30.md",
+    "docs/SWARM-PLUG-IN.md",
+    "docs/GLOSSARY.md",
+    "docs/history/AGENT-WAKE-SETUP.md"
+   ]
+  },
+  {
+   "module": "scripts/real-agent-fixture.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/evidence/work-context-2026-09-07.md"
+   ]
+  },
+  {
+   "module": "scripts/receipts-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/receive-qualify.mjs",
+   "covered": true,
+   "docs": [
+    "docs/CLAUDE-CHANNEL.md",
+    "docs/CONNECT-RECEIVE.md"
+   ]
+  },
+  {
+   "module": "scripts/reconnect-collaboration-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/INTEGRATION-BASELINE-2026-09-19.md",
+    "docs/history/RECONNECT-COLLABORATION-2026-09-08.md",
+    "docs/history/SIMPLE-EXECUTION-RESULTS.md"
+   ]
+  },
+  {
+   "module": "scripts/record-rails-fixture.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/recovery-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/JOURNEY-COVERAGE-MAP.md"
+   ]
+  },
+  {
+   "module": "scripts/recovery-coverage.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/ROOM-FAST-CHAT-RELEASE.md"
+   ]
+  },
+  {
+   "module": "scripts/recovery-fixture.mjs",
+   "covered": true,
+   "docs": [
+    "docs/INVITE-ONLY-CHECKLIST.md",
+    "docs/history/DURABLE-REPLY-ATTEMPTS-2026-09-08.md",
+    "docs/history/DURABLE-REPLY-REVIEW-2026-09-08.md",
+    "docs/history/NATIVE-TEXT-RESULT-CHECKPOINT-2026-09-08.md",
+    "docs/history/PRIVATE-OUTBOX-CONTRACT-2026-09-08.md",
+    "docs/history/REVIEWED-PRIVATE-REPLY-2026-09-08.md"
+   ]
+  },
+  {
+   "module": "scripts/refine-draft-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/release-checkpoint.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/MATCHMAKING-AND-CONTRIBUTION-PLAN-2026-09-30.md",
+    "docs/history/NEXT-CONTRIBUTION-WORK-PLAN-2026-09-30.md",
+    "docs/history/PRODUCT-EXECUTION-PLAN.md",
+    "docs/history/QUIET-ATTRIBUTION-CHECKPOINT-2026-09-08.md",
+    "docs/history/RELEASE-CHECKPOINT.md",
+    "docs/history/ROOM-EFFICIENCY-EXECUTION-20260927.md"
+   ]
+  },
+  {
+   "module": "scripts/release-evidence.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/AGENT-HELP-OFFERS.md",
+    "docs/history/EXECUTION-PLAN.md",
+    "docs/history/INVITE-ONLY-DEPLOYMENT.md",
+    "docs/history/MATCHMAKING-AND-CONTRIBUTION-PLAN-2026-09-30.md",
+    "docs/history/PRODUCTION-PLAN.md",
+    "docs/history/RELEASE-CHECKPOINT.md"
+   ]
+  },
+  {
+   "module": "scripts/release-polish-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/SIMPLE-EXECUTION-RESULTS.md"
+   ]
+  },
+  {
+   "module": "scripts/reminders-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/replay-room-export.mjs",
+   "covered": true,
+   "docs": [
+    "docs/BACKUPS.md",
+    "docs/ROOM-DEPLOYMENT.md"
+   ]
+  },
+  {
+   "module": "scripts/reply-request-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/reply-review-fixture.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/reply-update-fixture.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/report-test-failures.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/TESTING.md"
+   ]
+  },
+  {
+   "module": "scripts/report-unit-failures.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/request-host-fixture.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/NATIVE-HOST-REQUEST-CHECKPOINT-2026-09-08.md"
+   ]
+  },
+  {
+   "module": "scripts/restore-rehearsal.mjs",
+   "covered": true,
+   "docs": [
+    "docs/INVITE-ONLY-CHECKLIST.md",
+    "docs/SELF-HOSTING.md",
+    "docs/history/BACKUP-AUTOMATION.md",
+    "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+    "docs/history/POINT-IN-TIME-RECOVERY.md",
+    "docs/history/WHOLE-PROJECT-RESEARCH-BACKLOG-2026-09-08.md"
+   ]
+  },
+  {
+   "module": "scripts/restore-room-backup.mjs",
+   "covered": true,
+   "docs": [
+    "docs/BACKUPS.md"
+   ]
+  },
+  {
+   "module": "scripts/result-copy-agent-fixture.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/evidence/result-copy-agent-2026-09-07.md"
+   ]
+  },
+  {
+   "module": "scripts/result-copy-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/result-diff-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/SLACK-CODE-PRODUCT-RESEARCH.md"
+   ]
+  },
+  {
+   "module": "scripts/results-fixture.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/review-mechanical-report.mjs",
+   "covered": true,
+   "docs": [
+    "docs/REVIEW-PARALLELISM.md"
+   ]
+  },
+  {
+   "module": "scripts/review-scope-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/REVIEW-PARALLELISM.md"
+   ]
+  },
+  {
+   "module": "scripts/review-state.mjs",
+   "covered": true,
+   "docs": [
+    "docs/GITHUB-APP.md",
+    "docs/PRODUCT-CONSOLIDATION-PLAN-2026-09-30.md",
+    "docs/REVIEW-PARALLELISM.md",
+    "docs/history/HUMAN-HELP-OFFERS-2026-09-08.md",
+    "docs/history/ROOM-USEFUL-HANDOFFS-20260927.md"
+   ]
+  },
+  {
+   "module": "scripts/rollback-readback.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/room",
+   "covered": true,
+   "docs": [
+    "docs/ADMIN-GUIDE.md",
+    "docs/ADOPTION.md",
+    "docs/AGENT-ACCOUNT-LINK.md",
+    "docs/AGENT-CARD-CUSTODY.md",
+    "docs/AGENT-HOST-PLAN-2026-09-29.md",
+    "docs/AGENT-SEO.md"
+   ]
+  },
+  {
+   "module": "scripts/room-actions-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/JOURNEY-COVERAGE-MAP.md"
+   ]
+  },
+  {
+   "module": "scripts/room-chrome.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/ASK-QUIET-SHELL-V3.md",
+    "docs/history/QUIET-PRODUCT-DESIGN-PLAN-2026-09-08.md"
+   ]
+  },
+  {
+   "module": "scripts/room-coord.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ADOPTION.md",
+    "docs/AGENT-START-HERE.md",
+    "docs/ROOM-COORDINATION.md",
+    "docs/history/ACTION-RECOVERY-CHECKPOINT-2026-09-08.md",
+    "docs/history/BUILD-PLAN.md",
+    "docs/history/CONTRIBUTION-LEDGER.md"
+   ]
+  },
+  {
+   "module": "scripts/room-door-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/ROOM-DOOR-STATES-SPEC.md"
+   ]
+  },
+  {
+   "module": "scripts/room-export-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/JOURNEY-COVERAGE-MAP.md"
+   ]
+  },
+  {
+   "module": "scripts/room-guard.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ROOM-COORDINATION.md"
+   ]
+  },
+  {
+   "module": "scripts/room-health.mjs",
+   "covered": true,
+   "docs": [
+    "docs/HERDR-OPERATOR-RUNBOOK.md",
+    "docs/OPERATOR.md",
+    "docs/PRIVACY-POLICY-TEMPLATE.md",
+    "docs/history/PRODUCT-SIMPLIFICATION-2026-09-22.md",
+    "docs/history/UNWIRED-MODULES-2026-09-26.md"
+   ]
+  },
+  {
+   "module": "scripts/room-hygiene.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ROOM-PROTOCOL.md"
+   ]
+  },
+  {
+   "module": "scripts/room-instructions-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/room-key-pull.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/LOST-WORK-INVENTORY-2026-09-30.md"
+   ]
+  },
+  {
+   "module": "scripts/room-lifecycle-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/JOURNEY-COVERAGE-MAP.md"
+   ]
+  },
+  {
+   "module": "scripts/room-listen.mjs",
+   "covered": true,
+   "docs": [
+    "docs/CLAUDE-CHANNEL.md",
+    "docs/CONNECT-RECEIVE.md",
+    "docs/history/AGENT-WAKE-SETUP.md"
+   ]
+  },
+  {
+   "module": "scripts/room-mcp-init.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/MCP-INSTALL.md"
+   ]
+  },
+  {
+   "module": "scripts/room-mutate.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/ROOM-MUTATION-TESTING.md"
+   ]
+  },
+  {
+   "module": "scripts/room-overview-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/room-policy-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/JOURNEY-COVERAGE-MAP.md"
+   ]
+  },
+  {
+   "module": "scripts/room-results-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/USABILITY-PLAN.md"
+   ]
+  },
+  {
+   "module": "scripts/room-roster.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ROOM-ROSTER.md",
+    "docs/SWARM-PLUG-IN.md",
+    "docs/WORK-CONTEXT.md",
+    "docs/history/ISSUE-6-TRIAGE-2026-09-14.md"
+   ]
+  },
+  {
+   "module": "scripts/room-trust-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/JOURNEY-COVERAGE-MAP.md"
+   ]
+  },
+  {
+   "module": "scripts/route-acceptance.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/ROOM-RELIABLE-EVENTS-20260927.md"
+   ]
+  },
+  {
+   "module": "scripts/route-docs-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/OPENAPI-CONTRACT-REPORT.md",
+    "docs/ROUTE-AUTH-TABLE.md",
+    "docs/history/CONTRACT.md",
+    "docs/history/TESTING.md"
+   ]
+  },
+  {
+   "module": "scripts/routes-inventory.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/run-quarantined-tests.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/run-room-request.mjs",
+   "covered": true,
+   "docs": [
+    "docs/AGENT-QUICKSTART.md",
+    "docs/history/HUMAN-AGENT-EXECUTION-PLAN.md"
+   ]
+  },
+  {
+   "module": "scripts/runtime-import-closure.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/runtime-package.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ROOM-ROSTER.md",
+    "docs/SERVICE.md",
+    "docs/SWARM-PLUG-IN.md",
+    "docs/WIKI-API.md",
+    "docs/history/ACCEPTANCE-AUDIT-2026-09-07.md",
+    "docs/history/AGENT-CONNECTION-CHECKPOINT-2026-09-07.md"
+   ]
+  },
+  {
+   "module": "scripts/scan-secrets.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/secret-scan-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/SECRET-SCAN.md",
+    "docs/security/deploy-pipeline-supply-chain-audit.md",
+    "docs/security/pentest-checklist.md"
+   ]
+  },
+  {
+   "module": "scripts/secret-scan-diff.mjs",
+   "covered": true,
+   "docs": [
+    "docs/SECRET-SCAN.md"
+   ]
+  },
+  {
+   "module": "scripts/server-json-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/session-boundary-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/JOURNEY-COVERAGE-MAP.md",
+    "docs/history/INVITATION-CHECKPOINT.md"
+   ]
+  },
+  {
+   "module": "scripts/shadow-quarantine-report.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/AUTO-QUARANTINE-POLICY.md",
+    "docs/history/SHADOW-REPORT-2026-09-18.md"
+   ]
+  },
+  {
+   "module": "scripts/sign-agent-card.mjs",
+   "covered": true,
+   "docs": [
+    "docs/AGENT-CARD-CUSTODY.md",
+    "docs/security/deploy-pipeline-supply-chain-audit.md"
+   ]
+  },
+  {
+   "module": "scripts/signin-browser-journey.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/skills-sync-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/skills-sync.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/smoke-prod.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/snippet-adoption.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ADOPTION.md"
+   ]
+  },
+  {
+   "module": "scripts/soak-preload.mjs",
+   "covered": true,
+   "docs": [
+    "docs/SOAK-TEST.md"
+   ]
+  },
+  {
+   "module": "scripts/soak-run.mjs",
+   "covered": true,
+   "docs": [
+    "docs/SOAK-TEST.md"
+   ]
+  },
+  {
+   "module": "scripts/spend-allowance-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/JOURNEY-COVERAGE-MAP.md",
+    "docs/history/INTEGRATION-BASELINE-2026-09-19.md",
+    "docs/history/SESSION-BUDGETS.md",
+    "docs/history/SIMPLE-EXECUTION-RESULTS.md"
+   ]
+  },
+  {
+   "module": "scripts/stall-probe.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ADMIN-GUIDE.md",
+    "docs/QA-SYSTEM.md",
+    "docs/QA2-SYSTEMS.md"
+   ]
+  },
+  {
+   "module": "scripts/stamp-version.mjs",
+   "covered": true,
+   "docs": [
+    "docs/AGENT-CARD-CUSTODY.md",
+    "docs/security/deploy-pipeline-supply-chain-audit.md"
+   ]
+  },
+  {
+   "module": "scripts/start-room-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/starter-recipes-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/SIMPLE-EXECUTION-RESULTS.md"
+   ]
+  },
+  {
+   "module": "scripts/stream-recovery-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/JOURNEY-COVERAGE-MAP.md"
+   ]
+  },
+  {
+   "module": "scripts/sync-design-tokens-css.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/synthetic-mail-fixture.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/PRIVATE-REPLY-UI-2026-09-08.md"
+   ]
+  },
+  {
+   "module": "scripts/telegram-contract-fixture.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/telegram-rotate-webhook.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/UNIFIED-INBOX.md"
+   ]
+  },
+  {
+   "module": "scripts/telegram-set-webhook.mjs",
+   "covered": true,
+   "docs": [
+    "docs/CURRENT-ROOM.md",
+    "docs/history/GO-LIVE-CHECKLIST.md",
+    "docs/history/RE-AUDIT-2026-09-14.md",
+    "docs/history/TELEGRAM-BUSINESS-API-SPIKE.md",
+    "docs/history/TELEGRAM-INBOUND-DECISION.md",
+    "docs/history/UNIFIED-INBOX.md"
+   ]
+  },
+  {
+   "module": "scripts/thread-options-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/trace-entry.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/unified-journey-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/JOURNEY-COVERAGE-MAP.md",
+    "docs/history/UNIFICATION-2026-09-07.md"
+   ]
+  },
+  {
+   "module": "scripts/unit-ci.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/PRODUCT-EXECUTION-PLAN.md",
+    "docs/history/SIMPLE-EXECUTION-RESULTS.md"
+   ]
+  },
+  {
+   "module": "scripts/unit-shards-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/unit-shards.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/unstamped-member.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/untested-modules-lint.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/updates-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/verify-affected.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/visual-regression-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/visual-regression-helper.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/watch-deploy-drift.mjs",
+   "covered": true,
+   "docs": [
+    "docs/INCIDENT-1101-RUNBOOK.md",
+    "docs/ROOM-DEPLOYMENT.md",
+    "docs/security/monitoring-coverage-audit.md"
+   ]
+  },
+  {
+   "module": "scripts/weekly-learnings.mjs",
+   "covered": true,
+   "docs": [
+    "docs/WEEKLY-LEARNINGS.md",
+    "docs/lesson-scorer.md",
+    "docs/weekly-learnings-cron.md"
+   ]
+  },
+  {
+   "module": "scripts/wiki-build.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ROOM-WIKI.md",
+    "docs/WIKI-API.md"
+   ]
+  },
+  {
+   "module": "scripts/work-attempts-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/work-changes-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/work-context-agent-seed.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/work-lifecycle-agent-fixture.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/work-recipes-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/INTEGRATION-BASELINE-2026-09-19.md",
+    "docs/history/SIMPLE-EXECUTION-RESULTS.md"
+   ]
+  },
+  {
+   "module": "scripts/work-resume-browser-check.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "scripts/work-reuse-agent-fixture.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/evidence/work-reuse-agent-2026-09-07.md"
+   ]
+  },
+  {
+   "module": "scripts/work-reuse-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/INTEGRATION-BASELINE-2026-09-19.md",
+    "docs/history/SIMPLE-EXECUTION-RESULTS.md"
+   ]
+  },
+  {
+   "module": "scripts/work-search-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/JOURNEY-COVERAGE-MAP.md"
+   ]
+  },
+  {
+   "module": "scripts/worker-ci-build.mjs",
+   "covered": true,
+   "docs": [
+    "docs/AGENT-CARD-CUSTODY.md"
+   ]
+  },
+  {
+   "module": "scripts/workflow-browser-check.mjs",
+   "covered": true,
+   "docs": [
+    "docs/JOURNEY-COVERAGE-MAP.md",
+    "docs/history/WORKFLOW-REFINEMENT-2026-09-07.md"
+   ]
+  },
+  {
+   "module": "server.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ADMIN-GUIDE.md",
+    "docs/ADOPTION.md",
+    "docs/AGENT-CARD-CUSTODY.md",
+    "docs/AGENT-SEO.md",
+    "docs/AGENT-START-HERE.md",
+    "docs/ARCHITECTURE.md"
+   ]
+  },
+  {
+   "module": "server/a2a-jsonrpc.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ARCHITECTURE.md"
+   ]
+  },
+  {
+   "module": "server/abuse-rate-buckets.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/access-requests.mjs",
+   "covered": true,
+   "docs": [
+    "docs/INVARIANTS.md",
+    "docs/analytics/EVENTS.md",
+    "docs/history/MULTI-METHOD-LOGIN.md",
+    "docs/history/ONBOARDING-EXECUTION-PLAN.md",
+    "docs/history/ROOM-RELIABLE-EVENTS-20260927.md"
+   ]
+  },
+  {
+   "module": "server/access-review.mjs",
+   "covered": true,
+   "docs": [
+    "docs/INVITE-ONLY-CHECKLIST.md",
+    "docs/JOURNEY-COVERAGE-MAP.md",
+    "docs/ROUTE-AUTH-TABLE.md",
+    "docs/SWARM-PLUG-IN.md",
+    "docs/history/AGENT-EMPOWERMENT-ROADMAP.md",
+    "docs/history/ISSUE-6-TRIAGE-2026-09-14.md"
+   ]
+  },
+  {
+   "module": "server/account-deletion.mjs",
+   "covered": true,
+   "docs": [
+    "docs/DEMIGOD-BUYER-OFFER.md",
+    "docs/PRIVACY-POLICY-TEMPLATE.md",
+    "docs/QA-SYSTEM.md",
+    "docs/history/GMAIL-SETUP.md",
+    "docs/history/PRODUCTION-PLAN.md",
+    "docs/legal/privacy.md"
+   ]
+  },
+  {
+   "module": "server/account-login-methods.mjs",
+   "covered": true,
+   "docs": [
+    "docs/QA-MUTATION-PROBES.md",
+    "docs/SECRETS-ROTATION.md",
+    "docs/history/MULTI-METHOD-LOGIN.md"
+   ]
+  },
+  {
+   "module": "server/account-passkeys.mjs",
+   "covered": true,
+   "docs": [
+    "docs/SECRETS-ROTATION.md",
+    "docs/history/RELEASE-INVENTORY.md"
+   ]
+  },
+  {
+   "module": "server/action-classes.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/ROOM-ACTION-POLICY.md",
+    "docs/history/verified-state-transition-ledger.md"
+   ]
+  },
+  {
+   "module": "server/activity.mjs",
+   "covered": true,
+   "docs": [
+    "docs/AGENTS-WANT.md",
+    "docs/CONNECT-WAKE.md",
+    "docs/IDENTITY-LIFECYCLE.md",
+    "docs/INVITE-ONLY-CHECKLIST.md",
+    "docs/JOURNEY-COVERAGE-MAP.md",
+    "docs/OPENAPI-CONTRACT-REPORT.md"
+   ]
+  },
+  {
+   "module": "server/agent-api-keys.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/UNWIRED-MODULES-2026-09-26.md"
+   ]
+  },
+  {
+   "module": "server/agent-card-signing.mjs",
+   "covered": true,
+   "docs": [
+    "docs/AGENT-CARD-CUSTODY.md",
+    "docs/GUEST-AGENT-LINKS.md",
+    "docs/SIGNED-AGENT-CARDS.md",
+    "docs/SWARM-PLUG-IN.md",
+    "docs/history/REFERRAL-TREE-DESIGN.md",
+    "docs/history/self-serve-join.md"
+   ]
+  },
+  {
+   "module": "server/agent-connections.mjs",
+   "covered": true,
+   "docs": [
+    "docs/PRIVACY-POLICY-TEMPLATE.md",
+    "docs/TROUBLESHOOTING.md",
+    "docs/analytics/EVENTS.md",
+    "docs/history/BACKUP-AUTOMATION.md",
+    "docs/history/DATA-BOUNDARIES.md",
+    "docs/history/EXPORT-RETENTION-DELETION.md"
+   ]
+  },
+  {
+   "module": "server/agent-directory.mjs",
+   "covered": true,
+   "docs": [
+    "docs/CONNECT-WAKE.md",
+    "docs/SIGNED-AGENT-CARDS.md",
+    "docs/analytics/EVENTS.md",
+    "docs/history/AGENT-IDENTITIES.md"
+   ]
+  },
+  {
+   "module": "server/agent-fleet.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/agent-heartbeats.mjs",
+   "covered": true,
+   "docs": [
+    "docs/GLOSSARY.md",
+    "docs/analytics/EVENTS.md",
+    "docs/history/UNWIRED-MODULES-2026-09-26.md"
+   ]
+  },
+  {
+   "module": "server/agent-identities.mjs",
+   "covered": true,
+   "docs": [
+    "docs/INVITE-ONLY-CHECKLIST.md",
+    "docs/JOURNEY-COVERAGE-MAP.md",
+    "docs/ROUTE-AUTH-TABLE.md",
+    "docs/SECURITY-REVIEW-2026-09-14.md",
+    "docs/SECURITY-REVIEW-IDENTITIES-2026-09-12.md",
+    "docs/SWARM-PLUG-IN.md"
+   ]
+  },
+  {
+   "module": "server/agent-invites.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ARCHITECTURE.md",
+    "docs/INVITE-ONLY-CHECKLIST.md",
+    "docs/AGENT-QUICKSTART.md",
+    "docs/analytics/EVENTS.md",
+    "docs/history/DATA-BOUNDARIES.md",
+    "docs/history/RE-AUDIT-2026-09-14.md"
+   ]
+  },
+  {
+   "module": "server/agent-key-registry.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/agent-lanes.mjs",
+   "covered": true,
+   "docs": [
+    "docs/GLOSSARY.md",
+    "docs/history/AGENT-LANES.md",
+    "docs/history/OPEN-SOURCE-LAUNCH-PLAN.md"
+   ]
+  },
+  {
+   "module": "server/agent-plugin-manifest.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/CAPABILITY-REGISTRY.md"
+   ]
+  },
+  {
+   "module": "server/agent-plugin-routes.mjs",
+   "covered": true,
+   "docs": [
+    "docs/analytics/EVENTS.md"
+   ]
+  },
+  {
+   "module": "server/agent-plugin-store.mjs",
+   "covered": true,
+   "docs": [
+    "docs/QA-MUTATION-PROBES.md",
+    "docs/analytics/EVENTS.md"
+   ]
+  },
+  {
+   "module": "server/agent-rooms.mjs",
+   "covered": true,
+   "docs": [
+    "docs/SWARM-PLUG-IN.md",
+    "docs/analytics/EVENTS.md",
+    "docs/history/ONBOARDING-EXECUTION-PLAN.md",
+    "docs/history/OPEN-SOURCE-LAUNCH-PLAN.md",
+    "docs/history/RELEASE-INVENTORY.md",
+    "docs/history/SLACK-CODE-PRODUCT-RESEARCH.md"
+   ]
+  },
+  {
+   "module": "server/agent-webhook-subscriptions.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ARCHITECTURE.md",
+    "docs/PRIVACY-POLICY-TEMPLATE.md",
+    "docs/WEBHOOK-WAKEUPS.md",
+    "docs/security/webhook-security-review.md"
+   ]
+  },
+  {
+   "module": "server/attachment-schema.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/attachments.mjs",
+   "covered": true,
+   "docs": [
+    "docs/BACKUPS.md",
+    "docs/INVITE-ONLY-CHECKLIST.md",
+    "docs/JOURNEY-COVERAGE-MAP.md",
+    "docs/OPENAPI-CONTRACT-REPORT.md",
+    "docs/PRODUCT-CONSOLIDATION-PLAN-2026-09-30.md",
+    "docs/ROUTE-AUTH-TABLE.md"
+   ]
+  },
+  {
+   "module": "server/attention.mjs",
+   "covered": true,
+   "docs": [
+    "docs/AGENT-HOST-PLAN-2026-09-29.md",
+    "docs/CLAUDE-CHANNEL.md",
+    "docs/GROK-BUILD-CONTINUOUS.md",
+    "docs/GROK-DEEP-PLUG-PLAN-2026-09-29.md",
+    "docs/OPENAPI-CONTRACT-REPORT.md",
+    "docs/PRODUCT-CONSOLIDATION-PLAN-2026-09-30.md"
+   ]
+  },
+  {
+   "module": "server/audit-retention.mjs",
+   "covered": true,
+   "docs": [
+    "docs/security/data-retention-policy.md"
+   ]
+  },
+  {
+   "module": "server/autonomy-tiers.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ADMIN-GUIDE.md",
+    "docs/GLOSSARY.md"
+   ]
+  },
+  {
+   "module": "server/backup.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ADMIN-GUIDE.md",
+    "docs/BACKUPS.md",
+    "docs/DEMIGOD-BUYER-OFFER.md",
+    "docs/INCIDENT-RUNBOOK.md",
+    "docs/INVITE-ONLY-CHECKLIST.md",
+    "docs/PRIVACY-POLICY-TEMPLATE.md"
+   ]
+  },
+  {
+   "module": "server/bonds.mjs",
+   "covered": true,
+   "docs": [
+    "docs/OPENAPI-CONTRACT-REPORT.md",
+    "docs/ROOM-PROTOCOL.md",
+    "docs/ROUTE-AUTH-TABLE.md",
+    "docs/SPEND-PRIMITIVE.md",
+    "docs/SWARM-PLUG-IN.md",
+    "docs/WORK-CLAIMS.md"
+   ]
+  },
+  {
+   "module": "server/boot-config.mjs",
+   "covered": true,
+   "docs": [
+    "docs/AGENT-CARD-CUSTODY.md"
+   ]
+  },
+  {
+   "module": "server/boot-options.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/bootstrap.mjs",
+   "covered": true,
+   "docs": [
+    "docs/AGENT-ACCOUNT-LINK.md",
+    "docs/GROK-DEEP-PLUG-PLAN-2026-09-29.md",
+    "docs/I18N-HARNESS.md",
+    "docs/ROOM-DEPLOYMENT.md",
+    "docs/ROOM-KITS-CATALOG.md",
+    "docs/SERVICE.md"
+   ]
+  },
+  {
+   "module": "server/bounty-disputes.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ROOM-PROTOCOL.md",
+    "docs/TERMS-OF-SERVICE-TEMPLATE.md",
+    "docs/history/FREE-MISS-SETTLEMENT.md"
+   ]
+  },
+  {
+   "module": "server/bounty-escrow-routes.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/FREE-MISS-SETTLEMENT.md",
+    "docs/history/PAID-WORK-PILOT.md"
+   ]
+  },
+  {
+   "module": "server/bounty-escrow.mjs",
+   "covered": true,
+   "docs": [
+    "docs/QA-MUTATION-PROBES.md",
+    "docs/SPEND-PRIMITIVE.md",
+    "docs/exchange/103-reviewer-advisory-flow.md",
+    "docs/history/FREE-MISS-SETTLEMENT.md",
+    "docs/history/bounty-receipts.md"
+   ]
+  },
+  {
+   "module": "server/bounty-receipts.mjs",
+   "covered": true,
+   "docs": [
+    "docs/QA-MUTATION-PROBES.md",
+    "docs/signed-evidence.md",
+    "docs/history/FREE-MISS-SETTLEMENT.md",
+    "docs/history/bounty-receipts.md"
+   ]
+  },
+  {
+   "module": "server/bounty-reputation.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/FREE-MISS-SETTLEMENT.md"
+   ]
+  },
+  {
+   "module": "server/buyer-signoff.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/capability-visibility.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/channel-connection.mjs",
+   "covered": true,
+   "docs": [
+    "docs/SECURITY-REVIEW-2026-09-14.md",
+    "docs/history/EMAIL-ROUTING.md",
+    "docs/history/UNIFIED-INBOX.md",
+    "docs/history/WORKER-LIMITS.md"
+   ]
+  },
+  {
+   "module": "server/channel-drain.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/UNIFIED-INBOX.md"
+   ]
+  },
+  {
+   "module": "server/channel-import.mjs",
+   "covered": true,
+   "docs": [
+    "docs/SECURITY-REVIEW-2026-09-14.md",
+    "docs/history/DATA-BOUNDARIES.md",
+    "docs/history/GO-LIVE-CHECKLIST.md",
+    "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+    "docs/history/RE-AUDIT-2026-09-14.md",
+    "docs/history/TELEGRAM-INBOUND-DECISION.md"
+   ]
+  },
+  {
+   "module": "server/channel-journal.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ARCHITECTURE.md",
+    "docs/history/UNIFIED-INBOX.md"
+   ]
+  },
+  {
+   "module": "server/channel-live-status.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/telegram-live-status.md"
+   ]
+  },
+  {
+   "module": "server/channel-send-budgets.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/claim-autolink.mjs",
+   "covered": true,
+   "docs": [
+    "docs/security/webhook-security-review.md"
+   ]
+  },
+  {
+   "module": "server/claim-collisions.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ROOM-PROTOCOL.md",
+    "docs/history/AGENTIC-UX-PRINCIPLES.md",
+    "docs/history/UNWIRED-MODULES-2026-09-26.md"
+   ]
+  },
+  {
+   "module": "server/claim-coordination.mjs",
+   "covered": true,
+   "docs": [
+    "docs/QA-MUTATION-PROBES.md"
+   ]
+  },
+  {
+   "module": "server/claim-pr-sync.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ARCHITECTURE.md",
+    "docs/analytics/EVENTS.md"
+   ]
+  },
+  {
+   "module": "server/claim-reputation.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ARCHITECTURE.md",
+    "docs/WORK-CLAIMS.md",
+    "docs/GLOSSARY.md"
+   ]
+  },
+  {
+   "module": "server/claim-scopes.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/AGENT-API-STRATEGY-2026-09-30.md",
+    "docs/history/UNWIRED-MODULES-2026-09-26.md"
+   ]
+  },
+  {
+   "module": "server/claim-validate.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/ROOM-MUTATION-TESTING.md"
+   ]
+  },
+  {
+   "module": "server/code-drops.mjs",
+   "covered": true,
+   "docs": [
+    "docs/CODE-DROPS.md"
+   ]
+  },
+  {
+   "module": "server/connect-snippets.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/content-trust.mjs",
+   "covered": true,
+   "docs": [
+    "docs/WORK-CLAIMS.md"
+   ]
+  },
+  {
+   "module": "server/conversation-sync.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/csv-export.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/AUTO-QUARANTINE-POLICY.md"
+   ]
+  },
+  {
+   "module": "server/delivery-tracing.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/delivery-tracing.md"
+   ]
+  },
+  {
+   "module": "server/demigod-contracts.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/demigod-offers.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/demigod-policy-adapter.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/deployment.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ADMIN-GUIDE.md",
+    "docs/AGENT-CARD-CUSTODY.md",
+    "docs/CURRENT-ROOM.md",
+    "docs/DEPLOY-LANE.md",
+    "docs/EVENT-FIXTURES.md",
+    "docs/HERDR-OPERATOR-RUNBOOK.md"
+   ]
+  },
+  {
+   "module": "server/diagnostics.mjs",
+   "covered": true,
+   "docs": [
+    "docs/CLAUDE-CHANNEL.md",
+    "docs/HERDR-OPERATOR-RUNBOOK.md",
+    "docs/INCIDENT-RUNBOOK.md",
+    "docs/OPENAPI-CONTRACT-REPORT.md",
+    "docs/ROUTE-AUTH-TABLE.md",
+    "docs/SERVICE.md"
+   ]
+  },
+  {
+   "module": "server/discoverability.mjs",
+   "covered": true,
+   "docs": [
+    "docs/SIGNED-AGENT-CARDS.md",
+    "docs/history/CORE-USABILITY-FOLLOWUP-2026-09-22.md",
+    "docs/history/CROWDED-ROOM-REVIEW-2026-09-08.md",
+    "docs/history/DISCOVERABILITY.md",
+    "docs/history/GOAL-AGENT-HUMAN-FIRST-2026-09-06.md",
+    "docs/history/QUIET-PRODUCT-DESIGN-PLAN-2026-09-08.md"
+   ]
+  },
+  {
+   "module": "server/display-name-guard.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/dispute-arbiters.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ROOM-PROTOCOL.md",
+    "docs/history/FREE-MISS-SETTLEMENT.md"
+   ]
+  },
+  {
+   "module": "server/dm-consents.mjs",
+   "covered": true,
+   "docs": [
+    "docs/GLOSSARY.md",
+    "docs/history/UNWIRED-MODULES-2026-09-26.md"
+   ]
+  },
+  {
+   "module": "server/dm-event-visibility.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/email-envelope.mjs",
+   "covered": true,
+   "docs": [
+    "docs/I18N-HARNESS.md",
+    "docs/history/EMAIL-IMPORT-CONTRACT-2026-09-08.md",
+    "docs/history/EMAIL-ROUTING.md",
+    "docs/history/UNIFIED-INBOX.md"
+   ]
+  },
+  {
+   "module": "server/email-import.mjs",
+   "covered": true,
+   "docs": [
+    "docs/CURRENT-ROOM.md",
+    "docs/INBOX-QUICKSTART.md",
+    "docs/SECURITY-REVIEW-2026-09-14.md",
+    "docs/history/EMAIL-IMPORT-CHECKPOINT-2026-09-08.md",
+    "docs/history/EMAIL-IMPORT-CONTRACT-2026-09-08.md",
+    "docs/history/EMAIL-IMPORT-PERSISTENCE-2026-09-08.md"
+   ]
+  },
+  {
+   "module": "server/email-routing-inbound.mjs",
+   "covered": true,
+   "docs": [
+    "docs/CURRENT-ROOM.md",
+    "docs/history/EMAIL-ROUTING.md",
+    "docs/history/RE-AUDIT-2026-09-14.md",
+    "docs/history/UNIFIED-INBOX.md"
+   ]
+  },
+  {
+   "module": "server/fee-credit-ledger.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/feedback-routes.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/feedback-endpoint.md"
+   ]
+  },
+  {
+   "module": "server/feedback-scrub.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/feedback-endpoint.md"
+   ]
+  },
+  {
+   "module": "server/feedback-store.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/github-oauth.mjs",
+   "covered": true,
+   "docs": [
+    "docs/OAUTH-PROVIDER-SECURITY-REVIEW.md",
+    "docs/ROUTE-AUTH-TABLE.md",
+    "docs/analytics/EVENTS.md",
+    "docs/history/DISCOVERABILITY.md",
+    "docs/history/MULTI-METHOD-LOGIN.md"
+   ]
+  },
+  {
+   "module": "server/gmail-actions.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/PRODUCT-SIMPLIFICATION-2026-09-22.md"
+   ]
+  },
+  {
+   "module": "server/gmail-content.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/gmail-import-authority.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/gmail-mailbox.mjs",
+   "covered": true,
+   "docs": [
+    "docs/INVITE-ONLY-CHECKLIST.md",
+    "docs/ROUTE-AUTH-TABLE.md",
+    "docs/history/GMAIL-SETUP.md"
+   ]
+  },
+  {
+   "module": "server/gmail-sync.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/google-oauth.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ADMIN-GUIDE.md",
+    "docs/OAUTH-PROVIDER-SECURITY-REVIEW.md",
+    "docs/ROUTE-AUTH-TABLE.md",
+    "docs/analytics/EVENTS.md"
+   ]
+  },
+  {
+   "module": "server/governance.mjs",
+   "covered": true,
+   "docs": [
+    "docs/COLD-AGENT-WALKTHROUGH.md",
+    "docs/GUEST-AGENT-LINKS.md",
+    "docs/a2a-receipt-extension.md",
+    "docs/history/OPEN-SOURCE-LAUNCH-PLAN.md",
+    "docs/history/verified-state-transition-ledger.md"
+   ]
+  },
+  {
+   "module": "server/grants.mjs",
+   "covered": true,
+   "docs": [
+    "docs/AGENT-START-HERE.md",
+    "docs/ERROR-TAXONOMY.md",
+    "docs/GUEST-AGENT-LINKS.md",
+    "docs/HUMAN-ONBOARDING.md",
+    "docs/IDENTITY-LIFECYCLE.md",
+    "docs/INVITE-ONLY-CHECKLIST.md"
+   ]
+  },
+  {
+   "module": "server/graph-email.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/EMAIL-IMPORT-CONTRACT-2026-09-08.md",
+    "docs/history/UNIFIED-INBOX.md"
+   ]
+  },
+  {
+   "module": "server/graph-fixture-sync.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/GRAPH-FIXTURE-SYNC-2026-09-08.md"
+   ]
+  },
+  {
+   "module": "server/graph-reply-draft.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/GRAPH-REPLY-DRAFT-QUALIFICATION-2026-09-08.md",
+    "docs/history/REPLY-UPDATE-QUALIFICATION-2026-09-08.md",
+    "docs/history/UNWIRED-MODULES-2026-09-26.md"
+   ]
+  },
+  {
+   "module": "server/graph-reply-journal.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ARCHITECTURE.md",
+    "docs/CURRENT-ROOM.md"
+   ]
+  },
+  {
+   "module": "server/graph-reply-update-review.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/growth-experiments.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/LOCAL-RELEASE-CHECKPOINT-2026-09-08.md"
+   ]
+  },
+  {
+   "module": "server/growth-loop.mjs",
+   "covered": true,
+   "docs": [
+    "docs/GLOSSARY.md",
+    "docs/analytics/EVENTS.md",
+    "docs/history/BEYOND-INBOX-PRODUCT-INSPIRATION-2026-09-08.md",
+    "docs/history/GROWTH-EVENT-CONTRACT.md",
+    "docs/history/PRIVATE-REMINDERS-CHECKPOINT-2026-09-07.md"
+   ]
+  },
+  {
+   "module": "server/guest-agent-links.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ARCHITECTURE.md",
+    "docs/INVITE-ONLY-CHECKLIST.md",
+    "docs/video-walkthrough-script.md",
+    "docs/GLOSSARY.md",
+    "docs/analytics/EVENTS.md",
+    "docs/history/RELEASE-INVENTORY.md"
+   ]
+  },
+  {
+   "module": "server/guest-invites.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ARCHITECTURE.md",
+    "docs/GUEST-AGENT-LINKS.md",
+    "docs/JOINING.md",
+    "docs/PRIVACY-POLICY-TEMPLATE.md",
+    "docs/TROUBLESHOOTING.md",
+    "docs/GLOSSARY.md"
+   ]
+  },
+  {
+   "module": "server/handoff-case.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/history-visibility.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/http.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ADMIN-GUIDE.md",
+    "docs/AGENT-ACCOUNT-LINK.md",
+    "docs/AGENT-CARD-CUSTODY.md",
+    "docs/AGENT-HOST-PLAN-2026-09-29.md",
+    "docs/AGENT-START-HERE.md",
+    "docs/AGENTS-WANT.md"
+   ]
+  },
+  {
+   "module": "server/human-push.mjs",
+   "covered": true,
+   "docs": [
+    "docs/PUSH-VAPID-KEYS.md",
+    "docs/history/NOTIFICATIONS.md"
+   ]
+  },
+  {
+   "module": "server/identity-ratelimit.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/MULTI-METHOD-LOGIN.md"
+   ]
+  },
+  {
+   "module": "server/identity-secret-hash.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/DATA-BOUNDARIES.md"
+   ]
+  },
+  {
+   "module": "server/identity-verification.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/inbox-agent-routing.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/inbox-approval.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/inbox-assign.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/inbox-attachment-bytes.mjs",
+   "covered": true,
+   "docs": [
+    "docs/INVITE-ONLY-CHECKLIST.md",
+    "docs/ROUTE-AUTH-TABLE.md",
+    "docs/SWARM-PLUG-IN.md"
+   ]
+  },
+  {
+   "module": "server/inbox-collab-routes.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/inbox-collab-store.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/inbox-collision.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/inbox-handoff.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/AGENT-HANDOFF-PROTOCOL.md",
+    "docs/history/SLACK-CODE-PRODUCT-RESEARCH.md"
+   ]
+  },
+  {
+   "module": "server/inbox-import-guards.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/AUTO-QUARANTINE-POLICY.md",
+    "docs/history/UNIFIED-INBOX.md"
+   ]
+  },
+  {
+   "module": "server/inbox-internal-notes.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/inbox-outbox.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ARCHITECTURE.md",
+    "docs/history/UNIFIED-INBOX.md"
+   ]
+  },
+  {
+   "module": "server/inbox-search.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/inbox-spam.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/AUTO-QUARANTINE-POLICY.md",
+    "docs/history/UNIFIED-INBOX.md"
+   ]
+  },
+  {
+   "module": "server/inbox-stitch-store.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/inbox-stitch.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/inbox-threads.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/inbox-transport.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/inbox-triage.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/AGENT-HANDOFF-PROTOCOL.md",
+    "docs/history/AUTO-QUARANTINE-POLICY.md",
+    "docs/history/MORNING-DIGEST-SLA.md"
+   ]
+  },
+  {
+   "module": "server/inbox.mjs",
+   "covered": true,
+   "docs": [
+    "docs/AGENT-ACCOUNT-LINK.md",
+    "docs/AGENT-HOST-PLAN-2026-09-29.md",
+    "docs/AGENTS-WANT.md",
+    "docs/ARCHITECTURE.md",
+    "docs/COLD-AGENT-WALKTHROUGH.md",
+    "docs/CONNECT-AGENT-QUICKSTART.md"
+   ]
+  },
+  {
+   "module": "server/instance-lock.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/invitation-evidence.mjs",
+   "covered": true,
+   "docs": [
+    "docs/SERVICE.md",
+    "docs/analytics/EVENTS.md",
+    "docs/history/ACCEPTANCE-AUDIT-2026-09-07.md",
+    "docs/history/DISCOVERY-STORAGE-READS-2026-09-08.md",
+    "docs/history/NARROW-AUTHORITY-CHECKPOINT-2026-09-08.md",
+    "docs/history/SHAREABLE-GUEST-LINKS.md"
+   ]
+  },
+  {
+   "module": "server/invitation-journal.mjs",
+   "covered": true,
+   "docs": [
+    "docs/SERVICE.md",
+    "docs/history/ACCEPTANCE-AUDIT-2026-09-07.md",
+    "docs/history/INVITATION-AUDIT.md",
+    "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+    "docs/history/LOCAL-HANDOFF-MILESTONE.md",
+    "docs/history/RECOVERY-AUTHORITY-CONTRACT-2026-09-08.md"
+   ]
+  },
+  {
+   "module": "server/ip-blocklist.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/jev-admission.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/JEV-GATES.md"
+   ]
+  },
+  {
+   "module": "server/jev-receipts.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/JEV-GATES.md"
+   ]
+  },
+  {
+   "module": "server/jev-shadow-journal.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/JEV-GATES.md"
+   ]
+  },
+  {
+   "module": "server/jobs.mjs",
+   "covered": true,
+   "docs": [
+    "docs/INCIDENT-1101-RUNBOOK.md",
+    "docs/INVITE-ONLY-CHECKLIST.md",
+    "docs/OPENAPI-CONTRACT-REPORT.md",
+    "docs/OPERATOR.md",
+    "docs/ROOM-DEPLOYMENT.md",
+    "docs/ROUTE-AUTH-TABLE.md"
+   ]
+  },
+  {
+   "module": "server/land-queue.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ROOM-COORDINATION.md",
+    "docs/INVARIANTS.md",
+    "docs/analytics/EVENTS.md"
+   ]
+  },
+  {
+   "module": "server/legal-documents.mjs",
+   "covered": true,
+   "docs": [
+    "docs/security/data-retention-policy.md"
+   ]
+  },
+  {
+   "module": "server/legal-pages.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/legal-routes.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/legal-store.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/magic-links.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/RELEASE-INVENTORY.md"
+   ]
+  },
+  {
+   "module": "server/maintenance.mjs",
+   "covered": true,
+   "docs": [
+    "docs/AGENT-START-HERE.md",
+    "docs/BACKUPS.md",
+    "docs/ERROR-TAXONOMY.md",
+    "docs/INCIDENT-RUNBOOK.md",
+    "docs/INVITE-ONLY-CHECKLIST.md",
+    "docs/ROOM-DEPLOYMENT.md"
+   ]
+  },
+  {
+   "module": "server/matchmaking-routes.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/mcp-arg-errors.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/mcp-discovery.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ARCHITECTURE.md",
+    "docs/video-walkthrough-script.md",
+    "docs/history/HUMAN-HELP-PLAN-2026-09-08.md"
+   ]
+  },
+  {
+   "module": "server/mcp-full-profile.mjs",
+   "covered": true,
+   "docs": [
+    "docs/video-walkthrough-script.md",
+    "docs/history/AGENT-RESUME.md"
+   ]
+  },
+  {
+   "module": "server/mcp-hosted-tools.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ARCHITECTURE.md",
+    "docs/video-walkthrough-script.md"
+   ]
+  },
+  {
+   "module": "server/mcp-http.mjs",
+   "covered": true,
+   "docs": [
+    "docs/analytics/EVENTS.md"
+   ]
+  },
+  {
+   "module": "server/mcp-identity-mint.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/mcp-public-work.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/mcp-room-profile.mjs",
+   "covered": true,
+   "docs": [
+    "docs/analytics/EVENTS.md"
+   ]
+  },
+  {
+   "module": "server/member-permission-requests.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/members-directory.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/membership-delegation-journal.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/membership-delegation.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/mention-lifecycle.mjs",
+   "covered": true,
+   "docs": [
+    "docs/SQUADS.md",
+    "docs/GLOSSARY.md",
+    "docs/history/LOST-WORK-INVENTORY-2026-09-30.md",
+    "docs/history/NOTIFICATIONS.md"
+   ]
+  },
+  {
+   "module": "server/mention-receipts.mjs",
+   "covered": true,
+   "docs": [
+    "docs/GLOSSARY.md"
+   ]
+  },
+  {
+   "module": "server/merge-queue.mjs",
+   "covered": true,
+   "docs": [
+    "docs/INVARIANTS.md",
+    "docs/history/MERGE-QUEUE-DESIGN.md",
+    "docs/history/kb/index.md",
+    "docs/history/kb/decisions/merge-queue-native.md",
+    "docs/history/kb/plans/RC-2026-09-25-912.md"
+   ]
+  },
+  {
+   "module": "server/message-redaction.mjs",
+   "covered": true,
+   "docs": [
+    "docs/SECURITY-MODEL.md"
+   ]
+  },
+  {
+   "module": "server/messages-store.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ARCHITECTURE.md"
+   ]
+  },
+  {
+   "module": "server/mime-message.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/EMAIL-ROUTING.md",
+    "docs/history/UNIFIED-INBOX.md"
+   ]
+  },
+  {
+   "module": "server/moderation.mjs",
+   "covered": true,
+   "docs": [
+    "docs/INVITE-ONLY-CHECKLIST.md",
+    "docs/JOURNEY-COVERAGE-MAP.md",
+    "docs/ROUTE-AUTH-TABLE.md",
+    "docs/SERVICE.md",
+    "docs/history/BOUND-HELP-OFFERS-2026-09-08.md",
+    "docs/history/BUILD-PLAN.md"
+   ]
+  },
+  {
+   "module": "server/needs-me.mjs",
+   "covered": true,
+   "docs": [
+    "docs/GROK-BUILD-CONTINUOUS.md",
+    "docs/GROK-DEEP-PLUG-PLAN-2026-09-29.md",
+    "docs/history/ACTIVITY-FIRST-SLICE-2026-09-19.md",
+    "docs/history/BEYOND-INBOX-PRODUCT-INSPIRATION-2026-09-08.md",
+    "docs/history/FOCUSED-AGENT-ORIENTATION-2026-09-08.md"
+   ]
+  },
+  {
+   "module": "server/next-actions-routes.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/next-actions.mjs",
+   "covered": true,
+   "docs": [
+    "docs/SWARM-PLUG-IN.md",
+    "docs/history/BEYOND-INBOX-PRODUCT-INSPIRATION-2026-09-08.md",
+    "docs/history/BUILD-PLAN.md",
+    "docs/history/CALM-COOPERATION-RESEARCH-2026-09-07.md",
+    "docs/history/CAPABILITY-REGISTRY.md",
+    "docs/history/GETONE-ONE-STEALS.md"
+   ]
+  },
+  {
+   "module": "server/notifications.mjs",
+   "covered": true,
+   "docs": [
+    "docs/HERDR-SESSIONS-AGENTS.md",
+    "docs/OPENAPI-CONTRACT-REPORT.md",
+    "docs/QA-SYSTEM.md",
+    "docs/ROUTE-AUTH-TABLE.md",
+    "docs/SWARM-PLUG-IN.md",
+    "docs/exchange/104-exchange-slice-2-spec.md"
+   ]
+  },
+  {
+   "module": "server/notify-email.mjs",
+   "covered": true,
+   "docs": [
+    "docs/I18N-HARNESS.md"
+   ]
+  },
+  {
+   "module": "server/notify-policy.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/notify-prefs.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/NOTIFICATIONS.md",
+    "docs/history/UNIFIED-INBOX.md"
+   ]
+  },
+  {
+   "module": "server/oauth-provider-store.mjs",
+   "covered": true,
+   "docs": [
+    "docs/OAUTH-PROVIDER-SECURITY-REVIEW.md"
+   ]
+  },
+  {
+   "module": "server/oauth-provider.mjs",
+   "covered": true,
+   "docs": [
+    "docs/OAUTH-PROVIDER-SECURITY-REVIEW.md",
+    "docs/history/ONBOARDING-EXECUTION-PLAN.md",
+    "docs/history/RELEASE-INVENTORY.md"
+   ]
+  },
+  {
+   "module": "server/og-render.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/open-questions.mjs",
+   "covered": true,
+   "docs": [
+    "docs/GROK-DEEP-PLUG-PLAN-2026-09-29.md",
+    "docs/exchange/103-reviewer-advisory-flow.md",
+    "docs/history/AGENT-HANDOFF-PROTOCOL.md",
+    "docs/history/BOARD-V2-DESIGN.md",
+    "docs/history/DASHA-PROVIDER-COORDINATION.md",
+    "docs/history/GOAL-AGENT-HUMAN-FIRST-2026-09-06.md"
+   ]
+  },
+  {
+   "module": "server/operator-actions.mjs",
+   "covered": true,
+   "docs": [
+    "docs/OPERATOR.md",
+    "docs/SWARM-PLUG-IN.md"
+   ]
+  },
+  {
+   "module": "server/operator-auth.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/BOUND-HELP-OFFERS-2026-09-08.md",
+    "docs/history/HELP-WANTED-AND-CONTRIBUTIONS-2026-09-08.md",
+    "docs/history/kb/notes/fleet-join.md"
+   ]
+  },
+  {
+   "module": "server/operator-purge.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/operator-routes.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/operator-status.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/opportunities.mjs",
+   "covered": true,
+   "docs": [
+    "docs/INVITE-ONLY-CHECKLIST.md",
+    "docs/OPENAPI-CONTRACT-REPORT.md",
+    "docs/ROUTE-AUTH-TABLE.md",
+    "docs/history/AGENT-WORKSPACE-ROADMAP-2026-09-08.md",
+    "docs/history/DETERMINISTIC-UX-2026-09-22.md",
+    "docs/history/MATCHMAKING-AND-CONTRIBUTION-PLAN-2026-09-30.md"
+   ]
+  },
+  {
+   "module": "server/orient.mjs",
+   "covered": true,
+   "docs": [
+    "docs/OPENAPI-CONTRACT-REPORT.md",
+    "docs/PRODUCT-CONSOLIDATION-PLAN-2026-09-30.md",
+    "docs/SWARM-PLUG-IN.md",
+    "docs/WORK-CONTEXT.md",
+    "docs/AGENT-QUICKSTART.md",
+    "docs/history/ACCEPTANCE-AUDIT-2026-09-07.md"
+   ]
+  },
+  {
+   "module": "server/outbound-webhooks.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ARCHITECTURE.md",
+    "docs/GROK-DEEP-PLUG-PLAN-2026-09-29.md",
+    "docs/analytics/EVENTS.md"
+   ]
+  },
+  {
+   "module": "server/outside-agents.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ARCHITECTURE.md"
+   ]
+  },
+  {
+   "module": "server/owner-attention.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/JEV-GATES.md",
+    "docs/history/ROOM-COHESIVE-UX-PLAN-20260927.md"
+   ]
+  },
+  {
+   "module": "server/owner-delegates.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/persisted-row.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/pins.mjs",
+   "covered": true,
+   "docs": [
+    "docs/DEPLOY-LANE.md",
+    "docs/INVITE-ONLY-CHECKLIST.md",
+    "docs/JOURNEY-COVERAGE-MAP.md",
+    "docs/OPENAPI-CONTRACT-REPORT.md",
+    "docs/PRIVACY-POLICY-TEMPLATE.md",
+    "docs/QA-MUTATION-PROBES.md"
+   ]
+  },
+  {
+   "module": "server/project-offers.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/projection-at-rest.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/public-face.mjs",
+   "covered": true,
+   "docs": [
+    "docs/RECEIPTS-PAGE.md"
+   ]
+  },
+  {
+   "module": "server/public-read-model.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ARCHITECTURE.md",
+    "docs/GLOSSARY.md"
+   ]
+  },
+  {
+   "module": "server/public-rooms.mjs",
+   "covered": true,
+   "docs": [
+    "docs/FAQ.md",
+    "docs/analytics/EVENTS.md"
+   ]
+  },
+  {
+   "module": "server/public-work-claim-fence.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/public-work-claims.mjs",
+   "covered": true,
+   "docs": [
+    "docs/AGENT-QUICKSTART.md",
+    "docs/analytics/EVENTS.md"
+   ]
+  },
+  {
+   "module": "server/public-work-reviews.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/public-work-successors.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/purge-registry.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/push-subscriptions.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/NOTIFICATIONS.md"
+   ]
+  },
+  {
+   "module": "server/quarantine-review-coverage.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/AUTO-QUARANTINE-POLICY.md"
+   ]
+  },
+  {
+   "module": "server/quarantine-thread-splits.mjs",
+   "covered": true,
+   "docs": [
+    "docs/GLOSSARY.md"
+   ]
+  },
+  {
+   "module": "server/read-cursor.mjs",
+   "covered": true,
+   "docs": [
+    "docs/JOURNEY-COVERAGE-MAP.md",
+    "docs/PRIVACY-POLICY-TEMPLATE.md",
+    "docs/ROUTE-AUTH-TABLE.md",
+    "docs/history/AGENT-WAKE-SETUP.md",
+    "docs/history/AGENT-WORK-LIFECYCLE-CHECKPOINT-2026-09-08.md",
+    "docs/history/ASSIGNMENT-WATCHER-CHECKPOINT-2026-09-07.md"
+   ]
+  },
+  {
+   "module": "server/receipt-cards.mjs",
+   "covered": true,
+   "docs": [
+    "docs/GLOSSARY.md"
+   ]
+  },
+  {
+   "module": "server/receipts-live.mjs",
+   "covered": true,
+   "docs": [
+    "docs/QA-MUTATION-PROBES.md",
+    "docs/GLOSSARY.md",
+    "docs/analytics/EVENTS.md",
+    "docs/history/DURABLE-REPLY-ATTEMPTS-2026-09-08.md",
+    "docs/history/UNIFIED-INBOX.md"
+   ]
+  },
+  {
+   "module": "server/receipts-page.mjs",
+   "covered": true,
+   "docs": [
+    "docs/GLOSSARY.md"
+   ]
+  },
+  {
+   "module": "server/recovery.mjs",
+   "covered": true,
+   "docs": [
+    "docs/AGENT-ACCOUNT-LINK.md",
+    "docs/AGENT-CARD-CUSTODY.md",
+    "docs/AUDIT-CONTEST.md",
+    "docs/BACKUPS.md",
+    "docs/DEMIGOD-BUYER-OFFER.md",
+    "docs/DEPLOY-LANE.md"
+   ]
+  },
+  {
+   "module": "server/redact-read.mjs",
+   "covered": true,
+   "docs": [
+    "docs/SECURITY-MODEL.md"
+   ]
+  },
+  {
+   "module": "server/referral-invites.mjs",
+   "covered": true,
+   "docs": [
+    "docs/analytics/EVENTS.md",
+    "docs/security/time-handling-audit.md"
+   ]
+  },
+  {
+   "module": "server/referrals.mjs",
+   "covered": true,
+   "docs": [
+    "docs/OPENAPI-CONTRACT-REPORT.md",
+    "docs/PRODUCT-CONSOLIDATION-PLAN-2026-09-30.md",
+    "docs/QA-SYSTEM.md",
+    "docs/ROUTE-AUTH-TABLE.md",
+    "docs/SWARM-PLUG-IN.md",
+    "docs/analytics/EVENTS.md"
+   ]
+  },
+  {
+   "module": "server/reminders.mjs",
+   "covered": true,
+   "docs": [
+    "docs/OPENAPI-CONTRACT-REPORT.md",
+    "docs/PRIVACY-POLICY-TEMPLATE.md",
+    "docs/ROUTE-AUTH-TABLE.md",
+    "docs/SWARM-PLUG-IN.md",
+    "docs/WORK-CONTEXT.md",
+    "docs/history/ASSIGNMENT-WATCHER-CHECKPOINT-2026-09-07.md"
+   ]
+  },
+  {
+   "module": "server/reply-requests.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/AGENT-RESUME.md",
+    "docs/history/ASSIGNMENT-WATCHER.md",
+    "docs/history/CONTRIBUTION-JOURNEY-2026-09-08.md",
+    "docs/history/CURRENT-ATTENTION.md",
+    "docs/history/FOCUSED-AGENT-ORIENTATION-2026-09-08.md",
+    "docs/history/PROJECT-ROOM-LONG-RUN-GOAL-2026-09-07.md"
+   ]
+  },
+  {
+   "module": "server/reputation.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ARCHITECTURE.md",
+    "docs/HERDR-SESSIONS-AGENTS.md",
+    "docs/MATCHMAKING.md",
+    "docs/OPENAPI-CONTRACT-REPORT.md",
+    "docs/TERMS-OF-SERVICE-TEMPLATE.md",
+    "docs/WORK-CLAIMS.md"
+   ]
+  },
+  {
+   "module": "server/request-runs.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/MERGE-QUEUE-DESIGN.md"
+   ]
+  },
+  {
+   "module": "server/required-reading.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/resend-mailer.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/RELEASE-INVENTORY.md"
+   ]
+  },
+  {
+   "module": "server/retention-response.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/retention-run.mjs",
+   "covered": true,
+   "docs": [
+    "docs/security/data-retention-policy.md"
+   ]
+  },
+  {
+   "module": "server/retention.mjs",
+   "covered": true,
+   "docs": [
+    "docs/CURRENT-ROOM.md",
+    "docs/INVITE-ONLY-CHECKLIST.md",
+    "docs/OPENAPI-CONTRACT-REPORT.md",
+    "docs/PRIVACY-POLICY-TEMPLATE.md",
+    "docs/ROOM-DEPLOYMENT.md",
+    "docs/SECRETS-ROTATION.md"
+   ]
+  },
+  {
+   "module": "server/return-brief.mjs",
+   "covered": true,
+   "docs": [
+    "docs/SWARM-PLUG-IN.md",
+    "docs/AGENT-QUICKSTART.md",
+    "docs/history/ACCEPTANCE-AUDIT-2026-09-07.md",
+    "docs/history/AGENT-COLLABORATION-VALUE-2026-09-23.md",
+    "docs/history/AGENT-ONBOARDING-TESTING-2026-09-07.md",
+    "docs/history/BEYOND-INBOX-PRODUCT-INSPIRATION-2026-09-08.md"
+   ]
+  },
+  {
+   "module": "server/return-selectors.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/UNIFICATION-2026-09-07.md"
+   ]
+  },
+  {
+   "module": "server/room-activation-pack.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ARCHITECTURE.md"
+   ]
+  },
+  {
+   "module": "server/room-assistant.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/room-attachment-bytes.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/UNWIRED-MODULES-2026-09-26.md"
+   ]
+  },
+  {
+   "module": "server/room-context.mjs",
+   "covered": true,
+   "docs": [
+    "docs/PRODUCT-CONSOLIDATION-PLAN-2026-09-30.md",
+    "docs/SERVICE.md",
+    "docs/SWARM-PLUG-IN.md",
+    "docs/WORK-CONTEXT.md",
+    "docs/AGENT-QUICKSTART.md",
+    "docs/history/ACCOUNT-FIRST-INBOX-2026-09-08.md"
+   ]
+  },
+  {
+   "module": "server/room-directory.mjs",
+   "covered": true,
+   "docs": [
+    "docs/INVITE-ONLY-CHECKLIST.md",
+    "docs/ROUTE-AUTH-TABLE.md",
+    "docs/SWARM-PLUG-IN.md",
+    "docs/history/ONBOARDING-EXECUTION-PLAN.md",
+    "docs/history/ROOM-AUTH-SESSION-FRICTION-20260918.md"
+   ]
+  },
+  {
+   "module": "server/room-export-html.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ARCHITECTURE.md"
+   ]
+  },
+  {
+   "module": "server/room-export.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ARCHITECTURE.md",
+    "docs/BACKUPS.md",
+    "docs/JOURNEY-COVERAGE-MAP.md",
+    "docs/ROOM-DEPLOYMENT.md",
+    "docs/history/DATA-BOUNDARIES.md",
+    "docs/history/EXPORT-RETENTION-DELETION.md"
+   ]
+  },
+  {
+   "module": "server/room-flood-guard.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/room-guide.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/QUIET-FAST.md",
+    "docs/history/USABILITY-PLAN.md"
+   ]
+  },
+  {
+   "module": "server/room-key-presence.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/room-lifecycle.mjs",
+   "covered": true,
+   "docs": [
+    "docs/CURRENT-ROOM.md",
+    "docs/JOURNEY-COVERAGE-MAP.md",
+    "docs/SWARM-PLUG-IN.md",
+    "docs/GLOSSARY.md",
+    "docs/analytics/EVENTS.md",
+    "docs/history/GMAIL-SETUP.md"
+   ]
+  },
+  {
+   "module": "server/secret-scan.mjs",
+   "covered": true,
+   "docs": [
+    "docs/QA-SYSTEM.md",
+    "docs/SECRET-SCAN.md",
+    "docs/INDEX.md",
+    "docs/history/GMAIL-SETUP.md",
+    "docs/history/QA-AND-COLLABORATION-PLAN-2026-09-30.md",
+    "docs/history/RELIABILITY-GATE-2026-09-19.md"
+   ]
+  },
+  {
+   "module": "server/service-error.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/AGENT-WORK-LIFECYCLE.md",
+    "docs/history/FINAL-LOCAL-ACCEPTANCE-2026-09-07.md"
+   ]
+  },
+  {
+   "module": "server/session-adapter.mjs",
+   "covered": true,
+   "docs": [
+    "docs/HERDR-OPERATOR-RUNBOOK.md",
+    "docs/SESSION-ADAPTER.md"
+   ]
+  },
+  {
+   "module": "server/settlement-router.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/share-links.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ARCHITECTURE.md",
+    "docs/INVITE-ONLY-CHECKLIST.md",
+    "docs/JOINING.md",
+    "docs/PRIVACY-POLICY-TEMPLATE.md",
+    "docs/SECURITY-REVIEW-2026-09-12.md",
+    "docs/SERVICE.md"
+   ]
+  },
+  {
+   "module": "server/signed-evidence.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/BOND.md",
+    "docs/history/RESULT-COPY-PLAN-2026-09-07.md"
+   ]
+  },
+  {
+   "module": "server/sla-breach-journal.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/MORNING-DIGEST-SLA.md",
+    "docs/history/SLA-DASHBOARD.md"
+   ]
+  },
+  {
+   "module": "server/sla-clocks.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/MORNING-DIGEST-SLA.md",
+    "docs/history/SLA-DASHBOARD.md"
+   ]
+  },
+  {
+   "module": "server/sla-dashboard.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/RELEASE-INVENTORY.md",
+    "docs/history/SLA-DASHBOARD.md"
+   ]
+  },
+  {
+   "module": "server/spam-quarantine-journal.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/AUTO-QUARANTINE-POLICY.md",
+    "docs/history/UNIFIED-INBOX.md"
+   ]
+  },
+  {
+   "module": "server/spam-shadow-report.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/AUTO-QUARANTINE-POLICY.md",
+    "docs/history/SHADOW-REPORT-2026-09-18.md"
+   ]
+  },
+  {
+   "module": "server/spam-shadow.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/AUTO-QUARANTINE-POLICY.md",
+    "docs/history/SHADOW-REPORT-2026-09-18.md"
+   ]
+  },
+  {
+   "module": "server/spend-allowance.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ADMIN-GUIDE.md",
+    "docs/ERROR-TAXONOMY.md",
+    "docs/JOURNEY-COVERAGE-MAP.md",
+    "docs/SPEND-PRIMITIVE.md",
+    "docs/TROUBLESHOOTING.md",
+    "docs/history/ISSUE-6-TRIAGE-2026-09-14.md"
+   ]
+  },
+  {
+   "module": "server/spend-grants.mjs",
+   "covered": true,
+   "docs": [
+    "docs/SPEND-PRIMITIVE.md",
+    "docs/TERMS-OF-SERVICE-TEMPLATE.md"
+   ]
+  },
+  {
+   "module": "server/spend-pricing.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/squads.mjs",
+   "covered": true,
+   "docs": [
+    "docs/OPENAPI-CONTRACT-REPORT.md",
+    "docs/ROOM-COORDINATION.md",
+    "docs/SQUADS.md",
+    "docs/INDEX.md"
+   ]
+  },
+  {
+   "module": "server/starter-room.mjs",
+   "covered": true,
+   "docs": [
+    "docs/agents/START.md"
+   ]
+  },
+  {
+   "module": "server/store.mjs",
+   "covered": true,
+   "docs": [
+    "docs/AGENT-CARD-CUSTODY.md",
+    "docs/AGENT-START-HERE.md",
+    "docs/AGENTS-WANT.md",
+    "docs/ARCHITECTURE.md",
+    "docs/BACKUPS.md",
+    "docs/CLAUDE-CHANNEL.md"
+   ]
+  },
+  {
+   "module": "server/supervision-routes.mjs",
+   "covered": true,
+   "docs": [
+    "docs/HERDR-OPERATOR-RUNBOOK.md",
+    "docs/SESSION-ADAPTER.md"
+   ]
+  },
+  {
+   "module": "server/supervision.mjs",
+   "covered": true,
+   "docs": [
+    "docs/HERDR-OPERATOR-RUNBOOK.md",
+    "docs/HERDR-SESSIONS-AGENTS.md",
+    "docs/SESSION-ADAPTER.md",
+    "docs/SESSION-API.md",
+    "docs/history/AGENT-COLLABORATION-VALUE-2026-09-23.md",
+    "docs/history/RESEARCH-AGENDA-METHOD-2026-09-06.md"
+   ]
+  },
+  {
+   "module": "server/templates.mjs",
+   "covered": true,
+   "docs": [
+    "docs/I18N-HARNESS.md",
+    "docs/OPENAPI-CONTRACT-REPORT.md",
+    "docs/ROOM-PROTOCOL.md",
+    "docs/SWARM-PLUG-IN.md",
+    "docs/analytics/EVENTS.md",
+    "docs/exchange/106-bounty-pricing-guide.md"
+   ]
+  },
+  {
+   "module": "server/text-results.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/NATIVE-TEXT-RESULT-CHECKPOINT-2026-09-08.md",
+    "docs/history/NATIVE-TEXT-RESULT-PLAN-2026-09-08.md",
+    "docs/history/NATIVE-TEXT-RESULTS.md",
+    "docs/history/OUTSIDE-CONTRIBUTOR-CREDIT-2026-09-09.md",
+    "docs/history/PROJECT-ROOM-LONG-RUN-GOAL-2026-09-07.md",
+    "docs/history/WHOLE-PROJECT-RESEARCH-BACKLOG-2026-09-08.md"
+   ]
+  },
+  {
+   "module": "server/thread-mutes.mjs",
+   "covered": true,
+   "docs": [
+    "docs/GLOSSARY.md",
+    "docs/history/NOTIFICATIONS.md"
+   ]
+  },
+  {
+   "module": "server/token-bucket.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ARCHITECTURE.md",
+    "docs/history/MULTI-METHOD-LOGIN.md"
+   ]
+  },
+  {
+   "module": "server/trial-task-store.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/trial-tasks.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/typing.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ARCHITECTURE.md",
+    "docs/GROK-DEEP-PLUG-PLAN-2026-09-29.md",
+    "docs/OPENAPI-CONTRACT-REPORT.md",
+    "docs/video-walkthrough-script.md",
+    "docs/GLOSSARY.md",
+    "docs/history/ASK-CONTINUE-AFTER-STOP-SPEC-2026-09-18.md"
+   ]
+  },
+  {
+   "module": "server/updates.mjs",
+   "covered": true,
+   "docs": [
+    "docs/CURRENT-ROOM.md",
+    "docs/INBOX-QUICKSTART.md",
+    "docs/INCIDENT-RUNBOOK.md",
+    "docs/INVITE-ONLY-CHECKLIST.md",
+    "docs/JOURNEY-COVERAGE-MAP.md",
+    "docs/OPENAPI-CONTRACT-REPORT.md"
+   ]
+  },
+  {
+   "module": "server/usage-summary.mjs",
+   "covered": true,
+   "docs": [
+    "docs/JOURNEY-COVERAGE-MAP.md",
+    "docs/history/ISSUE-6-TRIAGE-2026-09-14.md",
+    "docs/history/RELEASE-INVENTORY.md"
+   ]
+  },
+  {
+   "module": "server/version.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ADOPTION.md",
+    "docs/AGENT-CARD-CUSTODY.md",
+    "docs/AGENT-START-HERE.md",
+    "docs/BACKUPS.md",
+    "docs/CODE-DROPS.md",
+    "docs/COLD-AGENT-WALKTHROUGH.md"
+   ]
+  },
+  {
+   "module": "server/vetting-receipts.mjs",
+   "covered": true,
+   "docs": [
+    "docs/security/pentest-checklist.md",
+    "docs/security/time-handling-audit.md"
+   ]
+  },
+  {
+   "module": "server/wake-queue-limits.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/wake-queue.mjs",
+   "covered": true,
+   "docs": [
+    "docs/CLAUDE-CHANNEL.md",
+    "docs/CONNECT-WAKE.md",
+    "docs/SECURITY-REVIEW-2026-09-14.md",
+    "docs/WORK-CLAIMS.md",
+    "docs/GLOSSARY.md",
+    "docs/analytics/EVENTS.md"
+   ]
+  },
+  {
+   "module": "server/web-fetch.mjs",
+   "covered": true,
+   "docs": [
+    "docs/SWARM-PLUG-IN.md",
+    "docs/legal/privacy.md",
+    "docs/security/data-retention-policy.md"
+   ]
+  },
+  {
+   "module": "server/web-push.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/web-research.mjs",
+   "covered": true,
+   "docs": [
+    "docs/legal/privacy.md",
+    "docs/security/data-retention-policy.md",
+    "docs/security/pentest-checklist.md"
+   ]
+  },
+  {
+   "module": "server/webhook-dispatch.mjs",
+   "covered": true,
+   "docs": [
+    "docs/QA-MUTATION-PROBES.md",
+    "docs/TROUBLESHOOTING.md",
+    "docs/WEBHOOK-WAKEUPS.md",
+    "docs/security/time-handling-audit.md"
+   ]
+  },
+  {
+   "module": "server/wiki-data.mjs",
+   "covered": true,
+   "docs": [
+    "docs/WIKI-API.md"
+   ]
+  },
+  {
+   "module": "server/wiki-parse.mjs",
+   "covered": true,
+   "docs": [
+    "docs/WIKI-API.md"
+   ]
+  },
+  {
+   "module": "server/wiki-read-api.mjs",
+   "covered": true,
+   "docs": [
+    "docs/WIKI-API.md"
+   ]
+  },
+  {
+   "module": "server/work-claim-events.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ARCHITECTURE.md",
+    "docs/INVARIANTS.md",
+    "docs/analytics/EVENTS.md"
+   ]
+  },
+  {
+   "module": "server/work-claim-integrity.mjs",
+   "covered": true,
+   "docs": [
+    "docs/QA-MUTATION-PROBES.md"
+   ]
+  },
+  {
+   "module": "server/work-claim-mirror.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/work-claim-routes.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ARCHITECTURE.md",
+    "docs/QA-MUTATION-PROBES.md",
+    "docs/WORK-CLAIMS.md",
+    "docs/GLOSSARY.md",
+    "docs/analytics/EVENTS.md",
+    "docs/history/JEV-GATES.md"
+   ]
+  },
+  {
+   "module": "server/work-claim-sqlite.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/work-claims.mjs",
+   "covered": true,
+   "docs": [
+    "docs/ARCHITECTURE.md",
+    "docs/BUG-BOUNTY.md",
+    "docs/HERDR-OPERATOR-RUNBOOK.md",
+    "docs/HERDR-SESSIONS-AGENTS.md",
+    "docs/INVITE-ONLY-CHECKLIST.md",
+    "docs/QA-MUTATION-PROBES.md"
+   ]
+  },
+  {
+   "module": "server/work-context.mjs",
+   "covered": true,
+   "docs": [
+    "docs/SWARM-PLUG-IN.md",
+    "docs/AGENT-QUICKSTART.md",
+    "docs/history/AGENT-CHARTERS-NEXT-2026-09-08.md",
+    "docs/history/AGENT-WORK-SEARCH-2026-09-08.md",
+    "docs/history/HUMAN-AGENT-EXECUTION-PLAN.md",
+    "docs/history/ISSUE-6-TRIAGE-2026-09-14.md"
+   ]
+  },
+  {
+   "module": "server/work-declarations.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/work-discussion.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/CROWDED-ROOM-REVIEW-2026-09-08.md",
+    "docs/history/HELP-WANTED-AND-CONTRIBUTIONS-2026-09-08.md",
+    "docs/history/HUMAN-AGENT-EXECUTION-PLAN.md",
+    "docs/history/UNWIRED-MODULES-2026-09-26.md",
+    "docs/history/WORK-DISCUSSION-PLAN-2026-09-08.md"
+   ]
+  },
+  {
+   "module": "server/work-duplicates.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/work-handoff.mjs",
+   "covered": true,
+   "docs": [
+    "docs/history/CONTRIBUTION-JOURNEY-2026-09-08.md",
+    "docs/history/PORTABLE-WORK-CHECKPOINT-2026-09-07.md",
+    "docs/history/ROOM-RELIABILITY-FOLLOWTHROUGH.md",
+    "docs/history/SLACK-CODE-PRODUCT-RESEARCH.md"
+   ]
+  },
+  {
+   "module": "server/work-help.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/work-matchmaking.mjs",
+   "covered": true,
+   "docs": [
+    "docs/MATCHMAKING.md"
+   ]
+  },
+  {
+   "module": "server/work-wakes.mjs",
+   "covered": true,
+   "docs": [
+    "docs/analytics/EVENTS.md"
+   ]
+  },
+  {
+   "module": "server/work-wants.mjs",
+   "covered": false,
+   "docs": []
+  },
+  {
+   "module": "server/writer-fence.mjs",
+   "covered": true,
+   "docs": [
+    "docs/QA-MUTATION-PROBES.md",
+    "docs/SECURITY-REVIEW-IDENTITIES-2026-09-12.md",
+    "docs/SERVICE.md",
+    "docs/SESSION-ADAPTER.md",
+    "docs/history/AGENT-HANDOFF-PROTOCOL.md",
+    "docs/history/CAPABILITY-REGISTRY.md"
+   ]
+  }
+ ]
+}
