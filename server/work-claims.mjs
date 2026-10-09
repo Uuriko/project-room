@@ -419,6 +419,25 @@ const requestOutcomesOf = value => {
   return Object.freeze(Object.fromEntries(kept.slice(Math.max(0, kept.length - MAX_REQUEST_OUTCOMES))));
 };
 const recordRequestOutcome = (current, key, at) => requestOutcomesOf({ ...(current ?? {}), [key]: at });
+// FIX-14 (WAVE-300): expiry checkpoint. When a lease lapses, the sweep
+// freezes the round's working fields (files, fileBlocks, attestations,
+// reviews) into `last_progress` before clearing them — the checkpoint a
+// successor reads to resume, instead of a blank slate. Null until the
+// first expiry; each later expiry overwrites it with the newer round.
+const lastProgressOf = value => {
+  if (value === undefined || value === null) return null;
+  check(value !== null && typeof value === "object" && !Array.isArray(value), "last_progress must be an object");
+  const declared = value.files === undefined || value.files === null
+    ? { files: Object.freeze([]), fileBlocks: Object.freeze({}) }
+    : claimedFilesOf(value.files);
+  const storedBlocks = fileBlocksOf(value.fileBlocks);
+  const attestations = Array.isArray(value.attestations) ? value.attestations.map(attestationOf) : [];
+  if (value.frozenAt !== undefined && value.frozenAt !== null) check(typeof value.frozenAt === "string" && Number.isFinite(Date.parse(value.frozenAt)), "last_progress frozenAt must be an ISO timestamp");
+  if (value.frozenFrom !== undefined && value.frozenFrom !== null) check(typeof value.frozenFrom === "string" && value.frozenFrom.length > 0 && value.frozenFrom.length <= 128, "last_progress frozenFrom must be 1..128 characters");
+  return Object.freeze({ files: declared.files, fileBlocks: Object.freeze({ ...storedBlocks, ...declared.fileBlocks }),
+    attestations: Object.freeze(attestations), reviews: reviewsOf(value.reviews),
+    frozenAt: value.frozenAt ?? null, frozenFrom: value.frozenFrom ?? null });
+};
 const workOf = value => {
   check(value !== null && typeof value === "object" && !Array.isArray(value), "work must be an object");
   check(typeof value.id === "string" && value.id.length > 0 && value.id.length <= 256, "work id must be 1..256 characters");
@@ -466,7 +485,8 @@ const workOf = value => {
     chain: chainOf(value.chain), supersededBy: optionalId(value.supersededBy, "supersededBy"),
     workItemId: optionalId(value.workItemId, "workItemId"),
     squadId: optionalId(value.squadId, "squadId"), // plan-squads: work offer targeted at a squad
-    kind, revision, ci: ciOf(value.ci), reviews: reviewsOf(value.reviews) };
+    kind, revision, ci: ciOf(value.ci), reviews: reviewsOf(value.reviews),
+    last_progress: lastProgressOf(value.last_progress) };
 };
 const agentOf = value => idOf(value, "agent id", 128);
 const stamp = (atMs, agentId, action, note) =>
@@ -985,7 +1005,15 @@ export function releaseExpired(items, now) {
     // 2026-09-30 (phase-2 gap audit L-P2-8): mirrors updateWork, where a
     // released claim drops its reviews too (attestations belong to the
     // lapsed owner's round of work, never to whoever claims next).
+    // FIX-14 (WAVE-300): freeze the checkpoint BEFORE clearing — files,
+    // fileBlocks, attestations, and reviews are frozen into last_progress
+    // so a successor re-claiming the work reads what the lapsed round had
+    // done. Expiry semantics are unchanged: the live claim still releases
+    // to unclaimed with clean working fields.
     const released = { ...item, state: "unclaimed", owner: null, leaseStartAt: null, leaseExpiresAt: null,
+      last_progress: lastProgressOf({ files: item.files, fileBlocks: item.fileBlocks,
+        attestations: item.attestations, reviews: item.reviews,
+        frozenAt: isoOf(atMs), frozenFrom: item.owner }),
       files: Object.freeze([]), fileBlocks: Object.freeze({}), attestations: Object.freeze([]), reviews: Object.freeze([]) };
     return withHistory(released, atMs, item.owner ?? "system", "lease_expired",
       `claim by ${item.owner ?? "nobody"} lapsed at ${item.leaseExpiresAt} — auto-released`);
