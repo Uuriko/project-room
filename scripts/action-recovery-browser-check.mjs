@@ -193,7 +193,7 @@ test("a competing reservation resolves an uncommitted retry without overwriting 
   f.send(T.WORK_ACCEPTED, { workItemId: "competing", expectedRevision: 0 });
   f.send(T.CLAIM_ACQUIRED, { ...attempts[0].data, workItemId: "competing", expectedRevision: 1 });
   await f.save.click(); await page.waitForFunction(() => !document.querySelector("#action-fields [name=paths]").disabled);
-  assert.match(await page.locator("#action-error").textContent(), /Scope is reserved/);
+  assert.match(await page.locator("#action-error").textContent(), /holds a claim on this scope/);
   assert.deepEqual(attempts[0], attempts[1]); assert.equal(f.item().claim, null);
   await f.input("paths").fill("docs/result.md"); await f.save.click(); await f.dialog.waitFor({ state: "hidden" });
   assert.notEqual(attempts[1].id, attempts[2].id); assert.deepEqual(f.item().claim.paths, ["docs/result.md"]);
