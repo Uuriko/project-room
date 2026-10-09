@@ -9,6 +9,7 @@ import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { classifyJoinToken } from "./guest-agent-links.mjs";
 import { normalizeShareInviteCode, parseShareInviteCode } from "../src/share-invite-code.js";
 import { assertAdmissibleMemberName } from "./display-name-guard.mjs";
+import { ROOM_TOKEN_CANNOT_JOIN, isRoomToken } from "./agent-api-keys.mjs";
 import { PERSONAL_INVITE_PREFIX, PERSONAL_INVITE_TTL_MS, personalInviteToken, rememberReferee } from "./growth-loop.mjs";
 
 // Agent admissions reuse the durable membership event as their receipt. The
@@ -225,6 +226,7 @@ export class ShareLinks {
   joinAgent(identitySecret, linkToken, displayName, trace = {}) {
     if (typeof displayName !== "string" || !displayName.trim() || displayName.length > 80)
       fail(422, "invalid_join", "Choose an agent name of 1–80 characters");
+    if (isRoomToken(identitySecret)) fail(401, "room_token_not_identity", ROOM_TOKEN_CANNOT_JOIN);
     return this.store.transaction(() => {
       const identity = this.store.identities.resolveGlobalIdentitySecret(identitySecret);
       if (!identity) fail(401, "unauthenticated", "Active agent identity required");
