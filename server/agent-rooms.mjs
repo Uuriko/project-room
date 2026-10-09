@@ -280,7 +280,24 @@ export class AgentRooms {
       // owner_required like the other owner-gated routes; the reducer keeps
       // its own guard for the generic command path.
       const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
-      if (auth.member.id !== this.store.roomAuthority(roomId).ownerId) fail(403, "owner_required", "Only the Room owner may transfer ownership");
+      const authority = this.store.roomAuthority(roomId);
+      // Retry of a dropped success response: the caller's transfer already
+      // landed, so it is no longer the owner and the plain owner check below
+      // would 403 a replay that changed nothing. The projection's
+      // previousOwnerId names the actor of the latest transfer — when the
+      // room's current owner is the requested member and the previous owner
+      // is the caller, this exact transfer already happened: answer the
+      // duplicate instead of failing the retry. A later transfer-back in
+      // between clears previousOwnerId to someone else, so a genuine new
+      // transfer never matches.
+      if (authority.ownerId === toMemberId) {
+        const previousOwnerId = this.store.room(roomId).state.room?.previousOwnerId;
+        if (previousOwnerId === auth.member.id) {
+          return { roomId, ownerId: toMemberId, previousOwnerId: auth.member.id,
+            sequence: this.store.room(roomId).sequence, duplicate: true };
+        }
+      }
+      if (auth.member.id !== authority.ownerId) fail(403, "owner_required", "Only the Room owner may transfer ownership");
       let result;
       try {
         result = this.store.command(token, roomId, {
