@@ -125,3 +125,17 @@ test("advertised acceptance schema and hosted validation support structured rubr
   for (const invalid of ["Checked it", [], {}, null, 1])
     assert.equal(validHostedStdioArgs("bounty_accept", { roomId: "commons", bountyId: "bounty-1", verifierAttestation: invalid }), false);
 });
+
+// Honest-product rule: every money-adjacent agent surface carries the honest
+// framing ("today this pays in reputation receipts; cash comes later" in
+// spirit). The bounty_list description advertises an "award" to agents, so it
+// must also say awards are valueless room credits with no cash-out —
+// otherwise an agent can read "award" as real money.
+test("bounty_list tells agents awards are valueless room credits", () => {
+  const entry = bountyTools.find(tool => tool.name === "bounty_list");
+  assert.ok(entry, "bounty_list must exist");
+  const description = entry.description.toLowerCase();
+  assert.ok(description.includes("award"), "bounty_list still names the award");
+  assert.ok(description.includes("valueless") && description.includes("reputation receipt"),
+    "bounty_list must carry the honest framing: awards are valueless credits paying in reputation receipts");
+});
