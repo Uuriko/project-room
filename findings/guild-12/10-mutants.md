@@ -45,7 +45,7 @@ pinned by fail-first regression tests in `findings/guild-12/regress/`:
    `regress/lease-duration-pinned.test.js` — PASSES clean, FAILS on mutant.
 4. **M14** — `baseBackoffMs` value unpinned (relative-ordering assertions
    only). Regression: `regress/fail-backoff-pinned.test.js` — PASSES clean,
-   FAILS on mutant (pending run at doc time; log `REGRESS-M14.log`).
+   FAILS on mutant (verified; uses the literal 30000, not the constant).
 
 ## Methodology note
 
