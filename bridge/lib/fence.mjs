@@ -6,6 +6,7 @@
  * against bypassing pane processes (threat-model §4).
  */
 import { resolve as resolvePath, sep } from 'node:path';
+import { realpathSync } from 'node:fs';
 import { bridgeError } from './errors.mjs';
 
 /** Pinned herdr socket protocol version (REDESIGN.md §2.3). */
@@ -67,9 +68,12 @@ const PINNED_PATH = '/usr/local/bin:/usr/bin:/bin';
 
 function clampWorkspaceRoot(workspaceRoot, allowedRoots) {
   if (workspaceRoot == null) return null;
-  const resolved = resolvePath(String(workspaceRoot));
+  // realpath both sides when they exist so a symlink inside the root cannot
+  // point the cwd outside it; a path that does not exist yet keeps resolve().
+  const real = (p) => { try { return realpathSync(p); } catch { return p; } };
+  const resolved = real(resolvePath(String(workspaceRoot)));
   const ok = (allowedRoots ?? []).some((root) => {
-    const r = resolvePath(String(root));
+    const r = real(resolvePath(String(root)));
     return resolved === r || resolved.startsWith(r + sep);
   });
   if (!ok) throw bridgeError('input', 'workspaceRoot is outside the allowlisted roots');
@@ -103,15 +107,31 @@ export function buildSpawnArgv({ kind, resumeSessionId, workspaceRoot, allowedRo
 }
 
 /**
- * Self-report binding: the caller must prove its HERDR_PANE_ID equals the
- * target pane (threat-model §4.2, risk-review §3.1). No proof → reject + audit.
+ * Report metadata is forwarded to the herdr sidebar/projection, so it is a
+ * small flat record, not a free-form object: <=16 keys, simple keys, scalar
+ * values (string <=256 chars, finite number, boolean, null), <=2048 bytes total.
+ * Anything else is rejected, never trimmed.
  */
-export function validateReportBinding({ herdrPaneId, targetPaneId }) {
-  if (typeof herdrPaneId !== 'string' || herdrPaneId.length === 0 ||
-      typeof targetPaneId !== 'string' || targetPaneId.length === 0 ||
-      herdrPaneId !== targetPaneId) {
-    throw bridgeError('binding_mismatch', 'self-report requires HERDR_PANE_ID == target pane');
+export const METADATA_LIMITS = { keys: 16, keyLen: 64, valueLen: 256, bytes: 2048 };
+const METADATA_KEY_RE = /^[A-Za-z0-9_.-]+$/;
+export function validateReportMetadata(metadata) {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    throw bridgeError('input', 'report metadata must be a flat object');
   }
+  const entries = Object.entries(metadata);
+  if (entries.length > METADATA_LIMITS.keys) throw bridgeError('input', 'report metadata has too many fields');
+  for (const [k, v] of entries) {
+    if (k.length > METADATA_LIMITS.keyLen || !METADATA_KEY_RE.test(k)) {
+      throw bridgeError('input', 'report metadata key is not allowed');
+    }
+    const ok = v === null || typeof v === 'boolean' || (typeof v === 'number' && Number.isFinite(v))
+      || (typeof v === 'string' && v.length <= METADATA_LIMITS.valueLen);
+    if (!ok) throw bridgeError('input', 'report metadata values must be short scalars');
+  }
+  if (Buffer.byteLength(JSON.stringify(metadata), 'utf8') > METADATA_LIMITS.bytes) {
+    throw bridgeError('input', 'report metadata is too large');
+  }
+  return metadata;
 }
 
 /**
