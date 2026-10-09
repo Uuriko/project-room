@@ -88,6 +88,24 @@ export class RoomDirectory {
     if (memberId !== state?.room?.ownerId) fail(403, "owner_only", "Only the room owner may change public discovery settings");
   }
 
+  _ownerState(roomId, memberId) {
+    const state = this._roomState(roomId);
+    this._requireOwner(state, memberId);
+    return state;
+  }
+
+  // Upsert of one toggle column. A room can opt out before it is listed:
+  // the insert starts with discoverable=0, listed_at=NULL, and every later
+  // update preserves the existing listing bits.
+  _upsert(roomId, column, enabled) {
+    this.db.prepare(`INSERT INTO room_directory_settings
+        (room_id, discoverable, listed_at, updated_at, ${column})
+        VALUES (?, 0, NULL, ?, ?)
+        ON CONFLICT(room_id) DO UPDATE SET ${column}=excluded.${column},
+          updated_at=excluded.updated_at`)
+      .run(roomId, nowMs(), enabled ? 1 : 0);
+  }
+
   // Runs the additive public_receipts migration at most once per instance.
   _ensureReceiptsColumn() {
     if (this._receiptsColumnEnsured) return;
@@ -97,18 +115,15 @@ export class RoomDirectory {
 
   // ---- owner controls ------------------------------------------------------
   status(roomId, memberId) {
-    const state = this._roomState(roomId);
-    this._requireOwner(state, memberId);
+    this._ownerState(roomId, memberId);
     this._ensureReceiptsColumn();
     const row = this.db.prepare("SELECT discoverable, listed_at, public_receipts FROM room_directory_settings WHERE room_id=?").get(roomId);
-    return { roomId, discoverable: row?.discoverable === 1, listedAt: row?.listed_at ?? null,
-      publicReceipts: row?.public_receipts !== 0 };
+    return { roomId, discoverable: row?.discoverable === 1, listedAt: row?.listed_at ?? null, publicReceipts: row?.public_receipts !== 0 };
   }
 
   set(roomId, memberId, discoverable) {
     if (typeof discoverable !== "boolean") fail(422, "invalid_directory", "discoverable (boolean) is the accepted field");
-    const state = this._roomState(roomId);
-    this._requireOwner(state, memberId);
+    this._ownerState(roomId, memberId);
     return this.store.transaction(() => {
       const at = nowMs();
       const existing = this.db.prepare("SELECT discoverable, listed_at FROM room_directory_settings WHERE room_id=?").get(roomId);
@@ -127,25 +142,16 @@ export class RoomDirectory {
   // Existing discoverable rooms default to feed-on, preserving prior behavior;
   // turning the feed off does not unlist the room or change its work items.
   opportunityStatus(roomId, memberId) {
-    const state = this._roomState(roomId);
-    this._requireOwner(state, memberId);
+    this._ownerState(roomId, memberId);
     const row = this.db.prepare("SELECT opportunities_enabled AS enabled FROM room_directory_settings WHERE room_id=?").get(roomId);
     return { roomId, enabled: row?.enabled !== 0 };
   }
 
   setOpportunities(roomId, memberId, enabled) {
     if (typeof enabled !== "boolean") fail(422, "invalid_opportunities", "enabled (boolean) is the accepted field");
-    const state = this._roomState(roomId);
-    this._requireOwner(state, memberId);
+    this._ownerState(roomId, memberId);
     return this.store.transaction(() => {
-      // A room can opt out before it is listed. Upsert preserves the existing
-      // listing bit and timestamp on every subsequent owner change.
-      this.db.prepare(`INSERT INTO room_directory_settings
-          (room_id, discoverable, listed_at, updated_at, opportunities_enabled)
-          VALUES (?, 0, NULL, ?, ?)
-          ON CONFLICT(room_id) DO UPDATE SET opportunities_enabled=excluded.opportunities_enabled,
-            updated_at=excluded.updated_at`)
-        .run(roomId, nowMs(), enabled ? 1 : 0);
+      this._upsert(roomId, "opportunities_enabled", enabled);
       return { roomId, enabled };
     });
   }
@@ -164,25 +170,16 @@ export class RoomDirectory {
   }
 
   receiptsVisibility(roomId, memberId) {
-    const state = this._roomState(roomId);
-    this._requireOwner(state, memberId);
+    this._ownerState(roomId, memberId);
     return { roomId, publicReceipts: this.publicReceiptsVisible(roomId) };
   }
 
   setReceiptsVisibility(roomId, memberId, enabled) {
     if (typeof enabled !== "boolean") fail(422, "invalid_public_receipts", "publicReceipts (boolean) is the accepted field");
-    const state = this._roomState(roomId);
-    this._requireOwner(state, memberId);
+    this._ownerState(roomId, memberId);
     return this.store.transaction(() => {
       this._ensureReceiptsColumn();
-      // A room can go private before it is listed. Upsert preserves the
-      // existing listing bits on every subsequent owner change.
-      this.db.prepare(`INSERT INTO room_directory_settings
-          (room_id, discoverable, listed_at, updated_at, public_receipts)
-          VALUES (?, 0, NULL, ?, ?)
-          ON CONFLICT(room_id) DO UPDATE SET public_receipts=excluded.public_receipts,
-            updated_at=excluded.updated_at`)
-        .run(roomId, nowMs(), enabled ? 1 : 0);
+      this._upsert(roomId, "public_receipts", enabled);
       return { roomId, publicReceipts: enabled };
     });
   }
