@@ -72,13 +72,9 @@ const TAG_PATTERN = /^[A-Za-z0-9_-]{1,32}$/;
 const BLOB_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const MAX_RECEIPT_TAGS = 10;
 const MAX_RECEIPT_BLOBS = 10;
-const tagsOf = value => {
-  check(Array.isArray(value), "tags must be an array");
-  check(value.length <= MAX_RECEIPT_TAGS, `tags must hold at most ${MAX_RECEIPT_TAGS} tags`);
-  value.forEach(tag => check(typeof tag === "string" && TAG_PATTERN.test(tag),
-    "each tag must be 1..32 characters matching [A-Za-z0-9_-]"));
-  return Object.freeze([...value]);
-};
+const tagsOf = value => frozenArrayOf(value, "tags", MAX_RECEIPT_TAGS, "tags",
+  tag => typeof tag === "string" && TAG_PATTERN.test(tag),
+  "each tag must be 1..32 characters matching [A-Za-z0-9_-]");
 // Files a claim will touch (RC claim-files): repo-relative paths, normalized
 // the same way server/claim-collisions.mjs normalizes them so overlap checks
 // compare like with like. Optional; an empty list means "not declared".
@@ -96,22 +92,19 @@ const normalizeClaimPath = path => {
 // is the whole file. Two labels on one path do not stack: a whole-file entry
 // wins and the path stays exclusive.
 const claimedFilesOf = value => {
-  check(Array.isArray(value), "files must be an array");
-  check(value.length <= MAX_CLAIM_FILES, `files must list at most ${MAX_CLAIM_FILES} paths`);
+  checkListShape(value, "files must be an array", MAX_CLAIM_FILES, `files must list at most ${MAX_CLAIM_FILES} paths`);
   const entries = value.map(entry => {
     if (typeof entry === "string") return { path: normalizeClaimPath(entry), block: null };
     check(entry !== null && typeof entry === "object" && !Array.isArray(entry), "each file must be a path or {path, block?}");
     const label = entry.block ?? entry.region ?? null;
-    if (label !== null && label !== undefined) {
+    if (label !== null) {
       check(typeof label === "string" && BLOCK_PATTERN.test(label), "file block must be 1..80 letters, numbers, spaces, or . _ : / -");
     }
     return { path: normalizeClaimPath(entry.path), block: label || null };
   });
   const whole = new Set(entries.filter(entry => !entry.block).map(entry => entry.path));
   const fileBlocks = {};
-  for (const entry of entries) {
-    if (entry.block && !whole.has(entry.path)) fileBlocks[entry.path] = entry.block;
-  }
+  for (const { path, block } of entries) if (block && !whole.has(path)) fileBlocks[path] = block;
   return {
     files: Object.freeze([...new Set(entries.map(entry => entry.path))].sort()),
     fileBlocks: Object.freeze(fileBlocks)
@@ -119,28 +112,32 @@ const claimedFilesOf = value => {
 };
 const fileBlocksOf = value => {
   if (value === undefined || value === null) return Object.freeze({});
-  check(value !== null && typeof value === "object" && !Array.isArray(value), "fileBlocks must be an object");
+  checkObject(value, "fileBlocks must be an object");
   const entries = Object.entries(value).map(([path, block]) => ({ path, block }));
   return claimedFilesOf(entries).fileBlocks;
 };
+// Optional declared-files input: absent/null reads as "not declared".
+const NO_DECLARED_FILES = Object.freeze({ files: Object.freeze([]), fileBlocks: Object.freeze({}) });
+const declaredFilesOf = value => value == null ? NO_DECLARED_FILES : claimedFilesOf(value);
+// Stored fileBlocks merged under newly declared ones (declared wins).
+const mergedFileBlocksOf = (stored, declared) =>
+  Object.freeze({ ...fileBlocksOf(stored), ...declared.fileBlocks });
+// The link the poller watches: the first outcome-less link, else the last settled one.
+const currentPullRequest = links => links.find(pull => !pull.outcome) ?? links[links.length - 1] ?? null;
 const NAME_PATTERN = /^[A-Za-z0-9._/-]{1,200}$/;
-const repoOf = value => {
+const nameOf = (value, what) => {
   if (value === undefined || value === null || value === "") return null;
-  check(typeof value === "string" && NAME_PATTERN.test(value), "repo must be 1..200 characters of letters, numbers, or . _ / -");
+  check(typeof value === "string" && NAME_PATTERN.test(value), `${what} must be 1..200 characters of letters, numbers, or . _ / -`);
   return value;
 };
-const branchOf = value => {
-  if (value === undefined || value === null || value === "") return null;
-  check(typeof value === "string" && NAME_PATTERN.test(value), "branch must be 1..200 characters of letters, numbers, or . _ / -");
-  return value;
-};
+const repoOf = value => nameOf(value, "repo");
+const branchOf = value => nameOf(value, "branch");
 const MAX_PULLS = 16;
 const MAX_CHAIN = 20;
 const DEPENDS_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const MAX_DEPENDS = 16;
 const dependsOnOf = (value, selfId) => {
-  check(Array.isArray(value), "dependsOn must be an array");
-  check(value.length <= MAX_DEPENDS, `dependsOn must list at most ${MAX_DEPENDS} claims`);
+  checkListShape(value, "dependsOn must be an array", MAX_DEPENDS, `dependsOn must list at most ${MAX_DEPENDS} claims`);
   const ids = value.map(id => {
     check(typeof id === "string" && DEPENDS_PATTERN.test(id), "each dependsOn entry must be a claim id");
     check(id !== selfId, "a claim cannot depend on itself");
@@ -163,86 +160,70 @@ const parentClaimIdOf = (value, selfId) => {
 const MAX_EVIDENCE_REFS = 16;
 const evidenceRefsOf = value => {
   if (value === undefined || value === null) return Object.freeze([]);
-  check(Array.isArray(value), "evidenceRefs must be an array");
-  check(value.length <= MAX_EVIDENCE_REFS, `evidenceRefs must hold at most ${MAX_EVIDENCE_REFS} pointers`);
+  checkListShape(value, "evidenceRefs must be an array", MAX_EVIDENCE_REFS, `evidenceRefs must hold at most ${MAX_EVIDENCE_REFS} pointers`);
   return Object.freeze(value.map(ref => {
     check(typeof ref === "string" && ref.length > 0 && ref.length <= 512,
       "each evidenceRef must be a 1..512 character string");
     if (BLOB_PATTERN.test(ref)) return ref;
-    let url = null;
-    try { url = new URL(ref); } catch { url = null; }
-    check(url && url.protocol === "https:" && !url.username && !url.password,
-      "each evidenceRef must be sha256:<64 hex> or an https:// URL without credentials");
+    check(httpsUrlOrNull(ref), "each evidenceRef must be sha256:<64 hex> or an https:// URL without credentials");
     return ref;
   }));
 };
+// Provenance is work-level, like dependsOn: absent inputs keep the stored
+// values, present inputs are validated. It survives release; the done
+// transition freezes the final values onto the receipt.
+const provenanceOf = (item, parentClaimId, evidenceRefs) => ({
+  parentClaimId: parentClaimId === undefined ? item.parentClaimId : parentClaimIdOf(parentClaimId, item.id),
+  evidenceRefs: evidenceRefs === undefined ? item.evidenceRefs : evidenceRefsOf(evidenceRefs),
+});
 // A premise-invalid flag: the named premise claim was declared a bad premise
 // and this claim builds on it (directly or transitively). The flag marks the
 // claim for re-review; it never changes the work's state or outcome.
 const premiseFlagOf = value => {
   if (value === undefined || value === null) return null;
-  check(value !== null && typeof value === "object" && !Array.isArray(value), "premiseFlag must be an object");
-  check(typeof value.premiseId === "string" && value.premiseId.length > 0 && value.premiseId.length <= 256,
-    "premiseFlag premiseId must be 1..256 characters");
-  check(typeof value.reason === "string" && value.reason.length > 0 && value.reason.length <= 2000,
-    "premiseFlag reason must be 1..2000 characters");
-  check(typeof value.by === "string" && value.by.length > 0 && value.by.length <= 128,
-    "premiseFlag by must be 1..128 characters");
-  check(typeof value.at === "string" && Number.isFinite(Date.parse(value.at)),
-    "premiseFlag at must be an ISO timestamp");
-  return Object.freeze({ premiseId: value.premiseId, reason: value.reason, by: value.by, at: value.at });
+  checkObject(value, "premiseFlag must be an object");
+  const premiseId = idOf(value.premiseId, "premiseFlag premiseId", 256);
+  const reason = idOf(value.reason, "premiseFlag reason", 2000);
+  const by = idOf(value.by, "premiseFlag by", 128);
+  checkIsoTimestamp(value.at, "premiseFlag at must be an ISO timestamp");
+  return Object.freeze({ premiseId, reason, by, at: value.at });
 };
+// Poller-observed fields on a stored PR link: each is validated when present.
+// Only the server's poller may fill these in.
+const PULL_REQUEST_OBSERVED_FIELDS = [
+  ["outcome", value => value === "merged" || value === "closed", "pullRequest outcome must be merged or closed"],
+  ["syncedAt", value => typeof value === "string" && Number.isFinite(Date.parse(value)), "pullRequest syncedAt must be an ISO timestamp"],
+  ["nextPollAt", value => typeof value === "number" && Number.isFinite(value), "pullRequest nextPollAt must be a millisecond timestamp"],
+  ["etag", value => typeof value === "string" && value.length > 0 && value.length <= 200 && /^[\x21-\x7E]+$/.test(value), "pullRequest etag must be a short printable token"],
+  ["rateLimitedUntil", value => typeof value === "number" && Number.isFinite(value), "pullRequest rateLimitedUntil must be a millisecond timestamp"],
+  ["pollBackoffMs", value => typeof value === "number" && Number.isFinite(value) && value >= 0, "pullRequest pollBackoffMs must be a non-negative number"],
+  ["ciCursor", value => value === "status" || value === "checks" || value === "done", "pullRequest ciCursor must be status, checks, or done"],
+];
 const pullRequestOf = value => {
   if (value === undefined || value === null) return null;
   const url = typeof value === "string" ? value : value?.url;
   const parsed = parsePullRequestUrl(typeof url === "string" ? url : "");
   check(parsed, "pullRequest must be an https://github.com/{owner}/{repo}/pull/{number} URL");
-  let outcome = null;
-  let syncedAt = null;
-  let nextPollAt = null;
-  let etag = null;
-  let rateLimitedUntil = null;
-  let pollBackoffMs = null;
-  let ciCursor = null;
+  const observed = {};
   if (value !== null && typeof value === "object") {
-    if (value.outcome !== undefined && value.outcome !== null) {
-      check(value.outcome === "merged" || value.outcome === "closed", "pullRequest outcome must be merged or closed");
-      outcome = value.outcome;
-    }
-    if (value.syncedAt !== undefined && value.syncedAt !== null) {
-      check(typeof value.syncedAt === "string" && Number.isFinite(Date.parse(value.syncedAt)), "pullRequest syncedAt must be an ISO timestamp");
-      syncedAt = value.syncedAt;
-    }
-    if (value.nextPollAt !== undefined && value.nextPollAt !== null) {
-      check(typeof value.nextPollAt === "number" && Number.isFinite(value.nextPollAt), "pullRequest nextPollAt must be a millisecond timestamp");
-      nextPollAt = value.nextPollAt;
-    }
-    if (value.etag !== undefined && value.etag !== null) {
-      check(typeof value.etag === "string" && value.etag.length > 0 && value.etag.length <= 200 && /^[\x21-\x7E]+$/.test(value.etag), "pullRequest etag must be a short printable token");
-      etag = value.etag;
-    }
-    if (value.rateLimitedUntil !== undefined && value.rateLimitedUntil !== null) {
-      check(typeof value.rateLimitedUntil === "number" && Number.isFinite(value.rateLimitedUntil), "pullRequest rateLimitedUntil must be a millisecond timestamp");
-      rateLimitedUntil = value.rateLimitedUntil;
-    }
-    if (value.pollBackoffMs !== undefined && value.pollBackoffMs !== null) {
-      check(typeof value.pollBackoffMs === "number" && Number.isFinite(value.pollBackoffMs) && value.pollBackoffMs >= 0, "pullRequest pollBackoffMs must be a non-negative number");
-      pollBackoffMs = value.pollBackoffMs;
-    }
-    if (value.ciCursor !== undefined && value.ciCursor !== null) {
-      check(value.ciCursor === "status" || value.ciCursor === "checks" || value.ciCursor === "done", "pullRequest ciCursor must be status, checks, or done");
-      ciCursor = value.ciCursor;
+    for (const [name, valid, message] of PULL_REQUEST_OBSERVED_FIELDS) {
+      const field = value[name];
+      if (field === undefined || field === null) continue;
+      check(valid(field), message);
+      observed[name] = field;
     }
   }
   return Object.freeze({
-    url: parsed.url, repo: parsed.repo, number: parsed.number, outcome, syncedAt, nextPollAt,
-    etag, rateLimitedUntil, pollBackoffMs, ciCursor
+    url: parsed.url, repo: parsed.repo, number: parsed.number,
+    outcome: observed.outcome ?? null, syncedAt: observed.syncedAt ?? null,
+    nextPollAt: observed.nextPollAt ?? null, etag: observed.etag ?? null,
+    rateLimitedUntil: observed.rateLimitedUntil ?? null,
+    pollBackoffMs: observed.pollBackoffMs ?? null, ciCursor: observed.ciCursor ?? null,
   });
 };
 const pullRequestsOf = value => {
   if (value === undefined || value === null) return Object.freeze([]);
-  check(Array.isArray(value), "pullRequests must be an array");
-  check(value.length <= MAX_PULLS, `pullRequests must list at most ${MAX_PULLS} pull requests`);
+  checkListShape(value, "pullRequests must be an array", MAX_PULLS, `pullRequests must list at most ${MAX_PULLS} pull requests`);
   const links = [];
   const seen = new Set();
   for (const entry of value) {
@@ -257,27 +238,23 @@ const chainOf = value => {
   if (value === undefined || value === null) return Object.freeze([]);
   check(Array.isArray(value) && value.length <= MAX_CHAIN, `chain must hold at most ${MAX_CHAIN} links`);
   return Object.freeze(value.map(entry => {
-    check(entry !== null && typeof entry === "object" && !Array.isArray(entry), "each chain link must be an object");
+    checkObject(entry, "each chain link must be an object");
     check(entry.kind === "handoff" || entry.kind === "supersede", "chain kind must be handoff or supersede");
-    check(typeof entry.targetId === "string" && entry.targetId.length > 0 && entry.targetId.length <= 128, "chain targetId must be 1..128 characters");
-    check(typeof entry.at === "string" && Number.isFinite(Date.parse(entry.at)), "chain at must be an ISO timestamp");
-    check(typeof entry.actorId === "string" && entry.actorId.length > 0 && entry.actorId.length <= 128, "chain actorId must be 1..128 characters");
+    const targetId = idOf(entry.targetId, "chain targetId", 128);
+    checkIsoTimestamp(entry.at, "chain at must be an ISO timestamp");
+    const actorId = idOf(entry.actorId, "chain actorId", 128);
     const note = entry.note ?? null;
     if (note !== null) check(typeof note === "string" && note.length <= 2000, "chain note must be at most 2000 characters");
-    return Object.freeze({ kind: entry.kind, targetId: entry.targetId, at: entry.at, actorId: entry.actorId, note });
+    return Object.freeze({ kind: entry.kind, targetId, at: entry.at, actorId, note });
   }));
 };
 const optionalId = (value, what) => {
   if (value === undefined || value === null || value === "") return null;
   return idOf(value, what, 256);
 };
-const blobsOf = value => {
-  check(Array.isArray(value), "blobs must be an array");
-  check(value.length <= MAX_RECEIPT_BLOBS, `blobs must hold at most ${MAX_RECEIPT_BLOBS} pointers`);
-  value.forEach(blob => check(typeof blob === "string" && BLOB_PATTERN.test(blob),
-    "each blob must match sha256:<64 lowercase hex characters>"));
-  return Object.freeze([...value]);
-};
+const blobsOf = value => frozenArrayOf(value, "blobs", MAX_RECEIPT_BLOBS, "pointers",
+  blob => typeof blob === "string" && BLOB_PATTERN.test(blob),
+  "each blob must match sha256:<64 lowercase hex characters>");
 // Predicate for query-time tag filters (the route validates `tag=` params
 // against the same shape stored tags must have).
 export const isReceiptTag = value => typeof value === "string" && TAG_PATTERN.test(value);
@@ -295,6 +272,35 @@ const ROUND_ENDED_ACTIONS = new Set(["pr_closed", "pr_merged", "state:unclaimed"
 class ClaimError extends Error { constructor(code, message) { super(message); this.name = "ClaimError"; this.code = code; } }
 const fail = (code, message) => { throw new ClaimError(code, message); };
 const check = (condition, message) => { if (!condition) fail("invalid_claim_input", message); };
+// Shared validators: every call site keeps its exact error message, so only
+// the repeated predicate/shape boilerplate shrinks.
+const checkObject = (value, message) =>
+  check(value !== null && typeof value === "object" && !Array.isArray(value), message);
+const checkIsoTimestamp = (value, message) =>
+  check(typeof value === "string" && Number.isFinite(Date.parse(value)), message);
+const checkBoundedNote = (note, max, message) => {
+  if (note !== undefined && note !== null) check(typeof note === "string" && note.length <= max, message);
+};
+// Optional validated list: absent/null reads as empty, present values are parsed.
+const listOrEmpty = (value, parse) => value == null ? Object.freeze([]) : parse(value);
+const frozenArrayOf = (value, what, max, countNoun, entryValid, entryMessage) => {
+  check(Array.isArray(value), `${what} must be an array`);
+  check(value.length <= max, `${what} must hold at most ${max} ${countNoun}`);
+  value.forEach(entry => check(entryValid(entry), entryMessage));
+  return Object.freeze([...value]);
+};
+// "X must be an array" + "X must <at most N items>" — the list-shape preamble.
+const checkListShape = (value, arrayMessage, max, limitMessage) => {
+  check(Array.isArray(value), arrayMessage);
+  check(value.length <= max, limitMessage);
+};
+// An https:// URL without credentials, or null when the raw value is not one.
+const httpsUrlOrNull = raw => {
+  try {
+    const url = new URL(raw);
+    return url.protocol === "https:" && !url.username && !url.password ? url : null;
+  } catch { return null; }
+};
 
 const toMs = value => {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -321,11 +327,11 @@ const revisionOf = value => {
 };
 const ciOf = value => {
   if (value === undefined || value === null) return null;
-  check(value !== null && typeof value === "object" && !Array.isArray(value), "ci must be an object");
+  checkObject(value, "ci must be an object");
   check(CI_STATES.includes(value.state), `ci.state must be one of ${CI_STATES.join(", ")}`);
   check(value.url == null || (typeof value.url === "string" && value.url.length > 0 && value.url.length <= 300), "ci.url must be a short string or null");
   check(value.headSha == null || (typeof value.headSha === "string" && /^[0-9a-f]{40}$/.test(value.headSha)), "ci.headSha must be a 40-character commit sha or null");
-  check(typeof value.checkedAt === "string" && Number.isFinite(Date.parse(value.checkedAt)), "ci.checkedAt must be an ISO timestamp");
+  checkIsoTimestamp(value.checkedAt, "ci.checkedAt must be an ISO timestamp");
   return Object.freeze({
     state: value.state,
     url: value.url ?? null,
@@ -346,21 +352,22 @@ const reviewBasisOf = value => {
 };
 const reviewBasisFor = item => Object.freeze({ version: 1, owner: item.owner, claimedAt: item.claimedAt,
   revision: item.revision ?? null, headSha: item.ci?.headSha ?? null });
-const sameBasis = (left, right) => Boolean(left && right) && Object.keys(right).every(key => left[key] === right[key]);
+const everyKeyMatches = (source, target) => Object.keys(target).every(key => source[key] === target[key]);
+const sameBasis = (left, right) => Boolean(left && right) && everyKeyMatches(left, right);
 const currentReviewBasis = (review, item) => {
   const basis = review?.basis, current = reviewBasisFor(item);
-  return basis && Object.keys(current).every(key => basis[key] === current[key]);
+  return basis && everyKeyMatches(basis, current);
 };
 
 const reviewRecordOf = value => {
-  check(value !== null && typeof value === "object" && !Array.isArray(value), "review must be an object");
-  check(typeof value.memberId === "string" && value.memberId.length > 0 && value.memberId.length <= 128, "review memberId must be 1..128 characters");
+  checkObject(value, "review must be an object");
+  const memberId = idOf(value.memberId, "review memberId", 128);
   check(REVIEW_VERDICTS.includes(value.verdict), `verdict must be one of ${REVIEW_VERDICTS.join(", ")}`);
-  check(typeof value.summary === "string" && value.summary.length > 0 && value.summary.length <= 2000, "summary must be 1..2000 characters");
+  const summary = idOf(value.summary, "summary", 2000);
   check(value.url == null || (typeof value.url === "string" && value.url.length <= 300), "review url must be at most 300 characters");
-  check(typeof value.at === "string" && Number.isFinite(Date.parse(value.at)), "review at must be an ISO timestamp");
+  checkIsoTimestamp(value.at, "review at must be an ISO timestamp");
   const basis = reviewBasisOf(value.basis);
-  return Object.freeze({ memberId: value.memberId, verdict: value.verdict, summary: value.summary, url: value.url ?? null, at: value.at,
+  return Object.freeze({ memberId, verdict: value.verdict, summary, url: value.url ?? null, at: value.at,
     ...(basis ? { basis } : {}) });
 };
 const reviewsOf = value => {
@@ -369,14 +376,14 @@ const reviewsOf = value => {
   return Object.freeze(value.map(reviewRecordOf));
 };
 const attestationOf = value => {
-  check(value !== null && typeof value === "object" && !Array.isArray(value), "attestation must be an object");
-  check(typeof value.memberId === "string" && value.memberId.length > 0 && value.memberId.length <= 128, "attestation memberId must be 1..128 characters");
-  check(typeof value.at === "string" && Number.isFinite(Date.parse(value.at)), "attestation at must be an ISO timestamp");
+  checkObject(value, "attestation must be an object");
+  const memberId = idOf(value.memberId, "attestation memberId", 128);
+  checkIsoTimestamp(value.at, "attestation at must be an ISO timestamp");
   if (value.note !== undefined && value.note !== null) check(typeof value.note === "string" && value.note.length <= 512, "attestation note must be at most 512 characters");
   // SEC-2: note attestations record the claim round and revision they were
   // made against, so a repeat note from the same reviewer is deduplicated.
   const basis = reviewBasisOf(value.basis);
-  return Object.freeze({ memberId: value.memberId, at: value.at, note: value.note ?? null, ...(basis ? { basis } : {}) });
+  return Object.freeze({ memberId, at: value.at, note: value.note ?? null, ...(basis ? { basis } : {}) });
 };
 
 // W012 required reading: read-acknowledgments are a per-agent map of
@@ -397,32 +404,28 @@ const readingAcksOf = value => {
   return Object.freeze(out);
 };
 const workOf = value => {
-  check(value !== null && typeof value === "object" && !Array.isArray(value), "work must be an object");
-  check(typeof value.id === "string" && value.id.length > 0 && value.id.length <= 256, "work id must be 1..256 characters");
+  checkObject(value, "work must be an object");
+  idOf(value.id, "work id", 256);
   check(value.state === undefined || STATES.includes(value.state), `state must be one of ${STATES.join(", ")}`);
-  if (value.claimedAt !== undefined && value.claimedAt !== null) check(typeof value.claimedAt === "string" && Number.isFinite(Date.parse(value.claimedAt)), "claimedAt must be an ISO timestamp");
-  if (value.leaseStartAt !== undefined && value.leaseStartAt !== null) check(typeof value.leaseStartAt === "string" && Number.isFinite(Date.parse(value.leaseStartAt)), "leaseStartAt must be an ISO timestamp");
-  if (value.leaseExpiresAt !== undefined && value.leaseExpiresAt !== null) check(typeof value.leaseExpiresAt === "string" && Number.isFinite(Date.parse(value.leaseExpiresAt)), "leaseExpiresAt must be an ISO timestamp");
+  if (value.claimedAt != null) checkIsoTimestamp(value.claimedAt, "claimedAt must be an ISO timestamp");
+  if (value.leaseStartAt != null) checkIsoTimestamp(value.leaseStartAt, "leaseStartAt must be an ISO timestamp");
+  if (value.leaseExpiresAt != null) checkIsoTimestamp(value.leaseExpiresAt, "leaseExpiresAt must be an ISO timestamp");
   if (value.deliveryMode !== undefined && value.deliveryMode !== null) check(DELIVERY_MODES.includes(value.deliveryMode), `deliveryMode must be one of ${DELIVERY_MODES.join(", ")}`);
   if (value.reviewPolicy !== undefined && value.reviewPolicy !== null) check(REVIEW_POLICIES.includes(value.reviewPolicy), `reviewPolicy must be one of ${REVIEW_POLICIES.join(", ")}`);
   if (value.reviewedBy !== undefined && value.reviewedBy !== null) check(typeof value.reviewedBy === "string" && value.reviewedBy.length > 0 && value.reviewedBy.length <= 128, "reviewedBy must be 1..128 characters");
   const attestations = Array.isArray(value.attestations) ? value.attestations.map(attestationOf) : [];
-  const tags = value.tags === undefined || value.tags === null ? Object.freeze([]) : tagsOf(value.tags);
-  const blobs = value.blobs === undefined || value.blobs === null ? Object.freeze([]) : blobsOf(value.blobs);
-  const declared = value.files === undefined || value.files === null
-    ? { files: Object.freeze([]), fileBlocks: Object.freeze({}) }
-    : claimedFilesOf(value.files);
-  const storedBlocks = fileBlocksOf(value.fileBlocks);
-  const fileBlocks = Object.freeze({ ...storedBlocks, ...declared.fileBlocks });
-  const files = declared.files;
-  const dependsOn = value.dependsOn === undefined || value.dependsOn === null ? Object.freeze([]) : dependsOnOf(value.dependsOn, value.id);
+  const tags = listOrEmpty(value.tags, tagsOf);
+  const blobs = listOrEmpty(value.blobs, blobsOf);
+  const declared = declaredFilesOf(value.files);
+  const fileBlocks = mergedFileBlocksOf(value.fileBlocks, declared);
+  const dependsOn = listOrEmpty(value.dependsOn, ids => dependsOnOf(ids, value.id));
   const parentClaimId = parentClaimIdOf(value.parentClaimId, value.id);
   const evidenceRefs = evidenceRefsOf(value.evidenceRefs);
   const premiseFlag = premiseFlagOf(value.premiseFlag);
   const listedPulls = Array.isArray(value.pullRequests) && value.pullRequests.length
     ? pullRequestsOf(value.pullRequests)
     : (value.pullRequest ? Object.freeze([pullRequestOf(value.pullRequest)]) : Object.freeze([]));
-  const pullRequest = listedPulls.find(pull => !pull.outcome) ?? listedPulls[listedPulls.length - 1] ?? null;
+  const pullRequest = currentPullRequest(listedPulls);
   const kind = kindOf(value.kind);
   const revision = revisionOf(value.revision);
   if (kind === "deploy") check(revision, "a deploy claim needs a revision");
@@ -435,7 +438,7 @@ const workOf = value => {
     claimedAt: value.claimedAt ?? null, leaseStartAt: value.leaseStartAt ?? null, leaseExpiresAt: value.leaseExpiresAt ?? null,
     deliveryMode: value.deliveryMode ?? null, reviewPolicy: value.reviewPolicy ?? null,
     reviewedBy: value.reviewedBy ?? null, attestations: Object.freeze(attestations),
-    tags, files, fileBlocks, blobs, dependsOn, pullRequest, pullRequests: listedPulls,
+    tags, files: declared.files, fileBlocks, blobs, dependsOn, pullRequest, pullRequests: listedPulls,
     parentClaimId, evidenceRefs, premiseFlag,
     repo: repoOf(value.repo), branch: branchOf(value.branch),
     chain: chainOf(value.chain), supersededBy: optionalId(value.supersededBy, "supersededBy"),
@@ -462,6 +465,11 @@ const withHistory = (work, atMs, agentId, action, note) => {
     history: Object.freeze(dropped > 0 ? full.slice(dropped) : full),
     ...(omitted > 0 ? { historyOmitted: omitted } : {}) });
 };
+// Round-scoped fields an owner leaves behind on release/retire/expiry —
+// whoever takes the claim next starts clean.
+const clearedReviewsOf = () => ({ attestations: Object.freeze([]), reviews: Object.freeze([]) });
+const clearedRoundOf = () => ({ owner: null, leaseStartAt: null, leaseExpiresAt: null,
+  ...clearedReviewsOf(), files: Object.freeze([]), fileBlocks: Object.freeze({}) });
 // Append one history stamp to a claim without a state transition (W012
 // required reading acks, and any future note-only stamps). Same trimming
 // rules as every other claim write.
@@ -511,6 +519,17 @@ const leaseHoursOf = value => {
     `leaseHours must be > 0 and <= ${MAX_LEASE_HOURS}, or null for no lease`);
   return value;
 };
+// The effective lease window in hours: an explicit number wins, explicit
+// null opts out, otherwise the room default applies.
+const effectiveLeaseHoursOf = (leaseHours, room) => {
+  const wanted = leaseHoursOf(leaseHours);
+  return wanted === null ? null : wanted ?? roomWorkClaimConfig(room).defaultLeaseHours;
+};
+// The lease window a claim carries from `atMs`, or no window at all when
+// the claim opted out of leases.
+const leaseWindowOf = (atMs, effectiveHours) => effectiveHours === null
+  ? { leaseStartAt: null, leaseExpiresAt: null }
+  : { leaseStartAt: isoOf(atMs), leaseExpiresAt: isoOf(atMs + effectiveHours * 3600 * 1000) };
 const pullList = (pullRequest, pullRequests) => {
   const links = pullRequestsOf(pullRequests);
   const single = pullRequestOf(pullRequest);
@@ -530,25 +549,25 @@ export function createWork({ id, title, reviewPolicy, note, tags, files, depends
   // SEC2: the create note is stored on the "created" history stamp and served
   // on every board list — without a bound, a direct API caller can stash an
   // arbitrarily large string. 4000 matches the New-item form's maxlength.
-  if (note !== undefined && note !== null) check(typeof note === "string" && note.length <= 4000, "note must be a string of at most 4000 characters");
+  checkBoundedNote(note, 4000, "note must be a string of at most 4000 characters");
   if (reviewPolicy !== undefined && reviewPolicy !== null) check(REVIEW_POLICIES.includes(reviewPolicy), `reviewPolicy must be one of ${REVIEW_POLICIES.join(", ")}`);
   const claimKind = kindOf(kind);
   const claimRevision = revisionOf(revision);
   if (claimKind === "deploy") check(claimRevision, "a deploy claim needs a revision");
-  const declared = files === undefined || files === null ? { files: Object.freeze([]), fileBlocks: Object.freeze({}) } : claimedFilesOf(files);
+  const declared = declaredFilesOf(files);
   const links = pullList(pullRequest, pullRequests);
   const item = { id, title: title ?? id, state: "unclaimed", owner: null, history: [],
     claimedAt: null, leaseStartAt: null, leaseExpiresAt: null, deliveryMode: null,
     reviewPolicy: reviewPolicy ?? null, reviewedBy: null, attestations: Object.freeze([]),
-    tags: tags === undefined || tags === null ? Object.freeze([]) : tagsOf(tags),
+    tags: listOrEmpty(tags, tagsOf),
     files: declared.files,
-    fileBlocks: Object.freeze({ ...fileBlocksOf(fileBlocks), ...declared.fileBlocks }),
+    fileBlocks: mergedFileBlocksOf(fileBlocks, declared),
     blobs: Object.freeze([]),
-    dependsOn: dependsOn === undefined || dependsOn === null ? Object.freeze([]) : dependsOnOf(dependsOn, id),
+    dependsOn: listOrEmpty(dependsOn, ids => dependsOnOf(ids, id)),
     parentClaimId: parentClaimIdOf(parentClaimId, id),
     evidenceRefs: evidenceRefsOf(evidenceRefs),
     premiseFlag: null,
-    pullRequest: links.find(pull => !pull.outcome) ?? links[links.length - 1] ?? null,
+    pullRequest: currentPullRequest(links),
     pullRequests: links,
     repo: repoOf(repo), branch: branchOf(branch),
     chain: Object.freeze([]), supersededBy: null, workItemId: optionalId(workItemId, "workItemId"),
@@ -566,25 +585,22 @@ export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, p
   // QA D-1: the 4000-char bound applies to every note stored on a history
   // stamp, not just create — an unbounded claim note is the same
   // storage/amplification vector the SEC2 create cap closed.
-  if (note !== undefined && note !== null) check(typeof note === "string" && note.length <= 4000, "note must be a string of at most 4000 characters");
-  const wanted = leaseHoursOf(leaseHours);
-  const effective = wanted === null ? null : wanted ?? roomWorkClaimConfig(room).defaultLeaseHours;
-  const declared = files === undefined || files === null ? null : claimedFilesOf(files);
+  checkBoundedNote(note, 4000, "note must be a string of at most 4000 characters");
+  const effective = effectiveLeaseHoursOf(leaseHours, room);
+  const declared = files == null ? null : claimedFilesOf(files);
   const links = pullRequest === undefined && pullRequests === undefined ? null : pullList(pullRequest, pullRequests);
   const claimed = { ...item, state: "claimed", owner: agent, claimedAt: isoOf(atMs),
     files: declared ? declared.files : item.files,
     fileBlocks: declared
-      ? Object.freeze({ ...fileBlocksOf(fileBlocks), ...declared.fileBlocks })
+      ? mergedFileBlocksOf(fileBlocks, declared)
       : (fileBlocks === undefined ? item.fileBlocks : fileBlocksOf(fileBlocks)),
     dependsOn: dependsOn === undefined ? item.dependsOn : dependsOnOf(dependsOn ?? [], item.id),
-    parentClaimId: parentClaimId === undefined ? item.parentClaimId : parentClaimIdOf(parentClaimId, item.id),
-    evidenceRefs: evidenceRefs === undefined ? item.evidenceRefs : evidenceRefsOf(evidenceRefs),
+    ...provenanceOf(item, parentClaimId, evidenceRefs),
     pullRequests: links ?? item.pullRequests,
-    pullRequest: links ? (links.find(pull => !pull.outcome) ?? links[links.length - 1] ?? null) : item.pullRequest,
+    pullRequest: links ? currentPullRequest(links) : item.pullRequest,
     repo: repo === undefined ? item.repo : repoOf(repo),
     branch: branch === undefined ? item.branch : branchOf(branch),
-    leaseStartAt: effective === null ? null : isoOf(atMs),
-    leaseExpiresAt: effective === null ? null : isoOf(atMs + effective * 3600 * 1000) };
+    ...leaseWindowOf(atMs, effective) };
   return withHistory(claimed, atMs, agent, "claimed",
     effective === null ? note : note ?? `lease: ${effective}h`);
 }
@@ -603,15 +619,12 @@ export function renewWork(work, agentId, { note, leaseHours, room, now } = {}) {
   check(item.leaseExpiresAt !== null, `work "${item.id}" has no lease — nothing to renew`);
   check(Date.parse(item.leaseExpiresAt) > atMs, `work "${item.id}" lease already lapsed — claim it again instead`);
   // QA D-1: same 4000-char bound as create — see claimWork.
-  if (note !== undefined && note !== null) check(typeof note === "string" && note.length <= 4000, "note must be a string of at most 4000 characters");
-  const wanted = leaseHoursOf(leaseHours);
+  checkBoundedNote(note, 4000, "note must be a string of at most 4000 characters");
   // Explicit null opts out of leases, exactly like claimWork: the renewed
   // claim carries no lease window (it previously fell through to the room
   // default, contradicting claimWork's null handling).
-  const effective = wanted === null ? null : wanted ?? roomWorkClaimConfig(room).defaultLeaseHours;
-  const renewed = { ...item,
-    leaseStartAt: effective === null ? null : isoOf(atMs),
-    leaseExpiresAt: effective === null ? null : isoOf(atMs + effective * 3600 * 1000) };
+  const effective = effectiveLeaseHoursOf(leaseHours, room);
+  const renewed = { ...item, ...leaseWindowOf(atMs, effective) };
   return withHistory(renewed, atMs, agent, "renewed",
     note ?? (effective === null ? "lease removed" : `lease: ${effective}h`));
 }
@@ -685,7 +698,7 @@ export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClai
     ? Object.freeze(prior.map(entry => (canonicalUrl(entry) === parsed.url ? fresh : entry)))
     : Object.freeze([...prior, fresh]);
   return withHistory({ ...work, pullRequests: links,
-    pullRequest: links.find(pull => !pull.outcome) ?? links[links.length - 1],
+    pullRequest: currentPullRequest(links),
     ci: null, attestations: Object.freeze([]) }, atMs, agent, "pr_linked", `Linked pull request ${parsed.url}`);
 }
 // Update claimed work: move state or add a note. Only the owner may update.
@@ -702,48 +715,33 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
   if (state !== undefined) {
     check(STATES.includes(state), `state must be one of ${STATES.join(", ")}`);
     const allowed = TRANSITIONS[item.state] ?? [];
-    const allowedLabel = next => next === "unclaimed" ? "released" : next;
     check(allowed.includes(state),
-      `cannot move "${item.id}" from ${item.state} to ${state} — allowed: ${item.state} -> ${allowed.map(allowedLabel).join("|") || "none"}`);
+      `cannot move "${item.id}" from ${item.state} to ${state} — allowed: ${item.state} -> ${allowed.map(next => next === "unclaimed" ? "released" : next).join("|") || "none"}`);
   }
-  if (deliveryMode !== undefined && deliveryMode !== null) {
-    check(state === "done", "deliveryMode is only recorded on the done transition");
-    check(DELIVERY_MODES.includes(deliveryMode), `deliveryMode must be one of ${DELIVERY_MODES.join(", ")}`);
-  }
-  if (reviewedBy !== undefined && reviewedBy !== null) {
-    check(state === "done", "reviewedBy is only recorded on the done transition");
-    agentOf(reviewedBy);
-  }
-  if (tags !== undefined && tags !== null) {
-    check(state === "done", "tags are only recorded on the done transition");
-    tagsOf(tags);
-  }
-  if (blobs !== undefined && blobs !== null) {
-    check(state === "done", "blobs are only recorded on the done transition");
-    blobsOf(blobs);
+  // deliveryMode/reviewedBy/tags/blobs are recorded on the done transition
+  // only — each is refused anywhere else before its own validation runs.
+  const doneOnly = [
+    [deliveryMode, value => check(DELIVERY_MODES.includes(value), `deliveryMode must be one of ${DELIVERY_MODES.join(", ")}`), "deliveryMode is only recorded on the done transition"],
+    [reviewedBy, agentOf, "reviewedBy is only recorded on the done transition"],
+    [tags, tagsOf, "tags are only recorded on the done transition"],
+    [blobs, blobsOf, "blobs are only recorded on the done transition"],
+  ];
+  for (const [value, validate, onlyOnDone] of doneOnly) {
+    if (value === undefined || value === null) continue;
+    check(state === "done", onlyOnDone);
+    validate(value);
   }
   // QA D-1: same 4000-char bound as create — see claimWork.
-  if (note !== undefined && note !== null) check(typeof note === "string" && note.length <= 4000, "note must be a string of at most 4000 characters");
+  checkBoundedNote(note, 4000, "note must be a string of at most 4000 characters");
   const released = state === "unclaimed";
   // Provenance is work-level, like dependsOn: it survives release and the
   // done transition freezes the final values onto the receipt. It applies on
   // note-only updates too — a provenance correction needs no state change.
-  const withProvenance = {
-    parentClaimId: parentClaimId === undefined ? item.parentClaimId : parentClaimIdOf(parentClaimId, item.id),
-    evidenceRefs: evidenceRefs === undefined ? item.evidenceRefs : evidenceRefsOf(evidenceRefs),
-  };
+  const withProvenance = provenanceOf(item, parentClaimId, evidenceRefs);
   const next = state === undefined ? { ...item, ...withProvenance } : { ...item, state,
-    owner: released ? null : item.owner,
-    leaseStartAt: released ? null : item.leaseStartAt, // a released claim holds no lease
-    leaseExpiresAt: released ? null : item.leaseExpiresAt, // a released claim holds no lease
-    // a released claim drops its reviews too — attestations belong to the
-    // lapsed owner's round of work, never to whoever claims next
-    attestations: released ? Object.freeze([]) : item.attestations,
-    reviews: released ? Object.freeze([]) : item.reviews,
-    // declared files belong to the owner's round too — a re-claim must not
-    // inherit the previous owner's file declarations
-    files: released ? Object.freeze([]) : item.files,
-    fileBlocks: released ? Object.freeze({}) : item.fileBlocks,
+    // a released claim holds no lease, and drops its round-scoped reviews,
+    // attestations, and declared files — the next holder starts clean
+    ...(released ? clearedRoundOf() : {}),
     deliveryMode: state === "done" && deliveryMode != null ? deliveryMode : item.deliveryMode,
     reviewedBy: state === "done" && reviewedBy != null ? reviewedBy : item.reviewedBy,
     tags: state === "done" && tags != null ? tagsOf(tags) : item.tags,
@@ -759,7 +757,7 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
 export function closeWork(work, agentId, { verb = "close", reason, now, authority = false } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(verb === "close" || verb === "cancel", "verb must be close or cancel");
-  if (reason !== undefined && reason !== null) check(typeof reason === "string" && reason.length <= 4000, "reason must be a string of at most 4000 characters");
+  checkBoundedNote(reason, 4000, "reason must be a string of at most 4000 characters");
   const next = nextClaimState(item.state, verb);
   if (next === null) fail("work_claim_terminal", `Cannot ${verb} "${item.id}": it is already ${item.state}`);
   const holder = item.owner !== null && item.owner === agent;
@@ -770,9 +768,7 @@ export function closeWork(work, agentId, { verb = "close", reason, now, authorit
       ? `Only the member who opened "${item.id}" (while unclaimed), its holder, or a claim manager can cancel it`
       : `Only the holder of "${item.id}" or a claim manager (room owner or manage_claims) can close it`);
   }
-  const closed = { ...item, state: next, owner: null, leaseStartAt: null, leaseExpiresAt: null,
-    attestations: Object.freeze([]), reviews: Object.freeze([]),
-    files: Object.freeze([]), fileBlocks: Object.freeze({}) };
+  const closed = { ...item, state: next, ...clearedRoundOf() };
   return withHistory(closed, atMs, agent, verb === "cancel" ? "cancelled" : "closed", reason);
 }
 // The member who created the item, when the creation stamp is still in history.
@@ -786,7 +782,7 @@ export function creatorOf(work) {
 export function attestWork(work, agentId, { note, now } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(ACTIVE_CLAIM_STATES.includes(item.state), `work "${item.id}" is ${item.state} — only active claims can be reviewed`);
-  if (note !== undefined && note !== null) check(typeof note === "string" && note.length <= 512, "note must be at most 512 characters");
+  checkBoundedNote(note, 512, "note must be at most 512 characters");
   const prior = item.attestations.find(entry => entry.memberId === agent);
   const explicit = item.reviews.some(entry => entry.memberId === agent);
   if (!explicit && prior && prior.note === (note ?? null)) return Object.freeze(item);
@@ -820,9 +816,7 @@ export function recordReview(work, agentId, { verdict, summary, url, now } = {})
   let reviewUrl = null;
   if (url !== undefined && url !== null) {
     check(typeof url === "string" && url.length > 0 && url.length <= 300, "url must be at most 300 characters");
-    let parsed;
-    try { parsed = new URL(url); } catch { parsed = null; }
-    check(parsed && parsed.protocol === "https:" && !parsed.username && !parsed.password, "url must be an https URL without credentials");
+    check(httpsUrlOrNull(url), "url must be an https URL without credentials");
     reviewUrl = url;
   }
   const prior = item.reviews.find(entry => entry.memberId === agent);
@@ -885,11 +879,10 @@ export function reassignWork(work, agentId, newOwner, { note, now, authority = f
   // Before this, the owner was set but the state stayed "unclaimed" with no
   // lease, so the item showed as free to take and never expired.
   const fresh = item.state === "unclaimed";
-  const hours = fresh ? roomWorkClaimConfig(room).defaultLeaseHours : null;
-  const claim = fresh ? { state: "claimed", claimedAt: isoOf(atMs),
-    leaseStartAt: hours === null ? null : isoOf(atMs),
-    leaseExpiresAt: hours === null ? null : isoOf(atMs + hours * 3600 * 1000) } : {};
-  return withHistory({ ...item, ...claim, owner: target, attestations: Object.freeze([]), reviews: Object.freeze([]) }, atMs, agent, `reassigned:${target}`, note);
+  const claim = fresh
+    ? { state: "claimed", claimedAt: isoOf(atMs), ...leaseWindowOf(atMs, roomWorkClaimConfig(room).defaultLeaseHours) }
+    : {};
+  return withHistory({ ...item, ...claim, owner: target, ...clearedReviewsOf() }, atMs, agent, `reassigned:${target}`, note);
 }
 // True when the item holds an active claim whose lease has lapsed. Items
 // without a lease, and items not under claim, never expire.
@@ -907,13 +900,13 @@ export function releaseExpired(items, now) {
   return items.map(entry => {
     const item = workOf(entry);
     if (!isLeaseExpired(item, atMs)) return item;
-    // Auto-release clears owner, lease, the lapsed owner's declared
-    // files, and their attestations — whoever claims next starts clean.
+    // Auto-release clears the lapsed owner's round-scoped fields — owner,
+    // lease, declared files, attestations, reviews — whoever claims next
+    // starts clean.
     // 2026-09-30 (phase-2 gap audit L-P2-8): mirrors updateWork, where a
     // released claim drops its reviews too (attestations belong to the
     // lapsed owner's round of work, never to whoever claims next).
-    const released = { ...item, state: "unclaimed", owner: null, leaseStartAt: null, leaseExpiresAt: null,
-      files: Object.freeze([]), fileBlocks: Object.freeze({}), attestations: Object.freeze([]), reviews: Object.freeze([]) };
+    const released = { ...item, state: "unclaimed", ...clearedRoundOf() };
     return withHistory(released, atMs, item.owner ?? "system", "lease_expired",
       `claim by ${item.owner ?? "nobody"} lapsed at ${item.leaseExpiresAt} — auto-released`);
   });
@@ -1036,7 +1029,7 @@ export function walkProvenance(items, rootId) {
 export function flagPremiseInvalid(work, { premiseId, reason, byMemberId, now } = {}) {
   const item = workOf(work), agent = agentOf(byMemberId), atMs = nowMsOf(now);
   const pid = idOf(premiseId, "premise id", 256);
-  check(typeof reason === "string" && reason.length > 0 && reason.length <= 2000, "reason must be 1..2000 characters");
+  idOf(reason, "reason", 2000);
   const flag = Object.freeze({ premiseId: pid, reason, by: agent, at: isoOf(atMs) });
   return withHistory({ ...item, premiseFlag: flag }, atMs, agent, "premise_flagged",
     `Premise "${pid}" declared invalid: ${reason.slice(0, 200)}`);
@@ -1046,7 +1039,7 @@ export function flagPremiseInvalid(work, { premiseId, reason, byMemberId, now } 
 export function clearPremiseFlag(work, { byMemberId, note, now } = {}) {
   const item = workOf(work), agent = agentOf(byMemberId), atMs = nowMsOf(now);
   check(item.premiseFlag !== null, `work "${item.id}" carries no premise flag`);
-  if (note !== undefined && note !== null) check(typeof note === "string" && note.length <= 2000, "note must be at most 2000 characters");
+  checkBoundedNote(note, 2000, "note must be at most 2000 characters");
   const { premiseFlag: _dropped, ...rest } = item;
   return withHistory({ ...rest, premiseFlag: null }, atMs, agent, "premise_cleared", note ?? null);
 }
