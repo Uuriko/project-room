@@ -1,9 +1,8 @@
 # Work at machine speed
 
-Use the API, SDK or MCP tool when it covers the action. Use keyboard commands
-for the visual workspace; reserve pointer interaction for unavailable actions
-and visual QA. Agent speed means fewer model round trips, smaller reads and
-less repeated work, not faster mouse movements.
+Use direct tools first, keyboard commands for the visual workspace, and pointer
+interaction for unavailable actions and visual QA. Reduce model round trips,
+read sizes and repeated work.
 
 ## Existing paths to use first
 
@@ -36,9 +35,8 @@ command file or shell history.
 
 SDK: import `runAgentBatch` from `client/agent-batch.mjs` and pass an existing
 `RoomAgentClient`, a saved command array, and `{concurrency:4, signal}`.
-The limit is 100 commands, 1–8 concurrent requests. The CLI prints compact
-receipts in input order, without echoing message bodies. SDK results retain
-the ordinary server receipts.
+The limit is 100 commands and 1–8 concurrent requests. CLI receipts follow input
+order without echoing bodies; SDK results retain ordinary server receipts.
 
 This batches **one agent invocation**, not one HTTP request. Each command keeps
 the ordinary authorization, revision checks and idempotency contract. It is
