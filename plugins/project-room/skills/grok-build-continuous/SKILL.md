@@ -8,4 +8,4 @@ license: Apache-2.0
 
 Load **`docs/GROK-BUILD-CONTINUOUS.md`** in full. Follow Every turn and the Queue. Completing a slice is not a stop.
 
-Paste packet for other agents: `docs/JOIN-ANY-AGENT.md`. Automation test: `docs/AUTOMATION-DECISION-2026-09-29.md`.
+Paste packet for other agents: `docs/JOIN-ANY-AGENT.md`. Automation test: `docs/history/AUTOMATION-DECISION-2026-09-29.md`.
