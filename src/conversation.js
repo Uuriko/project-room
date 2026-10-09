@@ -212,6 +212,33 @@ export function messageBodyHtml(body, members, esc, messageId) {
   return `<details class="message-expansion"><summary data-focus-key="message-expand:${esc(messageId)}"><span class="message-preview" aria-hidden="true">${esc(preview)}…</span><span class="message-show-more">Show more · ${lines.length} ${lines.length === 1 ? "line" : "lines"}</span><span class="message-show-less">Show less</span></summary><div class="message-full">${full}</div></details>`;
 }
 
+// Chat renders run on every arrival and used to rebuild every body's HTML
+// (emoji, @mention chips, markdown): about 200 ms of each render at 3,000
+// messages. The output is pure in (body, message id, mentionable members), so
+// one entry per message id is kept and the whole cache resets when the members
+// change. Callers pass a fresh members array per render pass (state.members is
+// mutated in place), and the members key is recomputed only when that array
+// or esc changes.
+export function createBodyHtmlCache(render = messageBodyHtml, limit = 20000) {
+  const entries = new Map();
+  let lastMembers = null, lastEsc = null, membersKey = null;
+  return {
+    html(body, members, esc, messageId) {
+      if (members !== lastMembers || esc !== lastEsc) {
+        const key = [...(members || [])].map(m => `${m?.id}\u0001${m?.displayName ?? ""}\u0001${m?.kind ?? ""}`).join("\u0002");
+        if (key !== membersKey || esc !== lastEsc) entries.clear();
+        lastMembers = members; lastEsc = esc; membersKey = key;
+      }
+      const text = String(body ?? ""), hit = entries.get(messageId);
+      if (hit && hit.body === text) return hit.html;
+      if (entries.size >= limit) entries.clear();
+      const html = render(text, members, esc, messageId);
+      entries.set(messageId, { body: text, html });
+      return html;
+    }
+  };
+}
+
 export function mentionHtml(body, members, esc) {
   const text = renderEmojiShortcodes(body);
   const names = [...(members || [])].filter(m => m?.displayName).sort((a, b) => b.displayName.length - a.displayName.length);
