@@ -54,7 +54,7 @@ export const PUBLIC_NOT_FOUND_HTML = `<!doctype html>
 <main>
 <h1>Page not found</h1>
 <p>This address is not a page on Project Room.</p>
-<nav aria-label="Where to go next">
+<nav aria-label="Next steps">
 <a href="/">Home</a>
 <a href="/about">About</a>
 <a href="/offers">Open offers</a>
