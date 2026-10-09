@@ -15,7 +15,7 @@ import { attemptReceipts, attemptLedger, cancellationState, workContinuity, spen
 import { consumeJoinFragment, installShareLinks, canRetryInvitation, requestFailureMessage } from "./share-links.js";
 import { FIRST_ROOM_SETUP_FAILURE } from "./first-room-copy.js";
 import { dmConsentPeerSummary, incomingDmRequests, dmConsentPairDescription, dmConsentActionsForPeer, fetchDmConsents, requestDmConsent, decideDmConsent, revokeDmConsent, blockDmMember, unblockDmMember, dmConsentFailureMessage, DM_CONSENT_REFUSAL_CODES } from "./dm-consents.js";
-import { identityIdOf, mergeFriendBonds, bondWithPeer, friendChrome, friendBondCommand, friendFailureMessage, friendFocusTarget } from "./friend-bond.js";
+import { identityIdOf, mergeFriendBonds, bondWithPeer, friendChrome, friendBondCommand, friendFailureMessage, friendFocusTarget, friendMessageHtml } from "./friend-bond.js";
 import { installAgentConnections } from "./agent-connections.js";
 import { catalogById } from "./room-roster.js";
 import { installRoomInstructions } from "./room-instructions.js";
@@ -7020,14 +7020,9 @@ async function runFriendAction(action, peerMemberId, bondId, button) {
     }
   }
 }
-function friendMessageHtml(messages, peerMemberId) {
-  if (!messages?.length) return `<li class="friend-dm-empty">No messages yet.</li>`;
+function friendThreadHtml(messages, peerMemberId) {
   const selfId = identityIdOf(state.members[session.member.id] ?? session.member, presenceStates.get(session.member.id));
-  return messages.map(message => {
-    const mine = message.fromIdentityId === selfId;
-    const who = mine ? "You" : displayName(peerMemberId);
-    return `<li class="friend-dm-message${mine ? " mine" : ""}"><span class="friend-dm-meta">${esc(who)}</span><p>${esc(message.body)}</p></li>`;
-  }).join("");
+  return friendMessageHtml(messages, { selfId, peerName: displayName(peerMemberId), esc, time });
 }
 async function loadFriendThread(peerMemberId) {
   if (!state || !session || friendDmPeerId !== peerMemberId) return;
@@ -7038,10 +7033,10 @@ async function loadFriendThread(peerMemberId) {
     const listed = await client.request(client.path("/peer-dms"));
     if (generation !== client.generation || friendDmPeerId !== peerMemberId || !state) return;
     const thread = (listed?.threads ?? []).find(row => row.peerIdentityId === peerIdentity);
-    if (!thread) { renderContent("#friend-dm-list", `<li class="friend-dm-empty">No messages yet.</li>`); return; }
+    if (!thread) { renderContent("#friend-dm-list", friendThreadHtml(null, peerMemberId)); return; }
     const history = await client.request(client.path(`/peer-dms/${encodeURIComponent(thread.threadId)}`));
     if (generation !== client.generation || friendDmPeerId !== peerMemberId || !state) return;
-    renderContent("#friend-dm-list", friendMessageHtml(history?.messages, peerMemberId));
+    renderContent("#friend-dm-list", friendThreadHtml(history?.messages, peerMemberId));
   } catch (error) {
     if (generation === client.generation && friendDmPeerId === peerMemberId) dialogNotice("#friend-dm-status", friendFailureMessage(error), true);
   }
@@ -7054,7 +7049,7 @@ function openFriendThread(peerMemberId) {
   $("#friend-dm-title").textContent = `Friends with ${peer.displayName}`;
   $("#friend-dm-input").value = "";
   setFormStatus($("#friend-dm-status"), "");
-  renderContent("#friend-dm-list", `<li class="friend-dm-empty">No messages yet.</li>`);
+  renderContent("#friend-dm-list", friendThreadHtml(null, peerMemberId));
   if (!$("#friend-dm-dialog").open) $("#friend-dm-dialog").showModal();
   void loadFriendThread(peerMemberId);
   $("#friend-dm-input").focus();
