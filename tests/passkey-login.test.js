@@ -354,7 +354,9 @@ test("defaultVerifySignature accepts real DER WebAuthn signatures (H-6)", () => 
   const data = Buffer.from("signed payload");
   // What authenticators actually emit: ASN.1 DER, not raw R||S.
   const der = sign("sha256", data, { key: key.privateKey, dsaEncoding: "der" });
-  assert.ok(der.length >= 70 && der.length <= 72, `DER signatures are ~70-72 bytes, got ${der.length}`);
+  // DER drops leading zero bytes of r and s, so P-256 lengths run 68-72 (69 shows
+  // up in ~0.2% of runs); assert the shape (SEQUENCE tag, not 64-byte raw R||S).
+  assert.ok(der[0] === 0x30 && der.length > 64 && der.length <= 72, `expected DER, got ${der.length} bytes`);
   assert.equal(defaultVerifySignature({ publicKeyCose: key.cose, data, signature: der }), true);
   // A tampered DER signature must not verify under either encoding.
   const tampered = Buffer.from(der);
