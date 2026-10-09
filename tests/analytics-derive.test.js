@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { derivedSources, readDerivedPage } from "../server/analytics/derive-tables.mjs";
-import { dailyValue, ensureAnalyticsSchema } from "../server/analytics/schema.mjs";
+import { columnExists, dailyValue, ensureAnalyticsSchema } from "../server/analytics/schema.mjs";
 import { runAnalyticsTail } from "../server/analytics/tail.mjs";
 
 test("side-table readers page by created time and id, and a missing table is counted", async () => {
@@ -44,4 +44,16 @@ test("side-table readers page by created time and id, and a missing table is cou
   assert.equal(dailyValue(tailDb, "2023-11-14", "missing_table"), derivedSources().length);
   db.close();
   tailDb.close();
+});
+
+test("columnExists is true only for the exact column on an existing table (guild-09 fail-first)", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec("CREATE TABLE t (a TEXT, b TEXT)");
+  assert.equal(columnExists(db, "t", "a"), true);
+  assert.equal(columnExists(db, "t", "b"), true);
+  // a missing column must not be reported present (kills `row.name !== column` mutant)
+  assert.equal(columnExists(db, "t", "zzz"), false);
+  // a missing table must not report any column present (kills `return false -> true` mutant)
+  assert.equal(columnExists(db, "nope", "a"), false);
+  db.close();
 });
