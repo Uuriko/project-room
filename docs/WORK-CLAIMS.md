@@ -28,8 +28,15 @@ that write board cards: `claim.acquired`, `claim.released`, `claim.renewed`,
 { "id": "lane-a", "title": "Lane A", "reviewPolicy": "self_attested", "note": "optional", "tags": ["migration"], "files": ["server/a.mjs"], "dependsOn": ["lane-b"], "pullRequest": "https://github.com/Uuriko/project-room/pull/7" }
 ```
 
-`id` matches `[A-Za-z0-9_-]{1,128}`. Only `id` is required. A duplicate id is
+`id` matches `[A-Za-z0-9_-]{1,128}`. `id` and `files` are required. A duplicate id is
 **409** `work_claim_exists`. The item starts `unclaimed`.
+
+`files` names the exact repo-relative files the work will touch, so the
+file-lease collision system can protect them. A missing or `null` `files` is
+**422** `work_claim_files_required` — file-less claims are refused instead of
+being created silently with no collision protection. Pass `files: []` only
+when the work truly touches no files; that is an explicit, visible "no
+files" declaration, not silence.
 
 `assignee` names an active member. The item is claimed for them and they are
 woken with reason `assigned`. An unknown or inactive member is **422**
@@ -61,6 +68,11 @@ see the manual review contract below.
 Only an `unclaimed` item can be claimed. A second holder is **409**
 `work_claim_conflict`. `repo` and `branch` are optional labels (1..200
 characters of letters, numbers, or `.` `_` `/` `-`).
+
+Claiming an item that declares no files without passing `files` is **422**
+`work_claim_files_required` — declare the exact files this claim will touch
+(`files: []` when it touches none). An item that already declares files is
+claimed without re-declaring: the claim inherits the item's files.
 
 Files are an exclusive lease. A path string, or `{ "path", "block"? }` /
 `{ "path", "region"? }`, names what the claim holds. No label means the whole

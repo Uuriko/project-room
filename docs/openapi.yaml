@@ -4930,7 +4930,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [id]
+              required: [id, files]
               properties:
                 id: { type: string, description: Claim id, pattern: '[A-Za-z0-9_-]{1,128}' }
                 title: { type: string }
@@ -4945,7 +4945,13 @@ paths:
                   type: array
                   items: { type: string, maxLength: 512 }
                   maxItems: 64
-                  description: Repo-relative paths this work will touch. A later claim that overlaps a live lease is refused.
+                  description: |
+                    REQUIRED. Repo-relative paths this work will touch. A missing
+                    or null files is 422 work_claim_files_required — file-less
+                    claims are refused instead of being created silently with no
+                    collision protection. Pass [] only when the work truly
+                    touches no files. A later claim that overlaps a live lease
+                    is refused.
                 dependsOn:
                   type: array
                   items: { type: string, pattern: '[A-Za-z0-9_-]{1,128}' }
@@ -4987,7 +4993,7 @@ paths:
         '401': { description: unauthenticated }
         '403': { description: work_claims_not_permitted }
         '409': { description: work_claim_exists, work_board_full, or too_many_open_claims }
-        '422': { description: invalid_claim_input or work_assignee_unknown_member }
+        '422': { description: invalid_claim_input, work_assignee_unknown_member, or work_claim_files_required }
   /api/rooms/{roomId}/work-claims/config:
     get:
       summary: Read the room's work-claim caps
@@ -5259,7 +5265,12 @@ paths:
         Declared files are an exclusive lease: overlap with another live
         claim is 409 `file_lease_conflict`, naming the holder, the files,
         and `leaseExpiresAt`. `advisory: true` records the claim anyway and
-        returns `fileWarnings`. API keys need `rooms:write`.
+        returns `fileWarnings`. Claiming an item that declares no files
+        without passing `files` is 422 `work_claim_files_required` — declare
+        the exact files this claim will touch (`files: []` when it touches
+        none). An item that already declares files is claimed without
+        re-declaring: the claim inherits the item's files. API keys need
+        `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: claimId
@@ -5279,7 +5290,11 @@ paths:
                   type: array
                   items: { type: string, maxLength: 512 }
                   maxItems: 64
-                  description: Repo-relative paths this claim will touch. Replaces the item's files when given.
+                  description: |
+                    Repo-relative paths this claim will touch. Replaces the
+                    item's files when given. Required when the item declares no
+                    files (422 work_claim_files_required otherwise); an item
+                    that already declares files is claimed without re-declaring.
                 advisory:
                   type: boolean
                   description: True keeps overlap as fileWarnings and still claims. Omitted or false refuses overlap with 409.
