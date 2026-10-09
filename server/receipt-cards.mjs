@@ -3,9 +3,9 @@
 // path. This module does not import the work-claim or guide modules.
 //
 // ACT-1b renders the card. The Board done branch in work-claim-routes stays
-// untouched while BF (#1331, #1345) is open; the claim digest flush
-// (FIX-69, server/work-claim-events.mjs flushClaimDigest) calls
-// postReceiptCard instead, batched per digest window.
+// untouched while BF (#1331, #1345) is open; FIX-69 keeps the card posting
+// immediate (server/work-claim-events.mjs emitWorkClaimEventRouted) — only
+// the per-transition work_claim.updated events ride the digest.
 import { createHash } from "node:crypto";
 import { applyEvent, event, isRoomArchived } from "../src/events.js";
 import { syncMessageRows } from "./messages-store.mjs";

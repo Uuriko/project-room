@@ -742,6 +742,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       attention: extra.attention,
       attentionMemberId: extra.attentionMemberId
     });
+    // ACT-1a: the in-room receipt card posts immediately when a claim goes
+    // done (FIX-69: inside emitWorkClaimEventRouted, the shared write choke
+    // point) — only the per-transition work_claim.updated events ride the
+    // digest. A receipt failure must not roll back the claim.
     if (extra.wakeMemberId && extra.wakeReason) {
       const stamp = extra.wakeStamp ?? receipt?.sequence ?? nowMs;
       enqueueClaimWake(store, roomId, extra.wakeMemberId,

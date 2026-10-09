@@ -7,6 +7,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { seedStarter } from "../server/starter-room.mjs";
 import { runGuideStep } from "../server/room-guide.mjs";
 import { postReceiptCard } from "../server/receipt-cards.mjs";
+import { flushClaimDigestWindow } from "../server/work-claim-events.mjs";
 import { buildGrowthEvent } from "../src/growth-emit.js";
 import { roomUsageSummary } from "../server/usage-summary.mjs";
 
@@ -167,8 +168,16 @@ test("a choice closes the starter with a result card, then the first agent is as
   assert.equal(card.deliveryMode, "result");
   assert.equal(card.closedBy, "Room Guide");
   assertIndexedMessage(store, "script-room", card);
-  const done = store.db.prepare("SELECT body FROM events WHERE room_id=? AND json_extract(body,'$.type')='work_claim.updated' AND json_extract(body,'$.data.workClaim')='starter-receipt' AND json_extract(body,'$.data.claimState')='done'").get("script-room");
-  assert.ok(done, "the done work_claim.updated event is the claim_completed record");
+  // FIX-69: routine transitions batch into the digest instead of one
+  // work_claim.updated event each. Flush the window and assert the digest
+  // record carries the done transition as the claim_completed record.
+  flushClaimDigestWindow(store, "script-room");
+  const digest = store.db.prepare("SELECT body FROM events WHERE room_id=? AND json_extract(body,'$.type')='work_claim.digest' ORDER BY sequence DESC LIMIT 1").get("script-room");
+  assert.ok(digest, "a digest event lands after the window flush");
+  const digestBody = JSON.parse(digest.body);
+  const doneEntry = digestBody.data.digestClaims.find(entry => entry.workClaim === "starter-receipt");
+  assert.ok(doneEntry, "the done transition is the claim_completed record in the digest");
+  assert.equal(doneEntry.claimState, "done");
   const welcomeEvent = store.db.prepare("SELECT body FROM events WHERE room_id=? AND json_extract(body,'$.data.messageId')=?").get("script-room", welcome.id);
   const welcomeBody = JSON.parse(welcomeEvent.body);
   assert.equal(welcomeBody.data.actorKind, "system");

@@ -1,6 +1,10 @@
-// Work-claims ?view=summary: the board list gains a compact projection
-// (id, title, state, owner, leaseExpiresAt) for the 331+ item muse-room
-// list, while the default view stays byte-identical.
+// Work-claims ?view=summary: the board list defaults to a compact projection
+// (id, title, state, owner, leaseExpiresAt, leaseHeartbeatAt, expired) for the
+// 331+ item muse-room list; ?view=full opts back into the heavy per-claim
+// payload (history, description, notes, files, tags, reviews...).
+// FIX-69 (event-light claim writes): leaseHeartbeatAt and the derived expired
+// flag ride the summary projection so liveness and lapse are visible at a
+// glance; "expired" is distinct from "unclaimed" in the read model.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { RoomAgentClient } from "../client/room-agent.mjs";
@@ -54,7 +58,7 @@ async function fixture(t) {
   return { ownerKey, coordKey, owner, coord, call };
 }
 
-const COMPACT_KEYS = ["id", "leaseExpiresAt", "owner", "state", "title"];
+const COMPACT_KEYS = ["expired", "id", "leaseExpiresAt", "leaseHeartbeatAt", "owner", "state", "title"];
 
 test("?view=summary returns compact per-claim projections without heavy fields", async t => {
   const { owner, ownerKey, call } = await fixture(t);
@@ -72,28 +76,52 @@ test("?view=summary returns compact per-claim projections without heavy fields",
   assert.equal(heavy.title, "Heavy claim");
   assert.equal(heavy.state, "claimed");
   assert.equal(heavy.owner, "owner");
+  assert.equal(heavy.expired, false, "a held claim reads unexpired");
+  assert.equal(heavy.leaseHeartbeatAt, null, "no heartbeat yet");
   assert.ok(Date.parse(heavy.leaseExpiresAt) > Date.now(), "lease expiry is a future timestamp");
   const light = value.claims.find(c => c.id === "sum-2");
   assert.equal(light.state, "unclaimed");
   assert.equal(light.owner, null);
   assert.equal(light.leaseExpiresAt, null);
+  assert.equal(light.expired, false, "unclaimed with no lapse is not expired");
   // the paging envelope is unchanged
   assert.equal(value.roomId, "commons");
   assert.equal(value.hasMore, false);
 });
 
-test("the default list view still returns full claims with history", async t => {
+test("the board list defaults to the summary projection", async t => {
   const { owner, ownerKey, call } = await fixture(t);
-  await owner.workClaimCreate({ id: "full-1", title: "Full claim", note: "keep me" });
+  await owner.workClaimCreate({ id: "def-1", title: "Default view claim", note: "heavy note" });
   const { status, value } = await call(ownerKey, "/work-claims");
   assert.equal(status, 200);
+  const claim = value.claims.find(c => c.id === "def-1");
+  assert.deepEqual(Object.keys(claim).sort(), COMPACT_KEYS, "default list view is the summary projection");
+});
+
+test("touch stamps leaseHeartbeatAt and the summary reflects it", async t => {
+  const { owner, ownerKey, call } = await fixture(t);
+  await owner.workClaimCreate({ id: "hb-1", title: "Heartbeat claim" });
+  await owner.claimWorkItem("hb-1", { leaseHours: 2 });
+  await owner.touchWorkItem("hb-1");
+  const { status, value } = await call(ownerKey, "/work-claims?view=summary");
+  assert.equal(status, 200);
+  const claim = value.claims.find(c => c.id === "hb-1");
+  assert.ok(Date.parse(claim.leaseHeartbeatAt) <= Date.now() + 1000, "heartbeat lands in the summary projection");
+  assert.equal(claim.expired, false);
+});
+
+test("?view=full returns full claims with history", async t => {
+  const { owner, ownerKey, call } = await fixture(t);
+  await owner.workClaimCreate({ id: "full-1", title: "Full claim", note: "keep me" });
+  const { status, value } = await call(ownerKey, "/work-claims?view=full");
+  assert.equal(status, 200);
   const claim = value.claims.find(c => c.id === "full-1");
-  assert.ok(Array.isArray(claim.history) && claim.history.length >= 1, "default view keeps history entries");
+  assert.ok(Array.isArray(claim.history) && claim.history.length >= 1, "?view=full keeps history entries");
 });
 
 test("an unknown view value is rejected", async t => {
   const { ownerKey, call } = await fixture(t);
-  const { status, value } = await call(ownerKey, "/work-claims?view=full");
+  const { status, value } = await call(ownerKey, "/work-claims?view=grid");
   assert.equal(status, 422);
   assert.equal(value.error.code, "invalid_claim_input");
 });

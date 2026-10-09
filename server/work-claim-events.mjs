@@ -213,27 +213,21 @@ export function emitClaimDigestEvent(store, roomId, { actorId = null, digest, at
   return { sequence, event: incoming };
 }
 
-// FIX-69: flush one due digest window: append the digest event, then post
-// the batched in-room receipt cards (ACT-1a) for claims the window completed.
-// A receipt failure must not roll back the digest. If the digest event
-// itself cannot land, the buffer is restored so the next flush retries —
-// visibility is at-least-once, while the claim rows stay the source of truth.
+// FIX-69: flush one due digest window: append the digest event. If the
+// digest event itself cannot land, the buffer is restored so the next flush
+// retries — visibility is at-least-once, while the claim rows stay the
+// source of truth. In-room receipt cards (ACT-1a) still post immediately in
+// emitWorkClaimEventRouted; only the per-transition work_claim.updated
+// events are batched.
 function flushClaimDigest(store, roomId, nowMs) {
   const digest = takeClaimDigest(store, roomId, nowMs);
   if (!digest) return null;
-  let receipt;
   try {
-    receipt = emitClaimDigestEvent(store, roomId, { actorId: digest.actorId, digest, atMs: nowMs });
+    return emitClaimDigestEvent(store, roomId, { actorId: digest.actorId, digest, atMs: nowMs });
   } catch (error) {
     restoreClaimDigest(store, roomId, digest);
     throw error;
   }
-  for (const entry of digest.claims) {
-    if (entry.item?.state !== "done") continue;
-    try { postReceiptCard(store, roomId, entry.item, entry.atMs); }
-    catch (error) { console.error("work claim receipt card failed:", error?.message ?? error); }
-  }
-  return receipt;
 }
 
 // FIX-69: flush the current digest window now, even if it has not lapsed.
@@ -257,5 +251,15 @@ export function emitWorkClaimEventRouted(store, roomId, { actorId, item, action,
   // one window, and the write that crosses the boundary starts the next.
   if (claimDigestDue(store, roomId, stamp)) flushClaimDigest(store, roomId, stamp);
   accumulateClaimDigest(store, roomId, { action, item, actorId, atMs: stamp, paths, previousOwnerId, pullRequest, reason });
+  // ACT-1a (unchanged by FIX-69): the in-room receipt card still posts
+  // immediately when a claim goes done, on every write path (route commit,
+  // room guide, starter seed) — only the per-transition work_claim.updated
+  // events ride the digest. postReceiptCard no-ops unless the item is done;
+  // the message id is deterministic so a repeat is a no-op. A receipt
+  // failure must not roll back the claim.
+  if (action === "state_changed" && item.state === "done") {
+    try { postReceiptCard(store, roomId, item, stamp); }
+    catch (error) { console.error("work claim receipt card failed:", error?.message ?? error); }
+  }
   return { digested: true, sequence: null };
 }
