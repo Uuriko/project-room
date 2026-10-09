@@ -759,6 +759,28 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     ...withProvenance };
   return withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note);
 }
+// Release a claim, bound to the claim round the caller read (E5/D4, QA-200
+// 2026-10-08): expectedClaimedAt + expectedHistoryLength must match the
+// current item, so a stale replay (timed-out retry) or a delayed duplicate
+// landing after an intervening release + re-claim is refused instead of
+// silently destroying the fresh claim. Mirrors appendWorkPullRequest's
+// round check — the history length also discriminates same-millisecond
+// re-claims, which keep the previous round's claimedAt. Claims held
+// in_progress/blocked are routed through the internal pause transition
+// first (W2); both steps are stamped in history.
+export function releaseWork(work, agentId, { expectedClaimedAt, expectedHistoryLength, note, now, authority = false } = {}) {
+  const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  check(typeof expectedClaimedAt === "string" && expectedClaimedAt.length <= 100 && Number.isFinite(Date.parse(expectedClaimedAt)), "expectedClaimedAt must be the current claim timestamp");
+  check(Number.isSafeInteger(expectedHistoryLength) && expectedHistoryLength >= 0, "expectedHistoryLength must be a non-negative integer");
+  if (item.claimedAt !== expectedClaimedAt || claimHistoryLength(item) !== expectedHistoryLength) {
+    fail("work_claim_conflict", "The claim changed since it was read");
+  }
+  let current = item;
+  if (current.state === "in_progress" || current.state === "blocked") {
+    current = updateWork(current, agent, { state: "claimed", note: "paused for release", now: atMs, authority });
+  }
+  return updateWork(current, agent, { state: "unclaimed", note, now: atMs, authority });
+}
 // Retire open work without delivering it. close: the room's claim managers
 // (authority) or the current holder. cancel: whoever opened the item while
 // it is still unclaimed, or the current holder; authority may also cancel.
