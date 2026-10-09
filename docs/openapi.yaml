@@ -17395,6 +17395,36 @@ components:
           items: { type: string, pattern: '^sha256:[0-9a-f]{64}$' }
           maxItems: 10
           description: sha256 evidence pointers recorded on the done transition
+        last_progress:
+          type: [object, 'null']
+          description: |
+            Expiry checkpoint (FIX-14). When a lease lapses, the expiry sweep
+            freezes the round's files, fileBlocks, attestations, and reviews
+            here BEFORE clearing them from the live claim. Null until the
+            first expiry; each later expiry overwrites it with the newer
+            round. A successor re-claiming the work reads this to resume.
+          properties:
+            files: { type: array, items: { type: string } }
+            fileBlocks: { type: object, additionalProperties: { type: string } }
+            attestations:
+              type: array
+              items:
+                type: object
+                properties:
+                  memberId: { type: string }
+                  at: { type: string, format: date-time }
+                  note: { type: [string, 'null'] }
+            reviews:
+              type: array
+              items:
+                type: object
+                properties:
+                  memberId: { type: string }
+                  verdict: { type: string, enum: [approve, changes_requested, comment] }
+                  summary: { type: string }
+                  at: { type: string, format: date-time }
+            frozenAt: { type: [string, 'null'], format: date-time }
+            frozenFrom: { type: [string, 'null'] }
     BoardV2Claim:
       description: |
         A board-v2 claim: a lane's typed write declaring intent to work on

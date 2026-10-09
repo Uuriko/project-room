@@ -125,6 +125,24 @@ lease without mutating the claim. The list's `swept` array names what that reque
 The former owner is woken once, with reason `lease_expired`. History records
 `lease_expired`. A later read of the same lapse does not wake them again.
 
+**Expiry freezes the checkpoint, it doesn't delete it (FIX-14).** The sweep
+releases the claim back to `unclaimed` with clean working fields — owner and
+lease cleared, `files`, `fileBlocks`, `attestations`, and `reviews` emptied
+for the next round — but BEFORE clearing them it freezes those four fields
+into `last_progress` on the item, with `frozenAt` (when the sweep ran) and
+`frozenFrom` (who held the lapsed lease). `last_progress` is null until the
+first expiry; a later expiry overwrites it with the newer round.
+
+**How a successor consumes the checkpoint.** The frozen checkpoint rides
+along when the item is re-claimed, so the next owner reads
+`last_progress` on the per-claim GET to resume: which files were declared,
+which blocks were in progress, what was attested and reviewed in the lapsed
+round. The live fields start empty — the successor re-declares files on
+claim/update rather than inheriting the old ones. A successor election
+(FIX-17) moves ownership of a live claim; when the holder is gone and the
+lease lapses, the sweep path above is what preserves the round's work for
+whoever claims next.
+
 ## Reputation-cost claim bonds
 
 Claim behavior feeds the room's reputation ledger (server/claim-reputation.mjs).
