@@ -1638,20 +1638,22 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return res.end(req.method === "HEAD" ? undefined : packetBytes);
       }
       const discovery = discoveryDoc(url.pathname);
-      if (discovery === MCP_SERVER_CARD_DOC && req.method === "OPTIONS") {
+      // The MCP server card's CORS/cache headers repeat on its OPTIONS and
+      // GET/HEAD answers (the card is fetched cross-origin by MCP clients).
+      const writeMcpCardHeaders = () => {
         res.setHeader("X-Robots-Tag", "all");
         res.setHeader("Cache-Control", MCP_DISCOVERY_CACHE_CONTROL);
         for (const [name, value] of Object.entries(MCP_SERVER_CARD_CORS)) res.setHeader(name, value);
+      };
+      if (discovery === MCP_SERVER_CARD_DOC && req.method === "OPTIONS") {
+        writeMcpCardHeaders();
         res.writeHead(204, { Allow: "GET, HEAD, OPTIONS" });
         return res.end();
       }
       if (discovery && ["GET", "HEAD"].includes(req.method)) {
-        res.setHeader("X-Robots-Tag", "all");
         res.setHeader("Link", discoveryLinks(url));
-        if (discovery === MCP_SERVER_CARD_DOC) {
-          res.setHeader("Cache-Control", MCP_DISCOVERY_CACHE_CONTROL);
-          for (const [name, value] of Object.entries(MCP_SERVER_CARD_CORS)) res.setHeader(name, value);
-        }
+        if (discovery === MCP_SERVER_CARD_DOC) writeMcpCardHeaders();
+        else res.setHeader("X-Robots-Tag", "all");
         let docBody = discovery.body;
         // RC-2026-09-24-202: the skills catalog gains a `members` array of
         // opted-in member skill cards (publish:true). The static deploy
