@@ -106,7 +106,7 @@ function anchorExists(file, frag) {
 test("no dead internal links on the static human-door pages", () => {
   const dead = [];
   const badAnchors = [];
-  for (const [path, file] of pageFiles) {
+  for (const [, file] of pageFiles) {
     const html = read(file).replaceAll("{{ASSET_BASE}}", "");
     for (const link of linksFrom(file, html)) {
       if (!resolveTarget(link.target)) {
@@ -134,7 +134,7 @@ test("every marketing page has inbound links from the site nav", () => {
     ...COMPARE.map(name => `compare/${name}.html`),
   ]);
   const inbound = new Map();
-  for (const [path, file] of pageFiles) {
+  for (const [, file] of pageFiles) {
     if (!controlled.has(file)) continue;
     const html = read(file);
     for (const link of linksFrom(file, html)) {
