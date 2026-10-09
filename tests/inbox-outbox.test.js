@@ -306,3 +306,23 @@ test("ANCHOR-D6c: flush ignores queued entries; concurrent flushes collapse to o
   assert.equal(f.read()[0].status, "accepted");
   assert.doesNotThrow(() => auditRecovery(f.store));
 });
+
+test("flushSend: only an unknown attempt moves, and a very recent one is left to the in-flight dispatch (minAgeMs)", async t => {
+  const f = setup(t), request = f.reserve(); f.apply(request);
+  const driver = f.driver(), sourceId = "note", binding = f.session.sessionBinding, id = f.read()[0].id;
+  // queued: untouched, nothing submitted.
+  assert.equal((await driver.flushSend(f.token, sourceId, id, binding)).status, "queued");
+  assert.equal(f.provider.submits, 0);
+  f.transport(f.command("send.dispatch", f.read()[0]));
+  assert.equal(f.read()[0].status, "unknown");
+  // A recent unknown attempt is skipped when the caller asks for an age floor.
+  assert.equal((await driver.flushSend(f.token, sourceId, id, binding, { minAgeMs: 3_600_000 })).status, "unknown");
+  assert.equal(f.provider.submits, 0, "no submit while the original dispatch may still be in flight");
+  // Without the floor it reconciles, finds no record, and submits exactly once.
+  assert.equal((await driver.flushSend(f.token, sourceId, id, binding)).status, "accepted");
+  assert.equal(f.provider.submits, 1);
+  // Settled: a repeat is a no-op.
+  assert.equal((await driver.flushSend(f.token, sourceId, id, binding)).status, "accepted");
+  assert.equal(f.provider.submits, 1);
+  assert.doesNotThrow(() => auditRecovery(f.store));
+});
