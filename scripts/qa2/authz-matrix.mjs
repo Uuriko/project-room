@@ -107,7 +107,8 @@ const A = [
   ["release claim held by collaborator", ["owner", "collaborator"], async t => {
     // E5/D4 (QA-200 2026-10-08): /release binds the claim round the client read.
     const id = t === T.owner ? "qa2-release" : "qa2-held";
-    const held = must(await req("GET", `${R}/work-claims/${id}`, { token: t }), "read claim round");
+    // Read the round as the owner: roles under test (outsider, anonymous) cannot read it.
+    const held = must(await req("GET", `${R}/work-claims/${id}`, { token: T.owner }), "read claim round");
     return req("POST", `${R}/work-claims/${id}/release`, { token: t, body: { note: "drop",
       expectedClaimedAt: held.claimedAt,
       expectedHistoryLength: held.history.length + (held.historyOmitted ?? 0) } });
