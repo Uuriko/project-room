@@ -54,8 +54,9 @@ const RUNS = Number(args.runs ?? 3);
 const INTERVAL = Number(args.interval ?? 250);
 // Adaptive preload: every stream must still be pumping FULL 100-row pages
 // when the measurement window ends. Catch-up needs PRELOAD/100 ticks;
-// opens cost ~0.25s/stream sequentially, so budget N*120 events (floor 5000).
-const PRELOAD = Number(args.preload ?? Math.max(5000, STREAMS * 120));
+// opens cost ~0.3s/stream sequentially under fleet contention, so budget
+// N*160 events (floor 5000).
+const PRELOAD = Number(args.preload ?? Math.max(5000, STREAMS * 160));
 const PROJECTION_MESSAGES = Number(args.projectionMessages ?? 2000);
 const OUT = args.out ?? null;
 const LABEL = args.label ?? "w500-sse-scale";
