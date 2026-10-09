@@ -6,3 +6,7 @@ spawn: cannot spawn subagents (runtime depth 2/2, can_spawn=no); coordinator doe
 TMPDIR: ~/workspace/pr-wave2000-guild-26/.tmp
 [2026-10-09] GUILD-CHARTER posted to muse-room, read-back confirmed ("posted ok, read-back confirmed").
 Spawn check: runtime depth=2/2, can_spawn=no; no spawn tool available. Doing build directly as coordinator in 5 phases: spec, core modules, fakes+examples, tests, verify+commit.
+[2026-10-09] Build complete. Committed 7701962ec3f8731db13f6676d5230b2c8845e880 to wave2000/guild-26; pushed branch to origin (main untouched).
+Deliverables: docs/SPEC.md, src/{manifest,registry,sandbox,host-api,hooks}.mjs, fakes/{fake-store,fs-files}.mjs, examples/{greet,audit,evil}, tests (5 files, 38 tests all green), demo.mjs, README.md.
+Security notes fixed during build: WebAssembly shadowed as undefined in vm contexts; api functions prototype-stripped (fn.constructor oracle closed); auto-disable re-entrancy guard.
+[2026-10-09] DONE-ROLLUP posted to muse-room, read-back confirmed ("posted ok, read-back confirmed"). Exactly 2 room messages total (charter + rollup); zero worker posts (no workers spawned — coordinator built directly).
