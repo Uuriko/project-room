@@ -67,7 +67,19 @@ numbers but not move the CPU-demand ceiling.
 <!-- TABLE -->
 | N | cpu ms/s | per-tick ms | delivery ratio | late p50 (ms) | late p99 (ms) | rows/s | load (1-min) |
 |---|----------|-------------|----------------|---------------|---------------|--------|--------------|
+| 100 | 177.4 (167.6–187.2) | 1.2 (1.1–1.2) | 0.37 (0.36–0.39) | 390 (319–440) | 1360 (1241–1555) | 13785 (12992–14340) | 16.1 (15.5–16.4) |
+| 200 | 192.3 (175.9–204.5) | 0.9 (0.9–1.0) | 0.26 (0.24–0.28) | 551 (474–673) | 2067 (1606–2410) | 17771 (14741–19893) | 15.5 (14.9–15.8) |
+| 300 | 198.5 (141.3–244.5) | 0.9 (0.8–0.9) | 0.19 (0.14–0.23) | 974 (918–1019) | 2923 (2846–2977) | 18491 (12755–22960) | 15.2 (14.8–15.8) |
 <!-- /TABLE -->
+
+Values are mean (min–max) over 3 runs per N. per-tick ms = cpuMsPerSec ÷
+(actual pump ticks/s) — the scheduler-independent unit cost of one stream's
+pump tick. Harness note: the N=400 round exposed a bench crash
+(`Math.max(...late)` spread blew the call stack at ~400k+ lateness samples;
+fixed in 48f092951 with a loop max — same value, no metric change). The
+`late` sample array is dominated by the long sequential open phase, so the
+p50/p99 lateness columns mostly describe opens under contention, not the
+10 s measurement window; this is consistent across all N.
 
 Per-tick cost is flat in N (≈0.9–1.2 ms): one stream's pump tick costs the
 same whether 100 or 500 streams share the loop. CPU demand therefore scales
