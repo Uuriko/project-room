@@ -396,3 +396,40 @@ test("exportTrailer pages the event log and hashes exactly what one full read wo
   assert.equal(exportTrailer(empty).events, 0);
   empty.close();
 });
+
+function plainStore(t) {
+  const directory = mkdtempSync(join(tmpdir(), "room-backup-paging-"));
+  const store = new RoomStore(join(directory, "live.sqlite"));
+  t.after(() => { try { store.close(); } catch { /* already closed */ } rmSync(directory, { recursive: true, force: true }); });
+  store.initialize(initialRoom());
+  return { store, key: store.issueAccessKey("commons", "owner") };
+}
+
+test("a paged export is byte-identical to a single-page export, whatever the page size", t => {
+  const { store, key } = plainStore(t);
+  for (let n = 0; n < 30; n += 1) store.command(key, "commons", { id: crypto.randomUUID(), type: T.MESSAGE_POSTED, data: { body: `paged ${n}` } });
+  const body = lines => lines.map(line => (line.startsWith('{"kind":"watermark"') ? line.replace(/"backedUpAt":\d+/, '"backedUpAt":0') : line));
+  const whole = body([...exportNdjsonLines(store.db, { pageRows: 1_000_000 })]);
+  assert.ok(whole.length > 60, "the fixture spans several pages");
+  for (const pageRows of [1, 2, 7, 500]) {
+    assert.deepEqual(body([...exportNdjsonLines(store.db, { pageRows })]), whole, `pageRows ${pageRows}`);
+  }
+});
+
+test("export pages never read a whole large table at once", t => {
+  const { store, key } = plainStore(t);
+  void key;
+  const base = store.db.prepare("SELECT sequence FROM rooms WHERE id='commons'").get().sequence;
+  store.db.exec("BEGIN");
+  for (let n = 1; n <= 250; n += 1) store.db.prepare("INSERT INTO events (room_id, sequence, id, body) VALUES ('commons', ?, ?, '{}')").run(base + n, crypto.randomUUID());
+  store.db.exec("COMMIT");
+  let biggest = 0;
+  const spy = { prepare: sql => {
+    const st = store.db.prepare(sql);
+    return { get: (...a) => st.get(...a), all: (...a) => { const rows = st.all(...a); if (/FROM "events"/.test(sql)) biggest = Math.max(biggest, rows.length); return rows; } };
+  } };
+  const events = store.db.prepare("SELECT count(*) AS n FROM events").get().n;
+  assert.ok(events > 250);
+  for (const _line of exportNdjsonLines(spy)) { /* drain */ }
+  assert.ok(biggest <= 100, `events were read ${biggest} rows at once`);
+});
