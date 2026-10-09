@@ -1,0 +1,419 @@
+{
+ "partitions": [
+  {
+   "name": "synth-p0",
+   "worktree": "/home/hatch/workspace/pr-synth-p0",
+   "branches": [
+    "synth/p0"
+   ],
+   "claimIds": [
+    "synth-p0-01"
+   ],
+   "files": [
+    "server/backpressure/bp-mod1.mjs",
+    "server/backpressure/bp-mod2.mjs",
+    "server/backpressure/bp-mod3.mjs",
+    "server/backpressure/bp-mod4.mjs",
+    "server/backpressure/bp-mod5.mjs",
+    "server/http.mjs",
+    "tests/backpressure/bp-mod1.test.js",
+    "tests/backpressure/bp-mod2.test.js",
+    "tests/backpressure/bp-mod3.test.js",
+    "tests/backpressure/bp-mod4.test.js",
+    "tests/backpressure/bp-mod5.test.js"
+   ],
+   "dirs": [
+    "docs/backpressure/"
+   ],
+   "_tasks": [
+    "bp-task1",
+    "bp-task2",
+    "bp-task3",
+    "bp-task4",
+    "bp-task5",
+    "bp-http-reg",
+    "tl-http-reg"
+   ],
+   "_waves": [
+    [
+     "bp-task1",
+     "bp-http-reg"
+    ],
+    [
+     "bp-task2",
+     "tl-http-reg"
+    ],
+    [
+     "bp-task3"
+    ],
+    [
+     "bp-task4"
+    ],
+    [
+     "bp-task5"
+    ]
+   ]
+  },
+  {
+   "name": "synth-p1",
+   "worktree": "/home/hatch/workspace/pr-synth-p1",
+   "branches": [
+    "synth/p1"
+   ],
+   "claimIds": [
+    "synth-p1-01"
+   ],
+   "files": [
+    "docs/openapi.yaml",
+    "server/data-plane/dp-mod1.mjs",
+    "server/data-plane/dp-mod2.mjs",
+    "server/data-plane/dp-mod3.mjs",
+    "server/data-plane/dp-mod4.mjs",
+    "server/data-plane/dp-mod5.mjs",
+    "tests/data-plane/dp-mod1.test.js",
+    "tests/data-plane/dp-mod2.test.js",
+    "tests/data-plane/dp-mod3.test.js",
+    "tests/data-plane/dp-mod4.test.js",
+    "tests/data-plane/dp-mod5.test.js"
+   ],
+   "dirs": [
+    "docs/data-plane/"
+   ],
+   "_tasks": [
+    "dp-task1",
+    "dp-task2",
+    "dp-task3",
+    "dp-task4",
+    "dp-task5",
+    "dp-openapi",
+    "fo-openapi"
+   ],
+   "_waves": [
+    [
+     "dp-task1",
+     "dp-openapi"
+    ],
+    [
+     "dp-task2",
+     "fo-openapi"
+    ],
+    [
+     "dp-task3"
+    ],
+    [
+     "dp-task4"
+    ],
+    [
+     "dp-task5"
+    ]
+   ]
+  },
+  {
+   "name": "synth-p2",
+   "worktree": "/home/hatch/workspace/pr-synth-p2",
+   "branches": [
+    "synth/p2"
+   ],
+   "claimIds": [
+    "synth-p2-01"
+   ],
+   "files": [
+    "server/fanout/fo-mod1.mjs",
+    "server/fanout/fo-mod2.mjs",
+    "server/fanout/fo-mod3.mjs",
+    "server/fanout/fo-mod4.mjs",
+    "server/fanout/fo-mod5.mjs",
+    "server/payload-store.mjs",
+    "tests/fanout/fo-mod1.test.js",
+    "tests/fanout/fo-mod2.test.js",
+    "tests/fanout/fo-mod3.test.js",
+    "tests/fanout/fo-mod4.test.js",
+    "tests/fanout/fo-mod5.test.js",
+    "tests/payload-store-a.test.js",
+    "tests/payload-store-b.test.js"
+   ],
+   "dirs": [
+    "docs/fanout/"
+   ],
+   "_tasks": [
+    "fo-task1",
+    "fo-task2",
+    "fo-task3",
+    "fo-task4",
+    "fo-task5",
+    "pa-store-a",
+    "pa-store-b"
+   ],
+   "_waves": [
+    [
+     "fo-task1",
+     "pa-store-a"
+    ],
+    [
+     "fo-task2",
+     "pa-store-b"
+    ],
+    [
+     "fo-task3"
+    ],
+    [
+     "fo-task4"
+    ],
+    [
+     "fo-task5"
+    ]
+   ]
+  },
+  {
+   "name": "synth-p3",
+   "worktree": "/home/hatch/workspace/pr-synth-p3",
+   "branches": [
+    "synth/p3"
+   ],
+   "claimIds": [
+    "synth-p3-01"
+   ],
+   "files": [
+    "server/payloads/pa-mod1.mjs",
+    "server/payloads/pa-mod2.mjs",
+    "server/payloads/pa-mod3.mjs",
+    "server/payloads/pa-mod4.mjs",
+    "server/payloads/pa-mod5.mjs",
+    "server/work-claim-sqlite.mjs",
+    "tests/payloads/pa-mod1.test.js",
+    "tests/payloads/pa-mod2.test.js",
+    "tests/payloads/pa-mod3.test.js",
+    "tests/payloads/pa-mod4.test.js",
+    "tests/payloads/pa-mod5.test.js",
+    "tests/work-claim-sqlite.test.js"
+   ],
+   "dirs": [
+    "docs/payloads/"
+   ],
+   "_tasks": [
+    "pa-task1",
+    "pa-task2",
+    "pa-task3",
+    "pa-task4",
+    "pa-task5",
+    "rp-claims-sql",
+    "sh-claims-sql"
+   ],
+   "_waves": [
+    [
+     "pa-task1",
+     "rp-claims-sql"
+    ],
+    [
+     "pa-task2",
+     "sh-claims-sql"
+    ],
+    [
+     "pa-task3"
+    ],
+    [
+     "pa-task4"
+    ],
+    [
+     "pa-task5"
+    ]
+   ]
+  },
+  {
+   "name": "synth-p4",
+   "worktree": "/home/hatch/workspace/pr-synth-p4",
+   "branches": [
+    "synth/p4"
+   ],
+   "claimIds": [
+    "synth-p4-01"
+   ],
+   "files": [
+    "server/reaper/rp-mod1.mjs",
+    "server/reaper/rp-mod2.mjs",
+    "server/reaper/rp-mod3.mjs",
+    "server/reaper/rp-mod4.mjs",
+    "server/reaper/rp-mod5.mjs",
+    "tests/reaper/rp-mod1.test.js",
+    "tests/reaper/rp-mod2.test.js",
+    "tests/reaper/rp-mod3.test.js",
+    "tests/reaper/rp-mod4.test.js",
+    "tests/reaper/rp-mod5.test.js"
+   ],
+   "dirs": [
+    "docs/reaper/"
+   ],
+   "_tasks": [
+    "rp-task1",
+    "rp-task2",
+    "rp-task3",
+    "rp-task4",
+    "rp-task5"
+   ],
+   "_waves": [
+    [
+     "rp-task1"
+    ],
+    [
+     "rp-task2"
+    ],
+    [
+     "rp-task3"
+    ],
+    [
+     "rp-task4"
+    ],
+    [
+     "rp-task5"
+    ]
+   ]
+  },
+  {
+   "name": "synth-p5",
+   "worktree": "/home/hatch/workspace/pr-synth-p5",
+   "branches": [
+    "synth/p5"
+   ],
+   "claimIds": [
+    "synth-p5-01"
+   ],
+   "files": [
+    "server/replay/rw-mod1.mjs",
+    "server/replay/rw-mod2.mjs",
+    "server/replay/rw-mod3.mjs",
+    "server/replay/rw-mod4.mjs",
+    "server/replay/rw-mod5.mjs",
+    "tests/replay/rw-mod1.test.js",
+    "tests/replay/rw-mod2.test.js",
+    "tests/replay/rw-mod3.test.js",
+    "tests/replay/rw-mod4.test.js",
+    "tests/replay/rw-mod5.test.js"
+   ],
+   "dirs": [
+    "docs/replay/"
+   ],
+   "_tasks": [
+    "rw-task1",
+    "rw-task2",
+    "rw-task3",
+    "rw-task4",
+    "rw-task5"
+   ],
+   "_waves": [
+    [
+     "rw-task1"
+    ],
+    [
+     "rw-task2"
+    ],
+    [
+     "rw-task3"
+    ],
+    [
+     "rw-task4"
+    ],
+    [
+     "rw-task5"
+    ]
+   ]
+  },
+  {
+   "name": "synth-p6",
+   "worktree": "/home/hatch/workspace/pr-synth-p6",
+   "branches": [
+    "synth/p6"
+   ],
+   "claimIds": [
+    "synth-p6-01"
+   ],
+   "files": [
+    "server/shards/sh-mod1.mjs",
+    "server/shards/sh-mod2.mjs",
+    "server/shards/sh-mod3.mjs",
+    "server/shards/sh-mod4.mjs",
+    "server/shards/sh-mod5.mjs",
+    "tests/shards/sh-mod1.test.js",
+    "tests/shards/sh-mod2.test.js",
+    "tests/shards/sh-mod3.test.js",
+    "tests/shards/sh-mod4.test.js",
+    "tests/shards/sh-mod5.test.js"
+   ],
+   "dirs": [
+    "docs/shards/"
+   ],
+   "_tasks": [
+    "sh-task1",
+    "sh-task2",
+    "sh-task3",
+    "sh-task4",
+    "sh-task5"
+   ],
+   "_waves": [
+    [
+     "sh-task1"
+    ],
+    [
+     "sh-task2"
+    ],
+    [
+     "sh-task3"
+    ],
+    [
+     "sh-task4"
+    ],
+    [
+     "sh-task5"
+    ]
+   ]
+  },
+  {
+   "name": "synth-p7",
+   "worktree": "/home/hatch/workspace/pr-synth-p7",
+   "branches": [
+    "synth/p7"
+   ],
+   "claimIds": [
+    "synth-p7-01"
+   ],
+   "files": [
+    "server/telemetry/tl-mod1.mjs",
+    "server/telemetry/tl-mod2.mjs",
+    "server/telemetry/tl-mod3.mjs",
+    "server/telemetry/tl-mod4.mjs",
+    "server/telemetry/tl-mod5.mjs",
+    "tests/telemetry/tl-mod1.test.js",
+    "tests/telemetry/tl-mod2.test.js",
+    "tests/telemetry/tl-mod3.test.js",
+    "tests/telemetry/tl-mod4.test.js",
+    "tests/telemetry/tl-mod5.test.js"
+   ],
+   "dirs": [
+    "docs/telemetry/"
+   ],
+   "_tasks": [
+    "tl-task1",
+    "tl-task2",
+    "tl-task3",
+    "tl-task4",
+    "tl-task5"
+   ],
+   "_waves": [
+    [
+     "tl-task1"
+    ],
+    [
+     "tl-task2"
+    ],
+    [
+     "tl-task3"
+    ],
+    [
+     "tl-task4"
+    ],
+    [
+     "tl-task5"
+    ]
+   ]
+  }
+ ]
+}

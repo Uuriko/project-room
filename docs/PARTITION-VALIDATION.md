@@ -7,7 +7,8 @@ Claim: `wave500-coord-cost-partition-validation` via claim.sh (first-claim-wins;
 ## Tooling under test
 
 - `scripts/partition-check.mjs` — PRESENT (untracked, owned by wave500-coord-cost-worker10; not committed by this worker). Overlap gate across four axes: (a) file/dir incl. dir-prefix containment, (b) branch-name equality, (c) claim-id namespace, (d) worktree nesting. Exit 0=PASS, 1=FAIL, 2=input error. Its own unit suite: **4/4 pass** (`node scripts/partition-check.test.mjs`, 2026-10-08).
-- `scripts/partition-plan.mjs` — **MISSING.** worker9 claimed `wave500-coord-cost-file-scripts/partition-plan.mjs` in the claim registry, but the file never landed in the tree (checked `scripts/` — no partition-plan.mjs, no PARTITION-PLANNER doc). Experiment (c) therefore validates the checker's *output contract* with a manually built planner-style partition, and notes the gap. **Follow-up owed to worker9: land scripts/partition-plan.mjs.**
+- `scripts/partition-plan.mjs` — PRESENT as of mid-validation (landed by wave500-coord-cost-worker9 while this validation ran; untracked, owned by worker9, not committed here). Static partition planner: greedy graph-coloring on the file/dir conflict graph + must-link closure + balanced bin-packing into K partitions, with per-partition claim namespaces, execution waves, determinism, and honest imbalance reporting. Experiment (c) below runs the REAL planner. (Early in this run the file was absent; the doc first drafted a manual-assignment stand-in — superseded.)
+- NOTE on commit hygiene: my `git add docs/partition-validation/` swept in two files worker9 wrote concurrently (`wave300-10lanes-plan.json`, `wave300-10lanes-check-input.json` — their planner run over my wave300 input). They ride along in my commit 0085168f; attributed to worker9 here.
 
 Method for all experiments: run the real `scripts/partition-check.mjs` against JSON partitions; raw tool output saved under `docs/partition-validation/*.check.txt` (transcribed verbatim below).
 
@@ -65,14 +66,22 @@ No false positives in this pair: the two test files are disjoint (both kept — 
 
 ---
 
-## Experiment (c) — synthetic 40-task partition (planner stand-in)
+## Experiment (c) — synthetic 40+ task list through the REAL planner, checker verifies output
 
-**Verdict: PASS (exit 0) on the disjoint assignment; negative control FAILS exactly on the injected collision.**
-Full outputs: `docs/partition-validation/swarm40-planner-output.check.txt`, `docs/partition-validation/swarm40-negative-control.check.txt`
+**Verdict: planner co-locates every injected conflict; independent checker PASS (exit 0), zero overlaps across 8 partitions.**
+Assets: `swarm40-tasks.json` (input), `swarm40-plan.json` (planner output), `swarm40-plan.stdout.txt`, `swarm40-plan.check-input.json`, `swarm40-plan.check.txt`.
 
-- Built 40 synthetic tasks (5 per lane × 8 lanes, topics modeled on wave-300 lane families), assigned disjointly the way a partition planner must: per-lane dirs `server/synth/<t>/` + `tests/synth-<t>/`, one per-lane doc, sibling worktrees `/home/hatch/workspace/pr-synth-<t>`, distinct branches `synth/<t>`, distinct claim namespaces `synth-<t>-NN`.
-- Checker: `PASS — 8 partitions, zero overlaps` — a planner emitting a truly disjoint partition clears the gate.
-- Negative control (same input, one shared file `server/synth/shared-registry.mjs` injected into lanes 2 and 5): `FAIL — 1 overlap(s)` naming exactly that file pair. The gate is not vacuously passing.
+- Input: 48 synthetic tasks (40 base across 8 wave-style lane topics × 5, plus 8 injected conflict tasks) modeled on the swarm-100 exercise pattern.
+- Injected conflicts: `server/http.mjs` shared by a backpressure + a telemetry task; `docs/openapi.yaml` shared by a data-plane + a fanout task; `server/work-claim-sqlite.mjs` shared by a reaper + a shards task; `server/payload-store.mjs` shared by two payloads tasks.
+- Planner run: `node scripts/partition-plan.mjs --tasks swarm40-tasks.json --partitions 8 --prefix synth --out swarm40-plan.json --json`.
+- **Co-location: every injected cross-lane conflict pair landed in the SAME partition** (`bp-http-reg`+`tl-http-reg` → synth-p0; `dp-openapi`+`fo-openapi` → synth-p1; `pa-store-a`+`pa-store-b` → synth-p2; `rp-claims-sql`+`sh-claims-sql` → synth-p3) — the must-link closure behaving as documented.
+- **Determinism: two identical runs → byte-identical plans.**
+- Planner exit code was **1, not 0**: the indivisible conflict components (each lane's tasks share its `docs/<lane>/` dir, forming one atom per lane) make ±1 balance impossible (sizes 7,7,7,7,5,5,5,5); the planner reports the residual imbalance honestly instead of hiding it. This is the correct behavior for a coordinator gate — flag, don't fake.
+- Checker, run independently on the planner's emitted partitions (converted to partitions JSON): **`PASS — 8 partitions, zero overlaps`** — the checker's own recomputation agrees with the planner's internal `crossPartitionOverlaps: []`.
+
+A preliminary manual disjoint assignment (stand-in from before the planner landed) also passed the checker, and a negative control — one shared file injected into two lanes of an otherwise-disjoint plan — fails the checker on exactly that file (`swarm40-negative-control.check.txt`): the gate is not vacuously passing.
+
+**Net: planner → checker compose correctly. The planner's guarantee (conflicting tasks never separated) is independently confirmed by the checker, and its honesty property (exit 1 on residual imbalance) held.**
 
 ---
 
@@ -84,11 +93,16 @@ Full outputs: `docs/partition-validation/swarm40-planner-output.check.txt`, `doc
 4. **FN-1 (claim-id axis):** historical wave-300 claim IDs unrecoverable; synthesized IDs prove only that the axis *runs*, not that history was clean on it.
 5. **FN-2 (what the checker can't see):** same-file different-line edits (the `#1436`/`#1443` class: same file, overlapping *hunks*) vs same-file disjoint edits — the checker treats both identically. It is a collision *gate*, not a merge oracle. Conversely, it misses cross-file semantic coupling (e.g. lane A changes an API that lane B's untouched file consumes).
 6. **Coverage note:** the replay lane had three sub-worktrees (replay-w1/w2/w3); only the harness branch was modeled as the lane partition. Sub-partition overlap inside a lane is out of scope for the lane-level gate.
-7. **Missing planner:** experiment (c) substitutes a manual disjoint assignment for the missing `scripts/partition-plan.mjs`. End-to-end planner→checker validation is still owed once worker9 lands the planner.
+7. **Planner honesty, confirmed:** exit 1 on residual imbalance (sizes 7,7,7,7,5,5,5,5 vs 8×6) is a feature, not a bug — indivisible conflict atoms are reported, not silently split. A coordinator consuming exit codes must treat 1 as "review," not "broken."
+8. **Internal vs cross-partition conflicts:** the planner flags within-partition conflicts (same-lane tasks sharing a docs dir) in its own `internalConflicts` — the checker only gates *across* partitions. The two tools answer different questions; use both.
 
 ## Assets
 - `docs/partition-validation/wave300-10lanes.json` — experiment (a) input (with `_provenance` per lane)
 - `docs/partition-validation/wave300-10lanes.check.txt` — experiment (a) raw tool output
 - `docs/partition-validation/qa2-collision.json` / `.check.txt` — experiment (b)
-- `docs/partition-validation/swarm40-planner-output.json` / `.check.txt` — experiment (c)
+- `docs/partition-validation/swarm40-tasks.json` — experiment (c) planner input (48 tasks, 8 injected conflicts)
+- `docs/partition-validation/swarm40-plan.json` / `swarm40-plan.stdout.txt` — experiment (c) real planner output + stdout
+- `docs/partition-validation/swarm40-plan.check-input.json` / `swarm40-plan.check.txt` — experiment (c) checker verification of the planner's output
+- `docs/partition-validation/swarm40-planner-output.json` / `.check.txt` — preliminary manual-assignment stand-in (superseded by the real planner run)
 - `docs/partition-validation/swarm40-negative-control.json` / `.check.txt` — experiment (c) negative control
+- `docs/partition-validation/wave300-10lanes-plan.json` / `wave300-10lanes-check-input.json` — worker9's planner artifacts over the wave300 input (their work, carried in this branch)

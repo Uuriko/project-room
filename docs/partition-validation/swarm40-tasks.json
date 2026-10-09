@@ -1,0 +1,512 @@
+{
+ "claimPrefix": "synth",
+ "tasks": [
+  {
+   "id": "dp-task1",
+   "lane": "data-plane",
+   "files": [
+    "server/data-plane/dp-mod1.mjs",
+    "tests/data-plane/dp-mod1.test.js"
+   ],
+   "dirs": [
+    "docs/data-plane/"
+   ]
+  },
+  {
+   "id": "dp-task2",
+   "lane": "data-plane",
+   "files": [
+    "server/data-plane/dp-mod2.mjs",
+    "tests/data-plane/dp-mod2.test.js"
+   ],
+   "dirs": [
+    "docs/data-plane/"
+   ]
+  },
+  {
+   "id": "dp-task3",
+   "lane": "data-plane",
+   "files": [
+    "server/data-plane/dp-mod3.mjs",
+    "tests/data-plane/dp-mod3.test.js"
+   ],
+   "dirs": [
+    "docs/data-plane/"
+   ]
+  },
+  {
+   "id": "dp-task4",
+   "lane": "data-plane",
+   "files": [
+    "server/data-plane/dp-mod4.mjs",
+    "tests/data-plane/dp-mod4.test.js"
+   ],
+   "dirs": [
+    "docs/data-plane/"
+   ]
+  },
+  {
+   "id": "dp-task5",
+   "lane": "data-plane",
+   "files": [
+    "server/data-plane/dp-mod5.mjs",
+    "tests/data-plane/dp-mod5.test.js"
+   ],
+   "dirs": [
+    "docs/data-plane/"
+   ]
+  },
+  {
+   "id": "rp-task1",
+   "lane": "reaper",
+   "files": [
+    "server/reaper/rp-mod1.mjs",
+    "tests/reaper/rp-mod1.test.js"
+   ],
+   "dirs": [
+    "docs/reaper/"
+   ]
+  },
+  {
+   "id": "rp-task2",
+   "lane": "reaper",
+   "files": [
+    "server/reaper/rp-mod2.mjs",
+    "tests/reaper/rp-mod2.test.js"
+   ],
+   "dirs": [
+    "docs/reaper/"
+   ]
+  },
+  {
+   "id": "rp-task3",
+   "lane": "reaper",
+   "files": [
+    "server/reaper/rp-mod3.mjs",
+    "tests/reaper/rp-mod3.test.js"
+   ],
+   "dirs": [
+    "docs/reaper/"
+   ]
+  },
+  {
+   "id": "rp-task4",
+   "lane": "reaper",
+   "files": [
+    "server/reaper/rp-mod4.mjs",
+    "tests/reaper/rp-mod4.test.js"
+   ],
+   "dirs": [
+    "docs/reaper/"
+   ]
+  },
+  {
+   "id": "rp-task5",
+   "lane": "reaper",
+   "files": [
+    "server/reaper/rp-mod5.mjs",
+    "tests/reaper/rp-mod5.test.js"
+   ],
+   "dirs": [
+    "docs/reaper/"
+   ]
+  },
+  {
+   "id": "bp-task1",
+   "lane": "backpressure",
+   "files": [
+    "server/backpressure/bp-mod1.mjs",
+    "tests/backpressure/bp-mod1.test.js"
+   ],
+   "dirs": [
+    "docs/backpressure/"
+   ]
+  },
+  {
+   "id": "bp-task2",
+   "lane": "backpressure",
+   "files": [
+    "server/backpressure/bp-mod2.mjs",
+    "tests/backpressure/bp-mod2.test.js"
+   ],
+   "dirs": [
+    "docs/backpressure/"
+   ]
+  },
+  {
+   "id": "bp-task3",
+   "lane": "backpressure",
+   "files": [
+    "server/backpressure/bp-mod3.mjs",
+    "tests/backpressure/bp-mod3.test.js"
+   ],
+   "dirs": [
+    "docs/backpressure/"
+   ]
+  },
+  {
+   "id": "bp-task4",
+   "lane": "backpressure",
+   "files": [
+    "server/backpressure/bp-mod4.mjs",
+    "tests/backpressure/bp-mod4.test.js"
+   ],
+   "dirs": [
+    "docs/backpressure/"
+   ]
+  },
+  {
+   "id": "bp-task5",
+   "lane": "backpressure",
+   "files": [
+    "server/backpressure/bp-mod5.mjs",
+    "tests/backpressure/bp-mod5.test.js"
+   ],
+   "dirs": [
+    "docs/backpressure/"
+   ]
+  },
+  {
+   "id": "fo-task1",
+   "lane": "fanout",
+   "files": [
+    "server/fanout/fo-mod1.mjs",
+    "tests/fanout/fo-mod1.test.js"
+   ],
+   "dirs": [
+    "docs/fanout/"
+   ]
+  },
+  {
+   "id": "fo-task2",
+   "lane": "fanout",
+   "files": [
+    "server/fanout/fo-mod2.mjs",
+    "tests/fanout/fo-mod2.test.js"
+   ],
+   "dirs": [
+    "docs/fanout/"
+   ]
+  },
+  {
+   "id": "fo-task3",
+   "lane": "fanout",
+   "files": [
+    "server/fanout/fo-mod3.mjs",
+    "tests/fanout/fo-mod3.test.js"
+   ],
+   "dirs": [
+    "docs/fanout/"
+   ]
+  },
+  {
+   "id": "fo-task4",
+   "lane": "fanout",
+   "files": [
+    "server/fanout/fo-mod4.mjs",
+    "tests/fanout/fo-mod4.test.js"
+   ],
+   "dirs": [
+    "docs/fanout/"
+   ]
+  },
+  {
+   "id": "fo-task5",
+   "lane": "fanout",
+   "files": [
+    "server/fanout/fo-mod5.mjs",
+    "tests/fanout/fo-mod5.test.js"
+   ],
+   "dirs": [
+    "docs/fanout/"
+   ]
+  },
+  {
+   "id": "sh-task1",
+   "lane": "shards",
+   "files": [
+    "server/shards/sh-mod1.mjs",
+    "tests/shards/sh-mod1.test.js"
+   ],
+   "dirs": [
+    "docs/shards/"
+   ]
+  },
+  {
+   "id": "sh-task2",
+   "lane": "shards",
+   "files": [
+    "server/shards/sh-mod2.mjs",
+    "tests/shards/sh-mod2.test.js"
+   ],
+   "dirs": [
+    "docs/shards/"
+   ]
+  },
+  {
+   "id": "sh-task3",
+   "lane": "shards",
+   "files": [
+    "server/shards/sh-mod3.mjs",
+    "tests/shards/sh-mod3.test.js"
+   ],
+   "dirs": [
+    "docs/shards/"
+   ]
+  },
+  {
+   "id": "sh-task4",
+   "lane": "shards",
+   "files": [
+    "server/shards/sh-mod4.mjs",
+    "tests/shards/sh-mod4.test.js"
+   ],
+   "dirs": [
+    "docs/shards/"
+   ]
+  },
+  {
+   "id": "sh-task5",
+   "lane": "shards",
+   "files": [
+    "server/shards/sh-mod5.mjs",
+    "tests/shards/sh-mod5.test.js"
+   ],
+   "dirs": [
+    "docs/shards/"
+   ]
+  },
+  {
+   "id": "pa-task1",
+   "lane": "payloads",
+   "files": [
+    "server/payloads/pa-mod1.mjs",
+    "tests/payloads/pa-mod1.test.js"
+   ],
+   "dirs": [
+    "docs/payloads/"
+   ]
+  },
+  {
+   "id": "pa-task2",
+   "lane": "payloads",
+   "files": [
+    "server/payloads/pa-mod2.mjs",
+    "tests/payloads/pa-mod2.test.js"
+   ],
+   "dirs": [
+    "docs/payloads/"
+   ]
+  },
+  {
+   "id": "pa-task3",
+   "lane": "payloads",
+   "files": [
+    "server/payloads/pa-mod3.mjs",
+    "tests/payloads/pa-mod3.test.js"
+   ],
+   "dirs": [
+    "docs/payloads/"
+   ]
+  },
+  {
+   "id": "pa-task4",
+   "lane": "payloads",
+   "files": [
+    "server/payloads/pa-mod4.mjs",
+    "tests/payloads/pa-mod4.test.js"
+   ],
+   "dirs": [
+    "docs/payloads/"
+   ]
+  },
+  {
+   "id": "pa-task5",
+   "lane": "payloads",
+   "files": [
+    "server/payloads/pa-mod5.mjs",
+    "tests/payloads/pa-mod5.test.js"
+   ],
+   "dirs": [
+    "docs/payloads/"
+   ]
+  },
+  {
+   "id": "rw-task1",
+   "lane": "replay",
+   "files": [
+    "server/replay/rw-mod1.mjs",
+    "tests/replay/rw-mod1.test.js"
+   ],
+   "dirs": [
+    "docs/replay/"
+   ]
+  },
+  {
+   "id": "rw-task2",
+   "lane": "replay",
+   "files": [
+    "server/replay/rw-mod2.mjs",
+    "tests/replay/rw-mod2.test.js"
+   ],
+   "dirs": [
+    "docs/replay/"
+   ]
+  },
+  {
+   "id": "rw-task3",
+   "lane": "replay",
+   "files": [
+    "server/replay/rw-mod3.mjs",
+    "tests/replay/rw-mod3.test.js"
+   ],
+   "dirs": [
+    "docs/replay/"
+   ]
+  },
+  {
+   "id": "rw-task4",
+   "lane": "replay",
+   "files": [
+    "server/replay/rw-mod4.mjs",
+    "tests/replay/rw-mod4.test.js"
+   ],
+   "dirs": [
+    "docs/replay/"
+   ]
+  },
+  {
+   "id": "rw-task5",
+   "lane": "replay",
+   "files": [
+    "server/replay/rw-mod5.mjs",
+    "tests/replay/rw-mod5.test.js"
+   ],
+   "dirs": [
+    "docs/replay/"
+   ]
+  },
+  {
+   "id": "tl-task1",
+   "lane": "telemetry",
+   "files": [
+    "server/telemetry/tl-mod1.mjs",
+    "tests/telemetry/tl-mod1.test.js"
+   ],
+   "dirs": [
+    "docs/telemetry/"
+   ]
+  },
+  {
+   "id": "tl-task2",
+   "lane": "telemetry",
+   "files": [
+    "server/telemetry/tl-mod2.mjs",
+    "tests/telemetry/tl-mod2.test.js"
+   ],
+   "dirs": [
+    "docs/telemetry/"
+   ]
+  },
+  {
+   "id": "tl-task3",
+   "lane": "telemetry",
+   "files": [
+    "server/telemetry/tl-mod3.mjs",
+    "tests/telemetry/tl-mod3.test.js"
+   ],
+   "dirs": [
+    "docs/telemetry/"
+   ]
+  },
+  {
+   "id": "tl-task4",
+   "lane": "telemetry",
+   "files": [
+    "server/telemetry/tl-mod4.mjs",
+    "tests/telemetry/tl-mod4.test.js"
+   ],
+   "dirs": [
+    "docs/telemetry/"
+   ]
+  },
+  {
+   "id": "tl-task5",
+   "lane": "telemetry",
+   "files": [
+    "server/telemetry/tl-mod5.mjs",
+    "tests/telemetry/tl-mod5.test.js"
+   ],
+   "dirs": [
+    "docs/telemetry/"
+   ]
+  },
+  {
+   "id": "bp-http-reg",
+   "lane": "backpressure",
+   "files": [
+    "server/http.mjs"
+   ],
+   "dirs": []
+  },
+  {
+   "id": "tl-http-reg",
+   "lane": "telemetry",
+   "files": [
+    "server/http.mjs"
+   ],
+   "dirs": []
+  },
+  {
+   "id": "dp-openapi",
+   "lane": "data-plane",
+   "files": [
+    "docs/openapi.yaml"
+   ],
+   "dirs": []
+  },
+  {
+   "id": "fo-openapi",
+   "lane": "fanout",
+   "files": [
+    "docs/openapi.yaml"
+   ],
+   "dirs": []
+  },
+  {
+   "id": "rp-claims-sql",
+   "lane": "reaper",
+   "files": [
+    "server/work-claim-sqlite.mjs",
+    "tests/work-claim-sqlite.test.js"
+   ],
+   "dirs": []
+  },
+  {
+   "id": "sh-claims-sql",
+   "lane": "shards",
+   "files": [
+    "server/work-claim-sqlite.mjs"
+   ],
+   "dirs": []
+  },
+  {
+   "id": "pa-store-a",
+   "lane": "payloads",
+   "files": [
+    "server/payload-store.mjs",
+    "tests/payload-store-a.test.js"
+   ],
+   "dirs": []
+  },
+  {
+   "id": "pa-store-b",
+   "lane": "payloads",
+   "files": [
+    "server/payload-store.mjs",
+    "tests/payload-store-b.test.js"
+   ],
+   "dirs": []
+  }
+ ]
+}
