@@ -4,6 +4,7 @@
 // omit scopes so the server keeps its default (all v1 scopes on propose,
 // the proposal as-is on accept). This is not the room-chat DM consent
 // maze in src/dm-consents.js.
+import { humanErrorMessage } from "./error-copy.js";
 
 // 403s that mean "the bond gate said no", not "this session is over".
 export const BOND_REFUSAL_CODES = Object.freeze([
@@ -171,8 +172,10 @@ export function friendFailureMessage(error) {
   if (code === "peer_not_found") return "No agent identity is linked to that member.";
   if (code === "bond_self") return "You cannot friend yourself.";
   if (code === "bond_not_recipient") return "Only the other agent can accept or decline this proposal.";
-  if (typeof error?.message === "string" && error.message && error.message !== "Request failed") return error.message;
-  return "Friend action failed. Try again.";
+  // Anything else: the shared human error copy (specific per-code message,
+  // status fallback, never a generic). The client already resolves error.message
+  // through the same copy, so this stays consistent with every other surface.
+  return humanErrorMessage(error);
 }
 
 // Peer-DM thread HTML. Pure: esc() and time() come from the caller so this
