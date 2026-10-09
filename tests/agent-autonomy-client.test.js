@@ -148,7 +148,7 @@ test("agent inbox CLI exposes the autonomy primitives", async t => {
     const clean = { ...process.env };
     for (const name of Object.keys(clean)) if (name.startsWith("ROOM_AGENT_")) delete clean[name];
     try { return { ...(await promisify(execFile)(process.execPath, ["scripts/agent-inbox.mjs", ...args],
-      { env: { ...clean, ...env }, encoding: "utf8", timeout: 15000 })), status: 0 }; }
+      { env: { ...clean, ...env, NODE_NO_WARNINGS: "1" }, encoding: "utf8", timeout: 15000 })), status: 0 }; }
     catch (error) { return { stdout: error.stdout, stderr: error.stderr, status: error.code }; }
   };
   for (const args of [["presence"], ["capabilities"], ["advertise", "web-research"], ["sessions"]]) {
@@ -191,7 +191,7 @@ test("agent inbox say --stdin posts an outside-agent envelope with its newline",
   const run = (args, input) => new Promise(resolve => {
     const clean = { ...process.env };
     for (const name of Object.keys(clean)) if (name.startsWith("ROOM_AGENT_")) delete clean[name];
-    const child = spawn(process.execPath, ["scripts/agent-inbox.mjs", ...args], { env: { ...clean, ...env } });
+    const child = spawn(process.execPath, ["scripts/agent-inbox.mjs", ...args], { env: { ...clean, ...env, NODE_NO_WARNINGS: "1" } });
     let stdout = "", stderr = "";
     const timer = setTimeout(() => child.kill(), 15000);
     child.stdout.setEncoding("utf8");
@@ -219,7 +219,7 @@ test("a saved seat can introduce an outside agent the room can see, and a change
   const run = args => new Promise(resolve => {
     const clean = { ...process.env };
     for (const name of Object.keys(clean)) if (name.startsWith("ROOM_AGENT_")) delete clean[name];
-    const child = spawn(process.execPath, ["scripts/agent-inbox.mjs", ...args], { env: { ...clean, ...env } });
+    const child = spawn(process.execPath, ["scripts/agent-inbox.mjs", ...args], { env: { ...clean, ...env, NODE_NO_WARNINGS: "1" } });
     let stdout = "", stderr = "";
     const timer = setTimeout(() => child.kill(), 15000);
     child.stdout.setEncoding("utf8");
