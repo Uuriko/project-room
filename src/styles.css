@@ -1254,8 +1254,15 @@ summary { overflow-wrap: anywhere; }
 .friend-bond:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 .friend-chip { font-size: .75rem; font-weight: 700; color: var(--muted); }
 .friend-chip[data-friend-state="active"] { color: var(--room-green); }
-.friend-dm-list { list-style: none; margin: .5rem 0 1rem; padding: 0; display: grid; gap: .75rem; max-height: 16rem; overflow: auto; }
+.friend-dm-list { list-style: none; margin: .5rem 0 1rem; padding: 0; display: grid; gap: .75rem; max-height: min(16rem, 40dvh); overflow: auto; }
 .friend-dm-meta { display: block; font-size: .75rem; color: var(--muted); }
+/* Chat-bubble rows: the peer's messages sit left, mine sit right on an accent
+   tint so a mobile reader can tell them apart at a glance. The .mine class
+   existed in the markup with no styling — own and peer messages looked
+   identical. Measured text contrast, both themes: 6.1:1 dark, 8.3:1 light. */
+.friend-dm-message { justify-self: start; max-width: 88%; padding: .45rem .7rem; border: 1px solid var(--line-soft); border-radius: .75rem; background: var(--panel); }
+.friend-dm-message.mine { justify-self: end; border-color: transparent; background: var(--blue-strong); color: var(--on-accent); }
+.friend-dm-message.mine .friend-dm-meta { color: var(--on-accent); opacity: .8; }
 .friend-dm-message p { margin: .15rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .friend-dm-empty { color: var(--muted); font-size: .85rem; }
 

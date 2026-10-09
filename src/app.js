@@ -7039,9 +7039,17 @@ async function loadFriendThread(peerMemberId) {
     const history = await client.request(client.path(`/peer-dms/${encodeURIComponent(thread.threadId)}`));
     if (generation !== client.generation || friendDmPeerId !== peerMemberId || !state) return;
     renderContent("#friend-dm-list", friendMessageHtml(history?.messages, peerMemberId));
+    // The thread window is short on a phone: land on the newest message, the
+    // same way the room chat list does, instead of leaving the reader at the
+    // oldest message of the thread.
+    scrollFriendDmToLatest();
   } catch (error) {
     if (generation === client.generation && friendDmPeerId === peerMemberId) dialogNotice("#friend-dm-status", friendFailureMessage(error), true);
   }
+}
+function scrollFriendDmToLatest() {
+  const list = $("#friend-dm-list");
+  if (list) list.scrollTop = list.scrollHeight;
 }
 function openFriendThread(peerMemberId) {
   if (!state || !session) return;
@@ -7084,6 +7092,27 @@ $("#friend-dm-form").addEventListener("submit", async event => {
     const submit = $("#friend-dm-form")?.querySelector("button[type=submit]");
     if (submit) submit.disabled = false;
     if (generation === client.generation && state) await refreshFriendBonds();
+  }
+});
+// The DM compose mirrors the room composer: Enter sends on desktop keyboards
+// (Shift+Enter for a new line), while touch keyboards keep Return as a new
+// line and get a "send" return key plus the matching hint.
+function syncFriendDmHint() {
+  const input = $("#friend-dm-input"), caption = $("#friend-dm-hint");
+  const hint = touchKeyboard.matches ? "Return for a new line · ↑ to send" : "Enter to send · Shift + Enter for a new line";
+  input.title = hint;
+  input.setAttribute("aria-description", hint);
+  if (caption) caption.textContent = hint;
+  input.enterKeyHint = touchKeyboard.matches ? "enter" : "send";
+}
+touchKeyboard.addEventListener("change", syncFriendDmHint);
+syncFriendDmHint();
+$("#friend-dm-input").addEventListener("keydown", e => {
+  // Composition, key repeat, and touch Return must never accidentally submit —
+  // the shared sendsOnEnter gate carries the same rules as the room composer.
+  if (sendsOnEnter(e, touchKeyboard.matches)) {
+    e.preventDefault();
+    if (!friendBusy && $("#friend-dm-input").value.trim()) $("#friend-dm-form").requestSubmit();
   }
 });
 $("#notification-read-button").addEventListener("click", async () => {
