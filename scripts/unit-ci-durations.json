@@ -327,6 +327,7 @@
   "tests/handoff-envelope.test.js": 11155,
   "tests/handoff-receipt.test.js": 23361,
   "tests/handoff-renderer.test.js": 8088,
+  "tests/heartbeat-real-db-errors.test.js": 300,
   "tests/help-actions.test.js": 4447,
   "tests/help-discovery.test.js": 143047,
   "tests/help-mcp.test.js": 43264,
