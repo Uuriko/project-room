@@ -1233,7 +1233,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "reassign" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { required: ["newOwner"], optional: ["note"] })) invalidInput(reject, "{newOwner, note?}");
+    if (!shape(data, { required: ["newOwner", "expectedClaimedAt", "expectedHistoryLength"], optional: ["note"] }))
+      invalidInput(reject, "{newOwner, expectedClaimedAt, expectedHistoryLength, note?}");
     const item = load(claimIdOf(reject, workClaimId));
     const authority = authorityOver(item);
     // W3 (QA 2026-09-28): /reassign used to accept any newOwner string, so a
@@ -1260,7 +1261,19 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     requireEventBudget();
     const previousOwnerId = item.owner;
     const note = text("note", data.note, { multiline: true });
-    const reassigned = runPure(reject, () => reassignWork(item, caller, target, { note, now: nowMs, authority, room: roomLike }));
+    // A stale round is a 409 work_claim_conflict, same as /release.
+    let reassigned;
+    try {
+      reassigned = reassignWork(item, caller, target, {
+        expectedClaimedAt: data.expectedClaimedAt, expectedHistoryLength: data.expectedHistoryLength,
+        note, now: nowMs, authority, room: roomLike });
+    } catch (error) {
+      if (error instanceof ClaimError && error.code === "work_claim_conflict") {
+        reject(409, error.code, `${error.message} — re-read the claim and retry with the current round.`);
+      }
+      if (error instanceof ClaimError) reject(422, error.code, error.message);
+      throw error;
+    }
     // QA200 ch-2037: reassign moves a lease to a new holder (and a fresh
     // unclaimed item lands claimed) without touching the claim route — run
     // the exclusivity check here too.
