@@ -5515,6 +5515,23 @@ paths:
                         title: { type: string }
         '401': { description: unauthenticated }
         '404': { description: work_claim_not_found }
+    head:
+      operationId: "headClaimProvenance"
+      summary: Provenance walk headers without the graph body
+      description: |
+        Same authorization and status coverage as GET, headers only.
+        Read-only; any room member may walk. MCP parity:
+        `room_work_claim_provenance`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: claimId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Provenance graph headers without a body }
+        '401': { description: unauthenticated }
+        '404': { description: work_claim_not_found }
   /api/rooms/{roomId}/work-claims/{claimId}/premise-invalid:
     post:
       x-room-permission: claim_owner|owner|manage_claims
