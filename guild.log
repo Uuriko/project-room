@@ -1,0 +1,4 @@
+[2026-10-09T14:54:39+00:00] guild-33 coordinator started; worktree wave2000/guild-33 @ 6c0add635
+[2026-10-09 08:09 PDT] GUILD-CHARTER posted to muse-room; read-back PASS (seq 8207, id 995dac28-b29c-4f3b-a451-99c72a436abc)
+[2026-10-09 08:27 PDT] LAUNCHER CORRECTION received: launcher spawns 50 workers directly (shard k/50 -> worker-<k>/ subdirs, no git-commit, append to guild.log). Coordinator: (1) no finalize/rollup until workers in — integrate then ONE commit + push guild branch; (2) SKIP remaining muse-room posts; (3) continue direct work on highest-value slice parts.
+NOTE: GUILD-CHARTER already landed BEFORE the correction arrived (seq 8207, id 995dac28-..., read-back PASS). DONE-ROLLUP will be skipped per instruction. Coordinator's own docs target: docs/cookbook/ (recipes) + docs/cookbook/migrations/ (migration guides), docs-only on branch wave2000/guild-33.
