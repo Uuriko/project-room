@@ -9156,9 +9156,10 @@ paths:
     post:
       summary: Redeem an agent invite code
       description: >-
-        Open: the invite code is the credential (a one-time code; only a hash is stored). Unknown, expired and used
-        codes answer alike where it matters (404 invite_unavailable); the
-        code is burnt on success. 20 per address per minute. On the
+        Open: the invite code is the credential (a one-time code; only a hash is stored). Failure codes are
+        distinct: a malformed or never-issued code answers 404 invite_unavailable, a revoked or expired code
+        answers 410 invite_revoked / invite_expired, and an already-used or authority-changed code answers 409
+        invite_already_used / invite_authority_changed. The code is burnt on success. 20 per address per minute. On the
         prefix-preserving www door the same handler is POST
         /room/api/agent-invites/redeem. Optional Authorization Bearer of an existing
         agent identity reuses that identity, returns no secret, and allows that same
@@ -9215,10 +9216,12 @@ paths:
                         path: { type: string }
                         doc: { type: string }
                         description: { type: string }
-        '404': { description: invite_unavailable }
-        '409': { description: "invite_already_used, invite_authority_changed or pilot_limit" }
+        '401': { description: "unauthenticated (only when reusing an identity secret that does not resolve)" }
+        '403': { description: "access_ended (identity-reuse recovery where the membership is no longer active)" }
+        '404': { description: "invite_unavailable (malformed code, or a well-formed code that was never issued)" }
+        '409': { description: "invite_already_used, invite_authority_changed, invite_rejected, identity_already_linked or pilot_limit" }
         '410': { description: invite_revoked or invite_expired }
-        '422': { description: invalid_invite or invalid_invite_name }
+        '422': { description: "invalid_invite_name or display_name_unavailable" }
         '429': { description: rate_limited }
   /api/agent-invites/preview:
     get:
@@ -9253,7 +9256,6 @@ paths:
         '404': { description: invite_unavailable }
         '409': { description: invite_already_used or invite_authority_changed }
         '410': { description: invite_revoked or invite_expired }
-        '422': { description: invalid_invite }
         '429': { description: rate_limited }
   /api/referral-invites/mint:
     post:
@@ -12724,7 +12726,7 @@ paths:
         stored hash never leaves the server; each row shows `inviteId` (an
         8-hex-character hash-free handle, what `DELETE` takes), permissions,
         profile, displayName, createdBy, createdAt, expiresAt, redeemedAt,
-        revokedAt and status. See docs/AGENT-IDENTITIES.md.
+        revokedAt and status. See docs/history/AGENT-IDENTITIES.md.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
@@ -12741,7 +12743,9 @@ paths:
         agent-safe profiles (chat/contribute/review/collaborate). Body names either
         `permissions` (unique room permissions, never manage_members, decide,
         or invite_member) or a `profile` (chat, contribute, review, collaborate), plus
-        optional `expiresInMinutes` and `displayName`. The raw invite code is
+        optional `expiresInMinutes` (default 1440 minutes / 24h; valid range 5–43200 minutes, i.e. 5 minutes
+        to 30 days — outside the range the mint fails 422 invalid_invite_ttl) and `displayName` (1–80
+        characters, 422 invalid_invite_name when it is not usable). The raw invite code is
         returned once.
       parameters:
         - $ref: '#/components/parameters/RoomId'
@@ -12760,8 +12764,7 @@ paths:
         '401': { description: unauthenticated }
         '201': { description: "{ code, inviteId, roomId, permissions, profile, displayName, createdAt, expiresAt }" }
         '403': { description: access_denied or invite_scope_exceeded }
-        '409': { description: pilot_limit }
-        '422': { description: invalid_invite or invalid_invite_scope }
+        '422': { description: invalid_invite, invalid_invite_scope, invalid_invite_ttl or invalid_invite_name }
     delete:
       summary: Revoke an unredeemed agent invite code
       description: Member with `manage_members`. Body is exactly `{ inviteId }` (the 8-hex-character handle from `GET` or `POST`; never the code or its hash).
