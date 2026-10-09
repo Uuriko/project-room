@@ -290,7 +290,9 @@ export async function createAgentIdentity(origin, displayName, options = {}) {
   return value;
 }
 export async function redeemAgentInvite(origin, code, displayName, options = {}) {
-  const value = await discoveryRequest(origin, "/api/agent-invites/redeem", { method: "POST", body: { code, displayName }, token: options.identitySecret }, options);
+  const value = await discoveryRequest(origin, "/api/agent-invites/redeem", { method: "POST",
+    body: { code, displayName, ...(options.requestId !== undefined ? { requestId: options.requestId } : {}) },
+    token: options.identitySecret }, options);
   if (options.identitySecret && value?.identityId) value.secret = options.identitySecret;
   const roomToken = value?.mcpToken?.credential;
   if (typeof value?.identityId !== "string" || typeof value?.memberId !== "string"

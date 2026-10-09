@@ -108,7 +108,7 @@ export async function connectRoom({ target, directory, origin, name = "Room agen
     let membership = memberships.find(room => room.roomId === step.roomId);
     if (!membership && (destination.code || destination.sharedToken)) {
       const joined = destination.sharedToken ? await joinSharedInvite(saved.origin, destination.sharedToken, saved.name, options)
-        : await redeemAgentInvite(saved.origin, destination.code, saved.name, options);
+        : await redeemAgentInvite(saved.origin, destination.code, saved.name, { ...options, requestId: step.requestId });
       const expected = JSON.parse(step.approved);
       if (joined.roomId !== expected.roomId || joined.identityId !== saved.identityId
         || !joined.duplicate && JSON.stringify([...joined.permissions].sort()) !== JSON.stringify(expected.permissions))
