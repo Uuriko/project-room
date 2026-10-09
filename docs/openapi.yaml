@@ -7708,6 +7708,12 @@ paths:
         Moves payable credits between lanes (payable → payable, no fee),
         receipt-backed. Credits are valueless ledger units. Emits
         `credit.transferred`. API keys need `rooms:write`.
+        An idempotency key is REQUIRED — supply it as the `idempotencyKey`
+        body field or the `Idempotency-Key` header. Keyless calls are refused
+        with 422 `idempotency_key_required`: credit.transfer is the one
+        money-moving op whose keyless retry would silently double-move
+        payable credits, so a key is mandatory and a keyed retry replays the
+        stored receipt instead of moving credits again.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:

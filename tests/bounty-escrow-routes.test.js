@@ -214,6 +214,67 @@ test("an idempotency key reused with different input → 409 idempotency_key_reu
   assert.equal(second.body.code, "idempotency_key_reused");
 });
 
+// --- credit.transfer: the idempotency key is required ---------------------------
+// credit.transfer is the only money-moving op whose keyless fallback is
+// silent double-spend: a lost-response client retry re-moves payable credits
+// (B4 audit, PR #2159). The route refuses keyless transfers outright; a
+// keyed retry replays the stored receipt without moving credits again.
+
+const payableOf = async (store, laneId) => {
+  const res = await call(store, { method: "GET", route: "balances", identity: encodeURIComponent(laneId) });
+  assert.equal(res.statusCode, 200);
+  return res.body.balances.payable;
+};
+
+test("transfer without an idempotency key → 422 idempotency_key_required, credits untouched", async () => {
+  const { store } = makeStore();
+  store.bountyEscrow.ensureGenesis(ROOM);
+  const before = await payableOf(store, JILL);
+  assert.ok(before >= 5, "genesis must fund the sender for this test");
+  const res = await call(store, { route: "transfer", bodyData: { to: GROK, amount: 5 } });
+  assert.equal(res.statusCode, 422);
+  assert.equal(res.body.code, "idempotency_key_required");
+  assert.equal(await payableOf(store, JILL), before, "a refused keyless transfer must not move credits");
+});
+
+test("transfer with a header key moves credits once; the retry replays", async () => {
+  const { store } = makeStore();
+  store.bountyEscrow.ensureGenesis(ROOM);
+  const before = await payableOf(store, JILL);
+  const headers = { "Idempotency-Key": "xfer-header-key-1" };
+  const first = await call(store, { route: "transfer", bodyData: { to: GROK, amount: 5 }, headers });
+  assert.equal(first.statusCode, 200);
+  assert.equal(await payableOf(store, JILL), before - 5);
+  const replay = await call(store, { route: "transfer", bodyData: { to: GROK, amount: 5 }, headers });
+  assert.equal(replay.statusCode, 200);
+  assert.deepEqual(replay.body, first.body);
+  assert.equal(await payableOf(store, JILL), before - 5, "a keyed retry must not move credits twice");
+});
+
+test("transfer accepts the key as the idempotencyKey body field", async () => {
+  const { store } = makeStore();
+  store.bountyEscrow.ensureGenesis(ROOM);
+  const before = await payableOf(store, JILL);
+  const bodyData = { to: GROK, amount: 5, idempotencyKey: "xfer-body-key-1" };
+  const first = await call(store, { route: "transfer", bodyData });
+  assert.equal(first.statusCode, 200);
+  const replay = await call(store, { route: "transfer", bodyData });
+  assert.equal(replay.statusCode, 200);
+  assert.deepEqual(replay.body, first.body);
+  assert.equal(await payableOf(store, JILL), before - 5);
+});
+
+test("transfer with a fresh key is a fresh operation", async () => {
+  const { store } = makeStore();
+  store.bountyEscrow.ensureGenesis(ROOM);
+  const before = await payableOf(store, JILL);
+  const first = await call(store, { route: "transfer", bodyData: { to: GROK, amount: 5 }, headers: { "Idempotency-Key": "xfer-fresh-1" } });
+  assert.equal(first.statusCode, 200);
+  const second = await call(store, { route: "transfer", bodyData: { to: GROK, amount: 5 }, headers: { "Idempotency-Key": "xfer-fresh-2" } });
+  assert.equal(second.statusCode, 200);
+  assert.equal(await payableOf(store, JILL), before - 10);
+});
+
 // --- identityOf: bounded percent-decoded identity -----------------------------
 
 test("balances: percent-encoded lane id with slashes decodes and works", async () => {
