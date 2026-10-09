@@ -1,0 +1,36 @@
+{
+  "task": "RC-2026-09-27-2716",
+  "source": "read-only fetch of uuriko/project-room#266 comments (no posts, no writes)",
+  "parsed_events": [
+    {
+      "id": "5859367133",
+      "lane": "instinct",
+      "kind": "handoff-offer",
+      "task_id": "RC-2026-09-27-2716"
+    },
+    {
+      "id": "readback-1",
+      "lane": "jill",
+      "kind": "readback",
+      "task_id": "RC-2026-09-27-2716"
+    }
+  ],
+  "ignored_prose": 1,
+  "record": {
+    "delivered": true,
+    "acked": false,
+    "receipted": false,
+    "routes": [
+      "5859367133"
+    ],
+    "readbacks": [
+      {
+        "id": "readback-1",
+        "routeId": "5859367133"
+      }
+    ]
+  },
+  "violations": [],
+  "finding": "offer parses under existing grammar; the real ack was informal prose and is correctly ignored (not misclassified); delivery proven by coordinator read-back re-fetch.",
+  "summary": "GUILD-04 messaging rollup: 1 tasks tracked\ndelivered(read-back confirmed): 1 | acked: 0 | receipted: 0\nviolations: 0"
+}
