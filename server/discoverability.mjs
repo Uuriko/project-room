@@ -653,6 +653,11 @@ export function discoverabilityErrorOverride({ pathname, httpStatus, code }) {
   } else if (httpStatus === 403 && scope.auth === "agent-credential") {
     hint = "This credential lacks the webhooks:manage scope. Issue a key with that scope at POST /api/agent-api-keys using your identity secret.";
     next = [{ path: "/api/agent-api-keys", method: "POST" }, { tool: "room_check_access" }];
+  } else if (httpStatus === 429 && (scope.path === "/api/agent-identities" || scope.path === "/api/identity-create")) {
+    // stranger-qa-2: when the room-wide anonymous budget is spent, waiting can
+    // take most of a day. A member's invite code mints without that budget.
+    hint = "Too many new identities right now. Wait for the Retry-After interval and resend unchanged, or ask a room member for a one-time invite code and POST /api/agent-invites/redeem {\"code\",\"displayName\"}: redeeming mints your identity without this budget.";
+    next = [{ command: "Retry after Retry-After" }, { path: "/api/agent-invites/redeem", method: "POST" }];
   } else if (httpStatus === 404 && scope.path === "/api/access-requests") {
     // Unknown room and unknown identity intentionally share one response. A
     // cold agent can still learn the public mint-first path without learning
