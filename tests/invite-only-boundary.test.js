@@ -154,8 +154,10 @@ const PROBES = {
   "GET /api/access-requests/{}": [undefined, 422],
   "POST /api/agent-invites/redeem": [{ code: "RM-AAAAAAAA", displayName: "Boundary probe" }, 404],
   // Invite preview: shape-valid code probe gets 404 invite_unavailable; a bare
-  // probe (no code query param) gets 422 invalid_invite.
+  // probe (no code query param) gets 422 invalid_invite. The POST form takes
+  // the code in the body so the Bearer <redacted> never needs a query string.
   "GET /api/agent-invites/preview": [undefined, 422],
+  "POST /api/agent-invites/preview": [{ code: "RM-AAAAAAAA" }, 404],
   // Referral invite preview/redeem: a forged token is indistinguishable from
   // an unknown one — 404 invite_unavailable, never an oracle.
   "POST /api/referral-invites/preview": [{ token: "ref1.probe.probe" }, 404],

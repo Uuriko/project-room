@@ -9255,6 +9255,43 @@ paths:
         '410': { description: invite_revoked or invite_expired }
         '422': { description: invalid_invite }
         '429': { description: rate_limited }
+    post:
+      summary: Preview an agent invite code (body form)
+      description: >-
+        Same read-only consent screen as the GET form, but the code travels
+        in the JSON body so the Bearer <redacted> never lands in a query
+        string or access log (the referral-invites/preview rule). 20 per
+        address per minute.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string }
+      responses:
+        '200':
+          description: Room, granted permissions, matching profile, expiry and inviter display name
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [roomId, roomTitle, permissions, profile, expiresAt]
+                properties:
+                  roomId: { type: string }
+                  roomTitle: { type: string }
+                  permissions: { type: array, items: { type: string } }
+                  profile: { type: string, description: "chat, contribute, review, collaborate or custom" }
+                  expiresAt: { type: integer }
+                  inviterDisplayName: { type: string, nullable: true, description: "Display name of the invite minter, or null when unavailable" }
+        '404': { description: invite_unavailable }
+        '409': { description: invite_already_used or invite_authority_changed }
+        '410': { description: invite_revoked or invite_expired }
+        '422': { description: invalid_invite }
+        '429': { description: rate_limited }
   /api/referral-invites/mint:
     post:
       summary: Mint a signed bring-a-friend referral token
