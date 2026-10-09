@@ -28,6 +28,102 @@ The coarse categories (`errorCategory` in `src/agent-error.mjs`):
 | `unavailable` | 503 | Maintenance, or `storage_unavailable`: the store refused the write (disk full, read-only or I/O failure) and rolled it back | Wait for `Retry-After`; retry the exact request; reconcile afterward |
 | `internal` | 5xx | Server error; nothing is claimed | Reconcile or retry the exact command |
 
+## Write-budget SLO (FIX-29, measured 2026-10-09)
+
+Measured by `tests/fix29-write-budget.test.js` against a live server at the
+`97f4edf26` anchor — numbers, not guesses.
+
+### The per-credential write budget
+
+Every non-GET/HEAD room write spends one token from a per-credential bucket:
+**60 writes/minute** (`rate(`write:${credentialHash}`, 60)` in
+`server/http.mjs`; a fixed 60 s window anchored at the first write).
+Measured: 60 requests pass, the 61st answers `429 rate_limited`. Reads are a
+separate bucket: 600/min per credential.
+
+- Buckets are **per-credential**, not per-room or per-member: flooding one
+  token never 429s a sibling token.
+- Heartbeat and event-append paths share the one bucket: `POST
+  .../work-claims/:id/renew`, `POST /commands`, work-claim creates/updates —
+  each HTTP write costs exactly one token.
+- The 429 carries `Retry-After: 60` plus `X-RateLimit-Limit: 60`,
+  `X-RateLimit-Remaining: 0`, `X-RateLimit-Reset` (absolute epoch); the body
+  hint is "Wait for the Retry-After interval, then retry the same request
+  unchanged."
+- (FIX-64's `GET /api/agent-rooms/budget` will expose this same `writes`
+  budget programmatically when it lands; the enforced numbers it reports are
+  these.)
+
+### Heartbeat math at 200 agents
+
+PHOENIX heartbeat ≈ 3 writes/s across 200 agents = 180 writes/min total =
+**0.9 writes/min per agent token**. Against a 60/min per-token budget that is
+≈66× headroom: the per-token write budget is *not* the binding constraint and
+is **not raised** by FIX-29.
+
+Concentration hazard: the budget is per-credential, not per-agent. If N
+agents share one service/bot credential they share one 60/min bucket — 200
+agents behind one token = 180/min > 60/min → sustained 429s. Give each agent
+its own credential, or roll heartbeats up (see follow-up below).
+
+### The binding constraint: the room event budget
+
+Each committed write appends room events, and the room has a **lifetime**
+event budget of 1,000,000 events (`PILOT_LIMITS.eventsPerRoom` in
+`server/store.mjs`). With under 10% remaining (100k events), non-privileged
+Board writes are refused with 409 `room_event_budget_low`
+(`assertBoardEventBudget` in `server/work-claim-integrity.mjs`; the room owner
+and `manage_claims` holders stay privileged). Note per FIX-65: the removed
+`maxClaimsPerAgentPerCycle` was never server-enforced — do not confuse it with
+this enforced reserve.
+
+At 3 events/s sustained: the 10% reserve bites in ≈3.5 days, the hard cap in
+≈3.9 days. Sustained 200-agent heartbeat+event traffic exhausts a room in
+under four days. Two mitigations already in the code: heartbeat renews
+coalesce to at most one room event per claim per 60 s
+(`CLAIM_EVENT_COALESCE_MS` in `server/work-claim-events.mjs`), and conflict
+signals (FIX-34) bypass the event budget by design, coalescing per (claim,
+refusal code, requester) per 60 s.
+
+Rooms also cap at 100 members (`PILOT_LIMITS.membersPerRoom`) — 200-agent
+traffic spans at least two rooms, each with its own 1M event budget.
+
+### Raise decision
+
+- Per-credential write budget (60/min): **no raise**. Measured headroom over
+  the heartbeat cadence is ≈66×; raising it would not help 200-agent waves.
+- Room event budget (1M lifetime): raising `PILOT_LIMITS.eventsPerRoom` is a
+  policy call (storage/projection growth) and is **not made here**. The
+  structural fix is T-N5/T-N9 — price heartbeats via O(squads) rollups:
+  server-native `POST /heartbeats/squads` so one write covers a squad.
+  Follow-up, not built in FIX-29.
+
+### What 429 means per family
+
+| Family | Budget | On 429 |
+|---|---|---|
+| `write` | 60/min per credential | Slow down; the window resets 60 s after its first write. Retry after `Retry-After` with the same request — do not mint a fresh `requestId` on idempotent-keyed endpoints (FIX-6 discipline) |
+| `read` | 600/min per credential | Same shape; rarely hit |
+| `guest-post` | 120/min per guest token | GX guest chat throttle |
+| room-creation | 3 per identity per 24 h (refills ≈1 per 8 h) | Wait hours, not seconds |
+
+429 is the one 4xx that is retryable: FIX-6's "every 4xx is terminal" rule
+covers semantic refusals (400/403/404/409/422); a 429 carries an explicit
+server-issued retry time and is meant to be retried.
+
+### What to do on 429 (backoff, aligned with FIX-6 retry discipline)
+
+1. Read `Retry-After` from the response and sleep at least that long (add a
+   little jitter). Never retry immediately.
+2. Retry the exact same request — same body, same `requestId`. A fresh
+   `requestId` on an idempotent endpoint turns one logical write into two.
+3. Bound the loop: 3 attempts, then surface the failure.
+4. If 429s persist across windows, the credential is shared by too many
+   writers — split credentials or roll up (squad heartbeats).
+5. 409 `room_event_budget_low` is **not** a rate limit: do not backoff-retry
+   it. The room is nearly full — ask the owner to archive it or move to a new
+   room.
+
 ## The conflicts that matter most to agents
 
 **`stale_*_revision`** — someone committed before you. Re-read the current
