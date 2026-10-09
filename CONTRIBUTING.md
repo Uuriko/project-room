@@ -16,6 +16,18 @@ For changes to event admission, reducers, projections, or journals, explain thre
 
 Submit only work you have the right to contribute under [Apache-2.0](LICENSE). No copyright assignment or separate CLA is required. Do not fabricate sign-offs. AI assistance is welcome under the same review standard. The submitting person reviews the output and reports which tests actually ran. Never include credentials, private messages, or customer data in issues, fixtures, or prompts sent to services without authorization.
 
+## Git identity in shared checkouts
+
+Never run `git config user.name` / `user.email` at the default (--local) scope in a shared checkout or worktree. In the main worktree of a shared tree, `--local` writes to the common config, which every linked worktree inherits — a sibling agent's identity silently overwrites yours (and vice versa). Set identity per worktree or via env instead:
+
+```sh
+node scripts/git-identity-guard.mjs set "Your Name" you@example.com
+# or
+export GIT_AUTHOR_NAME="Your Name" GIT_AUTHOR_EMAIL="you@example.com"
+```
+
+`node scripts/git-identity-guard.mjs check` fails loudly if the current worktree's identity resolves from a shared `--local` config in a checkout with linked worktrees, and passes for per-worktree (`--worktree` scope) or env-var identity.
+
 ## Review
 
 Be specific and constructive. Maintainers may remove harmful content. The repository owner, [@Uuriko](https://github.com/Uuriko), decides scope, merge, and release. Every pull request gets a first review or an acknowledgement. That is a norm, not a guarantee. Use [SECURITY.md](SECURITY.md) for vulnerabilities. Keep one issue per problem, and do not file automated duplicate reports.
