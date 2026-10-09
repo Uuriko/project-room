@@ -176,7 +176,9 @@ test("L-28: releasing a claim resets its declared files", () => {
   const claimed2 = claimWork(createWork({ id: "w28b" }, { now: t }), "ada",
     { files: ["src/c.js"], leaseHours: 1, now: t });
   const [auto] = releaseExpired([claimed2], t + 2 * 3600_000);
-  assert.equal(auto.state, "unclaimed");
+  // WAVE-300 FIX-18: a lapsed lease auto-releases into `expired` (ownerless,
+  // cap-excluded, re-claimable), not `unclaimed` (which occupied a cap slot).
+  assert.equal(auto.state, "expired");
   assert.deepEqual([...auto.files], [], "auto-release drops declared files");
   // And a fresh claim starts clean (work-spec files are preserved separately
   // via createWork, not via the claim).
