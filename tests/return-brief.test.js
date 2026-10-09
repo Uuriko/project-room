@@ -75,14 +75,15 @@ test("history pages keep the frozen horizon beyond 100 events; mid-pagination ar
 });
 
 test("fetching never acknowledges; the explicit action acknowledges exactly H and H+1 stays new", t => {
-  const { store, human } = fixture(t);
-  postMessages(store, human, 10);
+  // Another member writes: the reader's own posts are not news (catchup-own-events.test.js).
+  const { store, human, agent } = fixture(t);
+  postMessages(store, agent, 10);
   const before = store.returnBrief(human, "commons", {});
   store.returnBrief(human, "commons", {}); // more reads
   assert.equal(store.snapshot(human, "commons").cursor, 0); // reads moved nothing
   store.markCaughtUp(human, "commons", before.history.evaluatedThrough); // ack exactly H
   assert.equal(store.snapshot(human, "commons").cursor, before.history.evaluatedThrough);
-  postMessages(store, human, 1, "new-");
+  postMessages(store, agent, 1, "new-");
   const after = store.returnBrief(human, "commons", {});
   assert.equal(after.history.cursor, before.history.evaluatedThrough);
   assert.equal(after.history.items.length, 1); // H+1 is the only new event
@@ -247,8 +248,8 @@ test("the proposer is drillable from history and the projection after replay; fo
 });
 
 test("cursors are isolated per member", t => {
-  const { store, human, agent } = fixture(t);
-  postMessages(store, human, 10);
+  const { store, owner, human, agent } = fixture(t);
+  postMessages(store, owner, 10);
   store.markCaughtUp(human, "commons", 8);
   assert.equal(store.returnBrief(human, "commons", {}).history.cursor, 8);
   assert.equal(store.returnBrief(agent, "commons", {}).history.cursor, 0); // untouched by the other member's ack
@@ -310,8 +311,8 @@ test("a cursor moved by another tab rejects the continuation with 409 cursor_cha
 });
 
 test("a malformed continuation tuple (frozen cursor past the continuation point) rejects 422", t => {
-  const { store, human } = fixture(t);
-  postMessages(store, human, 10);
+  const { store, human, agent } = fixture(t);
+  postMessages(store, agent, 10);
   store.markCaughtUp(human, "commons", 5);
   const page1 = store.returnBrief(human, "commons", { limit: 2 }); // freezes C=5
   assert.equal(page1.history.cursor, 5);
