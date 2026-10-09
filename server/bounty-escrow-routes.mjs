@@ -52,15 +52,18 @@ export const isRoomOwner = (store, roomId, auth) => {
   return typeof ownerId === "string" && ownerId === memberId;
 };
 
+// EscrowError code -> HTTP status. reject() throws, so the first (only)
+// applicable mapping wins; anything unlisted is 422.
+const ESCROW_HTTP_STATUS = {
+  unknown_bounty: 404, unknown_flag: 404,
+  not_authorized: 403,
+  already_claimed: 409, dispute_exists: 409,
+  idempotency_actor_mismatch: 409, idempotency_key_reused: 409,
+};
 const runPure = (reject, fn) => {
   try { return fn(); }
   catch (error) {
-    if (error instanceof EscrowError) {
-      if (error.code === "unknown_bounty" || error.code === "unknown_flag") reject(404, error.code, error.message);
-      if (error.code === "not_authorized") reject(403, error.code, error.message);
-      if (error.code === "already_claimed" || error.code === "dispute_exists" || error.code === "idempotency_actor_mismatch" || error.code === "idempotency_key_reused") reject(409, error.code, error.message);
-      reject(422, error.code, error.message);
-    }
+    if (error instanceof EscrowError) reject(ESCROW_HTTP_STATUS[error.code] ?? 422, error.code, error.message);
     throw error;
   }
 };
@@ -139,16 +142,17 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
   if (escrowRoute === "list" && req.method === "GET") {
     const group = url.searchParams.get("group");
     if (group !== null && !BOUNTY_GROUPS.includes(group)) invalidInput(reject, `group one of ${BOUNTY_GROUPS.join(", ")}`);
+    // "self" resolves to the caller for the viewer/poster params (documented
+    // below); any other value passes through verbatim.
+    const self = param => param === null ? null : param === "self" ? caller : param;
     // Slice 4: optional per-viewer routing visibility (?viewer=self or a lane
     // id). Read-only; annotates each bounty with the routing layer's
     // band-derived claimable answer for that viewer. Bounties are never
     // hidden — visibility only.
-    const viewerParam = url.searchParams.get("viewer");
-    const viewer = viewerParam === null ? null : viewerParam === "self" ? caller : viewerParam;
+    const viewer = self(url.searchParams.get("viewer"));
     // ?poster= filters to bounties posted by a lane; "self" means the caller.
     // Lets a poster see their own bounties (proposed, funded, or otherwise).
-    const posterParam = url.searchParams.get("poster");
-    const poster = posterParam === null ? null : posterParam === "self" ? caller : posterParam;
+    const poster = self(url.searchParams.get("poster"));
     const bounties = runPure(reject, () => escrow.listBounties(roomId, { group, viewer, poster }));
     return json(res, 200, { roomId, bounties });
   }
@@ -194,150 +198,139 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
     const packets = runPure(reject, () => escrow.getReputationPackets(roomId));
     return json(res, 200, { roomId, packets });
   }
-  if (escrowRoute === "create" && req.method === "POST") {
+  // Table-driven mutations: one shared shape check + idempotency wrapper for
+  // every POST mutation. Each entry keeps its exact body schema, the
+  // idempotency route/status pair, and the escrow call with its exact
+  // response construction — watch/transfer spread the whole escrow result,
+  // the rest return {roomId, ...named}; key order and extra-key elision are
+  // preserved verbatim so payloads are byte-compatible with the old code.
+  const MUTATIONS = {
+    create: {
+      required: ["title", "criteria", "amount", "deadline"], optional: ["verifierId", "approvalMode", "rubric", "idempotencyKey"],
+      expected: "{title, criteria, amount, deadline, verifierId?, approvalMode?, rubric?, idempotencyKey?}",
+      idem: ["bounty.post", 201],
+      exec: p => { const { bounty, receipt } = escrow.postBounty(roomId,
+        { poster: caller, title: p.title, criteria: p.criteria, amount: p.amount, deadline: p.deadline,
+          verifierId: p.verifierId ?? null, approvalMode: p.approvalMode ?? "human", rubric: p.rubric ?? null, actor });
+        return { roomId, bounty, receipt }; },
+    },
+    // Slice 6: re-pin the rubric (v+1). Poster-only; only while PROPOSED —
+    // funding pins the rubric for the rest of the lifecycle.
+    rubric: {
+      required: ["rubric"], optional: ["idempotencyKey"],
+      expected: "{rubric: [{criterionId, description}], idempotencyKey?}",
+      idem: ["bounty.rubric", 200],
+      exec: p => { const { bounty, receipt } = escrow.updateRubric(roomId, bountyId, { poster: caller, rubric: p.rubric, actor });
+        return { roomId, bounty, receipt }; },
+    },
+    // Triage quartet: poster-only transitions out of PROPOSED.
+    fund: {
+      optional: ["idempotencyKey"], expected: "{idempotencyKey?}",
+      idem: ["bounty.fund", 200],
+      exec: () => { const { bounty, receipt } = escrow.fundBounty(roomId, bountyId, { funder: caller, actor });
+        return { roomId, bounty, receipt }; },
+    },
+    decline: {
+      required: ["reason"], optional: ["idempotencyKey"], expected: "{reason, idempotencyKey?}",
+      idem: ["bounty.decline", 200],
+      exec: p => { const { bounty, receipt } = escrow.declineBounty(roomId, bountyId, { decliner: caller, reason: p.reason, actor });
+        return { roomId, bounty, receipt }; },
+    },
+    snooze: {
+      required: ["until"], optional: ["idempotencyKey"], expected: "{until, idempotencyKey?}",
+      idem: ["bounty.snooze", 200],
+      exec: p => { const { bounty, receipt } = escrow.snoozeBounty(roomId, bountyId, { snoozer: caller, until: p.until, actor });
+        return { roomId, bounty, receipt }; },
+    },
+    duplicate: {
+      required: ["canonical_id"], optional: ["idempotencyKey"], expected: "{canonical_id, idempotencyKey?}",
+      idem: ["bounty.duplicate", 200],
+      exec: p => { const { bounty, receipt } = escrow.duplicateBounty(roomId, bountyId, { marker: caller, canonicalId: p.canonical_id, actor });
+        return { roomId, bounty, receipt }; },
+    },
+    watch: {
+      optional: ["idempotencyKey"], expected: "{idempotencyKey?}",
+      idem: ["bounty.watch", 200],
+      exec: () => { const result = escrow.watchBounty(roomId, bountyId, { watcher: caller, actor });
+        return { roomId, ...result }; },
+    },
+    claim: {
+      optional: ["idempotencyKey"], expected: "{idempotencyKey?}",
+      idem: ["bounty.claim", 200],
+      exec: () => { const { bounty, receipt } = escrow.claimBounty(roomId, bountyId, { claimant: caller, actor });
+        return { roomId, bounty, receipt }; },
+    },
+    submit: {
+      required: ["evidenceUrl", "summary"], optional: ["evidenceKind", "checksClaimed", "producerId", "idempotencyKey"],
+      expected: "{evidenceUrl, summary, evidenceKind?, checksClaimed?, producerId?, idempotencyKey?}",
+      idem: ["bounty.submit", 200],
+      exec: p => { const { bounty, receipt } = escrow.submitWork(roomId, bountyId, { claimant: caller, actor,
+        evidence: { evidenceUrl: p.evidenceUrl, evidenceKind: p.evidenceKind ?? null, summary: p.summary,
+          checksClaimed: p.checksClaimed ?? [], producerId: p.producerId ?? null } });
+        return { roomId, bounty, receipt }; },
+    },
+    accept: {
+      required: ["verifierAttestation"], optional: ["idempotencyKey"], expected: "{verifierAttestation, idempotencyKey?}",
+      idem: ["bounty.accept", 200],
+      exec: p => { const { bounty, approval, attribution, receipt } = escrow.acceptWork(roomId, bountyId,
+        { acceptor: caller, verifierAttestation: p.verifierAttestation, actor });
+        return { roomId, bounty, approval, attribution, receipt }; },
+    },
+    // Free-miss settlement: the poster (or the designated verifier) rejects
+    // submitted work with a written reason. The award — still locked with the
+    // poster, never attributed — refunds to the poster in full with no fee;
+    // the worker settles at zero; the claim bond is forfeited and a flake
+    // strike recorded (the same "work judged bad" treatment as a
+    // dispute-upheld cancel). Idempotent: a replayed request replays the
+    // stored settlement verdict without new journal movement.
+    reject: {
+      required: ["reason"], optional: ["idempotencyKey"], expected: "{reason, idempotencyKey?}",
+      idem: ["bounty.reject", 200],
+      exec: p => { const { bounty, settlement, alreadySettled, receipt } = escrow.rejectWork(roomId, bountyId,
+        { rejector: caller, reason: p.reason, actor });
+        return { roomId, bounty, settlement, alreadySettled, receipt }; },
+    },
+    dispute: {
+      required: ["bond", "grounds"], optional: ["idempotencyKey"], expected: "{bond, grounds, idempotencyKey?}",
+      idem: ["bounty.dispute", 201],
+      exec: p => { const { bounty, dispute, receipt } = escrow.disputeBounty(roomId, bountyId,
+        { challenger: caller, bond: p.bond, grounds: p.grounds, actor });
+        return { roomId, bounty, dispute, receipt }; },
+    },
+    "dispute-decide": {
+      required: ["outcome", "reasonCodes"], optional: ["rubricCheck", "idempotencyKey"],
+      expected: "{outcome, reasonCodes, rubricCheck?, idempotencyKey?}",
+      idem: ["bounty.dispute-decide", 200],
+      exec: p => { const { bounty, resolution, receipt } = escrow.decideDispute(roomId, bountyId,
+        { decider: caller, outcome: p.outcome, reasonCodes: p.reasonCodes, rubricCheck: p.rubricCheck ?? null, actor });
+        return { roomId, bounty, resolution, receipt }; },
+    },
+    finalize: {
+      optional: ["idempotencyKey"], expected: "{idempotencyKey?}",
+      idem: ["bounty.finalize", 200],
+      exec: () => { const { bounty, action, receipt } = escrow.finalizeBounty(roomId, bountyId, { caller });
+        return { roomId, bounty, action, receipt }; },
+    },
+    transfer: {
+      required: ["to", "amount"], optional: ["idempotencyKey"], expected: "{to, amount, idempotencyKey?}",
+      idem: ["credit.transfer", 200],
+      exec: p => { const result = escrow.transfer(roomId, { from: caller, to: p.to, amount: p.amount, actor });
+        return { roomId, ...result }; },
+    },
+    "epoch-close": {
+      optional: ["idempotencyKey"], expected: "{idempotencyKey?}",
+      idem: ["credit.epoch-close", 200],
+      exec: () => { const epoch = escrow.closeEpoch(roomId, { caller });
+        return { roomId, epoch }; },
+    },
+  };
+  const mutation = MUTATIONS[escrowRoute];
+  if (mutation && req.method === "POST") {
     const payload = await readPayload(reject, body, req);
-    if (!shape(payload, { required: ["title", "criteria", "amount", "deadline"], optional: ["verifierId", "approvalMode", "rubric", "idempotencyKey"] }))
-      invalidInput(reject, "{title, criteria, amount, deadline, verifierId?, approvalMode?, rubric?, idempotencyKey?}");
-    return idem(payload, "bounty.post", 201, () => {
-      const { bounty, receipt } = escrow.postBounty(roomId,
-        { poster: caller, title: payload.title, criteria: payload.criteria, amount: payload.amount,
-          deadline: payload.deadline, verifierId: payload.verifierId ?? null,
-          approvalMode: payload.approvalMode ?? "human", rubric: payload.rubric ?? null, actor });
-      return { roomId, bounty, receipt };
-    });
-  }
-  // Slice 6: re-pin the rubric (v+1). Poster-only; only while PROPOSED —
-  // funding pins the rubric for the rest of the lifecycle.
-  if (escrowRoute === "rubric" && req.method === "POST") {
-    const payload = await readPayload(reject, body, req);
-    if (!shape(payload, { required: ["rubric"], optional: ["idempotencyKey"] }))
-      invalidInput(reject, "{rubric: [{criterionId, description}], idempotencyKey?}");
-    return idem(payload, "bounty.rubric", 200, () => {
-      const { bounty, receipt } = escrow.updateRubric(roomId, bountyId,
-        { poster: caller, rubric: payload.rubric, actor });
-      return { roomId, bounty, receipt };
-    });
-  }
-  // Triage quartet: poster-only transitions out of PROPOSED.
-  if (escrowRoute === "fund" && req.method === "POST") {
-    const payload = await readPayload(reject, body, req);
-    if (!shape(payload, { optional: ["idempotencyKey"] })) invalidInput(reject, "{idempotencyKey?}");
-    return idem(payload, "bounty.fund", 200, () => {
-      const { bounty, receipt } = escrow.fundBounty(roomId, bountyId, { funder: caller, actor });
-      return { roomId, bounty, receipt };
-    });
-  }
-  if (escrowRoute === "decline" && req.method === "POST") {
-    const payload = await readPayload(reject, body, req);
-    if (!shape(payload, { required: ["reason"], optional: ["idempotencyKey"] }))
-      invalidInput(reject, "{reason, idempotencyKey?}");
-    return idem(payload, "bounty.decline", 200, () => {
-      const { bounty, receipt } = escrow.declineBounty(roomId, bountyId, { decliner: caller, reason: payload.reason, actor });
-      return { roomId, bounty, receipt };
-    });
-  }
-  if (escrowRoute === "snooze" && req.method === "POST") {
-    const payload = await readPayload(reject, body, req);
-    if (!shape(payload, { required: ["until"], optional: ["idempotencyKey"] }))
-      invalidInput(reject, "{until, idempotencyKey?}");
-    return idem(payload, "bounty.snooze", 200, () => {
-      const { bounty, receipt } = escrow.snoozeBounty(roomId, bountyId, { snoozer: caller, until: payload.until, actor });
-      return { roomId, bounty, receipt };
-    });
-  }
-  if (escrowRoute === "duplicate" && req.method === "POST") {
-    const payload = await readPayload(reject, body, req);
-    if (!shape(payload, { required: ["canonical_id"], optional: ["idempotencyKey"] }))
-      invalidInput(reject, "{canonical_id, idempotencyKey?}");
-    return idem(payload, "bounty.duplicate", 200, () => {
-      const { bounty, receipt } = escrow.duplicateBounty(roomId, bountyId,
-        { marker: caller, canonicalId: payload.canonical_id, actor });
-      return { roomId, bounty, receipt };
-    });
-  }
-  if (escrowRoute === "watch" && req.method === "POST") {
-    const payload = await readPayload(reject, body, req);
-    if (!shape(payload, { optional: ["idempotencyKey"] })) invalidInput(reject, "{idempotencyKey?}");
-    return idem(payload, "bounty.watch", 200, () => {
-      const result = escrow.watchBounty(roomId, bountyId, { watcher: caller, actor });
-      return { roomId, ...result };
-    });
-  }
-  if (escrowRoute === "claim" && req.method === "POST") {
-    const payload = await readPayload(reject, body, req);
-    if (!shape(payload, { optional: ["idempotencyKey"] })) invalidInput(reject, "{idempotencyKey?}");
-    return idem(payload, "bounty.claim", 200, () => {
-      const { bounty, receipt } = escrow.claimBounty(roomId, bountyId, { claimant: caller, actor });
-      return { roomId, bounty, receipt };
-    });
-  }
-  if (escrowRoute === "submit" && req.method === "POST") {
-    const payload = await readPayload(reject, body, req);
-    if (!shape(payload, { required: ["evidenceUrl", "summary"],
-      optional: ["evidenceKind", "checksClaimed", "producerId", "idempotencyKey"] }))
-      invalidInput(reject, "{evidenceUrl, summary, evidenceKind?, checksClaimed?, producerId?, idempotencyKey?}");
-    return idem(payload, "bounty.submit", 200, () => {
-      const { bounty, receipt } = escrow.submitWork(roomId, bountyId, { claimant: caller, actor,
-        evidence: { evidenceUrl: payload.evidenceUrl, evidenceKind: payload.evidenceKind ?? null,
-          summary: payload.summary, checksClaimed: payload.checksClaimed ?? [], producerId: payload.producerId ?? null } });
-      return { roomId, bounty, receipt };
-    });
-  }
-  if (escrowRoute === "accept" && req.method === "POST") {
-    const payload = await readPayload(reject, body, req);
-    if (!shape(payload, { required: ["verifierAttestation"], optional: ["idempotencyKey"] }))
-      invalidInput(reject, "{verifierAttestation, idempotencyKey?}");
-    return idem(payload, "bounty.accept", 200, () => {
-      const { bounty, approval, attribution, receipt } = escrow.acceptWork(roomId, bountyId,
-        { acceptor: caller, verifierAttestation: payload.verifierAttestation, actor });
-      return { roomId, bounty, approval, attribution, receipt };
-    });
-  }
-  // Free-miss settlement: the poster (or the designated verifier) rejects
-  // submitted work with a written reason. The award — still locked with the
-  // poster, never attributed — refunds to the poster in full with no fee;
-  // the worker settles at zero; the claim bond is forfeited and a flake
-  // strike recorded (the same "work judged bad" treatment as a
-  // dispute-upheld cancel). Idempotent: a replayed request replays the
-  // stored settlement verdict without new journal movement.
-  if (escrowRoute === "reject" && req.method === "POST") {
-    const payload = await readPayload(reject, body, req);
-    if (!shape(payload, { required: ["reason"], optional: ["idempotencyKey"] }))
-      invalidInput(reject, "{reason, idempotencyKey?}");
-    return idem(payload, "bounty.reject", 200, () => {
-      const { bounty, settlement, alreadySettled, receipt } = escrow.rejectWork(roomId, bountyId,
-        { rejector: caller, reason: payload.reason, actor });
-      return { roomId, bounty, settlement, alreadySettled, receipt };
-    });
-  }
-  if (escrowRoute === "dispute" && req.method === "POST") {
-    const payload = await readPayload(reject, body, req);
-    if (!shape(payload, { required: ["bond", "grounds"], optional: ["idempotencyKey"] }))
-      invalidInput(reject, "{bond, grounds, idempotencyKey?}");
-    return idem(payload, "bounty.dispute", 201, () => {
-      const { bounty, dispute, receipt } = escrow.disputeBounty(roomId, bountyId,
-        { challenger: caller, bond: payload.bond, grounds: payload.grounds, actor });
-      return { roomId, bounty, dispute, receipt };
-    });
-  }
-  if (escrowRoute === "dispute-decide" && req.method === "POST") {
-    const payload = await readPayload(reject, body, req);
-    if (!shape(payload, { required: ["outcome", "reasonCodes"], optional: ["rubricCheck", "idempotencyKey"] }))
-      invalidInput(reject, "{outcome, reasonCodes, rubricCheck?, idempotencyKey?}");
-    return idem(payload, "bounty.dispute-decide", 200, () => {
-      const { bounty, resolution, receipt } = escrow.decideDispute(roomId, bountyId,
-        { decider: caller, outcome: payload.outcome, reasonCodes: payload.reasonCodes,
-          rubricCheck: payload.rubricCheck ?? null, actor });
-      return { roomId, bounty, resolution, receipt };
-    });
-  }
-  if (escrowRoute === "finalize" && req.method === "POST") {
-    const payload = await readPayload(reject, body, req);
-    if (!shape(payload, { optional: ["idempotencyKey"] })) invalidInput(reject, "{idempotencyKey?}");
-    return idem(payload, "bounty.finalize", 200, () => {
-      const { bounty, action, receipt } = escrow.finalizeBounty(roomId, bountyId, { caller });
-      return { roomId, bounty, action, receipt };
-    });
+    if (!shape(payload, { required: mutation.required ?? [], optional: mutation.optional ?? [] }))
+      invalidInput(reject, mutation.expected);
+    const [idemRoute, idemStatus] = mutation.idem;
+    return idem(payload, idemRoute, idemStatus, () => mutation.exec(payload));
   }
   if (escrowRoute === "balances" && req.method === "GET") {
     const balances = runPure(reject, () => escrow.balances(roomId, identityOf(reject, identity)));
@@ -349,23 +342,6 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
     const receipts = runPure(reject, () => escrow.history(roomId, identityOf(reject, identity),
       { state: state ?? null, since: since ?? null }));
     return json(res, 200, { roomId, receipts });
-  }
-  if (escrowRoute === "transfer" && req.method === "POST") {
-    const payload = await readPayload(reject, body, req);
-    if (!shape(payload, { required: ["to", "amount"], optional: ["idempotencyKey"] }))
-      invalidInput(reject, "{to, amount, idempotencyKey?}");
-    return idem(payload, "credit.transfer", 200, () => {
-      const result = escrow.transfer(roomId, { from: caller, to: payload.to, amount: payload.amount, actor });
-      return { roomId, ...result };
-    });
-  }
-  if (escrowRoute === "epoch-close" && req.method === "POST") {
-    const payload = await readPayload(reject, body, req);
-    if (!shape(payload, { optional: ["idempotencyKey"] })) invalidInput(reject, "{idempotencyKey?}");
-    return idem(payload, "credit.epoch-close", 200, () => {
-      const epoch = escrow.closeEpoch(roomId, { caller });
-      return { roomId, epoch };
-    });
   }
   reject(405, "method_not_allowed", "Method not allowed");
 }

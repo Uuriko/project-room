@@ -78,23 +78,12 @@ const METHODS = {
   confirm: "POST", dismiss: "POST", snooze: "POST", refetch: "POST",
 };
 
+// Only the named codes are conflicts (409); SupervisionError codes are
+// otherwise invalid input (422). reject() throws, so one mapping wins.
+const CONFLICT_CODES = new Set(["illegal_transition", "undo_expired", "undo_window_open", "confirm_required"]);
 function supervisionHttpError(reject, error) {
-  if (error instanceof SupervisionError) {
-    switch (error.code) {
-      case "invalid_input":
-      case "confirmation_required":
-      case "nothing_to_hold":
-      case "not_confirm_gated":
-        return reject(422, error.code, error.message);
-      case "illegal_transition":
-      case "undo_expired":
-      case "undo_window_open":
-      case "confirm_required":
-        return reject(409, error.code, error.message);
-      default:
-        return reject(422, error.code, error.message);
-    }
-  }
+  if (error instanceof SupervisionError)
+    return reject(CONFLICT_CODES.has(error.code) ? 409 : 422, error.code, error.message);
   throw error;
 }
 
@@ -191,6 +180,14 @@ export async function handleSupervisionRoutes({
       return supervisionHttpError(reject, error);
     }
   };
+  // One transition = apply + upsert + journal. `note` is a value or a
+  // function of the transitioned card (dismiss needs next.dismissNote).
+  const commitTransition = (card, event, note = null) => {
+    const next = runTransition(card, event);
+    store.upsertCard(roomId, memberId, next);
+    journaled(next, card.state, event.type, typeof note === "function" ? note(next) : note);
+    return next;
+  };
 
   switch (route) {
     case "list": {
@@ -226,10 +223,7 @@ export async function handleSupervisionRoutes({
     }
 
     case "seen": {
-      const card = load(cardId);
-      const next = runTransition(card, { type: "focus" });
-      store.upsertCard(roomId, memberId, next);
-      journaled(next, card.state, "focus");
+      const next = commitTransition(load(cardId), { type: "focus" });
       return json(res, 200, { card: withSuggestions(next), seen: true });
     }
 
@@ -244,9 +238,7 @@ export async function handleSupervisionRoutes({
       const suggestion = suggestions[index - 1];
       if (suggestion.gate === "confirm") {
         // Confirm-only class: open the challenge sheet, record nothing yet.
-        const next = runTransition(card, { type: "start_confirm", suggestion });
-        store.upsertCard(roomId, memberId, next);
-        journaled(next, card.state, "start_confirm", suggestion.kind);
+        const next = commitTransition(card, { type: "start_confirm", suggestion }, suggestion.kind);
         return json(res, 200, {
           card: withSuggestions(next),
           requiresConfirm: true,
@@ -257,9 +249,7 @@ export async function handleSupervisionRoutes({
         return reject(422, "nothing_to_hold", "navigation-only suggestions record no intent — follow the deep link");
       }
       const holdMs = data?.holdMs ?? DEFAULT_UNDO_HOLD_MS;
-      const next = runTransition(card, { type: "pick", suggestion, holdMs });
-      store.upsertCard(roomId, memberId, next);
-      journaled(next, card.state, "pick", suggestion.kind);
+      const next = commitTransition(card, { type: "pick", suggestion, holdMs }, suggestion.kind);
       return json(res, 200, {
         card: withSuggestions(next),
         suggestion,
@@ -273,10 +263,7 @@ export async function handleSupervisionRoutes({
     }
 
     case "retract": {
-      const card = load(cardId);
-      const next = runTransition(card, { type: "retract" });
-      store.upsertCard(roomId, memberId, next);
-      journaled(next, card.state, "retract");
+      const next = commitTransition(load(cardId), { type: "retract" });
       return json(res, 200, { card: withSuggestions(next), retracted: true });
     }
 
@@ -299,9 +286,8 @@ export async function handleSupervisionRoutes({
           apiNote: card.pickedSuggestion?.apiNote ?? null,
         });
       }
-      const next = runTransition(card, { type: "confirm", confirmed: true });
-      store.upsertCard(roomId, memberId, next);
-      journaled(next, card.state, "confirm", next.pickedSuggestion?.kind ?? null);
+      const next = commitTransition(card, { type: "confirm", confirmed: true },
+        nextCard => nextCard.pickedSuggestion?.kind ?? null);
       return json(res, 200, {
         confirmed: true,
         card: withSuggestions(next),
@@ -315,10 +301,8 @@ export async function handleSupervisionRoutes({
 
     case "dismiss": {
       const data = await body(req);
-      const card = load(cardId);
-      const next = runTransition(card, { type: "dismiss", note: data?.note ?? null });
-      store.upsertCard(roomId, memberId, next);
-      journaled(next, card.state, "dismiss", next.dismissNote);
+      const next = commitTransition(load(cardId), { type: "dismiss", note: data?.note ?? null },
+        nextCard => nextCard.dismissNote);
       return json(res, 200, { card: withSuggestions(next), dismissed: true });
     }
 
@@ -336,9 +320,7 @@ export async function handleSupervisionRoutes({
       if (untilMs === null) {
         return reject(422, "invalid_input", "snooze needs snoozeFor (1h|4h|tomorrow) or untilMs");
       }
-      const next = runTransition(card, { type: "snooze", untilMs });
-      store.upsertCard(roomId, memberId, next);
-      journaled(next, card.state, "snooze");
+      const next = commitTransition(card, { type: "snooze", untilMs });
       return json(res, 200, { card: withSuggestions(next), snoozedUntilMs: next.snoozedUntilMs });
     }
 
@@ -348,16 +330,12 @@ export async function handleSupervisionRoutes({
       if (data?.fired === true) {
         // v1 client-held dispatch: the client fired the held write on lapse
         // and reports delivery; the card becomes dispatched with the receipt.
-        const next = runTransition(card, { type: "fired" });
-        store.upsertCard(roomId, memberId, next);
-        journaled(next, card.state, "fired");
+        const next = commitTransition(card, { type: "fired" });
         return json(res, 200, { card: withSuggestions(next), fired: true });
       }
       const holds = sourceHolds(card);
       if (holds === false) {
-        const next = runTransition(card, { type: "mark_stale" });
-        store.upsertCard(roomId, memberId, next);
-        journaled(next, card.state, "mark_stale", "resolved elsewhere");
+        const next = commitTransition(card, { type: "mark_stale" }, "resolved elsewhere");
         return json(res, 200, { card: withSuggestions(next), stale: true });
       }
       // holds === true: still live. holds === null: cannot verify — keep the
