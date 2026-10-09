@@ -1379,6 +1379,19 @@ paths:
         (alone or with `after`) is 422 `invalid_event_cursor`: it is not
         applied as a filter, and it does not mean the caller is caught up.
         Pass the previous response's `next` back as `after`.
+
+        The cursor contract (COLLIDE-5): a cursor that points past the end of
+        the log is a hard error, never a silent page. If `after` exceeds the
+        room's current sequence, the server answers 409 `cursor_ahead`
+        ("Cursor exceeds room history; fetch a fresh snapshot") — it does
+        not return an empty page and does not fabricate events for a cursor
+        beyond history. Recover by resetting `after` to 0 (or to the `next`
+        of a fresh snapshot read) and paging forward again. A malformed
+        cursor (non-integer or negative `after`, `limit` outside 1–100,
+        empty `actor`, unparseable `since`/`until`) is 422 `invalid_cursor`;
+        fix the parameter and retry. The boundary is safe: `after` equal to
+        the room's sequence returns an ordinary empty page with
+        `next == sequence` and `hasMore: false`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: after
@@ -1431,7 +1444,7 @@ paths:
   /api/rooms/{roomId}/stream:
     get:
       summary: Server-sent events stream
-      description: Live event stream. Resume with Last-Event-ID header or ?after= (the header wins when both are sent). A consumer whose unsent bytes exceed the per-connection cap (64 KiB) receives a final `stream_lagging` event, is closed alone, and resumes by reconnecting with Last-Event-ID. An authorization or session-binding refusal emits `access-ended`; other pump failures emit a bounded `unavailable` event and close the transport so EventSource can reconnect without claiming lost account access. Because EventSource cannot set headers, this route also accepts the account-session selectors in the query string; src/client.js opens `/stream?after=N&auth=account&binding=<sessionBinding>` for a signed-in browser.
+      description: Live event stream. Resume with Last-Event-ID header or ?after= (the header wins when both are sent). A resume cursor past the room's sequence is 409 `cursor_ahead` per the /events cursor contract — never a silent empty stream; reconnect with a fresh `after`. A consumer whose unsent bytes exceed the per-connection cap (64 KiB) receives a final `stream_lagging` event, is closed alone, and resumes by reconnecting with Last-Event-ID. An authorization or session-binding refusal emits `access-ended`; other pump failures emit a bounded `unavailable` event and close the transport so EventSource can reconnect without claiming lost account access. Because EventSource cannot set headers, this route also accepts the account-session selectors in the query string; src/client.js opens `/stream?after=N&auth=account&binding=<sessionBinding>` for a signed-in browser.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: Last-Event-ID
