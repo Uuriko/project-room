@@ -54,6 +54,7 @@ export const ERROR_KEYS = new Set([
   "dm_not_blocked",
   "dm_nothing_to_revoke",
   "email_connection_changed",
+  "email_unverified",
   "face_not_enabled",
   "face_not_found",
   "grant_active",
