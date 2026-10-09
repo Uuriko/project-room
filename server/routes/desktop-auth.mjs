@@ -61,11 +61,13 @@ async function handleDesktopAuth(ctx) {
         setCookie(res, accountCookieName, result.token, Math.max(0, Math.floor((result.session.expiresAt - store.now()) / 1000)));
         return json(res, 201, { status: "signed_in" });
       }
-
 }
 
+const desktopRoute = row => ({ auth: "none", capability: null, events: [], scope: "worker",
+  schema: { response: { type: "object" } }, ...row });
+
 export const DESKTOP_AUTH_ROUTES = [
-  { id: "desktop-auth-start", method: "GET", path: "/api/auth/desktop/start", auth: "none", capability: null, events: [], scope: "worker", handler: handleDesktopAuth, schema: { response: { type: "object" } } },
-  { id: "desktop-auth-callback", method: "GET", path: "/api/auth/desktop/callback", auth: "none", capability: null, events: [], scope: "worker", handler: handleDesktopAuth, schema: { response: { type: "object" } } },
-  { id: "desktop-auth-session", method: "POST", path: "/api/auth/desktop/session", auth: "none", capability: null, events: [], scope: "worker", handler: handleDesktopAuth, schema: { response: { type: "object" } } }
+  desktopRoute({ id: "desktop-auth-start", method: "GET", path: "/api/auth/desktop/start", handler: handleDesktopAuth }),
+  desktopRoute({ id: "desktop-auth-callback", method: "GET", path: "/api/auth/desktop/callback", handler: handleDesktopAuth }),
+  desktopRoute({ id: "desktop-auth-session", method: "POST", path: "/api/auth/desktop/session", handler: handleDesktopAuth }),
 ];

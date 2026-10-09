@@ -66,6 +66,23 @@ export async function handleAuthGroup(ctx) {
     try { await fn(); } catch { /* Delivery does not change the signup response. */ }
   };
   const passkeyUnavailable = () => json(res, 503, { status: "unavailable", reason: "passkey_not_configured" });
+  const guardPost = () => {
+    if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+    checkOrigin(req, true);
+  };
+  const validEmail = email => {
+    const normalized = normalizeEmail(email);
+    if (!normalized) reject(422, "invalid_email", "A valid email address is required");
+    return normalized;
+  };
+  const passkeySession = () => {
+    checkOrigin(req, true);
+    const slotToken = cookie(req, accountCookieName);
+    if (!slotToken) reject(401, "account_session_required", "Sign in before registering a passkey");
+    const authed = store.authenticateAccountSession(slotToken); // 401 unless the slot is authenticated
+    protectWrite(req, authed, false);
+    return authed;
+  };
 
   // ---- Magic link auth (slice 3, RC-2026-09-17-012) ----
   //
@@ -88,8 +105,7 @@ export async function handleAuthGroup(ctx) {
   // session write; the response shape never reveals whether the email
   // already has an account.
   if (url.pathname === "/api/auth/magic/request" || url.pathname === "/api/auth/magic/consume") {
-    if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
-    checkOrigin(req, true);
+    guardPost();
     const slotToken = cookie(req, accountCookieName);
     if (!slotToken) reject(401, "account_session_required", "Start an account browser session before signing in");
     const slot = store.accountSessionSlot(slotToken);
@@ -98,8 +114,7 @@ export async function handleAuthGroup(ctx) {
       const data = await body(req);
       if (!(exact(data, ["email"]) || exact(data, ["email", "returnTo"])) || typeof data.email !== "string") reject(422, "invalid_email_request", "An email address is required");
       if (Object.hasOwn(data, "returnTo") && validateMagicReturnTo(data.returnTo) === null) reject(422, "invalid_return_target", "A valid local return target is required");
-      const normalized = normalizeEmail(data.email);
-      if (!normalized) reject(422, "invalid_email", "A valid email address is required");
+      const normalized = validEmail(data.email);
       rate(`magic-request:${remoteAddress}`, 5);
       magicEmailLimit(magicRequestEmailLimiter, normalized);
       if (!magicMailer.isConfigured()) return json(res, 200, magicLinkUnavailable());
@@ -113,8 +128,7 @@ export async function handleAuthGroup(ctx) {
     if (typeof data.email !== "string" || typeof data.code !== "string" || !Number.isSafeInteger(data.sessionRevision)) {
       reject(422, "invalid_magic_login", "Email, code, session token, and current session revision are required");
     }
-    const normalized = normalizeEmail(data.email);
-    if (!normalized) reject(422, "invalid_email", "A valid email address is required");
+    const normalized = validEmail(data.email);
     rate(`magic-consume:${remoteAddress}`, 10);
     magicEmailLimit(magicConsumeEmailLimiter, normalized);
     // QAX-007 (RC-2026-09-19-074): never silently switch accounts. A slot
@@ -165,8 +179,7 @@ export async function handleAuthGroup(ctx) {
     return json(res, 201, accountView(loggedIn));
   }
   if (url.pathname === "/api/auth/password/reset/request" || url.pathname === "/api/auth/password/reset/consume") {
-    if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
-    checkOrigin(req, true);
+    guardPost();
     const slotToken = cookie(req, accountCookieName);
     if (!slotToken) reject(401, "account_session_required", "Start a browser session before resetting a password");
     const slot = store.accountSessionSlot(slotToken);
@@ -178,8 +191,7 @@ export async function handleAuthGroup(ctx) {
       if (Object.hasOwn(data, "returnTo") && validateMagicReturnTo(data.returnTo) === null) reject(422, "invalid_return_target", "A valid local return target is required");
     } else if (!exact(data, ["email", "code", "newPassword", "sessionRevision"]) || typeof data.email !== "string"
       || typeof data.code !== "string" || typeof data.newPassword !== "string") reject(422, "invalid_password_reset", "Reset proof, new password and current session revision are required");
-    const normalized = normalizeEmail(data.email);
-    if (!normalized) reject(422, "invalid_email", "A valid email address is required");
+    const normalized = validEmail(data.email);
     rate(`password-reset-${requesting ? "request" : "consume"}:${remoteAddress}`, requesting ? 5 : 10);
     magicEmailLimit(requesting ? resetRequestEmailLimiter : resetConsumeEmailLimiter, normalized);
     if (requesting) {
@@ -231,8 +243,7 @@ export async function handleAuthGroup(ctx) {
   // authenticated session. Plaintext passwords never reach the store.
   // ---- ID-SEC auth: verified email and uniform signup ----
   if (url.pathname === "/api/auth/password/signup") {
-    if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
-    checkOrigin(req, true);
+    guardPost();
     rate(`password-signup:${remoteAddress}`, 10);
     const data = await body(req);
     const signupToken = signInSlotToken(req, data, ["email", "password", "sessionRevision"],
@@ -240,8 +251,7 @@ export async function handleAuthGroup(ctx) {
     if (typeof data.email !== "string" || typeof data.password !== "string") {
       reject(422, "invalid_signup", "An email, password, and current session are required");
     }
-    const normalized = normalizeEmail(data.email);
-    if (!normalized) reject(422, "invalid_email", "A valid email address is required");
+    const normalized = validEmail(data.email);
     const policy = checkPasswordPolicy(data.password);
     if (policy) reject(422, policy.code, policy.message);
     magicEmailLimit(signupEmailLimiter, normalized);
@@ -271,8 +281,7 @@ export async function handleAuthGroup(ctx) {
     return json(res, 202, signupReply());
   }
   if (url.pathname === "/api/auth/password/login") {
-    if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
-    checkOrigin(req, true);
+    guardPost();
     rate(`password-login-ip:${remoteAddress}`, 60);
     const data = await body(req);
     const loginToken = signInSlotToken(req, data, ["email", "password", "sessionRevision"],
@@ -280,8 +289,7 @@ export async function handleAuthGroup(ctx) {
     if (typeof data.email !== "string" || typeof data.password !== "string") {
       reject(422, "invalid_login", "An email, password, and current session are required");
     }
-    const normalized = normalizeEmail(data.email);
-    if (!normalized) reject(422, "invalid_email", "A valid email address is required");
+    const normalized = validEmail(data.email);
     rate(`password-login:${normalized}`, 10);
     const accountId = store.accountLogins.findPasswordAccount(normalized);
     const verifier = accountId ? store.accountLogins.readPasswordVerifier(accountId) : null;
@@ -296,8 +304,7 @@ export async function handleAuthGroup(ctx) {
     return json(res, 200, accountView(loggedIn));
   }
   if (url.pathname === "/api/auth/password/change") {
-    if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
-    checkOrigin(req, true);
+    guardPost();
     rate(`password-change:${remoteAddress}`, 20);
     const slotToken = cookie(req, accountCookieName);
     if (!slotToken) reject(401, "account_session_required", "Sign in before changing the password");
@@ -334,11 +341,7 @@ export async function handleAuthGroup(ctx) {
   }
   // ---- Passkey auth (slice 5, RC-2026-09-17-014) ----
   if (url.pathname === "/api/auth/passkey/register/options" && req.method === "POST") {
-    checkOrigin(req, true);
-    const slotToken = cookie(req, accountCookieName);
-    if (!slotToken) reject(401, "account_session_required", "Sign in before registering a passkey");
-    const auth = store.authenticateAccountSession(slotToken); // 401 unless the slot is authenticated
-    protectWrite(req, auth, false);
+    const auth = passkeySession();
     rate(`passkey-register-options:${auth.account.id}`, 10);
     const params = resolvePasskeyParams(expectedOrigin());
     if (!params) return passkeyUnavailable();
@@ -354,11 +357,7 @@ export async function handleAuthGroup(ctx) {
       rpName: params.rpId, userName: data.userName ?? auth.account.id, authenticatorSelection: data.authenticatorSelection }));
   }
   if (url.pathname === "/api/auth/passkey/register/finish" && req.method === "POST") {
-    checkOrigin(req, true);
-    const slotToken = cookie(req, accountCookieName);
-    if (!slotToken) reject(401, "account_session_required", "Sign in before registering a passkey");
-    const auth = store.authenticateAccountSession(slotToken);
-    protectWrite(req, auth, false);
+    const auth = passkeySession();
     rate(`passkey-register-finish:${auth.account.id}`, 10);
     const params = resolvePasskeyParams(expectedOrigin());
     if (!params) return passkeyUnavailable();
