@@ -19,7 +19,7 @@
 //    verify, and solve helpers are the production functions.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -237,14 +237,14 @@ test("proof is required after the free quota, and recoverable replay does not sp
   const replayStore = openStore({ after: () => {} }, () => now);
   try {
     const replay = mint(replayStore, { anonymousDailyLimit: 1, proofFreePerAddress: 5 });
-    const secret = `pri_${"c".repeat(43)}`;
+    const secret = `pri_${randomBytes(32).toString("base64url")}`;
     const saved = replay.create("Saved Name", { secret, anonymous: { address: "198.51.100.60" } });
     assert.equal(saved.duplicate, false);
     const again = replay.create("Saved Name", { secret, anonymous: { address: "198.51.100.60" } });
     assert.equal(again.duplicate, true);
     assert.equal(again.identityId, saved.identityId);
     const otherSecret = refusal(() => replay.create("Someone Else", {
-      secret: `pri_${"d".repeat(43)}`,
+      secret: `pri_${randomBytes(32).toString("base64url")}`,
       anonymous: { address: "198.51.100.61" },
     }));
     assert.equal(otherSecret.status, 429);
