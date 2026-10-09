@@ -7,9 +7,24 @@ import { pathToFileURL } from 'node:url';
 const shaPattern = /^[0-9a-f]{40}$/;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const knownSchema = value => Number.isSafeInteger(value) && value > 0;
+const diagnostic = value => {
+  let text = String(value ?? '').replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '');
+  // Redact before bounding: truncation must not expose fragments of a known
+  // credential. These are diagnostics, never a dump of the child environment.
+  for (const [name, secret] of Object.entries(process.env)) {
+    if (secret && /TOKEN|SECRET|PASSWORD|CREDENTIAL|AUTHORIZATION|API_KEY|SIGNING_KEY|ACCOUNT_ID/i.test(name))
+      text = text.split(secret).join('[REDACTED]');
+  }
+  text = text.replace(/\b(Bearer|Basic)\s+[^\s"']+/gi, '$1 [REDACTED]');
+  return text.length <= 4096 ? text : `${text.slice(0, 2048)}\n[diagnostic truncated]\n${text.slice(-2048)}`;
+};
 const command = (args, cwd) => {
   const result = spawnSync(args[0], args.slice(1), { cwd, encoding: 'utf8' });
-  if (result.error || result.status !== 0) throw new Error(`${args[0]} ${args[1]} failed (${result.status ?? 'spawn'})`);
+  if (result.error || result.status !== 0) {
+    const detail = [result.error?.message && `spawn: ${diagnostic(result.error.message)}`,
+      result.stderr && `stderr: ${diagnostic(result.stderr)}`, result.stdout && `stdout: ${diagnostic(result.stdout)}`].filter(Boolean).join('\n');
+    throw new Error(`${diagnostic(args.join(' '))} failed (${result.status ?? 'spawn'})${detail ? `\n${detail}` : ''}`);
+  }
   return result.stdout;
 };
 export function schemaAt(revision, git = args => command(['git', ...args])) {
