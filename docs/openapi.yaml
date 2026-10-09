@@ -11377,7 +11377,11 @@ paths:
         inert fixture sender that answers "accepted" without leaving the
         process. `dispatch` moves queued -> unknown -> accepted | rejected
         (or leaves unknown when Telegram is unreachable); `reconcile` replays
-        the recorded receipt for an unknown or accepted attempt. Email sources,
+        the recorded receipt for an unknown or accepted attempt; `flush` retries an
+        attempt stuck at unknown for more than 30 seconds (reconcile first, then
+        resubmit only when the provider has no record, with the original
+        operationId; any other status is returned unchanged, and a resubmit
+        spends one send budget token). Email sources,
         samples and disconnected connections have no transport. The same
         `channelSend` descriptor (and `simulationAvailable`) is returned by
         GET /api/inbox/sources/{id}/sends and /send-context so the browser
@@ -11392,7 +11396,7 @@ paths:
               type: object
               required: [action, sourceId, sendId]
               properties:
-                action: { type: string, enum: [dispatch, reconcile] }
+                action: { type: string, enum: [dispatch, reconcile, flush] }
                 sourceId: { type: string }
                 sendId: { type: string }
       responses:
