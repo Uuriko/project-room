@@ -1,0 +1,50 @@
+{
+ "unit": "m10",
+ "file": "cloudflare/scheduled-rpc.test-fixture.mjs",
+ "results": [
+  {
+   "unit": "m10",
+   "file": "cloudflare/scheduled-rpc.test-fixture.mjs",
+   "mutant": "run-reseeds",
+   "status": "KILLED",
+   "tests": [
+    "cloudflare/scheduled-rpc.check.mjs"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  },
+  {
+   "unit": "m10",
+   "file": "cloudflare/scheduled-rpc.test-fixture.mjs",
+   "mutant": "fail-wrong-table",
+   "status": "KILLED",
+   "tests": [
+    "cloudflare/scheduled-rpc.check.mjs"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  },
+  {
+   "unit": "m10",
+   "file": "cloudflare/scheduled-rpc.test-fixture.mjs",
+   "mutant": "seed-ages-swapped",
+   "status": "KILLED",
+   "tests": [
+    "cloudflare/scheduled-rpc.check.mjs"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  },
+  {
+   "unit": "m10",
+   "file": "cloudflare/scheduled-rpc.test-fixture.mjs",
+   "mutant": "drop-planretention-method",
+   "status": "KILLED",
+   "tests": [
+    "cloudflare/scheduled-rpc.check.mjs"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  }
+ ]
+}

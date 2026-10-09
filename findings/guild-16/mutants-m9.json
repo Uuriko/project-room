@@ -1,0 +1,50 @@
+{
+ "unit": "m9",
+ "file": "cloudflare/jobs-alarm.test-fixture.mjs",
+ "results": [
+  {
+   "unit": "m9",
+   "file": "cloudflare/jobs-alarm.test-fixture.mjs",
+   "mutant": "alarm-at-null",
+   "status": "KILLED",
+   "tests": [
+    "cloudflare/jobs-alarm.check.mjs"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  },
+  {
+   "unit": "m9",
+   "file": "cloudflare/jobs-alarm.test-fixture.mjs",
+   "mutant": "alarm-swallow-throw",
+   "status": "KILLED",
+   "tests": [
+    "cloudflare/jobs-alarm.check.mjs"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  },
+  {
+   "unit": "m9",
+   "file": "cloudflare/jobs-alarm.test-fixture.mjs",
+   "mutant": "seed-due-now",
+   "status": "KILLED",
+   "tests": [
+    "cloudflare/jobs-alarm.check.mjs"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  },
+  {
+   "unit": "m9",
+   "file": "cloudflare/jobs-alarm.test-fixture.mjs",
+   "mutant": "delivery-always-pending",
+   "status": "KILLED",
+   "tests": [
+    "cloudflare/jobs-alarm.check.mjs"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  }
+ ]
+}

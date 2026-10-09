@@ -32,28 +32,31 @@ Generated 2026-10-09T11:16:33.289Z. Method: for each exported symbol, grep all o
 
 ## src/growth-scheduler.js exports — see table above
 
-## Candidate dead symbols (zero external refs)
+## Candidate dead symbols (zero external refs — corrected with internal-use check)
 
-
-### JOB_BUDGET_MS (server/jobs.mjs)
-
-- Zero external references found. Verify before removing: check cloudflare/room.mjs and any dynamic import strings.
-
-### MINUTE_MS (server/jobs.mjs)
-
-- Zero external references found. Verify before removing: check cloudflare/room.mjs and any dynamic import strings.
-
-### SAFETY_NET_CRON (server/jobs.mjs)
-
-- Zero external references found. Verify before removing: check cloudflare/room.mjs and any dynamic import strings.
-
-### SAFETY_NET_MS (server/jobs.mjs)
-
-- Defined as `30 * MINUTE_MS` next to SAFETY_NET_CRON. No importer. The cron STRING is what the Worker consumes; the MS constant looks like a leftover from a numeric-schedule design. Evidence: grep finds no reference outside jobs.mjs. Recommendation: remove or wire it (low risk either way — it is exported, so removal is technically breaking for hypothetical external importers; none exist in-repo).
+**Genuinely unreferenced anywhere in the repo:**
 
 ### jobByName (server/jobs.mjs)
 
-- Zero external references found. Verify before removing: check cloudflare/room.mjs and any dynamic import strings.
+- Zero references in server/, src/, cloudflare/, scripts/, tests/, .github/. The registry
+  is consumed via `JOBS`, `jobsFor`, `jobEnabled`, etc. Safe to remove; harmless to keep.
+
+### SAFETY_NET_MS (server/jobs.mjs)
+
+- Defined as `30 * MINUTE_MS` next to SAFETY_NET_CRON. No importer. Leftover from a
+  numeric-schedule design.
+
+### SAFETY_NET_CRON (server/jobs.mjs) — documentation-only, drift risk
+
+- The exported constant is imported nowhere. The PRODUCTION safety-net cron lives in
+  `cloudflare/wrangler.jsonc` (`triggers.crons: ["*/30 * * * *"]`, asserted by
+  `cloudflare/http.check.mjs:422`). The constant duplicates that truth as documentation
+  next to the scheduler code. If the wrangler cron ever changes, the constant silently
+  lies. Recommendation: derive one from the other, or delete the constant.
+
+**NOT dead (used internally in jobs.mjs, just not imported elsewhere):**
+- `JOB_BUDGET_MS` (3 uses: defineJob default), `MINUTE_MS` (cadences). Internal use
+  keeps them live; "external refs" counts only cross-file imports.
 
 ## Workflows
 

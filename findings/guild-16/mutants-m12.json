@@ -1,0 +1,39 @@
+{
+ "unit": "m12",
+ "file": ".github/workflows/qa2-fuzz.yml",
+ "results": [
+  {
+   "unit": "m12",
+   "file": ".github/workflows/qa2-fuzz.yml",
+   "mutant": "schedule-overlap",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/ci-workflow-concurrency.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  },
+  {
+   "unit": "m12",
+   "file": ".github/workflows/qa2-fuzz.yml",
+   "mutant": "schedule-everymin",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/ci-workflow-concurrency.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  },
+  {
+   "unit": "m12",
+   "file": ".github/workflows/qa2-fuzz.yml",
+   "mutant": "schedule-6field",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/ci-workflow-concurrency.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  }
+ ]
+}

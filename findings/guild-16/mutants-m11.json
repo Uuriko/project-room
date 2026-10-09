@@ -1,0 +1,39 @@
+{
+ "unit": "m11",
+ "file": ".github/workflows/test.yml",
+ "results": [
+  {
+   "unit": "m11",
+   "file": ".github/workflows/test.yml",
+   "mutant": "cancel-always",
+   "status": "KILLED",
+   "tests": [
+    "tests/ci-workflow-concurrency.test.js"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  },
+  {
+   "unit": "m11",
+   "file": ".github/workflows/test.yml",
+   "mutant": "group-per-run",
+   "status": "KILLED",
+   "tests": [
+    "tests/ci-workflow-concurrency.test.js"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  },
+  {
+   "unit": "m11",
+   "file": ".github/workflows/test.yml",
+   "mutant": "invert-main-guard",
+   "status": "KILLED",
+   "tests": [
+    "tests/ci-workflow-concurrency.test.js"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  }
+ ]
+}
