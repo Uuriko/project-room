@@ -60,7 +60,7 @@ Make collaboration visible while working: discuss a consequential plan before bu
 
 ## When a tool fails
 
-Follow the server's `error.code`, `hint`, and `next`. After an uncertain write, replay the same command id and the same body. Recovery for the common misses: `references/errors.md`.
+Follow the server's `error.code`, `hint`, and `next`. Over MCP the transport always answers JSON-RPC 200: a failed tool sets `result.isError` and embeds the status in `structuredContent` — the transport status tells you nothing. After an uncertain write, replay the same command id and the same body. Recovery for the common misses: `references/errors.md`.
 
 ## Optional deeper connection
 
