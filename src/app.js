@@ -2237,8 +2237,51 @@ function renderTyping(typists) {
   el.textContent = `${who} ${names.length + extra === 1 ? "is" : "are"} typing…`;
   el.hidden = false;
 }
+// QA-2026-10-07: a busy room's timeline keeps only its newest rows in the DOM
+// (every render and layout used to walk all of them). Each view remembers the
+// first message it shows; "Show earlier messages" and revealMessage move it back.
+const TIMELINE_WINDOW = 150;
+const timelineWindows = new Map(); // view -> id of the first rendered message
+function timelineView() {
+  return currentThreadId ? `thread:${currentThreadId}` : `room:${activeChannelId}`;
+}
+function timelineMessages() {
+  return currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
+}
+function timelineWindowStart(view, messages) {
+  const from = timelineWindows.get(view), index = from ? messages.findIndex(m => m.id === from) : -1;
+  return index >= 0 ? index : Math.max(0, messages.length - TIMELINE_WINDOW);
+}
+function timelineEarlierRow(row, hidden) {
+  if (!row) {
+    row = document.createElement("li");
+    row.className = "timeline-earlier";
+    row.dataset.key = "timeline:earlier";
+    row.setAttribute("data-timeline-earlier", "");
+    row.innerHTML = `<button type="button" class="text-button"></button>`;
+  }
+  const label = `Show earlier messages (${hidden} more)`;
+  if (row.firstElementChild.textContent !== label) row.firstElementChild.textContent = label;
+  return row;
+}
+function showEarlierMessages() {
+  const view = timelineView(), messages = timelineMessages();
+  const start = Math.max(0, timelineWindowStart(view, messages) - TIMELINE_WINDOW);
+  if (!messages.length) return;
+  const list = $("#message-list"), hadFocus = list.querySelector(":scope > [data-timeline-earlier]")?.contains(document.activeElement);
+  timelineWindows.set(view, messages[start].id);
+  renderMessages();
+  // All history is shown and the button is gone: keep keyboard focus in the timeline.
+  if (hadFocus && document.activeElement === document.body) list.querySelector(":scope > .message")?.focus({ preventScroll: true });
+}
+function widenTimelineTo(id) {
+  const view = timelineView(), messages = timelineMessages(), index = messages.findIndex(m => m.id === id);
+  if (index < 0 || index >= timelineWindowStart(view, messages)) return;
+  timelineWindows.set(view, messages[Math.max(0, index - 20)].id);
+  renderMessages();
+}
 function renderMessages() {
-  const list = $("#message-list"), view = currentThreadId ? `thread:${currentThreadId}` : `room:${activeChannelId}`;
+  const list = $("#message-list"), view = timelineView();
   const sameView = list.dataset.view === view;
   if (!sameView) syncChatSuggestions();
   // The read-horizon anchor is recomputed when the view changes (room vs
@@ -2251,14 +2294,14 @@ function renderMessages() {
     if (horizonCache.has(threadKey)) horizonAnchorId = horizonAnchorFor(messages, horizonCache.get(threadKey));
     else { horizonAnchorId = null; void applyHorizonAnchor(); }
   }
-  const messages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
+  const allMessages = timelineMessages();
   const previous = new Map([...list.children].map(e => [e.dataset.key, e]));
   const pageScroll = list.scrollHeight <= list.clientHeight;
   const listTop = Math.max(0, list.getBoundingClientRect().top);
   const nearBottom = pageScroll ? list.getBoundingClientRect().bottom <= innerHeight + 80
     : list.scrollHeight - list.scrollTop - list.clientHeight < 80;
   const anchor = [...list.children].find(e => {
-    if (e.hasAttribute("data-claim-update")) return false; // removed and repainted below
+    if (e.hasAttribute("data-claim-update") || e.hasAttribute("data-timeline-earlier")) return false; // repainted below
     const bounds = e.getBoundingClientRect();
     return bounds.bottom > listTop && (!pageScroll || bounds.top < innerHeight);
   });
@@ -2273,7 +2316,20 @@ function renderMessages() {
   // node is in its final place.
   const focusedKey = focused?.dataset.focusKey ?? null;
   const focusedMessage = focused?.matches(".message");
-  const newMessages = sameView ? messages.filter(m => !previous.has(`message:${m.id}`)) : [];
+  // QA-2026-10-07: only the newest rows of a view are in the DOM. Rows shown by
+  // "Show earlier messages" come before the first row already on screen, so
+  // they are not arrivals.
+  let windowStart = timelineWindowStart(view, allMessages);
+  let messages = windowStart ? allMessages.slice(windowStart) : allMessages;
+  const firstKnown = sameView ? messages.findIndex(m => previous.has(`message:${m.id}`)) : -1;
+  const newMessages = sameView ? messages.filter((m, i) => !previous.has(`message:${m.id}`) && (firstKnown < 0 || i > firstKnown)) : [];
+  // Arrivals grow the window so retained rows stay put; a reader at the bottom
+  // of a window that has doubled gets it trimmed back.
+  if (nearBottom && newMessages.length && messages.length > 2 * TIMELINE_WINDOW) {
+    windowStart = allMessages.length - TIMELINE_WINDOW;
+    messages = allMessages.slice(windowStart);
+  }
+  if (allMessages.length) timelineWindows.set(view, allMessages[windowStart].id); else timelineWindows.delete(view);
   const newCount = newMessages.length;
   if (!sameView || nearBottom) unreadAnchorId = null;
   else if (!unreadAnchorId && newMessages[0]) unreadAnchorId = newMessages[0].id;
@@ -2289,7 +2345,7 @@ function renderMessages() {
   if (currentThreadId) {
     const root = conversation.byId.get(currentThreadId);
     $("#thread-title").textContent = `Thread with ${name(root.authorId)}`;
-    setText("#thread-context", `${messages.length - 1} ${messages.length === 2 ? "reply" : "replies"} · ${messages.some(message => message.toMemberId) ? "includes private messages" : "visible to everyone in this room"}`);
+    setText("#thread-context", `${allMessages.length - 1} ${allMessages.length === 2 ? "reply" : "replies"} · ${allMessages.some(message => message.toMemberId) ? "includes private messages" : "visible to everyone in this room"}`);
   }
 
   // Retain unchanged message nodes so new arrivals do not discard text selection or focus.
@@ -2302,7 +2358,9 @@ function renderMessages() {
   // one; any left in the list made the reorder below move every message row
   // after them on every arrival. They are repainted after each render.
   list.querySelectorAll(":scope > [data-claim-update]").forEach(node => node.remove());
-  for (const [id, node] of previous) if (!keep.has(id) && !node.hasAttribute("data-work-timeline")) node.remove();
+  for (const [id, node] of previous) if (!keep.has(id) && !node.hasAttribute("data-work-timeline") && id !== "timeline:earlier") node.remove();
+  // Work cards are not windowed: every work item stays reachable in the
+  // timeline, and ones older than the window sit under "Show earlier messages".
   const workEntries = currentThreadId || !state ? [] : timelineWorkEntries().filter(e => e.channelId === activeChannelId);
   const ordered = [];
   // One members array per pass keeps the body HTML cache keyed (see createBodyHtmlCache).
@@ -2389,6 +2447,7 @@ function renderMessages() {
     merged.push(ordered[index]);
   });
   while (wi < workEntries.length) merged.push(workById.get(workEntries[wi++].item.id));
+  if (windowStart) merged.unshift(timelineEarlierRow(previous.get("timeline:earlier"), windowStart));
   const showInvite = Boolean(session?.member?.id && state?.members?.[session.member.id]?.active !== false);
   if (!messages.length && !workEntries.length) list.innerHTML = `<li class="empty-note">No messages yet. <button type="button" class="text-button" data-empty-write>Write the first one</button>${showInvite ? ' · <button type="button" class="text-button" data-empty-invite>Invite someone</button>' : ""}</li>`;
   else {
@@ -2889,6 +2948,7 @@ function revealMessage(id) {
   const message = conversation.byId.get(id);
   if (messageChannelId(message) !== activeChannelId) setActiveChannel(messageChannelId(message));
   switchThread(message.replyToId ? conversation.rootById.get(id) : null);
+  widenTimelineTo(id);
   const row = [...$("#message-list").querySelectorAll("[data-message-record-id]")]
     .find(node => node.dataset.messageRecordId === id);
   // Scroll first: content-visibility: auto skips off-screen rows, and focusing
@@ -4106,6 +4166,7 @@ $("#message-list").addEventListener("click", e => {
   if (file) { void downloadMessageFile(file.dataset.downloadFile, file.dataset.fileMessage); return; }
   if (e.target.closest("[data-empty-write]")) { $("#message-input").focus(); return; }
   if (e.target.closest("[data-empty-invite]")) { $("#invite-people-button")?.click(); return; }
+  if (e.target.closest("[data-timeline-earlier] button")) { showEarlierMessages(); return; }
   const chip = e.target.closest("[data-mention-id]");
   if (chip && state) { applyMentionMember(state.members[chip.dataset.mentionId]); return; }
   const button = e.target.closest("[data-message-id]"); if (!button || !state || busy) return;
