@@ -9,7 +9,7 @@
  */
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, existsSync, mkdirSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
@@ -21,7 +21,7 @@ import { redactValue, redactSecretShaped } from '../bridge/lib/redact.mjs';
 import {
   assertSocketMethodAllowed,
   buildSpawnArgv,
-  validateReportBinding,
+  validateReportMetadata,
 } from '../bridge/lib/fence.mjs';
 import { createBridge } from '../bridge/lib/bridge.mjs';
 
@@ -503,36 +503,66 @@ test('circuit breaker opens after 5 consecutive failures and probes back', async
 });
 
 // ---------------------------------------------------------------------------
-// Report: self-report binding (HERDR_PANE_ID == target)
+// Report: occupant-pinned handle, bounded metadata
 // ---------------------------------------------------------------------------
-test('report with mismatched pane binding is rejected', async () => {
-  const { status, json } = await post('/v1/report', {
-    kind: 'state', targetPaneId: 'pane-1', herdrPaneId: 'pane-evil',
-    state: 'done', idempotencyKey: randomUUID(),
-  });
-  assert.equal(status, 409);
-  assert.equal(json.error.code, 'binding_mismatch');
-  assert.equal(fixtureA.callsFor('pane.report_agent').length, 0);
-});
+async function spawnHandle() {
+  const sp = await post('/v1/spawn', { kind: 'claude', idempotencyKey: randomUUID() });
+  return sp.json.handle;
+}
 
-test('report with matching binding reaches the socket', async () => {
-  const callsBefore = fixtureA.callsFor('pane.report_agent').length;
-  const { status } = await post('/v1/report', {
+test('report without a handle (caller-asserted pane ids) is rejected', async () => {
+  const before = fixtureA.callsFor('pane.report_agent').length;
+  const { status, json } = await post('/v1/report', {
     kind: 'state', targetPaneId: 'pane-1', herdrPaneId: 'pane-1',
     state: 'done', idempotencyKey: randomUUID(),
   });
+  assert.equal(status, 404);
+  assert.equal(json.error.code, 'handle_not_found');
+  assert.equal(fixtureA.callsFor('pane.report_agent').length, before);
+});
+
+test('report with an issued handle reaches the socket on the handle pane', async () => {
+  const handle = await spawnHandle();
+  const callsBefore = fixtureA.callsFor('pane.report_agent').length;
+  const { status } = await post('/v1/report', { kind: 'state', handle, state: 'done', idempotencyKey: randomUUID() });
   assert.equal(status, 200);
-  assert.equal(fixtureA.callsFor('pane.report_agent').length, callsBefore + 1);
+  const calls = fixtureA.callsFor('pane.report_agent');
+  assert.equal(calls.length, callsBefore + 1);
+  assert.equal(calls.at(-1).params.paneId, 'pane-1');
 });
 
-test('validateReportBinding unit', () => {
-  assert.throws(() => validateReportBinding({ herdrPaneId: 'a', targetPaneId: 'b' }), (e) => e.code === 'binding_mismatch');
-  validateReportBinding({ herdrPaneId: 'a', targetPaneId: 'a' });
+test('a tenant-b handle cannot be used to report from tenant-a', async () => {
+  const hb = (await post('/v1/snapshot', {}, authed(TENANT_B))).json.panes[0].handle;
+  const { status } = await post('/v1/report', { kind: 'state', handle: hb, state: 'x', idempotencyKey: randomUUID() }, authed(TENANT_A));
+  assert.equal(status, 404);
 });
 
-// ---------------------------------------------------------------------------
-// Audit: every call logged, redacted, denies included
-// ---------------------------------------------------------------------------
+test('report after the occupant changed is refused', async () => {
+  const handle = await spawnHandle();
+  fixtureA.state.occupant = 'occ-2';
+  try {
+    const { status, json } = await post('/v1/report', { kind: 'state', handle, state: 'x', idempotencyKey: randomUUID() });
+    assert.equal(status, 409);
+    assert.equal(json.error.code, 'occupant_changed');
+  } finally { fixtureA.state.occupant = 'occ-1'; }
+});
+
+test('report metadata is bounded: flat scalars only', async () => {
+  const handle = await spawnHandle();
+  const bad = [
+    { nested: { a: 1 } }, ['x'], { k: 'x'.repeat(257) }, { 'bad key!': 1 },
+    Object.fromEntries(Array.from({ length: 17 }, (_, i) => [`k${i}`, i])),
+    Object.fromEntries(Array.from({ length: 16 }, (_, i) => [`k${i}`, 'y'.repeat(200)])),
+  ];
+  for (const metadata of bad) {
+    const r = await post('/v1/report', { kind: 'metadata', handle, metadata, idempotencyKey: randomUUID() });
+    assert.equal(r.status, 422, JSON.stringify(metadata).slice(0, 60));
+  }
+  const ok = await post('/v1/report', { kind: 'metadata', handle, metadata: { label: 'build', n: 3, done: false, none: null }, idempotencyKey: randomUUID() });
+  assert.equal(ok.status, 200);
+  assert.deepEqual(validateReportMetadata({ a: 1 }), { a: 1 });
+});
+
 test('denied calls are audit-logged at the same level as allowed ones', async () => {
   const callsBefore = auditEntries().length;
   await post('/v1/ping', {}, authed(TENANT_A, KEY_ID, 'bad'));
@@ -621,4 +651,154 @@ test('events without auth is 401', async () => {
   const res = await fetch(`${base}/v1/events`);
   assert.equal(res.status, 401);
   assert.ok(existsSync(auditLog));
+});
+
+// ---------------------------------------------------------------------------
+// Review fixes: idempotency
+// ---------------------------------------------------------------------------
+test('concurrent retries with the same idempotencyKey execute the write once', async () => {
+  const sp = await post('/v1/spawn', { kind: 'claude', idempotencyKey: randomUUID() });
+  const before = fixtureA.callsFor('agent.prompt').length;
+  fixtureA.state.delayMs = 60;
+  try {
+    const body = { handle: sp.json.handle, text: 'race', idempotencyKey: randomUUID() };
+    const [r1, r2] = await Promise.all([post('/v1/send', body), post('/v1/send', body)]);
+    assert.equal(r1.status, 200);
+    assert.equal(r2.status, 200);
+    assert.equal(fixtureA.callsFor('agent.prompt').length, before + 1, 'in-flight duplicate must wait, not re-run');
+  } finally { fixtureA.state.delayMs = 0; }
+});
+
+test('idempotency conflict sees nested field differences', async () => {
+  const key = randomUUID();
+  const base = { kind: 'metadata', handle: await spawnHandle(), idempotencyKey: key };
+  const r1 = await post('/v1/report', { ...base, metadata: { a: 1 } });
+  const r2 = await post('/v1/report', { ...base, metadata: { a: 2 } });
+  assert.equal(r1.status, 200);
+  assert.equal(r2.status, 409);
+  assert.equal(r2.json.error.code, 'idempotency_conflict');
+});
+
+test('a failed write releases its idempotency key for a retry', async () => {
+  const key = randomUUID();
+  const r1 = await post('/v1/send', { handle: 'nope', text: 'x', idempotencyKey: key });
+  assert.equal(r1.status, 404);
+  const sp = await post('/v1/spawn', { kind: 'claude', idempotencyKey: randomUUID() });
+  const r2 = await post('/v1/send', { handle: sp.json.handle, text: 'x', idempotencyKey: key });
+  assert.equal(r2.status, 200, 'a failed attempt must not pin the key (no conflict, no cached error)');
+});
+
+// ---------------------------------------------------------------------------
+// Review fixes: SSE teardown and handle lifetime
+// ---------------------------------------------------------------------------
+test('closing an SSE stream releases its slot and stops the subscription', async () => {
+  const open = () => bridge._internals.eventStreams.get(TENANT_A) ?? 0;
+  const start = open();
+  const ctrl = new AbortController();
+  const res = await fetch(`${base}/v1/events`, { headers: authed(), signal: ctrl.signal });
+  assert.equal(res.status, 200);
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(open(), start + 1);
+  ctrl.abort();
+  for (let i = 0; i < 40 && open() !== start; i++) await new Promise((r) => setTimeout(r, 25));
+  assert.equal(open(), start, 'slot released after the client leaves');
+});
+
+test('a tenant cannot open more than maxEventStreams streams (429)', async () => {
+  const capped = createBridge({
+    port: 0, bind: '127.0.0.1', masterSecret: MASTER, keyId: KEY_ID, tenantsFile,
+    auditLog: join(dir, 'audit-cap.jsonl'), sseHeartbeatMs: 50, maxEventStreams: 2,
+  });
+  await capped.start();
+  const cbase = `http://127.0.0.1:${capped.port}`;
+  const ctrls = [];
+  try {
+    for (let i = 0; i < 2; i++) {
+      const c = new AbortController(); ctrls.push(c);
+      const r = await fetch(`${cbase}/v1/events`, { headers: authed(), signal: c.signal });
+      assert.equal(r.status, 200);
+    }
+    const third = await fetch(`${cbase}/v1/events`, { headers: authed() });
+    assert.equal(third.status, 429);
+  } finally {
+    ctrls.forEach((c) => c.abort());
+    await new Promise((r) => setTimeout(r, 50));
+    await capped.stop();
+  }
+});
+
+test('snapshot/list reuse one handle per pane instead of minting new ones', async () => {
+  const s1 = await post('/v1/snapshot', {});
+  const size1 = bridge._internals.handles.size;
+  const s2 = await post('/v1/snapshot', {});
+  const l1 = await post('/v1/list', {});
+  assert.equal(s1.json.panes[0].handle, s2.json.panes[0].handle);
+  assert.equal(l1.json.agents[0].handle, s1.json.panes[0].handle);
+  assert.equal(bridge._internals.handles.size, size1);
+});
+
+test('handles expire after handleTtlMs and are capped per tenant', async () => {
+  const short = createBridge({
+    port: 0, bind: '127.0.0.1', masterSecret: MASTER, keyId: KEY_ID, tenantsFile,
+    auditLog: join(dir, 'audit-ttl.jsonl'), handleTtlMs: 80, maxHandlesPerTenant: 1,
+  });
+  await short.start();
+  const sbase = `http://127.0.0.1:${short.port}`;
+  const call = (path, body) => fetch(`${sbase}${path}`, { method: 'POST', headers: authed(), body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, json: await r.json() }));
+  try {
+    const sp = await call('/v1/spawn', { kind: 'claude', idempotencyKey: randomUUID() });
+    await new Promise((r) => setTimeout(r, 120));
+    const gone = await call('/v1/send', { handle: sp.json.handle, text: 'x', idempotencyKey: randomUUID() });
+    assert.equal(gone.status, 404);
+    assert.equal(gone.json.error.code, 'handle_not_found');
+    assert.ok(short._internals.handles.size <= 1);
+  } finally { await short.stop(); }
+});
+
+// ---------------------------------------------------------------------------
+// Review fixes: audit bodies, redaction, sanitizer, wait clamp, symlink clamp
+// ---------------------------------------------------------------------------
+test('send prompts and report metadata are audited as bytes/hash, never in clear', async () => {
+  const sp = await post('/v1/spawn', { kind: 'claude', idempotencyKey: randomUUID() });
+  const marker = `private-prompt-${randomUUID()}`;
+  await post('/v1/send', { handle: sp.json.handle, text: marker, idempotencyKey: randomUUID() });
+  await post('/v1/report', {
+    kind: 'metadata', handle: sp.json.handle,
+    metadata: { note: marker }, idempotencyKey: randomUUID(),
+  });
+  const raw = readFileSync(auditLog, 'utf8');
+  assert.ok(!raw.includes(marker), 'prompt text must not reach audit.jsonl');
+  const send = auditEntries().filter((e) => e.route === 'send' && e.params?.text?.sha256).pop();
+  assert.equal(send.params.text.bytes, Buffer.byteLength(marker));
+});
+
+test('redaction covers ghs_/ghu_ tokens, ga1. guest links and Bearer text', () => {
+  const ga1 = `ga1.${'A'.repeat(43)}`;
+  const out = redactSecretShaped(`a ghs_abcdefghij1234 b ghu_abcdefghij1234 c ${ga1} d ${'Bear' + 'er'} abcdefghijklmnopqrstuv e`);
+  assert.ok(!/ghs_|ghu_|ga1\.|Bearer abc/.test(out), out);
+});
+
+test('sanitizer strips bidi and zero-width controls but keeps ZWJ emoji', () => {
+  assert.equal(sanitizePaneText('a\u202Eb\u2066c\u200Bd\u2069e\uFEFFf'), 'abcdef');
+  const family = '\u{1F468}\u200D\u{1F469}';
+  assert.equal(sanitizePaneText(family), family);
+});
+
+test('wait clamps a negative timeoutMs to at least 1ms', async () => {
+  const sp = await post('/v1/spawn', { kind: 'claude', idempotencyKey: randomUUID() });
+  await post('/v1/wait', { handle: sp.json.handle, timeoutMs: -5, idempotencyKey: randomUUID() });
+  const last = fixtureA.callsFor('agent.wait').pop();
+  assert.ok(last.params.timeoutMs >= 1, `timeoutMs was ${last.params.timeoutMs}`);
+});
+
+test('workspaceRoot symlink pointing outside the tenant root is refused', () => {
+  const root = join(dir, 'ws-a');
+  const outside = join(dir, 'outside');
+  mkdirSync(outside, { recursive: true });
+  try { symlinkSync(outside, join(root, 'escape')); } catch { /* exists from a prior run */ }
+  assert.throws(() => buildSpawnArgv({
+    kind: 'claude', workspaceRoot: join(root, 'escape'), allowedRoots: [root], tenantId: 't',
+  }), /outside the allowlisted roots/);
+  const ok = buildSpawnArgv({ kind: 'claude', workspaceRoot: root, allowedRoots: [root], tenantId: 't' });
+  assert.ok(ok.cwd);
 });
