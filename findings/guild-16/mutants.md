@@ -1,6 +1,6 @@
 # Mutation results — guild-16 (workflows slice)
 
-Generated 2026-10-09T12:44:07.916Z.
+Generated 2026-10-09T12:55:12.003Z.
 
 | unit | file | killed | survived | skipped |
 |---|---|---|---|---|

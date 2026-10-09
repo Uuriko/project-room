@@ -2,13 +2,13 @@
 
 Scope: `.github/workflows/`, `server/jobs*.mjs`, `server/*schedul*.mjs` (→ `src/growth-scheduler.js`), cloudflare jobs-alarm/scheduled-rpc checks, docs/weekly-learnings-cron.md.
 
-Generated 2026-10-09T12:44:07.971Z.
+Generated 2026-10-09T12:55:12.295Z.
 
 ## Documents
 
 | file | contents |
 |---|---|
-| jobs-registry.md | Every job: schedule, purpose, runtimes, gates, failure modes, retry |
+| [jobs-registry.md](jobs-registry.md) | Every job: schedule, purpose, runtimes, gates, failure modes, retry |
 | [scheduler-mechanics.md](scheduler-mechanics.md) | Worker alarms vs node scheduler, at-most-once, budgets, health endpoint |
 | [growth-scheduler.md](growth-scheduler.md) | Growth watcher wiring, cadence, fault containment |
 | [cloudflare-cron-probes.md](cloudflare-cron-probes.md) | The two workerd proofs: what each proves |
