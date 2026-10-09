@@ -1,6 +1,6 @@
 === R8: origin/wave300/fix12-unprivileged-succession ===
 Preparing worktree (detached HEAD 143543319)
-Updating files:   9% (256/2822)Updating files:  10% (283/2822)Updating files:  11% (311/2822)Updating files:  12% (339/2822)Updating files:  13% (367/2822)Updating files:  14% (396/2822)Updating files:  15% (424/2822)Updating files:  16% (452/2822)Updating files:  17% (480/2822)Updating files:  18% (508/2822)Updating files:  19% (537/2822)Updating files:  19% (549/2822)Updating files:  20% (565/2822)Updating files:  21% (593/2822)Updating files:  22% (621/2822)Updating files:  23% (650/2822)Updating files:  24% (678/2822)Updating files:  25% (706/2822)Updating files:  26% (734/2822)Updating files:  27% (762/2822)Updating files:  28% (791/2822)Updating files:  29% (819/2822)Updating files:  30% (847/2822)Updating files:  30% (871/2822)Updating files:  31% (875/2822)Updating files:  32% (904/2822)Updating files:  33% (932/2822)Updating files:  34% (960/2822)Updating files:  35% (988/2822)Updating files:  36% (1016/2822)Updating files:  37% (1045/2822)Updating files:  37% (1062/2822)Updating files:  38% (1073/2822)Updating files:  39% (1101/2822)Updating files:  40% (1129/2822)Updating files:  41% (1158/2822)Updating files:  42% (1186/2822)Updating files:  43% (1214/2822)Updating files:  44% (1242/2822)Updating files:  45% (1270/2822)Updating files:  46% (1299/2822)Updating files:  47% (1327/2822)Updating files:  48% (1355/2822)Updating files:  48% (1381/2822)Updating files:  49% (1383/2822)Updating files:  50% (1411/2822)Updating files:  51% (1440/2822)Updating files:  52% (1468/2822)Updating files:  53% (1496/2822)Updating files:  54% (1524/2822)Updating files:  55% (1553/2822)Updating files:  56% (1581/2822)Updating files:  57% (1609/2822)Updating files:  57% (1617/2822)Updating files:  58% (1637/2822)Updating files:  59% (1665/2822)Updating files:  60% (1694/2822)Updating files:  61% (1722/2822)Updating files:  62% (1750/2822)Updating files:  63% (1778/2822)Updating files:  64% (1807/2822)Updating files:  65% (1835/2822)Updating files:  66% (1863/2822)Updating files:  67% (1891/2822)Updating files:  67% (1899/2822)Updating files:  68% (1919/2822)Updating files:  69% (1948/2822)Updating files:  70% (1976/2822)Updating files:  71% (2004/2822)Updating files:  72% (2032/2822)Updating files:  73% (2061/2822)Updating files:  74% (2089/2822)Updating files:  74% (2094/2822)Updating files:  75% (2117/2822)Updating files:  76% (2145/2822)Updating files:  77% (2173/2822)Updating files:  78% (2202/2822)Updating files:  79% (2230/2822)Updating files:  80% (2258/2822)Updating files:  81% (2286/2822)Updating files:  82% (2315/2822)Updating files:  83% (2343/2822)Updating files:  84% (2371/2822)Updating files:  84% (2382/2822)Updating files:  85% (2399/2822)Updating files:  86% (2427/2822)Updating files:  87% (2456/2822)Updating files:  88% (2484/2822)Updating files:  89% (2512/2822)Updating files:  90% (2540/2822)Updating files:  91% (2569/2822)Updating files:  92% (2597/2822)Updating files:  93% (2625/2822)Updating files:  94% (2653/2822)Updating files:  95% (2681/2822)Updating files:  95% (2696/2822)Updating files:  96% (2710/2822)Updating files:  97% (2738/2822)Updating files:  98% (2766/2822)Updating files:  99% (2794/2822)Updating files: 100% (2822/2822)Updating files: 100% (2822/2822), done.
+Updating files:  15% (444/2822)Updating files:  16% (452/2822)Updating files:  17% (480/2822)Updating files:  18% (508/2822)Updating files:  19% (537/2822)Updating files:  20% (565/2822)Updating files:  21% (593/2822)Updating files:  22% (621/2822)Updating files:  23% (650/2822)Updating files:  24% (678/2822)Updating files:  25% (706/2822)Updating files:  26% (734/2822)Updating files:  26% (747/2822)Updating files:  27% (762/2822)Updating files:  28% (791/2822)Updating files:  29% (819/2822)Updating files:  30% (847/2822)Updating files:  31% (875/2822)Updating files:  32% (904/2822)Updating files:  33% (932/2822)Updating files:  34% (960/2822)Updating files:  35% (988/2822)Updating files:  36% (1016/2822)Updating files:  37% (1045/2822)Updating files:  38% (1073/2822)Updating files:  39% (1101/2822)Updating files:  40% (1129/2822)Updating files:  41% (1158/2822)Updating files:  42% (1186/2822)Updating files:  43% (1214/2822)Updating files:  44% (1242/2822)Updating files:  45% (1270/2822)Updating files:  46% (1299/2822)Updating files:  46% (1302/2822)Updating files:  47% (1327/2822)Updating files:  48% (1355/2822)Updating files:  49% (1383/2822)Updating files:  50% (1411/2822)Updating files:  51% (1440/2822)Updating files:  52% (1468/2822)Updating files:  53% (1496/2822)Updating files:  54% (1524/2822)Updating files:  55% (1553/2822)Updating files:  56% (1581/2822)Updating files:  57% (1609/2822)Updating files:  58% (1637/2822)Updating files:  59% (1665/2822)Updating files:  60% (1694/2822)Updating files:  60% (1720/2822)Updating files:  61% (1722/2822)Updating files:  62% (1750/2822)Updating files:  63% (1778/2822)Updating files:  64% (1807/2822)Updating files:  65% (1835/2822)Updating files:  66% (1863/2822)Updating files:  67% (1891/2822)Updating files:  68% (1919/2822)Updating files:  69% (1948/2822)Updating files:  70% (1976/2822)Updating files:  71% (2004/2822)Updating files:  72% (2032/2822)Updating files:  73% (2061/2822)Updating files:  74% (2089/2822)Updating files:  75% (2117/2822)Updating files:  76% (2145/2822)Updating files:  77% (2173/2822)Updating files:  77% (2179/2822)Updating files:  78% (2202/2822)Updating files:  79% (2230/2822)Updating files:  80% (2258/2822)Updating files:  81% (2286/2822)Updating files:  82% (2315/2822)Updating files:  83% (2343/2822)Updating files:  84% (2371/2822)Updating files:  85% (2399/2822)Updating files:  86% (2427/2822)Updating files:  87% (2456/2822)Updating files:  88% (2484/2822)Updating files:  88% (2504/2822)Updating files:  89% (2512/2822)Updating files:  90% (2540/2822)Updating files:  91% (2569/2822)Updating files:  92% (2597/2822)Updating files:  93% (2625/2822)Updating files:  94% (2653/2822)Updating files:  95% (2681/2822)Updating files:  96% (2710/2822)Updating files:  97% (2738/2822)Updating files:  98% (2766/2822)Updating files:  99% (2794/2822)Updating files: 100% (2822/2822)Updating files: 100% (2822/2822), done.
 HEAD is now at 143543319 FIX-12: declare x-room-permission on POST .../succeed (route-permission guard)
 Rebasing (1/2)Auto-merging docs/openapi.yaml
 Auto-merging server/http.mjs
@@ -16,91 +16,91 @@ Could not apply 18bbf7222... FIX-12: unprivileged succession fast path (POST ...
 REBASE: conflict
 195 /home/hatch/workspace/pr-wave1000-guild-19/findings/guild-19/reverify-8.diff
 TESTS: tests/work-claim-board.test.js
-{"event":"room.cold_start","durationMs":674,"integrity":"eager","phases":{"schema":{"ms":102,"rowsRead":0},"plugin":{"ms":467,"rowsRead":0},"fence":{"ms":80,"rowsRead":0},"verifies":{"ms":9,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":159,"heapBytes":35057592,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1121,"integrity":"eager","phases":{"schema":{"ms":212,"rowsRead":0},"plugin":{"ms":279,"rowsRead":0},"fence":{"ms":447,"rowsRead":0},"verifies":{"ms":165,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":160,"heapBytes":35003608,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
 ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
-{"event":"room.cold_start","durationMs":1296,"integrity":"eager","phases":{"schema":{"ms":183,"rowsRead":0},"plugin":{"ms":710,"rowsRead":0},"fence":{"ms":354,"rowsRead":0},"verifies":{"ms":40,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":134,"heapBytes":35783728,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
-{"event":"room.cold_start","durationMs":372,"integrity":"eager","phases":{"schema":{"ms":64,"rowsRead":0},"plugin":{"ms":187,"rowsRead":0},"fence":{"ms":110,"rowsRead":0},"verifies":{"ms":11,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":120,"heapBytes":40669968,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
-✔ a contribute-profile agent creates, renews, and releases a claim without write_external (4068.749184ms)
-room diagnostic op_NU5Lrazw 403 work_claims_not_permitted access /api/rooms/:roomId/work-claims/config
-{"event":"room.cold_start","durationMs":2527,"integrity":"eager","phases":{"schema":{"ms":279,"rowsRead":0},"plugin":{"ms":801,"rowsRead":0},"fence":{"ms":895,"rowsRead":0},"verifies":{"ms":531,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":153,"heapBytes":48392272,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
-✔ the room owner sets the per-member claim cap and a second claim is refused (1026.61706ms)
-{"event":"room.cold_start","durationMs":903,"integrity":"eager","phases":{"schema":{"ms":228,"rowsRead":0},"plugin":{"ms":236,"rowsRead":0},"fence":{"ms":436,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":126,"heapBytes":37760160,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
-✔ an ownerless room refuses a non-member and a member without a claim profile (2874.969422ms)
-{"event":"room.cold_start","durationMs":286,"integrity":"eager","phases":{"schema":{"ms":63,"rowsRead":0},"plugin":{"ms":183,"rowsRead":0},"fence":{"ms":36,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":113,"heapBytes":43596216,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
-✔ CI state changes are stored, receipted, and wake the owner on failure (1021.784608ms)
-room diagnostic op_Yaq5vfwA 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/review
-{"event":"room.cold_start","durationMs":372,"integrity":"eager","phases":{"schema":{"ms":87,"rowsRead":0},"plugin":{"ms":199,"rowsRead":0},"fence":{"ms":75,"rowsRead":0},"verifies":{"ms":8,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":122,"heapBytes":49439464,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
-✔ review records refuse the owner and a chat agent, and a changes request wakes the owner (438.702103ms)
-room diagnostic op_tG-UacGx 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
-room diagnostic op_2yp8ILvg 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
-room diagnostic op_p4TTfFvi 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
-room diagnostic op_WPkriR3J 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
-room diagnostic op_9fN78XNg 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
-room diagnostic op_OelxEUUe 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
-{"event":"room.cold_start","durationMs":892,"integrity":"eager","phases":{"schema":{"ms":83,"rowsRead":0},"plugin":{"ms":489,"rowsRead":0},"fence":{"ms":288,"rowsRead":0},"verifies":{"ms":18,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":144,"heapBytes":46800816,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":309,"integrity":"eager","phases":{"schema":{"ms":96,"rowsRead":0},"plugin":{"ms":136,"rowsRead":0},"fence":{"ms":45,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":121,"heapBytes":35818520,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":826,"integrity":"eager","phases":{"schema":{"ms":280,"rowsRead":0},"plugin":{"ms":99,"rowsRead":0},"fence":{"ms":425,"rowsRead":0},"verifies":{"ms":15,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":138,"heapBytes":40737912,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a contribute-profile agent creates, renews, and releases a claim without write_external (4650.92607ms)
+room diagnostic op_0M1GJGWT 403 work_claims_not_permitted access /api/rooms/:roomId/work-claims/config
+{"event":"room.cold_start","durationMs":1422,"integrity":"eager","phases":{"schema":{"ms":539,"rowsRead":0},"plugin":{"ms":763,"rowsRead":0},"fence":{"ms":88,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":147,"heapBytes":48518136,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ the room owner sets the per-member claim cap and a second claim is refused (1169.022047ms)
+{"event":"room.cold_start","durationMs":1436,"integrity":"eager","phases":{"schema":{"ms":345,"rowsRead":0},"plugin":{"ms":718,"rowsRead":0},"fence":{"ms":355,"rowsRead":0},"verifies":{"ms":17,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":135,"heapBytes":37857056,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ an ownerless room refuses a non-member and a member without a claim profile (1712.918406ms)
+{"event":"room.cold_start","durationMs":2093,"integrity":"eager","phases":{"schema":{"ms":342,"rowsRead":0},"plugin":{"ms":1016,"rowsRead":0},"fence":{"ms":712,"rowsRead":0},"verifies":{"ms":22,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":156,"heapBytes":43730560,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ CI state changes are stored, receipted, and wake the owner on failure (1795.468339ms)
+room diagnostic op_2Nc1j68e 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/review
+{"event":"room.cold_start","durationMs":578,"integrity":"eager","phases":{"schema":{"ms":59,"rowsRead":0},"plugin":{"ms":466,"rowsRead":0},"fence":{"ms":41,"rowsRead":0},"verifies":{"ms":8,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":122,"heapBytes":49572520,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ review records refuse the owner and a chat agent, and a changes request wakes the owner (2668.370478ms)
+room diagnostic op_LLo60-4f 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
+room diagnostic op_b3y1QuaL 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
+room diagnostic op_nWbnanzE 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
+room diagnostic op_fBvQsPi8 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
+room diagnostic op_DoFzdtJV 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
+room diagnostic op_iTa-nK8K 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
+{"event":"room.cold_start","durationMs":2474,"integrity":"eager","phases":{"schema":{"ms":735,"rowsRead":0},"plugin":{"ms":1192,"rowsRead":0},"fence":{"ms":411,"rowsRead":0},"verifies":{"ms":132,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":154,"heapBytes":46892352,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
 ▶ reviewed completion requires the named reviewer's latest explicit approval
-  ✔ distinct_member (1778.058472ms)
-room diagnostic op_-qmra2rp 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
-room diagnostic op_uxmTpiRs 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
-room diagnostic op_Y-Q37uGZ 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
-room diagnostic op_ywGvmF9L 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
-room diagnostic op_uWwQ9JPj 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
-room diagnostic op_KMtvGRLf 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
-room diagnostic op_UwdAZ15f 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
-room diagnostic op__Vblr-nv 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
-room diagnostic op_lo5PFl82 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
-{"event":"room.cold_start","durationMs":646,"integrity":"eager","phases":{"schema":{"ms":196,"rowsRead":0},"plugin":{"ms":239,"rowsRead":0},"fence":{"ms":185,"rowsRead":0},"verifies":{"ms":23,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":128,"heapBytes":49433968,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
-  ✔ independent_principal (3018.512338ms)
-✔ reviewed completion requires the named reviewer's latest explicit approval (4812.429469ms)
-room diagnostic op_7K4xAD_j 403 work_review_rejected access /api/rooms/:roomId/work-claims/named-reviewer/update
-{"event":"room.cold_start","durationMs":1604,"integrity":"eager","phases":{"schema":{"ms":522,"rowsRead":0},"plugin":{"ms":843,"rowsRead":0},"fence":{"ms":180,"rowsRead":0},"verifies":{"ms":35,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":153,"heapBytes":43875952,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
-✔ manual completion uses the named reviewer's approval, not another member's verdict (1375.036675ms)
-room diagnostic op_Ukdbq8xy 403 work_review_rejected access /api/rooms/:roomId/work-claims/self-review/update
-{"event":"room.cold_start","durationMs":1076,"integrity":"eager","phases":{"schema":{"ms":387,"rowsRead":0},"plugin":{"ms":471,"rowsRead":0},"fence":{"ms":169,"rowsRead":0},"verifies":{"ms":41,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":139,"heapBytes":51720936,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
-✔ human verify permits review without granting Board writes, and self-attested closure is unchanged (2523.616876ms)
-room diagnostic op_Z_KzwSce 403 work_review_rejected access /api/rooms/:roomId/work-claims/authority/update
-{"event":"room.cold_start","durationMs":1225,"integrity":"eager","phases":{"schema":{"ms":200,"rowsRead":0},"plugin":{"ms":521,"rowsRead":0},"fence":{"ms":459,"rowsRead":0},"verifies":{"ms":38,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":149,"heapBytes":44785760,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+  ✔ distinct_member (3874.751461ms)
+room diagnostic op_iwPJIO91 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
+room diagnostic op_KQmyjM3y 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
+room diagnostic op_qRHWeoIU 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
+room diagnostic op_VscR9pjX 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
+room diagnostic op_b9iCq7Fs 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
+room diagnostic op_eyWwWeQ9 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
+room diagnostic op_eoc9QaZP 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
+room diagnostic op_nW_yFn93 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
+room diagnostic op_hv4Ai-h1 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
+{"event":"room.cold_start","durationMs":1726,"integrity":"eager","phases":{"schema":{"ms":198,"rowsRead":0},"plugin":{"ms":879,"rowsRead":0},"fence":{"ms":506,"rowsRead":0},"verifies":{"ms":138,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":155,"heapBytes":49710656,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+  ✔ independent_principal (5610.429181ms)
+✔ reviewed completion requires the named reviewer's latest explicit approval (9488.780485ms)
+room diagnostic op_YnSNFxyr 403 work_review_rejected access /api/rooms/:roomId/work-claims/named-reviewer/update
+{"event":"room.cold_start","durationMs":841,"integrity":"eager","phases":{"schema":{"ms":313,"rowsRead":0},"plugin":{"ms":474,"rowsRead":0},"fence":{"ms":42,"rowsRead":0},"verifies":{"ms":4,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":133,"heapBytes":44179472,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ manual completion uses the named reviewer's approval, not another member's verdict (2330.096198ms)
+room diagnostic op_uJ5Hb5Pn 403 work_review_rejected access /api/rooms/:roomId/work-claims/self-review/update
+{"event":"room.cold_start","durationMs":403,"integrity":"eager","phases":{"schema":{"ms":212,"rowsRead":0},"plugin":{"ms":144,"rowsRead":0},"fence":{"ms":33,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":115,"heapBytes":51997592,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ human verify permits review without granting Board writes, and self-attested closure is unchanged (1341.624052ms)
+room diagnostic op_VEVx9U3I 403 work_review_rejected access /api/rooms/:roomId/work-claims/authority/update
+{"event":"room.cold_start","durationMs":586,"integrity":"eager","phases":{"schema":{"ms":309,"rowsRead":0},"plugin":{"ms":125,"rowsRead":0},"fence":{"ms":114,"rowsRead":0},"verifies":{"ms":18,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":140,"heapBytes":44810192,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
 ▶ completion rechecks a reviewer's active membership and current review authority
-  ✔ distinct_member: permission revoked (1740.326918ms)
-room diagnostic op_KxH9z24H 403 work_review_rejected access /api/rooms/:roomId/work-claims/authority/update
-{"event":"room.cold_start","durationMs":1692,"integrity":"eager","phases":{"schema":{"ms":224,"rowsRead":0},"plugin":{"ms":880,"rowsRead":0},"fence":{"ms":479,"rowsRead":0},"verifies":{"ms":44,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":160,"heapBytes":50578216,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
-  ✔ distinct_member: inactive (1670.15465ms)
-room diagnostic op_dTbRAOKR 403 work_review_rejected access /api/rooms/:roomId/work-claims/authority/update
-{"event":"room.cold_start","durationMs":143,"integrity":"eager","phases":{"schema":{"ms":22,"rowsRead":0},"plugin":{"ms":84,"rowsRead":0},"fence":{"ms":32,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":104,"heapBytes":56196528,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
-  ✔ independent_principal: permission revoked (2393.802683ms)
-room diagnostic op_dgejw5q5 403 work_review_rejected access /api/rooms/:roomId/work-claims/authority/update
-{"event":"room.cold_start","durationMs":471,"integrity":"eager","phases":{"schema":{"ms":302,"rowsRead":0},"plugin":{"ms":117,"rowsRead":0},"fence":{"ms":38,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":117,"heapBytes":46273880,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
-  ✔ independent_principal: inactive (447.064082ms)
-✔ completion rechecks a reviewer's active membership and current review authority (6320.219408ms)
-{"event":"room.cold_start","durationMs":1872,"integrity":"eager","phases":{"schema":{"ms":511,"rowsRead":0},"plugin":{"ms":684,"rowsRead":0},"fence":{"ms":650,"rowsRead":0},"verifies":{"ms":10,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":144,"heapBytes":52202328,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
-✔ an unchanged latest review retry preserves its timestamp, basis, events, and wakes (1150.923657ms)
-room diagnostic op_hZ7GvVHg 403 work_review_rejected access /api/rooms/:roomId/work-claims/basis-revision/update
-room diagnostic op_EB1t_peg 403 work_review_rejected access /api/rooms/:roomId/work-claims/basis-revision/update
-{"event":"room.cold_start","durationMs":1634,"integrity":"eager","phases":{"schema":{"ms":343,"rowsRead":0},"plugin":{"ms":906,"rowsRead":0},"fence":{"ms":369,"rowsRead":0},"verifies":{"ms":11,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":138,"heapBytes":47021496,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+  ✔ distinct_member: permission revoked (918.449021ms)
+room diagnostic op_6xc_M0bJ 403 work_review_rejected access /api/rooms/:roomId/work-claims/authority/update
+{"event":"room.cold_start","durationMs":427,"integrity":"eager","phases":{"schema":{"ms":21,"rowsRead":0},"plugin":{"ms":186,"rowsRead":0},"fence":{"ms":165,"rowsRead":0},"verifies":{"ms":54,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":124,"heapBytes":50639600,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+  ✔ distinct_member: inactive (761.847539ms)
+room diagnostic op_koXy-k9o 403 work_review_rejected access /api/rooms/:roomId/work-claims/authority/update
+{"event":"room.cold_start","durationMs":743,"integrity":"eager","phases":{"schema":{"ms":75,"rowsRead":0},"plugin":{"ms":302,"rowsRead":0},"fence":{"ms":308,"rowsRead":0},"verifies":{"ms":54,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":132,"heapBytes":56264784,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+  ✔ independent_principal: permission revoked (734.752868ms)
+room diagnostic op_DFZMAe1o 403 work_review_rejected access /api/rooms/:roomId/work-claims/authority/update
+{"event":"room.cold_start","durationMs":134,"integrity":"eager","phases":{"schema":{"ms":21,"rowsRead":0},"plugin":{"ms":61,"rowsRead":0},"fence":{"ms":47,"rowsRead":0},"verifies":{"ms":5,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":108,"heapBytes":46356600,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+  ✔ independent_principal: inactive (1048.717847ms)
+✔ completion rechecks a reviewer's active membership and current review authority (3524.913637ms)
+{"event":"room.cold_start","durationMs":304,"integrity":"eager","phases":{"schema":{"ms":106,"rowsRead":0},"plugin":{"ms":88,"rowsRead":0},"fence":{"ms":99,"rowsRead":0},"verifies":{"ms":9,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":121,"heapBytes":52285368,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ an unchanged latest review retry preserves its timestamp, basis, events, and wakes (270.47989ms)
+room diagnostic op_72QCTweQ 403 work_review_rejected access /api/rooms/:roomId/work-claims/basis-revision/update
+room diagnostic op_RKdBTXN1 403 work_review_rejected access /api/rooms/:roomId/work-claims/basis-revision/update
+{"event":"room.cold_start","durationMs":583,"integrity":"eager","phases":{"schema":{"ms":210,"rowsRead":0},"plugin":{"ms":116,"rowsRead":0},"fence":{"ms":191,"rowsRead":0},"verifies":{"ms":28,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":156,"heapBytes":47046504,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
 ▶ approval remains bound to the reviewed revision and observed pull-request head
-  ✔ revision (2456.673313ms)
-room diagnostic op_8XHVwcUC 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
-room diagnostic op_9OvgUrky 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
-  ✔ headSha (2953.104941ms)
-✔ approval remains bound to the reviewed revision and observed pull-request head (5500.01365ms)
-{"event":"room.cold_start","durationMs":986,"integrity":"eager","phases":{"schema":{"ms":68,"rowsRead":0},"plugin":{"ms":563,"rowsRead":0},"fence":{"ms":114,"rowsRead":0},"verifies":{"ms":12,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":149,"heapBytes":54605288,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
-{"event":"room.cold_start","durationMs":459,"integrity":"eager","phases":{"schema":{"ms":166,"rowsRead":0},"plugin":{"ms":75,"rowsRead":0},"fence":{"ms":130,"rowsRead":0},"verifies":{"ms":6,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":45,"heapBytes":50261176,"rooms":1,"sequences":9,"projectionBytes":1239,"events":9}
-room diagnostic op_zC9HFIUM 403 work_review_rejected access /api/rooms/:roomId/work-claims/persisted-review/update
-{"event":"room.cold_start","durationMs":470,"integrity":"eager","phases":{"schema":{"ms":210,"rowsRead":0},"plugin":{"ms":72,"rowsRead":0},"fence":{"ms":143,"rowsRead":0},"verifies":{"ms":41,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":110,"heapBytes":55240264,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
-✔ persisted approvals retain their basis while older unbound records need a fresh review (3671.031087ms)
-room diagnostic op_4YRTx51o 403 work_review_rejected access /api/rooms/:roomId/work-claims/superseded-review/update
-{"event":"room.cold_start","durationMs":489,"integrity":"eager","phases":{"schema":{"ms":152,"rowsRead":0},"plugin":{"ms":294,"rowsRead":0},"fence":{"ms":40,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":125,"heapBytes":48477424,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
-✔ a superseded claim cannot be manually completed with an otherwise valid approval (1121.835344ms)
-{"event":"room.cold_start","durationMs":1192,"integrity":"eager","phases":{"schema":{"ms":287,"rowsRead":0},"plugin":{"ms":582,"rowsRead":0},"fence":{"ms":277,"rowsRead":0},"verifies":{"ms":39,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":141,"heapBytes":54010544,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
-✔ a deploy claim closes when the live revision matches, and status reports main (807.113299ms)
-{"event":"room.cold_start","durationMs":681,"integrity":"eager","phases":{"schema":{"ms":36,"rowsRead":0},"plugin":{"ms":439,"rowsRead":0},"fence":{"ms":184,"rowsRead":0},"verifies":{"ms":21,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":127,"heapBytes":58415200,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
-✔ land queue rows copy into land claims once and the list stays the same shape (1335.429596ms)
-{"event":"room.cold_start","durationMs":592,"integrity":"eager","phases":{"schema":{"ms":75,"rowsRead":0},"plugin":{"ms":124,"rowsRead":0},"fence":{"ms":349,"rowsRead":0},"verifies":{"ms":43,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":129,"heapBytes":48511912,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
-{"event":"room.cold_start","durationMs":492,"integrity":"eager","phases":{"schema":{"ms":122,"rowsRead":0},"plugin":{"ms":322,"rowsRead":0},"fence":{"ms":44,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":139,"heapBytes":52642456,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
-✔ board v2 routes answer 410 and point at work claims (1606.048225ms)
-{"event":"room.cold_start","durationMs":657,"integrity":"eager","phases":{"schema":{"ms":271,"rowsRead":0},"plugin":{"ms":350,"rowsRead":0},"fence":{"ms":33,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":127,"heapBytes":57897936,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
-✔ hard work defaults to a distinct reviewer at create; an explicit policy still wins (630.666795ms)
-✔ reassign honors the room's per-member open-claim cap (821.423505ms)
+  ✔ revision (979.258258ms)
+room diagnostic op_7I3L6_D8 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
+room diagnostic op_k1ZNOUc8 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
+  ✔ headSha (2028.33988ms)
+✔ approval remains bound to the reviewed revision and observed pull-request head (3033.481272ms)
+{"event":"room.cold_start","durationMs":828,"integrity":"eager","phases":{"schema":{"ms":63,"rowsRead":0},"plugin":{"ms":552,"rowsRead":0},"fence":{"ms":46,"rowsRead":0},"verifies":{"ms":7,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":158,"heapBytes":54687376,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":385,"integrity":"eager","phases":{"schema":{"ms":220,"rowsRead":0},"plugin":{"ms":13,"rowsRead":0},"fence":{"ms":45,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":46,"heapBytes":50342176,"rooms":1,"sequences":9,"projectionBytes":1239,"events":9}
+room diagnostic op_PkC8HaXG 403 work_review_rejected access /api/rooms/:roomId/work-claims/persisted-review/update
+{"event":"room.cold_start","durationMs":977,"integrity":"eager","phases":{"schema":{"ms":214,"rowsRead":0},"plugin":{"ms":647,"rowsRead":0},"fence":{"ms":96,"rowsRead":0},"verifies":{"ms":10,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":143,"heapBytes":55321392,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ persisted approvals retain their basis while older unbound records need a fresh review (3198.298684ms)
+room diagnostic op_WyY6_9hO 403 work_review_rejected access /api/rooms/:roomId/work-claims/superseded-review/update
+{"event":"room.cold_start","durationMs":1797,"integrity":"eager","phases":{"schema":{"ms":612,"rowsRead":0},"plugin":{"ms":854,"rowsRead":0},"fence":{"ms":248,"rowsRead":0},"verifies":{"ms":81,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":143,"heapBytes":48570576,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a superseded claim cannot be manually completed with an otherwise valid approval (2292.19488ms)
+{"event":"room.cold_start","durationMs":410,"integrity":"eager","phases":{"schema":{"ms":56,"rowsRead":0},"plugin":{"ms":99,"rowsRead":0},"fence":{"ms":242,"rowsRead":0},"verifies":{"ms":11,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":144,"heapBytes":54093320,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a deploy claim closes when the live revision matches, and status reports main (2679.868123ms)
+{"event":"room.cold_start","durationMs":688,"integrity":"eager","phases":{"schema":{"ms":25,"rowsRead":0},"plugin":{"ms":307,"rowsRead":0},"fence":{"ms":337,"rowsRead":0},"verifies":{"ms":19,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":129,"heapBytes":58498336,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ land queue rows copy into land claims once and the list stays the same shape (466.523604ms)
+{"event":"room.cold_start","durationMs":1457,"integrity":"eager","phases":{"schema":{"ms":131,"rowsRead":0},"plugin":{"ms":773,"rowsRead":0},"fence":{"ms":496,"rowsRead":0},"verifies":{"ms":55,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":146,"heapBytes":48592216,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":745,"integrity":"eager","phases":{"schema":{"ms":355,"rowsRead":0},"plugin":{"ms":179,"rowsRead":0},"fence":{"ms":176,"rowsRead":0},"verifies":{"ms":21,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":129,"heapBytes":52723128,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ board v2 routes answer 410 and point at work claims (2401.786634ms)
+{"event":"room.cold_start","durationMs":1210,"integrity":"eager","phases":{"schema":{"ms":555,"rowsRead":0},"plugin":{"ms":600,"rowsRead":0},"fence":{"ms":44,"rowsRead":0},"verifies":{"ms":4,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":159,"heapBytes":57978704,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ hard work defaults to a distinct reviewer at create; an explicit policy still wins (969.012983ms)
+✔ reassign honors the room's per-member open-claim cap (1355.986576ms)
 ℹ tests 26
 ℹ suites 0
 ℹ pass 26
@@ -108,7 +108,7 @@ room diagnostic op_4YRTx51o 403 work_review_rejected access /api/rooms/:roomId/w
 ℹ cancelled 0
 ℹ skipped 0
 ℹ todo 0
-ℹ duration_ms 49115.209171
+ℹ duration_ms 51510.36853
 TEST_EXIT: 0
 HEAD: 143543319
 DONE R8 rebase=conflict
