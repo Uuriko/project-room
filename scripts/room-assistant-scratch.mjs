@@ -43,6 +43,7 @@ export function createRoomClient({ origin, roomId, token, fetchImpl = fetch }) {
     assistant: () => call("GET", "/assistant"),
     act: input => call("POST", "/assistant", input),
     message: async id => (await call("GET", `/conversation?messageId=${encodeURIComponent(id)}`)).messages?.find(m => m.id === id) ?? null,
+    recent: async (limit = 100) => (await call("GET", `/conversation?limit=${limit}`)).messages ?? [],
     post: (messageId, body, extra = {}) => call("POST", "/commands", { id: stable("cmd", messageId), type: "message.posted", data: { messageId, body, ...extra } })
   };
 }
@@ -97,31 +98,50 @@ export async function runHostOnce(client, { memberId, hostId = memberId, execute
       run = (await client.act({ action: "claim", requestId: stable("claim", run.id, attemptId), runId: run.id, attemptId, expectedRevision: run.revision })).result;
       log(`claimed ${run.id}`);
     }
-    if (run.status === "pause_requested") { outcomes.push({ runId: run.id, state: (await report("paused", "Paused at the requester's ask.")).result.status }); continue; }
-    if (run.status === "cancel_requested") { outcomes.push({ runId: run.id, state: (await report("cancelled", "Stopped at the requester's ask.")).result.status }); continue; }
+    const acknowledge = async current => {
+      run = current;
+      if (run.status === "pause_requested") return (await report("paused", "Paused at the requester's ask.")).result.status;
+      if (run.status === "cancel_requested") return (await report("cancelled", "Stopped at the requester's ask.")).result.status;
+      return null;
+    };
+    const stopped = await acknowledge(run);
+    if (stopped) { outcomes.push({ runId: run.id, state: stopped }); continue; }
     if (run.status === "resume_requested") run = (await report("working", "Resumed.")).result;
     if (run.status !== "working") { outcomes.push({ runId: run.id, waiting: run.status }); continue; }
-    // A contribution can land between publishing and reporting done. The
-    // server refuses done with assistant_inputs_pending; re-read and answer
-    // again with the late input, never dropping it. Bounded retries.
-    for (let attempt = 0; attempt < 3; attempt++) {
+    const reread = async () => (await client.assistant()).runs.find(r => r.id === run.id);
+    // Each attempt: brief, execute, re-read, then publish only if the run is
+    // still working at the same revision. A Stop or Pause during execution
+    // publishes nothing; a late addition re-briefs before anything is posted.
+    // The server has no run-bound publication yet, so a Stop that lands in
+    // the instant between the final read and the post can still leave one
+    // answer in chat; the host then acknowledges the stop and says so.
+    let outcome = null;
+    for (let attempt = 0; attempt < 4 && !outcome; attempt++) {
       const input = await brief(client, run, names);
       let answer;
       try { answer = await execute(input); }
-      catch (failure) { outcomes.push({ runId: run.id, state: (await report("failed", `Couldn't finish: ${failure.message}`.slice(0, 2000))).result.status }); break; }
+      catch (failure) {
+        const current = await reread();
+        const state = current?.status === "working" ? (run = current, (await report("failed", `Couldn't finish: ${failure.message}`.slice(0, 2000))).result.status) : await acknowledge(current);
+        outcome = { runId: run.id, state: state ?? current?.status }; break;
+      }
+      const current = await reread();
+      if (!current || current.status !== "working") { outcome = { runId: run.id, state: (current && await acknowledge(current)) ?? current?.status ?? "missing", published: false }; break; }
+      if (current.revision !== run.revision) { run = current; log(`run ${run.id} changed while composing; answering again`); continue; }
       const applied = run.inputs.map(i => i.sourceMessageId);
       const resultMessageId = `result-${stable(run.id, ...applied)}`;
       await client.post(resultMessageId, answer, { replyToId: run.sourceMessageId, ...(input.opening?.channelId ? { channelId: input.opening.channelId } : {}) });
       try {
         const done = await report("done", `Answered with ${applied.length} input${applied.length === 1 ? "" : "s"}.`, { resultMessageId, appliedInputMessageIds: applied });
-        outcomes.push({ runId: run.id, state: done.result.status, resultMessageId, applied }); log(`done ${run.id}`); break;
+        outcome = { runId: run.id, state: done.result.status, resultMessageId, applied }; log(`done ${run.id}`);
       } catch (failure) {
         if (!["assistant_inputs_pending", "assistant_revision_conflict"].includes(failure.code)) throw failure;
-        run = (await client.assistant()).runs.find(r => r.id === run.id);
-        if (!run || run.status !== "working") { outcomes.push({ runId: run?.id, waiting: run?.status ?? "missing" }); break; }
-        log(`late input on ${run.id}; answering again`);
+        const latest = await reread();
+        if (!latest || latest.status !== "working") { outcome = { runId: run.id, state: (latest && await acknowledge(latest)) ?? latest?.status ?? "missing", postedBeforeStop: resultMessageId }; break; }
+        run = latest; log(`late input on ${run.id}; answering again`);
       }
     }
+    outcomes.push(outcome ?? { runId: run.id, waiting: "retry_limit" });
   }
   return { outcomes };
 }

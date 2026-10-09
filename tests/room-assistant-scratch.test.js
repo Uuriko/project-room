@@ -75,6 +75,69 @@ test("an addition that lands after the answer is drafted is answered, never drop
   const final = await runOf(owner);
   assert.deepEqual(final.inputs.map(i => i.status), ["applied", "applied", "applied"]);
   assert.match((await owner.message(final.resultMessageId)).body, /Vegetarian options too/);
+  assert.equal((await owner.recent()).filter(m => m.authorId === "producer").length, 1, "the late addition is folded in before anything is posted");
+});
+
+// Wrap a client so a step runs just before the host's public post: the
+// narrowest boundary a client can reach without a server publication fence.
+const beforePost = (client, step) => ({ ...client, post: async (...args) => { await step(); return client.post(...args); } });
+
+test("an addition at the publication boundary is refused for done and answered again", async t => {
+  const { owner, friend, producer } = await setup(t);
+  await ask(owner, friend);
+  let once = false;
+  const host = beforePost(producer, async () => {
+    if (once) return; once = true;
+    const current = await runOf(friend);
+    await friend.post("edge", "Somewhere quiet", { replyToId: "ask" });
+    await friend.act({ action: "contribute", requestId: "edge-contribute", runId: "run", sourceMessageId: "edge", expectedRevision: current.revision });
+  });
+  const { outcomes } = await runHostOnce(host, { memberId: "producer" });
+  assert.equal(outcomes[0].state, "done");
+  assert.deepEqual(outcomes[0].applied, ["ask", "add", "edge"]);
+  assert.deepEqual((await runOf(owner)).inputs.map(i => i.status), ["applied", "applied", "applied"]);
+});
+
+test("Stop or Pause while the executor is still running publishes nothing", async t => {
+  for (const stop of ["cancel", "pause"]) await t.test(stop, async t => {
+    const { owner, friend, producer } = await setup(t);
+    await ask(owner, friend);
+    let release, started;
+    const running = new Promise(r => { started = r; });
+    let calls = 0;
+    // First call waits for the Stop; any later call answers at once, so a
+    // host that ignored the Stop would publish rather than hang.
+    const execute = brief => ++calls > 1 ? scriptedExecute(brief) : new Promise(resolve => { release = () => resolve(scriptedExecute(brief)); started(); });
+    const pass = runHostOnce(producer, { memberId: "producer", execute });
+    await running;
+    const current = await runOf(owner);
+    assert.equal(current.status, "working");
+    await owner.act({ action: stop, requestId: `${stop}-during`, runId: "run", expectedRevision: current.revision });
+    release();
+    const { outcomes } = await pass;
+    const expected = stop === "cancel" ? "cancelled" : "paused";
+    assert.deepEqual(outcomes, [{ runId: "run", state: expected, published: false }]);
+    const final = await runOf(friend);
+    assert.equal(final.status, expected);
+    assert.equal(final.resultMessageId, undefined);
+    const page = await friend.recent();
+    assert.equal(page.filter(m => m.authorId === "producer").length, 0, "no answer reached the chat");
+  });
+});
+
+test("a Stop at the publication boundary is acknowledged and the posted answer is reported", async t => {
+  const { owner, friend, producer } = await setup(t);
+  await ask(owner, friend);
+  const host = beforePost(producer, async () => {
+    const current = await runOf(owner);
+    await owner.act({ action: "cancel", requestId: "edge-cancel", runId: "run", expectedRevision: current.revision });
+  });
+  const { outcomes } = await runHostOnce(host, { memberId: "producer" });
+  assert.equal(outcomes[0].state, "cancelled");
+  assert.match(outcomes[0].postedBeforeStop, /^result-/, "the residual race is surfaced, not hidden");
+  const final = await runOf(friend);
+  assert.equal(final.status, "cancelled");
+  assert.equal(final.resultMessageId, undefined, "a stopped run never claims a result");
 });
 
 test("the host reports executor failure and acknowledges pause, resume and cancel", async t => {
