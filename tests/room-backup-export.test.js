@@ -1,4 +1,5 @@
 import test from "node:test";
+import { DatabaseSync as TrailerDb } from "node:sqlite";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -8,7 +9,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { exportNdjsonLines, exportNdjsonStream, exportNdjsonText, operatorExportResponse, replayNdjson, sanitizeCell, REPLAY_SKIPPED_TABLES } from "../server/room-export.mjs";
+import { exportNdjsonLines, exportTrailer, exportNdjsonStream, exportNdjsonText, operatorExportResponse, replayNdjson, sanitizeCell, REPLAY_SKIPPED_TABLES } from "../server/room-export.mjs";
 import { backupTarget, writeDailyBackup, writeKvBackup } from "../cloudflare/room-backup.mjs";
 import { assembleKvBackup, summarizeRoom } from "../scripts/restore-room-backup.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
@@ -370,4 +371,28 @@ test("Durable Object BLOB cells (bare SharedArrayBuffer) export as base64, not {
   const expected = { $base64: Buffer.from(bytes).toString("base64") };
   assert.deepEqual(sanitizeCell("bytes", sab), expected);
   assert.notEqual(JSON.stringify(sanitizeCell("bytes", sab)), "{}");
+});
+
+test("exportTrailer pages the event log and hashes exactly what one full read would", () => {
+  const db = new TrailerDb(":memory:");
+  db.exec("CREATE TABLE events (room_id TEXT NOT NULL, sequence INTEGER NOT NULL, id TEXT NOT NULL, PRIMARY KEY (room_id, sequence))");
+  const insert = db.prepare("INSERT INTO events (room_id, sequence, id) VALUES (?,?,?)");
+  db.exec("BEGIN");
+  for (const room of ["room-a", "room-b", "room-c"]) for (let n = 1; n <= 1700; n += 1) insert.run(room, n, `${room}-evt-${n}`);
+  db.exec("COMMIT");
+  const reference = createHash("sha256");
+  for (const row of db.prepare("SELECT room_id, sequence, id FROM events ORDER BY room_id, sequence").all()) reference.update(`${row.room_id}\t${row.sequence}\t${row.id}\n`);
+  // Count the rows each query hands back: no single read may return the whole log.
+  let biggest = 0;
+  const spy = { prepare: sql => { const st = db.prepare(sql); return { all: (...a) => { const rows = st.all(...a); biggest = Math.max(biggest, rows.length); return rows; } }; } };
+  const trailer = exportTrailer(spy);
+  assert.equal(trailer.events, 5100);
+  assert.equal(trailer.eventsHash, reference.digest("hex"));
+  assert.ok(biggest < 5100, `trailer read ${biggest} rows at once`);
+  db.close();
+  // An empty log still yields a valid trailer.
+  const empty = new TrailerDb(":memory:");
+  empty.exec("CREATE TABLE events (room_id TEXT NOT NULL, sequence INTEGER NOT NULL, id TEXT NOT NULL)");
+  assert.equal(exportTrailer(empty).events, 0);
+  empty.close();
 });
