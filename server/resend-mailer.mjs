@@ -72,23 +72,24 @@ export function resendMagicLinkSend({ apiKey, from, fetchFn = fetch } = {}) {
     // don't render links.
     const link = notice ? null : buildMagicLinkUrl({ baseUrl, to, code, returnTo, purpose });
     const resetting = purpose === "password-reset";
+    const verifying = purpose === "email-verify";
     if (resetting && !link) throw new Error("Password reset email requires a configured app URL");
-    const action = resetting ? "Reset your Project Room password" : "Sign in to Project Room";
-    const subject = notice ? "Your Project Room password was reset" : resetting ? "Reset your Project Room password" : "Your Project Room sign-in link";
+    const action = resetting ? "Reset your Project Room password" : verifying ? "Verify your Project Room email" : "Sign in to Project Room";
+    const subject = notice ? "Your Project Room password was reset" : resetting ? "Reset your Project Room password" : verifying ? "Verify your Project Room email" : "Your Project Room sign-in link";
     const notification = "Your Project Room password was reset. Your existing human sign-in sessions were signed out. If you did not make this change, contact your room administrator.";
     const text = notice ? notification : link
       ? `${action}:\n\n${link}\n\n` +
         `This link expires in ${minutes} minutes and works once. ` +
         (resetting ? "Choose a new password after opening the link.\n\n" : `If the button doesn't work, enter this code instead: ${code}\n\n`) +
         `If you didn't request this, you can ignore this email.`
-      : `Your Project Room sign-in code is: ${code}\n\n` +
+      : `Your Project Room ${verifying ? "verification" : "sign-in"} code is: ${code}\n\n` +
         `It expires in ${minutes} minutes. If you didn't request this, you can ignore this email.`;
     const html = notice ? `<p>${notification}</p>` : link
       ? `<p><a href="${escapeHtml(link)}" style="display:inline-block;padding:12px 24px;background:#4f46e5;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:bold;">${action}</a></p>` +
         `<p>This link expires in ${minutes} minutes and works once.</p>` +
         (resetting ? `<p>Choose a new password after opening the link.</p>` : `<p>If the button doesn't work, enter this code instead:</p><p style="font-size: 24px; font-weight: bold; letter-spacing: 4px;">${escapeHtml(code)}</p>`) +
         `<p>If you didn't request this, you can ignore this email.</p>`
-      : `<p>Your Project Room sign-in code is:</p>` +
+      : `<p>Your Project Room ${verifying ? "verification" : "sign-in"} code is:</p>` +
         `<p style="font-size: 24px; font-weight: bold; letter-spacing: 4px;">${escapeHtml(code)}</p>` +
         `<p>It expires in ${minutes} minutes. If you didn't request this, you can ignore this email.</p>`;
     await postResendEmail({ apiKey, from, fetchFn, to, subject, text, html, label: "magic link email" });
