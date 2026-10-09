@@ -16,3 +16,15 @@ rebase attempt 3 failed:
 CONFLICT (content): Merge conflict in server/claim-pr-sync.mjs
 CONFLICT (content): Merge conflict in server/work-claim-routes.mjs
 CONFLICT (content): Merge conflict in tests/work-claim-events.test.js
+QUIESCE_TIMEOUT
+rebase attempt 4 failed:
+CONFLICT (content): Merge conflict in server/claim-pr-sync.mjs
+CONFLICT (content): Merge conflict in server/work-claim-routes.mjs
+CONFLICT (content): Merge conflict in tests/work-claim-events.test.js
+QUIESCE_TIMEOUT
+rebase attempt 5 failed:
+CONFLICT (content): Merge conflict in server/claim-pr-sync.mjs
+CONFLICT (content): Merge conflict in server/work-claim-routes.mjs
+CONFLICT (content): Merge conflict in tests/work-claim-events.test.js
+--- NOT rebased; RESULT: REBASE_FAILED — no tests run
+DONE_RV_2
