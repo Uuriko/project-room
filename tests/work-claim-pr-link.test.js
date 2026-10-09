@@ -166,7 +166,9 @@ test("an explicit release settles a batch while a linked pull is still open", as
   const { store, call } = await room(t);
   await call("create", null, { id: "open-batch", pullRequests: [URL_A, "https://github.com/Uuriko/project-room/pull/11"] });
   await call("claim", "open-batch", {});
-  const released = await call("release", "open-batch", { reason: "handed off" });
+  const held = store.workClaims.get("commons", "open-batch");
+  const released = await call("release", "open-batch", { reason: "handed off",
+    expectedClaimedAt: held.claimedAt, expectedHistoryLength: held.history.length });
   assert.equal(released.value.state, "unclaimed");
   assert.equal(store.workClaims.get("commons", "open-batch").owner, null);
 });

@@ -295,7 +295,9 @@ test("with under 10% of the event budget left only the owner and claim managers 
   const note = await f.call("contrib", "update", { id: "budget", body: { note: "still here" } });
   assert.equal(note.status, 409);
   assert.equal((await f.call("owner", "create", { body: { id: "owner-late" } })).status, 201);
-  assert.equal((await f.call("manager", "release", { id: "budget", body: { reason: "winding down" } })).status, 200);
+  const read = await f.call("manager", "read", { id: "budget" });
+  assert.equal((await f.call("manager", "release", { id: "budget", body: { reason: "winding down",
+    expectedClaimedAt: read.value.claimedAt, expectedHistoryLength: read.value.history.length } })).status, 200);
   const status = await f.call("chatter", "status");
   assert.equal(status.value.eventsRemaining, PILOT_LIMITS.eventsPerRoom - f.store.room("commons").sequence);
 });

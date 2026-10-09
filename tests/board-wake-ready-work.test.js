@@ -72,6 +72,7 @@ async function fixture(t) {
   return { store, ownerKey, owner, call, enroll, wants, readWants, readyWakes, advance: ms => { at += ms; } };
 }
 
+const roundOf = c => ({ expectedClaimedAt: (c.claim ?? c).claimedAt, expectedHistoryLength: ((c.claim ?? c).history?.length ?? 0) + ((c.claim ?? c).historyOmitted ?? 0) });
 test("five matching creates inside ten minutes are one ready_work wake; the next window wakes again", async t => {
   const { owner, enroll, wants, readWants, readyWakes, advance } = await fixture(t);
   const agent = await enroll("Docs Agent");
@@ -119,7 +120,7 @@ test("a release wakes other opted-in agents, not the agent that released it", as
   assert.equal((await wants(holder, {})).status, 200);
   await owner.workClaimCreate({ id: "lane-r", title: "Lane R", assignee: holder.memberId });
   assert.equal((await wants(watcher, {})).status, 200);
-  await holder.client.releaseWorkItem("lane-r", { reason: "handing back" });
+  await holder.client.releaseWorkItem("lane-r", { reason: "handing back", ...roundOf(await holder.client.workClaimGet("lane-r")) });
   assert.deepEqual((await readyWakes(watcher)).map(wake => wake.workClaim), ["lane-r"]);
   assert.equal((await readyWakes(holder)).length, 0);
 });

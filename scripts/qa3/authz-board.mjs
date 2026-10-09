@@ -209,10 +209,19 @@ try {
         body: { progressMessageId },
       });
     },
-    "release claim": role => client.request("POST", `${roomPath}/work-claims/${held[`release:${role}`] ?? "rel-deny"}/release`, {
-      token: tokens[role],
-      body: { note: "release" },
-    }),
+    "release claim": async role => {
+      // E5/D4 (QA-200 2026-10-08): /release binds the claim round the client read.
+      const id = held[`release:${role}`] ?? "rel-deny";
+      const read = await client.request("GET", `${roomPath}/work-claims/${id}`, {
+        token: tokens[role],
+      });
+      const item = read.json?.claim ?? read.json;
+      return client.request("POST", `${roomPath}/work-claims/${id}/release`, {
+        token: tokens[role],
+        body: { note: "release", expectedClaimedAt: item?.claimedAt,
+          expectedHistoryLength: (item?.history?.length ?? 0) + (item?.historyOmitted ?? 0) },
+      });
+    },
     "reassign claim": role => client.request("POST", `${roomPath}/work-claims/${held[`reassign:${role}`] ?? "reas-deny"}/reassign`, {
       token: tokens[role],
       body: { newOwner: role === "contribute" ? memberIds.owner : memberIds.contribute, note: "reassign" },
