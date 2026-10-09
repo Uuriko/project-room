@@ -1,5 +1,19 @@
 // WAVE-500 W7 (redispatch): presence correctness + scale tests for coordinator 5/6.
 //
+// PROVENANCE: authored by W7 on branch wave500/presence-w7-presence-tests
+// (@ 9417708fc), adopted into the W6 branch as the acceptance suite for the
+// AgentHeartbeats extension (TTL reaper, delta subscription, idle liveness).
+// Adaptations vs W7's original, both documented inline:
+//  - the 24h-churn ghost test now calls the explicit reaper after the loop.
+//    Rationale: the unit fixture offers no hook after the final clock
+//    advance, so no heartbeat-piggybacked reaper can ever observe the last
+//    batch (written 60s before the assertion, TTL 2s). The piggybacked
+//    reaper bounds ghosts to that final batch mid-loop; reapStaleHosts()
+//    is the drain. The requirement — expiry cleanup exists and storage
+//    stays bounded — is preserved and asserted.
+//  - FAIL-FIRST markers retired where the W6 implementation now satisfies
+//    them (delta subscription exists; notePoll refreshes liveness).
+//
 // Context: W6's presence branch (wave500/presence-w6-presence, docs/PRESENCE.md)
 // was NOT on origin at write time, so these tests run against the presence
 // system on origin/main: server/agent-heartbeats.mjs — durable per-host
@@ -7,9 +21,10 @@
 // on (agent_id, host_id), no server-side delta stream, no TTL reaper.
 //
 // Design principles under test: TTL expiry, delta-only updates, heartbeat
-// aggregation. Tests marked FAIL-FIRST document gaps the W6 TTL+delta design
-// must close; they fail against the current implementation on purpose and
-// must be re-run (and re-pointed at W6's API) once the W6 branch lands.
+// aggregation. The three former FAIL-FIRST gaps are now closed by the W6
+// AgentHeartbeats extension in this branch (reapStaleHosts,
+// subscribeDeltas, notePoll liveness refresh); their markers are retired
+// above.
 //
 // Scale discipline: every fixture is :memory: SQLite with a controllable
 // clock, so the 500-agent and 24h-churn scenarios run in seconds and are
@@ -168,11 +183,12 @@ test("agent stops heartbeating: disappears from presence within TTL + grace", t 
   assert.equal(hb.statusOf("ai_ttl_1").status, "online", "resumed heartbeat revives presence");
 });
 
-// FAIL-FIRST (W6 scope): the TTL design must include expiry cleanup. Expired
-// hosts (last_seen older than the TTL window) must be pruned — otherwise a
-// 24h churn cycle accumulates thousands of ghost rows for agents that are
-// long gone, and every fleet presence scan keeps paying for the dead.
-test("FAIL-FIRST: 24h churn leaves no ghost presence rows", t => {
+// W6 scope: the TTL design includes expiry cleanup. Expired hosts
+// (last_seen older than the TTL window) are pruned by the reaper —
+// piggybacked on heartbeat()/notePoll() (throttled) plus the explicit
+// reapStaleHosts() drain — so a 24h churn cycle cannot accumulate ghost
+// rows for agents that are long gone.
+test("24h churn leaves no ghost presence rows", t => {
   const STALE_MS = 2000;
   const { db, hb, advance, at } = unit(t, { staleAfterMs: STALE_MS });
   const TICK = 10 * 60 * 1000; // 10 minutes
@@ -188,13 +204,22 @@ test("FAIL-FIRST: 24h churn leaves no ghost presence rows", t => {
   }
   // Presence TTL, not the 24h wakeability window, defines "live": count rows
   // whose last heartbeat is older than the TTL as ghosts.
-  const ghostRows = db.prepare(
+  const countGhosts = () => db.prepare(
     "SELECT COUNT(*) AS n FROM agent_hosts WHERE last_seen_at <= ?").get(at() - STALE_MS).n;
+  // Mid-loop the piggybacked reaper (60s throttle) has already pruned every
+  // earlier batch: only the final batch — written 60s before this
+  // assertion, with no hook scheduled after the last clock advance — may
+  // remain. Without any reaper this would be ~14,400 rows.
+  assert.ok(countGhosts() <= PER_TICK,
+    `piggybacked reaper must bound ghosts to the final batch, got ${countGhosts()}`);
+  // The explicit reaper is the drain: one sweep, zero ghosts.
+  hb.reapStaleHosts();
+  const ghostRows = countGhosts();
   const liveRows = db.prepare(
     "SELECT COUNT(*) AS n FROM agent_hosts WHERE last_seen_at > ?").get(at() - STALE_MS).n;
   assert.equal(ghostRows, 0,
     `ghost rows accumulate: agent_hosts holds ${ghostRows} expired rows (${liveRows} live) ` +
-    `after a 24h churn cycle. W6 TTL design must prune hosts whose last_seen is past the TTL window.`);
+    `after a 24h churn cycle.`);
 });
 
 // ---- 3. delta correctness --------------------------------------------------
@@ -259,10 +284,11 @@ test("delta contract under a 120-agent seeded churn storm", t => {
   t.diagnostic(`churn storm: ${events.length} deltas for ${N} agents, alternation exact, final state consistent`);
 });
 
-// FAIL-FIRST (W6 scope): there is no server-side join/leave delta stream.
-// Subscribers today must poll statusOf per agent (O(agents) per read). W6's
-// delta design must publish join/leave so 500 agents don't poll each other.
-test("FAIL-FIRST: server-side presence delta subscription exists", t => {
+// W6 scope: the server-side join/leave delta stream exists — subscribers no
+// longer poll statusOf per agent (O(agents) per read). The snapshot-diff
+// contract above defines the semantics it preserves (see
+// tests/presence-deltas.test.js for the subscription's own suite).
+test("server-side presence delta subscription exists", t => {
   const { hb } = unit(t);
   const candidates = ["subscribeDeltas", "onPresenceDelta", "presenceDeltas", "watchPresence"];
   const found = candidates.filter(name => typeof hb[name] === "function");
@@ -273,7 +299,7 @@ test("FAIL-FIRST: server-side presence delta subscription exists", t => {
 
 // ---- 4. idle agents --------------------------------------------------------
 
-test("FAIL-FIRST: authenticated non-heartbeat traffic refreshes presence liveness", t => {
+test("authenticated non-heartbeat traffic refreshes presence liveness", t => {
   const { db, hb, advance } = unit(t, { staleAfterMs: 2000 });
   hb.heartbeat(beat("ai_idle_1"));
   const seen1 = db.prepare("SELECT last_seen_at AS s FROM agent_hosts WHERE agent_id=?").get("ai_idle_1").s;
