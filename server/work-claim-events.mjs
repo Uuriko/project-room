@@ -185,9 +185,13 @@ export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previ
   if (actor?.system === true) incoming.data.actorKind = "system";
   const state = applyEvent(room.state, incoming);
   const sequence = room.sequence + 1;
-  store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
+  // wave400/perf: cache the hot prepares per store (db handle is fixed for
+  // the store's lifetime); this path was re-preparing on every claim event.
+  (store._wceInsertStmt ??= store.db.prepare("INSERT INTO events VALUES(?,?,?,?)"))
+    .run(roomId, sequence, incoming.id, JSON.stringify(incoming));
   const compact = { ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
-  store.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, store.storedProjection(roomId, compact), roomId);
+  (store._wceUpdateRoomStmt ??= store.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?"))
+    .run(sequence, store.storedProjection(roomId, compact), roomId);
   if (coalesce) noteClaimEvent(store, coalesceKey(roomId, item.id, action), stamp);
   try {
     if (store.agentPlugin) store.agentPlugin.fanoutRoomEvent({ roomId, event: incoming });

@@ -368,8 +368,9 @@ export function syncRoomPublication(store, { roomId, state, previous = null, aut
 // A claim changed. Refresh that room's public receipts only when it already
 // publishes. One indexed lookup; private rooms stop before the projection parse.
 export function noteWorkClaimChange(store, roomId) {
-  const flags = store.db.prepare(`SELECT json_extract(projection, '$.room.publicReceipts.enabled') AS receipts,
-    json_extract(projection, '$.room.publicPage.enabled') AS page FROM rooms WHERE id=?`).get(roomId);
+  // wave400/perf: cache the hot prepare per store; this runs on every claim change.
+  const flags = (store._nwccFlagsStmt ??= store.db.prepare(`SELECT json_extract(projection, '$.room.publicReceipts.enabled') AS receipts,
+    json_extract(projection, '$.room.publicPage.enabled') AS page FROM rooms WHERE id=?`)).get(roomId);
   if (!flags || (flags.receipts !== 1 && flags.page !== 1)) return;
   let state;
   try { state = store.room(roomId).state; } catch { return; }

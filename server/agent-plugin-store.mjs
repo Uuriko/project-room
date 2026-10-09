@@ -1149,12 +1149,13 @@ export class AgentPluginStore {
   // the event insert, so a delivery is never journaled without its
   // triggering event.
   fanoutRoomEvent({ roomId, event }) {
-    const rows = this.db.prepare(
+    // wave400/perf: cache the hot prepare per store; this runs on every room event.
+    const rows = (this._fanoutSubsStmt ??= this.db.prepare(
       `SELECT s.subscription_id AS subscriptionId, s.agent_id AS agentId,
               s.events_json AS eventsJson, l.member_id AS memberId
        FROM agent_webhook_subs s
        JOIN identity_links l ON l.identity_id = s.agent_id AND l.room_id = ?
-       WHERE s.enabled = 1`).all(roomId);
+       WHERE s.enabled = 1`)).all(roomId);
     let created = 0;
     // Q3-D: the actor's kind and name come from the room roster, read once.
     let members;
