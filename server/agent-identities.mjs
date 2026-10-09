@@ -11,6 +11,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { fastIdentityHashCandidates, forgetIdentityVerifier, isV2IdentityHash, legacyIdentityHash, scryptIdentityHash } from "./identity-secret-hash.mjs";
 import { ServiceError } from "./store.mjs";
+import { rateLimitDetail } from "../src/agent-error.mjs";
 import { generateKeyPair as generateEd25519KeyPair } from "./agent-card-signing.mjs";
 import { memberCan } from "../src/events.js";
 import { nextActionsForIdentityMint } from "./discoverability.mjs";
@@ -226,17 +227,23 @@ export function enforceAnonymousMintLimits(identities, { name, buckets, proof, r
   const addressMinute = db.prepare(
     "SELECT count(*) AS n FROM agent_identities WHERE mint_address=? AND created_at>=?"
   ).get(buckets.address, now - MINT_MINUTE_MS).n;
-  const limited = (message, retryAfter) => fail(429, limitCode, message, { "Retry-After": String(retryAfter) });
-  if (addressMinute >= identities.addressMinuteLimit) limited("Too many identity mints from this address", 60);
-  if (addressDay >= identities.addressDailyLimit) limited("Identity mint address budget reached", 3600);
+  const limited = (message, retryAfter, limit, window) => fail(429, limitCode, message,
+    { "Retry-After": String(retryAfter) },
+    rateLimitDetail({ retryAfterMs: retryAfter * 1000, limit, window, remaining: 0 }));
+  if (addressMinute >= identities.addressMinuteLimit)
+    limited("Too many identity mints from this address", 60, identities.addressMinuteLimit, "1m");
+  if (addressDay >= identities.addressDailyLimit)
+    limited("Identity mint address budget reached", 3600, identities.addressDailyLimit, "24h");
   const networkDay = db.prepare(
     "SELECT count(*) AS n FROM agent_identities WHERE mint_network=? AND created_at>=?"
   ).get(buckets.network, dayStart).n;
-  if (networkDay >= identities.networkDailyLimit) limited("Identity mint network budget reached", 3600);
+  if (networkDay >= identities.networkDailyLimit)
+    limited("Identity mint network budget reached", 3600, identities.networkDailyLimit, "24h");
   const globalDay = db.prepare(
     "SELECT count(*) AS n FROM agent_identities WHERE mint_address IS NOT NULL AND created_at>=?"
   ).get(dayStart).n;
-  if (globalDay >= identities.anonymousDailyLimit) limited("Identity mint daily budget reached", 3600);
+  if (globalDay >= identities.anonymousDailyLimit)
+    limited("Identity mint daily budget reached", 3600, identities.anonymousDailyLimit, "24h");
 }
 
 export function solveIdentityMintProof(displayName, now = Date.now(), bits = IDENTITY_POW_BITS) {

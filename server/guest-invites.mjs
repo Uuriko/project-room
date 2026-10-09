@@ -17,6 +17,7 @@ import { EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, event, validId }
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { verifyCardSignature, isValidPublicKey } from "./agent-card-signing.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
+import { rateLimitDetail } from "../src/agent-error.mjs";
 import {
   GUEST_AGENT_TOKEN_PREFIX,
   GUEST_AGENT_TOKEN_PATTERN,
@@ -29,7 +30,11 @@ import { guestHistoryAccessLead } from "./history-visibility.mjs";
 class GuestInviteError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
 }
-const fail = (status, code, message) => { throw new GuestInviteError(status, code, message); };
+const fail = (status, code, message, detail = null) => {
+  const error = new GuestInviteError(status, code, message);
+  if (detail) error.detail = detail;
+  throw error;
+};
 const hash = value => createHash("sha256").update(value).digest("hex");
 
 // Invite codes are public-safe: single-use, stored as a hash, and they
@@ -668,7 +673,8 @@ export class GuestInvites {
     // signature verification, so a bad signature can't burn someone
     // else's key quota.
     const ipGate = this.selfServeIpLimiter.check(`guest-join:${clientIp || "unknown"}`);
-    if (!ipGate.allowed) fail(429, "rate_limited", "Too many guest join requests from this address; try again later");
+    if (!ipGate.allowed) fail(429, "rate_limited", "Too many guest join requests from this address; try again later",
+      rateLimitDetail({ retryAfterMs: ipGate.retryAfterMs, limit: 5, window: "1h", remaining: 0 }));
     const keyHash = hash(publicKey);
     // The joinRequest binds the signature to this room and this request, so
     // a captured card cannot be replayed elsewhere or later.
@@ -735,7 +741,8 @@ export class GuestInvites {
       // Per-key abuse gate, after the signature is known good. Idempotent
       // replays above never reach this gate.
       const keyGate = this.selfServeKeyLimiter.check(`guest-join:key:${keyHash}`);
-      if (!keyGate.allowed) fail(429, "rate_limited", "Too many guest join requests for this agent card; try again tomorrow");
+      if (!keyGate.allowed) fail(429, "rate_limited", "Too many guest join requests for this agent card; try again tomorrow",
+        rateLimitDetail({ retryAfterMs: keyGate.retryAfterMs, limit: 3, window: "24h", remaining: 0 }));
       const { card } = assertCardShape(cardInput);
       let room = this.store.room(roomId);
       refuseArchivedWrite(room.state);

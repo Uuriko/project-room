@@ -68,6 +68,24 @@ export function createRateLimiter({ store, now, capacity = 60, refillPerSecond =
     refill(bucket);
     return Object.freeze({ identityId, tokens: Math.floor(bucket.tokens), capacity });
   };
-  return Object.freeze({ check: checkLimit, state, capacity, refillPerSecond });
+  // Read the bucket without consuming a token: the programmatic budget read
+  // (GET /api/agent-rooms/budget) must not spend what it reports. Returns
+  // { allowed, remaining, capacity, retryAfterMs, resetAtMs } where
+  // resetAtMs is the ms-epoch the next token refills, or null when full.
+  const peekLimit = identityId => {
+    const bucket = bucketFor(identityId);
+    refill(bucket);
+    const remaining = bucket.tokens;
+    const full = remaining >= capacity;
+    const fractional = remaining - Math.floor(remaining);
+    return Object.freeze({
+      allowed: remaining >= 1,
+      remaining,
+      capacity,
+      retryAfterMs: remaining >= 1 ? 0 : Math.ceil((1 - remaining) / refillPerSecond * 1000),
+      resetAtMs: full ? null : Math.ceil(clock() + ((1 - fractional) / refillPerSecond) * 1000),
+    });
+  };
+  return Object.freeze({ check: checkLimit, state, peek: peekLimit, capacity, refillPerSecond });
 }
 export { RateLimitError };

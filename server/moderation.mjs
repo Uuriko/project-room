@@ -16,11 +16,16 @@
 import { randomUUID } from "node:crypto";
 import { validId, isMutedBy } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
+import { rateLimitDetail } from "../src/agent-error.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { messageVisibleToViewer, summaryHistoryFloor } from "./history-visibility.mjs";
 
-const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
+const fail = (status, code, message, detail = null) => {
+  const error = new ServiceError(status, code, message);
+  if (detail) error.detail = detail;
+  throw error;
+};
 
 export const reportLimits = Object.freeze({ reasonLength: 280, perReporterPerHour: 20, perRoom: 5000 });
 
@@ -110,7 +115,8 @@ export class Moderation {
       if (prior) return { ...this.viewer(auth, roomId), report: receipt(prior), duplicate: true };
       const now = this.store.now();
       const recent = this.db.prepare("SELECT count(*) n FROM message_reports WHERE room_id=? AND reporter_id=? AND created_at>?").get(roomId, auth.member.id, now - 3600000).n;
-      if (recent >= reportLimits.perReporterPerHour) fail(429, "report_limit", "You have sent many reports in the last hour. The owner has them; try again later.");
+      if (recent >= reportLimits.perReporterPerHour) fail(429, "report_limit", "You have sent many reports in the last hour. The owner has them; try again later.",
+        rateLimitDetail({ limit: reportLimits.perReporterPerHour, window: "1h", remaining: 0 }));
       const total = this.db.prepare("SELECT count(*) n FROM message_reports WHERE room_id=?").get(roomId).n;
       if (total >= reportLimits.perRoom) fail(409, "pilot_limit", "Report capacity reached for this room; nothing was saved");
       const row = { room_id: roomId, report_id: randomUUID(), message_id: request.messageId, reporter_id: auth.member.id, author_id: message.authorId, reason, created_at: now };

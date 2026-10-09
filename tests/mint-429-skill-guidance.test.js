@@ -45,11 +45,12 @@ test("served SKILL.md gets Retry-After semantics right per tier", () => {
   assert.ok(!/always\s+sends\s+[`']?Retry-After:?\s*3600/.test(skill), "never claims Retry-After: 3600 is always sent");
 });
 
-test("served SKILL.md says the wait lives in the header, not the body", () => {
-  // Mint 429 bodies are { error: { code, message }, ... } with no retryAfterMs/
-  // resetAt (server/service-error.mjs + http.mjs error envelope); the wait is
-  // header-only. A stranger must not go hunting for machine-readable fields.
+test("served SKILL.md names the header and the machine-readable body detail", () => {
+  // Mint 429s carry the canonical 429 shape: the Retry-After header is
+  // authoritative and the body carries detail.retryAfterMs/limit/window for
+  // programmatic backoff (docs/ERROR-TAXONOMY.md "The canonical 429 shape").
   assert.ok(/Retry-After/i.test(skill), "names the Retry-After header");
+  assert.ok(/detail\.retryAfterMs/.test(skill), "names the body detail.retryAfterMs field");
   assert.ok(/header/i.test(skill) && /body/i.test(skill), "contrasts header vs body");
 });
 

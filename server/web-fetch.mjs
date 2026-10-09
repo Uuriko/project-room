@@ -669,7 +669,7 @@ export class WebFetch {
       const resetAt = oldest + WEB_FETCH_RATE_WINDOW_MS;
       fail(429, "rate_limited",
         `Web fetch quota exceeded (${per} per day ${scope ? "for this member" : "for this room"})`,
-        { retryAfterMs: Math.max(0, resetAt - now), resetAt });
+        { retryAfterMs: Math.max(0, resetAt - now), resetAt, limit: per, window: "24h" });
     };
     // Only successful fetches (hit/miss) consume quota; typed failures are
     // journaled but never billed.

@@ -33,6 +33,7 @@ import { PILOT_LIMITS } from "./store.mjs";
 import { randomUUID, createHash } from "node:crypto";
 import { MemberPermissionRequests, permissionRequestContents } from "./member-permission-requests.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
+import { rateLimitDetail } from "../src/agent-error.mjs";
 // RC-2026-09-19-071 (QAJ-006): a new access request appends an
 // access.requested room event so the request is timeline-visible and drives
 // an owner notification. These imports follow the agent-invites.mjs
@@ -51,7 +52,11 @@ class ServiceError extends Error {
   constructor(status, code, message, headers = null) { super(message); this.status = status; this.code = code; this.headers = headers; }
 }
 
-const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
+const fail = (status, code, message, detail = null) => {
+  const error = new ServiceError(status, code, message);
+  if (detail) error.detail = detail;
+  throw error;
+};
 // Room permission vocabulary, mirrored from PERMISSIONS in src/events.js
 // (same Workers-bundle reason as above). access requests and approvals are
 // validated against this so an invalid name fails fast with a 422 that
@@ -256,7 +261,8 @@ export class AccessRequests {
       }
       // Invalid upgrade proofs must not spend the real holder's request quota.
       const limit = this.rateLimiter.check(`access-request:${identityId}`);
-      if (!limit.allowed) fail(429, "rate_limited", limit.message);
+      if (!limit.allowed) fail(429, "rate_limited", limit.message,
+        rateLimitDetail({ retryAfterMs: limit.retryAfterMs, limit: this.rateLimiter.capacity, window: "1h", remaining: 0 }));
       const roomExists = this.db.prepare("SELECT 1 FROM rooms WHERE id=?").get(roomId);
       if (!roomExists) fail(404, "not_found", "No such room or identity");
       const room = this.store.room(roomId);

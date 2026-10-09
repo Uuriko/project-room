@@ -11,6 +11,7 @@
 
 import { createRateLimiter } from "./identity-ratelimit.mjs";
 import { ServiceError } from "./service-error.mjs";
+import { rateLimitDetail } from "../src/agent-error.mjs";
 
 const CHAT_COMMANDS = new Set(["message.posted", "dm.posted"]);
 const AGENT_WAIT = "on 429, wait Retry-After and retry";
@@ -24,7 +25,8 @@ export function createRoomFloodGuard({ now, capacity = 30, refillPerSecond = 0.5
       const decision = limiter.check(`${roomId}:${memberId}`);
       if (decision.allowed) return;
       const seconds = Math.max(1, Math.ceil(decision.retryAfterMs / 1000));
-      const error = new ServiceError(429, "rate_limited", AGENT_WAIT, { "Retry-After": String(seconds) });
+      const error = new ServiceError(429, "rate_limited", AGENT_WAIT, { "Retry-After": String(seconds) },
+        rateLimitDetail({ retryAfterMs: decision.retryAfterMs, limit: capacity, remaining: 0 }));
       error.retryAfterMs = decision.retryAfterMs;
       throw error;
     }

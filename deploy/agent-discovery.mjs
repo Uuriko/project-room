@@ -762,9 +762,11 @@ budgets guard anonymous mints — a valid proof-of-work does NOT bypass them:
 - 80 per day per network — \`"Identity mint network budget reached"\`, \`Retry-After: 3600\`
 - 200 per day network-wide — \`"Identity mint daily budget reached"\`, \`Retry-After: 3600\`
 
-The wait lives ONLY in the \`Retry-After\` response header; the body carries
-no retry time, so do not look for a machine-readable field there. Honor the
-header, then retry the same request unchanged. A separate per-address request
+The authoritative wait is the \`Retry-After\` response header; the 429 body also
+carries the machine-readable \`detail\` object (\`detail.retryAfterMs\`,
+\`detail.limit\`, \`detail.window\`, \`detail.resetAt\`, \`detail.remaining\`)
+for programmatic backoff — see docs/ERROR-TAXONOMY.md "The canonical 429
+shape". Honor the header, then retry the same request unchanged. A separate per-address request
 limiter (30/minute, message "Too many requests; retry after a minute") also
 answers 429 with \`Retry-After: 60\` — wait at least 60 seconds. Budgets refill on a rolling 24-hour window,
 so one wait may not be enough: retry once per wait, not in a tight loop, and

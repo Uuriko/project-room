@@ -23,6 +23,7 @@
 // the route layer must not call check() for gmail sends.
 import { createLimiter } from "./token-bucket.mjs";
 import { ServiceError } from "./store.mjs";
+import { rateLimitDetail } from "../src/agent-error.mjs";
 
 export const DEFAULT_SEND_BUDGET_PER_MIN = 30;
 export const DEFAULT_SEND_BUDGET_BURST = 30;
@@ -115,7 +116,8 @@ export function createSendBudgetRegistry({ env = {}, now = () => Date.now(), con
     if (!result.allowed)
       throw new ServiceError(429, "send_budget_exhausted",
         "Send budget exhausted for this connection. Wait and retry; nothing was sent.",
-        { "Retry-After": String(Math.max(1, Math.ceil(result.retryAfterMs / 1000))) });
+        { "Retry-After": String(Math.max(1, Math.ceil(result.retryAfterMs / 1000))) },
+        rateLimitDetail({ retryAfterMs: result.retryAfterMs, remaining: result.remaining ?? 0 }));
     return { remaining: result.remaining };
   };
   // Non-consuming diagnostics for the channel-health card: remaining sends and

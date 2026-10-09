@@ -2,8 +2,13 @@
 // minted for a human: the durable principal is explicitly room-member scoped.
 import { randomUUID, createHash } from "node:crypto";
 import { PERMISSIONS, EVENT_TYPES as T, isRoomArchived, memberCan } from "../src/events.js";
+import { rateLimitDetail } from "../src/agent-error.mjs";
 
-const fail = (status, code, message) => { throw Object.assign(new Error(message), { status, code }); };
+const fail = (status, code, message, detail = null) => {
+  const error = Object.assign(new Error(message), { status, code });
+  if (detail) error.detail = detail;
+  throw error;
+};
 const ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const eventKey = requestId => createHash("sha256").update(`access-request:${requestId}`).digest("hex");
 
@@ -61,7 +66,8 @@ export class MemberPermissionRequests {
         return this.access.toRequest(existing);
       }
       const limit = this.access.rateLimiter.check(`access-request:${identityId ?? `${roomId}:${principalId}`}`);
-      if (!limit.allowed) fail(429, "rate_limited", limit.message);
+      if (!limit.allowed) fail(429, "rate_limited", limit.message,
+        rateLimitDetail({ retryAfterMs: limit.retryAfterMs, limit: this.access.rateLimiter.capacity, window: "1h", remaining: 0 }));
       if (permissions.every(p => member.permissions.includes(p))) {
         fail(409, "nothing_to_request", `Already held: ${member.permissions.join(", ") || "read/chat access"}`);
       }

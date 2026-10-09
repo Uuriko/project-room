@@ -33,7 +33,7 @@ import { buildOpportunitiesFeed } from "./opportunities.mjs"; // Public opportun
 import { telegramConfig, TelegramLiveStatus } from "./channel-adapters/telegram-config.mjs";
 import { TelegramTransport } from "./channel-adapters/telegram-transport.mjs";
 import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
-import { agentErrorBody, errorCategory, mergeErrorDetail, ERROR_COMMAND_TYPE } from "../src/agent-error.mjs";
+import { agentErrorBody, errorCategory, mergeErrorDetail, rateLimitDetail, ERROR_COMMAND_TYPE } from "../src/agent-error.mjs";
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { redactEventPage, redactEventRows, redactMessageTree, redactSnapshotState } from "./redact-read.mjs";
@@ -138,7 +138,7 @@ const LIVENESS_GET_ONLY_PATHS = new Set(["/api/health", "/api/health/", "/api/ve
 // W009: the wiki read API owns every /api/wiki/ template inside
 // server/wiki-read-api.mjs (reads are lazy per request; import is side-effect-free).
 const wikiReadApi = createWikiReadApi();
-const reject = (status, code, message, headers) => { throw new ServiceError(status, code, message, headers ?? null); };
+const reject = (status, code, message, headers, detail) => { throw new ServiceError(status, code, message, headers ?? null, detail ?? null); };
 
 // RFC 9116. Contact comes from ROOM_SECURITY_CONTACT. A bare address becomes
 // a mailto URI. Anything else must already be mailto: or https:, with no
@@ -355,7 +355,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   const magicEmailLimit = (limiter, normalized) => {
     const checked = limiter.check(rateHash(normalized));
     if (!checked.allowed) {
-      throw new ServiceError(429, "rate_limited", checked.message, { "Retry-After": String(Math.ceil(checked.retryAfterMs / 1000)) });
+      throw new ServiceError(429, "rate_limited", checked.message, { "Retry-After": String(Math.ceil(checked.retryAfterMs / 1000)) },
+        rateLimitDetail({ retryAfterMs: checked.retryAfterMs, limit: 3, window: "1h", remaining: 0 }));
     }
   };
   // RC-2026-09-19-078: signs the confirm-then-delete confirmation tokens.
@@ -389,7 +390,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   const recoveryRedeemLimiter = createRateLimiter({ capacity: 10, refillPerSecond: 10 / (15 * 60) });
   const recoveryRedeemAllowed = emailHint => {
     const verdict = recoveryRedeemLimiter.check(`recovery-redeem:${rateHash(emailHint)}`);
-    if (!verdict.allowed) reject(429, "rate_limited", verdict.message);
+    if (!verdict.allowed) reject(429, "rate_limited", verdict.message, null,
+      rateLimitDetail({ retryAfterMs: verdict.retryAfterMs, limit: 10, window: "15m", remaining: 0 }));
   };
   // Long-lived passkey auth service (slice 5, RC-2026-09-17-014): one challenge
   // store per server instance (one per Durable Object in production) so
@@ -678,7 +680,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     const left = rateFamilies.get(family) - 1;
     if (left > 0) rateFamilies.set(family, left); else rateFamilies.delete(family);
   };
-  function rate(id, maximum) {
+  // FIX-64: rate(res, id, maximum) sets the standard RateLimit headers on the
+  // response (200s carry the remaining budget, 429s the spent one). Route
+  // modules constructed at server scope call the legacy shape
+  // rate(id, maximum) — no response object is available there, so the
+  // headers are skipped but the 429 (detail + X-RateLimit-* headers, and the
+  // canonical body via the catch below) is identical.
+  function rate(resOrId, idOrMaximum, maximum) {
+    const hasRes = resOrId !== null && typeof resOrId === "object" && typeof resOrId.setHeader === "function";
+    const res = hasRes ? resOrId : null;
+    const id = hasRes ? idOrMaximum : resOrId;
+    const max = hasRes ? maximum : idOrMaximum;
     const now = Date.now();
     for (const [k, v] of rates) if (v.until <= now) dropRate(k);
     const family = rateFamily(id);
@@ -695,11 +707,21 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     entry.n++;
     rates.set(id, entry);
     if (durable) {
-      const stride = Math.max(1, Math.floor(maximum / 4));
-      if (entry.n >= maximum || entry.n % stride === 0) saveAbuseRateBucket(store.db, id, entry);
+      const stride = Math.max(1, Math.floor(max / 4));
+      if (entry.n >= max || entry.n % stride === 0) saveAbuseRateBucket(store.db, id, entry);
     }
-    if (entry.n > maximum) throw new ServiceError(429, "rate_limited", "Too many requests; retry after a minute",
-      { "X-RateLimit-Limit": maximum, "X-RateLimit-Remaining": 0, "X-RateLimit-Reset": Math.ceil(entry.until / 1000) });
+    // Every response guarded by a limiter carries the standard RateLimit
+    // headers — on 200s (the remaining budget) and on 429s (spent). The
+    // X-RateLimit-* headers on the 429 stay for existing readers.
+    // RateLimit-Reset is delta-seconds until the window refills.
+    if (res && !res.headersSent) {
+      res.setHeader("RateLimit-Limit", String(max));
+      res.setHeader("RateLimit-Remaining", String(Math.max(0, max - entry.n)));
+      res.setHeader("RateLimit-Reset", String(Math.max(0, Math.ceil((entry.until - now) / 1000))));
+    }
+    if (entry.n > max) throw new ServiceError(429, "rate_limited", "Too many requests; retry after a minute",
+      { "X-RateLimit-Limit": max, "X-RateLimit-Remaining": 0, "X-RateLimit-Reset": Math.ceil(entry.until / 1000) },
+      rateLimitDetail({ retryAfterMs: 60000, limit: max, window: "1m", remaining: 0 }));
   }
   function cookie(req, name) {
     const scoped = scopedCookieName(name);
@@ -987,7 +1009,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       };
       const inboundPath = url.pathname;
       if (isRoomMcpPath(inboundPath) || isRoomMcpPath(rewriteRoomApiPrefix(inboundPath))) {
-        rate(`mcp-join:${remoteAddress}`, 60);
+        rate(res, `mcp-join:${remoteAddress}`, 60);
         if (req.method === "POST") {
           // Join traffic stays on the small JSON cap. A live identity secret
           // may stage one room file (base64, at most attachmentLimits.fileBytes).
@@ -1001,7 +1023,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return writeRoomMcpNode(req, res, url);
       }
       if (isA2aPath(inboundPath)) {
-        rate(`a2a:${remoteAddress}`, 60);
+        rate(res, `a2a:${remoteAddress}`, 60);
         const text = req.method === "POST" ? await readText(req, JSON_BODY_BYTES, () => new ServiceError(413, "too_large", "Request is too large")) : "";
         return writeA2aNode(req, res, { bodyText: text });
       }
@@ -1059,7 +1081,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // JDOT-MEMBER-PERMS begin: share quotas across request aliases.
         accessRequests,
         // JDOT-MEMBER-PERMS end
-        json, reject, rate, cookie, setCookie, bearer, body, readText,
+        json, reject, rate: (id, maximum) => rate(res, id, maximum), cookie, setCookie, bearer, body, readText,
         roomAuth, roomCredentials, expectedBinding, accountBinding,
         checkOrigin, protectWrite, exact, pathId, expectedOrigin,
         accountCookieName, roomCookieName, tokenPattern, accountView: sessionAccountView,
@@ -1088,7 +1110,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // and returns a same-origin HTML page so the SameSite=Strict session
       // cookie is sent on the next load. Error responses never carry tokens.
       if (url.pathname === "/api/auth/gmail/callback" && req.method === "GET") {
-        rate(`gmail-callback:${remoteAddress}`, 20);
+        rate(res, `gmail-callback:${remoteAddress}`, 20);
         let result = 'error';
         try {
           if (gmail) {
@@ -1115,7 +1137,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           }
           return json(res, 503, { status: "unavailable", reason: "google_not_configured" });
         }
-        rate(`google-start:${remoteAddress}`, 10);
+        rate(res, `google-start:${remoteAddress}`, 10);
         let slotToken = cookie(req, accountCookieName), expectedRevision;
         if (slotToken) {
           try { expectedRevision = store.accountSessionSlot(slotToken).sessionRevision; }
@@ -1141,7 +1163,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
         const signIn = google();
         if (!signIn) return json(res, 503, { status: "unavailable", reason: "google_not_configured" });
-        rate(`google-callback:${remoteAddress}`, 20);
+        rate(res, `google-callback:${remoteAddress}`, 20);
         const finishGoogle = href => {
           const html = googlePostLoginPage(href);
           res.setHeader("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
@@ -1195,7 +1217,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/api/auth/email/verify") {
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
         checkOrigin(req, true);
-        rate(`email-verify:${remoteAddress}`, 10);
+        rate(res, `email-verify:${remoteAddress}`, 10);
         const slotToken = cookie(req, accountCookieName);
         if (!slotToken) reject(401, "account_session_required", "Sign in before verifying your email");
         let session;
@@ -1229,7 +1251,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         protectWrite(req, session, false);
         // Tight per-account budget: a resend mints a fresh code, so this is
         // not a free oracle for someone else's inbox.
-        rate(`email-verify-resend:${session.account.id}`, 5);
+        rate(res, `email-verify-resend:${session.account.id}`, 5);
         const emailRow = store.db.prepare(`SELECT email FROM account_login_methods
           WHERE account_id=? AND type='password' AND disabled=0 AND email IS NOT NULL LIMIT 1`)
           .get(session.account.id);
@@ -1272,7 +1294,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return json(res, 503, { status: "unavailable", reason: "github_not_configured",
             error: { code: "github_not_configured", message: "GitHub sign-in is not configured" } });
         }
-        rate(`github-start:${remoteAddress}`, 10);
+        rate(res, `github-start:${remoteAddress}`, 10);
         // Browser clients cannot read the HttpOnly slot cookie into the
         // sessionToken query param, so the slot falls back to the request
         // cookie (CSRF-protected); API clients keep the bearer query param.
@@ -1300,7 +1322,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const oauth = github();
         if (!oauth) return json(res, 503, { status: "unavailable", reason: "github_not_configured",
           error: { code: "github_not_configured", message: "GitHub sign-in is not configured" } });
-        rate(`github-callback:${remoteAddress}`, 20);
+        rate(res, `github-callback:${remoteAddress}`, 20);
         // Browser OAuth navigations send Accept: text/html; they get a
         // landing page (slice 7) while API clients keep the JSON body.
         const githubWantsHtml = (req.headers.accept || "").includes("text/html");
@@ -1403,7 +1425,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // The user must be logged in (account session cookie); otherwise redirect
       // to the login page with a return URL.
       if (url.pathname === "/oauth/authorize" && req.method === "GET") {
-        rate(`oauth-authorize:${remoteAddress}`, 30);
+        rate(res, `oauth-authorize:${remoteAddress}`, 30);
         const slotToken = cookie(req, accountCookieName);
         // QA-Sec 2026-09-19: the old code read slot?.session?.account?.id,
         // but accountSessionSlot never populates account (always null), so
@@ -1464,7 +1486,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // server's own consent form (application/x-www-form-urlencoded with a
       // csrf_token field) and JSON API clients (x-csrf-token header).
       if (url.pathname === "/oauth/authorize" && req.method === "POST") {
-        rate(`oauth-authorize:${remoteAddress}`, 30);
+        rate(res, `oauth-authorize:${remoteAddress}`, 30);
         const slotToken = cookie(req, accountCookieName);
         // QA-Sec 2026-09-19: authenticateAccountSession, not the raw slot
         // (whose account is always null) — the same authN fix QA-Auth #720
@@ -1539,7 +1561,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       // POST /oauth/token — exchange codes and refresh tokens (RFC 6749 §4.1.3, §6).
       if (url.pathname === "/oauth/token" && req.method === "POST") {
-        rate(`oauth-token-exchange:${remoteAddress}`, 60);
+        rate(res, `oauth-token-exchange:${remoteAddress}`, 60);
         const data = await body(req);
         const grantType = data.grant_type;
         // F-02 session metadata: the IP and User-Agent seen at issuance,
@@ -1586,7 +1608,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // is what the consent screen promises). Revoking an access token
       // stays surgical — only that token dies.
       if (url.pathname === "/oauth/revoke" && req.method === "POST") {
-        rate(`oauth-revoke:${remoteAddress}`, 60);
+        rate(res, `oauth-revoke:${remoteAddress}`, 60);
         const data = await body(req);
         oauthProvider.revoke(data.token);
         return json(res, 200, {});
@@ -1596,7 +1618,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // scopes, and the IP/User-Agent seen at issuance. Account session
       // cookie + session binding; a caller only ever sees their own families.
       if (url.pathname === "/api/oauth/sessions" && req.method === "GET") {
-        rate(`oauth-sessions-list:${remoteAddress}`, 60);
+        rate(res, `oauth-sessions-list:${remoteAddress}`, 60);
         const slotToken = cookie(req, accountCookieName);
         if (!slotToken) reject(401, "account_session_required", "Sign in to manage connected sessions");
         const auth = store.authenticateAccountSession(slotToken, null, accountBinding(req));
@@ -1606,7 +1628,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // the signed-in account (F-02): all refresh families and access tokens
       // die immediately, across all clients. The consent promise made real.
       if (url.pathname === "/api/oauth/sessions/revoke-all" && req.method === "POST") {
-        rate(`oauth-sessions-revoke-all:${remoteAddress}`, 30);
+        rate(res, `oauth-sessions-revoke-all:${remoteAddress}`, 30);
         const slotToken = cookie(req, accountCookieName);
         if (!slotToken) reject(401, "account_session_required", "Sign in to manage connected sessions");
         const auth = store.authenticateAccountSession(slotToken, null, accountBinding(req));
@@ -1619,7 +1641,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // families both answer 404, so a caller can't probe for them.
       const oauthSessionKill = /^\/api\/oauth\/sessions\/([^/]{1,128})$/.exec(url.pathname);
       if (oauthSessionKill && req.method === "DELETE") {
-        rate(`oauth-session-kill:${remoteAddress}`, 60);
+        rate(res, `oauth-session-kill:${remoteAddress}`, 60);
         const slotToken = cookie(req, accountCookieName);
         if (!slotToken) reject(401, "account_session_required", "Sign in to manage connected sessions");
         const auth = store.authenticateAccountSession(slotToken, null, accountBinding(req));
@@ -1720,7 +1742,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // DM data ever leaves. Registered BEFORE the /api/public/rooms/{code}
       // matcher below, which would otherwise read "directory" as a code.
       if (url.pathname === "/api/public/rooms/directory" && req.method === "GET") {
-        rate(`room-directory:${remoteAddress}`, 120);
+        rate(res, `room-directory:${remoteAddress}`, 120);
         return json(res, 200, store.roomDirectory.list({
           after: url.searchParams.get("after"),
           limit: url.searchParams.get("limit"),
@@ -1730,7 +1752,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/api/public-work/match") {
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
         if ([...url.searchParams].length) reject(422, "invalid_public_work", "No matching query parameters accepted");
-        rate(`public-work-match:${remoteAddress}`, 60);
+        rate(res, `public-work-match:${remoteAddress}`, 60);
         const secret = bearer(req);
         const input = await body(req);
         return json(res, 200, store.publicWorkClaims.match(secret, input));
@@ -1739,7 +1761,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (publicWorkReviewMatch) {
         if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, HEAD" });
         if ([...url.searchParams].length) reject(422, "invalid_public_work_review", "No review query parameters accepted");
-        rate(`public-work-review:${remoteAddress}`, 120);
+        rate(res, `public-work-review:${remoteAddress}`, 120);
         return json(res, 200, store.publicWorkReviews.contributorReview(bearer(req), pathId(publicWorkReviewMatch[1])), req.method === "HEAD");
       }
       const publicWorkTaskMatch = /^\/api\/public-work\/tasks\/([^/]{1,128})(?:\/(claim|renew|release|finish))?$/.exec(url.pathname);
@@ -1749,11 +1771,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const action = publicWorkTaskMatch?.[2];
         if (action) {
           if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
-          rate(`public-work-write:${remoteAddress}`, 60);
+          rate(res, `public-work-write:${remoteAddress}`, 60);
           const secret = bearer(req);
           const identity = store.identities.resolveGlobalIdentitySecret(secret);
           if (!identity) reject(401, "unauthenticated", "Use your saved agent identity credential");
-          rate(`public-work-identity:${identity.identityId}`, 60);
+          rate(res, `public-work-identity:${identity.identityId}`, 60);
           // Escaped JSON can be larger than the domain's 64KiB UTF8 artifact.
           // The larger envelope limit applies to this one route only.
           const data = await body(req, action === "finish" ? { limit: 524288 } : {});
@@ -1762,7 +1784,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return json(res, 200, store.publicWorkClaims.act(pathId(publicWorkTaskMatch[1]), secret, action, data));
         }
         if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, HEAD" });
-        rate(`public-work-read:${remoteAddress}`, 120);
+        rate(res, `public-work-read:${remoteAddress}`, 120);
         if (publicWorkReceiptMatch) {
           const receiptId = pathId(publicWorkReceiptMatch[1]);
           // Owner-only public-receipts toggle: a room that turned receipts
@@ -1795,7 +1817,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const projectOfferPublicMatch = /^\/api\/project-offers\/([^/]{1,128})(?:\/(brief.md))?$/.exec(url.pathname);
       if (url.pathname === "/api/project-offers" || projectOfferPublicMatch) {
         if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed");
-        rate(`project-offers:${remoteAddress}`, 120);
+        rate(res, `project-offers:${remoteAddress}`, 120);
         if (projectOfferPublicMatch) {
           // Exact literal guard: route inventory expands the dot-form matcher.
           if (projectOfferPublicMatch[2] && projectOfferPublicMatch[2] !== "brief.md") reject(404, "not_found", "Not found");
@@ -1818,7 +1840,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // code, or admission data ever leaves. ?since=<cursor> returns only
       // items opened/created after the cursor (cheap resume for pollers).
       if (url.pathname === "/api/opportunities.json" && req.method === "GET") {
-        rate(`opportunities:${remoteAddress}`, 120);
+        rate(res, `opportunities:${remoteAddress}`, 120);
         return json(res, 200, buildOpportunitiesFeed(store, {
           now: store.now(),
           roomId: url.searchParams.get("room"),
@@ -1837,7 +1859,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const publicFeedMatch = /^\/api\/public\/rooms\/([^/]{1,128})\/feed$/.exec(url.pathname);
       const publicApiAny = publicApiMatch ?? publicFeedMatch;
       if ((publicFaceMatch || publicApiAny) && req.method === "GET") {
-        rate(`public-face:${remoteAddress}`, 120);
+        rate(res, `public-face:${remoteAddress}`, 120);
         const code = (publicFaceMatch ?? publicApiAny)[1];
         // Malformed/unknown/disabled codes all 404 as face_not_found inside
         // the module (never plain not_found, so the invite-only boundary
@@ -1864,7 +1886,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (publicFaceMatch || publicApiAny) reject(405, "method_not_allowed", "Method not allowed");
       // --- ACT-2a public agent-connect page: GET /a/<code> ---
       // RT's route table has not landed. In-memory limiter until a persisted limiter lands.
-      if (handleAgentConnect(req, url, { res, store, remoteAddress, rate, reject, origin: expectedOrigin() })) return;
+      if (handleAgentConnect(req, url, { res, store, remoteAddress, rate: (id, maximum) => rate(res, id, maximum), reject, origin: expectedOrigin() })) return;
       // --- end ACT-2a ---
       // --- GR1 public pages: live receipts and /room/<marketing> aliases ---
       const gr1Alias = gr1PublicPath(url.pathname);
@@ -1875,7 +1897,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // --- end GR2 ---
       const receiptDetail = /^\/receipts\/((?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}))(\.json)?$/.exec(url.pathname);
       if ((url.pathname === "/receipts" || url.pathname === "/api/public/receipts" || receiptDetail) && ["GET", "HEAD"].includes(req.method)) {
-        rate(`receipts:${remoteAddress}`, 120);
+        rate(res, `receipts:${remoteAddress}`, 120);
         const indexable = !url.search;
         if (indexable) res.setHeader("X-Robots-Tag", "all");
         // Owner-only public-receipts toggle: these representations are
@@ -1933,7 +1955,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // --- LEGAL public pages, terms acceptance, abuse reports, operator unpublish (G-SEC-11, G-SEC-14). ---
       if (legalApiPaths.has(url.pathname) || isLegalPath(url.pathname)) {
         const handled = await handleLegalRequest({
-          req, res, url, store, rate, remoteAddress, readBody: body, json, cookie, protectWrite, reject,
+          req, res, url, store, rate: (id, maximum) => rate(res, id, maximum), remoteAddress, readBody: body, json, cookie, protectWrite, reject,
           operatorAccountId, accountCookieName, accountView: sessionAccountView,
         });
         if (handled) return;
@@ -1971,7 +1993,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const acquisition = url.pathname === "/templates" || url.pathname === "/templates.json"
         || url.pathname === "/agents" || templateDetail || roomPage;
       if (acquisition && ["GET", "HEAD"].includes(req.method)) {
-        rate(`acquisition:${remoteAddress}`, 120);
+        rate(res, `acquisition:${remoteAddress}`, 120);
         const ref = url.searchParams.get("ref") ?? "";
         const sendPage = (status, html, jsonBody, canonical, cacheControl = "public, max-age=60") => {
           if (!url.search) res.setHeader("X-Robots-Tag", "all");
@@ -2058,7 +2080,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // administration somewhere (owner or manage_members), and bounds the count.
         const token = cookie(req, accountCookieName), binding = accountBinding(req);
         const auth = store.authenticateAccountSession(token, null, binding);
-        protectWrite(req, auth, false); rate(`account-room-create:${auth.account.id}`, 10);
+        protectWrite(req, auth, false); rate(res, `account-room-create:${auth.account.id}`, 10);
         const result = store.createAccountRoom(token, binding, await body(req));
         return json(res, result.duplicate ? 200 : 201, result);
       }
@@ -2067,7 +2089,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const token = cookie(req, accountCookieName), binding = accountBinding(req);
         const auth = store.authenticateAccountSession(token, null, binding);
         protectWrite(req, auth, false);
-        rate(`account-template:${auth.account.id}`, 10);
+        rate(res, `account-template:${auth.account.id}`, 10);
         const result = applyRoomTemplate(store, token, binding, await body(req));
         return json(res, result.duplicate ? 200 : 201, result);
       }
@@ -2078,7 +2100,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // back with created=false and nothing is created.
         const token = cookie(req, accountCookieName), binding = accountBinding(req);
         const auth = store.authenticateAccountSession(token, null, binding);
-        protectWrite(req, auth, false); rate(`account-default-room:${auth.account.id}`, 10);
+        protectWrite(req, auth, false); rate(res, `account-default-room:${auth.account.id}`, 10);
         const existing = store.db.prepare(
           "SELECT room_id FROM member_accounts WHERE account_id=? ORDER BY room_id LIMIT 1").get(auth.account.id);
         if (existing) return json(res, 200, { room: { id: existing.room_id }, created: false });
@@ -2106,7 +2128,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             return json(res, 200, sessionAccountView(confirmed));
           }
           if (!slotToken) {
-            rate(`account-slot:${remoteAddress}`, 20);
+            rate(res, `account-slot:${remoteAddress}`, 20);
             const created = store.createAccountSessionSlot();
             setCookie(res, accountCookieName, created.token, Math.max(0, Math.floor((created.session.expiresAt - store.now()) / 1000)));
             return json(res, 200, sessionAccountView(created.session));
@@ -2118,7 +2140,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             try { slot = store.accountSessionSlot(slotToken); }
             catch (slotError) {
               if (slotError.status !== 401) throw slotError;
-              rate(`account-slot:${remoteAddress}`, 20);
+              rate(res, `account-slot:${remoteAddress}`, 20);
               const created = store.createAccountSessionSlot();
               setCookie(res, accountCookieName, created.token, Math.max(0, Math.floor((created.session.expiresAt - store.now()) / 1000)));
               slot = created.session;
@@ -2133,7 +2155,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const data = await body(req);
         if (req.method === "POST") {
           if (!exact(data, ["accountAccessKey", "expectedSessionRevision"]) || typeof data.accountAccessKey !== "string") reject(422, "invalid_login", "An account key and current session revision are required");
-          rate(`account-login:${remoteAddress}:${slot.credentialHash}`, 10);
+          rate(res, `account-login:${remoteAddress}:${slot.credentialHash}`, 10);
           const oldRoomToken = cookie(req, roomCookieName);
           // QAS-702 (RC-2026-09-19-069), QA-Auth 2026-09-19: rotate the slot
           // atomically with the login (same store transaction). The pre-login
@@ -2163,7 +2185,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // sessions see only the configured/remaining counts, never the codes.
       if (url.pathname === "/api/auth/recovery-codes/generate" && req.method === "POST") {
         checkOrigin(req, true);
-        rate(`recovery-codes-generate:${remoteAddress}`, 10);
+        rate(res, `recovery-codes-generate:${remoteAddress}`, 10);
         const auth = store.authenticateAccountSession(cookie(req, accountCookieName));
         protectWrite(req, auth, false);
         const { codes, count } = store.accountLogins.generateRecoveryCodes(auth.account.id);
@@ -2171,7 +2193,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           warning: "Save these now \u2014 they are shown once and each works a single time. Regenerating invalidates the previous set." });
       }
       if (url.pathname === "/api/auth/recovery-codes/status" && req.method === "GET") {
-        rate(`recovery-codes-status:${remoteAddress}`, 30);
+        rate(res, `recovery-codes-status:${remoteAddress}`, 30);
         const auth = store.authenticateAccountSession(cookie(req, accountCookieName));
         const configured = store.accountLogins.listMethods(auth.account.id)
           .some(method => method.type === "recovery-code-set" && !method.disabled);
@@ -2180,7 +2202,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (url.pathname === "/api/auth/recovery-codes/redeem" && req.method === "POST") {
         checkOrigin(req, true);
-        rate(`recovery-redeem:${remoteAddress}`, 10);
+        rate(res, `recovery-redeem:${remoteAddress}`, 10);
         const data = await body(req);
         const redeemToken = signInSlotToken(req, data, ["email", "code", "sessionRevision"],
           { code: "invalid_recovery_redeem", message: "An email, recovery code, session token, and current session revision are required", csrf: "always" });
@@ -2268,7 +2290,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/api/auth/methods/disable") {
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
         checkOrigin(req, true);
-        rate(`auth-methods:${remoteAddress}`, 30);
+        rate(res, `auth-methods:${remoteAddress}`, 30);
         const session = requireAccountSession();
         protectWrite(req, session, false);
         const method = store.accountLogins.setMethodDisabled(session.account.id, methodIdFrom(await body(req)), true);
@@ -2277,7 +2299,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/api/auth/methods/enable") {
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
         checkOrigin(req, true);
-        rate(`auth-methods:${remoteAddress}`, 30);
+        rate(res, `auth-methods:${remoteAddress}`, 30);
         const session = requireAccountSession();
         protectWrite(req, session, false);
         const method = store.accountLogins.setMethodDisabled(session.account.id, methodIdFrom(await body(req)), false);
@@ -2286,7 +2308,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/api/auth/methods/remove") {
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
         checkOrigin(req, true);
-        rate(`auth-methods:${remoteAddress}`, 30);
+        rate(res, `auth-methods:${remoteAddress}`, 30);
         const session = requireAccountSession();
         protectWrite(req, session, false);
         const removed = store.accountLogins.removeMethod(session.account.id, methodIdFrom(await body(req)));
@@ -2295,7 +2317,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/api/auth/password/set") {
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
         checkOrigin(req, true);
-        rate(`password-set:${remoteAddress}`, 20);
+        rate(res, `password-set:${remoteAddress}`, 20);
         const session = requireAccountSession();
         protectWrite(req, session, false);
         const data = await body(req);
@@ -2322,7 +2344,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const oauth = github();
         if (!oauth) return json(res, 503, { status: "unavailable", reason: "github_not_configured",
           error: { code: "github_not_configured", message: "GitHub sign-in is not configured" } });
-        rate(`github-link-start:${remoteAddress}`, 10);
+        rate(res, `github-link-start:${remoteAddress}`, 10);
         const slotToken = session.slotToken;
         const expectedRevision = store.accountSessionSlot(slotToken).sessionRevision;
         const { state, codeVerifier } = oauth.pending.create({ sessionToken: slotToken, sessionRevision: expectedRevision, link: true });
@@ -2339,7 +2361,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const session = requireAccountSession();
         const signIn = google();
         if (!signIn) return json(res, 503, { status: "unavailable", reason: "google_not_configured" });
-        rate(`google-link-start:${remoteAddress}`, 10);
+        rate(res, `google-link-start:${remoteAddress}`, 10);
         const slotToken = session.slotToken;
         const expectedRevision = store.accountSessionSlot(slotToken).sessionRevision;
         const started = signIn.begin({ slotToken, expectedRevision, link: true });
@@ -2360,7 +2382,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
         checkOrigin(req, true);
-        rate(`account-profile:${remoteAddress}`, 30);
+        rate(res, `account-profile:${remoteAddress}`, 30);
         const session = requireAccountSession();
         protectWrite(req, session, false);
         return json(res, 200, store.updateAccountProfile(session.account.id, await body(req)));
@@ -2373,7 +2395,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/api/account/onboarding/complete") {
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
         checkOrigin(req, true);
-        rate(`account-onboarding:${remoteAddress}`, 30);
+        rate(res, `account-onboarding:${remoteAddress}`, 30);
         const session = requireAccountSession();
         protectWrite(req, session, false);
         return json(res, 200, store.completeOnboarding(session.account.id));
@@ -2386,7 +2408,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/api/account/deletion/plan") {
         if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
         const session = requireAccountSession();
-        rate(`account-deletion-plan:${remoteAddress}`, 10);
+        rate(res, `account-deletion-plan:${remoteAddress}`, 10);
         const { plan, summary } = planAccountDeletion(store, session.account.id);
         return json(res, 200, {
           plan,
@@ -2398,7 +2420,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/api/account/delete") {
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
         checkOrigin(req, true);
-        rate(`account-delete:${remoteAddress}`, 5);
+        rate(res, `account-delete:${remoteAddress}`, 5);
         const session = requireAccountSession();
         protectWrite(req, session, false);
         const data = await body(req);
@@ -2418,7 +2440,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (url.pathname === "/api/guest-agent-links" && req.method === "POST") {
         checkOrigin(req, !carriesBearer(req));
-        rate(`guest-agent-mint:${remoteAddress}`, 30);
+        rate(res, `guest-agent-mint:${remoteAddress}`, 30);
         const selected = roomCredentials(req, url);
         if (!selected.token) reject(401, "unauthenticated", "Ask the owner to mint a guest invite or Add agent.");
         const data = await body(req);
@@ -2433,14 +2455,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (url.pathname === "/api/guest-agent-links/preview" && req.method === "POST") {
         checkOrigin(req, true);
-        rate(`guest-agent-preview:${remoteAddress}`, 30);
+        rate(res, `guest-agent-preview:${remoteAddress}`, 30);
         const data = await body(req);
         if (!exact(data, ["linkToken"])) reject(422, "invalid_link", "Guest-agent link required");
         return json(res, 200, store.guestAgentLinks.preview(data.linkToken));
       }
       if (url.pathname === "/api/guest-agent-links/join" && req.method === "POST") {
         checkOrigin(req, true);
-        rate(`guest-agent-join:${remoteAddress}`, 20);
+        rate(res, `guest-agent-join:${remoteAddress}`, 20);
         const data = await body(req);
         if (!exact(data, ["linkToken"])) reject(422, "invalid_link", "Guest-agent link required");
         const joinedLink = store.guestAgentLinks.join(data.linkToken);
@@ -2459,7 +2481,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // is the proof; revoked, swept, and v1 seats are refused inside
         // GuestAgentLinks#refresh. Rate matches the sibling join route.
         checkOrigin(req, true);
-        rate(`guest-agent-refresh:${remoteAddress}`, 20);
+        rate(res, `guest-agent-refresh:${remoteAddress}`, 20);
         const data = await body(req);
         if (!exact(data, ["linkToken"])) reject(422, "invalid_link", "Guest-agent link required");
         return json(res, 200, store.guestAgentLinks.refresh(data.linkToken));
@@ -2473,21 +2495,21 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (url.pathname === "/api/guest-invites/preview" && req.method === "POST") {
         checkOrigin(req, true);
-        rate(`guest-invite-preview:${remoteAddress}`, 30);
+        rate(res, `guest-invite-preview:${remoteAddress}`, 30);
         const data = await body(req);
         if (!exact(data, ["inviteCode"]) || typeof data.inviteCode !== "string") reject(422, "invalid_guest_invite", "Guest invite code required");
         return json(res, 200, store.guestInvites.preview(data.inviteCode));
       }
       if (url.pathname === "/api/guest-invites/redeem" && req.method === "POST") {
         checkOrigin(req, !carriesBearer(req));
-        rate(`guest-invite-redeem:${remoteAddress}`, 10);
+        rate(res, `guest-invite-redeem:${remoteAddress}`, 10);
         // The identity secret rides the Authorization header (never the
         // body): the share-links join-agent flow uses the same convention.
         const identitySecret = bearer(req);
         const data = await body(req);
         if (!identitySecret) reject(401, "unauthenticated", "Present your agent identity secret as a Bearer token");
         if (!exact(data, ["inviteCode", "card"]) || typeof data.inviteCode !== "string") reject(422, "invalid_guest_invite", "Supply the invite code and a signed agent card");
-        rate(`guest-invite-redeem-code:${rateHash(data.inviteCode)}`, 5);
+        rate(res, `guest-invite-redeem-code:${rateHash(data.inviteCode)}`, 5);
         const result = store.guestInvites.redeem(data.inviteCode, identitySecret, data.card);
         // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md):
         // score the join, journal the would-be decision, admit anyway. The
@@ -2505,7 +2527,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // room + requestId. Per-minute IP guard here; the hourly/daily
         // gates live in GuestInvites#requestSelfServe.
         checkOrigin(req, true);
-        rate(`guest-invite-request:${remoteAddress}`, 10);
+        rate(res, `guest-invite-request:${remoteAddress}`, 10);
         const data = await body(req);
         if (!exact(data, ["card"])) reject(422, "card_invalid", "Supply a signed agent card with a joinRequest");
         const result = store.guestInvites.requestSelfServe(data.card, String(remoteAddress ?? ""));
@@ -2518,7 +2540,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (url.pathname === "/api/guest-invites/rotate" && req.method === "POST") {
         checkOrigin(req, !carriesBearer(req));
-        rate(`guest-invite-rotate:${remoteAddress}`, 10);
+        rate(res, `guest-invite-rotate:${remoteAddress}`, 10);
         const guestToken = bearer(req);
         if (!guestToken) reject(401, "unauthenticated", "Present your guest credential as a Bearer token");
         const data = await body(req);
@@ -2528,14 +2550,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (url.pathname === "/api/share-links/preview" && req.method === "POST") {
         checkPreviewOrigin(req);
-        rate(`link-preview:${remoteAddress}`, 30);
+        rate(res, `link-preview:${remoteAddress}`, 30);
         const data = await body(req);
         if (!exact(data, ["linkToken"])) reject(422, "invalid_link", "Invitation link required");
         return json(res, 200, store.shareLinks.preview(data.linkToken, cookie(req, accountCookieName), expectedBinding(req)));
       }
       if (url.pathname === "/api/share-links/join-agent" && req.method === "POST") {
         checkOrigin(req, !carriesBearer(req));
-        rate(`link-agent-join:${remoteAddress}`, 20);
+        rate(res, `link-agent-join:${remoteAddress}`, 20);
         const identitySecret = bearer(req);
         if (identitySecret?.startsWith(API_KEY_PREFIX)) reject(401, "room_token_not_identity", ROOM_TOKEN_NOT_IDENTITY);
         if (!store.identities.resolveGlobalIdentitySecret(identitySecret)) reject(401, "unauthenticated", "Active agent identity required");
@@ -2573,7 +2595,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const binding = accountBinding(req);
         const data = await body(req);
         if (!exact(data, ["linkToken", "displayName", "redemptionId", "expectedSessionRevision"])) reject(422, "invalid_join", "Supply the invitation link and your name");
-        rate(`link-join:${remoteAddress}`, 20);
+        rate(res, `link-join:${remoteAddress}`, 20);
         const oldRoomToken = cookie(req, roomCookieName);
         const result = store.shareLinks.join(token, data.linkToken, { ...data, expectedSessionBinding: binding,
           revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null,
@@ -2582,7 +2604,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (url.pathname === "/api/invitations/preview" && req.method === "POST") {
         checkOrigin(req, true);
-        rate(`invitation-preview:${remoteAddress}`, 30);
+        rate(res, `invitation-preview:${remoteAddress}`, 30);
         const data = await body(req);
         if (!exact(data, ["invitationToken"]) || typeof data.invitationToken !== "string") reject(422, "invalid_invitation", "Invitation token required");
         return json(res, 200, store.previewInvitation(data.invitationToken));
@@ -2594,13 +2616,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         protectWrite(req, auth, false);
         const data = await body(req);
         if (!exact(data, ["invitationToken", "redemptionId", "expectedRevision"]) || typeof data.invitationToken !== "string" || typeof data.redemptionId !== "string") reject(422, "invalid_invitation_acceptance", "Invitation token, redemption ID, and expected revision required");
-        rate(`invitation-accept:${auth.credentialHash}:${rateHash(data.invitationToken)}`, 20);
+        rate(res, `invitation-accept:${auth.credentialHash}:${rateHash(data.invitationToken)}`, 20);
         const result = store.acceptInvitation(slotToken, data.invitationToken, { redemptionId: data.redemptionId, expectedRevision: data.expectedRevision, expectedSessionBinding: auth.sessionBinding });
         return json(res, result.duplicate ? 200 : 201, result);
       }
       if (url.pathname === "/api/session" && req.method === "POST") {
         checkOrigin(req, true);
-        rate(`login:${remoteAddress}`, 10);
+        rate(res, `login:${remoteAddress}`, 10);
         const data = await body(req);
         if (!exact(data, ["accessKey"]) || typeof data.accessKey !== "string") reject(422, "invalid_login", "An access key is required");
         const { token, session } = store.createSession(data.accessKey);
@@ -2613,7 +2635,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // creates a room-scoped browser session for the chosen room.
       if (url.pathname === "/api/auth/agent/rooms" && req.method === "POST") {
         checkOrigin(req, true);
-        rate(`login:${remoteAddress}`, 10);
+        rate(res, `login:${remoteAddress}`, 10);
         const data = await body(req);
         if (!exact(data, ["identityId"]) || typeof data.identityId !== "string") {
           reject(422, "invalid_login", "An agent identity ID is required");
@@ -2626,7 +2648,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (url.pathname === "/api/auth/agent/session" && req.method === "POST") {
         checkOrigin(req, true);
-        rate(`login:${remoteAddress}`, 10);
+        rate(res, `login:${remoteAddress}`, 10);
         const data = await body(req);
         if (!exact(data, ["identityId", "roomId"]) || typeof data.identityId !== "string" || typeof data.roomId !== "string") {
           reject(422, "invalid_login", "An agent identity ID and room are required");
@@ -2654,7 +2676,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       //   { displayName, inviteCode }   -> redeem the invite into its room
       // The one-time identity secret is shown once; save it immediately.
       if ((url.pathname === "/join" || url.pathname === "/room/join" || url.pathname === "/api/join") && req.method === "POST") {
-        rate(`join:${remoteAddress}`, 20);
+        rate(res, `join:${remoteAddress}`, 20);
         const data = await body(req);
         const hasProof = Boolean(data) && Object.hasOwn(data, "proof");
         const hasInvite = Boolean(data) && Object.hasOwn(data, "inviteCode");
@@ -2818,7 +2840,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!webAuth.member?.id) reject(401, "unauthenticated", "Member credential required");
         if (isWebFetchGuest(webAuth.member)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
         protectWrite(req, webAuth, isBearer);
-        rate(`write:${webAuth.credentialHash}`, 60);
+        rate(res, `write:${webAuth.credentialHash}`, 60);
         const data = await body(req);
         try {
           return json(res, 200, await store.webFetch.fetch(webAuth.roomId, webAuth.member.id, data, { credentialHash: webAuth.credentialHash }));
@@ -2828,8 +2850,19 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (error instanceof WebFetchError) {
             const payload = { error: { code: error.code, message: error.message }, request_id: error.requestId ?? null };
             if (error.code === "rate_limited") {
+              // FIX-64: the quota 429 answers the same canonical shape as
+              // every other 429 (envelope + nested detail). The flat
+              // retryAfterMs/resetAt stay for existing readers.
+              const detail = rateLimitDetail({ retryAfterMs: error.retryAfterMs, resetAt: error.resetAt, limit: error.limit, window: error.window, remaining: 0 });
               res.setHeader("Retry-After", String(Math.max(1, Math.ceil(error.retryAfterMs / 1000))));
-              return json(res, 429, { ...payload, retryAfterMs: error.retryAfterMs, resetAt: error.resetAt });
+              if (Number.isFinite(error.resetAt)) {
+                res.setHeader("RateLimit-Reset", String(Math.max(0, Math.ceil((error.resetAt - Date.now()) / 1000))));
+              }
+              return json(res, 429, {
+                ...agentErrorBody({ httpStatus: 429, code: error.code, message: error.message }),
+                operationId, category: "rate_limited", detail,
+                ...payload, retryAfterMs: error.retryAfterMs, resetAt: error.resetAt,
+              });
             }
             return json(res, error.status, payload);
           }
@@ -2851,7 +2884,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!researchAuth.member?.id) reject(401, "unauthenticated", "Member credential required");
         if (isWebFetchGuest(researchAuth.member)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
         protectWrite(req, researchAuth, researchIsBearer);
-        rate(`write:${researchAuth.credentialHash}`, 60);
+        rate(res, `write:${researchAuth.credentialHash}`, 60);
         const researchData = await body(req);
         try {
           return json(res, 200, await store.webResearch.research(researchAuth.roomId, researchAuth.member.id, researchData, { credentialHash: researchAuth.credentialHash }));
@@ -2859,8 +2892,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (error instanceof WebFetchError) {
             const payload = { error: { code: error.code, message: error.message }, request_id: error.requestId ?? null };
             if (error.code === "rate_limited") {
+              // FIX-64: same canonical 429 shape as /api/web/fetch (see
+              // above): envelope + nested detail, flat fields kept.
+              const detail = rateLimitDetail({ retryAfterMs: error.retryAfterMs, resetAt: error.resetAt, limit: error.limit, window: error.window, remaining: 0 });
               res.setHeader("Retry-After", String(Math.max(1, Math.ceil(error.retryAfterMs / 1000))));
-              return json(res, 429, { ...payload, retryAfterMs: error.retryAfterMs, resetAt: error.resetAt });
+              if (Number.isFinite(error.resetAt)) {
+                res.setHeader("RateLimit-Reset", String(Math.max(0, Math.ceil((error.resetAt - Date.now()) / 1000))));
+              }
+              return json(res, 429, {
+                ...agentErrorBody({ httpStatus: 429, code: error.code, message: error.message }),
+                operationId, category: "rate_limited", detail,
+                ...payload, retryAfterMs: error.retryAfterMs, resetAt: error.resetAt,
+              });
             }
             return json(res, error.status, payload);
           }
@@ -2879,7 +2922,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // Documented in docs/openapi.yaml like every other route literal here.
       if (url.pathname === "/api/claims/validate") {
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
-        rate(`claim-validate:${remoteAddress}`, 30);
+        rate(res, `claim-validate:${remoteAddress}`, 30);
         const data = await body(req, { limit: CLAIM_TEXT_MAX_LENGTH + 8192 });
         if (!exact(data, ["text"]) || typeof data.text !== "string") {
           reject(422, "invalid_claim_text", "A claim text string is required");
@@ -2897,7 +2940,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // (429 rate_limited / 428 proof_required) and the IDENTITY_LIMIT cap
       // (409 pilot_limit, no row written).
       if ((url.pathname === "/api/agent-identities" || url.pathname === "/api/identity-create") && req.method === "POST") {
-        rate(`identity-create:${remoteAddress}`, 30);
+        rate(res, `identity-create:${remoteAddress}`, 30);
         const data = await body(req);
         const hasProof = Boolean(data) && Object.hasOwn(data, "proof");
         const recoverable = data?.recoverable === true;
@@ -2938,7 +2981,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // Agent invite codes: redemption is unauthenticated (the code is the
       // bearer credential); issuance is owner-only per room.
       if (url.pathname === "/api/agent-invites/redeem" && req.method === "POST") {
-        rate(`invite-redeem:${remoteAddress}`, 20);
+        rate(res, `invite-redeem:${remoteAddress}`, 20);
         const data = await body(req);
         // Colony round-2 (musespark-explorer, 2026-10-06): the static 422 here
         // blamed the caller for sending *less* when the body carried an *extra*
@@ -2971,7 +3014,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // Redemption is unauthenticated (the token is the credential) and
       // lands the stranger at the fixed read+chat tier.
       if (url.pathname === "/api/referral-invites/mint" && req.method === "POST") {
-        rate(`referral-invite-mint:${remoteAddress}`, 20);
+        rate(res, `referral-invite-mint:${remoteAddress}`, 20);
         const secret = bearer(req);
         if (!secret) reject(401, "unauthenticated", "Sign in with an active room key or agent identity secret");
         const data = await body(req);
@@ -2988,7 +3031,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
       }
       if (url.pathname === "/api/referral-invites/redeem" && req.method === "POST") {
-        rate(`referral-invite-redeem:${remoteAddress}`, 20);
+        rate(res, `referral-invite-redeem:${remoteAddress}`, 20);
         const data = await body(req);
         // SEC-1: a bearer attaches an existing identity. A new join shares
         // the anonymous mint limiter, so proof is accepted on this body.
@@ -3023,7 +3066,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // never lands in a query string or access log. Unauthenticated;
       // consumes nothing, reveals no inviter or identity data.
       if (url.pathname === "/api/referral-invites/preview" && req.method === "POST") {
-        rate(`referral-invite-preview:${remoteAddress}`, 20);
+        rate(res, `referral-invite-preview:${remoteAddress}`, 20);
         const data = await body(req);
         if (!exact(data, ["token"]) || typeof data.token !== "string") reject(422, "invalid_invite", "token is required");
         return json(res, 200, store.referralInvites.preview(data.token));
@@ -3035,7 +3078,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // review screen. Unauthenticated (the code is the bearer credential);
       // consumes nothing, reveals no member or identity data.
       if (url.pathname === "/api/agent-invites/preview" && req.method === "GET") {
-        rate(`invite-preview:${remoteAddress}`, 20);
+        rate(res, `invite-preview:${remoteAddress}`, 20);
         const code = url.searchParams.get("code");
         if (typeof code !== "string" || !code) reject(422, "invalid_invite", "Invite code is required");
         return json(res, 200, store.invites.preview(code));
@@ -3047,7 +3090,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // The other three open POST routes all bound themselves per address
         // before reading a body; this one did not, so the only limit it had was
         // keyed on a field the caller chooses.
-        rate(`access-request:${remoteAddress}`, 20);
+        rate(res, `access-request:${remoteAddress}`, 20);
         const data = await body(req);
         // RC-2026-09-28-3410: the old exact() gate demanded all six keys and
         // answered every violation with one static "accepted fields" list, so
@@ -3109,16 +3152,37 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // the bearer header (never a JSON body); per-address rate limit
       // before the body is read, per-identity budget inside the module.
       if (url.pathname === "/api/agent-rooms" && req.method === "GET") {
-        rate(`agent-room-list:${remoteAddress}`, 60);
+        rate(res, `agent-room-list:${remoteAddress}`, 60);
         return json(res, 200, agentRooms.list(bearer(req), url.searchParams.get("after") ?? ""));
       }
       if (url.pathname === "/api/agent-rooms" && req.method === "POST") {
-        rate(`agent-room-create:${remoteAddress}`, 20);
+        rate(res, `agent-room-create:${remoteAddress}`, 20);
         const secret = bearer(req);
         if (!secret) reject(401, "unauthenticated", "Identity secret required. Agents can self-mint an identity at POST /api/agent-identities.");
         const data = await body(req);
         const created = agentRooms.create(secret, data);
         return json(res, created.duplicate ? 200 : 201, created);
+      }
+      // FIX-64: programmatic budget read. The caller's identity-scoped budgets
+      // (room-creation cap, per-credential read/write budgets) with remaining
+      // tokens and ms-epoch reset times. Read-only: reading never spends.
+      if (url.pathname === "/api/agent-rooms/budget" && req.method === "GET") {
+        rate(res, `agent-room-budget:${remoteAddress}`, 60);
+        const secret = bearer(req);
+        if (!secret) reject(401, "unauthenticated", "Identity secret required. Agents can self-mint an identity at POST /api/agent-identities.");
+        const view = agentRooms.budget(secret);
+        const credentialKey = rateHash(secret);
+        for (const [name, family, limit, window] of [["reads", "read", 600, "1m"], ["writes", "write", 60, "1m"]]) {
+          const entry = rates.get(`${family}:${credentialKey}`);
+          const active = entry && entry.until > Date.now();
+          view.budgets[name] = {
+            limit,
+            remaining: active ? Math.max(0, limit - entry.n) : limit,
+            window,
+            resetAt: active ? entry.until : null,
+          };
+        }
+        return json(res, 200, view);
       }
       // GET is a documented identity-secret list (401 without a pri_), not a
       // POST-only route. Other methods are not part of that contract.
@@ -3127,7 +3191,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       // Cross-room attention for one identity. Same read as MCP room_needs_me.
       if (url.pathname === "/api/needs-me" && (req.method === "GET" || req.method === "HEAD")) {
-        rate(`needs-me:${remoteAddress}`, 60);
+        rate(res, `needs-me:${remoteAddress}`, 60);
         const secret = bearer(req);
         if (secret && secret.startsWith(API_KEY_PREFIX)) reject(401, "room_token_not_identity", ROOM_TOKEN_NOT_IDENTITY);
         if (!secret || !isIdentitySecret(secret)) reject(401, "unauthenticated", "Identity secret required. Agents can self-mint an identity at POST /api/agent-identities.");
@@ -3167,7 +3231,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return query;
       };
       if (url.pathname === "/api/updates" && (req.method === "GET" || req.method === "HEAD")) {
-        rate(`updates:${remoteAddress}`, 60);
+        rate(res, `updates:${remoteAddress}`, 60);
         const secret = bearer(req);
         if (secret) {
           if (!isIdentitySecret(secret)) reject(401, "unauthenticated", "Cross-room updates need an identity secret or an account session");
@@ -3190,14 +3254,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           const granted = (auth.apiKeyScopes ?? []).some(scope => scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
           if (!granted) reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
         }
-        rate(`read:${auth.credentialHash}`, 600);
+        rate(res, `read:${auth.credentialHash}`, 600);
         if (updatesListMatch) {
           if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, HEAD" });
           return json(res, 200, listRoomUpdates(store, selected.token, roomId, updatesQuery(), fence), req.method === "HEAD");
         }
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
         protectWrite(req, auth, selected.bearer);
-        rate(`write:${auth.credentialHash}`, 60);
+        rate(res, `write:${auth.credentialHash}`, 60);
         const data = await body(req);
         // JDOT-COH-UPDATES-BASIS begin
         // Missing expectedBasis can reach only an authenticated legacy receipt;
@@ -3213,7 +3277,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // enumeration vector (a wrong identity and a missing request answer
         // the same 404, and identity ids are 96 random bits), but an open read
         // with no limit at all is still unbounded work for anyone who asks.
-        rate(`access-request-status:${remoteAddress}`, 60);
+        rate(res, `access-request-status:${remoteAddress}`, 60);
         const identityId = url.searchParams.get("identityId");
         if (!identityId) reject(422, "invalid_request", "identityId query param is required");
         // JDOT-ACCESS-UPGRADE-HTTP begin: upgrade status has the same identity boundary.
@@ -3232,7 +3296,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         });
       }
       if (accessStatusMatch && req.method === "POST") {
-        rate(`access-request-cancel:${remoteAddress}`, 20);
+        rate(res, `access-request-cancel:${remoteAddress}`, 20);
         const secret = bearer(req);
         if (!secret) reject(401, "unauthenticated", "The requesting identity's current bearer secret is required");
         const data = await body(req);
@@ -3261,14 +3325,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
           if (!granted) reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
         }
-        rate(`read:${auth.credentialHash}`, 600);
+        rate(res, `read:${auth.credentialHash}`, 600);
         if (action === "list_land_queue") {
           if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
           return json(res, 200, store.landQueue.list(roomId, auth.member.id), req.method === "HEAD");
         }
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
         protectWrite(req, auth, selected.bearer);
-        rate(`write:${auth.credentialHash}`, 60);
+        rate(res, `write:${auth.credentialHash}`, 60);
         const data = await body(req);
         try {
           if (action === "add_land_item") {
@@ -3333,17 +3397,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         if (readFileId) {
           if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
-          rate(`read:${auth.credentialHash}`, 600);
+          rate(res, `read:${auth.credentialHash}`, 600);
           return json(res, 200, store.roomAttachments.get(selected.token, roomId, readFileId), req.method === "HEAD");
         }
         if (!writing) {
           if (!["GET", "HEAD"].includes(req.method) || fileId) reject(405, "method_not_allowed", "Method not allowed", { Allow: fileId ? "POST" : "GET" });
-          rate(`read:${auth.credentialHash}`, 600);
+          rate(res, `read:${auth.credentialHash}`, 600);
           return json(res, 200, store.roomAttachments.list(selected.token, roomId), req.method === "HEAD");
         }
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: fileId ? "POST" : "GET, POST" });
         protectWrite(req, auth, selected.bearer);
-        rate(`write:${auth.credentialHash}`, 60);
+        rate(res, `write:${auth.credentialHash}`, 60);
         if (fileId) {
           const data = await body(req);
           if (!exact(data, ["messageId"]) || typeof data.messageId !== "string") reject(422, "invalid_message", "messageId is required");
@@ -3609,8 +3673,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const auth = roomAuth(selected, roomId, fence);
       if (selected.bearer && auth.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
       if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
-      rate(`read:${auth.credentialHash}`, 600);
-      if (!["GET", "HEAD"].includes(req.method)) { protectWrite(req, auth, selected.bearer); rate(`write:${auth.credentialHash}`, 60); }
+      rate(res, `read:${auth.credentialHash}`, 600);
+      if (!["GET", "HEAD"].includes(req.method)) { protectWrite(req, auth, selected.bearer); rate(res, `write:${auth.credentialHash}`, 60); }
       // RC-2026-09-18-012: API-key callers are confined to their stored
       // scopes on every room route — reads need rooms:read, writes need
       // rooms:write. Owner identity secrets and room credentials are
@@ -4653,7 +4717,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, result.duplicate ? 200 : 201, result);
       }
       if (route === "guest-agent-links" && req.method === "POST") {
-        rate(`guest-agent-mint:${remoteAddress}`, 30);
+        rate(res, `guest-agent-mint:${remoteAddress}`, 30);
         const result = store.guestAgentLinks.mint(selected.token, roomId, await body(req), fence);
         return json(res, result.duplicate ? 200 : 201, result);
       }
@@ -4661,32 +4725,32 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // (store-level owner gate). Public preview/redeem/rotate live at the
       // top-level /api/guest-invites/* routes above.
       if (route === "guest-invites" && req.method === "POST") {
-        rate(`guest-invite-mint:${remoteAddress}`, 30);
+        rate(res, `guest-invite-mint:${remoteAddress}`, 30);
         const result = store.guestInvites.mint(selected.token, roomId, await body(req), fence);
         return json(res, result.duplicate ? 200 : 201, result);
       }
       if (route === "guest-invites-list" && req.method === "POST") {
-        rate(`guest-invite-admin:${remoteAddress}`, 30);
+        rate(res, `guest-invite-admin:${remoteAddress}`, 30);
         return json(res, 200, store.guestInvites.list(selected.token, roomId, fence));
       }
       if (route === "guest-invites-revoke" && req.method === "POST") {
-        rate(`guest-invite-admin:${remoteAddress}`, 30);
+        rate(res, `guest-invite-admin:${remoteAddress}`, 30);
         const data = await body(req);
         if (!exact(data, ["inviteId"]) || typeof data.inviteId !== "string") reject(422, "invalid_guest_invite", "Supply the invite id");
         return json(res, 200, store.guestInvites.revoke(selected.token, roomId, data.inviteId, fence));
       }
       if (route === "guest-invites-disconnect" && req.method === "POST") {
-        rate(`guest-invite-admin:${remoteAddress}`, 30);
+        rate(res, `guest-invite-admin:${remoteAddress}`, 30);
         const data = await body(req);
         if (!exact(data, ["memberId"]) || typeof data.memberId !== "string") reject(422, "invalid_guest_invite", "Supply the guest member id");
         return json(res, 200, store.guestInvites.disconnect(selected.token, roomId, data.memberId, fence));
       }
       if (route === "guest-invites-revoke-all" && req.method === "POST") {
-        rate(`guest-invite-admin:${remoteAddress}`, 30);
+        rate(res, `guest-invite-admin:${remoteAddress}`, 30);
         return json(res, 200, store.guestInvites.revokeAll(selected.token, roomId, fence));
       }
       if (route === "guest-invites-upgrade" && req.method === "POST") {
-        rate(`guest-invite-admin:${remoteAddress}`, 30);
+        rate(res, `guest-invite-admin:${remoteAddress}`, 30);
         const upgradeBody = await body(req);
         return json(res, 200, store.guestInvites.upgrade(selected.token, roomId, upgradeBody.memberId, upgradeBody.tier, fence));
       }
@@ -4881,7 +4945,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // mitigation). The per-request scope gate in RoomStore#command is
         // the authority boundary; this is volume control.
         if (typeof selected.token === "string" && selected.token.startsWith(GUEST_AGENT_TOKEN_PREFIX)) {
-          rate(`guest-post:${rateHash(selected.token)}`, 120);
+          rate(res, `guest-post:${rateHash(selected.token)}`, 120);
         }
         const command = await body(req, { limit: MAX_MESSAGE_COMMAND_BYTES });
         // R1 delivery-path tracing (RC-2026-09-26-966): delivery.inbound spans
@@ -4958,7 +5022,25 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // Storage failures raised outside a store transaction take the same typed 503 and count toward readiness.
       const error = caught instanceof ServiceError ? caught : store.storageFailure?.(caught) ?? caught;
       if (res.headersSent) { res.end(); return; }
-      if (error.status === 429) res.setHeader("Retry-After", "60");
+      // FIX-64: 429s answer one canonical shape — the documented envelope
+      // plus a nested `detail` ({ retryAfterMs, limit, window, resetAt?,
+      // remaining? }). Retry-After is derived from that detail: the old
+      // hardcoded 60 lied for budgets like the 3/24h room-creation cap.
+      // Explicit error.headers still win over the derived values.
+      const rateDetail = error.status === 429 && error.detail && typeof error.detail === "object" && !Array.isArray(error.detail)
+        ? error.detail : null;
+      const detailRetryAfterMs = rateDetail && Number.isFinite(rateDetail.retryAfterMs) ? rateDetail.retryAfterMs : null;
+      if (error.status === 429) {
+        res.setHeader("Retry-After", String(Math.max(1, Math.ceil((detailRetryAfterMs ?? 60000) / 1000))));
+        if (rateDetail) {
+          if (Number.isFinite(rateDetail.limit)) res.setHeader("RateLimit-Limit", String(rateDetail.limit));
+          res.setHeader("RateLimit-Remaining",
+            String(Number.isFinite(rateDetail.remaining) ? Math.max(0, rateDetail.remaining) : 0));
+          if (Number.isFinite(rateDetail.resetAt)) {
+            res.setHeader("RateLimit-Reset", String(Math.max(0, Math.ceil((rateDetail.resetAt - Date.now()) / 1000))));
+          }
+        }
+      }
       if (error.headers && typeof error.headers === "object") {
         for (const [name, value] of Object.entries(error.headers)) res.setHeader(name, String(value));
       }
@@ -5022,6 +5104,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         ? { error: { code, message }, ...errorOverride, operationId, category }
         : { ...agentErrorBody({ httpStatus, code, message, roomId, workItemId, commandType: error[ERROR_COMMAND_TYPE] }), operationId, category },
       error.detail);
+      // FIX-64: the canonical nested 429 detail. The flat merge above stays
+      // for existing readers; `detail` is the documented machine-readable
+      // shape going forward.
+      if (rateDetail) errorBody.detail = { ...rateDetail };
       json(res, httpStatus, errorBody);
     }
   });

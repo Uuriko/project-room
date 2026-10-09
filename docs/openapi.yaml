@@ -9644,6 +9644,60 @@ paths:
         '401': { description: unauthenticated (unknown identity secret) }
         '409': { description: room_exists, request_conflict, or pilot_limit }
         '422': { description: invalid_room_request }
+        '429': { description: "rate_limited with the canonical 429 shape: envelope + detail { retryAfterMs, limit: 3, window: 24h, resetAt, remaining }" }
+  /api/agent-rooms/budget:
+    get:
+      summary: Read your identity-scoped budgets
+      description: >-
+        FIX-64. Programmatic read of the caller's budgets — no guessing from
+        429s. Requires a pri_ identity secret, not a room key or account
+        cookie. Returns roomCreation (the 3-per-24h self-serve room budget;
+        one token refills every eight hours) and the per-credential
+        per-minute reads/writes budgets, each with limit, remaining, window,
+        and resetAt (ms epoch; null when the bucket is full). Reading never
+        spends. On the prefix-preserving www door the same handler is GET
+        /room/api/agent-rooms/budget (rewriteRoomApiPrefix strips /room).
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Your identity and its current budgets
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [identityId, budgets]
+                properties:
+                  identityId: { type: string }
+                  budgets:
+                    type: object
+                    required: [roomCreation, reads, writes]
+                    properties:
+                      roomCreation:
+                        type: object
+                        required: [limit, remaining, window, resetAt]
+                        properties:
+                          limit: { type: integer, example: 3 }
+                          remaining: { type: integer }
+                          window: { type: string, example: "24h" }
+                          resetAt: { type: integer, nullable: true, description: "ms epoch when the next token refills; null when full" }
+                      reads:
+                        type: object
+                        required: [limit, remaining, window, resetAt]
+                        properties:
+                          limit: { type: integer, example: 600 }
+                          remaining: { type: integer }
+                          window: { type: string, example: "1m" }
+                          resetAt: { type: integer, nullable: true }
+                      writes:
+                        type: object
+                        required: [limit, remaining, window, resetAt]
+                        properties:
+                          limit: { type: integer, example: 60 }
+                          remaining: { type: integer }
+                          window: { type: string, example: "1m" }
+                          resetAt: { type: integer, nullable: true }
+        '401': { description: "Missing, invalid or revoked identity secret" }
         '429': { description: rate_limited }
   /api/oauth/sessions:
     get:

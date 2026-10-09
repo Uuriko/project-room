@@ -18,6 +18,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { EVENT_TYPES as T, PERMISSIONS, event, validId, ROOM_KINDS, HISTORY_DEFAULTS_VERSION } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
+import { rateLimitDetail } from "../src/agent-error.mjs";
 import { nextActionsForRoomCreate } from "./discoverability.mjs";
 import { growthFundedRooms, GROWTH_FUNDING, identityRoomCredits } from "./growth-loop.mjs";
 import { claimWork, createWork } from "./work-claims.mjs";
@@ -34,7 +35,9 @@ const refuseRoomToken = secret => {
   if (typeof secret === "string" && secret.startsWith(API_KEY_PREFIX)) fail(401, "room_token_not_identity", ROOM_TOKEN_NOT_IDENTITY);
 };
 
-const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
+const fail = (status, code, message, headers = null, detail = null) => {
+  throw new ServiceError(status, code, message, headers, detail);
+};
 
 // Bounded pilot: rooms one identity may create.
 export const AGENT_ROOM_LIMIT = 100;
@@ -158,6 +161,29 @@ export class AgentRooms {
     return { identityId: identity.identityId, rooms, nextCursor: links.length > 100 ? links[99].roomId : null };
   }
 
+  // Programmatic budget read (FIX-64): the caller's current room-creation
+  // budget with remaining tokens and the ms-epoch the next token refills.
+  // Read-only — unlike check(), peek() never consumes a token.
+  budget(secret) {
+    const identity = this.store.identities.resolveGlobalIdentitySecret(secret);
+    if (!identity) refuseRoomToken(secret);
+    if (!identity) fail(401, "unauthenticated", "Unknown identity secret");
+    const peek = typeof this.createLimiter.peek === "function"
+      ? this.createLimiter.peek(identity.identityId)
+      : (() => { const s = this.createLimiter.state(identity.identityId); return { remaining: s.tokens, resetAtMs: null }; })();
+    return {
+      identityId: identity.identityId,
+      budgets: {
+        roomCreation: {
+          limit: AGENT_ROOM_CREATE_CAPACITY,
+          remaining: Math.max(0, Math.floor(peek.remaining)),
+          window: "24h",
+          resetAt: peek.resetAtMs,
+        },
+      },
+    };
+  }
+
   // Shared shape for both idempotency keys (client roomId, client requestId):
   // the original room, a fresh onboarding token, and the duplicate flag so
   // the HTTP layer answers 200 on a replay.
@@ -240,7 +266,8 @@ export class AgentRooms {
       if (!limit.allowed) {
         const credits = identityRoomCredits(this.store, identity.identityId);
         const funded = growthFundedRooms(this.store, identity.identityId);
-        if (credits.total - funded < 1) fail(429, "rate_limited", limit.message);
+        if (credits.total - funded < 1) fail(429, "rate_limited", limit.message, null,
+          rateLimitDetail({ retryAfterMs: limit.retryAfterMs, limit: AGENT_ROOM_CREATE_CAPACITY, window: "24h", remaining: 0 }));
         fundedByGrowth = true;
       }
       const createdCount = this.store.db.prepare("SELECT count(*) AS n FROM agent_room_ownership WHERE identity_id=?").get(identity.identityId).n;

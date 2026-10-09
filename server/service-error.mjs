@@ -10,5 +10,5 @@
 // `instanceof` checks behave identically.
 
 export class ServiceError extends Error {
-  constructor(status, code, message, headers = null) { super(message); this.status = status; this.code = code; this.headers = headers; }
+  constructor(status, code, message, headers = null, detail = null) { super(message); this.status = status; this.code = code; this.headers = headers; this.detail = detail; }
 }

@@ -725,7 +725,7 @@ export function agentErrorBody({ httpStatus, code, message, roomId, workItemId, 
 // errorId/fingerprint the server mints.
 const RESERVED_DETAIL_KEYS = Object.freeze([
   "error", "status", "reason", "hint", "next", "operationId", "category",
-  "message", "code", "stack", "cause", "errorId", "fingerprint", "trace",
+  "message", "code", "stack", "cause", "errorId", "fingerprint", "trace", "detail",
 ]);
 export function mergeErrorDetail(errorBody, detail) {
   if (!detail || typeof detail !== "object" || Array.isArray(detail)) return errorBody;
@@ -733,6 +733,24 @@ export function mergeErrorDetail(errorBody, detail) {
     if (!RESERVED_DETAIL_KEYS.includes(key)) errorBody[key] = value;
   }
   return errorBody;
+}
+
+// FIX-64 canonical 429 detail: the machine-readable retry/budget info every
+// 429 body carries nested under `detail`, next to the { error: { code,
+// message } } envelope. retryAfterMs is the authoritative wait (the
+// Retry-After header mirrors it); limit is the bucket capacity; window is
+// the human budget window ("1m", "1h", "24h"); resetAt is the ms-epoch when
+// the budget next refills (null when full); remaining is tokens left (0 on
+// a refusal). Undefined fields are dropped so the shape stays tight.
+export function rateLimitDetail({ retryAfterMs, limit, window, resetAt = null, remaining = null } = {}) {
+  const detail = {};
+  if (Number.isFinite(retryAfterMs)) detail.retryAfterMs = retryAfterMs;
+  if (Number.isFinite(limit)) detail.limit = limit;
+  if (typeof window === "string" && window) detail.window = window;
+  if (Number.isFinite(resetAt)) detail.resetAt = resetAt;
+  else if (resetAt === null) detail.resetAt = null;
+  if (Number.isFinite(remaining)) detail.remaining = remaining;
+  return Object.freeze(detail);
 }
 
 export function validAgentNext(next) {
