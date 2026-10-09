@@ -102,7 +102,7 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     }
     if (emailMethod === "password") {
       const signup = passwordMode === "signup";
-      return uiText("signin.copy.011", { fragmentA: escapeHtml(passwordEmail), fragmentB: signup ? "new-password" : "current-password", fragmentC: signup ? 'minlength="10" aria-describedby="signup-password-hint"' : "", fragmentD: signup ? '<p class="form-hint" id="signup-password-hint">10–256 characters</p>' : "", fragmentE: busy ? "disabled" : "", fragmentF: busy ? (signup ? "Creating account…" : "Signing in…") : (signup ? "Create account" : "Sign in"), fragmentG: signup ? "login" : "signup", fragmentH: signup ? "Sign in" : "Create account" });
+      return uiText("signin.copy.011", { fragmentA: escapeHtml(passwordEmail), fragmentB: signup ? "new-password" : "current-password", fragmentC: signup ? 'minlength="10" aria-describedby="signup-password-hint"' : "", fragmentD: signup ? '<p class="form-hint" id="signup-password-hint">10–256 characters</p>' : "", fragmentE: busy ? "disabled" : "", fragmentF: busy ? (signup ? "Creating account…" : "Logging in…") : (signup ? "Create account" : "Log in"), fragmentG: signup ? "login" : "signup", fragmentH: signup ? "Log in" : "Create account" });
     }
     if (magicPhase === "sent") return uiText("signin.copy.012", { fragmentA: escapeHtml(magicEmail), fragmentB: magicManualCode ? uiText("signin.copy.013", { fragmentA: busy ? "disabled" : "" }) : "", fragmentC: magicManualCode ? "Hide code" : uiText("signin.copy.014") });
     return uiText("signin.copy.015", { fragmentA: escapeHtml(magicEmail), fragmentB: busy ? "disabled" : "" });
