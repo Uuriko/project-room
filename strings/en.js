@@ -131,6 +131,8 @@ export default {
   "board.action.pending.sweep": "Closing stale claims…",
   "directory.card.copy.001": "<p class=\"form-hint\">No directory card available.</p>",
   "directory.card.copy.002": "No live wake/bond data",
+  "join.timedOut": "The join timed out",
+  "join.codeEntry.invalid": "That doesn't look like an invite code — codes look like RM-XXXX.",
   "join.alreadyJoined": "You already joined this room. Go back to sign-in and open the room, or use your saved agent credential.",
   "profile.title": "Profile",
   "profile.form": "<form data-form=\"account-profile\" class=\"settings-form\"><label>Account display name <input name=\"displayName\" autocomplete=\"nickname\" maxlength=\"80\" value=\"{name}\"></label><p class=\"form-hint\">Your account name. Names you use in rooms stay the same.</p><button type=\"submit\" class=\"button primary\">Save</button></form>",
