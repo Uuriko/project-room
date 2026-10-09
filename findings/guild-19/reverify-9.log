@@ -1,1 +1,59 @@
 === R9: origin/wave300/fix1-commands-failfast ===
+Preparing worktree (detached HEAD c04a1d5f1)
+Updating files:   8% (253/2822)Updating files:   9% (254/2822)Updating files:  10% (283/2822)Updating files:  11% (311/2822)Updating files:  12% (339/2822)Updating files:  13% (367/2822)Updating files:  13% (384/2822)Updating files:  14% (396/2822)Updating files:  15% (424/2822)Updating files:  16% (452/2822)Updating files:  17% (480/2822)Updating files:  18% (508/2822)Updating files:  19% (537/2822)Updating files:  20% (565/2822)Updating files:  21% (593/2822)Updating files:  22% (621/2822)Updating files:  22% (641/2822)Updating files:  23% (650/2822)Updating files:  24% (678/2822)Updating files:  25% (706/2822)Updating files:  26% (734/2822)Updating files:  27% (762/2822)Updating files:  28% (791/2822)Updating files:  29% (819/2822)Updating files:  29% (838/2822)Updating files:  30% (847/2822)Updating files:  31% (875/2822)Updating files:  31% (876/2822)Updating files:  32% (904/2822)Updating files:  33% (932/2822)Updating files:  34% (960/2822)Updating files:  35% (988/2822)Updating files:  35% (1008/2822)Updating files:  36% (1016/2822)Updating files:  37% (1045/2822)Updating files:  38% (1073/2822)Updating files:  39% (1101/2822)Updating files:  40% (1129/2822)Updating files:  40% (1134/2822)Updating files:  41% (1158/2822)Updating files:  42% (1186/2822)Updating files:  43% (1214/2822)Updating files:  44% (1242/2822)Updating files:  45% (1270/2822)Updating files:  45% (1297/2822)Updating files:  46% (1299/2822)Updating files:  47% (1327/2822)Updating files:  48% (1355/2822)Updating files:  49% (1383/2822)Updating files:  50% (1411/2822)Updating files:  50% (1425/2822)Updating files:  51% (1440/2822)Updating files:  52% (1468/2822)Updating files:  53% (1496/2822)Updating files:  54% (1524/2822)Updating files:  55% (1553/2822)Updating files:  55% (1564/2822)Updating files:  56% (1581/2822)Updating files:  57% (1609/2822)Updating files:  58% (1637/2822)Updating files:  59% (1665/2822)Updating files:  60% (1694/2822)Updating files:  60% (1714/2822)Updating files:  61% (1722/2822)Updating files:  62% (1750/2822)Updating files:  63% (1778/2822)Updating files:  64% (1807/2822)Updating files:  65% (1835/2822)Updating files:  66% (1863/2822)Updating files:  67% (1891/2822)Updating files:  68% (1919/2822)Updating files:  69% (1948/2822)Updating files:  70% (1976/2822)Updating files:  71% (2004/2822)Updating files:  71% (2006/2822)Updating files:  72% (2032/2822)Updating files:  73% (2061/2822)Updating files:  74% (2089/2822)Updating files:  75% (2117/2822)Updating files:  76% (2145/2822)Updating files:  77% (2173/2822)Updating files:  78% (2202/2822)Updating files:  79% (2230/2822)Updating files:  80% (2258/2822)Updating files:  81% (2286/2822)Updating files:  82% (2315/2822)Updating files:  83% (2343/2822)Updating files:  84% (2371/2822)Updating files:  85% (2399/2822)Updating files:  86% (2427/2822)Updating files:  86% (2452/2822)Updating files:  87% (2456/2822)Updating files:  88% (2484/2822)Updating files:  89% (2512/2822)Updating files:  90% (2540/2822)Updating files:  91% (2569/2822)Updating files:  92% (2597/2822)Updating files:  93% (2625/2822)Updating files:  94% (2653/2822)Updating files:  94% (2670/2822)Updating files:  95% (2681/2822)Updating files:  96% (2710/2822)Updating files:  97% (2738/2822)Updating files:  98% (2766/2822)Updating files:  98% (2772/2822)Updating files:  99% (2794/2822)Updating files: 100% (2822/2822)Updating files: 100% (2822/2822), done.
+HEAD is now at c04a1d5f1 Make the saturation tests deterministic: poll gate depth instead of timing
+Rebasing (1/2)Rebasing (2/2)                                                                                Successfully rebased and updated detached HEAD.
+REBASE: ok
+59 /home/hatch/workspace/pr-wave1000-guild-19/findings/guild-19/reverify-9.diff
+TESTS: tests/http-public-dm.test.js
+{"event":"room.cold_start","durationMs":3736,"integrity":"eager","phases":{"schema":{"ms":601,"rowsRead":0},"plugin":{"ms":1489,"rowsRead":0},"fence":{"ms":1033,"rowsRead":0},"verifies":{"ms":94,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":206,"heapBytes":37025464,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":1935,"integrity":"eager","phases":{"schema":{"ms":386,"rowsRead":0},"plugin":{"ms":1128,"rowsRead":0},"fence":{"ms":273,"rowsRead":0},"verifies":{"ms":19,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":172,"heapBytes":35670992,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ POST /join mints an identity and a personal first room (6961.244718ms)
+{"event":"room.cold_start","durationMs":2978,"integrity":"eager","phases":{"schema":{"ms":386,"rowsRead":0},"plugin":{"ms":1604,"rowsRead":0},"fence":{"ms":649,"rowsRead":0},"verifies":{"ms":106,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":179,"heapBytes":41684904,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ POST /join with an inviteCode redeems the invite (4778.024397ms)
+{"event":"room.cold_start","durationMs":2081,"integrity":"eager","phases":{"schema":{"ms":339,"rowsRead":0},"plugin":{"ms":839,"rowsRead":0},"fence":{"ms":677,"rowsRead":0},"verifies":{"ms":14,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":165,"heapBytes":47342608,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ POST /join validates its body (3888.852803ms)
+{"event":"room.cold_start","durationMs":2122,"integrity":"eager","phases":{"schema":{"ms":331,"rowsRead":0},"plugin":{"ms":962,"rowsRead":0},"fence":{"ms":172,"rowsRead":0},"verifies":{"ms":27,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":155,"heapBytes":37398928,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ GET /skills serves the machine-readable catalog (+ aliases) (2924.188976ms)
+room diagnostic op_PvzKXsMR 403 dm_consent_required access /api/rooms/:roomId/commands
+room diagnostic op_0wcBeYfO 403 dm_blocked access /api/rooms/:roomId/commands
+{"event":"room.cold_start","durationMs":2228,"integrity":"eager","phases":{"schema":{"ms":332,"rowsRead":0},"plugin":{"ms":1230,"rowsRead":0},"fence":{"ms":427,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":167,"heapBytes":44856416,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ DMs are open by default; request/block flows still work over HTTP (4534.446889ms)
+room diagnostic op_REyPKHZ6 403 owner_only access /api/rooms/:roomId/public-face
+{"event":"room.cold_start","durationMs":1704,"integrity":"eager","phases":{"schema":{"ms":202,"rowsRead":0},"plugin":{"ms":597,"rowsRead":0},"fence":{"ms":570,"rowsRead":0},"verifies":{"ms":45,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":147,"heapBytes":40049848,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ public face: owner opt-in, sanitized reads, DMs never leak, disable 404s (4348.764785ms)
+{"event":"room.cold_start","durationMs":1544,"integrity":"eager","phases":{"schema":{"ms":297,"rowsRead":0},"plugin":{"ms":592,"rowsRead":0},"fence":{"ms":429,"rowsRead":0},"verifies":{"ms":42,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":154,"heapBytes":44691720,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ discovery surfaces carry Link headers (2639.046171ms)
+room diagnostic op_tPc_KOEL 403 dm_blocked access /api/rooms/:roomId/commands
+{"event":"room.cold_start","durationMs":1957,"integrity":"eager","phases":{"schema":{"ms":629,"rowsRead":0},"plugin":{"ms":541,"rowsRead":0},"fence":{"ms":475,"rowsRead":0},"verifies":{"ms":43,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":152,"heapBytes":49644864,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ refused DM persists no event and no message (2236.409401ms)
+room diagnostic op_u6X8DKSk 403 dm_consent_required access /api/rooms/:roomId/commands
+room diagnostic op_-MujYFny 403 dm_blocked access /api/rooms/:roomId/dm-consents
+room diagnostic op_Hn2LpztB 403 dm_blocked access /api/rooms/:roomId/commands
+room diagnostic op_HwskUoLt 409 dm_no_pending_request conflict /api/rooms/:roomId/dm-consents/bob/decide
+{"event":"room.cold_start","durationMs":1977,"integrity":"eager","phases":{"schema":{"ms":179,"rowsRead":0},"plugin":{"ms":1052,"rowsRead":0},"fence":{"ms":557,"rowsRead":0},"verifies":{"ms":31,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":152,"heapBytes":43461992,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ DM consent reject / block / unblock over HTTP (3783.226609ms)
+{"event":"room.cold_start","durationMs":1852,"integrity":"eager","phases":{"schema":{"ms":326,"rowsRead":0},"plugin":{"ms":873,"rowsRead":0},"fence":{"ms":459,"rowsRead":0},"verifies":{"ms":18,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":159,"heapBytes":48084872,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ DM consent reason is trimmed and capped at 500 characters (2588.493256ms)
+{"event":"room.cold_start","durationMs":2118,"integrity":"eager","phases":{"schema":{"ms":858,"rowsRead":0},"plugin":{"ms":883,"rowsRead":0},"fence":{"ms":189,"rowsRead":0},"verifies":{"ms":5,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":155,"heapBytes":40204888,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ public feed edges: limits clamp, unknown cursor restarts, HEAD is 405 (3607.902659ms)
+{"event":"room.cold_start","durationMs":2246,"integrity":"eager","phases":{"schema":{"ms":281,"rowsRead":0},"plugin":{"ms":831,"rowsRead":0},"fence":{"ms":838,"rowsRead":0},"verifies":{"ms":47,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":151,"heapBytes":44541536,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ join identity + first-room creation is atomic (no orphan identity) (2941.229439ms)
+room diagnostic op_fTfzcqvv 403 dm_blocked access /api/rooms/:roomId/dm-consents
+room diagnostic op_a0YdQ9Xo 403 dm_blocked access /api/rooms/:roomId/commands
+room diagnostic op_fNavKk9H 422 invalid_dm_block input /api/rooms/:roomId/dm-consents/block
+room diagnostic op_MA3PEzut 404 blocked_not_found not_found /api/rooms/:roomId/dm-consents/block
+room diagnostic op_tUIDaGsX 401 unauthenticated access /api/rooms/:roomId/dm-consents/block
+✔ DM consent proactive block over HTTP (3899.229265ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 57791.405435
+TEST_EXIT: 0
+HEAD: 0422fb0a3
+DONE R9 rebase=ok
