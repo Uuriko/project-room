@@ -3,7 +3,7 @@ import { anonymousIdentityMintMcpTools } from './mcp-identity-mint.mjs';
 // Binds the one server card to the tool lists the hosted MCP actually serves.
 import { MCP_SUPPORTED_VERSIONS } from "../client/mcp-stdio.mjs";
 import { ROOM_ORIGIN, ROOM_SOURCE, bindLiveMcpServerCard } from "../deploy/agent-discovery.mjs";
-import { ROOM_MCP_PUBLIC_URL, ROOM_MCP_SERVER_VERSION, CORE_MCP_TOOLS, CORE_MCP_BLURBS, mcpToolAlias } from "../src/room-mcp-join.js";
+import { ROOM_MCP_PUBLIC_URL, ROOM_MCP_SERVER_VERSION, CORE_MCP_TOOLS, CORE_MCP_BLURBS, mcpToolAliases } from "../src/room-mcp-join.js";
 import { renderMcpServerCardJson } from "../src/mcp-server-card.mjs";
 import { MCP_JOIN_TOOLS } from "./mcp-http.mjs";
 import { hostedMcpToolDefs } from "./mcp-hosted-tools.mjs";
@@ -32,15 +32,15 @@ const FOCUS_COMMON_TOOLS = [
 // advanced tools from the full catalog without changing direct-call availability.
 export const MCP_TOOL_FOCUSES = Object.freeze({
   public_work: [],
-  conversation: ["room_read_inbox", "room_read_messages", "room_react", "room_request_history", "room_cancel_request", "bond_list", "bond_accept", "bond_decline", "bond_revoke", "room_list_peer_dms", "dm_posted"],
+  conversation: ["room_read_inbox", "room_read_messages", "room_react", "room_request_history", "room_cancel_request", "bond_list", "bond_accept", "bond_decline", "bond_revoke", "room_list_peer_dms", "dm_send"],
   work: ["room_assistant_action", "room_list_work", "room_read_work", "room_read_work_discussion", "room_read_result",
     "room_propose_work", "room_begin_work", "room_accept_work", "room_start_work", "room_block_work",
     "room_resolve_blocker", "room_post_draft", "room_submit_text_result", "room_record_completion",
     "room_record_handoff", "room_acquire_claim", "room_renew_claim", "room_release_claim", "room_link_work_claim_pr",
-    "room_work_claim_provenance",
+    "room_work_claim_provenance", "room_read_work_claims",
     "room_list_files", "room_get_file", "room_put_file", "room_commit_file"],
   review: ["room_list_work", "room_read_work", "room_read_work_discussion", "room_read_result",
-    "room_record_verification", "room_list_files", "room_get_file", "list_land_queue"],
+    "room_record_verification", "room_list_files", "room_get_file", "room_list_land_queue"],
   automation: ["wake_register", "wake_clear", "wake_pause", "wake_resume", "heartbeat_set",
     "heartbeat_get", "heartbeat_ack", "webhook_subscribe", "webhook_list", "webhook_unsubscribe"]
 });
@@ -56,11 +56,11 @@ export function listedMcpTools(profile = "core", aliases = false, agent = null, 
     : CORE_MCP_TOOLS.map(name => hostedMcpToolDefs.find(entry => entry.name === name));
   const tools = source.map(entry => {
     const description = profile === "core" && CORE_MCP_BLURBS[entry.name] ? CORE_MCP_BLURBS[entry.name] : entry.description;
-    const alias = mcpToolAlias(entry.name);
+    const legacyNames = mcpToolAliases(entry.name);
     return {
       ...entry,
       description,
-      ...(aliases && alias ? { aliases: [alias] } : {})
+      ...(aliases && legacyNames.length ? { aliases: legacyNames } : {})
     };
   });
   const listed = [...tools, ...MCP_JOIN_TOOLS];

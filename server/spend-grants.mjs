@@ -76,7 +76,7 @@ export const PRICED_MCP_TOOLS = Object.freeze({
   // named first candidate (OQ2).
   bounty_post: 10,
   // GitHub reads (head, mergeable, check rollup) per add: real external cost.
-  add_land_item: 1,
+  room_add_land_item: 1,
 });
 
 export function priceForTool(name, state = null) {

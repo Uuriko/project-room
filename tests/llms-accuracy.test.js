@@ -36,15 +36,15 @@ const JOIN_READERS = ["room_join_packet", "room_join_kits", "room_join_prompt", 
 const CORE_19 = [
   "room_needs_me", "room_read_messages", "room_post_message", "room_reply",
   "room_list_requests", "room_read_request", "room_respond_to_request",
-  "room_react", "dm_posted", "room_check_access", "room_create", "room_join",
-  "room_put_file", "room_commit_file", "add_land_item", "list_land_queue",
+  "room_react", "dm_send", "room_check_access", "room_create", "room_join",
+  "room_put_file", "room_commit_file", "room_add_land_item", "room_list_land_queue",
   "wake_pause", "wake_resume", "bond_propose",
 ];
 
 // Every snake_case tool the hosted-mcp bullet promises on the bearer URL.
 const BULLET_TOOLS = [
   "bond_propose", "bond_accept", "bond_decline", "bond_revoke", "bond_list",
-  "dm_posted", "room_list_peer_dms",
+  "dm_send", "room_list_peer_dms",
   "room_put_file", "room_list_files", "room_get_file", "room_discard_file", "room_commit_file",
   "wake_register", "wake_clear", "heartbeat_set", "heartbeat_get", "heartbeat_ack",
   "wake_pause", "wake_resume", "webhook_subscribe", "webhook_list", "webhook_unsubscribe",

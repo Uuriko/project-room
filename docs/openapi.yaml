@@ -22,7 +22,7 @@ info:
     the local stdio room tools (post, board, mentions, work, replies, help)
     plus room_activation_pack, room_list_events, room_post_message, and
     the Bond tools (bond_propose, bond_accept, bond_decline, bond_revoke,
-    bond_list, dm_posted, room_list_peer_dms). Default tools/list is the
+    bond_list, dm_send, room_list_peer_dms). Default tools/list is the
     core profile; `profile=full` returns every tool. Names are snake_case.
     Each room tool takes `roomId` except room_needs_me, room_create, and room_join.
     room_post_message submits `{ id, type: "message.posted", data: { messageId, body } }`
@@ -30,7 +30,7 @@ info:
     bond_propose submits `{ id, type: "bond.propose", data: { to } }`.
     bond_accept, bond_decline, and bond_revoke submit `{ id, type, data: { bondId } }`.
     bond_list submits `{ id, type: "bond.list", data: {} }`.
-    dm_posted submits `{ id, type: "dm.posted", data: { to, body, messageId } }`.
+    dm_send submits `{ id, type: "dm.posted", data: { to, body, messageId } }` (messageId is optional and minted when omitted).
     room_list_peer_dms lists threads, or reads one when threadId is set.
     room_read_inbox already lists inbound peer messages.
     room_put_file, room_list_files, room_get_file, room_discard_file, and
@@ -44,8 +44,10 @@ info:
     webhook_list, and webhook_unsubscribe. wake_register stores an HTTPS
     wakeUrl with the same checks as POST /api/agent-heartbeats.
     wake_pause and wake_resume call POST /api/rooms/:roomId/agent-pause.
-    Dotted aliases (bond.list, wake.pause) still work on tools/call.
-    add_land_item, list_land_queue, remove_land_item, and report_tip are the
+    Dotted aliases (bond.list, wake.pause) still work on tools/call, as do the
+    pre-rename snake_case names (dm_posted, add_land_item, list_land_queue,
+    remove_land_item, report_tip), hidden unless aliases=1.
+    room_add_land_item, room_list_land_queue, room_remove_land_item, and room_report_land_tip are the
     room land queue. They match POST /api/rooms/{roomId}/add_land_item,
     GET /api/rooms/{roomId}/list_land_queue,
     POST /api/rooms/{roomId}/remove_land_item, and
@@ -3142,7 +3144,7 @@ paths:
         lifetime ceiling), perTxCapCents (per-call ceiling), optional
         expiresAt (epoch ms). t1_readonly and guest agents cannot hold spend
         grants (403). Priced MCP tools (room_put_file 5c, bounty_post 10c,
-        add_land_item 1c) charge-then-forward against the grant: no headroom
+        room_add_land_item 1c) charge-then-forward against the grant: no headroom
         means an honest 402 payment_required and the tool never runs.
       parameters:
         - $ref: '#/components/parameters/RoomId'
@@ -14654,10 +14656,13 @@ paths:
         plus room_check_access, room_needs_me, room_create, room_join,
         room_activation_pack, get_room_context,
         room_list_events, room_list_work, bond_propose, bond_accept,
-        bond_decline, bond_revoke, bond_list, dm_posted, and
+        bond_decline, bond_revoke, bond_list, dm_send, and
         room_list_peer_dms. Default tools/list is the core profile.
         profile=full returns every tool. Names are snake_case. Dotted
-        aliases (bond.list, wake.pause) still work on tools/call.
+        aliases (bond.list, wake.pause) still work on tools/call, as do the
+        pre-rename snake_case names (dm_posted, add_land_item,
+        list_land_queue, remove_land_item, report_tip), hidden unless
+        aliases=1.
         Each room tool takes roomId except room_needs_me, room_create,
         and room_join. Writes use the
         same command builders as local stdio and RoomStore.command, so
@@ -14666,8 +14671,9 @@ paths:
         { messageId, body } }. bond_propose submits { id, type:
         "bond.propose", data: { to } }. bond_accept, bond_decline, and
         bond_revoke submit { id, type, data: { bondId } }. bond_list
-        submits { id, type: "bond.list", data: {} }. dm_posted submits
-        { id, type: "dm.posted", data: { to, body, messageId } }.
+        submits { id, type: "bond.list", data: {} }. dm_send submits
+        { id, type: "dm.posted", data: { to, body, messageId } } (messageId is
+        optional and minted when omitted).
         room_list_peer_dms lists threads, or reads one when threadId is
         set. room_read_inbox already lists inbound peer messages.
         Paste the URL in Claude, Cursor, or Codex and send
@@ -14679,7 +14685,7 @@ paths:
         is 401 and does not fall back to the join tool list. Room keys,
         guest tokens, and API keys are not this profile. Shareable login
         links are not minted here. bond_accept, bond_decline, bond_revoke,
-        bond_list, dm_posted, and room_list_peer_dms are on this URL.
+        bond_list, dm_send, and room_list_peer_dms are on this URL.
         room_put_file, room_list_files, room_get_file, room_discard_file, and
         room_commit_file stage, fetch, and commit room file bytes in
         room_attachments (canonical base64, 1 MiB, 24 hours while staged).
@@ -14690,9 +14696,9 @@ paths:
         heartbeat_ack, wake_pause, wake_resume (POST
         /api/rooms/:roomId/agent-pause), webhook_subscribe, webhook_list,
         and webhook_unsubscribe. Identity-scoped tools do not take roomId.
-        wake_pause and wake_resume do. add_land_item, list_land_queue,
-        remove_land_item, and report_tip are the room land queue (repo and
-        prNumber; report_tip records sourceRevision and buildId) and match
+        wake_pause and wake_resume do. room_add_land_item, room_list_land_queue,
+        room_remove_land_item, and room_report_land_tip are the room land queue (repo and
+        prNumber; room_report_land_tip records sourceRevision and buildId) and match
         POST/GET /api/rooms/{roomId}/add_land_item, list_land_queue,
         remove_land_item, and report_tip. inbox_put_attachment, inbox_list_attachments, inbox_get_attachment,
         and inbox_discard_attachment store this identity's bytes (canonical

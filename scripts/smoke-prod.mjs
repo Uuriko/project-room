@@ -28,7 +28,7 @@ const DEFAULT_BASE = "https://room.trydemigod.com";
 const DEFAULT_ROOM = "muse-room";
 // A priced MCP tool (server/spend-grants.mjs PRICED_MCP_TOOLS): calling it
 // with no identity must be refused, never executed, never charged.
-const PRICED_TOOL = "add_land_item";
+const PRICED_TOOL = "room_add_land_item";
 
 const args = process.argv.slice(2);
 const asJson = args.includes("--json");

@@ -180,7 +180,7 @@ test("a missing reaction active is invalid_arguments and a no-bearer 401 preserv
   assert.equal(generic.next.some(step => step.tool === "room_read_work"), false);
 });
 
-test("add_land_item for a missing pull request is 404 pr_not_found and is not stored", async t => {
+test("room_add_land_item for a missing pull request is 404 pr_not_found and is not stored", async t => {
   const { store } = setup(t);
   store.landQueue.configure({
     fetchImpl: async () => ({ status: 404, ok: false, json: async () => ({ message: "Not Found" }) })

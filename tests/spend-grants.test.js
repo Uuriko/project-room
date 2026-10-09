@@ -245,7 +245,7 @@ test("cap, per-tx cap, allowlist, and nonce replay are enforced", async t => {
   const perTx = spendError(() => authz("room_put_file", 7, "n3"), { status: 402, code: "payment_required" });
   assert.equal(perTx.detail.reason, "per_tx_cap_exceeded");
   // Allowlist: a priced tool outside it is denied, not charged.
-  spendError(() => authz("add_land_item", 1, "n4"), { status: 403, code: "spend_tool_not_allowlisted" });
+  spendError(() => authz("room_add_land_item", 1, "n4"), { status: 403, code: "spend_tool_not_allowlisted" });
   // Nonce replay: the same (grant, nonce) never authorizes twice. A
   // re-presented reserved nonce returns the live authorization (crash
   // recovery); a settled one returns its receipt (exactly-once); only a

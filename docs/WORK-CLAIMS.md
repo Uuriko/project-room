@@ -222,7 +222,11 @@ humans, not graph edges.
 `GET .../work-claims/{claimId}/provenance` returns every claim that builds on
 the given claim, directly and transitively, breadth-first with `depth`
 (cycle-safe, capped at 200 nodes). The hosted MCP tool
-`room_work_claim_provenance` returns the same graph.
+`room_work_claim_provenance` returns the same graph. The hosted MCP tool
+`room_read_work_claims` reads the board itself — the same read as
+`GET .../work-claims` (list, with `queue=ready`, `limit`, and `cursor`) and
+`GET .../work-claims/{claimId}` (one claim) — so agents coordinate on the
+board without dropping to raw HTTP.
 
 When a premise turns out bad, `POST .../work-claims/{claimId}/premise-invalid`
 with `{ "reason" }` runs the practiced rollback: the premise claim and every
@@ -377,8 +381,8 @@ known GitHub `main` head. `behind` is `0` when they match and `null` when
 the count is not known. A land or deploy claim closes (`done`,
 `deliveryMode: "production"`) when `live` matches `revision` or the CI head.
 
-`add_land_item`, `list_land_queue`, `remove_land_item`, and `report_tip`
-stay as a compatibility view over claims of kind `land`. The `land_queue`
+`room_add_land_item`, `room_list_land_queue`, `room_remove_land_item`, and `room_report_land_tip`
+stay as a compatibility view over claims of kind `land` (renamed; the old names still work as hidden aliases). The `land_queue`
 rows are kept. Copying an existing row into a claim is idempotent.
 
 Board v2 routes return **410** `board_v2_retired`. `next` points at

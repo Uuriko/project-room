@@ -270,7 +270,7 @@ function landChangesOf(store, roomId, memberId, after, afterId) {
     seq: row.updated_at,
     id: row.item_id,
     summary: clip(row.title || `${row.repo}#${row.pr_number} ${row.checks_state}`),
-    next: { tool: "list_land_queue", arguments: { roomId } }
+    next: { tool: "room_list_land_queue", arguments: { roomId } }
   }));
 }
 

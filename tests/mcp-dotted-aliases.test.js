@@ -4,6 +4,10 @@
 //   (bond.*, dm.posted, wake.*, heartbeat.*, webhook.*). They work on
 //   tools/call, behave identically to their canonical tool, and stay hidden
 //   from tools/list unless aliases=1.
+// - Snake_case renames exist ONLY for the legacy names in MCP_TOOL_RENAMES
+//   (dm_posted, add_land_item, list_land_queue, remove_land_item,
+//   report_tip). Same contract as dotted aliases: they work on tools/call
+//   and are advertised under aliases=1 only.
 // - Any other dotted (or otherwise undocumented) name must 404 as
 //   unknown_tool with a helpful hint — never reach a tool, never behave
 //   differently under an undocumented name.
@@ -18,9 +22,11 @@ import { AgentRooms } from "../server/agent-rooms.mjs";
 import {
   HOSTED_ROOM_MCP_TOOLS,
   MCP_TOOL_ALIASES,
+  MCP_TOOL_RENAMES,
   MCP_TOOL_NAME_RE,
   canonicalMcpToolName,
   mcpToolAlias,
+  mcpToolAliases,
 } from "../src/room-mcp-join.js";
 import { hostedMcpToolDefs } from "../server/mcp-hosted-tools.mjs";
 import { MCP_JOIN_TOOLS } from "../server/mcp-http.mjs";
@@ -74,7 +80,7 @@ const EXPECTED_ALIASES = Object.freeze({
   "bond.decline": "bond_decline",
   "bond.revoke": "bond_revoke",
   "bond.list": "bond_list",
-  "dm.posted": "dm_posted",
+  "dm.posted": "dm_send",
   "wake.register": "wake_register",
   "wake.clear": "wake_clear",
   "heartbeat.set": "heartbeat_set",
@@ -85,6 +91,29 @@ const EXPECTED_ALIASES = Object.freeze({
   "webhook.subscribe": "webhook_subscribe",
   "webhook.list": "webhook_list",
   "webhook.unsubscribe": "webhook_unsubscribe",
+});
+
+// The documented snake_case-rename contract: these 5 legacy names must keep
+// working on tools/call. Pinned explicitly (not derived from the source) so a
+// removed or added rename fails loudly here instead of silently shifting the
+// contract agents rely on.
+const EXPECTED_RENAMES = Object.freeze({
+  "dm_posted": "dm_send",
+  "add_land_item": "room_add_land_item",
+  "list_land_queue": "room_list_land_queue",
+  "remove_land_item": "room_remove_land_item",
+  "report_tip": "room_report_land_tip",
+});
+
+test("rename registry: the documented snake_case-rename set is exactly the pinned contract", () => {
+  assert.deepEqual({ ...MCP_TOOL_RENAMES }, { ...EXPECTED_RENAMES },
+    "MCP_TOOL_RENAMES must match the documented rename contract exactly");
+  for (const [oldName, canonical] of Object.entries(EXPECTED_RENAMES)) {
+    assert.match(canonical, MCP_TOOL_NAME_RE, `rename target ${canonical} must be a legal tool name`);
+    assert.ok(HOSTED_ROOM_MCP_TOOLS.includes(canonical), `rename ${oldName} must map to a hosted canonical tool`);
+    assert.ok(!HOSTED_ROOM_MCP_TOOLS.includes(oldName), `rename ${oldName} must not stay canonical`);
+    assert.equal(canonicalMcpToolName(oldName), canonical, `${oldName} must canonicalize on tools/call`);
+  }
 });
 
 test("canonical registry: every hosted tool name is legal snake_case, no dotted names", () => {
@@ -198,13 +227,14 @@ test("tools/list hides dotted aliases by default and reveals them with aliases=1
   const aliasEntries = withAliases.filter(tool => "aliases" in tool);
   assert.ok(aliasEntries.length > 0, "aliases=1 must surface the documented aliases");
   for (const tool of aliasEntries) {
-    assert.deepEqual(tool.aliases, [mcpToolAlias(tool.name)],
-      `${tool.name} must advertise exactly its documented alias`);
-    assert.ok(tool.aliases.every(a => a.includes(".")), "advertised aliases must be dotted");
+    assert.deepEqual(tool.aliases, mcpToolAliases(tool.name),
+      `${tool.name} must advertise exactly its documented legacy names`);
+    assert.ok(tool.aliases.every(a => a.includes(".") || Object.hasOwn(EXPECTED_RENAMES, a)),
+      "advertised legacy names must be dotted aliases or documented renames");
   }
-  const aliasedCanonicals = new Set(Object.values(EXPECTED_ALIASES));
+  const aliasedCanonicals = new Set([...Object.values(EXPECTED_ALIASES), ...Object.values(EXPECTED_RENAMES)]);
   assert.deepEqual(new Set(aliasEntries.map(tool => tool.name)), aliasedCanonicals,
-    "exactly the documented alias targets may advertise aliases");
+    "exactly the documented alias and rename targets may advertise legacy names");
 
   // ?aliases=1 query form behaves the same.
   const viaQuery = await list(origin, { profile: "full" }, secret, "?aliases=1");
