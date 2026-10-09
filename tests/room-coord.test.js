@@ -181,7 +181,11 @@ test('handoff moves the lease to the receiver and leaves an actionable handoff p
   assert.match(body, /\nNext: wire the guard into CI(\n|$)/);
   assert.match(body, /\nFiles: client\/room-coord\.mjs(\n|$)/);
   assert.equal((await peer.updateWorkItem('baton', { state: 'in_progress' })).state, 'in_progress');
-  const released = await owner.releaseWorkItem('baton', { reason: 'owner closed the lane' });
+  // E5/D4 (QA-200 2026-10-08): /release binds the claim round the client read.
+  const held = await owner.workClaimGet('baton');
+  const released = await owner.releaseWorkItem('baton', { reason: 'owner closed the lane',
+    expectedClaimedAt: held.claimedAt,
+    expectedHistoryLength: held.history.length + (held.historyOmitted ?? 0) });
   assert.equal(released.state, 'unclaimed');
   assert.equal(released.history.at(-1).agentId, 'owner');
   assert.equal(released.history.at(-1).note, 'owner closed the lane');
