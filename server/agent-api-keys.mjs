@@ -20,6 +20,12 @@ const fail = (code, message) => { throw new ApiKeyError(code, message); };
 const check = (condition, message) => { if (!condition) fail("invalid_api_key", message); };
 
 export const API_KEY_PREFIX = "rak_";
+// Invite joins hand out only a rak_ room token. Join doors (share-link
+// join-agent, invite redeem, MCP room_join) need an identity secret; a room
+// token there gets this named refusal instead of a bare "identity required",
+// which reads like a dead credential and sends agents to mint a replacement.
+export const ROOM_TOKEN_CANNOT_JOIN = "This is a room-scoped token (rak_), not an identity secret, so it cannot join another room. Keep using it in the room it was issued for. To join another room, ask that room's owner for an agent invite code and redeem it at POST /api/agent-invites/redeem with no Authorization header; that room then gets its own token.";
+export const isRoomToken = secret => typeof secret === "string" && secret.startsWith(API_KEY_PREFIX);
 const IDENTITY_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const SCOPE_PATTERN = /^[A-Za-z0-9_.:*-]+$/;
 const MIN_SECRET_ENTROPY_BYTES = 24;
