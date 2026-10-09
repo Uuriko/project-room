@@ -958,6 +958,7 @@
   "tests/error-leak-shapes.test.js": 272,
   "tests/guest-invites-agent-api-docs.test.mjs": 1026,
   "tests/herdr-bridge-adapter.test.js": 6100,
+  "tests/herdr-bridge-deploy.test.js": 300,
   "tests/rebuild-determinism.test.js": 9500,
   "tests/saved-history-floor.test.js": 464,
   "tests/rebuild-stale-checkpoint.test.js": 2200,
