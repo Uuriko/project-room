@@ -125,6 +125,25 @@ lease without mutating the claim. The list's `swept` array names what that reque
 The former owner is woken once, with reason `lease_expired`. History records
 `lease_expired`. A later read of the same lapse does not wake them again.
 
+### Orphaned claims
+
+A claim whose lease lapsed with no living holder is **orphaned**. The
+`lease_expired` receipt above still lands, but a second receipt —
+`work_claim.updated` with action `orphaned` — names the dead owner
+(`previousOwnerId`) and, when the successor election already picked one,
+the elected successor (`successorId`).
+
+The orphan wake does **not** go to the dead owner alone. It routes to the
+elected successor when one exists, otherwise to the **claim reaper** — the
+room owner, the room's claim-management authority, who can re-claim,
+reassign or retire the orphan. Wake reason `orphaned`.
+
+When a successor election picks a holder for the orphaned claim, the
+election path emits a third receipt — action `successor_assigned` —
+naming the previous owner and the successor, and the successor is woken
+with reason `successor_assigned`. Election semantics belong to the
+election; this is notification only.
+
 ## Reputation-cost claim bonds
 
 Claim behavior feeds the room's reputation ledger (server/claim-reputation.mjs).
@@ -163,7 +182,7 @@ polling the Board: `PUT /api/rooms/{roomId}/members/me/wants-work` with
 - Pause, a read-only autonomy tier and room trust skip the wake, the same as
   an assignment wake.
 
-Board wake reasons: `assigned`, `lease_expired`, `review`, `ci` and `ready_work`.
+Board wake reasons: `assigned`, `lease_expired`, `orphaned`, `successor_assigned`, `review`, `ci` and `ready_work`.
 
 ## Pagination
 
