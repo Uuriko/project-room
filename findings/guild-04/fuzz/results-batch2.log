@@ -1,0 +1,34 @@
+=== f6-wal-corruption ===
+{"event":"room.cold_start","durationMs":2676,"integrity":"eager","phases":{"schema":{"ms":71,"rowsRead":0},"plugin":{"ms":702,"rowsRead":0},"fence":{"ms":516,"rowsRead":0},"verifies":{"ms":120,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":246,"heapBytes":25063416,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+FAIL F6-wal-corruption: AssertionError [ERR_ASSERTION]: expected a WAL file with frames
+    at file:///home/hatch/workspace/pr-wave1000-guild-04/findings/guild-04/fuzz/f6-wal-corruption.mjs:22:10
+    at fuzz (file:///home/hatch/workspace/pr-wave1000-guild-04/findings/guild-04/fuzz/lib.mjs:23:11)
+    at file:///home/hatch/workspace/pr-wave1000-guild-04/findings/guild-04/fuzz/f6-wal-corruption.mjs:10:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+exit=1
+=== f7-hostile-room-ids ===
+{"event":"room.cold_start","durationMs":3689,"integrity":"eager","phases":{"schema":{"ms":476,"rowsRead":0},"plugin":{"ms":1740,"rowsRead":0},"fence":{"ms":524,"rowsRead":0},"verifies":{"ms":202,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":209,"heapBytes":24962168,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+  20 hostile ids: all 4xx-or-clean, no hangs, no stray rows
+PASS F7-hostile-room-ids
+exit=0
+=== f8-large-export ===
+{"event":"room.cold_start","durationMs":2270,"integrity":"eager","phases":{"schema":{"ms":195,"rowsRead":0},"plugin":{"ms":795,"rowsRead":0},"fence":{"ms":71,"rowsRead":0},"verifies":{"ms":20,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":177,"heapBytes":25512288,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+  inserted 5000 events in 1918ms
+  streamed 5007 lines / 11.4MB in 1072ms, heap delta -6.2MB
+  trailer verifies over the full stream
+PASS F8-large-export
+exit=0
+=== f9-flood-burst ===
+  burst: 30 allowed, 70 denied, Retry-After=2s
+  non-chat commands spend nothing
+  refill after 60s: bucket full again
+  garbage ids ignored without throw
+PASS F9-flood-burst
+exit=0
+=== f10-hostile-ids ===
+  roomKeyHostId: 6 accepted, 15 rejected-as-422
+  validAttachmentData: 15 hostile inputs, boolean-only
+PASS F10-hostile-ids
+exit=0

@@ -1,0 +1,12 @@
+=== RV-4 branch=wave300/sharded-claim-boards at 2026-10-09T12:38:58Z
+HEAD is now at fca324073 boards: openapi docs + keep pre-shard config shape when no boards configured
+--- rebase onto origin/main
+REBASE_FAILED
+hint: Resolve all conflicts manually, mark them as resolved with
+hint: "git add/rm <conflicted_files>", then run "git rebase --continue".
+hint: You can instead skip this commit: run "git rebase --skip".
+hint: To abort and get back to the state before "git rebase", run "git rebase --abort".
+Could not apply f2055c7f3... sharded claim boards: namespace routing, per-board caps, read-merge global view
+--- NOT rebased; RESULT: REBASE_FAILED — no tests run
+DONE_RV_4
+Deleted branch g04-rv-4-scratch (was fca324073).

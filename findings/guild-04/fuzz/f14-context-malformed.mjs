@@ -1,6 +1,6 @@
 // F14: malformed room states into buildRoomContext — RangeError or clean, never hang.
 import assert from "node:assert/strict";
-import { buildRoomContext } from "../../server/room-context.mjs";
+import { buildRoomContext } from "../../../server/room-context.mjs";
 import { fuzz, throwsBounded } from "./lib.mjs";
 
 const baseState = () => ({

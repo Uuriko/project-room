@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { createDurableWorkClaimRegistry, workClaimSchema } from "../../server/work-claim-sqlite.mjs";
+import { createDurableWorkClaimRegistry, workClaimSchema } from "../../../server/work-claim-sqlite.mjs";
 import { fuzz, scratchDir } from "./lib.mjs";
 
 const NPROC = 5, NSET = 50;
@@ -20,7 +20,7 @@ fuzz("F3-concurrent-writers", async () => {
   const worker = `
     import { DatabaseSync } from "node:sqlite";
     import { createDurableWorkClaimRegistry } from "/home/hatch/workspace/pr-wave1000-guild-04/server/work-claim-sqlite.mjs";
-    const [slot, file] = [Number(process.argv[2]), process.argv[3]];
+    const [slot, file] = [Number(process.argv[1]), process.argv[2]];
     const db = new DatabaseSync(file);
     db.exec("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;");
     const reg = createDurableWorkClaimRegistry(db, { transaction: fn => { db.exec("BEGIN IMMEDIATE"); try { const r = fn(); db.exec("COMMIT"); return r; } catch (e) { try { db.exec("ROLLBACK"); } catch {} throw e; } } });

@@ -1,0 +1,35 @@
+=== RV-3 branch=wave300/payload-store at 2026-10-09T12:22:34Z
+HEAD is now at 1d41de100 feat: wire PayloadStore into RoomStore + schema stamp (WAVE-300)
+--- rebase onto origin/main
+Rebasing (1/5)Rebasing (2/5)Rebasing (3/5)Rebasing (4/5)Rebasing (5/5)                                                                                Successfully rebased and updated refs/heads/g04-rv-3-scratch.
+error: unknown option `short'
+usage: git merge-base [-a | --all] <commit> <commit>...
+   or: git merge-base [-a | --all] --octopus <commit>...
+   or: git merge-base --is-ancestor <commit> <commit>
+   or: git merge-base --independent <commit>...
+   or: git merge-base --fork-point <ref> [<commit>]
+
+    -a, --[no-]all        output all common ancestors
+    --octopus             find ancestors for a single n-way merge
+    --independent         list revs not reachable from others
+    --is-ancestor         is the first one ancestor of the other?
+    --fork-point          find where <commit> forked from reflog of <ref>
+
+--- head: bf4458ff5 base: 
+--- tests: tests/payload-store.test.mjs tests/persisted-row.test.js
+✔ work-claim registry: legacy row loads with unknown fields dropped and missing defaulted (9.912355ms)
+✔ work-claim registry: new writes carry the version envelope and round-trip (6.480204ms)
+✔ bounty dispute hydration: legacy body loads with unknown dropped and missing defaulted (33.989368ms)
+✔ bounty dispute hydration: new envelope rows read back through the real path (101.064208ms)
+ℹ tests 32
+ℹ suites 0
+ℹ pass 32
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5282.216021
+TESTS_DONE
+--- slice diff vs origin/main:
+ server/store.mjs | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)

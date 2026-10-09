@@ -9,9 +9,10 @@ fuzz("F5-disk-full", async () => {
   const dir = scratchDir("g04-f5-");
   const file = join(dir, "room.sqlite");
   // Child runs under a hard file-size cap; writes must throw, not hang.
+  // The worker is written to a file (not -e) to avoid nested shell quoting.
   const worker = `
     import { DatabaseSync } from "node:sqlite";
-    const db = new DatabaseSync(${JSON.stringify(file)});
+    const db = new DatabaseSync(process.argv[2]);
     db.exec("CREATE TABLE t (id INTEGER PRIMARY KEY, blob BLOB)");
     const big = Buffer.alloc(200000, 7);
     let writes = 0, firstError = null;
@@ -22,7 +23,10 @@ fuzz("F5-disk-full", async () => {
     console.log(JSON.stringify({ writes, firstError }));
     db.close();
   `;
-  const p = spawnSync("bash", ["-c", `ulimit -f 256; node --input-type=module -e ${JSON.stringify(worker)}`],
+  const workerFile = join(dir, "worker.mjs");
+  const { writeFileSync } = await import("node:fs");
+  writeFileSync(workerFile, worker);
+  const p = spawnSync("bash", ["-c", 'ulimit -f 256; exec node "$1" "$2"', "f5", workerFile, file],
     { timeout: 60000, encoding: "utf8" });
   assert.equal(p.status, 0, `worker crashed: ${p.stderr?.slice(-400)}`);
   const { writes, firstError } = JSON.parse(p.stdout.trim().split("\n").pop());

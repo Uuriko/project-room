@@ -1,0 +1,38 @@
+=== f6-wal-corruption ===
+{"event":"room.cold_start","durationMs":1076,"integrity":"eager","phases":{"schema":{"ms":255,"rowsRead":0},"plugin":{"ms":250,"rowsRead":0},"fence":{"ms":198,"rowsRead":0},"verifies":{"ms":87,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":181,"heapBytes":25225992,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+  recovered: integrity_check=ok, events=3, seq=2 (135ms)
+PASS F6-wal-corruption
+exit=0
+=== f11-directory-race ===
+{"event":"room.cold_start","durationMs":3110,"integrity":"eager","phases":{"schema":{"ms":460,"rowsRead":0},"plugin":{"ms":1173,"rowsRead":0},"fence":{"ms":974,"rowsRead":0},"verifies":{"ms":168,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":187,"heapBytes":25356064,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+  100 racing set()s: exactly one row, coherent values
+PASS F11-directory-race
+exit=0
+=== f12-hostile-replay ===
+{"event":"room.cold_start","durationMs":2862,"integrity":"eager","phases":{"schema":{"ms":456,"rowsRead":0},"plugin":{"ms":1073,"rowsRead":0},"fence":{"ms":750,"rowsRead":0},"verifies":{"ms":88,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":208,"heapBytes":25304600,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+  empty: clean throw (Export is empty)
+  not-json-line: clean throw (Export line is not JSON)
+  two-watermarks: clean throw (Export has more than one watermark)
+  two-trailers: clean throw (Export has more than one trailer)
+  bad-trailer: clean throw (Export trailer is malformed)
+  torn-count: clean throw (Backup is torn: the export holds 2 events but its trailer counts 99999)
+{"event":"room.cold_start","durationMs":2010,"integrity":"eager","phases":{"schema":{"ms":601,"rowsRead":0},"plugin":{"ms":808,"rowsRead":0},"fence":{"ms":172,"rowsRead":0},"verifies":{"ms":16,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":156,"heapBytes":26402688,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+  object-cell: clean throw (Export cell is an object that is not an encoded BLOB)
+  noncanonical-b64: no hostile variant present in this export — skipped
+{"event":"room.cold_start","durationMs":1673,"integrity":"eager","phases":{"schema":{"ms":409,"rowsRead":0},"plugin":{"ms":834,"rowsRead":0},"fence":{"ms":203,"rowsRead":0},"verifies":{"ms":4,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":154,"heapBytes":30365464,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+  unknown-table: clean throw (Export names a table this store does not have)
+  missing-watermark: clean throw (Export is missing its watermark)
+{"event":"room.cold_start","durationMs":2329,"integrity":"eager","phases":{"schema":{"ms":355,"rowsRead":0},"plugin":{"ms":1093,"rowsRead":0},"fence":{"ms":491,"rowsRead":0},"verifies":{"ms":84,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":158,"heapBytes":34259952,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+  valid export: verified:true, trailer:verified, events:2, audit.ok=true
+PASS F12-hostile-replay
+exit=0
+=== f13-html-hostile ===
+  safeEvidenceHref: hostile schemes rejected, clean https kept
+FAIL F13-html-hostile: AssertionError [ERR_ASSERTION]: unescaped handler attribute in output
+    at file:///home/hatch/workspace/pr-wave1000-guild-04/findings/guild-04/fuzz/f13-html-hostile.mjs:35:10
+    at fuzz (file:///home/hatch/workspace/pr-wave1000-guild-04/findings/guild-04/fuzz/lib.mjs:23:11)
+    at file:///home/hatch/workspace/pr-wave1000-guild-04/findings/guild-04/fuzz/f13-html-hostile.mjs:7:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+exit=1

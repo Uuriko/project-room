@@ -1,9 +1,9 @@
 // F8: large export stream — bounded time/memory, trailer verifies.
 import assert from "node:assert/strict";
 import { join } from "node:path";
-import { RoomStore } from "../../server/store.mjs";
-import { initialRoom } from "../../server/bootstrap.mjs";
-import { exportNdjsonLines, exportTrailer, verifyTrailer } from "../../server/room-export.mjs";
+import { RoomStore } from "../../../server/store.mjs";
+import { initialRoom } from "../../../server/bootstrap.mjs";
+import { exportNdjsonLines, exportTrailer, verifyTrailer } from "../../../server/room-export.mjs";
 import { fuzz, scratchDir } from "./lib.mjs";
 
 fuzz("F8-large-export", async () => {

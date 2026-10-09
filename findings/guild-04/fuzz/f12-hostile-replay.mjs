@@ -2,9 +2,9 @@
 // a valid export replays verified:true.
 import assert from "node:assert/strict";
 import { join } from "node:path";
-import { RoomStore } from "../../server/store.mjs";
-import { initialRoom } from "../../server/bootstrap.mjs";
-import { exportNdjsonText, replayNdjson } from "../../server/room-export.mjs";
+import { RoomStore } from "../../../server/store.mjs";
+import { initialRoom } from "../../../server/bootstrap.mjs";
+import { exportNdjsonText, replayNdjson } from "../../../server/room-export.mjs";
 import { fuzz, scratchDir, throwsBounded } from "./lib.mjs";
 
 fuzz("F12-hostile-replay", async () => {
@@ -22,12 +22,13 @@ fuzz("F12-hostile-replay", async () => {
     "two-trailers": good + good.split("\n").filter(l => l.includes('"trailer"')).join("\n") + "\n",
     "bad-trailer": good.replace(/"eventsHash":"[0-9a-f]{64}"/, '"eventsHash":"zzzz"'),
     "torn-count": good.replace(/"events":\d+,"eventsHash"/, '"events":999999,"eventsHash"'),
-    "object-cell": good.replace(/"title":"[^"]*"/, '"title":{"$nope":1}'),
+    "object-cell": good.replace('"row":{"id":"commons"', '"row":{"id":{"$nope":1}'),
     "noncanonical-b64": good.replace(/"\$base64":"[A-Za-z0-9+/=]*"/, '"$base64":"!!!notbase64!!!"'),
     "unknown-table": good + JSON.stringify({ table: "nope_table", row: { a: 1 } }) + "\n",
     "missing-watermark": good.split("\n").filter(l => !l.includes('"watermark"')).join("\n"),
   };
   for (const [name, ndjson] of Object.entries(hostile)) {
+    if (ndjson === good) { console.log(`  ${name}: no hostile variant present in this export — skipped`); continue; }
     const t0 = Date.now();
     let threw = false, msg = "";
     try { replayNdjson(ndjson, join(dir, `out-${name}.sqlite`), { audit: "report" }); }

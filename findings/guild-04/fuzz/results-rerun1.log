@@ -1,0 +1,26 @@
+=== f1-corrupt-rows ===
+{"event":"room.cold_start","durationMs":4027,"integrity":"eager","phases":{"schema":{"ms":433,"rowsRead":0},"plugin":{"ms":447,"rowsRead":0},"fence":{"ms":418,"rowsRead":0},"verifies":{"ms":138,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":171,"heapBytes":25134600,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+  non-JSON event body: fence blocked clean (malformed JSON)
+FAIL F1-corrupt-rows: AssertionError [ERR_ASSERTION]: expected a throw
+    at throwsBounded (file:///home/hatch/workspace/pr-wave1000-guild-04/findings/guild-04/fuzz/lib.mjs:39:10)
+    at async readMustThrow (file:///home/hatch/workspace/pr-wave1000-guild-04/findings/guild-04/fuzz/f1-corrupt-rows.mjs:31:16)
+    at async file:///home/hatch/workspace/pr-wave1000-guild-04/findings/guild-04/fuzz/f1-corrupt-rows.mjs:42:5
+    at async fuzz (file:///home/hatch/workspace/pr-wave1000-guild-04/findings/guild-04/fuzz/lib.mjs:23:5)
+exit=1
+=== f2-seq-gaps ===
+{"event":"room.cold_start","durationMs":1115,"integrity":"eager","phases":{"schema":{"ms":81,"rowsRead":0},"plugin":{"ms":447,"rowsRead":0},"fence":{"ms":294,"rowsRead":0},"verifies":{"ms":73,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":177,"heapBytes":25224512,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+  duplicate sequence -> clean UNIQUE rejection
+  sequence gap -> rebuild throws "not contiguous" in 3ms
+  event deleted -> rebuild throws clean in 0ms
+  no torn projection served, no hangs
+PASS F2-seq-gaps
+exit=0
+=== f3-concurrent-writers ===
+  250 claims across 5 procs: zero lost, zero torn
+PASS F3-concurrent-writers
+exit=0
+=== f5-disk-full ===
+  stopped after 1 writes with: ERR_SQLITE_ERROR
+  reopen ok: 1 rows committed, quick_check=ok
+PASS F5-disk-full
+exit=0

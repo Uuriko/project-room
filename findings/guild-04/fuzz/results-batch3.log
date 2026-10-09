@@ -1,0 +1,61 @@
+=== f11-directory-race ===
+{"event":"room.cold_start","durationMs":1063,"integrity":"eager","phases":{"schema":{"ms":265,"rowsRead":0},"plugin":{"ms":401,"rowsRead":0},"fence":{"ms":161,"rowsRead":0},"verifies":{"ms":19,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":163,"heapBytes":25097264,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+FAIL F11-directory-race: AssertionError [ERR_ASSERTION]: torn: 0 settings rows
+
+0 !== 1
+
+    at file:///home/hatch/workspace/pr-wave1000-guild-04/findings/guild-04/fuzz/f11-directory-race.mjs:36:10
+    at fuzz (file:///home/hatch/workspace/pr-wave1000-guild-04/findings/guild-04/fuzz/lib.mjs:23:11)
+    at file:///home/hatch/workspace/pr-wave1000-guild-04/findings/guild-04/fuzz/f11-directory-race.mjs:11:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+exit=1
+=== f12-hostile-replay ===
+{"event":"room.cold_start","durationMs":1259,"integrity":"eager","phases":{"schema":{"ms":77,"rowsRead":0},"plugin":{"ms":586,"rowsRead":0},"fence":{"ms":326,"rowsRead":0},"verifies":{"ms":79,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":169,"heapBytes":25260216,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+  empty: clean throw (Export is empty)
+  not-json-line: clean throw (Export line is not JSON)
+  two-watermarks: clean throw (Export has more than one watermark)
+  two-trailers: clean throw (Export has more than one trailer)
+  bad-trailer: clean throw (Export trailer is malformed)
+  torn-count: clean throw (Backup is torn: the export holds 2 events but its trailer counts 99999)
+{"event":"room.cold_start","durationMs":1462,"integrity":"eager","phases":{"schema":{"ms":281,"rowsRead":0},"plugin":{"ms":546,"rowsRead":0},"fence":{"ms":329,"rowsRead":0},"verifies":{"ms":12,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":151,"heapBytes":26363328,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+FAIL F12-hostile-replay: AssertionError [ERR_ASSERTION]: object-cell: replay accepted hostile input!
+    at file:///home/hatch/workspace/pr-wave1000-guild-04/findings/guild-04/fuzz/f12-hostile-replay.mjs:36:12
+    at fuzz (file:///home/hatch/workspace/pr-wave1000-guild-04/findings/guild-04/fuzz/lib.mjs:23:11)
+    at file:///home/hatch/workspace/pr-wave1000-guild-04/findings/guild-04/fuzz/f12-hostile-replay.mjs:10:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+exit=1
+=== f13-html-hostile ===
+  safeEvidenceHref: hostile schemes rejected, clean https kept
+FAIL F13-html-hostile: AssertionError [ERR_ASSERTION]: raw onerror in output
+    at file:///home/hatch/workspace/pr-wave1000-guild-04/findings/guild-04/fuzz/f13-html-hostile.mjs:31:10
+    at fuzz (file:///home/hatch/workspace/pr-wave1000-guild-04/findings/guild-04/fuzz/lib.mjs:23:11)
+    at file:///home/hatch/workspace/pr-wave1000-guild-04/findings/guild-04/fuzz/f13-html-hostile.mjs:7:1
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+exit=1
+=== f14-context-malformed ===
+  null state: clean RangeError/TypeError (1ms)
+  null room: clean RangeError/TypeError (0ms)
+  negative sequence: clean RangeError/TypeError (0ms)
+  non-integer sequence: clean RangeError/TypeError (0ms)
+  negative caughtUp: clean RangeError/TypeError (0ms)
+  non-string viewer: clean RangeError/TypeError (0ms)
+  members null: tolerated (0ms)
+  members array: tolerated (0ms)
+  member garbage: tolerated (0ms)
+  workItems null: tolerated (1ms)
+  workItem garbage: tolerated (0ms)
+  now NaN: clean RangeError/TypeError (0ms)
+  huge sequence: tolerated (8ms)
+PASS F14-context-malformed
+exit=0
+=== f15-sqlite-busy ===
+  SQLITE_BUSY in 536ms (code: ERR_SQLITE_ERROR)
+  lock released -> write succeeds; no torn state
+PASS F15-sqlite-busy
+exit=0

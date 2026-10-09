@@ -1,6 +1,6 @@
 // F13: hostile event rows into the HTML exporter — no XSS, no javascript: links, tombstones stay empty.
 import assert from "node:assert/strict";
-import { walkExport, renderRoomExportHtml, safeEvidenceHref, esc } from "../../server/room-export-html.mjs";
+import { walkExport, renderRoomExportHtml, safeEvidenceHref, esc } from "../../../server/room-export-html.mjs";
 import { fuzz } from "./lib.mjs";
 
 const X = `</title><script>alert(1)</script><img src=x onerror=alert(2)>`;
@@ -28,9 +28,13 @@ fuzz("F13-html-hostile", async () => {
   assert.equal(walk.count, 9);
   const html = renderRoomExportHtml(rows, { roomId: "r" });
   assert.ok(!html.includes("<script"), "raw <script in output");
-  assert.ok(!html.includes("onerror="), "raw onerror in output");
-  assert.ok(!html.includes("javascript:"), "javascript: URL in output");
+  // NOTE: the escaped payload text legitimately contains the literal substring
+  // "onerror=" (escaped markup, inert). Remove every escaped-payload occurrence,
+  // then require no handler-attribute text remains anywhere else.
+  const scrubbed = html.split(esc(X)).join("");
+  assert.ok(!/(?:^|[\s"'>])on[a-z]+\s*=/i.test(scrubbed), "unescaped handler attribute in output");
   assert.ok(!html.includes(X), "raw payload in output");
+  assert.ok(!/href\s*=\s*["']?\s*javascript:/i.test(html), "javascript: href in output");
   assert.ok(html.includes(esc(X)), "escaped payload missing");
   assert.ok(html.includes("Message deleted"), "tombstone missing");
   assert.ok(!html.includes("alert(1)</script>"), "deleted body leaked");

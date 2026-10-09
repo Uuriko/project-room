@@ -1,7 +1,7 @@
 // F10: hostile inputs to room-key host-id derivation + attachment validators — 422s only, no hangs.
 import assert from "node:assert/strict";
-import { roomKeyHostId } from "../../server/room-key-presence.mjs";
-import { validAttachmentData, base64LengthForBytes } from "../../server/room-attachment-bytes.mjs";
+import { roomKeyHostId } from "../../../server/room-key-presence.mjs";
+import { validAttachmentData, base64LengthForBytes } from "../../../server/room-attachment-bytes.mjs";
 import { fuzz, throwsBounded } from "./lib.mjs";
 
 const auth = { hostPrefix: "rk_deadbeef_" };

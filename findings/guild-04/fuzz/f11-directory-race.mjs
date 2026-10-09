@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { RoomStore } from "../../server/store.mjs";
-import { initialRoom } from "../../server/bootstrap.mjs";
-import { RoomDirectory } from "../../server/room-directory.mjs";
+import { RoomStore } from "../../../server/store.mjs";
+import { initialRoom } from "../../../server/bootstrap.mjs";
+import { RoomDirectory } from "../../../server/room-directory.mjs";
 import { fuzz, scratchDir } from "./lib.mjs";
 
 fuzz("F11-directory-race", async () => {
@@ -19,7 +19,7 @@ fuzz("F11-directory-race", async () => {
   const worker = `
     import { RoomStore } from "/home/hatch/workspace/pr-wave1000-guild-04/server/store.mjs";
     import { RoomDirectory } from "/home/hatch/workspace/pr-wave1000-guild-04/server/room-directory.mjs";
-    const [file, slot] = [process.argv[2], Number(process.argv[3])];
+    const [file, slot] = [process.argv[1], Number(process.argv[2])];
     const store = new RoomStore(file);
     const d = new RoomDirectory(store);
     for (let i = 0; i < 50; i++) {

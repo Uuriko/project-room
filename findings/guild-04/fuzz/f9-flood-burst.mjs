@@ -1,6 +1,6 @@
 // F9: flood-guard burst — exactly capacity allowed, then 429 with Retry-After; refill over time.
 import assert from "node:assert/strict";
-import { createRoomFloodGuard } from "../../server/room-flood-guard.mjs";
+import { createRoomFloodGuard } from "../../../server/room-flood-guard.mjs";
 import { fuzz } from "./lib.mjs";
 
 fuzz("F9-flood-burst", async () => {

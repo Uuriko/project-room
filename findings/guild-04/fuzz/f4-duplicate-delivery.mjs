@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { createDurableWorkClaimRegistry, workClaimSchema } from "../../server/work-claim-sqlite.mjs";
+import { createDurableWorkClaimRegistry, workClaimSchema } from "../../../server/work-claim-sqlite.mjs";
 import { fuzz, scratchDir } from "./lib.mjs";
 
 fuzz("F4-duplicate-delivery", async () => {

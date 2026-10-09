@@ -1,0 +1,12 @@
+=== RV-2 branch=wave300/fix69-event-light-claims at 2026-10-09T12:38:28Z
+HEAD is now at 2bf5ec8fb FIX-69: rework integrity tests for the digest model (notes, list view, sweep budget)
+--- rebase onto origin/main
+REBASE_FAILED
+hint: It has been rescheduled; To edit the command before continuing, please
+hint: edit the todo list first:
+hint: 
+hint:     git rebase --edit-todo
+hint:     git rebase --continue
+--- NOT rebased; RESULT: REBASE_FAILED — no tests run
+DONE_RV_2
+Deleted branch g04-rv-2-scratch (was 2bf5ec8fb).

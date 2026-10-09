@@ -1,0 +1,86 @@
+{"event":"room.cold_start","durationMs":2399,"integrity":"eager","phases":{"schema":{"ms":238,"rowsRead":0},"plugin":{"ms":790,"rowsRead":0},"fence":{"ms":699,"rowsRead":0},"verifies":{"ms":385,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":196,"heapBytes":39135288,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ reducer: kind is validated at creation, archive is owner-only and closes the log, leaving needs no administration (13.572057ms)
+room diagnostic op_HWT4CWtW 422 command_rejected conflict /api/rooms/:roomId/commands
+room diagnostic op_z0nQ8uZx 422 invalid_command input /api/rooms/:roomId/commands
+room diagnostic op_-OsBKgz_ 409 room_archived conflict /api/rooms/:roomId/commands
+room diagnostic op_l7PUZAqh 409 room_archived conflict /api/rooms/:roomId/commands
+room diagnostic op_EmruwCXE 409 room_archived conflict /api/rooms/:roomId/commands
+room diagnostic op_wOwN7mAs 409 room_archived conflict /api/rooms/:roomId/commands
+room diagnostic op_5g0zTtG9 409 room_archived conflict /api/rooms/:roomId/import
+room diagnostic op_p-TsN6Ku 403 owner_required access /api/rooms/:roomId/export
+{"event":"room.cold_start","durationMs":447,"integrity":"eager","phases":{"schema":{"ms":110,"rowsRead":0},"plugin":{"ms":57,"rowsRead":0},"fence":{"ms":161,"rowsRead":0},"verifies":{"ms":44,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":58,"heapBytes":48354680,"rooms":1,"sequences":11,"projectionBytes":3013,"events":11}
+{"event":"room.cold_start","durationMs":665,"integrity":"eager","phases":{"schema":{"ms":56,"rowsRead":0},"plugin":{"ms":299,"rowsRead":0},"fence":{"ms":116,"rowsRead":0},"verifies":{"ms":23,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":139,"heapBytes":36438048,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":3,"failed":true,"error":"Read-only invitation audit requires schema v38; migrate a backed-up database through the service first","cpuMs":1,"heapBytes":46785640,"rooms":2,"sequences":31,"projectionBytes":10260,"events":31}
+{"event":"room.cold_start","durationMs":1989,"failed":true,"error":"Room lifecycle requires operator reconciliation","integrity":"eager","phases":{"schema":{"ms":277,"rowsRead":0},"plugin":{"ms":637,"rowsRead":0},"fence":{"ms":637,"rowsRead":0}},"cpuMs":270,"heapBytes":40257448,"rooms":2,"sequences":31,"projectionBytes":10260,"events":31}
+{"event":"room.cold_start","durationMs":1151,"integrity":"eager","phases":{"schema":{"ms":290,"rowsRead":0},"plugin":{"ms":687,"rowsRead":0},"fence":{"ms":34,"rowsRead":0},"verifies":{"ms":4,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":134,"heapBytes":44157672,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1182,"integrity":"eager","phases":{"schema":{"ms":116,"rowsRead":0},"plugin":{"ms":467,"rowsRead":0},"fence":{"ms":313,"rowsRead":0},"verifies":{"ms":104,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":161,"heapBytes":41037192,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1120,"integrity":"eager","phases":{"schema":{"ms":194,"rowsRead":0},"plugin":{"ms":536,"rowsRead":0},"fence":{"ms":206,"rowsRead":0},"verifies":{"ms":34,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":149,"heapBytes":52355352,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✖ store: archiving closes commands, import and every join path with 409 room_archived while reads and export continue (8736.839823ms)
+✖ store: a seeded history that ends archived stores the column, and one that continues past an archive does not replay (778.439598ms)
+✖ migration: genuine v27 data gains rooms.archived_at exactly once, keeps every room, and the migration is idempotent (20850.418035ms)
+✔ account rooms: discovery carries kind and archive state; creation is bounded to accounts that administer membership (4476.974239ms)
+✔ account rooms: the membership cap bounds creation (11270.49308ms)
+✔ account rooms: someone who left their only room may create their first room (2525.094643ms)
+
+Interrupted while running:
+
+⚠ tests/room-lifecycle.test.js (tests/room-lifecycle.test.js:1:1)
+✖ tests/room-lifecycle.test.js (239365.820504ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 4
+ℹ fail 3
+ℹ cancelled 1
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 239414.067709
+
+✖ failing tests:
+
+test at tests/room-lifecycle.test.js:74:1
+✖ store: archiving closes commands, import and every join path with 409 room_archived while reads and export continue (8736.839823ms)
+  AssertionError [ERR_ASSERTION]: Missing expected exception.
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-04/tests/room-lifecycle.test.js:135:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: /Room lifecycle requires operator reconciliation/,
+    operator: 'throws',
+    diff: 'simple'
+  }
+
+test at tests/room-lifecycle.test.js:146:1
+✖ store: a seeded history that ends archived stores the column, and one that continues past an archive does not replay (778.439598ms)
+  Error: Room lifecycle requires operator reconciliation
+      at verifyRoomLifecycle (file:///home/hatch/workspace/pr-wave1000-guild-04/server/room-lifecycle.mjs:50:11)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-04/tests/room-lifecycle.test.js:158:3)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests/room-lifecycle.test.js:162:1
+✖ migration: genuine v27 data gains rooms.archived_at exactly once, keeps every room, and the migration is idempotent (20850.418035ms)
+  Error: Room lifecycle requires operator reconciliation
+      at verifyRoomLifecycle (file:///home/hatch/workspace/pr-wave1000-guild-04/server/room-lifecycle.mjs:50:11)
+      at file:///home/hatch/workspace/pr-wave1000-guild-04/server/store.mjs:1823:9
+      at run (file:///home/hatch/workspace/pr-wave1000-guild-04/server/store.mjs:647:22)
+      at Object.transaction (file:///home/hatch/workspace/pr-wave1000-guild-04/server/store.mjs:674:22)
+      at RoomStore.transaction (file:///home/hatch/workspace/pr-wave1000-guild-04/server/store.mjs:2621:41)
+      at new RoomStore (file:///home/hatch/workspace/pr-wave1000-guild-04/server/store.mjs:1329:16)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-04/tests/room-lifecycle.test.js:181:19)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7)
+
+test at tests/room-lifecycle.test.js:1:1
+✖ tests/room-lifecycle.test.js (239365.820504ms)
+  'Promise resolution is still pending but the event loop has already resolved'
+exit=124

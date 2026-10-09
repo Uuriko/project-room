@@ -1,9 +1,9 @@
 // F7: hostile room ids against RoomDirectory — 4xx never 500, no hangs.
 import assert from "node:assert/strict";
 import { join } from "node:path";
-import { RoomStore } from "../../server/store.mjs";
-import { initialRoom } from "../../server/bootstrap.mjs";
-import { RoomDirectory } from "../../server/room-directory.mjs";
+import { RoomStore } from "../../../server/store.mjs";
+import { initialRoom } from "../../../server/bootstrap.mjs";
+import { RoomDirectory } from "../../../server/room-directory.mjs";
 import { fuzz, scratchDir, throwsBounded } from "./lib.mjs";
 
 const NASTY = [

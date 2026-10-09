@@ -1,0 +1,68 @@
+{"event":"room.cold_start","durationMs":1654,"integrity":"eager","phases":{"schema":{"ms":217,"rowsRead":0},"plugin":{"ms":508,"rowsRead":0},"fence":{"ms":607,"rowsRead":0},"verifies":{"ms":127,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":190,"heapBytes":37463976,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+room diagnostic op_U13D3Imb 401 unauthenticated access /api/rooms/:roomId/export
+room diagnostic op_NOJdO9VH 403 owner_required access /api/rooms/:roomId/export
+{"event":"room.cold_start","durationMs":1831,"integrity":"eager","phases":{"schema":{"ms":253,"rowsRead":0},"plugin":{"ms":812,"rowsRead":0},"fence":{"ms":530,"rowsRead":0},"verifies":{"ms":15,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":159,"heapBytes":34660872,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ room export returns the full event log as JSONL, framed by Content-Length (4375.952817ms)
+room diagnostic op_HHIma4nC 500 internal_error internal /api/rooms/:roomId/export
+error-trace eid_BJT79uF4Fbnk fp=967f6cb70bd46877 status=500 code=internal_error
+room diagnostic op_VhU3kq2R 503 storage_unavailable unavailable /api/rooms/:roomId/export
+error-trace eid_CQY8Iuk2vRx2 fp=1b6c4699dc93510f status=503 code=storage_unavailable
+{"event":"room.cold_start","durationMs":1857,"integrity":"eager","phases":{"schema":{"ms":409,"rowsRead":0},"plugin":{"ms":562,"rowsRead":0},"fence":{"ms":149,"rowsRead":0},"verifies":{"ms":4,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":152,"heapBytes":40577064,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ an export that fails part-way is a JSON error, never a clean-looking partial file (2824.552161ms)
+room diagnostic op_UCS83mrs 415 ndjson_required input /api/rooms/:roomId/import
+room diagnostic op_ld4u56cX 422 invalid_import input /api/rooms/:roomId/import
+room diagnostic op_uhTwMa3Y 403 owner_required access /api/rooms/:roomId/import
+{"event":"room.cold_start","durationMs":1036,"integrity":"eager","phases":{"schema":{"ms":168,"rowsRead":0},"plugin":{"ms":496,"rowsRead":0},"fence":{"ms":201,"rowsRead":0},"verifies":{"ms":45,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":145,"heapBytes":47531040,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ room import round-trips an export (round-2 #107) (2928.865564ms)
+{"event":"room.cold_start","durationMs":911,"integrity":"eager","phases":{"schema":{"ms":343,"rowsRead":0},"plugin":{"ms":332,"rowsRead":0},"fence":{"ms":64,"rowsRead":0},"verifies":{"ms":24,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":163,"heapBytes":37959240,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ room import resets cursors and refreshes the projection checkpoint (1615.084486ms)
+room diagnostic op_kfcvy5sl 422 invalid_import input /api/rooms/:roomId/import
+{"event":"room.cold_start","durationMs":839,"integrity":"eager","phases":{"schema":{"ms":99,"rowsRead":0},"plugin":{"ms":407,"rowsRead":0},"fence":{"ms":181,"rowsRead":0},"verifies":{"ms":10,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":146,"heapBytes":42768800,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ room import rejects duplicate event ids cleanly (1334.91852ms)
+{"event":"room.cold_start","durationMs":763,"integrity":"eager","phases":{"schema":{"ms":199,"rowsRead":0},"plugin":{"ms":372,"rowsRead":0},"fence":{"ms":41,"rowsRead":0},"verifies":{"ms":4,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":148,"heapBytes":41141352,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ room import round-trips a large (1500-event) export (254236.576809ms)
+room diagnostic op_xmeVInt4 422 invalid_import input /api/rooms/:roomId/import
+room diagnostic op_CMvhe-9c 422 invalid_import input /api/rooms/:roomId/import
+room diagnostic op_6k1qjk5p 422 invalid_import input /api/rooms/:roomId/import
+{"event":"room.cold_start","durationMs":2168,"integrity":"eager","phases":{"schema":{"ms":95,"rowsRead":0},"plugin":{"ms":1178,"rowsRead":0},"fence":{"ms":501,"rowsRead":0},"verifies":{"ms":100,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":172,"heapBytes":46248952,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ database failures during import surface as clean invalid_import, not raw errors (1522.454846ms)
+room diagnostic op_ZGXHJFOc 409 session_binding_changed conflict /api/rooms/:roomId/export
+room diagnostic op_TPo0RHxv 401 unauthenticated access /api/rooms/:roomId/export
+{"event":"room.cold_start","durationMs":1044,"integrity":"eager","phases":{"schema":{"ms":428,"rowsRead":0},"plugin":{"ms":328,"rowsRead":0},"fence":{"ms":137,"rowsRead":0},"verifies":{"ms":19,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":182,"heapBytes":50967952,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ export never answers a 200 with an empty body when the lazy authenticate fails (2889.666488ms)
+room diagnostic op_hv6w1IVy 422 invalid_import input /api/rooms/:roomId/import
+✔ import reports the line number of a corrupt line as it appears in the file, blanks included (2359.354085ms)
+{"event":"room.cold_start","durationMs":1393,"integrity":"eager","phases":{"schema":{"ms":185,"rowsRead":0},"plugin":{"ms":603,"rowsRead":0},"fence":{"ms":285,"rowsRead":0},"verifies":{"ms":52,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":165,"heapBytes":56552848,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ client exportRoom/importRoom use the hardened fetch posture and keep the service error code (129.40582ms)
+{"event":"room.cold_start","durationMs":2076,"integrity":"eager","phases":{"schema":{"ms":308,"rowsRead":0},"plugin":{"ms":570,"rowsRead":0},"fence":{"ms":548,"rowsRead":0},"verifies":{"ms":73,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":171,"heapBytes":61141624,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ F8 semantics: export returns the deletion tombstone; projection and search hide the text (2561.285736ms)
+room diagnostic op__G3zH638 403 owner_required access /api/rooms/:roomId/export
+room diagnostic op_s_bvDhV- 401 unauthenticated access /api/rooms/:roomId/export
+room diagnostic op_Q5A0iqnG 422 invalid_format input /api/rooms/:roomId/export
+room diagnostic op_SyLg5HsY 422 invalid_format input /api/rooms/:roomId/export
+{"event":"room.cold_start","durationMs":2642,"integrity":"eager","phases":{"schema":{"ms":959,"rowsRead":0},"plugin":{"ms":993,"rowsRead":0},"fence":{"ms":310,"rowsRead":0},"verifies":{"ms":100,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":188,"heapBytes":67333760,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ HTML export renders the same event walk for people: escaped, tombstoned, framed and sandboxed (4157.998531ms)
+room diagnostic op_TS1fUTa2 403 owner_required access /api/rooms/:roomId/export
+room diagnostic op_N3sOaMk4 403 owner_required access /api/rooms/:roomId/export
+room diagnostic op_XeUwE35_ 401 unauthenticated access /api/rooms/:roomId/export
+room diagnostic op_XaZ8QZpg 401 unauthenticated access /api/rooms/:roomId/export
+{"event":"room.cold_start","durationMs":3003,"integrity":"eager","phases":{"schema":{"ms":573,"rowsRead":0},"plugin":{"ms":2021,"rowsRead":0},"fence":{"ms":282,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":174,"heapBytes":73106304,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ HTML export respects current membership: a removed member gets nothing, the room shows access ended (4356.662738ms)
+room diagnostic op_GnIfZuM8 500 internal_error internal /api/rooms/:roomId/export
+error-trace eid_TBtWE2LL2G_c fp=967f6cb70bd46877 status=500 code=internal_error
+room diagnostic op_-hVlgJ6d 503 storage_unavailable unavailable /api/rooms/:roomId/export
+error-trace eid_aofz6a3LHWZG fp=1b6c4699dc93510f status=503 code=storage_unavailable
+{"event":"room.cold_start","durationMs":1309,"integrity":"eager","phases":{"schema":{"ms":97,"rowsRead":0},"plugin":{"ms":602,"rowsRead":0},"fence":{"ms":417,"rowsRead":0},"verifies":{"ms":16,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":160,"heapBytes":79127880,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ JSONL format variants match and omit deleted message text (4313.67804ms)
+✔ HTML renderer never links anything but a credential-free https URL and never fails on unknown events (24.051244ms)
+✔ R1: an owner's export of a room with inter-member DMs renumbers densely and round-trips through import (2422.911396ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 16
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 298509.50352
+exit=0

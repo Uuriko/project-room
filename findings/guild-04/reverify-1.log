@@ -1,0 +1,12 @@
+=== RV-1 branch=wave300/fix4-eventlog-read-scale at 2026-10-09T12:38:00Z
+HEAD is now at 4eceef376 FIX-4: event-log read scalability
+--- rebase onto origin/main
+REBASE_FAILED
+hint: It has been rescheduled; To edit the command before continuing, please
+hint: edit the todo list first:
+hint: 
+hint:     git rebase --edit-todo
+hint:     git rebase --continue
+--- NOT rebased; RESULT: REBASE_FAILED — no tests run
+DONE_RV_1
+Deleted branch g04-rv-1-scratch (was 4eceef376).
