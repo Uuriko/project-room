@@ -95,8 +95,9 @@ export class RoomAssistant {
       if (input.action === 'configure') {
         if (!isOwner) fail('assistant_denied', 'Only the room owner configures its assistant', 403);
         if (input.expectedRevision !== config.revision) fail('assistant_revision_conflict', 'Assistant settings changed; read them before retrying');
+        const candidate = state.members[input.coordinatorMemberId];
         if (typeof input.name !== 'string' || !input.name.trim() || input.name.length > 64
-          || input.coordinatorMemberId !== null && (!validId(input.coordinatorMemberId) || state.members[input.coordinatorMemberId]?.kind !== 'agent' || !hostReady(state.members[input.coordinatorMemberId])))
+          || input.coordinatorMemberId !== null && (!validId(input.coordinatorMemberId) || candidate?.kind !== 'agent' || !hostReady(candidate)))
           fail('invalid_assistant_config', 'Choose a name and an active room agent, or disconnect', 422);
         result = { name: input.name.trim(), coordinatorMemberId: input.coordinatorMemberId, revision: config.revision + 1 };
         this.store.db.prepare('INSERT INTO room_assistant_config VALUES(?,?) ON CONFLICT(room_id) DO UPDATE SET value=excluded.value').run(roomId, JSON.stringify(result));

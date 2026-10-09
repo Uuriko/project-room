@@ -98,11 +98,10 @@ export const COORDINATION_NORMS = Object.freeze({
   stopAfterRepeatedNoopWakes: true
 });
 
-const claimStatusOf = (claim, nowIso) => {
-  if (!claim) return null;
-  if (claim.status === "released") return "released";
-  return Date.parse(claim.expiresAt) > Date.parse(nowIso) ? "active" : "expired";
-};
+const claimStatusOf = (claim, nowIso) =>
+  !claim ? null
+  : claim.status === "released" ? "released"
+  : Date.parse(claim.expiresAt) > Date.parse(nowIso) ? "active" : "expired";
 
 const reviewPolicyOf = item =>
   item.independentVerificationRequired && item.ownerDecisionRequired ? "independent+owner"
