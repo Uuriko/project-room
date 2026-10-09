@@ -49,21 +49,9 @@ const DEFAULT_REPO = resolve(HERE, '..');
 // --- Named routines (Anthropic's framing, from the brief). Order matters:
 // --- this is the worker's default pick order. --------------------------------
 export const ROUTINES = [
-  {
-    name: 'openapi-drift',
-    match: /openapi|api.{0,12}(drift|contract|spec)|drift/i,
-    brief: 'Reconcile docs/openapi.yaml against the live server routes; report zero drift or open a PR.',
-  },
-  {
-    name: 'docs-gap',
-    match: /docs|document|README|changelog/i,
-    brief: 'Fill documentation gaps for merged-but-undocumented work.',
-  },
-  {
-    name: 'stale-todo',
-    match: /todo|FIXME|stale|cleanup|dead code|deprecated/i,
-    brief: 'Sweep stale TODOs / dead code; each removal must stay green.',
-  },
+  { name: 'openapi-drift', match: /openapi|api.{0,12}(drift|contract|spec)|drift/i, brief: 'Reconcile docs/openapi.yaml against the live server routes; report zero drift or open a PR.' },
+  { name: 'docs-gap', match: /docs|document|README|changelog/i, brief: 'Fill documentation gaps for merged-but-undocumented work.' },
+  { name: 'stale-todo', match: /todo|FIXME|stale|cleanup|dead code|deprecated/i, brief: 'Sweep stale TODOs / dead code; each removal must stay green.' },
   { name: 'general', match: /.*/, brief: 'General backlog work item.' },
 ];
 
@@ -311,12 +299,9 @@ export function saveState(path, state) {
 /** Drop slots whose heartbeat is older than staleAfterHours. Returns {state, reaped}. */
 export function reapStaleSlots(state, staleAfterHours, now = Date.now()) {
   const cutoff = now - staleAfterHours * 3600 * 1000;
-  const live = [];
-  const reaped = [];
-  for (const s of state.slots) {
-    if ((s.lastHeartbeat || 0) < cutoff) reaped.push(s);
-    else live.push(s);
-  }
+  const isLive = (s) => (s.lastHeartbeat || 0) >= cutoff;
+  const live = state.slots.filter(isLive);
+  const reaped = state.slots.filter((s) => !isLive(s));
   return { state: { ...state, slots: live }, reaped };
 }
 

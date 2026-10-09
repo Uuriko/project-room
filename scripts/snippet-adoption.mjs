@@ -259,15 +259,11 @@ async function hydrateRepos(repos, { credential, fetchImpl, sleepImpl, api }) {
     }
     if (!cache.has(repo.full_name)) {
       const { status, body } = await githubRequest(`${api}/repos/${repo.full_name}`, { credential, fetchImpl, sleepImpl });
-      if (status === 200 && body) {
-        cache.set(repo.full_name, {
-          stars: Number.isFinite(body.stargazers_count) ? body.stargazers_count : repo.stars,
-          pushed_at: typeof body.pushed_at === "string" ? body.pushed_at : repo.pushed_at,
-          fork: body.fork === true,
-        });
-      } else {
-        cache.set(repo.full_name, { stars: repo.stars, pushed_at: repo.pushed_at, fork: repo.fork });
-      }
+      cache.set(repo.full_name, status === 200 && body ? {
+        stars: Number.isFinite(body.stargazers_count) ? body.stargazers_count : repo.stars,
+        pushed_at: typeof body.pushed_at === "string" ? body.pushed_at : repo.pushed_at,
+        fork: body.fork === true,
+      } : { stars: repo.stars, pushed_at: repo.pushed_at, fork: repo.fork });
     }
     const extra = cache.get(repo.full_name);
     hydrated.push({ ...repo, ...extra });
@@ -287,11 +283,10 @@ export function publicRepo(repo) {
 }
 
 export function summarizeRepos(repos, previous) {
-  const ranked = topByStars(repos);
   const base = {
     total_repos: repos.length,
     repos_with_at_least_100_stars: repos.filter(repo => Number.isFinite(repo.stars) && repo.stars >= 100).length,
-    top_10_by_stars: ranked,
+    top_10_by_stars: topByStars(repos),
   };
   if (!previous) {
     return { ...base, new_this_week: null, lost_this_week: null, new_repos: [], lost_repos: [], baseline: "none" };
@@ -390,38 +385,39 @@ export async function resolveIngestPath() {
   }
 }
 
-async function postJson({ url, credential, body, fetchImpl }) {
+async function postAndCheck({ url, credential, body, fetchImpl, okStatuses = [200, 201] }) {
   const response = await fetchImpl(url, {
     method: "POST",
     headers: { authorization: `Bearer ${credential}`, "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify(body),
   });
-  return response.status;
+  return { ok: okStatuses.includes(response.status), status: response.status };
 }
 
 export async function postOpsSummary({ origin, roomId, credential, text, fetchImpl }) {
   if (!credential) return { posted: false, reason: "ROOM_OPS_POST_TOKEN not set" };
   if (!roomId) return { posted: false, reason: "ROOM_OPS_ROOM_ID not set" };
   const id = randomUUID();
-  const status = await postJson({
+  const { ok, status } = await postAndCheck({
     url: `${origin.replace(/\/$/, "")}/api/rooms/${encodeURIComponent(roomId)}/commands`,
     credential,
     fetchImpl,
     body: { id, type: "message.posted", data: { messageId: id, body: text } },
   });
-  return { posted: status === 200 || status === 201, status };
+  return { posted: ok, status };
 }
 
 export async function postAnalyticsSnapshot({ origin, ingestPath, credential, event, fetchImpl }) {
   if (!ingestPath) return { sent: false, reason: "analytics ingestion route is absent" };
   if (!credential) return { sent: false, reason: "ANALYTICS_INGEST_TOKEN not set" };
-  const status = await postJson({
+  const { ok, status } = await postAndCheck({
     url: `${origin.replace(/\/$/, "")}${ingestPath}`,
     credential,
     fetchImpl,
     body: event,
+    okStatuses: [200, 201, 202],
   });
-  return { sent: status === 200 || status === 201 || status === 202, status };
+  return { sent: ok, status };
 }
 
 function adoptionEvent(report) {

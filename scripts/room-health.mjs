@@ -103,6 +103,16 @@ function sh(cmd, args, input) {
 
 // ---------------------------------------------------------------- fetchers
 
+// Parse a fetch result's JSON body, prefixing parse failures with the label.
+function jsonResult(label, r) {
+  if (!r.ok) return r;
+  try {
+    return { ok: true, out: JSON.parse(r.out) };
+  } catch (e) {
+    return { ok: false, err: `${label}: ${String(e).slice(0, 200)}` };
+  }
+}
+
 function fetchComments() {
   // Raw comment JSON array (id, created_at, body) — the exact input that
   // scripts/room's parse_events consumes. --paginate emits one array per
@@ -115,11 +125,7 @@ function fetchComments() {
   if (!r.ok) return r;
   const merged = sh('jq', ['-s', 'add | map({id, created_at, body})'], r.out);
   if (!merged.ok) return { ok: false, err: 'comment merge: ' + merged.err };
-  try {
-    return { ok: true, out: JSON.parse(merged.out) };
-  } catch (e) {
-    return { ok: false, err: 'comment JSON parse: ' + String(e).slice(0, 200) };
-  }
+  return jsonResult('comment JSON parse', merged);
 }
 
 function boardState(comments) {
@@ -129,30 +135,20 @@ function boardState(comments) {
   if (!ev.ok) return { ok: false, err: 'room _parse: ' + ev.err };
   const st = sh('bash', [ROOM_SH, '_state'], ev.out);
   if (!st.ok) return { ok: false, err: 'room _state: ' + st.err };
-  try {
-    return { ok: true, out: JSON.parse(st.out) };
-  } catch (e) {
-    return { ok: false, err: 'state JSON parse: ' + String(e).slice(0, 200) };
-  }
+  return jsonResult('state JSON parse', st);
 }
 
 function fetchIssueMeta() {
-  const r = sh('gh', [
+  return jsonResult('issue JSON parse', sh('gh', [
     'api',
     `repos/${REPO_SLUG}/issues/${BOARD_ISSUE}`,
     '--jq',
     '{comments: .comments, state: .state, updated_at: .updated_at}',
-  ]);
-  if (!r.ok) return r;
-  try {
-    return { ok: true, out: JSON.parse(r.out) };
-  } catch (e) {
-    return { ok: false, err: 'issue JSON parse: ' + String(e).slice(0, 200) };
-  }
+  ]));
 }
 
 function fetchOpenPRs() {
-  const r = sh('gh', [
+  return jsonResult('PR JSON parse', sh('gh', [
     'pr',
     'list',
     '--repo',
@@ -163,23 +159,18 @@ function fetchOpenPRs() {
     '200',
     '--json',
     'number,title,createdAt,headRefName,author,statusCheckRollup',
-  ]);
-  if (!r.ok) return r;
-  try {
-    return { ok: true, out: JSON.parse(r.out) };
-  } catch (e) {
-    return { ok: false, err: 'PR JSON parse: ' + String(e).slice(0, 200) };
-  }
+  ]));
 }
 
 // ------------------------------------------------------------------ panels
 
 const LIVE = new Set(['submitted', 'working', 'suspended']);
+const liveState = (t) => LIVE.has(String(t.state || '').split('(')[0]);
 const nowMs = () => Date.now();
 
 function claimsPanel(state) {
   const tasks = Object.values((state && state.tasks) || {});
-  const live = tasks.filter((t) => LIVE.has(String(t.state || '').split('(')[0]));
+  const live = tasks.filter(liveState);
   const byLane = new Map();
   for (const t of live) {
     const lane = t.lane || '(unclaimed)';
@@ -326,7 +317,7 @@ function leasesPanel(state, now) {
   const tasks = Object.values((state && state.tasks) || {});
   const soon = [];
   for (const t of tasks) {
-    if (!LIVE.has(String(t.state || '').split('(')[0])) continue;
+    if (!liveState(t)) continue;
     if (!t.lease_expires_at) continue;
     const expMs = Date.parse(t.lease_expires_at);
     if (Number.isNaN(expMs)) continue;
@@ -361,6 +352,17 @@ function panel(title, inner, note) {
 
 function errPanel(title, err) {
   return `<section class="panel error"><h2>${esc(title)}</h2><p class="err">fetch failed: ${esc(err)}</p></section>`;
+}
+
+function sparkline(series) {
+  const max = Math.max(...series.map((x) => x.count), 1);
+  return series
+    .map((d, i) => {
+      const h = Math.max(2, (d.count / max) * 56);
+      const x = (i / Math.max(series.length - 1, 1)) * 276;
+      return `<rect x="${x.toFixed(1)}" y="${(58 - h).toFixed(1)}" width="14" height="${h.toFixed(1)}" fill="var(--blue)"><title>${d.day}: ${d.count}/day</title></rect>`;
+    })
+    .join('');
 }
 
 function render(data) {
@@ -435,14 +437,7 @@ function render(data) {
             `<div class="brow proj"><span class="blabel">projection (24h rate)</span><span class="bval">${pressure.rate24h === null ? '—' : `${pressure.rate24h} comments/day → cap in ≈${pressure.projectedDays === null ? '∞' : pressure.projectedDays + ' days'}`}</span></div>` +
             (pressure.series.length
               ? `<svg class="spark" viewBox="0 0 280 60" preserveAspectRatio="none" aria-label="comments per day, last 14 days">` +
-                pressure.series
-                  .map((d, i) => {
-                    const max = Math.max(...pressure.series.map((x) => x.count), 1);
-                    const h = Math.max(2, (d.count / max) * 56);
-                    const x = (i / Math.max(pressure.series.length - 1, 1)) * 276;
-                    return `<rect x="${x.toFixed(1)}" y="${(58 - h).toFixed(1)}" width="14" height="${h.toFixed(1)}" fill="var(--blue)"><title>${d.day}: ${d.count}/day</title></rect>`;
-                  })
-                  .join('') +
+                sparkline(pressure.series) +
                 `</svg><p class="note">comments/day, trailing 14 days</p>`
               : ''),
           `${pressure.remaining} comments of headroom before the 2500-comment GitHub limit; projection assumes the trailing-24h rate holds`,
@@ -490,25 +485,23 @@ function main() {
   const generatedAt = new Date(now).toISOString();
 
   const c = fetchComments();
-  let comments = null;
+  const comments = c.ok ? c.out : null;
   let state = null;
   if (!c.ok) {
     errors.claims = 'comments: ' + c.err;
     errors.pressure = 'comments: ' + c.err;
   } else {
-    comments = c.out;
-    const s = boardState(comments);
-    if (!s.ok) errors.claims = s.err;
-    else state = s.out;
+    const s = boardState(c.out);
+    if (s.ok) state = s.out;
+    else errors.claims = s.err;
   }
 
   const meta = fetchIssueMeta();
   if (!meta.ok) errors.pressure = errors.pressure ? errors.pressure + '; meta: ' + meta.err : 'meta: ' + meta.err;
 
   const pr = fetchOpenPRs();
-  let prs = null;
+  const prs = pr.ok ? pr.out : null;
   if (!pr.ok) errors.prs = pr.err;
-  else prs = pr.out;
 
   const data = {
     generatedAt,

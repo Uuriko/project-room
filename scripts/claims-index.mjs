@@ -32,6 +32,7 @@ export const TASK_ID_RE = /^RC-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+$/;
 export const LEASE_RE = /^lease=([0-9]+)h$/;
 export const STATE_RE = /^(submitted|working|cancelled|suspended|completed|failed\([A-Za-z0-9_]+\))$/;
 const STATE_WORD_RE = /^[a-z]+/;
+const wordOf = (s) => (s || "").match(STATE_WORD_RE)?.[0] || s;
 const LIVE_STATES = new Set(["submitted", "working", "suspended"]);
 const LEGAL = {
   submitted: ["working", "cancelled"],
@@ -114,10 +115,11 @@ function normalizeClaimHeader(line) {
   if (!match) return line;
   const a = match[2].trim();
   const b = match[3].trim();
-  const kind = value => (HEADER_KINDS.has(value.toLowerCase()) ? value.toLowerCase() : null);
-  const lane = value => /^[A-Za-z0-9_-]+$/.test(value);
-  if (kind(a) && lane(b) && !kind(b)) return `[${b}][${kind(a)}]${match[4]}`;
-  if (kind(b) && lane(a) && !kind(a)) return `[${a}][${kind(b)}]${match[4]}`;
+  const kindOf = (value) => (HEADER_KINDS.has(value.toLowerCase()) ? value.toLowerCase() : null);
+  const isLane = (value) => /^[A-Za-z0-9_-]+$/.test(value);
+  const [ka, kb] = [kindOf(a), kindOf(b)];
+  if (ka && isLane(b) && !kb) return `[${b}][${ka}]${match[4]}`;
+  if (kb && isLane(a) && !ka) return `[${a}][${kb}]${match[4]}`;
   return line;
 }
 
@@ -156,6 +158,11 @@ function parseComment(c) {
   const tail = pf ? pf[2] : rest;
   const fclaim = fence(body, "claim");
   const frcpt = fence(body, "receipt");
+  const receiptOf = (kind, task) => ({
+    id, at, url, lane, kind, task,
+    pr: firstPr(body), merged: firstSha(body),
+    receipt: frcpt ? fieldsOf(frcpt) : null,
+  });
 
   if (prefix === "[claim]") {
     if (fclaim) return { id, at, url, lane, kind: "claim", block: fieldsOf(fclaim) };
@@ -168,12 +175,7 @@ function parseComment(c) {
     };
   }
   if (prefix === "[receipt]") {
-    return {
-      id, at, url, lane, kind: "receipt",
-      task: firstRc(tail) || firstRc(body) || firstTask(tail) || firstTask(body),
-      pr: firstPr(body), merged: firstSha(body),
-      receipt: frcpt ? fieldsOf(frcpt) : null,
-    };
+    return receiptOf("receipt", firstRc(tail) || firstRc(body) || firstTask(tail) || firstTask(body));
   }
   if (prefix === "STATUS:") {
     if (fclaim) {
@@ -182,14 +184,7 @@ function parseComment(c) {
     }
     return { id, at, url, lane, kind: "unregistered", reason: "STATUS: without a fenced room-claim block — not registered" };
   }
-  if (prefix === "DONE:") {
-    return {
-      id, at, url, lane, kind: "done",
-      task: firstRc(tail),
-      pr: firstPr(body), merged: firstSha(body),
-      receipt: frcpt ? fieldsOf(frcpt) : null,
-    };
-  }
+  if (prefix === "DONE:") return receiptOf("done", firstRc(tail));
   if (prefix === "RECLAIM") {
     const strikeOne = body.match(/<!--\s*room:strike-one:(RC-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+):([^> \t]+)\s*-->/);
     const strikeTwo = body.match(/<!--\s*room:strike-two:(RC-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+):([^> \t]+)\s*-->/);
@@ -257,6 +252,19 @@ function reduce(events) {
     return base && t.lease_h ? Date.parse(base) + t.lease_h * 3600_000 : null;
   };
 
+  // M-49: transitions are lane-scoped. A STATUS:/DONE:/[receipt] from another
+  // lane must not renew, mutate, complete, or attach to someone else's claim.
+  const crossLane = (e, t, taskHint, verb) => unregistered.push({
+    comment_id: e.id, at: e.at, url: e.url, lane: e.lane,
+    kind: "cross-lane-transition", task_hint: taskHint, errors: [],
+    reason: `${verb} from lane ${e.lane || "—"} ignored — claim held by ${t.lane || "(released)"}`,
+  });
+  const mkRcpt = (e, kind) => ({
+    comment_id: e.id, at: e.at, url: e.url,
+    pr: e.pr || null, merged_sha: e.merged || null,
+    kind, fields: e.receipt,
+  });
+
   for (const e of events) {
     try {
       switch (e.kind) {
@@ -304,17 +312,11 @@ function reduce(events) {
           const t = tid && claims.get(tid);
           if (!t) break;
           if (e.lane !== t.lane) {
-            // M-49: transitions are lane-scoped. A STATUS: from another lane
-            // must not renew, mutate, or release someone else's claim.
-            unregistered.push({
-              comment_id: e.id, at: e.at, url: e.url, lane: e.lane,
-              kind: "cross-lane-transition", task_hint: tid, errors: [],
-              reason: `STATUS: from lane ${e.lane || "—"} ignored — claim held by ${t.lane || "(released)"}`,
-            });
+            crossLane(e, t, tid, "STATUS:");
             break;
           }
-          const toWord = (e.block.state || "").match(STATE_WORD_RE)?.[0] || e.block.state;
-          const fromWord = (t.state || "").match(STATE_WORD_RE)?.[0] || t.state;
+          const toWord = wordOf(e.block.state);
+          const fromWord = wordOf(t.state);
           if (e.heartbeat || toWord === fromWord) {
             // heartbeat: renews the lease from this comment
             t.heartbeat_at = e.at; t.last_at = e.at;
@@ -332,39 +334,21 @@ function reduce(events) {
         }
         case "done": {
           const t = e.task && claims.get(e.task);
-          const rcpt = {
-            comment_id: e.id, at: e.at, url: e.url,
-            pr: e.pr || null, merged_sha: e.merged || null,
-            kind: "done", fields: e.receipt,
-          };
+          const rcpt = mkRcpt(e, "done");
           if (t) {
             if (e.lane !== t.lane) {
-              // M-49: a DONE: from another lane must not complete someone else's claim.
-              unregistered.push({
-                comment_id: e.id, at: e.at, url: e.url, lane: e.lane,
-                kind: "cross-lane-transition", task_hint: e.task, errors: [],
-                reason: `DONE: from lane ${e.lane || "—"} ignored — claim held by ${t.lane || "(released)"}`,
-              });
+              crossLane(e, t, e.task, "DONE:");
             } else { t.state = "completed"; t.last_at = e.at; t.receipts.push(rcpt); }
           }
           else orphanReceipts.push({ ...rcpt, task_hint: e.task });
           break;
         }
         case "receipt": {
-          const rcpt = {
-            comment_id: e.id, at: e.at, url: e.url,
-            pr: e.pr || null, merged_sha: e.merged || null,
-            kind: "receipt", fields: e.receipt,
-          };
+          const rcpt = mkRcpt(e, "receipt");
           const t = e.task && claims.get(e.task);
           if (t) {
             if (e.lane !== t.lane) {
-              // M-49: a [receipt] from another lane must not attach to someone else's claim.
-              unregistered.push({
-                comment_id: e.id, at: e.at, url: e.url, lane: e.lane,
-                kind: "cross-lane-transition", task_hint: e.task, errors: [],
-                reason: `[receipt] from lane ${e.lane || "—"} ignored — claim held by ${t.lane || "(released)"}`,
-              });
+              crossLane(e, t, e.task, "[receipt]");
             } else { t.receipts.push(rcpt); t.last_at = e.at; }
           }
           else orphanReceipts.push({ ...rcpt, task_hint: e.task });
@@ -437,25 +421,18 @@ function mdTable(rows) {
 
 function emitMd(board, meta) {
   const L = [];
-  L.push(`# Claims board — ${REPO}#${ISSUE}`);
-  L.push(``);
-  L.push(`_Generated ${new Date().toISOString()} · ${meta.count} comments scanned · watermark ${meta.watermark}_`);
-  L.push(``);
+  L.push(`# Claims board — ${REPO}#${ISSUE}`, ``,
+    `_Generated ${new Date().toISOString()} · ${meta.count} comments scanned · watermark ${meta.watermark}_`, ``);
   const by = (s) => board.claims.filter((c) => c.status === s);
   const sec = (title, rows) => {
-    L.push(`## ${title} (${rows.length})`);
-    L.push(``);
-    L.push(rows.length ? mdTable(rows) : `_none_`);
-    L.push(``);
+    L.push(`## ${title} (${rows.length})`, ``, rows.length ? mdTable(rows) : `_none_`, ``);
   };
   sec("Active", by("active"));
   sec("Expired (no receipt)", by("expired"));
   sec("Receipted", by("receipted"));
   sec("Completed / cancelled / released", [...by("completed"), ...by("cancelled"), ...by("released")]);
-  L.push(`## Unregistered attempts (${board.unregistered.length})`);
-  L.push(``);
-  L.push(`Malformed or prose-only posts the board did not register — kept visible so nothing is silently dropped.`);
-  L.push(``);
+  L.push(`## Unregistered attempts (${board.unregistered.length})`, ``,
+    `Malformed or prose-only posts the board did not register — kept visible so nothing is silently dropped.`, ``);
   if (board.unregistered.length) {
     L.push(`| comment | at (UTC) | lane | task hint | reason |`);
     L.push(`|---|---|---|---|---|`);
@@ -466,16 +443,14 @@ function emitMd(board, meta) {
     L.push(``);
   } else L.push(`_none_`, ``);
   if (board.refused.length) {
-    L.push(`## Refused duplicate claims (${board.refused.length})`);
-    L.push(``);
+    L.push(`## Refused duplicate claims (${board.refused.length})`, ``);
     for (const r of board.refused) {
       L.push(`- ${r.task_id}: [#${r.comment_id}](${r.url}) by ${r.by_lane || "—"} — held by ${r.holder_lane} (${r.holder_state})`);
     }
     L.push(``);
   }
   if (board.orphanReceipts.length) {
-    L.push(`## Orphan receipts (${board.orphanReceipts.length})`);
-    L.push(``);
+    L.push(`## Orphan receipts (${board.orphanReceipts.length})`, ``);
     for (const o of board.orphanReceipts) {
       L.push(`- task hint ${o.task_hint || "—"}: [#${o.comment_id}](${o.url})${o.pr ? ` PR #${o.pr}` : ""}${o.merged_sha ? ` merge ${o.merged_sha}` : ""}`);
     }

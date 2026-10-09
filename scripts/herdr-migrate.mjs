@@ -81,6 +81,7 @@ const VALUE_FLAGS = new Set([
   "bridge-base", "pinned-herdr",
 ]);
 const BOOL_FLAGS = new Set(["dry-run", "execute", "resume", "json", "confirm"]);
+const NUMERIC_FLAGS = new Set(["batch", "limit", "from-cursor"]);
 const COMMANDS = new Set([
   "scan", "plan", "migrate", "reverse", "drain-status",
   "force-release", "reap-orphans", "status",
@@ -127,20 +128,16 @@ export function parseArgs(argv) {
       errors.push(`unknown flag: --${name}`);
       continue;
     }
-    let value = inline;
-    if (value === null) {
-      i++;
-      value = argv[i];
-      if (value === undefined || value.startsWith("--")) {
-        errors.push(`flag --${name} needs a value`);
-        i--;
-        continue;
-      }
+    const value = inline ?? argv[++i];
+    if (value === undefined || value.startsWith("--")) {
+      errors.push(`flag --${name} needs a value`);
+      i--;
+      continue;
     }
     const key = toCamel(name);
     if (name === "room") {
       flags.room.push(value);
-    } else if (name === "batch" || name === "limit" || name === "from-cursor") {
+    } else if (NUMERIC_FLAGS.has(name)) {
       const n = Number(value);
       if (!Number.isInteger(n) || n <= 0) {
         errors.push(`flag --${name} needs a positive integer`);
@@ -174,15 +171,11 @@ export function parseFlagValue(raw) {
 }
 
 export function effectiveFlagForRoom(parsed, roomId) {
-  if (parsed.mode === "on") return true;
-  if (parsed.mode === "rooms") return parsed.rooms.includes(roomId);
-  return false;
+  return parsed.mode === "on" || (parsed.mode === "rooms" && parsed.rooms.includes(roomId));
 }
 
 export function flagStateLabel(parsed) {
-  if (parsed.mode === "on") return "on";
-  if (parsed.mode === "off") return "off";
-  return `rooms(${parsed.rooms.join(",")})`;
+  return parsed.mode === "rooms" ? `rooms(${parsed.rooms.join(",")})` : parsed.mode;
 }
 
 // ---------------------------------------------------------------------------
@@ -218,10 +211,7 @@ export function hasOpenChangesRequested(reviews) {
     const prev = latest.get(r.memberId);
     if (!prev || at >= prev.at) latest.set(r.memberId, { verdict: r.verdict, at });
   }
-  for (const { verdict } of latest.values()) {
-    if (verdict === "changes_requested") return true;
-  }
-  return false;
+  return [...latest.values()].some(({ verdict }) => verdict === "changes_requested");
 }
 
 // ---------------------------------------------------------------------------
@@ -240,9 +230,7 @@ function fileSlots(item) {
 }
 
 function slotsConflict(left, right) {
-  if (left.path !== right.path) return false;
-  if (!left.block || !right.block) return true;
-  return left.block === right.block;
+  return left.path === right.path && (!left.block || !right.block || left.block === right.block);
 }
 
 export function fileLeaseConflicts(items, claimed) {
@@ -288,22 +276,15 @@ export function classifyClaim(claim, ctx) {
   const checks = {};
   const fail = (reason, extra = {}) => ({ eligible: false, reason, checks, ...extra });
 
-  if (TERMINAL_CLAIM_STATES.has(claim.state)) {
-    checks.state = "terminal";
-    return fail("claim_terminal");
-  }
-  if (!LIVE_CLAIM_STATES.has(claim.state)) {
-    checks.state = "not_live";
-    return fail("claim_not_live");
-  }
-  checks.state = "live";
+  if (TERMINAL_CLAIM_STATES.has(claim.state)) checks.state = "terminal";
+  else if (LIVE_CLAIM_STATES.has(claim.state)) checks.state = "live";
+  else checks.state = "not_live";
+  if (checks.state !== "live") return fail(checks.state === "terminal" ? "claim_terminal" : "claim_not_live");
 
-  if (claim.leaseExpiresAt) {
-    const exp = Date.parse(claim.leaseExpiresAt);
-    if (Number.isFinite(exp) && exp <= ctx.nowMs) {
-      checks.lease = "expired";
-      return fail("lease_expired");
-    }
+  const leaseExp = claim.leaseExpiresAt ? Date.parse(claim.leaseExpiresAt) : NaN;
+  if (Number.isFinite(leaseExp) && leaseExp <= ctx.nowMs) {
+    checks.lease = "expired";
+    return fail("lease_expired");
   }
   checks.lease = "valid"; // null leaseExpiresAt = no lease, never expires
 
@@ -330,12 +311,7 @@ export function classifyClaim(claim, ctx) {
   if (ctx.bridgeRequired) {
     if (bridgeStatus !== "ok") {
       checks.bridge = bridgeStatus;
-      const reason = bridgeStatus === "version_mismatch"
-        ? "bridge_version_mismatch"
-        : bridgeStatus === "unreachable"
-          ? "bridge_unreachable"
-          : "bridge_not_configured";
-      const out = fail(reason);
+      const out = fail(bridgeStatusReason(bridgeStatus));
       if (ctx.bridge?.detail) out.detail = ctx.bridge.detail;
       return out;
     }
@@ -388,11 +364,7 @@ export function isTerminalKind(kind) {
 }
 
 export function findTerminalEntry(entries, key) {
-  for (let i = entries.length - 1; i >= 0; i--) {
-    const e = entries[i];
-    if (e.idempotency_key === key && isTerminalKind(e.kind)) return e;
-  }
-  return null;
+  return [...entries].reverse().find((e) => e.idempotency_key === key && isTerminalKind(e.kind)) ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -435,9 +407,7 @@ export function batchPlan(plan, batchSize) {
 
 export function deriveExitCode({ systemic, total, ok, failed }) {
   if (systemic) return EXIT_SYSTEMIC;
-  if (failed > 0) return EXIT_PARTIAL;
-  if (total > 0 && ok < total) return EXIT_PARTIAL;
-  return EXIT_OK;
+  return failed > 0 || (total > 0 && ok < total) ? EXIT_PARTIAL : EXIT_OK;
 }
 
 // ---------------------------------------------------------------------------
@@ -529,9 +499,8 @@ export function detectOrphans({ sessions, bridgeInventory, claimsById, nowMs }) 
     const paneLive = bridgeInventory?.has(s.session_id) ?? false;
     const claim = claimsById?.[s.claim_id];
     const claimLive = claim ? LIVE_CLAIM_STATES.has(claim.state) : false;
-    const leaseExpired = claim?.leaseExpiresAt
-      ? Number.isFinite(Date.parse(claim.leaseExpiresAt)) && Date.parse(claim.leaseExpiresAt) <= nowMs
-      : false;
+    const leaseExp = Date.parse(claim?.leaseExpiresAt ?? "");
+    const leaseExpired = Number.isFinite(leaseExp) && leaseExp <= nowMs;
     let verdict;
     let reason;
     if (paneLive && claimLive) {
@@ -715,11 +684,8 @@ async function probeBridge({ bridgeBase, pinnedHerdrPath }) {
   } catch { /* pinned file absent: cannot verify */ }
   if (pinned && health && (health.herdrVersion || health.protocolVersion)) {
     const mismatches = [];
-    if (pinned.herdrVersion && health.herdrVersion && pinned.herdrVersion !== health.herdrVersion) {
-      mismatches.push(`herdrVersion pinned=${pinned.herdrVersion} server=${health.herdrVersion}`);
-    }
-    if (pinned.protocolVersion && health.protocolVersion && pinned.protocolVersion !== health.protocolVersion) {
-      mismatches.push(`protocolVersion pinned=${pinned.protocolVersion} server=${health.protocolVersion}`);
+    for (const k of ["herdrVersion", "protocolVersion"]) {
+      if (pinned[k] && health[k] && pinned[k] !== health[k]) mismatches.push(`${k} pinned=${pinned[k]} server=${health[k]}`);
     }
     if (mismatches.length > 0) return { status: "version_mismatch", detail: mismatches.join("; ") };
   }
@@ -795,17 +761,10 @@ function defaultPinnedHerdrPath() {
 // ---------------------------------------------------------------------------
 
 function emit(flags, obj, humanFn) {
-  if (flags.json) {
-    process.stdout.write(JSON.stringify(obj, null, 2) + "\n");
-  } else {
-    process.stdout.write(humanFn(obj) + "\n");
-  }
+  process.stdout.write((flags.json ? JSON.stringify(obj, null, 2) : humanFn(obj)) + "\n");
 }
 
-function pad(s, n) {
-  s = String(s);
-  return s.length >= n ? s : s + " ".repeat(n - s.length);
-}
+const pad = (s, n) => (s = String(s)).length >= n ? s : s + " ".repeat(n - s.length);
 
 function table(rows, headers) {
   const widths = headers.map((h, i) => Math.max(h.length, ...rows.map((r) => String(r[i] ?? "").length)));
@@ -816,6 +775,59 @@ function table(rows, headers) {
 function failExit(message, code = EXIT_SYSTEMIC) {
   process.stderr.write(`herdr-migrate: error: ${message}\n`);
   process.exit(code);
+}
+
+// ---------------------------------------------------------------------------
+// Shared command setup: the flag/bridge/api/journal preambles every command
+// repeats, factored so each command is one call per input.
+// ---------------------------------------------------------------------------
+
+function apiArgs(flags) {
+  return { base: flags.apiBase ?? process.env.ROOM_API_BASE ?? null, token: flags.token ?? process.env.ROOM_API_TOKEN ?? null };
+}
+
+function bridgeArgs(flags) {
+  return { bridgeBase: flags.bridgeBase ?? process.env.HERDR_BRIDGE_BASE ?? null, pinnedHerdrPath: flags.pinnedHerdr ?? defaultPinnedHerdrPath() };
+}
+
+function journalPathFor(flags) {
+  return flags.journal ?? defaultJournalPath();
+}
+
+function loadMarkers(flags) {
+  return flags.markersFile ? loadJsonFile(flags.markersFile, "markers file") : {};
+}
+
+function loadHostClasses(flags) {
+  return flags.hostClassesFile ? loadJsonFile(flags.hostClassesFile, "host-classes file") : null;
+}
+
+// The common scan/plan preamble: flag parse, opt-in inputs, bridge probe, API.
+async function scanSetup(flags, { hostClasses = false } = {}) {
+  return {
+    flagParsed: resolveFlag(flags),
+    markers: loadMarkers(flags),
+    hostClasses: hostClasses ? loadHostClasses(flags) : null,
+    bridge: await probeBridge(bridgeArgs(flags)),
+    api: roomApiClient(apiArgs(flags)),
+    nowMs: Date.now(),
+  };
+}
+
+// Session links from journal entries (pre-B5 source), keyed by claim id.
+function linkedSessionMap(journal, roomId) {
+  const linked = new Map();
+  for (const e of journal) {
+    if (e.room_id === roomId && (e.kind === "session_attached" || e.kind === "backfill_done") && e.session_id) {
+      linked.set(e.claim_id, { session_id: e.session_id, claim_id: e.claim_id, room_id: roomId });
+    }
+  }
+  return linked;
+}
+
+const BRIDGE_STATUS_REASONS = { version_mismatch: "bridge_version_mismatch", unreachable: "bridge_unreachable" };
+function bridgeStatusReason(status) {
+  return BRIDGE_STATUS_REASONS[status] ?? "bridge_not_configured";
 }
 
 // ---------------------------------------------------------------------------
@@ -830,18 +842,19 @@ async function scanRoom({ api, roomId, flagParsed, markers, hostClasses, hostCla
   for (const claim of claims) {
     if (claimFilter && claim.id !== claimFilter) continue;
     const optin = resolveOptinMarker(claim, roomMarkers);
+    const providedHost = hostClassesProvided ? (hostClasses?.[claim.owner] ?? null) : null;
     const c = classifyClaim(claim, {
       flagCoversRoom,
       optin,
       bridge,
       bridgeRequired: false,
-      hostClass: hostClassesProvided ? (hostClasses?.[claim.owner] ?? null) : (claim.owner ? undefined : null),
+      hostClass: hostClassesProvided ? providedHost : (claim.owner ? undefined : null),
       hostClassInputProvided: hostClassesProvided,
       allClaims: claims,
       existingHerdrSession: linkedClaims?.has(claim.id) ?? false,
       nowMs,
     });
-    classified.push({ roomId, claim, hostClass: hostClassesProvided ? (hostClasses?.[claim.owner] ?? null) : null, ...c });
+    classified.push({ roomId, claim, hostClass: providedHost, ...c });
   }
   return { claims, classified, flagCoversRoom };
 }
@@ -852,12 +865,7 @@ async function scanRoom({ api, roomId, flagParsed, markers, hostClasses, hostCla
 
 async function cmdScan(flags, deps) {
   if (flags.room.length === 0) failExit("scan needs --room <id> (repeatable)");
-  const flagParsed = resolveFlag(flags);
-  const markers = flags.markersFile ? loadJsonFile(flags.markersFile, "markers file") : {};
-  const hostClasses = flags.hostClassesFile ? loadJsonFile(flags.hostClassesFile, "host-classes file") : null;
-  const bridge = await probeBridge({ bridgeBase: flags.bridgeBase ?? process.env.HERDR_BRIDGE_BASE ?? null, pinnedHerdrPath: flags.pinnedHerdr ?? defaultPinnedHerdrPath() });
-  const api = roomApiClient({ base: flags.apiBase ?? process.env.ROOM_API_BASE ?? null, token: flags.token ?? process.env.ROOM_API_TOKEN ?? null });
-  const nowMs = Date.now();
+  const { flagParsed, markers, hostClasses, bridge, api, nowMs } = await scanSetup(flags, { hostClasses: true });
   const journal = readJournal(flags.journal ?? defaultJournalPath());
   const reports = [];
   for (const roomId of flags.room) {
@@ -902,13 +910,8 @@ async function cmdScan(flags, deps) {
 
 async function cmdPlan(flags, deps) {
   if (flags.room.length === 0) failExit("plan needs --room <id> (repeatable)");
-  const flagParsed = resolveFlag(flags);
-  const markers = flags.markersFile ? loadJsonFile(flags.markersFile, "markers file") : {};
-  const hostClasses = flags.hostClassesFile ? loadJsonFile(flags.hostClassesFile, "host-classes file") : null;
-  const bridge = await probeBridge({ bridgeBase: flags.bridgeBase ?? process.env.HERDR_BRIDGE_BASE ?? null, pinnedHerdrPath: flags.pinnedHerdr ?? defaultPinnedHerdrPath() });
-  const api = roomApiClient({ base: flags.apiBase ?? process.env.ROOM_API_BASE ?? null, token: flags.token ?? process.env.ROOM_API_TOKEN ?? null });
-  const nowMs = Date.now();
-  const journalPath = flags.journal ?? defaultJournalPath();
+  const { flagParsed, markers, hostClasses, bridge, api, nowMs } = await scanSetup(flags, { hostClasses: true });
+  const journalPath = journalPathFor(flags);
   const linkedByRoom = new Map();
   const linkedFor = (roomId) => {
     if (!linkedByRoom.has(roomId)) linkedByRoom.set(roomId, linkedClaimIds(readJournal(journalPath), roomId));
@@ -954,8 +957,9 @@ async function cmdPlan(flags, deps) {
 async function cmdMigrate(flags, deps) {
   if (flags.room.length === 0) failExit("migrate needs --room <id> (repeatable)");
   const flagParsed = resolveFlag(flags);
-  const bridgeBase = flags.bridgeBase ?? process.env.HERDR_BRIDGE_BASE ?? null;
-  const bridge = await probeBridge({ bridgeBase, pinnedHerdrPath: flags.pinnedHerdr ?? defaultPinnedHerdrPath() });
+  const args = bridgeArgs(flags);
+  const bridge = await probeBridge(args);
+  const bridgeBase = args.bridgeBase;
 
   if (!flags.execute) {
     // Dry-run: behave like scan but framed as the would-be execution.
@@ -964,18 +968,17 @@ async function cmdMigrate(flags, deps) {
 
   // Execute mode fails closed: bridge must be configured AND healthy.
   if (bridge.status !== "ok") {
-    const why = bridge.status === "version_mismatch" ? "bridge_version_mismatch"
-      : bridge.status === "unreachable" ? "bridge_unreachable" : "bridge_not_configured";
+    const why = bridgeStatusReason(bridge.status);
     failExit(`migrate --execute refused: bridge ${why}${bridge.detail ? ` (${bridge.detail})` : ""}. Fail-closed: no claim touched.`, EXIT_SYSTEMIC);
   }
   if (!flags.hostClassesFile) {
     failExit("migrate --execute needs --host-classes-file (host class is a mandatory eligibility check; never guessed).", EXIT_SYSTEMIC);
   }
 
-  const markers = flags.markersFile ? loadJsonFile(flags.markersFile, "markers file") : {};
-  const hostClasses = loadJsonFile(flags.hostClassesFile, "host-classes file");
-  const api = roomApiClient({ base: flags.apiBase ?? process.env.ROOM_API_BASE ?? null, token: flags.token ?? process.env.ROOM_API_TOKEN ?? null });
-  const journalPath = flags.journal ?? defaultJournalPath();
+  const markers = loadMarkers(flags);
+  const hostClasses = loadHostClasses(flags);
+  const api = roomApiClient(apiArgs(flags));
+  const journalPath = journalPathFor(flags);
   const journal = readJournal(journalPath);
   const nowMs = Date.now();
   const attachCap = await probeAttachCapability(bridgeBase);
@@ -1078,9 +1081,9 @@ async function cmdReverse(flags, deps) {
   if (flags.room.length === 0) failExit("reverse needs --room <id>");
   if (!flags.claim) failExit("reverse needs --claim <id>");
   const roomId = flags.room[0];
-  const api = roomApiClient({ base: flags.apiBase ?? process.env.ROOM_API_BASE ?? null, token: flags.token ?? process.env.ROOM_API_TOKEN ?? null });
-  const journalPath = flags.journal ?? defaultJournalPath();
-  const markers = flags.markersFile ? loadJsonFile(flags.markersFile, "markers file") : {};
+  const api = roomApiClient(apiArgs(flags));
+  const journalPath = journalPathFor(flags);
+  const markers = loadMarkers(flags);
   const claim = await api.getClaim(roomId, flags.claim).catch((err) => failExit(`cannot read claim: ${err.message}`));
   const marker = resolveOptinMarker(claim, markers[roomId] ?? {}).backend;
   const steps = planReverse({ roomId, claim, marker });
@@ -1114,24 +1117,18 @@ async function cmdReverse(flags, deps) {
 async function cmdDrainStatus(flags, deps) {
   if (flags.room.length === 0) failExit("drain-status needs --room <id> (repeatable)");
   const flagParsed = resolveFlag(flags);
-  const bridgeBase = flags.bridgeBase ?? process.env.HERDR_BRIDGE_BASE ?? null;
-  const bridge = await probeBridge({ bridgeBase, pinnedHerdrPath: flags.pinnedHerdr ?? defaultPinnedHerdrPath() });
-  const snap = await bridgeSnapshot(bridgeBase);
-  const api = roomApiClient({ base: flags.apiBase ?? process.env.ROOM_API_BASE ?? null, token: flags.token ?? process.env.ROOM_API_TOKEN ?? null });
-  const journal = readJournal(flags.journal ?? defaultJournalPath());
+  const args = bridgeArgs(flags);
+  const bridge = await probeBridge(args);
+  const snap = await bridgeSnapshot(args.bridgeBase);
+  const api = roomApiClient(apiArgs(flags));
+  const journal = readJournal(journalPathFor(flags));
   const rows = [];
   for (const roomId of flags.room) {
     const claims = await api.listClaims(roomId);
     // Session links: journal session_attached/backfill_done entries reconciled
     // against the bridge inventory (pre-B5 source; B5's herdr_sessions table
     // becomes the canonical source when it lands).
-    const linked = new Map();
-    for (const e of journal) {
-      if (e.room_id === roomId && (e.kind === "session_attached" || e.kind === "backfill_done") && e.session_id) {
-        linked.set(e.claim_id, { session_id: e.session_id, claim_id: e.claim_id, room_id: roomId });
-      }
-    }
-    const sessions = [...linked.values()];
+    const sessions = [...linkedSessionMap(journal, roomId).values()];
     const agg = aggregateDrainStatus({ roomId, flagParsed, sessions, claims, bridgeStatus: bridge.status });
     if (snap.status === "ok") {
       const claimsById = Object.fromEntries(claims.map((c) => [c.id, c]));
@@ -1159,9 +1156,9 @@ async function cmdForceRelease(flags, deps) {
   if (!flags.confirm) failExit("force-release needs --confirm (operator gate)", EXIT_SYSTEMIC);
   if (!flags.reason || !flags.reason.trim()) failExit("force-release needs --reason <text> (journaled + stamped on claim history)", EXIT_SYSTEMIC);
   const roomId = flags.room[0];
-  const api = roomApiClient({ base: flags.apiBase ?? process.env.ROOM_API_BASE ?? null, token: flags.token ?? process.env.ROOM_API_TOKEN ?? null });
-  const journalPath = flags.journal ?? defaultJournalPath();
-  const markers = flags.markersFile ? loadJsonFile(flags.markersFile, "markers file") : {};
+  const api = roomApiClient(apiArgs(flags));
+  const journalPath = journalPathFor(flags);
+  const markers = loadMarkers(flags);
   const claim = await api.getClaim(roomId, flags.claim).catch((err) => failExit(`cannot read claim: ${err.message}`));
   if (!LIVE_CLAIM_STATES.has(claim.state)) {
     failExit(`claim ${claim.id} is ${claim.state}: nothing live to force-release`, EXIT_SYSTEMIC);
@@ -1186,9 +1183,8 @@ async function cmdForceRelease(flags, deps) {
 
 async function cmdReapOrphans(flags, deps) {
   if (flags.room.length === 0) failExit("reap-orphans needs --room <id> (repeatable)");
-  const bridgeBase = flags.bridgeBase ?? process.env.HERDR_BRIDGE_BASE ?? null;
-  const snap = await bridgeSnapshot(bridgeBase);
-  const journalPath = flags.journal ?? defaultJournalPath();
+  const snap = await bridgeSnapshot(bridgeArgs(flags).bridgeBase);
+  const journalPath = journalPathFor(flags);
   if (snap.status !== "ok") {
     // Never reap what cannot be seen (D5 §4.4).
     const out = { command: "reap-orphans", rooms: flags.room, verdict: "unverifiable", bridge_status: snap.status, detail: snap.detail ?? "bridge inventory unavailable — no session reaped" };
@@ -1197,18 +1193,13 @@ async function cmdReapOrphans(flags, deps) {
   }
   const kill = flags.execute && flags.confirm;
   if (flags.execute && !flags.confirm) failExit("reap-orphans kill needs --confirm (pane kill is destructive)", EXIT_SYSTEMIC);
-  const api = roomApiClient({ base: flags.apiBase ?? process.env.ROOM_API_BASE ?? null, token: flags.token ?? process.env.ROOM_API_TOKEN ?? null });
+  const api = roomApiClient(apiArgs(flags));
   const journal = readJournal(journalPath);
   const results = [];
   for (const roomId of flags.room) {
     const claims = await api.listClaims(roomId);
     const claimsById = Object.fromEntries(claims.map((c) => [c.id, c]));
-    const linked = new Map();
-    for (const e of journal) {
-      if (e.room_id === roomId && (e.kind === "session_attached" || e.kind === "backfill_done") && e.session_id) {
-        linked.set(e.claim_id, { session_id: e.session_id, claim_id: e.claim_id, room_id: roomId });
-      }
-    }
+    const linked = linkedSessionMap(journal, roomId);
     const orphans = detectOrphans({ sessions: [...linked.values()], bridgeInventory: snap.inventory, claimsById, nowMs: Date.now() })
       .filter((o) => o.verdict === "orphan");
     for (const o of orphans) {
@@ -1241,13 +1232,9 @@ async function cmdReapOrphans(flags, deps) {
 
 async function cmdStatus(flags, deps) {
   if (flags.room.length === 0) failExit("status needs --room <id> (repeatable)");
-  const flagParsed = resolveFlag(flags);
-  const markers = flags.markersFile ? loadJsonFile(flags.markersFile, "markers file") : {};
-  const bridge = await probeBridge({ bridgeBase: flags.bridgeBase ?? process.env.HERDR_BRIDGE_BASE ?? null, pinnedHerdrPath: flags.pinnedHerdr ?? defaultPinnedHerdrPath() });
-  const api = roomApiClient({ base: flags.apiBase ?? process.env.ROOM_API_BASE ?? null, token: flags.token ?? process.env.ROOM_API_TOKEN ?? null });
-  const journalPath = flags.journal ?? defaultJournalPath();
+  const { flagParsed, markers, bridge, api, nowMs } = await scanSetup(flags);
+  const journalPath = journalPathFor(flags);
   const journal = readJournal(journalPath);
-  const nowMs = Date.now();
   const rooms = {};
   for (const roomId of flags.room) {
     const claims = await api.listClaims(roomId);
@@ -1297,25 +1284,22 @@ async function cmdStatus(flags, deps) {
 // main
 // ---------------------------------------------------------------------------
 
+const COMMAND_HANDLERS = {
+  scan: cmdScan, plan: cmdPlan, migrate: cmdMigrate, reverse: cmdReverse,
+  "drain-status": cmdDrainStatus, "force-release": cmdForceRelease,
+  "reap-orphans": cmdReapOrphans, status: cmdStatus,
+};
+
 async function main(argv) {
   const { command, flags, errors } = parseArgs(argv);
   if (errors.length > 0) {
     process.stderr.write(`herdr-migrate: ${errors.join("; ")}\n\n${USAGE}\n`);
     process.exit(EXIT_SYSTEMIC);
   }
-  const deps = {};
+  const handler = COMMAND_HANDLERS[command];
+  if (!handler) failExit(`unknown command: ${command}`);
   try {
-    switch (command) {
-      case "scan": return await cmdScan(flags, deps);
-      case "plan": return await cmdPlan(flags, deps);
-      case "migrate": return await cmdMigrate(flags, deps);
-      case "reverse": return await cmdReverse(flags, deps);
-      case "drain-status": return await cmdDrainStatus(flags, deps);
-      case "force-release": return await cmdForceRelease(flags, deps);
-      case "reap-orphans": return await cmdReapOrphans(flags, deps);
-      case "status": return await cmdStatus(flags, deps);
-      default: failExit(`unknown command: ${command}`);
-    }
+    return await handler(flags, {});
   } catch (err) {
     if (err instanceof RoomApiError) {
       // Expected operational / input errors: clean message, systemic exit.
@@ -1324,7 +1308,6 @@ async function main(argv) {
     }
     throw err;
   }
-  return EXIT_OK;
 }
 
 const isMain = process.argv[1] === fileURLToPath(import.meta.url);

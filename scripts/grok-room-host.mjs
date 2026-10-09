@@ -17,24 +17,25 @@ function fail(code, message) {
   throw new GrokHostError(code, message);
 }
 
+const trimmed = (env, key) => (typeof env[key] === "string" && env[key].trim()) || "";
+
 function connectionFromEnv(env = process.env) {
-  const directory = env.ROOM_AGENT_CONFIG;
-  if (typeof directory === "string" && directory.trim()) return readAgentConnection(directory.trim());
+  const directory = trimmed(env, "ROOM_AGENT_CONFIG");
+  if (directory) return readAgentConnection(directory);
   fail("config_not_found", "Set ROOM_AGENT_CONFIG to the private connection directory");
 }
 
 function journalPathFor(env = process.env) {
-  if (typeof env.ROOM_GROK_STATE === "string" && env.ROOM_GROK_STATE.trim()) return resolve(env.ROOM_GROK_STATE.trim());
-  if (typeof env.ROOM_AGENT_CONFIG === "string" && env.ROOM_AGENT_CONFIG.trim()) {
-    return join(resolve(env.ROOM_AGENT_CONFIG.trim()), "grok-host-journal.json");
-  }
+  const state = trimmed(env, "ROOM_GROK_STATE");
+  if (state) return resolve(state);
+  const directory = trimmed(env, "ROOM_AGENT_CONFIG");
+  if (directory) return join(resolve(directory), "grok-host-journal.json");
   fail("config_not_found", "Set ROOM_AGENT_CONFIG or ROOM_GROK_STATE for the journal");
 }
 
 function pendingAccessPathFor(env = process.env) {
-  if (typeof env.ROOM_AGENT_CONFIG === "string" && env.ROOM_AGENT_CONFIG.trim()) {
-    return join(resolve(env.ROOM_AGENT_CONFIG.trim()), "pending-access.json");
-  }
+  const directory = trimmed(env, "ROOM_AGENT_CONFIG");
+  if (directory) return join(resolve(directory), "pending-access.json");
   fail("config_not_found", "Set ROOM_AGENT_CONFIG");
 }
 
@@ -151,8 +152,7 @@ async function readNeedsMe(connection, { fetchImpl = fetch, since } = {}) {
 async function beatPullOnly(connection, { fetchImpl = fetch, env = process.env } = {}) {
   const hostId = hostIdFor(env);
   const parsed = await jsonRequest(connection, "/api/agent-heartbeats", {
-    fetchImpl, method: "POST",
-    body: { hostId, mode: "pull-only", cadenceSeconds: 60 }
+    fetchImpl, method: "POST", body: { hostId, mode: "pull-only", cadenceSeconds: 60 }
   });
   const pending = Array.isArray(parsed.pendingWakes) ? parsed.pendingWakes : [];
   return {
@@ -165,9 +165,7 @@ async function beatPullOnly(connection, { fetchImpl = fetch, env = process.env }
 
 async function ackWakes(connection, signalIds, { fetchImpl = fetch } = {}) {
   if (!signalIds.length) return { acknowledged: [] };
-  return await jsonRequest(connection, "/api/agent-heartbeats/ack", {
-    fetchImpl, method: "POST", body: { signalIds }
-  });
+  return await jsonRequest(connection, "/api/agent-heartbeats/ack", { fetchImpl, method: "POST", body: { signalIds } });
 }
 
 export async function doctor({ env = process.env, fetchImpl = fetch } = {}) {
@@ -337,9 +335,7 @@ export async function pull({ env = process.env, fetchImpl = fetch, execute = fal
 export async function ingestWake({ env = process.env, body, execute = false, runner, now = Date.now } = {}) {
   const connection = connectionFromEnv(env);
   const item = wakeToAttentionItem(parseWakePing(body));
-  const result = await planAndJournal({
-    connection, items: [item], env, execute, runner, now
-  });
+  const result = await planAndJournal({ connection, items: [item], env, execute, runner, now });
   return { ok: true, planned: result.plans, executed: result.executed, key: result.plans[0]?.key ?? null };
 }
 
@@ -513,9 +509,12 @@ function claimRoom(connection, roomId) {
   return typeof roomId === "string" && roomId ? roomId : connection.roomId;
 }
 
+function noSecretLeak(value, token) {
+  if (JSON.stringify(value).includes(token)) fail("secret_in_plan");
+}
+
 function safeClaimResult(parsed, token, workItemId, room) {
-  const blob = JSON.stringify(parsed);
-  if (blob.includes(token)) fail("secret_in_plan");
+  noSecretLeak(parsed, token);
   return {
     ok: true,
     workItemId: parsed.id || workItemId,
@@ -548,7 +547,7 @@ export async function listTags({ env = process.env, fetchImpl = fetch, roomId } 
     private: row.private === true,
     replyToMemberId: typeof row.replyToMemberId === "string" ? row.replyToMemberId : null,
   })).filter(row => row.messageId);
-  if (JSON.stringify(tags).includes(connection.token)) fail("secret_in_plan");
+  noSecretLeak(tags, connection.token);
   return { roomId: room, tags };
 }
 
@@ -568,8 +567,7 @@ export async function postRoomReply({ env = process.env, fetchImpl = fetch, room
       data: { messageId, body, replyToId, ...(toMemberId ? { toMemberId } : {}) },
     },
   });
-  const blob = JSON.stringify(parsed);
-  if (blob.includes(connection.token)) fail("secret_in_plan");
+  noSecretLeak(parsed, connection.token);
   const event = parsed.event ?? parsed.result?.event ?? null;
   return {
     ok: true,
@@ -594,13 +592,11 @@ export async function listWorkClaims({ env = process.env, fetchImpl = fetch, roo
     if (!parsed.hasMore || typeof parsed.nextCursor !== "string" || !parsed.nextCursor) break;
     cursor = parsed.nextCursor;
     if (page === 3) {
-      const blob = JSON.stringify(claims);
-      if (blob.includes(connection.token)) fail("secret_in_plan");
+      noSecretLeak(claims, connection.token);
       return { roomId: room, claims, truncated: true };
     }
   }
-  const blob = JSON.stringify(claims);
-  if (blob.includes(connection.token)) fail("secret_in_plan");
+  noSecretLeak(claims, connection.token);
   return { roomId: room, claims, truncated: false };
 }
 
