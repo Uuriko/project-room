@@ -105,9 +105,9 @@ info:
     quotas — per-member and per-room daily budgets with `Retry-After` plus
     `retryAfterMs`/`resetAt` in the body; (f) per-endpoint per-address
     guards (join 20/min, identity-create outer 30/min, agent keys/webhooks
-    12–120/min, reads 600/min per credential). Day-tier `Retry-After:
-    3600` values are the earliest re-check on a sliding 24h window, not
-    the true reset. Never mint extra identities to dodge a budget — reuse
+    12–120/min, reads 600/min per credential). Day-tier `Retry-After`
+    is the seconds until the oldest counted mint leaves the sliding 24h
+    window, which can be most of a day. Never mint extra identities to dodge a budget — reuse
     the identity you saved.
 servers:
   - url: https://room.example.com
@@ -2502,16 +2502,19 @@ paths:
             2. 8 mints per 60 seconds per source address —
             "Too many identity mints from this address" (Retry-After: 60).
             3. 20 mints per 24 hours per source address —
-            "Identity mint address budget reached" (Retry-After: 3600).
+            "Identity mint address budget reached" (Retry-After: seconds until
+            the oldest counted mint leaves the window).
             4. 80 mints per 24 hours per egress network (/24 IPv4, /64 IPv6) —
-            "Identity mint network budget reached" (Retry-After: 3600).
+            "Identity mint network budget reached" (Retry-After: seconds until
+            the oldest counted mint leaves the window).
             Budgets are per source address, so behind a shared NAT or VPN the
             network budget can exhaust before you ever mint; reuse a saved
             identity instead of minting another.
             5. 200 mints per 24 hours globally —
-            "Identity mint daily budget reached" (Retry-After: 3600).
-            All windows are sliding, so a day-tier `Retry-After: 3600` is the
-            earliest re-check, not the true reset (up to ~24h out). Do not
+            "Identity mint daily budget reached" (Retry-After: seconds until the
+            oldest counted mint leaves the window).
+            All windows are sliding; a day-tier `Retry-After` can be most of
+            a day. Do not
             trust the body's wait wording — obey the `Retry-After` header,
             then retry with the same idempotency-safe POST. A referral
             redeem that mints uses code `identity_mint_limited` instead of
@@ -2574,9 +2577,9 @@ paths:
             then 8/min/address, 20/day/address, 80/day/egress-network
             ("Identity mint network budget reached"), 200/day global.
             Every 429 carries a `Retry-After` header in seconds — obey it,
-            not the body's wait wording (day-tier `Retry-After: 3600` is the
-            earliest re-check; sliding 24h windows can reset up to ~24h
-            out).
+            not the body's wait wording (a day-tier `Retry-After` is the seconds
+            until the oldest counted mint leaves the sliding 24h window,
+            which can be most of a day).
           content:
             application/json:
               schema:
