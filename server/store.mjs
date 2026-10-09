@@ -1152,6 +1152,22 @@ class ProjectionCache {
   }
 }
 
+// Viewer identity stamped on read responses — one definition, identical shape everywhere.
+const viewerIdentity = auth => ({
+  viewerId: auth.member.id,
+  viewerAccountId: auth.account?.id ?? null,
+  viewerAuthEpoch: auth.account?.authEpoch ?? null,
+  viewerSessionBinding: auth.sessionBinding,
+  viewerSessionRevision: auth.sessionRevision ?? null,
+});
+
+// Reply-request read hint for inbox items (agentInbox, openDirectMentions).
+const replyRequestHint = (event, memberId) =>
+  event.data.requestKind === "reply" && event.data.requestPolicyVersion === 1
+    && [event.actorId, event.data.toMemberId].includes(memberId)
+    ? { requestKind: "reply", nextRead: { tool: "room_read_request", arguments: { requestMessageId: event.data.messageId ?? event.id } } }
+    : {};
+
 export class RoomStore {
   constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined, integrity = "eager",
     bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1" } = {}) {
@@ -3630,6 +3646,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return { token, session: this.authenticate(token) };
     });
   }
+  // RC-2026-09-23-106: sessions bind to the identity's current secret hash.
+  currentIdentitySecretHash(identityId) {
+    return this.db.prepare("SELECT secret_hash AS secretHash FROM agent_identities WHERE identity_id=?").get(identityId)?.secretHash ?? null;
+  }
   // Join-flow browser session. After a successful self-serve join the new
   // agent member's browser needs a working session — the join page's "open
   // the room" link would otherwise strand them with a secret but no session.
@@ -3651,10 +3671,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // (RC-2026-09-23-106). Members with no identity link keep the legacy
       // null binding.
       const linkRow = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?").get(roomId, memberId);
-      const secretRow = linkRow
-        ? this.db.prepare("SELECT secret_hash AS secretHash FROM agent_identities WHERE identity_id=?").get(linkRow.identityId)
-        : null;
-      const token = this.insertCredential(roomId, memberId, "session", null, expiresAt, secretRow?.secretHash ?? null);
+      const token = this.insertCredential(roomId, memberId, "session", null, expiresAt, linkRow ? this.currentIdentitySecretHash(linkRow.identityId) : null);
       return { token, expiresAt };
     });
   }
@@ -3670,12 +3687,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // RC-2026-09-23-106: bind the session to the current secret hash.
       // If the secret is rotated or revoked, authenticate() rejects sessions
       // carrying the old hash.
-      const secretRow = this.db.prepare("SELECT secret_hash AS secretHash FROM agent_identities WHERE identity_id=?").get(identityId);
-      const token = this.insertCredential(roomId, link.member.id, "session", null, this.now() + 8 * 3600000, secretRow?.secretHash ?? null);
+      const token = this.insertCredential(roomId, link.member.id, "session", null, this.now() + 8 * 3600000, this.currentIdentitySecretHash(identityId));
       return { token, session: this.authenticate(token) };
     });
   }
   revoke(token) { this.db.prepare("UPDATE credentials SET revoked=1 WHERE hash=?").run(hash(token)); }
+  // Member's caught-up cursor (0 when never caught up).
+  caughtUpCursor(roomId, memberId) {
+    return this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, memberId)?.sequence ?? 0;
+  }
   snapshot(token, roomId, expectedSessionBinding = null, view = "full", helpContext = false, offerContext = false) {
     // One read transaction keeps sequence, projection, and audit tail at the same commit.
     return this.readTransaction(() => {
@@ -3688,11 +3708,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         ...(helpContext ? { helpContextVersion: 1, evaluatedAt: new Date(this.now()).toISOString() } : {}),
         state: { room: room.state.room, members: room.state.members,
           workItems: Object.fromEntries(Object.entries(room.state.workItems).map(([id, item]) => [id, currentWorkRecord(item)])) },
-        charter: charterContext(room.state.room), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null,
-        viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
+        charter: charterContext(room.state.room), ...viewerIdentity(auth) };
       const rows = this.db.prepare("SELECT body FROM events WHERE room_id=? ORDER BY sequence DESC LIMIT 100").all(roomId);
-      const cursor = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id)?.sequence ?? 0;
-      return { ...room, roomId, ...(offerContext ? { offerContextVersion: 1 } : {}), charter: charterContext(room.state.room), replyRequestContractVersion: REPLY_POLICY_VERSION, state: { ...room.state, eventLog: rows.reverse().map(r => JSON.parse(r.body)) }, cursor, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
+      const cursor = this.caughtUpCursor(roomId, auth.member.id);
+      return { ...room, roomId, ...(offerContext ? { offerContextVersion: 1 } : {}), charter: charterContext(room.state.room), replyRequestContractVersion: REPLY_POLICY_VERSION, state: { ...room.state, eventLog: rows.reverse().map(r => JSON.parse(r.body)) }, cursor, ...viewerIdentity(auth) };
     });
   }
 
@@ -3730,8 +3749,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         charter = charterFromEvent(parsedEvent, { revision: selected - 1 });
       }
       return { contractVersion: 1, roomId, evaluatedThrough: room.sequence, currentRevision: current.revision, currentEventId: current.eventId,
-        ...charterContext({ charter }), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null,
-        viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
+        ...charterContext({ charter }), ...viewerIdentity(auth) };
     });
   }
   workSessions(token, roomId, { status = null, expectedSessionBinding = null } = {}) {
@@ -3915,6 +3933,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return this.command(token, roomId, { id: request.requestId, type, data }, expectedSessionBinding);
     });
   }
+  // Agent host presence for one member: null unless the member is an active
+  // agent with an identity link. The raw host status is returned as-is
+  // ("unregistered" included); callers map it onto their own contract.
+  agentHostPresence(roomId, members, memberId) {
+    const member = members[memberId];
+    if (!member || member.kind !== "agent" || member.active === false) return null;
+    const link = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?").get(roomId, memberId);
+    if (!link) return null;
+    const status = this.agentHeartbeats.statusOf(link.identityId);
+    return { identityId: link.identityId, status: status.status, lastSeenAt: status.lastSeenAt };
+  }
   // Who is around: the active roster, plus live SSE watchers and fresh
   // executing sessions. Legacy lastSeenAt also retains enrollment time.
   // Derived from existing data — no new tables, no people-data store.
@@ -3951,19 +3980,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       ).all(roomId).filter(row => row.member).map(row => [row.member, row.at]));
       const watching = new Set((watcherMemberIds ?? []).filter(memberId => members[memberId]?.active !== false));
       // RC-2026-09-18-051: additive host presence for agent members.
-      const identityLinkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
       // #660: raw host status per member. status is "online"|"offline"|null
       // (null = no registered host); identityId is the linked agent identity.
       const hostStatusOf = memberId => {
-        const m = members[memberId];
-        if (!m || m.kind !== "agent" || m.active === false) return { identityId: null, status: null, lastSeenAt: null };
-        const link = identityLinkOf.get(roomId, memberId);
-        if (!link) return { identityId: null, status: null, lastSeenAt: null };
-        const status = this.agentHeartbeats.statusOf(link.identityId);
+        const host = this.agentHostPresence(roomId, members, memberId);
+        if (!host) return { identityId: null, status: null, lastSeenAt: null };
         // Unregistered (no host) stays null so RC-051 clients keep the
         // "no presence field or absent" contract. Roster still lists the member.
-        if (status.status === "unregistered") return { identityId: link.identityId, status: null, lastSeenAt: null };
-        return { identityId: link.identityId, status: status.status, lastSeenAt: status.lastSeenAt };
+        if (host.status === "unregistered") return { identityId: host.identityId, status: null, lastSeenAt: null };
+        return host;
       };
       const agentPresence = memberId => {
         const host = hostStatusOf(memberId);
@@ -4028,13 +4053,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const { members } = this.roomAuthority(roomId);
       const needle = search?.toLowerCase();
       // RC-2026-09-18-051: additive host presence for agent members.
-      const identityLinkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
-      const agentPresence = m => {
-        if (!m || m.kind !== "agent" || m.active === false) return null;
-        const link = identityLinkOf.get(roomId, m.id);
-        if (!link) return null;
-        const status = this.agentHeartbeats.statusOf(link.identityId);
-        return { status: status.status, lastSeenAt: status.lastSeenAt };
+      const agentPresence = member => {
+        const host = this.agentHostPresence(roomId, members, member?.id);
+        return host ? { status: host.status, lastSeenAt: host.lastSeenAt } : null;
       };
       const listed = Object.values(members)
         .filter(m => m && m.active !== false && Array.isArray(m.capabilities) && m.capabilities.length > 0)
@@ -4091,20 +4112,24 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       catch (error) { fail(422, "invalid_import", `Export does not replay: ${error.message}`); }
       if (new Set(events.map(e => e.id)).size !== events.length) fail(422, "invalid_import", "Import has duplicate event ids");
       // Dependent rows reference event ids/sequences; a history replacement
-      // drops them. Pending invitations are lost on restore (documented).
-      this.db.prepare("DELETE FROM commands WHERE room_id=?").run(roomId);
-      this.db.prepare("DELETE FROM membership_invitation_events WHERE invitation_id IN (SELECT id FROM membership_invitations WHERE room_id=?)").run(roomId);
-      this.db.prepare("DELETE FROM membership_invitations WHERE room_id=?").run(roomId);
-      // Reader cursors point into the old history; reset them.
-      this.db.prepare("DELETE FROM cursors WHERE room_id=?").run(roomId);
-      // Replacing history may preserve the head id and sequence. Invalidate
-      // message replay snapshots and full-record certification explicitly.
-      this.db.prepare("DELETE FROM messages_backfill_cursor WHERE room_id=?").run(roomId);
-      // The projection checkpoint is a replay accelerator over the old
-      // history — a stale checkpoint would corrupt rebuildProjection, so
-      // replace it with one taken from the imported state.
-      this.db.prepare("DELETE FROM projection_checkpoints WHERE room_id=?").run(roomId);
-      this.db.prepare("DELETE FROM events WHERE room_id=?").run(roomId);
+      // drops them, in dependency order:
+      // - membership invitations: pending invitations are lost on restore (documented);
+      // - cursors: reader cursors point into the old history, so reset them;
+      // - messages_backfill_cursor: replacing history may preserve the head
+      //   id and sequence — invalidate message replay snapshots and
+      //   full-record certification explicitly;
+      // - projection_checkpoints: the checkpoint is a replay accelerator over
+      //   the old history — a stale one would corrupt rebuildProjection, so
+      //   it is replaced with one taken from the imported state below.
+      for (const sql of [
+        "DELETE FROM commands WHERE room_id=?",
+        "DELETE FROM membership_invitation_events WHERE invitation_id IN (SELECT id FROM membership_invitations WHERE room_id=?)",
+        "DELETE FROM membership_invitations WHERE room_id=?",
+        "DELETE FROM cursors WHERE room_id=?",
+        "DELETE FROM messages_backfill_cursor WHERE room_id=?",
+        "DELETE FROM projection_checkpoints WHERE room_id=?",
+        "DELETE FROM events WHERE room_id=?",
+      ]) this.db.prepare(sql).run(roomId);
       const insert = this.db.prepare("INSERT INTO events VALUES(?,?,?,?)");
       events.forEach((e, i) => insert.run(roomId, i + 1, e.id, JSON.stringify(e)));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?").run(events.length, this.storedProjection(roomId, state), archivedAtOf(state), roomId);
@@ -4234,14 +4259,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         fail(422, "invalid_context_version", "since_version must be the previous context_version (64 lowercase hex characters), or omit it");
       }
       const room = this.room(roomId);
-      const caughtUp = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id)?.sequence ?? 0;
+      const caughtUp = this.caughtUpCursor(roomId, auth.member.id);
       const built = buildRoomContext({
         state: room.state, sequence: room.sequence, viewerId: auth.member.id, caughtUp, now: this.now()
       });
-      const identity = {
-        viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
-        viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null
-      };
+      const identity = viewerIdentity(auth);
       if (sinceVersion === built.context_version) {
         return { not_modified: true, context_version: built.context_version, roomId,
           evaluatedThrough: built.evaluatedThrough, evaluatedAt: built.evaluatedAt, cursors: built.cursors, ...identity };
@@ -4256,8 +4278,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const room = this.room(roomId), now = this.now();
       if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
       return { ...selectedWorkContext({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence, now, includeSource, includeOffers }),
-        viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
-        viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
+        ...viewerIdentity(auth) };
     });
   }
   workDiscussion(token, roomId, workItemId, { cursor = null, since, limit, expectedSessionBinding = null } = {}) {
@@ -4271,9 +4292,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (!anchorId || (window.anchorId !== null && window.anchorId !== anchorId)) fail(409, "discussion_history_changed", "Discussion history changed; restart after recovery");
       const metadata = this.db.prepare("SELECT sequence,id,json_extract(body,'$.data.messageId') AS message_id FROM events WHERE room_id=? AND sequence<=? AND json_extract(body,'$.type')=? ORDER BY sequence").all(roomId, window.horizon, T.MESSAGE_POSTED);
       return { ...selectedWorkDiscussion({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence,
-        now: this.now(), metadata, window, anchorId, cursor }),
-        viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
-        viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
+        now: this.now(), metadata, window, anchorId, cursor }), ...viewerIdentity(auth) };
     });
   }
   workResult(token, roomId, workItemId, { completionEventId = null, draftMessageId = null, expectedSessionBinding = null } = {}) {
@@ -4287,8 +4306,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       try { value = selectedWorkResult({ db: this.db, state: room.state, workItemId, sequence: room.sequence, now: this.now(), completionEventId, draftMessageId }); }
       catch { fail(422, "result_unavailable", "Exact text evidence is unavailable; no other result was substituted"); }
       if (!value) fail(404, "result_not_found", "Completion not found on this work; no other result was substituted");
-      return stampWorkResult({ ...value, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
-        viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null }, auth.member.id);
+      return stampWorkResult({ ...value, ...viewerIdentity(auth) }, auth.member.id);
     });
   }
   eventsAfter(token, roomId, after = 0, limit = 100, bindingOrOptions = null, options = {}) {
@@ -4402,10 +4420,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
             body: parsed.data.body,
             at: parsed.at,
             channel: "room",
-            ...(parsed.data.requestKind === "reply" && parsed.data.requestPolicyVersion === 1
-              && [parsed.actorId, parsed.data.toMemberId].includes(memberId) ? {
-                requestKind: "reply", nextRead: { tool: "room_read_request", arguments: { requestMessageId: parsed.data.messageId ?? parsed.id } }
-              } : {}),
+            ...replyRequestHint(parsed, memberId),
           };
         });
       const assignments = this.collab.listAssignments(roomId)
@@ -4501,10 +4516,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         channel: event.data.channelId ?? "general",
         private: Boolean(event.data.toMemberId),
         ...(event.data.toMemberId ? { replyToMemberId: event.actorId } : {}),
-        ...(event.data.requestKind === "reply" && event.data.requestPolicyVersion === 1
-          && [event.actorId, event.data.toMemberId].includes(memberId) ? {
-            requestKind: "reply", nextRead: { tool: "room_read_request", arguments: { requestMessageId: event.data.messageId ?? event.id } }
-          } : {}),
+        ...replyRequestHint(event, memberId),
       }));
   }
   // Return-brief wiring (disposition 5557850637): one read transaction keeps the frozen
@@ -4514,7 +4526,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const room = this.room(roomId);
-      const cursor = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id)?.sequence ?? 0;
+      const cursor = this.caughtUpCursor(roomId, auth.member.id);
       const { H, startAfter, C, limit: pageLimit } = resolveHistoryWindow({ sequence: room.sequence, storedCursor: cursor, horizon, after, continuationCursor: frozenCursor, limit });
       const rows = this.db.prepare("SELECT sequence, body FROM events WHERE room_id=? AND sequence>? AND sequence<=? ORDER BY sequence LIMIT ?").all(roomId, startAfter, H, pageLimit)
         .map(r => ({ sequence: r.sequence, event: JSON.parse(r.body) }));
@@ -4528,7 +4540,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const dmVisible = dmEventVisibility(auth.member.id, room.state.messages, brief.history.items); // SEC-19
       brief.history.items = brief.history.items.filter(row => rowInHistory(row, floor, floorMessages) && dmVisible(row.event)
         && peerEventVisible(row.event, { memberId: auth.member.id, identityId, isOwner }));
-      return { roomId, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null, ...brief };
+      return { roomId, ...viewerIdentity(auth), ...brief };
     });
   }
   markCaughtUp(token, roomId, sequence, expectedSessionBinding = null) {
@@ -4536,8 +4548,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       if (!Number.isSafeInteger(sequence) || sequence < 0 || sequence > this.room(roomId).sequence) fail(422, "invalid_cursor", "Invalid caught-up cursor");
       this.db.prepare("INSERT INTO cursors VALUES(?,?,?) ON CONFLICT(room_id,member_id) DO UPDATE SET sequence=max(cursors.sequence,excluded.sequence)").run(roomId, auth.member.id, sequence);
-      return { cursor: this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id).sequence };
+      return { cursor: this.caughtUpCursor(roomId, auth.member.id) };
     });
+  }
+  // RC-2026-09-24-203: push doorbell — a pointer-only POST for the offline
+  // agent's push subscription; the inbox pull carries the body.
+  // Fire-and-forget; never fails the command.
+  pushDoorbell(identityId, eventType, roomId, id) {
+    this.agentHeartbeats.pushNotify({ identityId, eventType, roomId, id, ts: this.now() });
   }
   command(token, roomId, command, expectedSessionBinding = null) {
     validateCommand(command);
@@ -4844,8 +4862,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // RC-2026-09-24-203: push doorbell — a pointer-only POST for the
         // offline agent's push subscription (the inbox pull carries the
         // body). Fire-and-forget; never fails the command.
-        if (woken) this.agentHeartbeats.pushNotify({ identityId: incoming.data.toIdentityId,
-          eventType: "dm.posted", roomId, id: incoming.data.messageId ?? incoming.id, ts: this.now() });
+        if (woken) this.pushDoorbell(incoming.data.toIdentityId, "dm.posted", roomId, incoming.data.messageId ?? incoming.id);
       }
       // RC-2026-09-24-203: push doorbell for bond proposals. Both parties
       // (not the proposer, who is online by definition) get a pointer-only
@@ -4854,8 +4871,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const { agentAId, agentBId, proposerIdentityId, bondId } = bondEffect.data;
         for (const partyId of [agentAId, agentBId]) {
           if (typeof partyId === "string" && partyId.length > 0 && partyId !== proposerIdentityId) {
-            this.agentHeartbeats.pushNotify({ identityId: partyId, eventType: "bond.proposed",
-              roomId, id: typeof bondId === "string" ? bondId : incoming.id, ts: this.now() });
+            this.pushDoorbell(partyId, "bond.proposed", roomId, typeof bondId === "string" ? bondId : incoming.id);
           }
         }
       }
@@ -5015,12 +5031,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         agentId: link.identityId, kind, roomId, messageId: data.messageId ?? eventId });
       if (woken && signal) {
         this.agentPlugin.deliverWakePing({ identityId: link.identityId, signal });
-        // RC-2026-09-24-203: push doorbell — a pointer-only POST for the
-        // offline agent's push subscription; the inbox pull carries the body.
         // Targeted DMs (kind "dm") ride dm.posted, @mentions ride message.posted.
-        this.agentHeartbeats.pushNotify({ identityId: link.identityId,
-          eventType: kind === "dm" ? "dm.posted" : "message.posted",
-          roomId, id: data.messageId ?? eventId, ts: this.now() });
+        this.pushDoorbell(link.identityId, kind === "dm" ? "dm.posted" : "message.posted", roomId, data.messageId ?? eventId);
       }
     }
   }
@@ -5062,16 +5074,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
        (room_id,message_event_id,mentioned_member_id,state,created_at,timeout_at,decided_at)
        VALUES(?,?,?,?,?,?,NULL)`);
     const toMemberId = typeof data.toMemberId === "string" ? data.toMemberId : "";
+    const deliver = memberId => insert.run(roomId, eventId, memberId, "delivered", nowMs, nowMs + timeoutMs);
     for (const memberId of resolveMentionTargetsInText(members, identityNames, body, senderMemberId)) {
       if (toMemberId && toMemberId !== memberId) continue;
-      insert.run(roomId, eventId, memberId, "delivered", nowMs, nowMs + timeoutMs);
+      deliver(memberId);
     }
     // plan-squads: @squad/<name> fans out to one mention row per active
     // member (INSERT OR IGNORE dedupes against direct mentions). The
     // mention lifecycle owns delivery/ack/timeout from here.
-    for (const memberId of squadMentionTargets(this.db, roomId, body, senderMemberId, members, data.toMemberId)) {
-      insert.run(roomId, eventId, memberId, "delivered", nowMs, nowMs + timeoutMs);
-    }
+    for (const memberId of squadMentionTargets(this.db, roomId, body, senderMemberId, members, data.toMemberId)) deliver(memberId);
     // COMMS-02: warn the poster about @handles whose target is ambiguous
     // (2+ members match) or unknown, naming the candidates so they can
     // disambiguate. Delivery is unchanged — the post still lands; the
