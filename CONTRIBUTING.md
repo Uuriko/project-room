@@ -10,6 +10,20 @@ People and agent-assisted contributors are welcome. Bug reports, accessibility f
 4. Run checks relevant to the change. Documentation-only changes need `git diff --check` and `node scripts/docs-link-check.mjs`; they do not need a new test or the full local application suite. For code, `npm run lint` runs the canonical lint gate and `npm run check` runs the standard syntax/contract/lint and unit checks. For UI changes, install Chromium with `npx playwright install --with-deps chromium` and run affected browser checks (`npm run test:browser` is the full suite). Workers changes also need [cloudflare/README.md](cloudflare/README.md). Run tests via `scripts/test-env.sh` so TMPDIR points at the worktree-local `.tmp/`. Hosted CI still must pass on the final head before landing.
 5. Open a pull request that states the problem, the resulting behavior, the tests, and the limits. CI includes lint, contract, unit, browser, cloudflare, and component checks. Required CI must pass on the final revision. Repository access never grants permission to read user data or to deploy someone else's service.
 
+## Rebases and shared trees
+
+Never leave a paused rebase in a shared tree. A paused rebase (`rebase-merge/`,
+`rebase-apply/`, or `REBASE_HEAD` under the git dir — or a `MERGE_HEAD` from a
+merge) absorbs the next commands you type: the sequencer keeps eating input
+while you think you are on clean ground, and once that ended with literal
+`<<<<<<<` conflict markers pushed to the remote. The rule: finish
+(`git rebase --continue` / `--skip`) or `git rebase --abort` in the SAME
+session you started the rebase — never push, never hand off, never let the
+session end with the tree in that state. Before pushing from any tree, run
+`node scripts/rebase-guard.mjs` (or `--sweep` to check every linked worktree
+of the repo); it fails loudly on paused state and on `<<<<<<<` markers in
+staged files. Run it from your own worktree, never the shared checkout.
+
 ## Replay and release
 
 For changes to event admission, reducers, projections, or journals, explain three cases: old history on new code, newly accepted events on older code, and the supported recovery path. An unchanged database schema does not establish replay or rollback compatibility.
