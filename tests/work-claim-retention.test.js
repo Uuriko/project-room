@@ -253,7 +253,10 @@ const memberEntry = (id, permissions = ["accept_work", "complete_work"]) =>
   ({ id, kind: "agent", active: true, permissions });
 const authFor = id => ({ member: { id, kind: "agent", permissions: ["accept_work", "complete_work"] } });
 const seedUnclaimed = (registry, id) => {
-  registry.set("room1", createWork({ id, title: id }, { now: T0 - H }));
+  // FIX-45: seed items declare files so the claim route's files requirement
+  // is satisfied by inheritance. Each id gets a distinct path so the two
+  // claims in the ack test do not file-lease-conflict with each other.
+  registry.set("room1", createWork({ id, title: id, files: [`server/seeded-${id}.mjs`] }, { now: T0 - H }));
 };
 
 test("handler: claiming posts the ack; first-timers carry the SLA", async () => {
@@ -373,7 +376,8 @@ test("route table: wrong method on the retention path is a 405, not a claimId re
 
 test("handler: claiming an item you created yourself is still a first contribution", async () => {
   const registry = createWorkClaimRegistry();
-  registry.set("room1", createWork({ id: "w-mine", title: "w-mine" }, { now: T0 - H, agentId: "newbie" }));
+  // FIX-45: declared files so the claim inherits them (claim route requires declared files).
+  registry.set("room1", createWork({ id: "w-mine", title: "w-mine", files: ["server/seeded.mjs"] }, { now: T0 - H, agentId: "newbie" }));
   const members = { owner: memberEntry("owner"), newbie: memberEntry("newbie") };
   const store = fakeStore(members);
   const out = await handleWorkClaims({ req: { method: "POST", body: {} }, res: {},
