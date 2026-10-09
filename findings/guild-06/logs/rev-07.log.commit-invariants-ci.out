@@ -1,0 +1,17 @@
+✔ invariantName extracts the kebab id from scenario test names (4.819212ms)
+✔ invariantName slugifies non-invariant harness self-tests (0.407462ms)
+✔ isFileLevelTest skips per-file aggregate lines (0.494663ms)
+✔ parseTap records nested invariant tests with durations and skips file aggregates (1.214843ms)
+✔ parseTap marks not-ok tests as fail with the failure type (3.000843ms)
+✔ parseTap records skips and bail-outs (0.727411ms)
+✔ buildRunEnd fails closed on any fail and computes counts (6.75038ms)
+✔ applyRunnerExitGuard fails closed when the runner dies but records pass (4.002968ms)
+✔ renderMarkdown renders the table with the gate marker (19.222387ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1417.219299

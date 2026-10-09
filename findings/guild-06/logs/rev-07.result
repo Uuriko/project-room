@@ -1,0 +1,14 @@
+unit=rev-07 mode=commit head=6e03ee51e
+commit=16604aa3f subject=ci(invariants): wire the invariant harness as a standalone CI gate (rebased onto main, squashed) (invariants-ci.mjs)
+commit 16604aa3f1e1508e18b80bb9e351d62ea702bac5
+Author: Uuriko <jjohnpotter@gmail.com>
+Date:   Fri Oct 9 02:33:42 2026 -0700
+
+    ci(invariants): wire the invariant harness as a standalone CI gate (rebased onto main, squashed) (invariants-ci.mjs)
+
+ scripts/invariants-ci.mjs | 262 ++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 262 insertions(+)
+--- changed: scripts/invariants-ci.mjs
+  affected tests/invariants-ci-parser.test.js: exit=0 PASS
+diff-bytes=10953
+unit=rev-07 DONE

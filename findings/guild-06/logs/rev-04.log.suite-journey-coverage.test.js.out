@@ -1,0 +1,13 @@
+✔ coverage map parses and every claimed capability has wired executable evidence (83.599498ms)
+✔ a claim with no unit or browser evidence is an untested user path (2.793061ms)
+✔ missing files and unwired browser checks fail closed (36.227667ms)
+✔ malformed maps fail loudly instead of passing vacuously (30.094303ms)
+✔ browser suite membership is exact, not substring: check.mjs is not other-check.mjs (1.256385ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2005.731913

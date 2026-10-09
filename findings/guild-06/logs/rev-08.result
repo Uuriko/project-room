@@ -1,0 +1,18 @@
+unit=rev-08 mode=commit head=6e03ee51e
+commit=feed63746 subject=Compare-and-release: bind POST work-claims/:id/release to the claim round (E5/D4) (agent-inbox.mjs)
+commit feed63746a72d6385005b01ee0c65d1c1b42ea43
+Author: Uuriko <jjohnpotter@gmail.com>
+Date:   Fri Oct 9 01:24:43 2026 -0700
+
+    Compare-and-release: bind POST work-claims/:id/release to the claim round (E5/D4) (agent-inbox.mjs)
+
+ scripts/agent-inbox.mjs | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+--- changed: scripts/agent-inbox.mjs
+  affected tests/agent-autonomy-client.test.js: exit=0 PASS
+  affected tests/agent-connection.test.js: exit=0 PASS
+  affected tests/agent-doctor.test.js: exit=0 PASS
+  affected tests/agent-identities.test.js: exit=0 PASS
+  affected tests/agent-inbox-keys.test.js: exit=0 PASS
+diff-bytes=1532
+unit=rev-08 DONE

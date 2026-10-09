@@ -1,0 +1,16 @@
+✔ clean fixture: exit 0, ok report covering the room (5838.1744ms)
+✔ corrupt chain: exit 1 with a machine-readable violation report (9215.923786ms)
+✔ read-only guarantee: the check mutates neither the file nor its directory (6019.926897ms)
+✔ missing database file: exit 2 (1110.403088ms)
+✔ no --db and no ROOM_DB: exit 2 (1340.734727ms)
+✔ database without escrow schema: exit 2, not a violation (1374.038196ms)
+✔ database without rooms table: exit 2 (6437.175354ms)
+✔ ROOM_DB env fallback is honored (8263.75392ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 41508.828244

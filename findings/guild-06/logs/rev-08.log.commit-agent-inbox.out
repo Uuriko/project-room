@@ -1,0 +1,19 @@
+{"event":"room.cold_start","durationMs":2667,"integrity":"eager","phases":{"schema":{"ms":606,"rowsRead":0},"plugin":{"ms":1611,"rowsRead":0},"fence":{"ms":86,"rowsRead":0},"verifies":{"ms":21,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":196,"heapBytes":37318016,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":1560,"integrity":"eager","phases":{"schema":{"ms":242,"rowsRead":0},"plugin":{"ms":855,"rowsRead":0},"fence":{"ms":268,"rowsRead":0},"verifies":{"ms":4,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":149,"heapBytes":34178256,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ create mints a scoped expiring key; the secret is shown once and stored hashed (14920.740146ms)
+{"event":"room.cold_start","durationMs":2064,"integrity":"eager","phases":{"schema":{"ms":313,"rowsRead":0},"plugin":{"ms":983,"rowsRead":0},"fence":{"ms":462,"rowsRead":0},"verifies":{"ms":75,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":178,"heapBytes":40198744,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ scope enforcement: a key without the scope is 403 on the guarded route (12375.851587ms)
+{"event":"room.cold_start","durationMs":1220,"integrity":"eager","phases":{"schema":{"ms":89,"rowsRead":0},"plugin":{"ms":757,"rowsRead":0},"fence":{"ms":177,"rowsRead":0},"verifies":{"ms":10,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":155,"heapBytes":45511360,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ expired keys are rejected at the door (6259.128758ms)
+{"event":"room.cold_start","durationMs":1473,"integrity":"eager","phases":{"schema":{"ms":196,"rowsRead":0},"plugin":{"ms":716,"rowsRead":0},"fence":{"ms":408,"rowsRead":0},"verifies":{"ms":21,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":172,"heapBytes":36007136,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ rotate replaces the secret (old credential dies) and revoke ends the key (18814.967804ms)
+✔ usage errors exit non-zero without touching the server (33782.196495ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 95286.571214

@@ -1,0 +1,13 @@
+unit=rev-10 mode=commit head=6e03ee51e
+commit=6146ae702 subject=Compare-and-release: bind POST work-claims/:id/release to the claim round (E5/D4) (authz-board.mjs)
+commit 6146ae70282b73dd285627d873e1021c24b73950
+Author: Uuriko <jjohnpotter@gmail.com>
+Date:   Fri Oct 9 01:25:53 2026 -0700
+
+    Compare-and-release: bind POST work-claims/:id/release to the claim round (E5/D4) (authz-board.mjs)
+
+ scripts/qa3/authz-board.mjs | 17 +++++++++++++----
+ 1 file changed, 13 insertions(+), 4 deletions(-)
+--- changed: scripts/qa3/authz-board.mjs
+diff-bytes=1613
+unit=rev-10 DONE

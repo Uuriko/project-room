@@ -888,3 +888,534 @@ against a fixture store over loopback, use disposable identities/keys, and clean
 
 ### recovery-coverage.mjs
 - **P**: `seedRecoveryCoverage(f)` — the rows the recovery audit requires, shared with the cold-start budget so a wake is measured against a store with every application table, not just the event log. Disposable synthetic data only (vetting receipts, spam flags, notify prefs, grants, operator actions, room assistant…).
+
+---
+
+## docs-08 — recovery-fixture … room-lifecycle (chunk 07)
+
+### recovery-fixture.mjs
+- **P**: `createRecoveryFixture(filename)` — disposable synthetic data only (store init, work claims, signed evidence, tiers). **Never import from a production entrypoint.**
+
+### refine-draft-browser-check.mjs
+- **P**: Refine-draft journeys (desktop+mobile): separate edits, source link, exact retry, result. Simulated people in isolated rooms, incl. real browser failure recovery.
+
+### release-checkpoint.mjs
+- **P**: Read-only, bounded release observations. Not deployment or health proof.
+- **I**: Bounded by construction: `TIMEOUT_MS=10000`, `MAX_BYTES=256*1024`, control-char stripping, 40-hex SHA validation (contrast with the unbounded gh calls in claims-index.mjs — this is the pattern to follow).
+
+### release-evidence.mjs
+- **P**: Compact release-evidence manifest built only from actual results. Skipped tests are never labeled passed; a dirty candidate tree is never labeled clean; live state is never labeled live without a matching digest.
+- **I**: Exports `parseTapSummary`, `suiteLabel` (pure, unit-tested).
+
+### release-polish-check.mjs
+- **P**: Release polish journeys (desktop+touch): quiet controls, stable reading, usable History. Synthetic user journeys.
+
+### reminders-browser-check.mjs
+- **P**: Private reminders (desktop+mobile): schedule, due clock, privacy, recovery after resolution, keyboard, reflow. Simulated human tasks, isolated synthetic data.
+
+### replay-room-export.mjs
+- **P**: Replays a room export NDJSON into a new store via `replayNdjson`.
+- **U**: `node scripts/replay-room-export.mjs --from export.ndjson --to /path/room.sqlite`
+- **F**: Missing paths → error; verification failure → "Replay failed verification. The destination was not promoted." + exit 1.
+- **I**: `process.umask(0o077)`; prints only `{verified, events}` JSON.
+
+### reply-request-browser-check.mjs
+- **P**: Synthetic human journeys against a disposable real service for reply requests (uses `hostReplyBody`). Not participant research.
+
+### reply-review-fixture.mjs
+- **P**: `seedRecordedReply({store, token, binding, sourceId})` — deliberately invented provider history (draft save → reserve → reply). Not a provider driver or runtime asset.
+
+### reply-update-fixture.mjs
+- **P**: `createReplyUpdateFixture(t)` — shared invented mailbox/update fixture (Graph reply update prepare/inspect). Never contacts a provider; cleans up in `t.after`.
+
+### report-test-failures.mjs
+- **P**: Turns a `node --test --test-reporter=junit` results file into GitHub Actions annotations + job summary (BUILD-01 B50).
+- **U**: `node scripts/report-test-failures.mjs [test-results/browser-junit.xml]`
+- **I**: One `::error title=<suite>::<test>: <first line>` per failure; Markdown table appended to `$GITHUB_STEP_SUMMARY` when set. Capped (`MAX_FAILURES`, `MAX_MESSAGE`). Exit 0 whenever the file was read — even missing (emits `::warning`): the step runs `if: always()` and the test step already decided the job's colour. A genuine bug in this script still throws so it can't silently rot.
+
+### report-unit-failures.mjs
+- **P**: CI honesty: the "Report failures to PR" step names failing tests instead of pointing at the job log. Reads the shard receipt from `scripts/unit-ci.mjs` (latest attempt wins); writes the markdown comment body to `--body-file` or stdout.
+- **U**: `node scripts/report-unit-failures.mjs --shard=1/3 [--body-file=path]`; env `GITHUB_SERVER_URL/REPOSITORY/RUN_ID` for the run link.
+
+### request-host-fixture.mjs
+- **P**: Explicit synthetic native-host exercise (interactive: requires TTY + output path arg). Never opens an existing Room database.
+
+### restore-rehearsal.mjs
+- **P**: Restore rehearsal (backlog B5): restoring a stale backup resurrects the authority live at the watermark, and `reconcileRestoredAuthority` names every resurrected entry — stale restored authority is never silently treated as current.
+- **U**: `node scripts/restore-rehearsal.mjs` (disposable temp dirs).
+
+### restore-room-backup.mjs
+- **P**: Restores a nightly backup into a NEW sqlite store. Never touches a live room: destination must not exist; nothing writes to Cloudflare. Prints counts + digests only, never row contents.
+- **U**: `node scripts/restore-room-backup.mjs --kv 2026-10-08 --to /tmp/restore/room.sqlite --room muse-room` | `--from room-export.ndjson --to …`
+- **I**: `--kv` reads the KV manifest + parts via `wrangler kv key get --remote` (caller's login), checks every part's sha256 + whole-file sha256, then replays. `--save` writes reassembled NDJSON mode 0600. `--audit report` restores even when the recovery audit flags drift, printing the audit result.
+
+### result-copy-agent-fixture.mjs
+- **P**: Disposable, read-only actual-agent exercise (copy-editor agent promoted through autonomy tiers). Never opens a caller's database.
+
+### result-copy-browser-check.mjs
+- **P**: Simulated human journeys: result copy flows. Clipboard outcomes are controlled — no user text or system clipboard read/written, no live service.
+
+### result-diff-browser-check.mjs
+- **P**: Simulated human journeys in real browsers against isolated synthetic rooms (result diff rendering).
+
+### results-fixture.mjs
+- **P**: `createResultsFixture()` — disposable fictional results; signs via the production API directly (not the test helper) for packaging safety. No provider reads, execution, or publication.
+
+### review-mechanical-report.mjs
+- **P**: Renders the review-mechanical check report: short human table + machine-readable JSON block (`<!-- review-mechanical-report -->`); the workflow prints it into `$GITHUB_STEP_SUMMARY`.
+- **U**: `node scripts/review-mechanical-report.mjs --stage fast|full --pr <n> --head <sha> --lint <conclusion> --tests <conclusion> --additions <n> --deletions <n> --scope-json <path>`; `--annotations --scope-json <path>` prints escaped `::warning` annotations for scope drift.
+- **I**: `renderReport()` is pure and unit-tested; the JSON shape is the contract reviewers/tooling read.
+
+### review-scope-check.mjs
+- **P**: Claim-scope check for the cheap-first mechanical review pass. A PR declares covered files in its body via `<!-- claim-files: server/a.mjs, tests/a.test.js -->` (comma/newline-separated; trailing `/` covers a directory).
+- **F**: Verdicts: `clean` (all changed files declared), `drift` (changed file not declared), `undeclared` (no declaration — reviewer checks by hand).
+- **I**: Drift is a reviewer signal, not a merge blocker (claims legitimately grow: lockfiles, generated files). Reported as a machine-readable check summary.
+
+### review-state.mjs
+- **P**: Per-PR review-state surface + single-lane review assignment routing. Companion to #1585's review-parallelization protocol (`docs/REVIEW-PARALLELISM.md`): for every open PR, which reviewers posted verdicts, the head SHA each verdict covered, whether each verdict is stale (head moved) — plus deterministic single-lane assignment so reviewers neither block each other nor re-review stale heads.
+- **I**: Verdict provenance (reviewer + exact head SHA + timestamp) binds judgment to the inspected version.
+
+### rollback-readback.mjs
+- **P**: Verifies a rollback using fresh `wrangler deployments status --json` records (stdin / `--status-file`).
+- **I**: No deployment, no credentials — validates records + GETs both doors. Allocation proof ≠ data restoration; observed source revisions are receipts, not a source-SHA mapping.
+
+### room-actions-browser-check.mjs
+- **P**: Simulated-human navigation checks (sidebar/chrome actions), asserting expected message-write counts. Disposable data; no outside services.
+
+### room-chrome.mjs
+- **P**: Post-#656 chrome helpers for browser checks: `ensureSidebarOpen`, catch-up, Settings, Search helpers.
+- **I**: Product code unchanged — only teaches checks how to reach it. Sidebar always on screen at desktop widths, behind Menu below 900px. `/* global document */` — page.waitForFunction runs in the browser, not here.
+
+### room-coord.mjs
+- **P**: `room-coord`: claim, renew, hand off, land work through the room's typed work-claim registry instead of chat prose or GitHub comments. Output JSON unless `--md`.
+- **U**: `room-coord status|claim|renew|handoff|land|tail|…` (full USAGE in-file).
+- **I**: Pure coordination client over `client/room-coord.mjs` (`CoordError`, `claimAndVerify`, `closeClaim`, `land`, …).
+
+### room-door-browser-check.mjs
+- **P**: Public /room door (desktop+touch): canonical minimal auth, preserved deep links, separate agent packets.
+
+### room-export-browser-check.mjs
+- **P**: Room export (BUILD-01 F2 follow-up): a signed-in member takes the readable HTML export from the History panel — room-key mode and account mode (where the request must carry the session binding a plain link can't). Disposable rooms only.
+
+### room-guard.mjs
+- **P**: Refuses a commit (or flags a PR) touching files another member holds under a live room work claim — advisory leases become a hard stop at the moment it matters, like a pre-commit hook.
+- **U**: pre-commit: `node scripts/room-guard.mjs` (staged files); CI/PR: `--base origin/main`; explicit: `--files a.mjs,b.mjs`.
+- **F**: Exit 0 clean, 1 conflict, 2 usage, 3 Room unreachable with `--strict`.
+- **I**: Without `--strict`, an unreachable Room prints a notice and passes — a network blip never blocks local work; `--warn` reports conflicts and passes.
+
+### room-health.mjs
+- **P**: Room health dashboard generator (OBS-1): fetches LIVE data, writes a self-contained static page `docs/room-health.html`. Panels: open claims by lane, PR age distribution, hosted CI health, board comment count vs the 2500 cap (+projection), upcoming lease expirations.
+- **U**: `TMPDIR=<wt>/.tmp node scripts/room-health.mjs [--out <path>]`
+- **I**: Read-only against the board: never posts. Run on demand or from cron.
+
+### room-hygiene.mjs
+- **P**: Room hygiene (RC-2026-09-23): zombie-member cleanup + friction digest. Trusted local-operator script: opens the room SQLite read-only, reports, never writes.
+- **U**: `member-sweep --db PATH --room ROOM_ID [--days N] [--json]` (members with no heartbeat in N days, default 30); `friction-digest --db PATH --room ROOM_ID [--json]` (untriaged friction-labeled work items).
+- **I**: Read-only: deactivation happens via the owner path, not here.
+
+### room-instructions-browser-check.mjs
+- **P**: Room instructions/charter journeys (seeded/unseeded, owner/member, noStream variants). Synthetic human journeys.
+
+### room-key-pull.mjs
+- **P**: Register pull-only presence with the saved room access key; prints pending wake pointers. The key cannot install a wake URL. Ack only for a signal id this same pull just printed.
+- **U**: `node scripts/room-key-pull.mjs --host HOST [--cadence SECONDS] [--ack SIGNAL_ID]`
+- **I**: Reads `ROOM_AGENT_CONFIG` or `ROOM_AGENT_ORIGIN/ROOM/TOKEN`. Sends mode pull-only; never starts a listener. Credential never written to stdout/stderr.
+
+### room-lifecycle-browser-check.mjs
+- **P**: Issue #6 A2: an account administering membership creates a room from Rooms, opens it, archives it as owner (read-only afterwards; switcher shows it as read-only, never a working "Open"), and a member leaves from About and no longer finds it. Disposable first-party data.
+
+---
+
+## docs-09 — room-listen … stream-recovery (chunk 08)
+
+### room-listen.mjs
+- **P**: Room listen loop: `--mode channel|poll|webhook`. `agent-claude-channel.mjs` delegates here (`main(['--mode','channel',…])`).
+- **F**: Strict argv: first two args must be `--mode <mode>`; every flag needs a value, else `usage_error`.
+
+### room-mcp-init.mjs
+- **P**: Project Room MCP one-shot installer. Detects installed AI clients, registers the hosted MCP server in each client's MCP config. Idempotent.
+- **U**: `node scripts/room-mcp-init.mjs [client ...] [--url <mcp-url>] [--dry-run] [--yes]`
+- **I**: Portions adapted from Agent Room's init.ts (MIT). Unlike upstream (local stdio via npx), Project Room's hosted MCP is a plain HTTPS URL — every client gets a remote entry, no local install, no Node version dance.
+
+### room-mutate.mjs
+- **P**: Single-point mutant generator + runner for `scripts/room` (guild-05's file; this tool lives in my slice). Why custom instead of Stryker: `scripts/room` is bash with embedded jq; no JS mutation framework targets it. The room's `_parse`/`_state` verbs + fake-gh sweep give a deterministic test seam.
+- **U**: `node scripts/room-mutate.mjs --list | --run M1,M7 [--jobs 4] [--workdir DIR] | --run-all …`
+- **I**: Every run first executes the suite against an UNMUTATED overlay (baseline); if the baseline fails, exits 3 without attributing kills — a broken harness must never masquerade as mutant kills.
+
+### room-overview-browser-check.mjs
+- **P**: Room overview (desktop+mobile): source-backed orientation preserves writing, makes no room writes, updates live. Synthetic room only.
+
+### room-policy-browser-check.mjs
+- **P**: Issue #6 A4: when the owner makes review/approval mandatory, the new-work form shows the requirement locked on with the reason, and the recorded item carries it. Disposable first-party data.
+
+### room-results-browser-check.mjs
+- **P**: Room results (desktop+mobile, member/guest): simulated people, real local browser, fictional rooms.
+
+### room-roster.mjs
+- **P**: Thin CLI wrapper: `roomRosterMain(process.argv.slice(2), …)` from `src/room-roster.js`; prints to stdout, exit 1 on error.
+
+### room-trust-browser-check.mjs
+- **P**: Room Trust settings toggle: owner of a cross-owner room flips the kill-switch. Trust starts on; one click off, another on. Synthetic fixture only.
+
+### rotation-cutover.sh
+- **P**: Executes the claims-board rotation (old board → successor). DRY RUN BY DEFAULT; `--confirm` executes. Fail-closed at every step.
+- **I**: Order: preflight (gh+jq present; old-board count re-verified TWICE via REST, strictly above --threshold default 1500; no pre-existing successor) → quiet-window notice → wait --quiet-seconds (600) → re-read → … (runbook docs/ROOM-WATCH.md §8).
+
+### rotation-rehearse.sh
+- **P**: Hermetic end-to-end verification of the rotation runbook: exercises rotation-cutover.sh against a fixture board (no network/live state) through a `gh` shim, asserting every invariant — fail-closed gates, successor lineage title, header + carry-over ledger order, ledger = live unexpired claims only, zero lost stragglers, exactly-once comment processing, atomic watermark update, clean 266→N cron-repoint.
+
+### route-acceptance.mjs
+- **P**: Proves a route is mounted before a receipt says it is live. On 2026-09-27 two PRs (#1136, #1138) merged with receipts naming GET /events and GET /board, but the module was imported only by its tests — both paths 404'd on every door.
+- **U**: `node scripts/route-acceptance.mjs "GET /api/rooms/{roomId}/board" "POST /a2a"` | `--file routes.txt` | `--json …`
+- **I**: Starts the real HTTP server on a fresh local store; a route passes on anything but the generic unmatched-route 404 ("Not found"). 401/403/405/409/422 and resource-specific 404s all prove wiring.
+
+### route-docs-check.mjs
+- **P**: Route documentation gate (re-audit 2026-09-14, M4): `docs/openapi.yaml` must describe every /api route template the server can match, and none it no longer serves.
+- **I**: Served set from `routeCandidates()` (scripts/open-routes.mjs) + agent plug-in surface via single delegation in server/http.mjs. Path params reduced to {} both sides. A new route fails `npm run check` until documented with security scheme, request body, responses.
+
+### routes-inventory.mjs
+- **P**: Legacy route inventory (batch RT): walks routes served outside the route table; writes `scripts/routes-legacy-allowlist.json`. The allowlist is the parity baseline — only shrinks as extraction PRs move groups into `server/routes/table.mjs`.
+- **U**: No flag → prints the inventory; `--check` fails on drift; `--write` regenerates (`--baseline` resets the baseline).
+- **F**: A legacy route missing from the allowlist fails the check; a new legacy route cannot be added to the baseline.
+- **I**: Fuzz note: ~20s startup (import stall) — slow, not hung.
+
+### run-quarantined-tests.mjs
+- **P**: Zero-Bug System: non-blocking lane for quarantined flaky tests. Reads `tests/quarantine.json`; runs each entry with `QUARANTINE_RUN=1` ("file > test name" convention; bare file = whole file).
+- **F**: Exits nonzero when any quarantined test fails — the workflow keeps it non-blocking via `continue-on-error: true`, so red reports honestly without failing a PR. Dependency-free.
+
+### run-room-request.mjs
+- **P**: Runs one room request: `REQUEST_ID|--auto`, absolute private journal sqlite, absolute host.json.
+- **U**: `node scripts/run-room-request.mjs REQUEST_ID|--auto /absolute/private-journal.sqlite /absolute/host.json`
+- **I**: Uses `ROOM_AGENT_CONFIG` or existing connection env. Host JSON: command (absolute), args, cwd (absolute), timeoutMs, fixed policy, optional verification (no env). Host reads a typed untrusted context envelope on stdin.
+
+### runtime-import-closure.mjs
+- **P**: Static import-closure analyzer for the runtime-package allowlist lint: transitive closure of relative ES-module imports from an entrypoint, so tests assert every imported module is allowlisted without hand-maintained lists.
+- **I**: Only static `import`/`export … from` with relative specifiers; `node:` builtins, bare specifiers, dynamic `import()` ignored.
+
+### scan-secrets.mjs
+- **P**: Zero-bug gate: scans the PR diff for committed secrets.
+- **U**: `node scripts/scan-secrets.mjs [--base <git-ref>] [--diff <file>]` (default base origin/main; CI passes the PR base explicitly).
+- **F**: Exit 0 clean; 1 finding (blocks the PR).
+- **I**: Only ADDED lines (+, excluding +++ header) — history never blocks a new PR. Deliberately conservative: known provider prefixes only; NO generic high-entropy heuristics (they false-positive on hashes/UUIDs/fixtures). Escape hatch: `secrets-allowlist` on the line.
+
+### secret-scan-check.mjs
+- **P**: Secret-scan CI gate (H005): scans the repo tree via `server/secret-scan.mjs`; fails the build on any finding. Pure, dependency-free; runs in the contract job via check.mjs.
+- **I**: Config (ALLOWLIST, SKIP_FILES, SKIP_DIRS: node_modules/.git/coverage/…, extensions) exported so the diff gate and tests reuse the exact same rules. Tree walk only runs when executed directly.
+
+### secret-scan-diff.mjs
+- **P**: Secret-scan DIFF gate (200-list #162): scans ADDED lines of `git diff <base>...HEAD` with the shared detector + line allowlist + path allowlist (`.github/secret-scan-allowlist.txt`).
+- **U**: `[--base <ref>]` (default origin/main) | `--staged` (pre-commit) | `--files a b c`
+- **I**: Complements the tree scan (PR-focused, fast); findings never include secret values — redacted previews only. Recent commits: "removed lines starting with -- no longer shift line numbers" (8172fe0f1), "keep an added ++ source line" (bd6b36d3f), "keep a real provider key when a placeholder word is elsewhere" (f19ab4c3d).
+
+### server-json-check.mjs
+- **P**: Offline checks for server.json + optional registry version bump. The description is whatever the file says (POS-1a may change it; this checks shape only).
+- **I**: Exports `CANONICAL_ORIGIN`, `NAMESPACE_PREFIX="io.github.Uuriko/"`, `DESCRIPTION_MAX=100`, `REGISTRY_VERSIONS_URL`, `parseSemver`.
+
+### session-boundary-check.mjs
+- **P**: Browser regressions for session ownership, stale writes, live announcements, user-controlled record identities. All state/credentials disposable.
+
+### shadow-quarantine-report.mjs
+- **P**: Post-shadow precision report for auto-quarantine (AUTO-QUARANTINE-POLICY.md §5): reads the store READ-ONLY, joins shadow would-be-hold records to review outcomes in the durable spam_quarantine journal.
+- **U**: `node scripts/shadow-quarantine-report.mjs --store /path/to/room.db [--since …] [--until …] [--review-window-days 14] [--now …] [--format text|json]`
+
+### sign-agent-card.mjs
+- **P**: Build-time signer for the room's A2A Agent Card (RC-2026-09-23-105). Runs after stamp-version.mjs; signs canonical card bytes with the room's Ed25519 key, then card-plus-envelope as A2A v1.0 §8.4 JWS; writes `deploy/agent-card-signed.mjs`, honored only when the signature covers exactly the served build's revision.
+- **F**: Key from `ROOM_AGENT_CARD_SIGNING_KEY` (base64 seed) or `~/.config/project-room/agent-card-signing.key`. Never committed/logged/transmitted. Missing keys stop the build; local unsigned builds need explicit `--allow-unsigned`.
+
+### signin-browser-journey.mjs
+- **P**: Shared journey helpers: `openMagicSignin(page)` (visible password-first entry → forgot-password → magic option), `backToPasswordSignin(page)`. Reach recovery through the visible entry, incl. invitation hosts.
+
+### skills-sync-check.mjs
+- **P**: Fails when `plugins/project-room/skills/` is not an exact copy of `skills/`. Repair: `node scripts/skills-sync.mjs`. (Runs first inside `lint.mjs`.)
+
+### skills-sync.mjs
+- **P**: `skills/` is the only source for Project Room skills: copies the tree onto `plugins/project-room/skills/`, including skills existing only under `skills/`, dropping plugin-only copies (e.g. the shelved bounty worker).
+
+### smoke-prod.mjs
+- **P**: Production smoke probes (Zero-Bug, Phase 2). Zero deps. Synthetic READ-ONLY probes against live prod: never writes/mutates, never spends/charges, never authenticates as any user/agent.
+- **I**: Probes: A. landing 200+HTML; B. claims-board read 200+JSON `opportunities`; C. priced-tool MCP `tools/call add_land_item` → 401 auth_required (never 500). Note: the spend primitive's honest 402 needs an authenticated agent with no grant — creating/borrowing an identity would write or impersonate, so the probe doesn't.
+
+### snippet-adoption.mjs
+- **P**: Weekly count of public repos carrying the coordination marker or hosted MCP URL (GitHub code search + /repos fallback).
+- **I**: Exports `SEARCH_INTERVAL_MS=6500` (10 req/min ceiling), `SEARCH_PAGE_SIZE=100`, `SEARCH_RESULT_CAP=1000`, `GITHUB_API`, `ADOPTION_QUERIES`. Missing `ADOPTION_SEARCH_TOKEN` falls back to `GITHUB_TOKEN`; if the token can't search public code, exits 0.
+
+### soak-preload.mjs
+- **P**: Q007 soak harness — server-side instrumentation (observe-only). Loaded via `node --import` by soak-run.mjs; changes nothing about request handling; samples event loop, heap, FDs, unhandled rejections as NDJSON to `SOAK_METRICS_PATH`.
+- **I**: Fault-injection (failing-first proof only, set by the harness): `SOAK_INJECT_LEAK=1` (~1MiB retained/sample window), `SOAK_INJECT_REJECTION=1` (one unhandled rejection ~2s after load). Timers unref'd — never keep the process alive.
+
+### soak-run.mjs
+- **P**: Q007 soak harness — orchestrator. Boots the real server in a child (with soak-preload instrumentation; server code untouched), applies sustained HTTP load, evaluates memory growth, event-loop lag, FD growth, rejections, crashes.
+- **U**: `SOAK_DURATION_S=900 SOAK_LOAD_RPS=10 node scripts/soak-run.mjs` (86400 = full 24h).
+- **F**: Exit 0 PASS; 1 FAIL (threshold/rejection/crash); 2 harness error.
+
+### spend-allowance-browser-check.mjs
+- **P**: Issue #6 C3: room owner sets a spend allowance from the "Agent spend" card; every member sees allowance/spent/reserved/headroom move as a session reserves, reports, stops; only the owner has controls; removing the allowance restores the default. Disposable first-party data.
+
+### stall-probe.mjs
+- **P**: Fires one request/second for N seconds; fails when p99 latency exceeds budget. Requests stay in flight together — the shape of a Durable Object input-gate stall (a sequential probe would hide it).
+- **U**: `node scripts/stall-probe.mjs --url https://room.trydemigod.com --seconds 20 --path /api/ready`
+- **I**: CI: `.github/workflows/stall-probe.yml` (workflow_dispatch). Verdict function covered by `tests/edge-stall.test.js` without network. Exports `percentile`.
+
+### stamp-version.mjs
+- **P**: Stamps immutable release metadata into `server/version.mjs` at bundle/deploy time. Run immediately before bundling/uploading; commit first — the stamped revision must name an existing commit, never a working tree.
+- **I**: M-55: `--flag value` pairs parsed structurally (`KNOWN_FLAGS = --revision/--build-id`); the old `args.find(a => !a.startsWith("--"))` mistook option values for the positional target. Writes via tmp+rename (atomic). Fuzz: no partial writes.
+
+### start-room-browser-check.mjs
+- **P**: Start-a-room: the door's main button opens `/?start=room`; a new visitor sees "Sign in to start your room", signs in, lands inside their own room. One-shot intent; setup asks for a name only, before the room is made.
+
+### starter-recipes-browser-check.mjs
+- **P**: H1 recipe strip: catch-up and next-work chips render from committed state; dismissal is local only. Disposable first-party data.
+
+### stream-recovery-browser-check.mjs
+- **P**: Native EventSource reconnects after temporary storage failure without losing identity, unsent draft, or selection (synthetic `StorageUnavailableError` driver). Recent change (1db3e71f1, 751545238): snapshot routes match the path, so stream-open re-reads are caught — live refreshes re-read only the newest messages.
+
+---
+
+## docs-10 — sync-design-tokens-css … workflow (chunk 09)
+
+### sync-design-tokens-css.mjs
+- **P**: Regenerates the design-token variable blocks in `src/styles.css` from `src/design-tokens.js` (single source of truth). The `:root` (dark) and `[data-theme="light"]` blocks carry marker comments; everything between begin/end markers is replaced, preserving surrounding lines.
+- **U**: `node scripts/sync-design-tokens-css.mjs` | `--check` (CI gate).
+- **I**: Byte-identical output when tokens are unchanged → regeneration is a no-op diff.
+
+### synthetic-mail-fixture.mjs
+- **P**: Local test double with its own SQLite DB. NEVER imported by a deployed entrypoint. Kind "synthetic"; modes accepted/rejected/before; correlation-conflict detection on mismatched envelopes.
+
+### telegram-contract-fixture.mjs
+- **P**: Invented Telegram Bot API shaped data (no bot token, chat export, or real people): fixture connection/chat/users/updates.
+
+### telegram-rotate-webhook.mjs
+- **P**: Rotates the Telegram webhook secret without outage. Prints one fresh crypto-secure secret + exact follow-up steps (store via wrangler secret put; re-register with the new secret; Reconnect starts a rotation window — default 24h, dual-accepts old+new until it ends).
+- **U**: `node scripts/telegram-rotate-webhook.mjs --generate [--window-hours 24]`
+- **F**: Secrets are printed to the terminal for operator handoff — never in chat/email.
+
+### telegram-set-webhook.mjs
+- **P**: Registers (or removes) the Telegram webhook for one inbox connection.
+- **U**: `TELEGRAM_BOT_TOKEN=... TELEGRAM_WEBHOOK_SECRET=... node scripts/telegram-set-webhook.mjs https://room.example.test --connection telegram-main [--dry-run] [--delete]`
+- **F**: Token/secret from environment only, never printed. Exit 1 when Telegram answers ok:false; 2 for usage/config. `--dry-run` shows the request with the secret redacted.
+
+### test-env.sh
+- **P**: Safe test environment wrapper: `/tmp` is a 512MB tmpfs shared by all agents and actively reaped (files vanish; parallel runs die SQLITE_FULL). This wrapper points TMPDIR at a worktree-local `.tmp/` (persistent, gitignored) and ensures it exists.
+- **U**: `scripts/test-env.sh npm test` | `scripts/test-env.sh node --test tests/foo.test.js` | `source scripts/test-env.sh`
+
+### thread-options-browser-check.mjs
+- **P**: Thread-view Mute/Unmute + "Also send to channel" checkbox on thread replies (hidden for DMs and top-level messages); desktop and narrow (320px) viewports.
+
+### trace-entry.mjs
+- **P**: Trace-entry automation (W001): appends one merge-time line to `docs/ROOM-TRACES.jsonl` when a PR merges to main. Runner: `.github/workflows/trace-entry.yml` (pull_request_target, closed) — checks out main, validates with `scripts/check-wiki.mjs` (fail closed), commits to a `trace-entry/pr-<N>` bot branch, opens/merges a trace PR (direct push to main is blocked by status checks). Never runs untrusted PR code — reads only the GitHub event payload.
+- **I**: Entry fields (date, slice, agent, pr, sha, outcome, tests {pass,fail}, notes); dates non-decreasing, append-only.
+
+### unified-journey-check.mjs
+- **P**: Combined local UI/API journey: unified guest entry, account-bound draft recovery, catch-up, and agent handoff share one room. Every identity is a synthetic test participant.
+
+### unit-ci.mjs
+- **P**: CI wrapper for one shard of `npm test` (CI-speed lane). Runs the shard's Node-discovered test files with `node --test`; writes a receipt under `test-results/` for `scripts/unit-shards-check.mjs`, binding the shard to the exact plan (planHash), run, revision, attempt.
+- **U**: `node scripts/unit-ci.mjs --shard=1/3` (from repo root). Worktree-local scratch by default.
+
+### unit-shards-check.mjs
+- **P**: Required `unit` gate: successful Actions matrix AND all exact-run receipts. Mirrors browser-shards-check: every `tests/*.test.js` must be covered exactly once by a passing shard from this exact run/attempt plan.
+- **U**: `node scripts/unit-shards-check.mjs RECEIPT_DIRECTORY`
+
+### unit-shards.mjs
+- **P**: Allocation for the sharded unit suite (CI-speed lane). The old `unit` job ran `npm test` in one job (~625s on hosted CI, the long pole of every PR head); this splits into SHARD_COUNT file shards with balanced estimated duration (~1/SHARD_COUNT of the time).
+- **I**: Allocation follows Node24 default test discovery; timing never selects membership — every discovered file is in exactly one shard. Per-file durations in `scripts/unit-ci-durations.json` (hosted CI ms); files without a measurement get a conservative default so a new test file lands in a shard instead of breaking the plan.
+
+### unstamped-member.mjs
+- **P**: Historical-member rail helper: a live `member.added` stamps the display-name policy and refuses a folded duplicate; these checks need a stored collision to disambiguate names. An older event omits the stamp and still replays. Exports `admitHistoricalMember(store, roomId, actorId, data)`.
+
+### untested-modules-lint.mjs
+- **P**: Untested-server-module lint (plan task T1): lists `server/*.mjs` modules with zero references from `tests/`; fails if a NEW module joins the untested set, or if the grandfather list still names a module that is now tested (the list only shrinks).
+- **U**: `node scripts/untested-modules-lint.mjs`
+- **I**: Grandfather list captured 2026-09-25 (15 modules); entries removed as tests land, never added.
+
+### updates-browser-check.mjs
+- **P**: Updates HTTP/SQLite journeys: revision-bound marks, exact retries, retired navigation.
+
+### verify-affected.mjs
+- **P**: `verify:affected` — run only the unit tests related to your diff. A Node-discovered test file is selected when: (1) it changed itself; (2) it imports a changed file directly or transitively (static/literal dynamic imports, require(), `new URL(..., import.meta.url)`); (3) its source names a changed file's repo-relative path.
+- **U**: `npm run verify:affected` | `-- --list` (print selection) | `-- --base=<ref> --budget=300`
+- **I**: `--budget` is seconds of wall time per test worker, estimated from `scripts/unit-ci-durations.json`. AGENTS.md lesson: this can hang (>180s vs the "~30s" claim) — when it does, run targeted `node --test` directly.
+
+### visual-regression-browser-check.mjs
+- **P**: Q003 visual regression (screenshot diff) for the three surfaces a visitor/member actually sees: login/join entry pages (signed-out auth panel, join consent, join error), signed-in room view, `#message-list` region alone (a message-markup regression can't hide behind chrome pixels). Deterministic capture (fixed 1280x800, reduced motion, fonts settled, seeded store); dynamic regions (timestamps, avatars, presence, invite expiry) masked before capture; diff vs committed baselines in `scripts/visual-regression-baselines/`.
+
+### visual-regression-helper.mjs
+- **P**: Q003 shared screenshot-diff helper. Gate: committed baseline PNGs vs fresh capture each CI run; diff above `MAX_DIFF_PIXEL_RATIO` fails and writes actual+diff to `test-results/visual-regression/` (picked up by the browser-shards artifact upload). Determinism contract: fixed viewport, deviceScaleFactor 1, reduced motion, animations disabled at capture, caret hidden, fonts settled, seeded store data.
+
+### watch-deploy-drift.mjs
+- **P**: Deploy drift + 1101 watcher (plan task W3). Zero deps. Compares prod's public `/api/version` to the local main tip. Drift = revision missing, not an ancestor of the tip, or the tip ahead by > `--max-prs` (5) commits, or the first of those older than `--max-hours` (24). Matching revision or lag inside both budgets = not drift. Unhealthy probe still fails. Exit 0 = no drift and healthy.
+- **U**: `node scripts/watch-deploy-drift.mjs [--base URL] [--ref origin/main] [--max-prs 5] [--max-hours 24]` (git fetch first). Intended for cron/CI.
+
+### weekly-learnings.mjs
+- **P**: Weekly "learnings" auto-post for muse-room (backlog W007). Gathers the week's signal and posts ONE concise digest: merged PRs (via gh, one-line lesson each — a `Lesson:` line in the PR body when present, else the title), room DONE/BUG CONFIRMED posts, curated lessons lanes append to `docs/WEEKLY-LEARNINGS.md`.
+- **U**: `node scripts/weekly-learnings.mjs [--since ISO] [--week 2026-W41] [--queue PATH] [--repo OWNER/REPO] [--room ROOM] [--state-dir DIR] [--dry-run] [--post]`
+- **F**: Anti-spam: skips weeks with nothing material; hard-caps post length; never posts twice for the same ISO week (idempotency via sent log, default `~/.config/weekly-learnings/`). Default is a dry run.
+
+### wiki-build.mjs
+- **P**: W009 build-time embed of the wiki planes for the read API. `server/wiki-read-api.mjs` serves this data in every runtime incl. the bundled Cloudflare worker (no filesystem).
+- **U**: `node scripts/wiki-build.mjs` (writes `server/wiki-data.mjs`) | `--check` (fail if stale; CI gate). Regenerate after any wiki-plane change. Parsers live in `server/wiki-parse.mjs` (pure).
+
+### work-attempts-browser-check.mjs
+- **P**: Simulated human journeys (disposable first-party data): work attempts against real browsers.
+
+### work-changes-browser-check.mjs
+- **P**: F3: a draft based on an older revision gets a "what changed" explanation — a derived, read-time list from the item's own revision events. A draft at the current revision gets no prompt. Neither blocks any action. Simulated humans, real browsers, isolated synthetic rooms.
+
+### work-context-agent-seed.mjs
+- **P**: Deterministic synthetic prehistory only (fresh agents provide the correction and real review). `seedWorkContextExercise({store, keys, artifactOrigin, artifactDirectory})` builds a 'cancellation-checklist' scenario with revision-bound mutations (`expectedRevision` from live state).
+
+### work-lifecycle-agent-fixture.mjs
+- **P**: Synthetic same-room participation — never a hosted runner or external workspace. `startWorkLifecycleFixture()`: disposable tmpdir RoomStore + server, self-closing.
+
+### work-recipes-browser-check.mjs
+- **P**: Work recipes journeys: simulated humans, disposable first-party data, real browsers.
+
+### work-resume-browser-check.mjs
+- **P**: Synthetic restart journey in a real browser: resume handoff (phone + desktop) — visible next step, opt-in export, no writes.
+
+### work-reuse-agent-fixture.mjs
+- **P**: Disposable actual-agent exercise (no production paths or existing DB). Module-evaluated seed: repeat-planner agent, `repeat-source` work item with `repeat` cadence fields.
+
+### work-reuse-browser-check.mjs
+- **P**: Work-reuse journeys (simulated humans, disposable data) incl. in-place signin (`in-place-fixture-signin.mjs`) and signed evidence (`helpers/signed-evidence.mjs`).
+
+### work-search-browser-check.mjs
+- **P**: Work search (touch + desktop): return to outcomes without losing context. Simulated local people. Search must not submit, acknowledge, or create work. Imports `discovery-contribution-browser-check.mjs` for shared setup.
+
+### worker-ci-build.mjs
+- **P**: Bundle validation WITHOUT production key custody. Always `--dry-run`; the real deploy config keeps requiring a signed card. Asserts `wrangler.jsonc`'s build command includes `sign-agent-card.mjs` and not `--allow-unsigned`, then rebuilds the command with `--allow-unsigned` for the validation bundle.
+- **F**: Accepts no deployment arguments (throws otherwise).
+
+### workflow-browser-check.mjs
+- **P**: Workflow journeys (desktop + mobile 390x844): lighter checks, exact retries, truthful status. Disposable local participants only; no external runtime or evidence fetched.
+
+---
+
+## docs-10b — subdirectories (helpers, onboarding-probe, qa2, qa3, schema-gate)
+
+### helpers/google-oauth-fixture.mjs
+- **P**: Bounded signed Google provider fixture shared by real-HTTP and browser owners. Fixed dummy clientId/sub; RSA-2048 keys generated per process; references `GOOGLE_ISSUER`/`GOOGLE_SCOPES` from `server/google-oauth.mjs`.
+
+### helpers/signed-evidence.mjs
+- **P**: Test helper: signs external evidence for `work.completed` completions using the room's real identity issuance + key registry — tests exercise the same trust root as production. Exports `issueTestIdentity`, and (via server) `issueSignedEvidence`/`contentHashOf`.
+
+### onboarding-probe/agent-code.mjs
+- **P**: Mints a contribute invite from a probe owner account and follows `GET /a/<code>` — the page is the only source of the redeem/orient/board calls.
+
+### onboarding-probe/agent-docs.mjs
+- **P**: Follows `GET /llms.txt`; hosts in the packet rewritten to the target; documented display name replaced with a qa-prefixed name. Board curls run only when the packet itself shows a work-claim done call.
+
+### onboarding-probe/agent-mcp.mjs
+- **P**: Anonymous MCP: initialize, then tools/list, then stop. OAuth PKCE runs only when staging advertises a protected-resource document and the server challenges (that enrollment flow is not available here).
+
+### onboarding-probe/cleanup.mjs
+- **P**: Archives rooms and revokes identities created by a probe run. `created.json` receives ids only; secrets stay in memory for this call.
+
+### onboarding-probe/docs-publish.mjs
+- **P**: Publishes the weekly onboarding-probe results table into a docs-committed file, newest run first. The weekly `onboarding-probe` CI job runs this after `run.mjs` so zero-to-first-claim times per path are visible from the repo, not only the job summary. Additive: never touches probe-out or the job summary.
+
+### onboarding-probe/gate.mjs
+- **P**: Compares a probe run with `docs/onboarding-probe/baseline.json`. A path fails when >20% slower, >1.2x the calls, or loses a reachable step (exactly 20% still passes). A newly reachable close is an improvement; ready-latency jitter is inconclusive. Exports `classifyReady`, `pathMetric`.
+
+### onboarding-probe/human-home.mjs
+- **P**: Browser path: landing, signup, first room. Later product steps stay `not_available` until on the page. Times are machine ms; the KLM figure is labeled `est.` on every human step.
+
+### onboarding-probe/human-invite.mjs
+- **P**: Owner mints a share link; a 390px visitor opens it and sends a first message when the composer is on the page. Missing UI is `not_available`, not a throw.
+
+### onboarding-probe/lib.mjs
+- **P**: Shared clock, HTTP, curl reading, redaction for the probe. Nothing prints a credential; writers pass values through `redact`. Exports `PROBE_VERSION="0.1.0"`, `USER_AGENT`, `qaStamp`, `klmEst`, `probePassword`. W3-F7: one random password per process — never the hardcoded public string; memory-only.
+
+### onboarding-probe/pow.mjs
+- **P**: Remote copy of the identity-mint proof search. `scripts/onboarding-probe` keeps this equal to `solveIdentityMintProof` in `server/agent-identities.mjs` (BITS=12, WINDOW_MS=10min). Loopback runs import the server function instead.
+
+### onboarding-probe/predeploy.mjs
+- **P**: Pre-deploy onboarding gate (ACT-5b): runs the probe against staging, compares with the baseline via `gate.mjs`.
+- **U**: `node scripts/onboarding-probe/predeploy.mjs --target staging [--sha <40-hex>] [--runs 3] [--out probe-out] [--override "<reason>"]`
+
+### onboarding-probe/report.mjs
+- **P**: One probe-result document + the markdown table operators read. 4-week column is the baseline file; this module never rewrites it. Paths: agentDocs, agentMcp, agentCode, humanHome, humanInvite.
+
+### onboarding-probe/run.mjs
+- **P**: Weekly and manual entry for the fresh-agent probe. The gate report is written beside the result; this process exits 0 so a slow week is visible without failing the job. `gate.mjs` is what exits 1.
+
+### qa2/abuse-guards.mjs
+- **P**: Outcome checks for the work-claim, webhook, display-name, instructions, and member-text guards. Local only: writes rows in a throwaway room.
+- **U**: `node scripts/qa2/abuse-guards.mjs --origin http://127.0.0.1:4173 [--json out.json]` — exit 1 when any check fails.
+
+### qa2/agent-journeys.mjs
+- **P**: Synthetic agent journeys: a cold agent that only knows the origin. Each task follows public discovery (llms.txt, agents.json, openapi.json, MCP tools/list) and the server's own `next` hints, records whether the needed route was discoverable, and scores pass/fail on the END STATE (outcome-based, like tau-bench: state must change, not just a 2xx).
+- **U**: `node scripts/qa2/agent-journeys.mjs --origin http://127.0.0.1:4173 [--mcp URL] [--json out.json]`
+
+### qa2/authz-matrix.mjs
+- **P**: Authorization/IDOR matrix for the agent HTTP surface. Builds a throwaway room with one identity per role (owner, collaborator, chatter, linkguest, outsider, anonymous, revoked), runs every action as every role, compares with the expected policy.
+
+### qa2/journeys.mjs
+- **P**: Acceptance alias — the journey implementation lives in `agent-journeys.mjs`; this file exists so `node scripts/qa2/journeys.mjs` runs that suite.
+
+### qa2/lib/client.mjs
+- **P**: Shared QA HTTP client. Identity mints solve the same PoW as `src/client.js` (sha256(`${bucket}:${trim(displayName)}:${nonce}`) with `IDENTITY_POW_BITS/4` leading zero hex digits); a presented proof is accepted before the anonymous free-mint quota; 429s retried from Retry-After (POW_BITS=12).
+
+### qa2/load-smoke.mjs
+- **P**: Load/latency smoke with k6-style thresholds, dependency-free (Node 22+). Mixes anonymous reads (/, /llms.txt, /api/health) with one authenticated agent reading events + posting gently. Only point at production with `--vus <= 3` (single Durable Object; see QA2 findings).
+- **U**: `node scripts/qa2/load-smoke.mjs --origin http://127.0.0.1:4173 [--vus 20] [--seconds 30] [--json out.json]`
+- **F**: Thresholds (fail exit 1): p95 static <= 500ms, p95 API read <= 800ms.
+
+### qa2/mcp-conformance.mjs
+- **P**: Official MCP conformance suite with a not-applicable baseline (`qa2/baselines/mcp-conformance-baseline.yml`), plus a separate hard assertion that hostile Host/Origin headers are refused (the one dns-rebinding check that must pass). Retries once after 65s when the run trips Room's anonymous MCP rate limit.
+- **U**: `node scripts/qa2/mcp-conformance.mjs --url http://127.0.0.1:4173/mcp [--version 0.x.y]`
+
+### qa2/mcp-robustness.mjs
+- **P**: MCP robustness probe: malformed JSON-RPC, schema-violating tool args, boundary values, hostile strings against a hosted MCP endpoint. Invariants on every case: I1 no 5xx; I2 no stack trace/internal path in the body; I3 valid JSON-RPC envelope (jsonrpc "2.0", matching id, result XOR error); I4 the case's own expectation.
+- **U**: `node scripts/qa2/mcp-robustness.mjs --url http://127.0.0.1:4173`
+
+### qa2/public-pages.mjs
+- **P**: Public page gate: a11y (axe WCAG 2.2 AA), SEO/canonical/robots, OG tags, broken links, console errors, optional screenshot baselines for every public HTML page.
+- **U**: `node scripts/qa2/public-pages.mjs --origin URL [--known "/path:substring,..."] [--json out.json] [--shots dir] [--baseline dir] [--chrome /usr/bin/google-chrome]`
+- **F**: Exit 1 on axe serious/critical, missing title/canonical/lang, broken internal link, 5xx.
+
+### qa2/fuzz.sh
+- **P**: qa2 fuzz entry (bash). Companion to the node probes above.
+
+### qa2/baselines/mcp-conformance-baseline.yml
+- **P**: Not-applicable baseline for the official MCP conformance suite (the suite's N/A cases, versioned).
+
+### qa3/authz-board.mjs
+- **P**: Board, referral, receipts opt-in, sweep, status, wake-pause matrix. Roles: owner, contribute, chat, review, manage_claims, write_external, link guest, public. The policy is the one SEC-1 and SEC-2 implement. A cell whose fix has not merged is `expectedFail` with its finding id: the run stays green, and turns red once the fix matches while the flag is still set.
+- **U**: `node scripts/qa3/authz-board.mjs --origin http://127.0.0.1:4173`
+- **F**: **BROKEN by 6146ae702 (BUG-3):** its "release claim" action now sends `expectedClaimedAt`/`expectedHistoryLength` in the POST /release body, which the route's strict shape rejects with 422 — releases through this harness fail outright.
+
+### qa3/board-growth.mjs
+- **P**: Nightly board-growth budget: 400 done claims + 300 review notes from five review-profile members. List p95, the limit=1 body, and room-event headroom stay bounded (SEC-2 with Q3-A: F4 event headroom, F8 list).
+
+### qa3/content-trust.mjs
+- **P**: A guest payload must carry `untrusted:true` or `contentTrust` on every agent-facing read. Surfaces that already stamp stay required; surfaces that still omit the marker are `expectedFail` until their fix merges (event tail and SSE frames — SEC-2b). Webhook payloads fenced (Q3-D); board lists stamped (SEC-2). A guest cannot add a Board review note, so a review-profile member writes the Board marker.
+- **U**: `node scripts/qa3/content-trust.mjs --origin http://127.0.0.1:4173`
+
+### qa3/lib/sequence.mjs
+- **P**: SSE frame sequence extraction for the QA3 contract gate. An SSE frame without an `id:` line has no sequence; `Number(null)` is 0, which must not be mistaken for sequence 0 (synthetic id-less events like `typing` would otherwise corrupt ordering and Last-Event-ID resume checks).
+
+### qa3/lib/sse.mjs
+- **P**: Reads room SSE frames until `until` returns true or the deadline passes. `parseSseFrame`: skips `:` comments; parses id/event/data lines (one leading space stripped after `data:`).
+
+### qa3/lib/summary.mjs
+- **P**: Job summary for the QA3 gates. `expectedFail` cells stay green and are listed in GITHUB_STEP_SUMMARY; a cell that matches while its flag is still set fails the run, so the flag is removed once the fix lands. `assertLocalOrigin`: qa3 gates are local-only (127.0.0.1/localhost) — exit 2 otherwise.
+
+### qa3/public-scan-budget.mjs
+- **P**: Seeds 1,000 rooms through the store, then requires public routes under 50ms p95. PRM owns the separate assertion that no public route reads `rooms.projection`. The fixture already meets the bar, so the check is required: a regression fails the job.
+
+### qa3/sse-contract.mjs
+- **P**: SSE contract: 40 messages keep strict order, no duplicates, and a Last-Event-ID resume loses nothing. The per-credential cap of 3 is required; the per-room cap is Q3-F and stays skipped.
+- **U**: `node scripts/qa3/sse-contract.mjs --origin http://127.0.0.1:4173`
+
+### schema-gate/schema-gate.mjs
+- **P**: Schema convergence gate — CI-time harness for the bounty-propose-500 bug class. Incident: post-#792 (2026-09-22), bounty propose 500'd with "table bounty_records has no column named rubric_json" in SOME rooms while reads worked. Root cause: `BountyEscrow._ensure()` treated "some tables missing" and "columns need migrating" as either/or — schema converge now handles both.
+
+### schema-gate/README.md
+- **P**: Documents the schema-gate harness and the incident class it covers.
+
+### room-digest
+- **P**: `scripts/room-digest` (no extension, executable) — room digest helper. (Entry exists; header dump covered it as a shell/node executable; see chunk files for usage.)
+
+### vendor-licenses/apostrophe.txt
+- **P**: Vendored license text (Apostrophe — MIT-adjacent attribution). Static data, no code.

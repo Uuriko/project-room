@@ -1,0 +1,13 @@
+unit=rev-09 mode=commit head=6e03ee51e
+commit=1db3e71f1 subject=Browser checks: snapshot routes match the path, so stream-open re-reads are caught (stream-recovery-browser-check.mjs)
+commit 1db3e71f151fa6ca864b3ce3997eae60c0f97f8c
+Author: Uuriko <jjohnpotter@gmail.com>
+Date:   Thu Oct 8 23:27:37 2026 -0700
+
+    Browser checks: snapshot routes match the path, so stream-open re-reads are caught (stream-recovery-browser-check.mjs)
+
+ scripts/stream-recovery-browser-check.mjs | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+--- changed: scripts/stream-recovery-browser-check.mjs
+diff-bytes=1434
+unit=rev-09 DONE

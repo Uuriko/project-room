@@ -1,0 +1,36 @@
+{"event":"room.cold_start","durationMs":2896,"integrity":"eager","phases":{"schema":{"ms":564,"rowsRead":0},"plugin":{"ms":1094,"rowsRead":0},"fence":{"ms":709,"rowsRead":0},"verifies":{"ms":139,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":209,"heapBytes":21989624,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":425,"cpuMs":30,"heapBytes":26195448,"rooms":1,"sequences":5,"projectionBytes":1330,"events":5}
+{"event":"room.cold_start","durationMs":1070,"integrity":"eager","phases":{"schema":{"ms":386,"rowsRead":0},"plugin":{"ms":434,"rowsRead":0},"fence":{"ms":79,"rowsRead":0},"verifies":{"ms":5,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":138,"heapBytes":31886000,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":71,"cpuMs":31,"heapBytes":23537336,"rooms":1,"sequences":5,"projectionBytes":1330,"events":5}
+{"event":"room.cold_start","durationMs":1232,"integrity":"eager","phases":{"schema":{"ms":64,"rowsRead":0},"plugin":{"ms":724,"rowsRead":0},"fence":{"ms":290,"rowsRead":0},"verifies":{"ms":4,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":138,"heapBytes":27566744,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":251,"cpuMs":26,"heapBytes":31513648,"rooms":1,"sequences":5,"projectionBytes":1330,"events":5}
+{"event":"room.cold_start","durationMs":3007,"integrity":"eager","phases":{"schema":{"ms":528,"rowsRead":0},"plugin":{"ms":1045,"rowsRead":0},"fence":{"ms":1101,"rowsRead":0},"verifies":{"ms":114,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":171,"heapBytes":37012216,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2784,"integrity":"eager","phases":{"schema":{"ms":507,"rowsRead":0},"plugin":{"ms":744,"rowsRead":0},"fence":{"ms":343,"rowsRead":0},"verifies":{"ms":54,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":171,"heapBytes":25912688,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":27,"cpuMs":21,"heapBytes":29874944,"rooms":1,"sequences":5,"projectionBytes":1330,"events":5}
+{"event":"room.cold_start","durationMs":2376,"integrity":"eager","phases":{"schema":{"ms":696,"rowsRead":0},"plugin":{"ms":1429,"rowsRead":0},"fence":{"ms":71,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":160,"heapBytes":35426496,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":5803,"integrity":"eager","phases":{"schema":{"ms":1126,"rowsRead":0},"plugin":{"ms":1526,"rowsRead":0},"fence":{"ms":388,"rowsRead":0},"verifies":{"ms":7,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":180,"heapBytes":39404128,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2599,"integrity":"eager","phases":{"schema":{"ms":743,"rowsRead":0},"plugin":{"ms":1276,"rowsRead":0},"fence":{"ms":337,"rowsRead":0},"verifies":{"ms":22,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":177,"heapBytes":27558504,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2869,"integrity":"eager","phases":{"schema":{"ms":562,"rowsRead":0},"plugin":{"ms":1602,"rowsRead":0},"fence":{"ms":61,"rowsRead":0},"verifies":{"ms":5,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":166,"heapBytes":31776224,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ NDJSON export of a room holding a file replays, and events and file bytes come back equal (6316.947387ms)
+✔ replay refuses an object cell that is not an encoded BLOB, by name (5788.297049ms)
+✔ replay refuses a tampered BLOB by its stored sha256 and byte_length (15551.134482ms)
+{"event":"room.cold_start","durationMs":85,"cpuMs":30,"heapBytes":25684936,"rooms":1,"sequences":5,"projectionBytes":1330,"events":5}
+{"event":"room.cold_start","durationMs":308,"cpuMs":27,"heapBytes":33142648,"rooms":1,"sequences":5,"projectionBytes":1330,"events":5}
+{"event":"room.cold_start","durationMs":2446,"integrity":"eager","phases":{"schema":{"ms":362,"rowsRead":0},"plugin":{"ms":1399,"rowsRead":0},"fence":{"ms":449,"rowsRead":0},"verifies":{"ms":57,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":184,"heapBytes":37088936,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a clean backup verifies with byte checks, and its watermark carries the live digests (7206.001346ms)
+{"event":"room.cold_start","durationMs":220,"cpuMs":25,"heapBytes":26072840,"rooms":1,"sequences":5,"projectionBytes":1330,"events":5}
+{"event":"room.cold_start","durationMs":319,"cpuMs":26,"heapBytes":33401512,"rooms":1,"sequences":5,"projectionBytes":1330,"events":5}
+{"event":"room.cold_start","durationMs":1444,"integrity":"eager","phases":{"schema":{"ms":536,"rowsRead":0},"plugin":{"ms":712,"rowsRead":0},"fence":{"ms":32,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":146,"heapBytes":37210480,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ verification fails when an event body changes but the event count does not (4496.494574ms)
+{"event":"room.cold_start","durationMs":173,"cpuMs":24,"heapBytes":26421768,"rooms":1,"sequences":5,"projectionBytes":1330,"events":5}
+{"event":"room.cold_start","durationMs":252,"cpuMs":25,"heapBytes":33681456,"rooms":1,"sequences":5,"projectionBytes":1330,"events":5}
+✔ verification fails when room file bytes change at the same length (3548.741766ms)
+✔ the drill covers room files and proves byte equality (12606.994125ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 64158.913279

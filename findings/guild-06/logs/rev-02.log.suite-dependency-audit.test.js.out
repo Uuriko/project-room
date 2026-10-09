@@ -1,0 +1,30 @@
+✔ parseAuditJson: npm v7 payload → flat records with name/severity/title (2.536005ms)
+✔ parseAuditJson: npm v6 advisory payload → mapped to the same shape (0.393991ms)
+✔ parseAuditJson: empty audit → zero vulnerabilities, no error (3.53208ms)
+✔ parseAuditJson: malformed JSON throws AuditError (2.656036ms)
+✔ parseAuditJson: npm error payload throws AuditError mentioning the cause (8.532255ms)
+✔ parseAuditJson: payload with no vulnerabilities section throws (0.270626ms)
+✔ parseAuditJson: unknown severity throws AuditError (0.231047ms)
+✔ groupBySeverity: every severity key present, records in severity order (0.52018ms)
+✔ groupBySeverity: empty input → all empty groups (12.22747ms)
+✔ summarizeAudit: counts, total, and highest severity (0.606441ms)
+✔ summarizeAudit: empty audit → total 0, highest null (3.302517ms)
+✔ normalizeThreshold: accepts all severities, rejects junk (7.49681ms)
+✔ thresholdBreached: breach at threshold and above, pass below (0.415393ms)
+✔ thresholdBreached: no breach when nothing reaches the threshold (0.616946ms)
+✔ renderMarkdown: clean audit shows zero table and a no-vulns note (0.815204ms)
+✔ renderMarkdown: findings list severity-descending with names (55.556665ms)
+✔ renderJsonSummary: machine-readable summary carries counts, threshold, verdict (5.386664ms)
+✔ runAudit: injected runner wires parse → summarize → verdict (19.79069ms)
+✔ runAudit: runner that returns malformed JSON propagates AuditError (0.49345ms)
+✔ runAudit: runner that rejects propagates its error (14.017416ms)
+✔ runAudit: default threshold is high (0.360871ms)
+✔ parseArgs: flags parsed, unknown flags rejected (0.412449ms)
+ℹ tests 22
+ℹ suites 0
+ℹ pass 22
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2008.661409
