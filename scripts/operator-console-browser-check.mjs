@@ -131,5 +131,5 @@ test("the typed confirmation is the room title for one room, a count phrase othe
   assert.match(describeFailure(404, null), /not accepted/);
   assert.match(describeFailure(429, null), /Wait a minute/);
   assert.match(describeFailure(409, { error: { code: "plan_changed" } }), /Nothing was deleted/);
-  assert.equal(describeFailure(422, { error: { message: "Supply a reason" } }), "Refused (422): Supply a reason");
+  assert.equal(describeFailure(422, { error: { message: "Supply a reason" } }), "Supply a reason");
 });
