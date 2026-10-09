@@ -17,6 +17,15 @@
 .board-new h3 { margin: 0; font-size: var(--text-sm); }
 .board-new label { display: grid; gap: var(--space-1); }
 .board-older { margin: 0 0 var(--space-3); }
+/* Board search + "mine only" filter bar. Renders above the columns; the input
+   and checkbox clear hit the 44px coarse-pointer floor like every board
+   control. */
+.board-filter { display: flex; flex-wrap: wrap; align-items: end; gap: var(--space-2); margin: 0 0 var(--space-3); }
+.board-filter-q { display: grid; gap: var(--space-1); font-size: var(--text-sm); font-weight: 600; flex: 1 1 16rem; max-width: 28rem; }
+.board-filter-q input { min-height: 44px; padding: .45rem .6rem; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel); color: var(--text); font-size: var(--text-sm); }
+.board-filter-mine { display: inline-flex; align-items: center; gap: var(--space-1); min-height: 44px; font-size: var(--text-sm); }
+.board-filter-mine input { width: 1.25rem; height: 1.25rem; accent-color: var(--accent); }
+.board-filter-empty { margin: 0 0 var(--space-3); }
 .board-columns { display: grid; grid-template-columns: 1fr; gap: var(--space-3); }
 .board-columns section { min-width: 0; padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel-raised); }
 .board-columns h3 { margin: 0 0 var(--space-2); font-size: var(--text-sm); }
