@@ -3274,21 +3274,29 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (action === "add_land_item") {
             if (!data || typeof data !== "object" || Array.isArray(data)) reject(422, "invalid_land_item", "repo and prNumber are required");
             const claimant = Object.hasOwn(data, "claimantMemberId") ? data.claimantMemberId : null;
-            const allowed = claimant === null ? ["repo", "prNumber"] : ["repo", "prNumber", "claimantMemberId"];
+            // B6: requestId is the caller's idempotency key — a retry with the
+            // same key replays the stored response instead of re-executing.
+            // exact() matches the key set precisely, so the allowed list is
+            // built from the optional keys actually present.
+            const allowed = ["repo", "prNumber"];
+            if (claimant !== null) allowed.push("claimantMemberId");
+            if (data.requestId !== undefined) allowed.push("requestId");
             if (!exact(data, allowed) || typeof data.repo !== "string" || !Number.isSafeInteger(data.prNumber)) {
               reject(422, "invalid_land_item", "repo and prNumber are required");
             }
             const result = await store.landQueue.add(roomId, auth.member.id, {
-              repo: data.repo, prNumber: data.prNumber, claimantMemberId: claimant
+              repo: data.repo, prNumber: data.prNumber, claimantMemberId: claimant,
+              requestId: data.requestId ?? null
             });
             return json(res, result.duplicate ? 200 : 201, result);
           }
           if (action === "remove_land_item") {
-            if (!exact(data, ["itemId"]) || typeof data.itemId !== "string") reject(422, "invalid_land_item", "itemId is required");
-            return json(res, 200, store.landQueue.remove(roomId, auth.member.id, { itemId: data.itemId }));
+            const removeAllowed = data.requestId === undefined ? ["itemId"] : ["itemId", "requestId"];
+            if (!exact(data, removeAllowed) || typeof data.itemId !== "string") reject(422, "invalid_land_item", "itemId is required");
+            return json(res, 200, store.landQueue.remove(roomId, auth.member.id, { itemId: data.itemId, requestId: data.requestId ?? null }));
           }
           const tipKeys = Object.keys(data ?? {});
-          const tipAllowed = tipKeys.every(key => ["itemId", "sourceRevision", "buildId"].includes(key)) && tipKeys.includes("itemId");
+          const tipAllowed = tipKeys.every(key => ["itemId", "sourceRevision", "buildId", "requestId"].includes(key)) && tipKeys.includes("itemId");
           if (!tipAllowed || typeof data.itemId !== "string") reject(422, "invalid_land_tip", "itemId and a tip field are required");
           return json(res, 200, store.landQueue.reportTip(roomId, auth.member.id, data));
         } catch (error) {

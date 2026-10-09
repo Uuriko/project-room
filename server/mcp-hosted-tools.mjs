@@ -153,24 +153,27 @@ export const hostedRoomTools = [
     roomId: roomIdField,
     inviteId: { type: "string", minLength: 1, maxLength: 64, description: "inviteId from room_list_agent_invites." }
   }, ["roomId", "inviteId"]), false),
-  tool("add_land_item", "[paid: room-credits] 1 credit per call. Add a pull request to this room's land queue. Same call as POST /api/rooms/:roomId/add_land_item. repo is owner/name and prNumber is the pull request number. claimantMemberId defaults to the caller and must be an active member. Any member can add. The server reads head, mergeable, behind-main, and the required-check rollup. A missing GitHub token that the read requires returns github_unconfigured. This does not merge the pull request.", schema({
+  tool("add_land_item", "[paid: room-credits] 1 credit per call. Add a pull request to this room's land queue. Same call as POST /api/rooms/:roomId/add_land_item. repo is owner/name and prNumber is the pull request number. claimantMemberId defaults to the caller and must be an active member. Any member can add. The server reads head, mergeable, behind-main, and the required-check rollup. A missing GitHub token that the read requires returns github_unconfigured. This does not merge the pull request. Pass a stable requestId to make retries safe: the same key replays the original response.", schema({
     roomId: roomIdField,
     repo: { type: "string", minLength: 3, maxLength: 200, description: "GitHub repository as owner/name." },
     prNumber: { type: "integer", minimum: 1, maximum: 100000000 },
-    claimantMemberId: { ...idField, description: "Member woken about this pull request. Defaults to the caller." }
+    claimantMemberId: { ...idField, description: "Member woken about this pull request. Defaults to the caller." },
+    requestId: { type: "string", minLength: 1, maxLength: 64, description: "Caller-supplied idempotency key; retries with the same key replay the original response." }
   }, ["roomId", "repo", "prNumber"]), false),
   tool("list_land_queue", "List this room's land queue. Same read as GET /api/rooms/:roomId/list_land_queue. Each item includes the pull request number, title, head SHA, check rollup, behind-main flag, merged SHA, and tip when one was reported.", schema({
     roomId: roomIdField
   }, ["roomId"])),
-  tool("remove_land_item", "Remove one pull request from this room's land queue. Same call as POST /api/rooms/:roomId/remove_land_item. Any member can remove. itemId comes from add_land_item or list_land_queue.", schema({
+  tool("remove_land_item", "Remove one pull request from this room's land queue. Same call as POST /api/rooms/:roomId/remove_land_item. Any member can remove. itemId comes from add_land_item or list_land_queue. Pass a stable requestId to make retries safe: the same key replays the original receipt instead of 404.", schema({
     roomId: roomIdField,
-    itemId: { ...idField, description: "Land queue item id." }
+    itemId: { ...idField, description: "Land queue item id." },
+    requestId: { type: "string", minLength: 1, maxLength: 64, description: "Caller-supplied idempotency key; retries with the same key replay the original response." }
   }, ["roomId", "itemId"]), false),
-  tool("report_tip", "Report the tip being landed for a queue item. Same call as POST /api/rooms/:roomId/report_tip. Pass sourceRevision, buildId, or both. A change wakes the claimant.", schema({
+  tool("report_tip", "Report the tip being landed for a queue item. Same call as POST /api/rooms/:roomId/report_tip. Pass sourceRevision, buildId, or both. A change wakes the claimant. Pass a stable requestId to make retries safe: the same key replays the original response.", schema({
     roomId: roomIdField,
     itemId: { ...idField, description: "Land queue item id." },
     sourceRevision: { type: "string", minLength: 1, maxLength: 200 },
-    buildId: { type: "string", minLength: 1, maxLength: 200 }
+    buildId: { type: "string", minLength: 1, maxLength: 200 },
+    requestId: { type: "string", minLength: 1, maxLength: 64, description: "Caller-supplied idempotency key; retries with the same key replay the original response." }
   }, ["roomId", "itemId"]), false),
   tool("room_work_claim_provenance", "Walk the work-claim provenance graph: given a claim id, return the claims and receipts that build on it directly or transitively through parentClaimId edges, with depth, state, owner and title. Read-only. Same data as GET /api/rooms/:roomId/work-claims/:claimId/provenance. Use it to find what depends on a claim before changing its premise.", schema({
     roomId: roomIdField,
