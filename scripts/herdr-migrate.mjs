@@ -682,9 +682,13 @@ function roomApiClient({ base, token }) {
       return item?.claim ?? item;
     },
     async releaseClaim(roomId, claimId, reason) {
+      // E5/D4 (QA-200 2026-10-08): /release binds the claim round the client read.
+      const held = await this.getClaim(roomId, claimId);
       const item = await request(
         `/api/rooms/${encodeURIComponent(roomId)}/work-claims/${encodeURIComponent(claimId)}/release`,
-        { method: "POST", body: { reason } },
+        { method: "POST", body: { reason,
+          expectedClaimedAt: held?.claimedAt,
+          expectedHistoryLength: (held?.history?.length ?? 0) + (held?.historyOmitted ?? 0) } },
       );
       return item?.claim ?? item;
     },
