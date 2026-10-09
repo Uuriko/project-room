@@ -3836,7 +3836,9 @@ paths:
         room message and requester notification. Repeating a decision returns
         already_decided without duplicating the grant or message. Optional
         decision notes stay in the request record and are not copied into the
-        public outcome message. Scoped API keys require rooms:write.
+        public outcome message. To decide many requests at once, use
+        POST /api/rooms/{roomId}/access-requests/decide-batch (up to 100
+        items per call, per-item results). Scoped API keys require rooms:write.
       security:
         - bearerAuth: []
         - roomSession: []
@@ -3869,6 +3871,88 @@ paths:
         '404': { description: not_found }
         '409': { description: already_decided or stale_membership; current room write policy may also refuse the decision }
         '422': { description: invalid_request }
+  /api/rooms/{roomId}/access-requests/decide-batch:
+    post:
+      summary: Decide up to 100 join or permission requests in one call
+      description: >-
+        Batch form of the single decide endpoint above: each item carries the
+        same { requestId, decision, permissions?, note? } shape and is decided
+        with the same per-item semantics (already_decided, not_found,
+        invalid_request, and the same permission grants all behave exactly as
+        the single call). One bad item never fails the whole batch — its
+        failure is recorded in results[] as { requestId, ok: false, error }
+        and the remaining items still run. Batches of more than 100 items are
+        refused whole with 422 batch_too_large before any item is decided.
+        The response carries per-item results plus a summary count. Approval
+        unions the selected permissions with existing permissions; denial
+        never changes membership or permissions. Optional decision notes stay
+        in the request record and are not copied into the public outcome
+        message. Scoped API keys require rooms:write.
+      security:
+        - bearerAuth: []
+        - roomSession: []
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decisions]
+              properties:
+                decisions:
+                  type: array
+                  minItems: 0
+                  maxItems: 100
+                  description: At most 100 decisions per batch; more is refused with 422 batch_too_large
+                  items:
+                    type: object
+                    required: [requestId, decision]
+                    properties:
+                      requestId: { type: string }
+                      decision: { type: string, enum: [approve, deny] }
+                      permissions:
+                        type: array
+                        items: { $ref: '#/components/schemas/RequestedRoomPermission' }
+                      note: { type: [string, 'null'], maxLength: 500 }
+      responses:
+        '200':
+          description: "Per-item results: each item is an ok:true decide record or an ok:false error object"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [roomId, summary, results]
+                properties:
+                  roomId: { type: string }
+                  summary:
+                    type: object
+                    required: [total, succeeded, failed]
+                    properties:
+                      total: { type: integer }
+                      succeeded: { type: integer }
+                      failed: { type: integer }
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      required: [requestId, ok]
+                      properties:
+                        requestId: { type: string, nullable: true }
+                        ok: { type: boolean }
+                        error:
+                          type: object
+                          required: [status, code, message]
+                          properties:
+                            status: { type: integer }
+                            code: { type: string }
+                            message: { type: string }
+        '401': { description: unauthenticated }
+        '403': { description: access_denied, insufficient_scope, or csrf_denied }
+        '422': { description: invalid_request or batch_too_large }
+        '429': { description: rate_limited }
   # JDOT-MEMBER-PERMS end
   /api/rooms/{roomId}/referrals:
     get:

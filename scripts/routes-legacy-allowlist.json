@@ -1,5 +1,5 @@
 {
-  "note": "Legacy routes still served outside server/routes/table.mjs. baseline is the RT-0 set plus routes main added after that cut. This batch does not add legacy routes. routes is the set still in the legacy chain and only shrinks as groups move into the table.",
+  "note": "Legacy routes still served outside server/routes/table.mjs. baseline is the RT-0 set plus routes main added after that cut. FIX-60 (2026-10-09): adds POST /api/rooms/{id}/access-requests/decide-batch to the legacy chain (batch decide for access requests). routes is the set still in the legacy chain and only shrinks as groups move into the table.",
   "baseline": [
     {
       "method": "GET",
@@ -996,6 +996,10 @@
     {
       "method": "POST",
       "path": "/api/rooms/{id}/access-requests/{id}/decide"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/access-requests/decide-batch"
     },
     {
       "method": "GET",
@@ -4526,6 +4530,10 @@
     {
       "method": "POST",
       "path": "/api/rooms/{id}/access-requests/{id}/decide"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/access-requests/decide-batch"
     },
     {
       "method": "GET",

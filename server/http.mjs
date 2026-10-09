@@ -577,6 +577,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // access_requests schema is applied in the store open path (server/store.mjs),
   // so every RoomStore — including store-only recovery fixtures — carries it.
   const accessRequests = new AccessRequests(store);
+  // FIX-60 (WAVE-300 ranked-fixes burn-down): cap on the number of items in
+  // one POST /api/rooms/{roomId}/access-requests/decide-batch. Over the cap
+  // the whole request is refused with 422 batch_too_large before any item
+  // is decided.
+  const ACCESS_DECIDE_BATCH_CAP = 100;
   // agent_room_ownership schema is applied in the store open path
   // (server/store.mjs), so every RoomStore carries it; http.mjs only owns
   // the service instance.
@@ -3366,6 +3371,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
       const accessDecideMatch = /^\/api\/rooms\/([^/]{1,384})\/access-requests\/([^/]{1,64})\/decide$/.exec(url.pathname);
+      // FIX-60 (WAVE-300 ranked-fixes burn-down): batch decide endpoint.
+      // Literal segment, never mistaken for a request id; the single-decide
+      // regex above requires a trailing /decide so there is no overlap.
+      const accessDecideBatchMatch = /^\/api\/rooms\/([^/]{1,384})\/access-requests\/decide-batch$/.exec(url.pathname);
       // RC-2026-09-18-038: owner-granted membership administration for agent
       // identities (server/membership-delegation.mjs). Grant and revoke are
       // owner-only; the list is owner-only like the sibling audit lists.
@@ -3560,7 +3569,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         ?? boardV2EventsMatch ?? boardV2MirrorMatch ?? boardV2HealthMatch;
       // Consent-bound DMs (decide/revoke/unblock) and public-face rotate ride
       // the same funnel: their literal segments must never be mistaken for ids.
-      if (!publicWorkRoomReviewMatch && !projectOfferActionMatch && !match && !revokeMatch && !threadMatch && !accessDecideMatch && !delegationGrantMatch && !delegationRevokeMatch && !delegationListMatch && !ownerDelegateGrantMatch && !ownerDelegateRevokeMatch && !ownerDelegateListMatch && !ownershipTransferMatch && !collabMatch && !workClaimMatch
+      if (!publicWorkRoomReviewMatch && !projectOfferActionMatch && !match && !revokeMatch && !threadMatch && !accessDecideMatch && !accessDecideBatchMatch && !delegationGrantMatch && !delegationRevokeMatch && !delegationListMatch && !ownerDelegateGrantMatch && !ownerDelegateRevokeMatch && !ownerDelegateListMatch && !ownershipTransferMatch && !collabMatch && !workClaimMatch
         && !feedbackMatch && !bountyMatch && !creditsMatch && !boardV2Match
         && !dmConsentDecideMatch && !dmConsentBlockMatch && !dmConsentRevokeMatch && !dmConsentUnblockMatch && !publicFaceRotateMatch
         && !peerDmThreadMatch && !operatorAgentMatch
@@ -3568,7 +3577,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         && !memberCardMatch && !dirSeedMatch
         && !agentGrantsMatch && !agentGrantDeleteMatch && !agentCapabilitiesMatch
         && !matchmakingMatch) reject(404, "not_found", "Not found");
-      const roomId = pathId((publicWorkRoomReviewMatch ?? projectOfferActionMatch ?? match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? delegationGrantMatch ?? delegationRevokeMatch ?? delegationListMatch ?? ownerDelegateGrantMatch ?? ownerDelegateRevokeMatch ?? ownerDelegateListMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch
+      const roomId = pathId((publicWorkRoomReviewMatch ?? projectOfferActionMatch ?? match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? accessDecideBatchMatch ?? delegationGrantMatch ?? delegationRevokeMatch ?? delegationListMatch ?? ownerDelegateGrantMatch ?? ownerDelegateRevokeMatch ?? ownerDelegateListMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch
         ?? feedbackMatch ?? bountyMatch ?? creditsMatch ?? boardV2Match
         ?? dmConsentDecideMatch ?? dmConsentBlockMatch ?? dmConsentRevokeMatch ?? dmConsentUnblockMatch ?? publicFaceRotateMatch
         ?? peerDmThreadMatch ?? operatorAgentMatch
@@ -3587,7 +3596,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const savedDeleteMessageId = savedDeleteMatch ? pathId(savedDeleteMatch[2]) : null;
       const deactivateMemberId = memberDeactivateMatch ? pathId(memberDeactivateMatch[2]) : null;
       const cardMemberId = memberCardMatch ? pathId(memberCardMatch[2]) : null;
-      const route = publicWorkRoomReviewMatch ? "public-work-review" : projectOfferActionMatch ? "project-offers" : match ? (match[2] ?? "") : revokeMatch ? "invitation-revoke" : threadMatch ? "thread" : accessDecideMatch ? "access-decide" : delegationGrantMatch ? "delegation-grant" : delegationRevokeMatch ? "delegation-revoke" : delegationListMatch ? "delegation-list" : ownerDelegateGrantMatch ? "owner-delegate-grant" : ownerDelegateRevokeMatch ? "owner-delegate-revoke" : ownerDelegateListMatch ? "owner-delegate-list"
+      const route = publicWorkRoomReviewMatch ? "public-work-review" : projectOfferActionMatch ? "project-offers" : match ? (match[2] ?? "") : revokeMatch ? "invitation-revoke" : threadMatch ? "thread" : accessDecideBatchMatch ? "access-decide-batch" : accessDecideMatch ? "access-decide" : delegationGrantMatch ? "delegation-grant" : delegationRevokeMatch ? "delegation-revoke" : delegationListMatch ? "delegation-list" : ownerDelegateGrantMatch ? "owner-delegate-grant" : ownerDelegateRevokeMatch ? "owner-delegate-revoke" : ownerDelegateListMatch ? "owner-delegate-list"
         : dmConsentDecideMatch ? "dm-consent-decide" : dmConsentBlockMatch ? "dm-consent-block" : dmConsentRevokeMatch ? "dm-consent-revoke"
         : dmConsentUnblockMatch ? "dm-consent-unblock" : publicFaceRotateMatch ? "public-face-rotate"
         : peerDmThreadMatch ? "peer-dm-thread" : operatorAgentMatch ? "operator-agent"
@@ -4595,6 +4604,72 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             displayName: decided.displayName ?? "", card: null });
         }
         return json(res, 200, decided);
+      }
+      // FIX-60 (WAVE-300 ranked-fixes burn-down): batch decide for access
+      // requests. Each item is decided with the SAME AccessRequests.decide()
+      // the single endpoint uses — no shortcutting — and a per-item failure
+      // is captured into the results array instead of failing the whole
+      // batch. Auth is the room funnel's, identical to the single decide.
+      if (route === "access-decide-batch" && req.method === "POST") {
+        const data = await body(req);
+        // Mirror the single endpoint's unknown-field policy at the top
+        // level: only `decisions` is accepted.
+        const keys = Object.keys(data ?? {});
+        const decisions = data?.decisions;
+        if (!keys.includes("decisions") || keys.some(k => k !== "decisions") || !Array.isArray(decisions)) {
+          reject(422, "invalid_request", "decisions is required: an array of { requestId, decision, permissions?, note? }");
+        }
+        if (decisions.length > ACCESS_DECIDE_BATCH_CAP) {
+          reject(422, "batch_too_large",
+            `at most ${ACCESS_DECIDE_BATCH_CAP} decisions per batch; got ${decisions.length}`);
+        }
+        const results = [];
+        for (const item of decisions) {
+          const itemRequestId = item && typeof item === "object" && !Array.isArray(item)
+            && typeof item.requestId === "string" && item.requestId ? item.requestId : null;
+          try {
+            const itemKeys = item && typeof item === "object" ? Object.keys(item) : [];
+            // Per-item shape mirrors the single endpoint: decision is
+            // required, permissions/note are optional, unknown fields are
+            // rejected — as a per-item failure, not a batch failure.
+            if (!item || typeof item !== "object" || Array.isArray(item)
+              || typeof item.requestId !== "string" || !item.requestId
+              || !itemKeys.includes("decision")
+              || itemKeys.some(k => !["requestId", "decision", "permissions", "note"].includes(k))) {
+              reject(422, "invalid_request",
+                "each decision needs { requestId, decision }; permissions and note are optional");
+            }
+            const decided = accessRequests.decide(selected.token, roomId, item.requestId,
+              { decision: item.decision, permissions: item.permissions, note: item.note }, fence);
+            // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md):
+            // same as the single decide — an approved access request is an
+            // admission; score it, journal the would-be decision, keep the
+            // approval unchanged.
+            if (item.decision === "approve") {
+              jevShadowAdmission("access-request:approve", { roomId, identityId: decided.identityId ?? null,
+                displayName: decided.displayName ?? "", card: null });
+            }
+            results.push(Object.freeze({ ...decided, requestId: item.requestId, ok: true }));
+          } catch (error) {
+            const status = error?.status ?? 500;
+            results.push(Object.freeze({
+              requestId: itemRequestId,
+              ok: false,
+              error: Object.freeze({
+                status,
+                code: error?.code ?? "internal_error",
+                message: error?.status ? String(error.message)
+                  : "Service could not complete the request; no success is claimed",
+              }),
+            }));
+          }
+        }
+        const succeeded = results.filter(r => r.ok).length;
+        return json(res, 200, Object.freeze({
+          roomId,
+          summary: Object.freeze({ total: results.length, succeeded, failed: results.length - succeeded }),
+          results: Object.freeze(results),
+        }));
       }
       // RC-2026-09-18-038: owner-granted membership administration for agent
       // identities. Grant/revoke/list are owner-only; a grant lets the
