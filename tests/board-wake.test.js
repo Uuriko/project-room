@@ -80,7 +80,7 @@ test("reassign to a pull-mode agent is the next wake, with reason assigned", asy
   const beat = await post("/api/agent-heartbeats", { hostId: "host-1", mode: "pull-only" }, agent.secret);
   assert.equal(beat.status, 200);
   await owner.workClaimCreate({ id: "lane-a", title: "Lane A", files: [] }); // FIX-45
-  await owner.claimWorkItem("lane-a");
+  await owner.claimWorkItem("lane-a", { files: [] }); // FIX-45
   const reassigned = await owner.reassignWorkItem("lane-a", { newOwner: agent.memberId, note: "yours" });
   assert.equal(reassigned.owner, agent.memberId);
   const woken = await poll(agent.secret);
@@ -114,7 +114,7 @@ test("a webhook-mode agent gets one signed delivery for the assignment", async t
   }, agent.secret);
   assert.equal(subscribed.status, 201);
   await owner.workClaimCreate({ id: "lane-c", title: "Lane C", files: [] }); // FIX-45
-  await owner.claimWorkItem("lane-c");
+  await owner.claimWorkItem("lane-c", { files: [] }); // FIX-45
   await owner.reassignWorkItem("lane-c", { newOwner: agent.memberId });
   const rows = store.db.prepare(
     "SELECT payload_json, signature, created_at, event_type FROM agent_webhook_deliveries WHERE agent_id=?"
@@ -140,7 +140,7 @@ test("lease expiry under a fake clock wakes the former owner once", async t => {
   const key = store.issueAccessKey("commons", agent.memberId);
   const holder = new RoomAgentClient({ origin, roomId: "commons", token: key });
   await owner.workClaimCreate({ id: "lane-d", title: "Lane D", files: [] }); // FIX-45
-  await holder.claimWorkItem("lane-d", { leaseHours: 1 });
+  await holder.claimWorkItem("lane-d", { leaseHours: 1, files: [] }); // FIX-45
   advance(2 * 60 * 60 * 1000);
   const listed = await owner.workClaims();
   assert.deepEqual(listed.swept, ["lane-d"]);
@@ -164,7 +164,7 @@ test("a paused agent gets no wake and still gets an Updates attention item", asy
   const agent = enroll("Paused Agent");
   assert.equal((await post("/api/agent-heartbeats", { hostId: "host-1", mode: "pull-only" }, agent.secret)).status, 200);
   await owner.workClaimCreate({ id: "lane-e", title: "Lane E", files: [] }); // FIX-45
-  await owner.claimWorkItem("lane-e");
+  await owner.claimWorkItem("lane-e", { files: [] }); // FIX-45
   store.wakeQueue.pause(ownerKey, "commons", { requestId: randomUUID(), reason: "away" }, null, { memberId: agent.memberId });
   await owner.reassignWorkItem("lane-e", { newOwner: agent.memberId });
   const woken = await poll(agent.secret);
@@ -182,7 +182,7 @@ test("a read-only agent gets no assignment wake and still gets the attention ite
   assert.equal((await post("/api/agent-heartbeats", { hostId: "host-1", mode: "pull-only" }, agent.secret)).status, 200);
   setTier(store.db, "commons", agent.memberId, "t1_readonly", { updatedBy: "owner", nowMs: store.now() });
   await owner.workClaimCreate({ id: "lane-f", title: "Lane F", files: [] }); // FIX-45
-  await owner.claimWorkItem("lane-f");
+  await owner.claimWorkItem("lane-f", { files: [] }); // FIX-45
   await owner.reassignWorkItem("lane-f", { newOwner: agent.memberId });
   const woken = await poll(agent.secret);
   assert.equal(woken.value.pendingWakes.length, 0);
