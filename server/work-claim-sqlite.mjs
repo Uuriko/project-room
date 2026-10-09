@@ -63,10 +63,22 @@ const parse = text => {
 export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), transaction = fn => fn(), onChange = null } = {}) {
   if (!db || typeof db.prepare !== "function") throw new TypeError("a SQLite database handle is required");
   // Prepare lazily: RoomStore constructs services before its atomic schema migration.
+  // Statements are cached per registry instance (one db handle per registry):
+  // the claim hot path was spending ~38% of its time re-preparing the same
+  // five statements on every write (wave400/perf-stmt-cache).
+  const stmtCache = new Map();
+  const preparedOf = sql => {
+    let prepared = stmtCache.get(sql);
+    if (!prepared) {
+      prepared = db.prepare(sql);
+      stmtCache.set(sql, prepared);
+    }
+    return prepared;
+  };
   const statement = sql => ({
-    get: (...args) => db.prepare(sql).get(...args),
-    all: (...args) => db.prepare(sql).all(...args),
-    run: (...args) => db.prepare(sql).run(...args),
+    get: (...args) => preparedOf(sql).get(...args),
+    all: (...args) => preparedOf(sql).all(...args),
+    run: (...args) => preparedOf(sql).run(...args),
   });
   const selectOne = statement("SELECT item_json FROM work_claims WHERE room_id=? AND claim_id=?");
   const selectRoom = statement("SELECT item_json FROM work_claims WHERE room_id=? ORDER BY rowid ASC");
