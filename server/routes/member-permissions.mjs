@@ -66,19 +66,16 @@ const parameters = Object.freeze({ type: "object", required: ["roomId"], propert
 const requestBody = field => Object.freeze({ type: "object", required: [field], additionalProperties: false,
   properties: { [field]: { type: "array", items: { type: "string" } }, note: { type: "string", nullable: true }, requestId: { type: "string" } } });
 
+const routeRow = (id, method, path, handler, schema, events = []) => Object.freeze({ id, method, path,
+  auth: "room", capability: null, scope: "room", handler, schema, events });
+const permissionRequestRow = (id, path, field) => routeRow(id, "POST", path, requestMemberPermissions,
+  { params: parameters, body: requestBody(field), response: { type: "object" } }, ["access.requested"]);
+
 // Register all three together: adding POST alone at the queue's known path
 // would make the RT dispatcher intercept and refuse the existing GET.
 export const MEMBER_PERMISSION_ROUTES = Object.freeze([
-  Object.freeze({ id: "request-member-permissions", method: "POST", path: "/api/rooms/{roomId}/access-requests",
-    auth: "room", capability: null, scope: "room", handler: requestMemberPermissions,
-    schema: { params: parameters, body: requestBody("requestedPermissions"), response: { type: "object" } },
-    events: ["access.requested"] }),
-  Object.freeze({ id: "request-own-permissions", method: "POST", path: "/api/rooms/{roomId}/members/me/permission-requests",
-    auth: "room", capability: null, scope: "room", handler: requestMemberPermissions,
-    schema: { params: parameters, body: requestBody("permissions"), response: { type: "object" } },
-    events: ["access.requested"] }),
-  Object.freeze({ id: "list-member-access-requests", method: "GET", path: "/api/rooms/{roomId}/access-requests",
-    auth: "room", capability: null, scope: "room", handler: listMemberAccessRequests,
-    schema: { params: parameters, query: { type: "object", properties: { status: { type: "string" } } }, response: { type: "object" } },
-    events: [] }),
+  permissionRequestRow("request-member-permissions", "/api/rooms/{roomId}/access-requests", "requestedPermissions"),
+  permissionRequestRow("request-own-permissions", "/api/rooms/{roomId}/members/me/permission-requests", "permissions"),
+  routeRow("list-member-access-requests", "GET", "/api/rooms/{roomId}/access-requests", listMemberAccessRequests,
+    { params: parameters, query: { type: "object", properties: { status: { type: "string" } } }, response: { type: "object" } }),
 ]);

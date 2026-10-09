@@ -5,12 +5,6 @@
 // it for any method, and the handler decides. An unknown path returns false
 // so the legacy chain in server/http.mjs can still serve it.
 //
-// Shared steps, in the same order as the legacy server, run only when the
-// caller opts in with ctx.pipeline (authorize, then body parsing against
-// schema.body and bodyLimit, then the handler). Extracted handlers still
-// carry their own auth and body reads, so the production hook does not set
-// pipeline and those steps are not run twice.
-//
 // F-3 contract: the row's `auth` column is ENFORCED ONLY when ctx.pipeline
 // is set. When pipeline is unset, `auth` is documentation — the handler
 // MUST enforce its own authorization. Never add a row that relies on the
@@ -31,9 +25,9 @@ export function compileRoutes(routes) {
   const root = node();
   const mounts = [];
   for (const row of routes) {
-    // A mount matches its path and every deeper path, for any method.
-    // The handler owns session and method checks. Putting those rows in
-    // the method trie would answer 405 before the session check.
+    // A mount matches its path and every deeper path, for any method. The
+    // handler owns session and method checks, so mounts skip the method
+    // trie (which would answer 405 before the session check).
     if (row.mount) {
       mounts.push(row);
       continue;
@@ -58,12 +52,8 @@ export function compileRoutes(routes) {
 }
 
 function compiledFor(routes) {
-  let trie = compiled.get(routes);
-  if (!trie) {
-    trie = compileRoutes(routes);
-    compiled.set(routes, trie);
-  }
-  return trie;
+  if (!compiled.has(routes)) compiled.set(routes, compileRoutes(routes));
+  return compiled.get(routes);
 }
 
 function walk(cursor, segments, index, params) {
@@ -97,13 +87,12 @@ export function matchRoute(routes, method, pathname) {
   const found = walk(root, segments, 0, {});
   if (found) {
     const upper = String(method || "").toUpperCase();
-    const row = found.node.methods.get(upper) ?? null;
-    const allow = [...found.node.methods.keys()].sort();
-    return { row, allow, params: found.params, authRow: found.node.methods.values().next().value };
+    const methodNames = [...found.node.methods.keys()];
+    return { row: found.node.methods.get(upper) ?? null, allow: methodNames.sort(),
+      params: found.params, authRow: found.node.methods.get(methodNames[0]) };
   }
   const mount = matchMount(mounts, pathname);
-  if (!mount) return null;
-  return { row: mount, allow: [], params: {} };
+  return mount ? { row: mount, allow: [], params: {} } : null;
 }
 
 const ENTITY = new Set(["POST", "PUT", "PATCH", "DELETE"]);
@@ -142,9 +131,8 @@ export function schemaErrors(schema, value, path = "") {
     const keys = Object.keys(value);
     if (Number.isInteger(schema.minProperties) && keys.length < schema.minProperties) errors.push(`${here} has too few properties`);
     if (Number.isInteger(schema.maxProperties) && keys.length > schema.maxProperties) errors.push(`${here} has too many properties`);
-    if (Array.isArray(schema.required)) {
+    if (Array.isArray(schema.required))
       for (const key of schema.required) if (!Object.hasOwn(value, key)) errors.push(`${here}.${key} is required`);
-    }
     const properties = schema.properties && typeof schema.properties === "object" ? schema.properties : null;
     for (const key of keys) {
       if (properties && Object.hasOwn(properties, key)) errors.push(...schemaErrors(properties[key], value[key], `${here}.${key}`));
@@ -154,13 +142,17 @@ export function schemaErrors(schema, value, path = "") {
   return errors;
 }
 
+function requireStep(ctx, name, message) {
+  if (typeof ctx[name] !== "function") ctx.reject(500, "internal_error", message);
+}
+
 async function runPipeline(ctx, row) {
   if (row.auth !== "none") {
-    if (typeof ctx.authorize !== "function") ctx.reject(500, "internal_error", "Route auth is not available");
+    requireStep(ctx, "authorize", "Route auth is not available");
     await ctx.authorize(row, ctx);
   }
   if (row.schema.body && ENTITY.has(row.method)) {
-    if (typeof ctx.readJson !== "function") ctx.reject(500, "internal_error", "Route body reader is not available");
+    requireStep(ctx, "readJson", "Route body reader is not available");
     const value = await ctx.readJson(row.bodyLimit ?? 16 * 1024);
     const problems = schemaErrors(row.schema.body, value);
     if (problems.length) ctx.reject(422, "invalid_body", problems[0]);
@@ -170,21 +162,23 @@ async function runPipeline(ctx, row) {
   await row.handler(ctx);
 }
 
+// Authenticate protected paths before exposing their method surface.
+async function denyMethod(ctx, found) {
+  if (typeof found.authRow?.authenticate === "function") await found.authRow.authenticate(ctx);
+  if (found.authRow?.auth === "room" && typeof ctx.roomCredentials === "function") {
+    const selected = ctx.roomCredentials(ctx.req, ctx.url);
+    const fence = selected.mode === "account" ? ctx.accountBinding(ctx.req) : ctx.expectedBinding(ctx.req);
+    ctx.roomAuth(selected, found.params.roomId, fence);
+  }
+  ctx.res.setHeader("Allow", found.allow.join(", "));
+  ctx.reject(405, "method_not_allowed", "Method not allowed");
+}
+
 export async function dispatchRoute(ctx, routes = ROUTES) {
   if (!routes || routes.length === 0) return false;
   const found = matchRoute(routes, ctx.req.method, ctx.url.pathname);
   if (!found) return false;
-  if (!found.row) {
-    // Authenticate protected paths before exposing their method surface.
-    if (typeof found.authRow?.authenticate === "function") await found.authRow.authenticate(ctx);
-    if (found.authRow?.auth === "room" && typeof ctx.roomCredentials === "function") {
-      const selected = ctx.roomCredentials(ctx.req, ctx.url);
-      const fence = selected.mode === "account" ? ctx.accountBinding(ctx.req) : ctx.expectedBinding(ctx.req);
-      ctx.roomAuth(selected, found.params.roomId, fence);
-    }
-    ctx.res.setHeader("Allow", found.allow.join(", "));
-    ctx.reject(405, "method_not_allowed", "Method not allowed");
-  }
+  if (!found.row) return denyMethod(ctx, found);
   ctx.params = found.params;
   ctx.route = found.row;
   if (ctx.pipeline) await runPipeline(ctx, found.row);
