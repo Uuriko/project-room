@@ -1,3 +1,8 @@
+// Public work claims: unpaid project offers that strangers can discover,
+// claim, work, and submit artifacts for — without room membership.
+// Backed by public_work_tasks/requests/receipts tables plus a work_claims
+// row in a public_<hash> namespace. All writes are fenced and request-id
+// idempotent. See docs/wave400-core/modules/public-work-claims.md.
 import { validId } from '../src/events.js';
 import { createHash } from 'node:crypto';
 import { canonicalJson } from '../src/audit-receipts.mjs';

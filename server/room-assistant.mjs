@@ -1,4 +1,9 @@
 import { enforceAutonomyTierForAction } from './autonomy-tiers.mjs';
+// Room assistant: the shared-assistant coordination contract. One room
+// member (a human) asks, one configured coordinator agent (with accept_work)
+// hosts the execution, and humans contribute/resolve scope — with
+// optimistic-concurrency revisions, idempotent request IDs, and
+// host-liveness detection. See docs/wave400-core/modules/room-aux-set.md.
 import { validId, messageChannelId } from '../src/events.js';
 import { conversationIndex } from '../src/conversation.js';
 import { isGuestAgentMemberId } from './guest-agent-links.mjs';

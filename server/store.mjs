@@ -1,3 +1,8 @@
+// RoomStore: the central SQLite-backed, event-sourced room state.
+// Constructs ~60 sub-stores, owns transactions (WAL, BEGIN IMMEDIATE),
+// schema versioning, open-time repair, and deferred integrity batches.
+// The work_claims table is the source of truth; room events are pointers.
+// See docs/ARCHITECTURE-CORE.md and docs/wave400-core/modules/store-*.md.
 import { dmEventVisibility } from "./dm-event-visibility.mjs";
 import { publicWorkClaimFenceSchema, verifyPublicWorkClaimFence } from "./public-work-claim-fence.mjs";
 import { PublicWorkClaims, publicWorkClaimsSchema } from "./public-work-claims.mjs";

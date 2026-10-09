@@ -1,4 +1,7 @@
 import { createHash } from "node:crypto";
+// Room key presence: tracks which agent keys are live in a room via agent
+// heartbeats (per-secret hostPrefix), enforcing pull-only delivery where
+// configured. See docs/wave400-core/modules/room-aux-set.md.
 import { ServiceError } from "./service-error.mjs";
 import { isRoomAccessToken } from "./guest-agent-links.mjs";
 
