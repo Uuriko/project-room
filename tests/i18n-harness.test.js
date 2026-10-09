@@ -240,6 +240,18 @@ test("--check: growth already in the base tree passes without a regenerated base
   }
 });
 
+test("importing the harness does not run --check (undeclared growth must not fail an importer)", () => {
+  const probe = join(root, "src", "__i18n-probe-import.tmp.mjs");
+  try {
+    writeFileSync(probe, `export const probe = [${Array(50).fill('"An imported module must not run the ratchet for this probe"').join(",")}];\n`);
+    const r = spawnSync(process.execPath, ["--input-type=module", "-e", `await import(${JSON.stringify(harness)});`], { encoding: "utf8", env: strictEnv() });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout + r.stderr, "");
+  } finally {
+    rmSync(probe, { force: true });
+  }
+});
+
 test("growthAllowance reads the PR label or an i18n-growth body line from the event payload", () => {
   const dir = mkdtempSync(join(tmpdir(), "i18n-event-"));
   const event = join(dir, "event.json");
