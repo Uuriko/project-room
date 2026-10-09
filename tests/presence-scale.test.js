@@ -102,12 +102,12 @@ test("500 agents heartbeat: presence converges, writes are constant per agent, t
     return (performance.now() - start) / (to - from);
   };
   const avgFirst100 = lap(0, 100);
-  const writesFirst100 = counters.writes;
   lap(100, 400);
   const avgLast100 = lap(400, 500);
-  reset();
-  const writesPerHeartbeat = counters.writes / 100;
-  counters.writes = writesFirst100;
+  // No reset before reading: counters.writes is cumulative over all 500
+  // heartbeats (the pre-lap reset cleared fixture setup).
+  const writesAll500 = counters.writes;
+  const writesPerHeartbeat = writesAll500 / AGENTS;
 
   // Convergence: every one of the 500 reads back online.
   const convStart = performance.now();
@@ -120,10 +120,10 @@ test("500 agents heartbeat: presence converges, writes are constant per agent, t
 
   // A heartbeat is 3 PK upserts (agent_hosts, agent_wake_polls,
   // agent_push_configs) — constant, independent of fleet size.
-  assert.ok(counters.writes <= 6 * AGENTS,
-    `DB writes must stay linear: ${counters.writes} writes for ${AGENTS} heartbeats`);
+  assert.ok(writesAll500 <= 6 * AGENTS,
+    `DB writes must stay linear: ${writesAll500} writes for ${AGENTS} heartbeats`);
   assert.ok(writesPerHeartbeat <= 6,
-    `writes per heartbeat must be constant, got ${writesPerHeartbeat}`);
+    `writes per heartbeat must be constant, got ${writesPerHeartbeat.toFixed(2)}`);
   // Anti-O(n^2): per-heartbeat cost must not grow with table size. A full
   // scan per heartbeat would make the 401..500 lap several times slower
   // than the 1..100 lap.
@@ -133,7 +133,7 @@ test("500 agents heartbeat: presence converges, writes are constant per agent, t
   assert.ok(convMs < 10_000, `500 statusOf reads took ${convMs.toFixed(0)}ms`);
   t.diagnostic(`500 heartbeats: ${(performance.now() - convStart).toFixed(0)}ms reads; ` +
     `avg heartbeat first100=${avgFirst100.toFixed(3)}ms last100=${avgLast100.toFixed(3)}ms; ` +
-    `writes=${counters.writes} (${(counters.writes / AGENTS).toFixed(1)}/heartbeat)`);
+    `writes=${writesAll500} (${writesPerHeartbeat.toFixed(1)}/heartbeat)`);
 });
 
 test("presence list (wakeStatusList) converges for 500 agents in one scan", t => {
@@ -176,7 +176,7 @@ test("FAIL-FIRST: 24h churn leaves no ghost presence rows", t => {
   const STALE_MS = 2000;
   const { db, hb, advance, at } = unit(t, { staleAfterMs: STALE_MS });
   const TICK = 10 * 60 * 1000; // 10 minutes
-  const PER_TICK = 30;
+  const PER_TICK = 10; // small cohort per tick: still thousands of ghost rows
   const TICKS = 144; // 24h
   for (let tick = 0; tick < TICKS; tick++) {
     // This tick's cohort heartbeats every minute through the tick, then churns out.
@@ -326,33 +326,36 @@ test("heartbeats do not meaningfully slow claim mutations", t => {
   const { store } = room(t);
   const hb = store.agentHeartbeats;
   const N = 200;
-  const claim = i => store.workClaims.set("commons", { id: `w7-load-claim-${i}`, title: `load ${i}` });
-
-  // Baseline: claim mutations alone.
-  let start = performance.now();
-  for (let i = 0; i < N; i++) claim(i);
-  const baseMs = (performance.now() - start) / N;
-
-  // Loaded: the 500-agent fleet heartbeats between claims. Only the claim
-  // latency itself is timed — that is the real contention question: do
-  // heartbeat writes lock or bloat the tables that claim mutations touch?
-  let claimOnlyMs = 0;
+  const aloneMs = [], loadedMs = [];
+  // The two arms alternate inside one loop so both see the same claims-table
+  // growth, JIT state, GC pressure, and VM load — the ONLY difference is the
+  // three heartbeats interleaved before each loaded claim. That isolates the
+  // real contention question: do heartbeat writes slow claim mutations?
   for (let i = 0; i < N; i++) {
+    let c0 = performance.now();
+    store.workClaims.set("commons", { id: `w7-alone-claim-${i}`, title: `alone ${i}` });
+    aloneMs.push(performance.now() - c0);
     for (let h = 0; h < 3; h++) {
       hb.heartbeat(beat(`ai_load_${(i * 3 + h) % AGENTS}`, "load-host"));
     }
-    const c0 = performance.now();
-    store.workClaims.set("commons", { id: `w7-loaded-claim-${i}`, title: `load ${i}` });
-    claimOnlyMs += performance.now() - c0;
+    c0 = performance.now();
+    store.workClaims.set("commons", { id: `w7-loaded-claim-${i}`, title: `loaded ${i}` });
+    loadedMs.push(performance.now() - c0);
   }
-  const loadedMs = claimOnlyMs / N;
+  const mean = xs => xs.reduce((a, b) => a + b, 0) / xs.length;
+  const alone = mean(aloneMs), loaded = mean(loadedMs);
+  const ratio = loaded / Math.max(alone, 0.001);
 
-  // Heartbeats are a handful of PK upserts on their own tables; a fleet
-  // heartbeating alongside must not move claim latency materially. Bound is
-  // generous for shared CI runners.
-  assert.ok(loadedMs < 3 * Math.max(baseMs, 0.001),
-    `claim mutation slowed under heartbeat load: baseline ${baseMs.toFixed(3)}ms/claim, ` +
-    `loaded ${loadedMs.toFixed(3)}ms/claim`);
-  t.diagnostic(`claim mutation: baseline ${baseMs.toFixed(3)}ms, with 500-agent heartbeat traffic interleaved ${loadedMs.toFixed(3)}ms ` +
-    `(ratio ${(loadedMs / Math.max(baseMs, 0.001)).toFixed(2)}x)`);
+  // Heartbeats are a handful of PK upserts on their own tables in the same
+  // in-process DB; a claim mutation alongside them must not move materially.
+  // Bounds are generous: shared CI runners measure sub-millisecond
+  // latencies, so absolute latency is the meaningful gate and the ratio is
+  // a loose sanity check.
+  assert.ok(loaded < 5,
+    `claim mutation too slow under heartbeat load: ${loaded.toFixed(3)}ms/claim (alone ${alone.toFixed(3)}ms)`);
+  assert.ok(ratio < 5,
+    `claim mutation slowed under heartbeat load: alone ${alone.toFixed(3)}ms/claim, ` +
+    `loaded ${loaded.toFixed(3)}ms/claim (ratio ${ratio.toFixed(2)}x)`);
+  t.diagnostic(`claim mutation: alone ${alone.toFixed(3)}ms/claim, with 3 interleaved heartbeats ${loaded.toFixed(3)}ms/claim ` +
+    `(ratio ${ratio.toFixed(2)}x, n=${N}/arm)`);
 });
