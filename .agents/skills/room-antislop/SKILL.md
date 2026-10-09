@@ -128,6 +128,13 @@ are the valuable kind. Never change code to satisfy a comment rule.
   Room's identity is set in DESIGN.md. Don't restyle a surface to make it
   more lively inside an unrelated PR.
 
+## Prose now, lint later
+
+A rule that a script can check belongs in `npm run lint` with a baseline
+ratchet, like `strings/i18n-baseline.json`. Candidates: no new em dashes in
+`strings/en.json`, a minimum size for `.text-button`, and no enabled Copy
+button on an empty field. Once a rule becomes lint, delete its prose here.
+
 ## Done checklist
 
 - [ ] Read DESIGN.md, and the change fits the product direction.

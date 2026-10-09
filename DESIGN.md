@@ -127,7 +127,7 @@ From the Oct 9 QA and first-run click-through. Each item has a filter rule.
 | Raw `ai_…` ids in the room assistant's answer (fixed in #2309) | Machine ids on a human surface | Use display names |
 | A guest sees "No messages yet" in a 35-message room | An empty state that lies | Say "Earlier messages aren't shared with guests here" |
 | "Log in" on the landing page, "Sign in" on the form (fixed in #2303) | Two words for one action | One word everywhere |
-| Links on the login and signup forms about 8px tall | Tap target too small | At least 24px for inline links, 44px for primary controls |
+| Sign-up and login links use `.text-button` at .69rem (about 11px), with targets the QA click-through measured at about 8px | Text and tap target too small | Body-size text. At least 24px for inline links, 44px for primary controls |
 | New work's Create silently does nothing without a reviewer | A dead control | Show the reason and the choice before Create |
 | A multiplayer ask hidden under a collapsed Activity toggle | Shared state behind a disclosure | Show the card in the stream |
 
