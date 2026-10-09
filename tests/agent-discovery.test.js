@@ -290,8 +290,8 @@ test("uppercase /SKILL.md serves the agent skill, distinct from the llms.txt pac
   assert.ok(skill.body.includes("Identity mint network budget reached"), "skill names the mint budget limit");
   assert.ok(skill.body.includes("Retry-After"), "skill documents the mint 429 recovery interval");
   // ch-2041 challenge: the budget refills on a rolling 24h window, not after
-  // Retry-After, and the server always sends Retry-After: 3600 for this tier —
-  // the doc must not promise recovery after 60 seconds.
+  // Retry-After, and Retry-After names when the oldest counted mint leaves
+  // that window — the doc must not promise recovery after 60 seconds.
   assert.ok(skill.body.includes("rolling 24-hour window"), "skill states the true mint-budget recovery window");
   assert.ok(!skill.body.includes("60 seconds if the header is absent"), "skill drops the false 60s fallback");
   // ch-2041 challenge: an empty match is caused by everything claimed or by a
