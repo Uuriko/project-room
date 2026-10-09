@@ -27,6 +27,21 @@ export function verifyAccessSummary(value, { roomId, workItemId }) {
   return summary;
 }
 
+// Room events that only append: they never change a message already held, so
+// a live refresh for them can read `?messages=recent` and keep older history.
+const RECENT_REFRESH_EVENTS = new Set(["message.posted", "dm.posted", "work_claim.updated"]);
+// Join held history with a `?messages=recent` window. The window must start on
+// a held message with exactly `omitted` messages before it; anything else
+// returns null and the caller reads the full snapshot.
+function mergeRecentMessages(held, read) {
+  const window = read?.messagesWindow, recent = read?.state?.messages;
+  if (!window || window.mode !== "recent" || !Number.isSafeInteger(window.omitted) || window.omitted < 0 || !Array.isArray(recent)) return null;
+  const { messagesWindow, ...snapshot } = read;
+  if (window.omitted === 0) return snapshot;
+  const start = recent.length ? held.findIndex(message => message?.id === recent[0]?.id) : -1;
+  if (start !== window.omitted) return null;
+  return { ...snapshot, state: { ...snapshot.state, messages: [...held.slice(0, start), ...recent] } };
+}
 export const IDENTITY_MINT_POW_BITS = 12;
 export const IDENTITY_MINT_POW_WINDOW_MS = 10 * 60 * 1000;
 
@@ -440,24 +455,45 @@ export class RoomClient {
     // Reconnects, explicit refreshes and non-event receipts always revalidate access.
     const sequence = receipt?.event?.roomId === this.session?.roomId && Number.isSafeInteger(receipt?.sequence) && receipt.sequence > 0
       ? receipt.sequence : null;
-    if (sequence !== null && sequence <= this.sequence) return Promise.resolve();
+    // A new message or claim receipt cannot change older messages, so it may
+    // re-read only the newest ones. Anything else needs a full read at or past
+    // its own sequence, even when a newer windowed read already landed.
+    const windowed = sequence !== null && RECENT_REFRESH_EVENTS.has(receipt.event.type);
+    const held = this.heldMessages(), fullSequence = held?.fullSequence ?? this.sequence;
+    if (sequence !== null && sequence <= (windowed ? this.sequence : fullSequence)) return Promise.resolve();
     const generation = this.generation;
     if (this.flight?.generation === generation) {
       if (sequence === null) this.flight.again = true;
-      else this.flight.sequence = Math.max(this.flight.sequence, sequence);
+      else {
+        this.flight.sequence = Math.max(this.flight.sequence, sequence);
+        if (!windowed) this.flight.fullSequence = Math.max(this.flight.fullSequence, sequence);
+      }
       return this.flight.promise;
     }
-    const flight = { generation, again: false, sequence: 0 };
+    const flight = { generation, again: false, sequence: 0, fullSequence: 0, fullNow: !windowed };
     this.flight = flight;
     flight.promise = (async () => {
       try {
+        let covered = held?.fullSequence ?? 0;
         do {
-          flight.again = false; flight.sequence = 0;
-          const snapshot = await this.request(this.path(), { offerContext: true });
+          const session = this.session, holding = this.heldMessages();
+          const full = flight.again || flight.fullNow || flight.fullSequence > covered || !holding;
+          flight.again = false; flight.fullNow = false; flight.sequence = 0;
+          const read = await this.request(this.path(full ? "" : "?messages=recent"), { offerContext: true });
           if (generation !== this.generation || !this.session) return;
-          if (!this.ownsResponse(snapshot)) { this.endAccess(); return; }
-          if (snapshot.sequence >= this.sequence) { this.sequence = snapshot.sequence; this.onSnapshot(snapshot, this.session); }
-        } while (flight.again || flight.sequence > this.sequence);
+          if (!this.ownsResponse(read)) { this.endAccess(); return; }
+          // A server without the recent view ignores the parameter and answers in full.
+          const whole = full || !Object.hasOwn(read, "messagesWindow");
+          const snapshot = whole ? read : mergeRecentMessages(holding.messages, read);
+          if (!snapshot) { flight.fullNow = true; continue; }
+          if (whole) covered = Math.max(covered, read.sequence);
+          if (snapshot.sequence >= this.sequence) {
+            this.sequence = snapshot.sequence;
+            this.held = { generation, session, messages: Array.isArray(snapshot.state?.messages) ? snapshot.state.messages.slice() : null,
+              fullSequence: whole ? snapshot.sequence : holding.fullSequence };
+            this.onSnapshot(snapshot, this.session);
+          }
+        } while (flight.again || flight.fullNow || flight.sequence > this.sequence || flight.fullSequence > covered);
       } catch (error) {
         if (generation !== this.generation) return;
         if (this.session?.authMode === "account" && !this.ownsAccountSession()) { this.endAccess(); return; }
@@ -465,6 +501,11 @@ export class RoomClient {
       }
     })().finally(() => { if (this.flight === flight) this.flight = null; });
     return flight.promise;
+  }
+  // History held from this session's last snapshot, for windowed refreshes.
+  heldMessages() {
+    const held = this.held;
+    return held && held.generation === this.generation && held.session === this.session && Array.isArray(held.messages) ? held : null;
   }
   async send(command) {
     if (this.session?.authMode === "account" && !this.ownsAccountSession()) { this.endAccess(); throw accountSessionError("Account session changed; reopen the Room before sending"); }
