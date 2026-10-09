@@ -1,0 +1,83 @@
+{
+ "unit": "f16-http-body",
+ "inputs": 14,
+ "counts": {
+  "reject": 11,
+  "ok": 3
+ },
+ "results": [
+  {
+   "name": "wrong-ct",
+   "verdict": "reject",
+   "ms": 4499,
+   "slow": true
+  },
+  {
+   "name": "no-ct",
+   "verdict": "reject",
+   "ms": 992
+  },
+  {
+   "name": "array",
+   "verdict": "reject",
+   "ms": 680
+  },
+  {
+   "name": "null-lit",
+   "verdict": "reject",
+   "ms": 1164
+  },
+  {
+   "name": "num-lit",
+   "verdict": "reject",
+   "ms": 743
+  },
+  {
+   "name": "str-lit",
+   "verdict": "reject",
+   "ms": 1350
+  },
+  {
+   "name": "empty",
+   "verdict": "reject",
+   "ms": 1284
+  },
+  {
+   "name": "bad-json",
+   "verdict": "reject",
+   "ms": 405
+  },
+  {
+   "name": "deep-nest",
+   "verdict": "reject",
+   "ms": 2779,
+   "slow": true
+  },
+  {
+   "name": "dup-keys",
+   "verdict": "reject",
+   "detail": "dup-keys -> 422",
+   "ms": 779
+  },
+  {
+   "name": "proto-keys",
+   "verdict": "ok",
+   "ms": 1889
+  },
+  {
+   "name": "ct-charset",
+   "verdict": "ok",
+   "ms": 1966
+  },
+  {
+   "name": "ct-case",
+   "verdict": "ok",
+   "ms": 1229
+  },
+  {
+   "name": "ct-suffix",
+   "verdict": "reject",
+   "ms": 1381
+  }
+ ]
+}

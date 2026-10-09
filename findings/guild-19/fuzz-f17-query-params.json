@@ -1,0 +1,91 @@
+{
+ "unit": "f17-query-params",
+ "inputs": 16,
+ "counts": {
+  "ok": 5,
+  "reject": 11
+ },
+ "results": [
+  {
+   "name": "events-q0",
+   "verdict": "ok",
+   "ms": 2064,
+   "slow": true
+  },
+  {
+   "name": "events-q1",
+   "verdict": "reject",
+   "ms": 815
+  },
+  {
+   "name": "events-q2",
+   "verdict": "reject",
+   "ms": 1649
+  },
+  {
+   "name": "events-q3",
+   "verdict": "reject",
+   "ms": 1472
+  },
+  {
+   "name": "events-q4",
+   "verdict": "reject",
+   "ms": 1420
+  },
+  {
+   "name": "events-q5",
+   "verdict": "reject",
+   "ms": 1009
+  },
+  {
+   "name": "events-q6",
+   "verdict": "ok",
+   "ms": 918
+  },
+  {
+   "name": "events-q7",
+   "verdict": "reject",
+   "ms": 554
+  },
+  {
+   "name": "events-q8",
+   "verdict": "reject",
+   "ms": 401
+  },
+  {
+   "name": "events-q9",
+   "verdict": "reject",
+   "ms": 1371
+  },
+  {
+   "name": "events-q10",
+   "verdict": "ok",
+   "ms": 416
+  },
+  {
+   "name": "events-q11",
+   "verdict": "ok",
+   "ms": 393
+  },
+  {
+   "name": "events-q12",
+   "verdict": "ok",
+   "ms": 157
+  },
+  {
+   "name": "bad-room",
+   "verdict": "reject",
+   "ms": 166
+  },
+  {
+   "name": "room-traversal",
+   "verdict": "reject",
+   "ms": 192
+  },
+  {
+   "name": "room-empty",
+   "verdict": "reject",
+   "ms": 750
+  }
+ ]
+}
