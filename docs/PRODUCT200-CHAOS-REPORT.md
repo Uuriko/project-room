@@ -9,19 +9,19 @@ Verified by: re-ran the full landed chaos/property harness locally against the a
 - **8 property/chaos suites are on main**, all auto-wired into CI (`scripts/unit-shards.mjs` discovers every `tests/*.test.js`; the `unit-shards` job is a merge gate). No manual wiring exists or is needed.
 - **This session re-ran all 8 suites against origin/main: 51/51 pass** (~28 min wall clock, single-threaded, `node --test` with deps from a clean `npm ci`).
 - **Bug classes now permanently guarded**: claim-board lifecycle races (deadlocks, strike-two limbo, forged/early/terminal strike-twos, receipt double-count, heartbeat-grace violations, task-id reuse), webhook redelivery double-processing under replay/race/out-of-order schedules, Durable Object mid-write partial state, money-path double-spend / nonce-replay / grant-leakage, ingestion contract violations (MIME, headers, timestamps, Telegram updates), writer-fence drift, and SSE resume gaps/duplicates.
-- **Pending: exactly one worker produced unlanded work** — C2's claim-lifecycle race properties (PR #2151, OPEN, CI red on its own fail-first tests). C1/C3/C5/C9–C11: no committed work and no PRs found anywhere; marked honestly as nothing delivered.
+- **Status update (verified against main d001bb49, 2026-10-09)**: C2's claim-lifecycle race properties landed (PR #2151, merged; `tests/chaos/claim-lifecycle-races.test.js` is on main). C3's torn-write and history-monotonicity suites are open as PR #2172 (not on main yet). Nothing else from the C1/C5/C9-C11 slices has a PR. The original body below was anchored to `957e13ffa` and is corrected where noted.
 
 ## Worker-slice status (C1–C11, honest)
 
 | Slice | Scope | Branch | Status |
 |---|---|---|---|
 | C1 | chaos scaffold | `jill/product200-c1-chaos-scaffold` | **nothing delivered** — zero commits ahead of main, no PR. The scaffold concept lives on in the landed suites below |
-| C2 | claim-lifecycle races | `jill/product200-c2-chaos-races` | **PR #2151 OPEN, CI red** — `tests/chaos/claim-lifecycle-races.test.js` + `tests/chaos/claim-race-ops.mjs` (+ `.gitignore`, + a `server/work-claims.mjs` error-message wording tweak). Unit shard 1/3 fails on its own fail-first tests "P1 catches a weakened anti-collision guard" and "fail-first: weakened guards are caught". **PENDING** |
-| C3 | torn writes | `jill/product200-c3-chaos-torn-writes` | **nothing delivered** — zero commits, no PR |
+| C2 | claim-lifecycle races | `jill/product200-c2-chaos-races` | **PR #2151 merged** — `tests/chaos/claim-lifecycle-races.test.js` + `tests/chaos/claim-race-ops.mjs` are on main |
+| C3 | torn writes | `jill/product200-c3-chaos-torn-writes` | **PR #2172 open** — `tests/chaos/claim-torn-writes.test.js`, `tests/chaos/claim-history-monotonicity.test.js` and `tests/chaos/work-claim-chaos-scaffold.mjs`; not on main yet |
 | C5 | chaos events | `jill/product200-c5-chaosevents` | **nothing delivered** — zero commits, no PR |
 | C9–C11 | consolidated chaos properties | `jill/product200-c911-chaos-properties` | **nothing delivered** — zero commits, no PR. This report is the consolidation |
 
-(An all-PRs search for `product200-c` head refs returned only #2151; the other branches exist only as stale local checkouts behind main.)
+(Head refs other than #2151 and #2172 have no PR; those branches exist only as stale local checkouts behind main.)
 
 ## Properties table (landed on main)
 
@@ -45,13 +45,13 @@ Every landed suite is deterministic in CI: fixed default seeds (table above); `P
 ## CI wiring status
 
 - **Automatic**: `scripts/unit-shards.mjs` discovers every Node-discovered `tests/*.test.js` and places it in exactly one of 3 unit shards; the `unit` job requires all three shards green. The 8 chaos/property files need no registration — a future chaos suite lands in CI the moment it is merged as `tests/*chaos*.test.js` / `tests/*.property.test.js`.
-- **Gap (minor)**: none of the 8 files has a measurement in `scripts/unit-ci-durations.json`, so shard balancing uses the conservative 5 s default. Measured locally this session: writer-fence ~858 s, claims-state-machine ~600 s (fast-check), webhook-dedupe ~97 s. Shard wall-clock estimates are therefore understated; recommend adding the 8 measured durations to `unit-ci-durations.json`.
+- **Durations**: all 8 files have an entry in `scripts/unit-ci-durations.json` (writer-fence and claims-state-machine at 300000 ms, webhook-dedupe 167548 ms), so shard balancing is measured. This corrects the earlier draft, which said none were measured.
 - `PROPERTY_TEST_SEED` is not set in CI — exploratory shifted runs are manual only.
 
 ## Known gaps
 
-1. **C2 pending (PR #2151, CI red)** — the only server/`work-claims.mjs` race-property coverage. Its own fail-first tests fail in CI ("P1 catches a weakened anti-collision guard", "fail-first: weakened guards are caught"). Likely cause: P1 weakens claimWork's anti-collision guard, but the per-item legality oracles check each item in isolation — a double-claimed item (state `claimed`, owner = second agent) is still *per-item legal*, so the oracle cannot see the semantic race of two holders on one claim. A cross-holder invariant (at most one active holder per claim id across the store) is needed. The PR also edits `server/work-claims.mjs` message wording, which keeps drifting against the weakening string specs. Needs HELP-100 rebase-rescue + a property-design fix; out of this worker's scope.
-2. **C3 produced no torn-write suite** — torn lease/owner pairing on claim items is guarded only by route-level tests (#2088-era), not chaos properties.
+1. **C2 landed (PR #2151, merged)** — its fail-first tests ("P1 catches a weakened anti-collision guard", "fail-first: weakened guards are caught") are on main. The earlier text called it pending with CI red; that is stale.
+2. **C3 is open (PR #2172)** — torn lease/owner pairing on claim items is covered by chaos properties only once #2172 lands; until then only route-level tests (#2088-era) guard it.
 3. **C5 produced no event-ordering suite** — only SSE resume is covered; general event-ordering chaos (interleaved store events) has no property suite.
 4. **Fail-first (guard-weakening) coverage exists only in C2's pending PR** — the landed suites never run against weakened-guard modules in CI.
 5. **Explicitly out of scope** in the landed suites' own coverage limits: two overlapping sweeps (enforcer-lock concurrency), live board posting (dry-run only), clock-skew compensation.
