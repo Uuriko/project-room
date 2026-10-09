@@ -52,6 +52,10 @@ test("one connection survives lost registration and redemption responses with on
   const before = f.store.room("commons").sequence;
   const result = await f.connect({ target: invite.code, fetchImpl });
   assert.equal(result.status, "connected"); assert.equal(f.store.room("commons").sequence, before);
+  const saved = JSON.parse(readFileSync(join(f.directory, "setup.json"), "utf8"));
+  const requestId = Object.values(saved.targets)[0].requestId;
+  await assert.rejects(redeemAgentInvite(f.origin, invite.code, "Changed name", { requestId, identitySecret: saved.secret }),
+    { code: "invite_redeem_idempotency_conflict" });
   assert.equal(f.store.db.prepare("SELECT count(*) n FROM agent_identities").get().n, 1);
   const config = readAgentConnection(result.configDirectory);
   assert.equal(JSON.stringify(result).includes(config.token), false);
@@ -91,6 +95,23 @@ test("recoverable registration cannot resurrect a revoked or rotated identity", 
   const revoked = secret(), next = await createAgentIdentity(f.origin, "Other", { identitySecret: revoked });
   f.store.db.prepare("UPDATE agent_identities SET revoked_at=1 WHERE identity_id=?").run(next.identityId);
   await assert.rejects(createAgentIdentity(f.origin, "Other", { identitySecret: revoked }), { code: "identity_credential_changed" });
+});
+test("anonymous redeem client recovers a lost committed response with the same request id", async t => {
+  const f = await fixture(t), invite = f.invite(), requestId = "lost-redeem-response";
+  const fetchImpl = async (url, options) => {
+    const result = await fetch(url, options);
+    assert.equal(result.status, 201);
+    throw new TypeError("committed response lost");
+  };
+  await assert.rejects(redeemAgentInvite(f.origin, invite.code, "Peer", { requestId, fetchImpl }));
+  const before = f.store.room("commons").sequence;
+  const retry = await redeemAgentInvite(f.origin, invite.code, "Peer", { requestId });
+  assert.equal(retry.duplicate, true);
+  assert.equal(f.store.room("commons").sequence, before);
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM agent_identities").get().n, 1);
+  assert.equal(f.store.room("commons").state.members[retry.memberId].active, true);
+  await assert.rejects(redeemAgentInvite(f.origin, invite.code, "Changed name", { requestId }),
+    { code: "invite_redeem_idempotency_conflict" });
 });
 test("only the redeeming identity can recover an invite; revoked membership is not reactivated", async t => {
   const f = await fixture(t), invite = f.invite(), identitySecret = secret();
