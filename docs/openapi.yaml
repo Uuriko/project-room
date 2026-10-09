@@ -5664,7 +5664,7 @@ paths:
                   type: string
                   format: date-time
                   maxLength: 100
-                  description: Optional optimistic-concurrency precondition — exact claimedAt from the current item; binds the ownership round. When provided and the claim moved since the read, the release is 409 "The claim changed since it was read" (compare-and-release: a stale retry can no longer destroy a fresh re-claim).
+                  description: Optional optimistic-concurrency precondition — exact claimedAt from the current item; binds the ownership round. When provided and the claim moved since the read, the release is 409 "The claim changed since it was read" (compare-and-release — a stale retry can no longer destroy a fresh re-claim).
                 expectedHistoryLength:
                   type: integer
                   minimum: 0
