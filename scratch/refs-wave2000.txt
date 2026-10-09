@@ -1,0 +1,7 @@
+bbc41dc91ead907a19afba908b1018bd209cfbb4	refs/heads/wave2000/guild-20
+7a427e12b12eb3c6e974c7bbe5394cd797547ae7	refs/heads/wave2000/guild-22
+5b448ebee966cf5bd9d55f33fe9dc43f580670fc	refs/heads/wave2000/guild-26
+a1876bbbf3a24914589be10b10d7a363eb1fa5d5	refs/heads/wave2000/guild-27
+db7eddbdb73404748e0b030d3e184bb113a892b0	refs/heads/wave2000/guild-31
+f7a2630bb93312aad9e8edff153e77b9589ed9dc	refs/heads/wave2000/guild-33
+d39ce846a24fe501747a878193840f25e56a2602	refs/heads/wave2000/guild-40

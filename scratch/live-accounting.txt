@@ -1,0 +1,10 @@
+planned=2040 spawned_coordinators=40 spawned_workers_unique=250 drain_killed=11 runnable=290 finished_guilds=1 finished_prose=[22,26,31] branches_on_origin=7 costs=unknown
+duplicates=0 anomalies=0 clock_skew_ms=-4800360.670410156
+queue guild=01 spawn_phase_ms=2100000
+queue guild=02 spawn_phase_ms=unknown
+queue guild=03 spawn_phase_ms=unknown
+queue guild=04 spawn_phase_ms=2100000
+queue guild=05 spawn_phase_ms=6000000
+review guild=29 ms=unknown basis=spawn→DONE
+NOT-PROVEN: prose-reported completions without timestamped DONE lines: 22,26,31
+NOT-PROVEN: no token/compute cost receipts observed; cost stays unknown per Dot constraint
