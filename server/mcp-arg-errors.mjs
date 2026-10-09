@@ -162,67 +162,44 @@ export function diagnoseArguments(schema, args, { base64Fields = [] } = {}) {
 }
 
 export function mcpCallError(id, { reason, tool, suggestion = null, missing = [], unexpected = [], invalid = {}, hint = null } = {}) {
+  const shaped = (code, message, data) => ({ jsonrpc: "2.0", id, error: { code, message, data } });
   if (reason === "auth_required") {
-    return {
-      jsonrpc: "2.0",
-      id,
-      error: {
-        code: -32001,
-        message: MCP_AUTH_MESSAGE,
-        data: {
-          tool: tool ?? null,
-          ...canonicalData({
-            reason: "auth_required",
-            category: "access",
-            hint: hint || MCP_AUTH_HINT,
-            next: agentErrorAx({ httpStatus: 401 }).next,
-          }),
-        },
-      }
-    };
+    return shaped(-32001, MCP_AUTH_MESSAGE, {
+      tool: tool ?? null,
+      ...canonicalData({
+        reason: "auth_required",
+        category: "access",
+        hint: hint || MCP_AUTH_HINT,
+        next: agentErrorAx({ httpStatus: 401 }).next,
+      }),
+    });
   }
   if (reason === "unknown_tool") {
-    return {
-      jsonrpc: "2.0",
-      id,
-      error: {
-        code: -32602,
-        message: "unknown_tool",
-        data: {
-          tool: tool ?? null,
-          suggestion,
-          ...canonicalData({
-            reason: "unknown_tool",
-            category: "not_found",
-            hint: suggestion
-              ? `Did you mean "${suggestion}"? Re-list tools with tools/list and use the exact snake_case name.`
-              : "No tool has a name close to that. Re-list tools with tools/list and use an exact snake_case name.",
-            // Re-list tools rather than directing an unknown-tool caller to
-            // a hosted access check that may require authentication (#1551).
-            next: [Object.freeze({ command: "tools/list" })],
-          }),
-        },
-      }
-    };
+    return shaped(-32602, "unknown_tool", {
+      tool: tool ?? null,
+      suggestion,
+      ...canonicalData({
+        reason: "unknown_tool",
+        category: "not_found",
+        hint: suggestion
+          ? `Did you mean "${suggestion}"? Re-list tools with tools/list and use the exact snake_case name.`
+          : "No tool has a name close to that. Re-list tools with tools/list and use an exact snake_case name.",
+        // Re-list tools rather than directing an unknown-tool caller to
+        // a hosted access check that may require authentication (#1551).
+        next: [Object.freeze({ command: "tools/list" })],
+      }),
+    });
   }
-  return {
-    jsonrpc: "2.0",
-    id,
-    error: {
-      code: -32602,
-      message: "invalid_arguments",
-      data: {
-        tool: tool ?? null,
-        missing,
-        unexpected,
-        invalid,
-        ...canonicalData({
-          reason: "invalid_arguments",
-          category: "input",
-          hint: hint ?? "Fix the flagged arguments and retry; re-list the tool schema with tools/list.",
-          next: [Object.freeze({ command: "tools/list" })],
-        }),
-      },
-    },
-  };
+  return shaped(-32602, "invalid_arguments", {
+    tool: tool ?? null,
+    missing,
+    unexpected,
+    invalid,
+    ...canonicalData({
+      reason: "invalid_arguments",
+      category: "input",
+      hint: hint ?? "Fix the flagged arguments and retry; re-list the tool schema with tools/list.",
+      next: [Object.freeze({ command: "tools/list" })],
+    }),
+  });
 }

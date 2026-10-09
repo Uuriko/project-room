@@ -18,6 +18,12 @@ const result = (id, value, isError = false) => ({
   result: { content: [{ type: 'text', text: JSON.stringify(value) }], structuredContent: value, ...(isError ? { isError: true } : {}) }
 });
 
+const mintErrorBody = error => error instanceof ServiceError
+  // 428 proof_required carries the proof recipe in detail so the client
+  // can solve it and resend — the same contract as the HTTP door.
+  ? { status: error.status, code: error.code, message: error.message, ...(error.detail ? { detail: error.detail } : {}) }
+  : { status: 500, code: 'internal', message: 'Request could not be completed' };
+
 const displayNameField = {
   // Length and content rules live in the store (the HTTP door's owner):
   // an empty or over-long name must surface the store's 422 invalid_identity,
@@ -81,14 +87,6 @@ export function handleIdentityMintMcp(store, message, { remoteAddress } = {}) {
     noteIdentityMint(store, created.identityId, { address: String(remoteAddress ?? ''), session: null, accountId: null });
     return result(requestId, created);
   } catch (error) {
-    if (error instanceof ServiceError) {
-      // 428 proof_required carries the proof recipe in detail so the client
-      // can solve it and resend — the same contract as the HTTP door.
-      return result(requestId, {
-        status: error.status, code: error.code, message: error.message,
-        ...(error.detail ? { detail: error.detail } : {})
-      }, true);
-    }
-    return result(requestId, { status: 500, code: 'internal', message: 'Request could not be completed' }, true);
+    return result(requestId, mintErrorBody(error), true);
   }
 }

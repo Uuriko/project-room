@@ -54,17 +54,16 @@ export function listedMcpTools(profile = "core", aliases = false, agent = null, 
     : profile === "full"
     ? hostedMcpToolDefs
     : CORE_MCP_TOOLS.map(name => hostedMcpToolDefs.find(entry => entry.name === name));
-  const tools = source.map(entry => {
-    const description = profile === "core" && CORE_MCP_BLURBS[entry.name] ? CORE_MCP_BLURBS[entry.name] : entry.description;
+  const described = source.map(entry => {
     const alias = mcpToolAlias(entry.name);
     return {
       ...entry,
-      description,
+      description: profile === "core" && CORE_MCP_BLURBS[entry.name] ? CORE_MCP_BLURBS[entry.name] : entry.description,
       ...(aliases && alias ? { aliases: [alias] } : {})
     };
   });
-  const listed = [...tools, ...MCP_JOIN_TOOLS];
-  return [...(agent ? listed.filter(tool => capabilityVisibleTo(agent, tool)) : listed), ...(profile === "full" ? publicWorkMcpDefinitions : [])].map(withOpenWorldHint);
+  const catalog = agent ? [...described, ...MCP_JOIN_TOOLS].filter(tool => capabilityVisibleTo(agent, tool)) : [...described, ...MCP_JOIN_TOOLS];
+  return [...catalog, ...(profile === "full" ? publicWorkMcpDefinitions : [])].map(withOpenWorldHint);
 }
 
 export function liveEnrolledMcpTools() {
