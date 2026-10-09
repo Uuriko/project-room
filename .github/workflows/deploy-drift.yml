@@ -44,7 +44,7 @@ jobs:
         run: |
           set +e
           set -o pipefail
-          node scripts/watch-deploy-drift.mjs --ref origin/main --max-prs "$MAX_PRS" --max-hours "$MAX_HOURS" | tee "$RUNNER_TEMP/drift.json"
+          node scripts/watch-deploy-drift.mjs --ref origin/main --max-prs "$MAX_PRS" --max-hours "$MAX_HOURS" --settle-ms 120000 | tee "$RUNNER_TEMP/drift.json"
           code=$?
           {
             echo "## Deploy drift"
