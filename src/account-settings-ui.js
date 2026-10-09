@@ -412,7 +412,9 @@ export function createAccountSettingsUI({ accountClient, credentials = null, onA
     status("Loading sign-in methods\u2026");
     try {
       const data = await accountClient.request("/api/auth/methods", { session });
-      state = { methods: Array.isArray(data.methods) ? data.methods : [], providers: data.providers ?? null };
+      state = { methods: Array.isArray(data.methods) ? data.methods : [], providers: data.providers ?? null,
+        // The unverified-email form and the password-reset banner render from this.
+        emailVerification: data.emailVerification ?? null };
       paint();
       status("");
     } catch (error) {
