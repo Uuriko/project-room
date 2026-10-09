@@ -291,10 +291,20 @@ const ACTIVE_CLAIM_STATES = ["claimed", "in_progress", "blocked"];
 // History actions that end a claim round (the item can be claimed again after
 // each of these). Used by appendWorkPullRequest to prove a previous round
 // existed when an outcome timestamp ties the current round's claimedAt.
-const ROUND_ENDED_ACTIONS = new Set(["pr_closed", "pr_merged", "state:unclaimed", "lease_expired"]);
+const ROUND_ENDED_ACTIONS = new Set(["pr_closed", "pr_merged", "state:unclaimed", "lease_expired", "succeeded"]);
 class ClaimError extends Error { constructor(code, message) { super(message); this.name = "ClaimError"; this.code = code; } }
 const fail = (code, message) => { throw new ClaimError(code, message); };
 const check = (condition, message) => { if (!condition) fail("invalid_claim_input", message); };
+// FIX-17 (WAVE-300): server-side succession epoch. Every leadership change
+// (claim, reassign, release, expiry, close, election) moves it; a fresh
+// claim round resets it to 0. Ballots in a successor election compare-and-
+// swap against this value — it is computed by the server, never trusted
+// from a client except as the expected value in a ballot.
+const successionEpochOf = value => {
+  if (value === undefined || value === null) return 0;
+  check(Number.isSafeInteger(value) && value >= 0, "successionEpoch must be a non-negative integer");
+  return value;
+};
 
 const toMs = value => {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -458,6 +468,7 @@ const workOf = value => {
     ...(requestOutcomes !== null ? { requestOutcomes } : {}),
     ...(historyOmitted > 0 ? { historyOmitted } : {}),
     claimedAt: value.claimedAt ?? null, leaseStartAt: value.leaseStartAt ?? null, leaseExpiresAt: value.leaseExpiresAt ?? null,
+    successionEpoch: successionEpochOf(value.successionEpoch),
     deliveryMode: value.deliveryMode ?? null, reviewPolicy: value.reviewPolicy ?? null,
     reviewedBy: value.reviewedBy ?? null, attestations: Object.freeze(attestations),
     tags, files, fileBlocks, blobs, dependsOn, pullRequest, pullRequests: listedPulls,
@@ -605,6 +616,7 @@ export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, p
   const declared = files === undefined || files === null ? null : claimedFilesOf(files);
   const links = pullRequest === undefined && pullRequests === undefined ? null : pullList(pullRequest, pullRequests);
   const claimed = { ...item, state: "claimed", owner: agent, claimedAt: isoOf(atMs),
+    successionEpoch: 0, // FIX-17: a fresh claim round starts a new election epoch
     files: declared ? declared.files : item.files,
     fileBlocks: declared
       ? Object.freeze({ ...fileBlocksOf(fileBlocks), ...declared.fileBlocks })
@@ -772,6 +784,9 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
   };
   const next = state === undefined ? { ...item, ...withProvenance } : { ...item, state,
     owner: released ? null : item.owner,
+    // FIX-17: a release is a leadership change — the epoch moves so a stale
+    // election ballot read before the release can never win after it.
+    successionEpoch: released ? item.successionEpoch + 1 : item.successionEpoch,
     leaseStartAt: released ? null : item.leaseStartAt, // a released claim holds no lease
     leaseExpiresAt: released ? null : item.leaseExpiresAt, // a released claim holds no lease
     // a released claim drops its reviews too — attestations belong to the
@@ -833,6 +848,7 @@ export function closeWork(work, agentId, { verb = "close", reason, now, authorit
       : `Only the holder of "${item.id}" or a claim manager (room owner or manage_claims) can close it`);
   }
   const closed = { ...item, state: next, owner: null, leaseStartAt: null, leaseExpiresAt: null,
+    successionEpoch: item.successionEpoch + 1, // FIX-17: leadership change moves the epoch
     attestations: Object.freeze([]), reviews: Object.freeze([]),
     files: Object.freeze([]), fileBlocks: Object.freeze({}) };
   return withHistory(closed, atMs, agent, verb === "cancel" ? "cancelled" : "closed", reason);
@@ -962,7 +978,48 @@ export function reassignWork(work, agentId, newOwner, { expectedClaimedAt, expec
   const claim = fresh ? { state: "claimed", claimedAt: isoOf(atMs),
     leaseStartAt: hours === null ? null : isoOf(atMs),
     leaseExpiresAt: hours === null ? null : isoOf(atMs + hours * 3600 * 1000) } : {};
-  return withHistory({ ...item, ...claim, owner: target, attestations: Object.freeze([]), reviews: Object.freeze([]) }, atMs, agent, `reassigned:${target}`, note);
+  // FIX-17: a fresh claim round starts a new election epoch; a held transfer moves it.
+  return withHistory({ ...item, ...claim, owner: target, successionEpoch: fresh ? 0 : item.successionEpoch + 1,
+    attestations: Object.freeze([]), reviews: Object.freeze([]) }, atMs, agent, `reassigned:${target}`, note);
+}
+// Deterministic successor election (FIX-17, WAVE-300).
+//
+// A ballot wins only by compare-and-swap on the server-side succession
+// epoch: the caller names the epoch it read (expectedEpoch), and the
+// transfer commits only when it still matches. The store serializes
+// commits, so racing ballots serialize too — the first committer wins and
+// every later ballot sees the bumped epoch and loses with
+// work_claim_conflict. Exactly one leader at every instant, never a
+// split-brain, and the outcome is deterministic: the winner is whoever's
+// ballot committed first, never a bully or a grab.
+//
+// A null lead is WAIT, never a crown: when the claim has no owner the
+// election refuses with no_leader_wait and leadership stays empty. The
+// caller waits for the claim path (or the sweep) to establish leadership
+// and ballots again — it never seizes the claim through the election.
+//
+// Eligibility (is this holder actually gone?) stays at the route layer,
+// exactly like FIX-12's /succeed: this machine only moves ownership, and
+// only on a winning CAS.
+export function electSuccessor(work, agentId, { expectedEpoch, note, now } = {}) {
+  const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  check(!isTerminalClaimState(item.state), `work "${item.id}" is ${item.state} — a closed claim holds no election`);
+  // Null lead = wait: with no leader the election crowns nobody. No bully,
+  // no grab — leadership is established by a fresh claim, never seized here.
+  if (item.owner === null || item.owner === undefined) {
+    fail("no_leader_wait", `work "${item.id}" has no leader — the election waits; claim it directly to start a new round`);
+  }
+  check(ACTIVE_CLAIM_STATES.includes(item.state), `work "${item.id}" is ${item.state} — only an active claim elects a successor`);
+  check(Number.isSafeInteger(expectedEpoch) && expectedEpoch >= 0, "expectedEpoch must be the current succession epoch (non-negative integer)");
+  check(item.owner !== agent, `work "${item.id}" is yours — you are already the leader`);
+  const epoch = item.successionEpoch;
+  if (expectedEpoch !== epoch) {
+    fail("work_claim_conflict", `work "${item.id}" succession epoch moved since it was read (expected ${expectedEpoch}, current ${epoch}) — re-read and ballot again`);
+  }
+  const elected = { ...item, owner: agent, successionEpoch: epoch + 1,
+    attestations: Object.freeze([]), reviews: Object.freeze([]) };
+  return withHistory(elected, atMs, agent, "succeeded",
+    note ?? `successor elected at epoch ${epoch}: previous leader ${item.owner}`);
 }
 // True when the item holds an active claim whose lease has lapsed. Items
 // without a lease, and items not under claim, never expire.
@@ -986,6 +1043,7 @@ export function releaseExpired(items, now) {
     // released claim drops its reviews too (attestations belong to the
     // lapsed owner's round of work, never to whoever claims next).
     const released = { ...item, state: "unclaimed", owner: null, leaseStartAt: null, leaseExpiresAt: null,
+      successionEpoch: item.successionEpoch + 1, // FIX-17: leadership change moves the epoch
       files: Object.freeze([]), fileBlocks: Object.freeze({}), attestations: Object.freeze([]), reviews: Object.freeze([]) };
     return withHistory(released, atMs, item.owner ?? "system", "lease_expired",
       `claim by ${item.owner ?? "nobody"} lapsed at ${item.leaseExpiresAt} — auto-released`);

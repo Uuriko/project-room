@@ -17,14 +17,14 @@ import { encodeRow, decodeRow } from "./persisted-row.mjs";
 // (plain JSON, no envelope) still load.
 export const WORK_CLAIM_ROW_KIND = "work-claim";
 const WORK_CLAIM_FIELDS = ["id", "title", "state", "owner", "history", "claimedAt",
-  "leaseStartAt", "leaseExpiresAt", "deliveryMode", "reviewPolicy", "reviewedBy",
+  "leaseStartAt", "leaseExpiresAt", "successionEpoch", "deliveryMode", "reviewPolicy", "reviewedBy",
   "attestations", "tags", "files", "fileBlocks", "blobs", "dependsOn", "parentClaimId", "evidenceRefs",
   "premiseFlag", "pullRequest", "pullRequests", "updatedAt",
   "repo", "branch", "chain", "supersededBy", "workItemId", "squadId",
   "kind", "revision", "ci", "reviews", "historyOmitted", "readingAcks", "deploy",
   "requestOutcomes"];
 const WORK_CLAIM_DEFAULTS = { title: null, state: "unclaimed", owner: null, history: [],
-  claimedAt: null, leaseStartAt: null, leaseExpiresAt: null, deliveryMode: null,
+  claimedAt: null, leaseStartAt: null, leaseExpiresAt: null, successionEpoch: 0, deliveryMode: null,
   reviewPolicy: null, reviewedBy: null, attestations: [], tags: [], files: [], fileBlocks: {}, blobs: [],
   dependsOn: [], parentClaimId: null, evidenceRefs: [], premiseFlag: null,
   pullRequest: null, pullRequests: [], updatedAt: null,

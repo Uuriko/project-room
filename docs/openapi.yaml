@@ -17293,6 +17293,10 @@ components:
         title: { type: string }
         state: { type: string, enum: [unclaimed, claimed, in_progress, blocked, done, closed] }
         owner: { type: [string, 'null'] }
+        successionEpoch:
+          type: integer
+          minimum: 0
+          description: Server-side election epoch. Moved by every leadership change (claim, reassign, release, lease-expiry sweep, close, election); reset to 0 on a fresh claim round. Successor-election ballots compare-and-swap against it.
         claimedAt: { type: [string, 'null'], format: date-time }
         leaseStartAt: { type: [string, 'null'], format: date-time }
         leaseExpiresAt: { type: [string, 'null'], format: date-time }

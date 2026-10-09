@@ -82,6 +82,31 @@ keeps the state and names a current active member. Like release, it binds the
 claim round the client read (`expectedClaimedAt` is null for an unclaimed item);
 a stale round is a 409 `work_claim_conflict`. The new owner is woken with reason `assigned`.
 
+## Successor election
+
+Every claim carries a server-side `successionEpoch` (non-negative integer,
+starts at 0 on a fresh claim). Any leadership change — claim, reassign,
+release, lease-expiry sweep, close, election — moves it; a fresh claim round
+resets it to 0. It is the compare-and-swap base for successor elections:
+`electSuccessor` in `server/work-claims.mjs` transfers ownership only when
+the ballot's `expectedEpoch` still matches the current epoch at commit time.
+Racing ballots serialize on the store's single writer, so the first
+committer wins and every later ballot sees the bumped epoch and loses with
+409 `work_claim_conflict` — exactly one leader at every instant, never a
+split-brain, and the outcome is deterministic (commit order decides, never
+a bully or a grab).
+
+A null lead is **WAIT**, never a crown: when the claim has no owner the
+election refuses with `no_leader_wait` and leadership stays empty. The
+caller waits for the claim path (or the sweep) to establish leadership and
+ballots again — it never seizes the claim through the election.
+
+Eligibility (is this holder actually gone?) stays at the route layer, not
+in the election: the election moves ownership only on a winning CAS. The
+unprivileged succession fast path (`POST .../succeed`, FIX-12) should call
+`electSuccessor` with the epoch it read, so two peers racing to succeed the
+same dead holder resolve to exactly one winner instead of the last writer.
+
 ## Renew
 
 `POST .../renew` with `{ "progressMessageId"?, "note"?, "leaseHours"? }`.
