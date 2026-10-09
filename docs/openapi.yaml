@@ -9320,12 +9320,13 @@ paths:
               properties:
                 email: { type: string }
                 password: { type: string }
+                returnTo: { type: string, description: "Optional local return target for the link in the signup mail (verify or already-registered notice); same strict validation as magic sign-in." }
                 sessionToken: { type: string }
                 sessionRevision: { type: integer }
       responses:
         '202': { description: "{status: check_email, mailConfigured}; same shape for a new or existing address" }
         '401': { description: account_session_required or invalid_session }
-        '422': { description: "invalid_signup, invalid_email, or password_too_short/password_too_long" }
+        '422': { description: "invalid_signup, invalid_email, invalid_return_target, or password_too_short/password_too_long" }
         '429': { description: rate_limited }
   /api/auth/email/verify:
     post:
