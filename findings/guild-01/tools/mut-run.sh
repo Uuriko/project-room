@@ -7,11 +7,15 @@ WT="$HOME/workspace/pr-g01-mut-$ID"
 OUT="$BASE/findings/guild-01/mutants-raw/$ID.txt"
 mkdir -p "$BASE/findings/guild-01/mutants-raw" "$BASE/.tmp"
 
-cleanup() { git -C "$BASE" worktree remove --force "$WT" >/dev/null 2>&1 || true; }
+cleanup() { git -C "$BASE" worktree remove --force "$WT" >/dev/null 2>&1 || true; rm -rf "$WT"; }
 trap cleanup EXIT
 
-git -C "$BASE" worktree add -f "$WT" -b "g01mut-$ID" wave1000/guild-01 >/dev/null 2>&1 || {
-  git -C "$BASE" worktree add -f "$WT" -b "g01mut-$ID-$(date +%s)" wave1000/guild-01 >/dev/null 2>&1; }
+git -C "$BASE" worktree remove --force "$WT" >/dev/null 2>&1 || true
+rm -rf "$WT"
+git -C "$BASE" branch -D "g01mut-$ID" >/dev/null 2>&1 || true
+
+git -C "$BASE" worktree add "$WT" -b "g01mut-$ID" wave1000/guild-01 >/dev/null 2>&1 || {
+  echo "WORKTREE ADD FAILED" >"$OUT"; cat "$OUT"; exit 1; }
 {
   echo "MUTANT $ID"
   python3 - "$WT" "$BASE/findings/guild-01/tools/mut-spec.json" "$ID" <<'EOF'

@@ -8,12 +8,23 @@ WT="$HOME/workspace/pr-g01-rev-$SLUG"
 OUT="$BASE/findings/guild-01/reverify-raw/$SLUG.md"
 mkdir -p "$BASE/findings/guild-01/reverify-raw" "$BASE/.tmp"
 
-cleanup() { git -C "$BASE" worktree remove --force "$WT" >/dev/null 2>&1 || true; git -C "$BASE" branch -D "g01rev-$SLUG" >/dev/null 2>&1 || true; }
+cleanup() { git -C "$BASE" worktree remove --force "$WT" >/dev/null 2>&1 || true; rm -rf "$WT"; git -C "$BASE" branch -D "g01rev-$SLUG" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
+
+# A killed earlier run can leave a stale dir/worktree entry behind; start clean.
+git -C "$BASE" worktree remove --force "$WT" >/dev/null 2>&1 || true
+rm -rf "$WT"
+git -C "$BASE" worktree prune >/dev/null 2>&1 || true
+git -C "$BASE" branch -D "g01rev-$SLUG" >/dev/null 2>&1 || true
 
 {
 echo "# re-verify $BRANCH"
-git -C "$BASE" worktree add -f "$WT" -b "g01rev-$SLUG" "$BRANCH" >/dev/null 2>&1
+if ! git -C "$BASE" worktree add "$WT" -b "g01rev-$SLUG" "$BRANCH" >/tmp/g01-rev-$SLUG-add.log 2>&1; then
+  echo "- WORKTREE ADD FAILED (not a rebase conflict):"
+  head -5 /tmp/g01-rev-$SLUG-add.log | sed 's/^/  /'
+  echo "## verdict: unit aborted — rerun"
+  exit 0
+fi
 cd "$WT"
 MB=$(git merge-base origin/main "$BRANCH")
 echo "- merge-base with origin/main: $MB"
@@ -77,7 +88,8 @@ if [ "$REBASED" = "1" ]; then
       echo "- PASS: $t"
     else
       echo "- FAIL: $t"
-      grep -E "^(not ok|# fail)" "$WT/.tmp/tap.log" | head -5 | sed 's/^/    /'
+      grep -E "^not ok" "$WT/.tmp/tap.log" | head -5 | sed 's/^/    /'
+      grep -m1 -A10 -E "^not ok" "$WT/.tmp/tap.log" | grep -E "error:|AssertionError|expected" | head -4 | sed 's/^/    detail: /'
     fi
   done
 else

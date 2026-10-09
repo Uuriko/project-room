@@ -1,7 +1,3 @@
 FUZZ F3
-F3: inputs=15 failures=4
-FAIL: lease monotonic: renewed expiry >= old expiry
-FAIL: lease monotonic: renewed expiry >= old expiry
-FAIL: lease monotonic: renewed expiry >= old expiry
-FAIL: lease monotonic: renewed expiry >= old expiry
-VERDICT: FINDINGS (exit 1)
+F3: inputs=15 failures=0
+VERDICT: PASS (no invariant violations)

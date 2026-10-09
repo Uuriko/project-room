@@ -1,0 +1,114 @@
+## server/work-claims.mjs
+- ACTIVE_CLAIM_STATES: server/agent-fleet.mjs, server/claim-pr-sync.mjs, server/land-queue.mjs, server/work-claim-routes.mjs
+- CI_STATES: NO IMPORTERS
+- CLAIM_KINDS: server/work-claim-routes.mjs
+- CLAIM_LIFECYCLE: tests/claims-state-machine.property.test.js
+- CLAIM_VERBS: tests/claims-state-machine.property.test.js
+- ClaimError: server/mcp-room-profile.mjs, server/required-reading.mjs, server/work-claim-routes.mjs, tests/claims-state-machine.property.test.js, tests/lease-renewal.test.js, tests/work-claim-conflict-hint.test.js, tests/work-claim-leases.test.js, tests/work-claim-multiprocess-race.test.js (+2)
+- DEFAULT_LEASE_HOURS: server/governance.mjs, tests/discoverability.test.js, tests/work-claim-leases.test.js
+- DEFAULT_MAX_MEMBER_OPEN_CLAIMS: tests/work-claim-guards.test.js, tests/work-claim-idempotency.test.js
+- DEFAULT_MAX_OPEN_CLAIMS: tests/work-claim-guards.test.js
+- DELIVERY_MODES: tests/work-claim-leases.test.js
+- HARD_WORK_TAGS: NO IMPORTERS
+- MAX_CLAIM_HISTORY: server/claim-autolink.mjs, tests/work-claim-integrity.test.js
+- MAX_LEASE_HOURS: scripts/agent-inbox.mjs, server/governance.mjs, server/work-claim-routes.mjs, tests/discoverability.test.js
+- MAX_PROVENANCE_WALK: NO IMPORTERS
+- REVIEW_POLICIES: server/governance.mjs, server/work-claim-routes.mjs, tests/work-claim-leases.test.js
+- REVIEW_VERDICTS: NO IMPORTERS
+- STATES: scripts/herdr-migrate.mjs, server/agent-fleet.mjs, server/claim-autolink.mjs, server/claim-pr-sync.mjs, server/governance.mjs, server/land-queue.mjs, server/needs-me.mjs, server/store.mjs (+4)
+- TERMINAL_CLAIM_STATES: scripts/herdr-migrate.mjs, tests/claims-state-machine.property.test.js
+- TRANSITIONS: tests/claims-state-machine.property.test.js
+- appendWorkPullRequest: server/work-claim-routes.mjs, tests/claim-pr-sync-room-scoping.test.js, tests/claim-settle-1526.test.js, tests/work-claim-batch-outcome.test.js, tests/work-claim-settle-retry.test.js, tests/work-claims.test.js
+- attestWork: server/work-claim-routes.mjs, tests/work-claim-leases.test.js
+- canCloseWork: server/work-claim-routes.mjs, tests/work-claim-leases.test.js, tests/work-claims.test.js
+- claimHistoryLength: server/work-claim-routes.mjs, tests/claim-pr-sync-room-scoping.test.js, tests/claim-settle-1526.test.js, tests/work-claim-batch-outcome.test.js, tests/work-claim-multiprocess-race.test.js, tests/work-claim-settle-retry.test.js
+- claimUpdatedAt: server/agent-fleet.mjs, server/needs-me.mjs, server/work-claim-routes.mjs
+- claimWork: cloudflare/store-worker.test-fixture.mjs, relay/checks/harness.mjs, scripts/qa3/board-growth.mjs, scripts/recovery-fixture.mjs, server/agent-rooms.mjs, server/land-queue.mjs, server/public-work-claims.mjs, server/room-guide.mjs (+29)
+- clearPremiseFlag: server/work-claim-routes.mjs, tests/work-claim-provenance.test.js
+- closeWhenLive: server/claim-pr-sync.mjs, server/work-claim-routes.mjs
+- closeWork: server/work-claim-routes.mjs, tests/claims-state-machine.property.test.js
+- createWork: cloudflare/public-work-claims.check.mjs, cloudflare/store-worker.test-fixture.mjs, relay/checks/harness.mjs, scripts/qa3/board-growth.mjs, scripts/recovery-fixture.mjs, server/agent-rooms.mjs, server/land-queue.mjs, server/public-work-claims.mjs (+33)
+- creatorOf: tests/claims-state-machine.property.test.js
+- flagPremiseInvalid: server/work-claim-routes.mjs, tests/work-claim-provenance.test.js
+- hasCurrentReview: server/needs-me.mjs, server/work-claim-events.mjs
+- isHardWork: server/needs-me.mjs, server/work-claim-routes.mjs
+- isLeaseExpired: tests/claim-settle-1526.test.js, tests/work-claim-leases.test.js, tests/work-claim-reassign-unclaimed.test.js
+- isReceiptTag: server/work-claim-routes.mjs
+- isTerminalClaimState: server/work-claim-routes.mjs, tests/claims-state-machine.property.test.js
+- namedReviewers: NO IMPORTERS
+- nextClaimState: tests/claims-state-machine.property.test.js
+- notePullMerged: server/claim-pr-sync.mjs
+- reassignWork: server/work-claim-routes.mjs, tests/work-claim-leases.test.js, tests/work-claim-reassign-unclaimed.test.js, tests/work-claims.test.js
+- recordCi: server/claim-pr-sync.mjs, tests/needs-me-open-work.test.js, tests/work-claims.test.js
+- recordReview: server/work-claim-routes.mjs, tests/agent-fleet.test.js, tests/f12-board-mcp.test.js, tests/needs-me-open-work.test.js, tests/work-claim-leases.test.js, tests/work-claim-retention.test.js, tests/work-claims.test.js
+- releaseExpired: server/claim-pr-sync.mjs, server/public-work-claims.mjs, server/work-claim-routes.mjs, tests/audit-wave-low-c.test.js, tests/work-claim-leases.test.js, tests/work-claim-reassign-unclaimed.test.js
+- renewWork: server/public-work-claims.mjs, server/work-claim-mirror.mjs, server/work-claim-routes.mjs, tests/audit-wave-low-c.test.js, tests/lease-renewal.test.js, tests/work-claim-client.test.js, tests/work-claim-create-note.test.js, tests/work-claim-leases.test.js (+4)
+- resolveNamedReviewers: server/needs-me.mjs, server/work-claim-events.mjs
+- roomWorkClaimConfig: server/land-queue.mjs, server/work-claim-mirror.mjs, server/work-claim-routes.mjs, server/work-claim-sqlite.mjs, tests/work-claim-leases.test.js, tests/work-claim-reassign-unclaimed.test.js
+- stampClaimHistory: server/required-reading.mjs
+- summarizeClaimHistory: server/work-claim-routes.mjs
+- unclaimedWork: tests/work-claim-leases.test.js, tests/work-claims.test.js
+- updateWork: relay/checks/harness.mjs, scripts/qa3/board-growth.mjs, server/public-work-claims.mjs, server/room-guide.mjs, server/work-claim-mirror.mjs, server/work-claim-routes.mjs, tests/agent-fleet.test.js, tests/agent-rooms.test.js (+14)
+- walkProvenance: server/mcp-room-profile.mjs, server/work-claim-routes.mjs, tests/work-claim-provenance.test.js
+- workOwnedBy: tests/work-claim-leases.test.js, tests/work-claims.test.js
+## server/work-claim-events.mjs
+- CLAIM_EVENT_COALESCE_MS: NO IMPORTERS
+- WORK_CLAIM_ACTIONS: NO IMPORTERS
+- claimEventCoalesced: NO IMPORTERS
+- emitWorkClaimEvent: server/agent-rooms.mjs, server/claim-autolink.mjs, server/claim-pr-sync.mjs, server/room-guide.mjs, server/starter-room.mjs, server/work-claim-mirror.mjs, server/work-claim-routes.mjs, tests/analytics-fixture.mjs (+1)
+- enqueueClaimWake: server/claim-pr-sync.mjs, server/room-guide.mjs, server/work-claim-routes.mjs, server/work-wants.mjs
+- wakeNamedReviewers: server/claim-pr-sync.mjs, server/work-claim-routes.mjs, tests/needs-me-open-work.test.js
+- workClaimEventData: tests/work-claim-events.test.js
+## server/work-claim-integrity.mjs
+- BOARD_LEASE_HOURS_MAX: tests/work-claim-integrity.test.js
+- BOARD_LEASE_HOURS_MIN: NO IMPORTERS
+- DEPLOY_STATUS_MAX_AGE_MS: NO IMPORTERS
+- DONE_WINDOW_MS: server/work-claim-routes.mjs
+- EVENT_BUDGET_RESERVE: tests/work-claim-integrity.test.js
+- LIST_HISTORY_ENTRIES: server/work-claim-routes.mjs
+- assertBoardEventBudget: server/work-claim-routes.mjs, tests/work-claim-integrity.test.js
+- assertBoardLeaseHours: server/work-claim-routes.mjs, tests/work-claim-integrity.test.js
+- assertDependsOnKnown: server/work-claim-routes.mjs, tests/work-claim-integrity.test.js
+- boardText: server/work-claim-routes.mjs, tests/work-claim-integrity.test.js
+- boardTextFields: server/work-claim-routes.mjs
+- clientPullRequestInput: server/work-claim-routes.mjs, tests/work-claim-integrity.test.js
+- readBoardDeployStatus: server/work-claim-routes.mjs
+- roomEventsRemaining: server/work-claim-routes.mjs, tests/work-claim-integrity.test.js
+## server/work-claim-mirror.mjs
+- boardClaimId: tests/claim-scopes.test.js
+- mirrorProjectionClaim: server/store.mjs
+## server/work-claim-routes.mjs
+- buildWorkClaimPage: server/mcp-full-profile.mjs, server/routes/work-claims.mjs
+- closeWorkClaim: server/mcp-full-profile.mjs, tests/work-claim-pr-link.test.js
+- createWorkClaimRegistry: tests/claim-settle-1526.test.js, tests/lease-renewal.test.js, tests/receipt-search.test.js, tests/required-reading.test.js, tests/work-claim-batch-outcome.test.js, tests/work-claim-conflict-hint.test.js, tests/work-claim-duplicates.test.js, tests/work-claim-files.test.js (+9)
+- fileWarningsFor: NO IMPORTERS
+- handleWorkClaims: server/http.mjs, server/routes/work-claims.mjs, tests/claim-autolink.test.js, tests/claim-settle-1526.test.js, tests/lease-renewal.test.js, tests/receipt-search.test.js, tests/required-reading.test.js, tests/work-claim-board.test.js (+15)
+- linkWorkClaimPullRequest: server/mcp-full-profile.mjs
+- mayWriteWorkClaims: server/needs-me.mjs
+- workClaimRegistry: NO IMPORTERS
+## server/work-claim-sqlite.mjs
+- WORK_CLAIM_ROW_KIND: tests/persisted-row.test.js
+- createDurableWorkClaimRegistry: cloudflare/public-work-claims.check.mjs, server/store.mjs, tests/claim-pr-sync-room-scoping.test.js, tests/persisted-row.test.js, tests/public-work-claim-fence.test.js, tests/required-reading.test.js, tests/work-claim-multiprocess-race.test.js, tests/work-claim-sqlite.test.js
+- workClaimSchema: server/store.mjs, tests/claim-pr-sync-room-scoping.test.js, tests/persisted-row.test.js, tests/required-reading.test.js, tests/work-claim-multiprocess-race.test.js, tests/work-claim-sqlite.test.js
+## server/claim-coordination.mjs
+- PULL_CANDIDATE_CAP: server/claim-pr-sync.mjs
+- PULL_MISSING_BACKOFF_MS: server/claim-pr-sync.mjs
+- PULL_POLL_BACKOFF_MS: NO IMPORTERS
+- batchPullOutcome: server/claim-pr-sync.mjs, tests/claim-settle-1526.test.js, tests/work-claim-batch-outcome.test.js
+- fileLeaseConflictBody: server/work-claim-routes.mjs
+- fileLeaseConflicts: server/work-claim-routes.mjs
+- holdForRateLimit: server/claim-pr-sync.mjs, server/work-claim-routes.mjs
+- nextPullBackoff: server/claim-pr-sync.mjs
+- parsePullRequestUrl: client/mcp-stdio.mjs, server/claim-autolink.mjs, server/work-claims.mjs
+- pullLinks: server/claim-autolink.mjs, server/claim-pr-sync.mjs, tests/work-claim-settle-missing-link.test.js
+- pullRequestDue: server/claim-pr-sync.mjs, tests/work-claim-pr-link.test.js
+- pullRequestOutcomeFromApi: server/claim-pr-sync.mjs
+- pullRequestOutcomeFromWebhook: server/claim-pr-sync.mjs, tests/work-claim-pr-link.test.js
+- pullsReadyToSettle: server/claim-pr-sync.mjs, tests/claim-settle-1526.test.js, tests/work-claim-batch-outcome.test.js
+- rateLimitUntil: server/claim-autolink.mjs, server/claim-pr-sync.mjs
+- readyClaims: server/work-claim-routes.mjs, tests/work-claim-ready-queue.test.js
+- recordPullOutcome: server/claim-pr-sync.mjs, tests/claim-settle-1526.test.js, tests/work-claim-batch-outcome.test.js
+- rememberPoll: server/claim-pr-sync.mjs
+- rollupClaimCi: server/claim-pr-sync.mjs
+- settlePullRequest: server/claim-pr-sync.mjs, tests/claim-settle-1526.test.js, tests/work-claim-batch-outcome.test.js, tests/work-claim-settle-double.test.js, tests/work-claim-settle-missing-link.test.js
+- usableEtag: server/claim-pr-sync.mjs

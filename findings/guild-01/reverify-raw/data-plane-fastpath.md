@@ -1,6 +1,6 @@
 # re-verify wave300/data-plane-fastpath
 - merge-base with origin/main: a21c23643b36f18464ee2eee6a6939380a36079c
-- origin/main: 438081a3b
+- origin/main: 68ec17e83
 ## rebase
 - rebase onto origin/main: CLEAN
 ## slice files changed (origin/main...HEAD)
@@ -22,3 +22,7 @@
 - tests/work-claim-board.test.js
 - tests/work-claim-client.test.js
 - tests/work-claim-durable-http.test.js
+- PASS: tests/work-claim-board.test.js
+- FAIL: tests/work-claim-client.test.js
+- PASS: tests/work-claim-durable-http.test.js
+## verdict: recorded above
