@@ -3,9 +3,11 @@
 Date: 2026-10-08. Worker: wave500 W1 (coordinator 5/6, swarm-scale presence + streaming).
 Branch: `wave500/presence-w1-scale`. Harness: `perf/wave500-sse-scale-bench.mjs`.
 
-**Label: SIM.** Measurement only — F1 (shared SSE pump) is designed but not
-implemented; these numbers are the before-baseline for the current
-per-stream-`setInterval` pump in `server/http.mjs` `stream()`.
+**Label: SIM — PRE-F1 BASELINE.** Measurement only — F1 (shared SSE pump) is
+designed but not implemented on this branch; these numbers are the
+before-baseline for the current per-stream-`setInterval` pump in
+`server/http.mjs` `stream()`. Do not compare against post-F1 numbers without
+noting the pump change (see § Post-F1 comparison).
 
 ## What was measured
 
@@ -71,6 +73,7 @@ numbers but not move the CPU-demand ceiling.
 | 200 | 192.3 (175.9–204.5) | 0.9 (0.9–1.0) | 0.26 (0.24–0.28) | 551 (474–673) | 2067 (1606–2410) | 17771 (14741–19893) | 15.5 (14.9–15.8) |
 | 300 | 198.5 (141.3–244.5) | 0.9 (0.8–0.9) | 0.19 (0.14–0.23) | 974 (918–1019) | 2923 (2846–2977) | 18491 (12755–22960) | 15.2 (14.8–15.8) |
 | 400 | 134.9 (125.0–141.1) | 0.8 (0.7–0.9) | 0.11 (0.10–0.13) | 1849 (1531–2276) | 4781 (3979–5314) | 12247 (10718–13031) | 18.8 (15.3–21.7) |
+| 500 | 281.7 (213.8–394.6) | 0.8 (0.8–0.9) | 0.17 (0.12–0.25) | 1832 (1561–2283) | 4756 (4092–5676) | 26577 (19116–38376) | 13.0 (11.7–14.2) |
 <!-- /TABLE -->
 
 Values are mean (min–max) over 3 runs per N. per-tick ms = cpuMsPerSec ÷
@@ -82,22 +85,25 @@ fixed in 48f092951 with a loop max — same value, no metric change). The
 p50/p99 lateness columns mostly describe opens under contention, not the
 10 s measurement window; this is consistent across all N.
 
-Per-tick cost is flat in N (≈0.9–1.2 ms): one stream's pump tick costs the
-same whether 100 or 500 streams share the loop. CPU demand therefore scales
-linearly: **Demand(N) ≈ N × 4 × ~1.0 ms ≈ 4·N ms/s**.
+Per-tick cost is flat in N (0.7–1.2 ms, mean 0.93 ms across N=100–500): one
+stream's pump tick costs the same whether 100 or 500 streams share the loop.
+CPU demand therefore scales linearly: **Demand(N) ≈ N × 4 × 0.93 ms ≈
+3.7·N ms/s**. `rows/s` and `cpuMsPerSec` move with box contention (N=500 ran
+at load 13 and out-delivered N=400 at load 19) — they are not the ceiling
+signal; the scheduler-independent per-tick cost is.
 
 ## Ceiling
 
-**Measured ceiling: ~210–290 concurrent SSE streams per Node thread**
-(analytical: N* = 1000 / (4 × perTickMs)).
+**Measured ceiling: ~250–270 concurrent SSE streams per Node thread**
+(analytical: N* = 1000 / (4 × perTickMs); perTick mean 0.93 ms over N=100–500).
 
-- At N=100 the pump already burns ~300–400 ms/s — a third of the thread —
-  and tick lateness is degraded even in the cleanest run (p50 ~30 ms,
-  p99 200–430 ms).
-- Linear demand crosses 1000 ms/s at N ≈ 250 (perTick ≈ 1.0 ms). Beyond that
-  the thread cannot serve the 250 ms cadence: ticks shed (delivery ratio
-  falls), lateness explodes, and added streams buy no throughput — the loop
-  is saturated.
+- Demand(N) ≈ N × 4 × 0.93 ms ≈ 3.7·N ms/s crosses the 1000 ms/s
+  single-thread budget at N ≈ 270. At N=400 demand is ~1500 ms/s, at N=500
+  ~1850 ms/s — the thread is 50–85% oversubscribed. N=500 did not reveal a
+  ceiling beyond the analytical one; it confirmed the loop is deep past it.
+- Past the ceiling the signatures are all present: delivery ratio falls
+  (0.37 → 0.11), tick lateness explodes (p99 1360 ms → ~4800 ms), and the
+  loop sheds ticks instead of doing more work.
 - The current 100-stream global cap means a single production server can
   never reach this ceiling today; the ceiling binds only if the cap is
   raised or F1 changes the per-stream cost. For F1's before/after: F1 must
@@ -112,6 +118,20 @@ Comparison with prior baselines (same 100-stream, full-page regime):
 | perf guild w6 (SIM, 10/07) | ~25 s event-loop work/s (differently-defined metric — summed delay, not CPU) |
 | F1 bench `tests/bench-fanout-f1.mjs` before (10/08) | pump cpu burn 162.1 ms/s; event-loop delay mean 759.92 ms |
 | This series (SIM, 10/08) | cpu ~290 ms/s (clean series) / ~180 ms/s (contended, scheduler-throttled); per-tick ~0.85–1.2 ms |
+
+## Post-F1 comparison (informational, separate tree)
+
+<!-- POSTF1 -->
+One N=100 round was run against the F1 tree (`wave500/presence` @ 86ac6a90a,
+shared SSE pump) with the same harness, for a rough before/after signal.
+W2's own SIM before/after numbers are authoritative; this is a spot check.
+
+| N | tree | cpu ms/s | per-tick ms | delivery ratio | late p50/p99 (ms) |
+|---|------|----------|-------------|----------------|-------------------|
+| 100 | pre-F1 (`wave500/presence-w1-scale`) | 177.4 | 1.2 | 0.37 | 390 / 1360 |
+| 100 | post-F1 (`wave500/presence` @ 86ac6a90a) | — | — | — | — |
+
+<!-- /POSTF1 -->
 
 ## Reproduce
 
