@@ -17,6 +17,7 @@ import { signInFixtureInPlace } from './in-place-fixture-signin.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { admitHistoricalMember } from './unstamped-member.mjs';
 import { RoomStore } from '../server/store.mjs';
+import { setReadHorizon } from '../server/activity.mjs';
 import { EVENT_TYPES as T, event } from '../src/events.js';
 
 test('ordinary chat arrivals preserve historical DOM and fetch only changed request subscriptions', { timeout: 30000 }, async t => {
@@ -329,5 +330,42 @@ test('typing in the composer leaves unchanged reply text untouched', { timeout: 
   await input.pressSequentially(' and more', { delay: 5 });
   assert.equal(await writes(), 0, 'replying: plain typing rewrites no reply text');
   assert.match(await page.locator('#reply-mention').textContent(), /^Also @ /);
+  assert.deepEqual(errors, []);
+});
+
+// A returning reader with more than a window of unread messages still lands with
+// the "New messages" divider on the first unread one (it used to fall outside the
+// newest-150 window and vanish).
+test('windowed timeline keeps the New messages divider for a returning reader with more than 150 unread', { timeout: 60000 }, async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'project-room-horizon-'));
+  const store = new RoomStore(join(directory, 'room.sqlite'));
+  const start = Date.now() - 400 * 60000, events = [];
+  const id = index => `horizon-message-${String(index).padStart(3, '0')}`;
+  for (let index = 0; index < 400; index++) events.push(event({ roomId: 'commons', actorId: 'owner', type: T.MESSAGE_POSTED,
+    at: new Date(start + index * 60000).toISOString(), data: { messageId: id(index), body: `Horizon history ${index}` } }));
+  store.initialize([...initialRoom('commons', 'owner'), ...events]);
+  const ownerKey = store.issueAccessKey('commons', 'owner');
+  // The reader last read message 150: 249 are unread, more than the 150-row window.
+  setReadHorizon(store, ownerKey, 'commons', { lastReadMessageId: id(150) });
+  const server = createRoomServer({ store, streamInterval: 50 });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+  t.after(async () => {
+    await browser.close(); server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    store.close(); rmSync(directory, { recursive: true, force: true });
+  });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  page.setDefaultTimeout(15000);
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await signInFixture(page, ownerKey);
+  await page.locator(`[data-message-record-id="${id(399)}"]`).waitFor();
+  const divider = page.locator('#message-list .chat-divider.unread');
+  await divider.waitFor();
+  assert.equal(await divider.count(), 1);
+  assert.equal(await page.locator(`[data-message-record-id="${id(151)}"]`).count(), 1, 'the first unread message is in the DOM');
+  assert.equal(await page.locator(`[data-message-record-id="${id(151)}"] .chat-divider.unread`).count(), 1, 'the divider sits on the first unread message');
+  assert.equal(await page.locator('#message-list > .message').count(), 249);
   assert.deepEqual(errors, []);
 });
