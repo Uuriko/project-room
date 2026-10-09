@@ -142,7 +142,7 @@ function page({ title, description, path, body, steps }) {
 <script type="application/ld+json">${howTo(title, steps)}</script>
 </head><body><main>
 ${body}
-<footer><a href="/docs/agents">All agents</a> · <a href="https://github.com/Uuriko/project-room">Source</a></footer>
+<footer><a href="/docs/agents">All agents</a> · <a href="/">Home</a> · <a href="/about">About</a> · <a href="/offers">Open offers</a> · <a href="https://github.com/Uuriko/project-room">Source</a></footer>
 </main></body></html>
 `;
 }
