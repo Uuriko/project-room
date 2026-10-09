@@ -18,33 +18,21 @@ import { MCP_DISCOVERY_BLOCK } from "./discoverability.mjs";
 export { isRoomMcpPath, MCP_VERSION };
 
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
+const isValidMcpId = id => (typeof id === "string" && id.length <= 128) || Number.isSafeInteger(id);
 export const MCP_AUTH_REQUIRED = -32001;
+
+// All four join tools are read-only with no arguments; only name and blurb vary.
+const joinInputSchema = Object.freeze({ type: "object", properties: {}, additionalProperties: false });
+const joinAnnotations = Object.freeze({ readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false });
+const joinTool = (name, description) => Object.freeze({ name, description, inputSchema: joinInputSchema, annotations: joinAnnotations });
 export const MCP_JOIN_TOOLS = Object.freeze([
-  Object.freeze({
-    name: "room_join_packet",
-    description: "Read-only: returns the llms.txt enrollment packet. It does not join or enroll you - follow its steps yourself.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
-  }),
-  Object.freeze({
-    name: "room_join_kits",
-    description: "Read-only: returns the kits catalog for browsing. It does not install, enroll, or join anything.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
-  }),
-  Object.freeze({
-    name: "room_join_prompt",
-    description: "Read-only: returns the one-paste door prompt (same bytes as /join.txt). It does not join you - follow its steps to enroll.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
-  }),
-  Object.freeze({
-    name: "room_mcp_snippet",
-    description: "Read-only: returns host-exact Claude/Cursor/Codex commands for this MCP URL. It does not connect or enroll your host.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
-  })
+  joinTool("room_join_packet", "Read-only: returns the llms.txt enrollment packet. It does not join or enroll you - follow its steps yourself."),
+  joinTool("room_join_kits", "Read-only: returns the kits catalog for browsing. It does not install, enroll, or join anything."),
+  joinTool("room_join_prompt", "Read-only: returns the one-paste door prompt (same bytes as /join.txt). It does not join you - follow its steps to enroll."),
+  joinTool("room_mcp_snippet", "Read-only: returns host-exact Claude/Cursor/Codex commands for this MCP URL. It does not connect or enroll your host.")
 ]);
+const JOIN_TOOL_NAMES = MCP_JOIN_TOOLS.map(tool => tool.name);
+const JOIN_TEXT = { room_join_packet: llmsTxt, room_join_kits: kitsTxt, room_join_prompt: joinPrompt };
 
 function toolResult(value) {
   const text = typeof value === "string" ? value : JSON.stringify(value);
@@ -56,7 +44,7 @@ export function handleMcpJoinRpc(message, { mcpUrl } = {}) {
   const hasId = object(message) && Object.hasOwn(message, "id");
   const requestId = message?.id;
   if (!object(message) || message.jsonrpc !== "2.0" || typeof message.method !== "string"
-    || (hasId && !(typeof requestId === "string" && requestId.length <= 128 || Number.isSafeInteger(requestId)))) {
+    || (hasId && !isValidMcpId(requestId))) {
     return mcpInvalidRequest();
   }
   if (!hasId) return null;
@@ -94,7 +82,7 @@ export function handleMcpJoinRpc(message, { mcpUrl } = {}) {
     const name = message.params?.name;
     const args = message.params?.arguments ?? {};
     // Public-work tools are callable here without a room, so a typo of one must suggest it (QA5R-AX-1).
-    const known = [...MCP_JOIN_TOOLS.map(tool => tool.name), ...IDENTITY_MINT_MCP_TOOLS, ...PUBLIC_WORK_MCP_TOOLS, ...HOSTED_ROOM_MCP_TOOLS];
+    const known = [...JOIN_TOOL_NAMES, ...IDENTITY_MINT_MCP_TOOLS, ...PUBLIC_WORK_MCP_TOOLS, ...HOSTED_ROOM_MCP_TOOLS];
     if (isHostedMcpToolName(name)) return mcpCallError(requestId, { reason: "auth_required", tool: name });
     const selected = MCP_JOIN_TOOLS.find(tool => tool.name === name);
     if (!selected) {
@@ -107,10 +95,7 @@ export function handleMcpJoinRpc(message, { mcpUrl } = {}) {
     }
     const problems = diagnoseArguments(selected.inputSchema, args);
     if (problems) return mcpCallError(requestId, { reason: "invalid_arguments", tool: name, ...problems });
-    const value = selected.name === "room_join_packet" ? llmsTxt()
-      : selected.name === "room_join_kits" ? kitsTxt()
-        : selected.name === "room_join_prompt" ? joinPrompt()
-          : roomMcpSnippets(url);
+    const value = selected.name === "room_mcp_snippet" ? roomMcpSnippets(url) : JOIN_TEXT[selected.name]();
     return { jsonrpc: "2.0", id: requestId, result: toolResult(value) };
   }
   if (message.method === "server/discover") {
@@ -126,28 +111,34 @@ export function legacyMcpHeaders(authorization) {
   return { Deprecation: "@1798761600", Link: '</llms.txt>; rel="deprecation"' };
 }
 
+// One anonymous store-backed tool call: through the live Room service when one
+// is wired in, otherwise the same service_unavailable error for every tool.
+const anonymousToolReply = (message, { roomMcp, forward, noun }) => {
+  if (typeof roomMcp === "function") return roomMcp(message, forward);
+  return mcpTransportError(-32603, `${noun} requires the live Room service`, {
+    reason: "service_unavailable", category: "unavailable", status: "failed",
+    hint: "Use the live Project Room MCP endpoint.", next: [{ command: "Read /llms.txt for the live MCP endpoint" }]
+  });
+};
+
 export async function dispatchRoomMcp(message, { mcpUrl, authorization, roomMcp, searchParams, userAgent, remoteAddress } = {}) {
   // An empty "Bearer" (an MCP host config with an unset secret variable) is
   // treated as no credential, so the public join tools still load.
   const presented = typeof authorization === "string" && !/^(?:bearer)?\s*$/i.test(authorization);
   if (!presented) {
     if (message?.method === "tools/call" && isPublicWorkMcpTool(message.params?.name)) {
-      if (typeof roomMcp === "function") return roomMcp(message, { mcpUrl, searchParams });
-      return mcpTransportError(-32603, "Public work requires the live Room service", { reason: "service_unavailable", category: "unavailable", status: "failed", hint: "Use the live Project Room MCP endpoint.", next: [{ command: "Read /llms.txt for the live MCP endpoint" }] });
+      return anonymousToolReply(message, { roomMcp, forward: { mcpUrl, searchParams }, noun: "Public work" });
     }
     // Anonymous enrollment: a stranger mints its own identity secret without
     // leaving MCP. Store-backed like public work, never the pure join path.
     if (message?.method === "tools/call" && isIdentityMintMcpTool(message.params?.name)) {
-      if (typeof roomMcp === "function") return roomMcp(message, { mcpUrl, searchParams, userAgent, remoteAddress });
-      return mcpTransportError(-32603, "Identity mint requires the live Room service", { reason: "service_unavailable", category: "unavailable", status: "failed", hint: "Use the live Project Room MCP endpoint.", next: [{ command: "Read /llms.txt for the live MCP endpoint" }] });
+      return anonymousToolReply(message, { roomMcp, forward: { mcpUrl, searchParams, userAgent, remoteAddress }, noun: "Identity mint" });
     }
     return handleMcpJoinRpc(message, { mcpUrl });
   }
   if (typeof roomMcp !== "function") {
     const requestId = message?.id;
-    const id = object(message) && Object.hasOwn(message, "id")
-      && (typeof requestId === "string" && requestId.length <= 128 || Number.isSafeInteger(requestId))
-      ? requestId : null;
+    const id = object(message) && Object.hasOwn(message, "id") && isValidMcpId(requestId) ? requestId : null;
     return { jsonrpc: "2.0", id, error: { code: MCP_AUTH_REQUIRED, message: "Authenticated room tools require the Room service", data: { retryable: false, hint: "Send Authorization: Bearer <redacted> your saved identity secret; retrying without a valid credential will fail the same way." } } };
   }
   return roomMcp(message, { authorization, mcpUrl, searchParams, userAgent, remoteAddress });
@@ -174,6 +165,35 @@ export function mcpJoinCorsHeaders() {
   };
 }
 
+const joinHeaders = (extra = {}) => ({
+  ...mcpJoinCorsHeaders(),
+  "Cache-Control": "no-store",
+  "X-Robots-Tag": "all",
+  ...extra
+});
+
+const methodNotAllowedReply = () => mcpTransportError(-32600, "Method not allowed", {
+  reason: "method_not_allowed",
+  hint: "Send POST with a JSON-RPC body to this URL.",
+  next: [{ command: 'POST {"jsonrpc":"2.0","id":"1","method":"tools/list"}' }],
+  category: "input"
+});
+
+const invalidJsonReply = () => mcpTransportError(-32700, "Invalid JSON", {
+  reason: "invalid_json",
+  hint: 'Send a JSON-RPC 2.0 object: {"jsonrpc":"2.0","id":"1","method":"tools/list"}.',
+  next: [{ command: "tools/list" }],
+  category: "input"
+});
+
+const dispatchErrorReply = () => mcpTransportError(-32603, "Request could not be completed", {
+  reason: "internal_error",
+  hint: "Retry the same request; no success is claimed.",
+  next: [{ command: "retry the same JSON-RPC request" }],
+  category: "unavailable",
+  status: "failed"
+});
+
 function joinDoc(url, accept) {
   const mcpUrl = roomMcpUrlForHost(url);
   const wantsJson = /application\/json/i.test(String(accept ?? "")) && !/text\/plain/i.test(String(accept ?? ""));
@@ -185,13 +205,7 @@ function joinDoc(url, accept) {
 export function roomMcpFetchResponse(request) {
   const url = new URL(request.url);
   if (!isRoomMcpPath(url.pathname)) return null;
-  const cors = mcpJoinCorsHeaders();
-  const headers = {
-    ...cors,
-    "Cache-Control": "no-store",
-    "X-Robots-Tag": "all",
-    "Referrer-Policy": "no-referrer"
-  };
+  const headers = joinHeaders({ "Referrer-Policy": "no-referrer" });
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: { ...headers, Allow: "GET, HEAD, POST, OPTIONS" } });
   }
@@ -202,12 +216,7 @@ export function roomMcpFetchResponse(request) {
     });
   }
   if (request.method !== "POST") {
-    return new Response(JSON.stringify(mcpTransportError(-32600, "Method not allowed", {
-      reason: "method_not_allowed",
-      hint: "Send POST with a JSON-RPC body to this URL.",
-      next: [{ command: "POST {\"jsonrpc\":\"2.0\",\"id\":\"1\",\"method\":\"tools/list\"}" }],
-      category: "input",
-    })), {
+    return new Response(JSON.stringify(methodNotAllowedReply()), {
       status: 405, headers: { ...headers, Allow: "GET, HEAD, POST, OPTIONS", "Content-Type": "application/json; charset=utf-8" }
     });
   }
@@ -216,25 +225,12 @@ export function roomMcpFetchResponse(request) {
 
 export async function roomMcpFetchPost(request, options = {}) {
   const url = new URL(request.url);
-  const cors = mcpJoinCorsHeaders();
-  const headers = {
-    ...cors,
-    "Cache-Control": "no-store",
-    "X-Robots-Tag": "all",
-    "Content-Type": "application/json; charset=utf-8"
-  };
+  const headers = joinHeaders({ "Content-Type": "application/json; charset=utf-8" });
   let message;
   try {
     message = await request.json();
   } catch {
-    return new Response(JSON.stringify(mcpTransportError(-32700, "Invalid JSON", {
-      reason: "invalid_json",
-      hint: "Send a JSON-RPC 2.0 object: {\"jsonrpc\":\"2.0\",\"id\":\"1\",\"method\":\"tools/list\"}.",
-      next: [{ command: "tools/list" }],
-      category: "input",
-    })), {
-      status: 400, headers
-    });
+    return new Response(JSON.stringify(invalidJsonReply()), { status: 400, headers });
   }
   let reply;
   try {
@@ -246,13 +242,7 @@ export async function roomMcpFetchPost(request, options = {}) {
       userAgent: request.headers.get("user-agent")
     });
   } catch {
-    reply = mcpTransportError(-32603, "Request could not be completed", {
-      reason: "internal_error",
-      hint: "Retry the same request; no success is claimed.",
-      next: [{ command: "retry the same JSON-RPC request" }],
-      category: "unavailable",
-      status: "failed",
-    });
+    reply = dispatchErrorReply();
   }
   if (!reply) return new Response(null, { status: 202, headers });
   return new Response(JSON.stringify(reply), { status: mcpRpcStatus(reply), headers: { ...headers, ...mcpAuthHeaders(reply), ...legacyMcpHeaders(request.headers.get("authorization")) } });
@@ -268,34 +258,21 @@ export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMc
   if (method === "GET" || method === "HEAD") {
     const doc = joinDoc(url, accept ?? req.headers.accept);
     const bytes = Buffer.from(doc.body);
-    res.writeHead(200, {
-      ...cors,
+    res.writeHead(200, joinHeaders({
       "Content-Type": doc.type,
-      "Content-Length": bytes.length,
-      "Cache-Control": "no-store",
-      "X-Robots-Tag": "all"
-    });
+      "Content-Length": bytes.length
+    }));
     return res.end(method === "HEAD" ? undefined : bytes);
   }
   if (method !== "POST") {
     res.writeHead(405, { ...cors, Allow: "GET, HEAD, POST, OPTIONS", "Content-Type": "application/json; charset=utf-8" });
-    return res.end(JSON.stringify(mcpTransportError(-32600, "Method not allowed", {
-      reason: "method_not_allowed",
-      hint: "Send POST with a JSON-RPC body to this URL.",
-      next: [{ command: "POST {\"jsonrpc\":\"2.0\",\"id\":\"1\",\"method\":\"tools/list\"}" }],
-      category: "input",
-    })));
+    return res.end(JSON.stringify(methodNotAllowedReply()));
   }
   let message;
   try { message = JSON.parse(bodyText); }
   catch {
     res.writeHead(400, { ...cors, "Content-Type": "application/json; charset=utf-8" });
-    return res.end(JSON.stringify(mcpTransportError(-32700, "Invalid JSON", {
-      reason: "invalid_json",
-      hint: "Send a JSON-RPC 2.0 object: {\"jsonrpc\":\"2.0\",\"id\":\"1\",\"method\":\"tools/list\"}.",
-      next: [{ command: "tools/list" }],
-      category: "input",
-    })));
+    return res.end(JSON.stringify(invalidJsonReply()));
   }
   let reply;
   try {
@@ -308,13 +285,7 @@ export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMc
       remoteAddress
     });
   } catch {
-    reply = mcpTransportError(-32603, "Request could not be completed", {
-      reason: "internal_error",
-      hint: "Retry the same request; no success is claimed.",
-      next: [{ command: "retry the same JSON-RPC request" }],
-      category: "unavailable",
-      status: "failed",
-    });
+    reply = dispatchErrorReply();
   }
   if (!reply) {
     res.writeHead(202, { ...cors, "Cache-Control": "no-store" });
@@ -322,13 +293,11 @@ export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMc
   }
   const bytes = Buffer.from(JSON.stringify(reply));
   res.writeHead(mcpRpcStatus(reply), {
-    ...cors,
+    ...joinHeaders(),
     ...mcpAuthHeaders(reply),
     ...legacyMcpHeaders(req.headers.authorization),
     "Content-Type": "application/json; charset=utf-8",
-    "Content-Length": bytes.length,
-    "Cache-Control": "no-store",
-    "X-Robots-Tag": "all"
+    "Content-Length": bytes.length
   });
   return res.end(bytes);
 }
