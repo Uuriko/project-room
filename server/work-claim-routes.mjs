@@ -769,6 +769,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (!item) reject(404, "work_claim_not_found", `No work claim "${id}" in this room`);
     return item;
   };
+  const loadClaim = () => load(claimIdOf(reject, workClaimId));
   // Returns true when the caller is the room owner or holds manage_claims
   // and is acting on someone else's claim. The claim holder takes the
   // ordinary path. Fixtures that do not name an owner stay holder-only.
@@ -782,9 +783,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   // too — they must refuse overlapping leases with the same 409 body, or a
   // lease can be landed silently around the conflict check. fileLeaseConflicts
   // already excludes the item itself by id.
-  const refuseFileLeaseConflict = item => {
-    const conflicts = fileLeaseConflicts(registry.list(roomId), item);
-    if (conflicts.length === 0) return;
+  const throwFileLeaseConflict = (item, conflicts) => {
     const conflict = fileLeaseConflictBody(item, conflicts);
     const body = {
       ...agentErrorBody({ httpStatus: 409, code: "file_lease_conflict", message: conflict.error.message, roomId, workItemId: item.id }),
@@ -794,6 +793,46 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     error.code = "file_lease_conflict";
     error.body = body;
     throw error;
+  };
+  // Exclusive file-lease refusal shared by the three acquire paths (claim,
+  // create-with-assignee, reassign). advisory: true keeps the older
+  // warn-and-proceed behavior instead of the 409.
+  const refuseFileLeaseConflict = (item, { advisory = false } = {}) => {
+    const conflicts = fileLeaseConflicts(registry.list(roomId), item);
+    if (conflicts.length === 0 || advisory === true) return;
+    throwFileLeaseConflict(item, conflicts);
+  };
+  // Per-member open-claim cap: claim, create-with-assignee, and reassign all
+  // consume the holder's slot. holdVerb/actionVerb keep each route's
+  // wording byte-identical ("You already hold … before claiming another."
+  // vs "<member> already holds … before assigning another.").
+  const assertMemberClaimCap = (memberId, holder, holdVerb, actionVerb) => {
+    const held = registry.list(roomId).filter(entry => entry.owner === memberId && ACTIVE_CLAIM_STATES.includes(entry.state)).length;
+    if (held < config.maxMemberOpenClaims) return;
+    refuseCap("too_many_open_claims",
+      `${holder} already ${holdVerb} ${config.maxMemberOpenClaims} open claims. Release or finish one before ${actionVerb} another.`,
+      `Release or finish an open claim before ${actionVerb} another.`);
+  };
+  // Active-room-member lookup shared by receipts (member contract),
+  // create-with-assignee, and reassign (a typo'd owner must not strand a claim).
+  const requireActiveMember = (value, status, code, message) => {
+    const members = store.roomAuthority(roomId).members ?? {};
+    const member = typeof value === "string" ? members[value] : null;
+    if (!member || member.active === false) reject(status, code, message);
+    return member;
+  };
+  // Body-shape guard shared by every route: a failed shape check is always
+  // the same 422, only the expected-shape wording differs.
+  const assertShape = (data, schema, expected) => {
+    if (!shape(data, schema)) invalidInput(reject, expected);
+  };
+  // Typed-throw translation: pure helpers raise their own error class; the
+  // route surface is always a 422 carrying that class's code and message.
+  const runTyped = (fn, ErrorClass) => {
+    try { return fn(); } catch (error) {
+      if (error instanceof ErrorClass) reject(422, error.code, error.message);
+      throw error;
+    }
   };
 
   if (workClaimRoute === "status" && req.method === "GET") {
@@ -813,11 +852,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // unauthenticated callers (401); this names the member contract —
     // authenticated non-members get 403 not_member. Reads stay open to
     // guest agents, like every other GET on this family.
-    const members = store.roomAuthority(roomId).members ?? {};
-    const member = members[caller];
-    if (!member || member.active === false) {
-      reject(403, "not_member", `Member "${caller}" is not a member of room "${roomId}"`);
-    }
+    requireActiveMember(caller, 403, "not_member", `Member "${caller}" is not a member of room "${roomId}"`);
     const { q, tags, limit, cursor } = receiptsQueryOf(reject, url.searchParams);
     const offset = cursor === null ? 0 : cursorDecode(reject, cursor);
     const needle = q === null ? null : q.toLowerCase();
@@ -848,7 +883,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // applies here exactly like the other Board write routes.
     requireEventBudget();
     const data = body(req);
-    if (!shape(data, {})) invalidInput(reject, "an empty JSON object");
+    assertShape(data, {}, "an empty JSON object");
     let updated = 0;
     let checked = 0;
     const rateLimited = pullBatch.skipped || pullBatch.rateLimitedUntil != null;
@@ -875,7 +910,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // Linear-style "similar issues": fuzzy match over the room's claim
     // registry. Read-only — suggests candidates, never merges or closes.
     const params = url.searchParams;
-    for (const key of params.keys()) {
+    for (const key of new Set(params.keys())) {
       if (!["q", "limit"].includes(key) || params.getAll(key).length !== 1) {
         invalidInput(reject, "only single q and limit query parameters");
       }
@@ -890,18 +925,12 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       if (!/^[1-9]\d*$/.test(raw) || Number(raw) > 20) invalidInput(reject, "limit as an integer 1..20");
       limit = Number(raw);
     }
-    let duplicates;
-    try {
-      duplicates = findDuplicates(registry.list(roomId), q, { limit });
-    } catch (error) {
-      if (error instanceof DuplicateError) reject(422, error.code, error.message);
-      throw error;
-    }
+    const duplicates = runTyped(() => findDuplicates(registry.list(roomId), q, { limit }), DuplicateError);
     return json(res, 200, { roomId, query: q, duplicates });
   }
   if (workClaimRoute === "create" && req.method === "POST") {
     const raw = body(req);
-    if (!shape(raw, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch", "kind", "revision", "assignee", "squadId"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?, kind?, revision?, assignee?, squadId?}");
+    assertShape(raw, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch", "kind", "revision", "assignee", "squadId"] }, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?, kind?, revision?, assignee?, squadId?}");
     requireWriter();
     requireEventBudget();
     const id = claimIdOf(reject, raw.id);
@@ -918,12 +947,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (data.kind !== undefined && !CLAIM_KINDS.includes(data.kind)) invalidInput(reject, `kind one of ${CLAIM_KINDS.join(", ")}`);
     const assignee = data.assignee;
     if (assignee !== undefined) {
-      const members = store.roomAuthority(roomId).members ?? {};
-      const member = typeof assignee === "string" ? members[assignee] : null;
-      if (!member || member.active === false) {
-        reject(422, "work_assignee_unknown_member",
-          `assignee "${typeof assignee === "string" ? assignee : "?"}" is not an active member of this room`);
-      }
+      requireActiveMember(assignee, 422, "work_assignee_unknown_member",
+        `assignee "${typeof assignee === "string" ? assignee : "?"}" is not an active member of this room`);
     }
     // plan-squads: a work offer can target a squad; the squad must exist and be active.
     if (data.squadId !== undefined && data.squadId !== null && !getActiveSquad(store.db, roomId, data.squadId)) {
@@ -934,12 +959,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const reviewPolicy = data.reviewPolicy ?? (isHardWork({ tags: data.tags }) ? "distinct_member" : undefined);
     let item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy, note: data.note, tags: data.tags, files: data.files, dependsOn: data.dependsOn, parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs, pullRequest: data.pullRequest, pullRequests: data.pullRequests, repo: data.repo, branch: data.branch, kind: data.kind, revision: data.revision, squadId: data.squadId }, { now: nowMs, agentId: caller }));
     if (assignee) {
-      const held = registry.list(roomId).filter(entry => entry.owner === assignee && ACTIVE_CLAIM_STATES.includes(entry.state)).length;
-      if (held >= config.maxMemberOpenClaims) {
-        refuseCap("too_many_open_claims",
-          `${assignee} already holds ${config.maxMemberOpenClaims} open claims. Release or finish one before assigning another.`,
-          "Release or finish an open claim before assigning another.");
-      }
+      assertMemberClaimCap(assignee, assignee, "holds", "assigning");
       item = runPure(reject, () => claimWork(item, assignee, {
         note: data.note ?? `assigned by ${caller}`, room: roomLike, now: nowMs
       }));
@@ -966,13 +986,13 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   if (workClaimRoute === "read" && req.method === "GET") {
     closeLiveClaims();
     // SEC-2: member-authored text is marked untrusted for the reader.
-    return json(res, 200, withContentTrust(stampClaim(load(claimIdOf(reject, workClaimId)), caller)));
+    return json(res, 200, withContentTrust(stampClaim(loadClaim(), caller)));
   }
   if (workClaimRoute === "claim" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { optional: ["note", "leaseHours", "files", "advisory", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch"] })) invalidInput(reject, "{note?, leaseHours?, files?, advisory?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?}");
+    assertShape(data, { optional: ["note", "leaseHours", "files", "advisory", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch"] }, "{note?, leaseHours?, files?, advisory?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?}");
     if ("advisory" in data && typeof data.advisory !== "boolean") invalidInput(reject, "advisory true or false");
-    const item = load(claimIdOf(reject, workClaimId));
+    const item = loadClaim();
     if (item.state !== "unclaimed") reject(409, "work_claim_conflict", `Work "${item.id}" is already ${item.state} — release it first`);
     requireWriter();
     requireEventBudget();
@@ -980,12 +1000,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     assertBoardLeaseHours(reject, data);
     assertDependsOnKnown(reject, data, { selfId: item.id, has: other => registry.has(roomId, other) });
     Object.assign(data, clientPullRequestInput(reject, boardTextFields(reject, data, { note: { multiline: true } })));
-    const held = registry.list(roomId).filter(entry => entry.owner === caller && ACTIVE_CLAIM_STATES.includes(entry.state)).length;
-    if (held >= config.maxMemberOpenClaims) {
-      refuseCap("too_many_open_claims",
-        `You already hold ${config.maxMemberOpenClaims} open claims. Release or finish one before claiming another.`,
-        "Release or finish an open claim before claiming another.");
-    }
+    assertMemberClaimCap(caller, "You", "hold", "claiming");
     const claimed = runPure(reject, () => claimWork(item, caller, {
       note: data.note, leaseHours: leaseHoursOfBody(data), files: data.files,
       dependsOn: data.dependsOn, parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs,
@@ -995,18 +1010,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // Exclusive file lease. Overlap with another live claim is a 409 that
     // names the holder, the files, and when that lease ends. advisory: true
     // keeps the older warn-and-proceed behavior.
-    const conflicts = fileLeaseConflicts(registry.list(roomId), claimed);
-    if (conflicts.length > 0 && data.advisory !== true) {
-      const conflict = fileLeaseConflictBody(claimed, conflicts);
-      const body = {
-        ...agentErrorBody({ httpStatus: 409, code: "file_lease_conflict", message: conflict.error.message, roomId, workItemId: claimed.id }),
-        ...conflict
-      };
-      const error = new Error(body.error.message);
-      error.code = "file_lease_conflict";
-      error.body = body;
-      throw error;
-    }
+    refuseFileLeaseConflict(claimed, { advisory: data.advisory });
     // Retention ack (research brief 2026-09-28, mechanic #2): every claim gets
     // the bot's immediate structured receipt, so no contribution sits at zero
     // replies from t=0. First-time contributors carry the 24h verdict SLA in
@@ -1026,13 +1030,13 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "update" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs", "readingAck", "parentClaimId", "evidenceRefs"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?, readingAck?, parentClaimId?, evidenceRefs?}");
+    assertShape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs", "readingAck", "parentClaimId", "evidenceRefs"] }, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?, readingAck?, parentClaimId?, evidenceRefs?}");
     if (data.state === undefined && data.note === undefined && data.readingAck === undefined) invalidInput(reject, "a state transition, a note, or a reading ack");
     // W012 required reading: the owner confirms they read the enrollment
     // reading list. { docs: [...] } is validated by the pure machine; a
     // malformed ack is a 422, never a silent drop.
     if (data.readingAck !== undefined && !shape(data.readingAck, { required: ["docs"] })) invalidInput(reject, "readingAck: {docs: [...]}");
-    const item = load(claimIdOf(reject, workClaimId));
+    const item = loadClaim();
     if (item.owner !== caller) reject(403, "work_not_owner", `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
     requireWriter();
     requireEventBudget();
@@ -1046,27 +1050,21 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       // deputy). canCloseWork then applies the policy (distinct member /
       // verify permission) to the attested reviewer.
       const policy = item.reviewPolicy ?? config.reviewPolicy;
+      // All four review refusals share one 403 shape; only the reason differs.
+      const rejectReview = detail => reject(403, "work_review_rejected",
+        `Review policy "${policy}" not satisfied for "${item.id}": ${detail}`);
       if (policy === "self_attested") {
-        const reviewer = data.reviewedBy ?? caller;
-        if (reviewer !== caller) {
-          reject(403, "work_review_rejected",
-            `Review policy "self_attested" not satisfied for "${item.id}": only the owner may attest this work`);
-        }
+        if ((data.reviewedBy ?? caller) !== caller) rejectReview("only the owner may attest this work");
       } else {
         const reviewer = data.reviewedBy;
         if (typeof reviewer !== "string" || reviewer.length === 0 || reviewer.length > 128) {
-          reject(403, "work_review_rejected",
-            `Review policy "${policy}" not satisfied for "${item.id}": reviewedBy must name the member who attested this work`);
+          rejectReview("reviewedBy must name the member who attested this work");
         }
         const attested = (item.attestations ?? []).some(entry => entry.memberId === reviewer);
-        if (!attested) {
-          reject(403, "work_review_rejected",
-            `Review policy "${policy}" not satisfied for "${item.id}": no review attestation recorded by ${reviewer}`);
-        }
+        if (!attested) rejectReview(`no review attestation recorded by ${reviewer}`);
         const verifiers = verifiersOf(store, roomId);
         if (!canCloseWork(item, reviewer, { policy, verifyMembers: verifiers, reviewMembers: reviewersOf(store, roomId) })) {
-          reject(403, "work_review_rejected",
-            `Review policy "${policy}" not satisfied for "${item.id}": a current affirmative review by an authorized reviewer is required`);
+          rejectReview("a current affirmative review by an authorized reviewer is required");
         }
       }
     }
@@ -1113,11 +1111,11 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const data = body(req);
     const verdictReview = data && typeof data === "object" && !Array.isArray(data) && ("verdict" in data || "summary" in data || "url" in data);
     if (verdictReview) {
-      if (!shape(data, { required: ["verdict", "summary"], optional: ["url"] })) invalidInput(reject, "{verdict, summary, url?}");
+      assertShape(data, { required: ["verdict", "summary"], optional: ["url"] }, "{verdict, summary, url?}");
       if (!mayReviewWorkClaims(access)) refuseWorkClaims();
       requireEventBudget();
       data.summary = text("summary", data.summary, { multiline: true });
-      const item = load(claimIdOf(reject, workClaimId));
+      const item = loadClaim();
       if (item.owner === caller) reject(403, "work_review_rejected", "The owner cannot review their own claim");
       const reviewed = runPure(reject, () => recordReview(item, caller, { verdict: data.verdict, summary: data.summary, url: data.url, now: nowMs }));
       const duplicate = reviewed.history === item.history;
@@ -1127,11 +1125,11 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       }
       return json(res, 200, duplicate ? item : reviewed);
     }
-    if (!shape(data, { optional: ["note"] })) invalidInput(reject, "{note?} or {verdict, summary, url?}");
+    assertShape(data, { optional: ["note"] }, "{note?} or {verdict, summary, url?}");
     if (!mayAttestWorkClaims(access)) refuseAttest();
     requireEventBudget();
     const note = text("note", data.note, { multiline: true });
-    const item = load(claimIdOf(reject, workClaimId));
+    const item = loadClaim();
     const attested = runPure(reject, () => attestWork(item, caller, { note, now: nowMs }));
     if (attested.history !== item.history) {
       // A new attestation: one history entry, and at most one room event per
@@ -1152,9 +1150,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // the item while it is still unclaimed. Same pure path as MCP
     // room_close_work_claim (server/work-claims.mjs closeWork).
     const data = body(req);
-    if (!shape(data, { optional: ["reason"] })) invalidInput(reject, "{reason?}");
+    assertShape(data, { optional: ["reason"] }, "{reason?}");
     requireWriter();
-    const item = load(claimIdOf(reject, workClaimId));
+    const item = loadClaim();
     requireEventBudget();
     const reason = text("reason", data.reason, { multiline: true });
     const closed = retire(reject, item, caller, workClaimRoute, reason, mayManageAnyClaim(access), nowMs);
@@ -1163,8 +1161,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "release" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { optional: ["note", "reason"] })) invalidInput(reject, "{reason?, note?}");
-    let item = load(claimIdOf(reject, workClaimId));
+    assertShape(data, { optional: ["note", "reason"] }, "{reason?, note?}");
+    let item = loadClaim();
     const authority = authorityOver(item);
     requireEventBudget();
     const reason = text(Object.hasOwn(data, "reason") ? "reason" : "note", data.reason ?? data.note, { multiline: true });
@@ -1182,30 +1180,19 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "reassign" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { required: ["newOwner"], optional: ["note"] })) invalidInput(reject, "{newOwner, note?}");
-    const item = load(claimIdOf(reject, workClaimId));
+    assertShape(data, { required: ["newOwner"], optional: ["note"] }, "{newOwner, note?}");
+    const item = loadClaim();
     const authority = authorityOver(item);
     // W3 (QA 2026-09-28): /reassign used to accept any newOwner string, so a
     // typo stranded the claim on a nonexistent member (owner-only routes
     // then 403 for everyone until the lease swept). Validate against live
     // room membership: the new owner must be a current, active member.
-    const members = store.roomAuthority(roomId).members ?? {};
     const target = data.newOwner;
-    const targetMember = typeof target === "string" ? members[target] : null;
-    if (!targetMember || targetMember.active === false) {
-      reject(422, "work_reassign_unknown_member",
-        `newOwner "${typeof target === "string" ? target : "?"}" is not an active member of this room — reassign names a current memberId`);
-    }
+    requireActiveMember(target, 422, "work_reassign_unknown_member",
+      `newOwner "${typeof target === "string" ? target : "?"}" is not an active member of this room — reassign names a current memberId`);
     // A handoff consumes the new owner's slot just like claim and
     // create-with-assignee do; otherwise reassign bypasses the per-member cap.
-    if (target !== item.owner) {
-      const held = registry.list(roomId).filter(entry => entry.owner === target && ACTIVE_CLAIM_STATES.includes(entry.state)).length;
-      if (held >= config.maxMemberOpenClaims) {
-        refuseCap("too_many_open_claims",
-          `${target} already holds ${config.maxMemberOpenClaims} open claims. Release or finish one before assigning another.`,
-          "Release or finish an open claim before assigning another.");
-      }
-    }
+    if (target !== item.owner) assertMemberClaimCap(target, target, "holds", "assigning");
     requireEventBudget();
     const previousOwnerId = item.owner;
     const note = text("note", data.note, { multiline: true });
@@ -1227,8 +1214,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // the current lease window began. Renewals are discussed in the channel —
     // a stale holder can't hold work indefinitely without showing progress.
     const data = body(req);
-    if (!shape(data, { optional: ["progressMessageId", "note", "leaseHours"] })) invalidInput(reject, "{progressMessageId?, note?, leaseHours?}");
-    const item = load(claimIdOf(reject, workClaimId));
+    assertShape(data, { optional: ["progressMessageId", "note", "leaseHours"] }, "{progressMessageId?, note?, leaseHours?}");
+    const item = loadClaim();
     // W4 (QA 2026-09-28): a lapsed lease auto-releases the claim (owner
     // cleared), so the ownership check below would misdiagnose it as an
     // access problem ("owned by nobody — ask the owner for a guest invite").
@@ -1276,7 +1263,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   if (workClaimRoute === "config" && (req.method === "GET" || req.method === "POST")) {
     if (req.method === "GET") return json(res, 200, { roomId, ...config });
     const data = body(req);
-    if (!shape(data, { required: ["maxMemberOpenClaims"] })) invalidInput(reject, "{maxMemberOpenClaims}");
+    assertShape(data, { required: ["maxMemberOpenClaims"] }, "{maxMemberOpenClaims}");
     const ownerId = typeof access.authority?.ownerId === "string" && access.authority.ownerId.length > 0
       ? access.authority.ownerId : null;
     if (ownerId !== caller) reject(403, "work_claims_not_permitted", "Only the room owner can set the per-member claim cap.");
@@ -1292,13 +1279,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // and transitive. Read-only; any room member may walk.
     const id = claimIdOf(reject, workClaimId);
     load(id); // 404 when the claim does not exist
-    let walk;
-    try {
-      walk = walkProvenance(registry.list(roomId), id);
-    } catch (error) {
-      if (error instanceof ClaimError) reject(422, error.code, error.message);
-      throw error;
-    }
+    const walk = runTyped(() => walkProvenance(registry.list(roomId), id), ClaimError);
     return json(res, 200, { roomId, claimId: id, ...walk });
   }
   if (workClaimRoute === "premise-invalid" && req.method === "POST") {
@@ -1310,8 +1291,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // claim after re-review. Only the premise claim's owner, the room owner,
     // or a manage_claims holder may declare or clear.
     const data = body(req);
-    if (!shape(data, { optional: ["reason", "clear", "note"] })) invalidInput(reject, "{reason} or {clear: true, note?}");
-    const item = load(claimIdOf(reject, workClaimId));
+    assertShape(data, { optional: ["reason", "clear", "note"] }, "{reason} or {clear: true, note?}");
+    const item = loadClaim();
     authorityOver(item); // the premise owner, room owner, or a manage_claims holder may declare or clear
     requireEventBudget();
     if (data.clear === true) {
