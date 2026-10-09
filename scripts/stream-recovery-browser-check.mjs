@@ -240,7 +240,10 @@ test("a new message refreshes a busy room with the recent window, an old edit wi
   await page.locator(`[data-message-record-id="${ids.at(-1)}"]`).waitFor({ state: "visible" });
   const rendered = () => page.locator("[data-message-record-id]").evaluateAll(nodes => nodes.map(node => node.dataset.messageRecordId));
   const before = await rendered();
-  assert.ok(reads.length >= 1 && reads.every(read => read.search === ""), "opening reads the full snapshot");
+  // Opening reads in full once; the stream's own open re-reads only the window.
+  await page.waitForFunction(() => document.querySelector("#connection-status").textContent.startsWith("Connected"));
+  assert.equal(reads[0]?.search, "", "opening reads the full snapshot");
+  assert.ok(reads.slice(1).every(read => read.search === "?messages=recent"), JSON.stringify(reads));
 
   const opened = reads.length;
   const arrival = post(f.keys.producer, "a new arrival");
