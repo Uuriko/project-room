@@ -261,8 +261,9 @@ test("handler: create → claim → complete with delivery mode → release cycl
   assert.equal(done.value.deliveryMode, "merged");
   // release the done item is impossible; release flow on a fresh claim works
   await runRoute({ route: "create", body: { id: "h2" }, registry });
-  await runRoute({ route: "claim", id: "h2", registry });
-  const { out: released } = await runRoute({ route: "release", id: "h2", registry });
+  const { out: claimed2 } = await runRoute({ route: "claim", id: "h2", registry });
+  const { out: released } = await runRoute({ route: "release", id: "h2", registry, body: {
+    expectedClaimedAt: claimed2.value.claimedAt, expectedHistoryLength: claimed2.value.history.length } });
   assert.equal(released.value.state, "unclaimed");
   assert.equal(released.value.owner, null);
 });
@@ -339,7 +340,9 @@ test("handler: review attestations are caller-bound and cleared on handoff", asy
   await runRoute({ route: "create", body: { id: "a2", reviewPolicy: "distinct_member" }, registry });
   await runRoute({ route: "claim", id: "a2", registry });
   await runRoute({ route: "review", id: "a2", memberId: "vera", registry });
-  await runRoute({ route: "release", id: "a2", registry });
+  const reviewed = registry.get("room1", "a2");
+  await runRoute({ route: "release", id: "a2", registry, body: {
+    expectedClaimedAt: reviewed.claimedAt, expectedHistoryLength: reviewed.history.length } });
   const { out: reread } = await runRoute({ route: "read", id: "a2", registry });
   assert.deepEqual(reread.value.attestations, []);
   // cannot attest unclaimed or done work
