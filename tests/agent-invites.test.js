@@ -740,6 +740,23 @@ test("ANCHOR-D7a: redeem times out, retry with the same requestId recovers the m
   assert.equal(legacy.json.error.code, "invite_already_used");
 });
 
+test("ANCHOR-D7e: a replay with another identity's credential is refused and mints no token", async t => {
+  const { store, origin, ownerKey } = await serve(t);
+  const minted = await mint(origin, ownerKey, { permissions: ["accept_work"], expiresInMinutes: 60, displayName: "G1 Bot" });
+  const requestId = randomUUID();
+  const first = await post(origin, "/api/agent-invites/redeem", { code: minted.json.code, displayName: "G1 Bot", requestId });
+  assert.equal(first.status, 201, JSON.stringify(first.json));
+  const other = store.identities.create("Other Agent");
+  const stolen = await post(origin, "/api/agent-invites/redeem", { code: minted.json.code, displayName: "G1 Bot", requestId }, other.secret);
+  assert.equal(stolen.status, 403, JSON.stringify(stolen.json));
+  assert.equal(stolen.json.error.code, "invite_redeem_identity_mismatch");
+  assert.equal(stolen.json.mcpToken, undefined, "no credential for the redeemed member leaks to another identity");
+  // The anonymous client that kept only (code, displayName, requestId) still recovers.
+  const retry = await post(origin, "/api/agent-invites/redeem", { code: minted.json.code, displayName: "G1 Bot", requestId });
+  assert.equal(retry.status, 201, JSON.stringify(retry.json));
+  assert.equal(retry.json.identityId, first.json.identityId);
+});
+
 test("ANCHOR-D7b: same requestId with different content is a 409, never a second redemption", async t => {
   const { origin, ownerKey } = await serve(t);
   const a = await mint(origin, ownerKey, { permissions: ["accept_work"], expiresInMinutes: 60 });
