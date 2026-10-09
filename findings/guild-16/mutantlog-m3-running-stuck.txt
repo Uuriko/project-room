@@ -1,0 +1,32 @@
+{"event":"room.cold_start","durationMs":535,"integrity":"eager","phases":{"schema":{"ms":28,"rowsRead":0},"plugin":{"ms":204,"rowsRead":0},"fence":{"ms":99,"rowsRead":0},"verifies":{"ms":42,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":147,"heapBytes":36806232,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.integrity","matched":0,"skipped":0,"verified":1,"invitations":0}
+✖ node scheduler retries a failing webhook receiver then dead-letters it (2042.256675ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6717.227169
+
+✖ failing tests:
+
+test at tests/jobs-node-retry.test.js:19:1
+✖ node scheduler retries a failing webhook receiver then dead-letters it (2042.256675ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  1 !== 2
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-16/tests/jobs-node-retry.test.js:89:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 2,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

@@ -1,0 +1,12 @@
+{"event":"room.cold_start","durationMs":1566,"integrity":"eager","phases":{"schema":{"ms":432,"rowsRead":0},"plugin":{"ms":354,"rowsRead":0},"fence":{"ms":321,"rowsRead":0},"verifies":{"ms":194,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":173,"heapBytes":36943400,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.integrity","matched":0,"skipped":0,"verified":1,"invitations":0}
+✔ node scheduler retries a failing webhook receiver then dead-letters it (3663.546895ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 9541.313191

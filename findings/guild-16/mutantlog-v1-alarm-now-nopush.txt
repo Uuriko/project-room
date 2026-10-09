@@ -1,0 +1,72 @@
+{"event":"room.cold_start","durationMs":948,"integrity":"eager","phases":{"schema":{"ms":114,"rowsRead":0},"plugin":{"ms":387,"rowsRead":0},"fence":{"ms":246,"rowsRead":0},"verifies":{"ms":17,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":183,"heapBytes":24452160,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.integrity","matched":0,"skipped":0,"verified":0,"budgetExceeded":1,"checked":0,"swept":0}
+{"event":"room.cold_start","durationMs":1357,"integrity":"eager","phases":{"schema":{"ms":138,"rowsRead":0},"plugin":{"ms":853,"rowsRead":0},"fence":{"ms":186,"rowsRead":0},"verifies":{"ms":4,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":175,"heapBytes":24790656,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.integrity","matched":0,"skipped":0,"verified":0,"budgetExceeded":1,"checked":0,"swept":0}
+{"event":"room.cold_start","durationMs":562,"integrity":"eager","phases":{"schema":{"ms":96,"rowsRead":0},"plugin":{"ms":256,"rowsRead":0},"fence":{"ms":45,"rowsRead":0},"verifies":{"ms":5,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":138,"heapBytes":28904448,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+[integrity] boom
+{"event":"room.cold_start","durationMs":722,"integrity":"eager","phases":{"schema":{"ms":158,"rowsRead":0},"plugin":{"ms":284,"rowsRead":0},"fence":{"ms":130,"rowsRead":0},"verifies":{"ms":10,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":143,"heapBytes":33269528,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ concurrent runOnce calls run each due job at most once (reentrancy guard) (1200.994639ms)
+✔ lastRan advances on success: no every-tick rerun (cadence memory) (1531.549655ms)
+✔ jobNextDue falls back to lastRan + cadenceMs (no immediate-loop) (2.803417ms)
+✔ webhook-dispatch stays disabled when nothing is due (null, not 0) (0.336966ms)
+✔ a job returning {errors:1} without scanError is recorded as failed (754.587173ms)
+✖ slow jobs never arm the worker alarm, even when due sooner than fast jobs (6.147746ms)
+✖ a past-due job pushes the alarm out by one cadence, never to now (0.493291ms)
+✔ jobIsDue is true at exactly lastRan + cadence (boundary inclusive) (0.231958ms)
+✔ jobIsDue is true when nextDueAt equals now exactly (nextDueAt path) (0.26639ms)
+✔ GROWTH_WATCH_INTERVAL_MS=0 disables growth (not enabled with 0ms) (2.615054ms)
+✔ wireNodeJobs starts the scheduler (889.6481ms)
+✔ node start() twice arms exactly one timer (no double tick) (4.662818ms)
+✔ growth-scheduler runTick tolerates null and malformed tick results (185.820612ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 11
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6796.221897
+
+✖ failing tests:
+
+test at tests/jobs-scheduler-invariants.test.js:107:1
+✖ slow jobs never arm the worker alarm, even when due sooner than fast jobs (6.147746ms)
+  AssertionError [ERR_ASSERTION]: slow jobs must not arm the alarm (got 36000000)
+  + actual - expected
+  
+  + 36000000
+  - 36060000
+       ^
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-16/tests/jobs-scheduler-invariants.test.js:116:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 36000000,
+    expected: 36060000,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/jobs-scheduler-invariants.test.js:119:1
+✖ a past-due job pushes the alarm out by one cadence, never to now (0.493291ms)
+  AssertionError [ERR_ASSERTION]: alarm 36000000 must be strictly after now 36000000
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-16/tests/jobs-scheduler-invariants.test.js:125:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }

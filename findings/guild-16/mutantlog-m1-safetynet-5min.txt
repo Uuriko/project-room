@@ -1,0 +1,22 @@
+{"event":"room.cold_start","durationMs":2301,"integrity":"eager","phases":{"schema":{"ms":482,"rowsRead":0},"plugin":{"ms":486,"rowsRead":0},"fence":{"ms":434,"rowsRead":0},"verifies":{"ms":85,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":193,"heapBytes":36698688,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.integrity","matched":0,"skipped":0,"verified":1,"invitations":0}
+✔ node scheduler retries a failing webhook receiver then dead-letters it (4567.817098ms)
+✔ node and worker job names match aside from single-runtime jobs (7.346956ms)
+{"event":"room.cold_start","durationMs":562,"integrity":"eager","phases":{"schema":{"ms":43,"rowsRead":0},"plugin":{"ms":196,"rowsRead":0},"fence":{"ms":131,"rowsRead":0},"verifies":{"ms":45,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":156,"heapBytes":36679408,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.integrity","matched":0,"skipped":0,"verified":1,"invitations":0}
+[growth-alert] warn dead-window growth:dead-chat: at=2026-10-09T10:03:02.486Z no activity in window for: message.sent
+{"event":"room.cold_start","durationMs":1328,"integrity":"eager","phases":{"schema":{"ms":184,"rowsRead":0},"plugin":{"ms":691,"rowsRead":0},"fence":{"ms":233,"rowsRead":0},"verifies":{"ms":56,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":166,"heapBytes":41058528,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.integrity","matched":0,"skipped":0,"verified":1,"invitations":0}
+[growth-alert] warn dead-window growth:dead-chat: at=2026-10-09T10:03:04.431Z no activity in window for: message.sent
+✔ scheduler jobHealth lists every registry job and records runs (1070.038492ms)
+✔ GET /api/health/jobs on Node includes the jobs list once the scheduler is wired (2511.613042ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 20430.057629

@@ -1,0 +1,58 @@
+✔ every money-policy module carries RECORD-ONLY in its header comment (5.338181ms)
+✔ placement fee is exactly 1000 bps: table of known values (2.170597ms)
+✔ all placement amounts are decimal strings (0.305158ms)
+✔ placementFeeBreakdown rejects bad inputs (0.678088ms)
+✔ trial management fee is hours x rate, always creditable (0.9464ms)
+✔ trialManagementFee rejects bad inputs (1.727132ms)
+✔ CUSTODY_ENABLED is false and the requirements name John's approvals (0.305218ms)
+✔ routeSettlement always returns record-only, with a reason (0.493972ms)
+✔ routeSettlement rejects bad inputs (0.428784ms)
+✔ recordTrialFee stores a credit expiring 180 days out, as strings (8.047126ms)
+✔ recording the same trial fee twice is rejected (4.506893ms)
+✔ same trialTaskId under a different client is a separate fee (0.268192ms)
+✔ applyCreditToPlacement records the credit and it counts once (12.934211ms)
+✔ double-apply of the same trial fee is rejected (1.97208ms)
+✔ credit can never exceed the fee paid (0.338328ms)
+✔ expired credits are not applied (2.667783ms)
+✔ apply-time expiresAt can only shorten the credit, never extend it (3.100372ms)
+✔ creditBalance is derived from the journal: unexpired, unapplied fees only (0.339319ms)
+✔ expired fees contribute nothing to the balance (0.216235ms)
+✔ every journal entry is balanced double-entry (0.302765ms)
+✔ journal is append-only: callers get frozen copies, internal state is untouched (25.886749ms)
+✔ applyCreditToPlacement rejects unknown trials and bad ids (0.496465ms)
+{"event":"room.cold_start","durationMs":2046,"integrity":"eager","phases":{"schema":{"ms":233,"rowsRead":0},"plugin":{"ms":1068,"rowsRead":0},"fence":{"ms":280,"rowsRead":0},"verifies":{"ms":99,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":184,"heapBytes":36966896,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2985,"integrity":"eager","phases":{"schema":{"ms":806,"rowsRead":0},"plugin":{"ms":886,"rowsRead":0},"fence":{"ms":585,"rowsRead":0},"verifies":{"ms":74,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":160,"heapBytes":41216096,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.integrity","matched":0,"skipped":0,"verified":1,"invitations":0}
+[growth-alert] warn dead-window growth:dead-chat: at=2026-10-09T11:03:00.091Z no activity in window for: message.sent
+✖ scheduler jobHealth lists every registry job and records runs (2394.089884ms)
+✔ GET /api/health/jobs on Node includes the jobs list once the scheduler is wired (4323.977607ms)
+ℹ tests 24
+ℹ suites 0
+ℹ pass 23
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 16412.726899
+
+✖ failing tests:
+
+test at tests/node-jobs-health.test.js:21:1
+✖ scheduler jobHealth lists every registry job and records runs (2394.089884ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-16/tests/node-jobs-health.test.js:27:47)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.start (node:internal/test_runner/test:1257:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

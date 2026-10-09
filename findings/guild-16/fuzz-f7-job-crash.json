@@ -1,0 +1,14 @@
+{
+ "unit": "f7-job-crash",
+ "inputs": 1,
+ "counts": {
+  "ok": 1
+ },
+ "results": [
+  {
+   "name": "crash-then-recover",
+   "verdict": "ok",
+   "ms": 1249
+  }
+ ]
+}

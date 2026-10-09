@@ -1,0 +1,59 @@
+{
+ "unit": "f12-gates",
+ "inputs": 10,
+ "counts": {
+  "ok": 10
+ },
+ "results": [
+  {
+   "name": "enabled-throws",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "both-throw",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "enabled-returns-1",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "enabled-returns-true",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "reason-empty",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "reason-whitespace",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "reason-number",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "reason-good",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "no-enabled-fn",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "null-job",
+   "verdict": "ok",
+   "ms": 0
+  }
+ ]
+}

@@ -1,0 +1,71 @@
+{
+ "unit": "m1",
+ "file": "server/jobs.mjs",
+ "results": [
+  {
+   "unit": "m1",
+   "file": "server/jobs.mjs",
+   "mutant": "retry-delay-10x",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/jobs-node-retry.test.js",
+    "tests/jobs-parity.test.js",
+    "tests/node-jobs-health.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  },
+  {
+   "unit": "m1",
+   "file": "server/jobs.mjs",
+   "mutant": "safetynet-5min",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/jobs-node-retry.test.js",
+    "tests/jobs-parity.test.js",
+    "tests/node-jobs-health.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  },
+  {
+   "unit": "m1",
+   "file": "server/jobs.mjs",
+   "mutant": "budget-slashed",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/jobs-node-retry.test.js",
+    "tests/jobs-parity.test.js",
+    "tests/node-jobs-health.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  },
+  {
+   "unit": "m1",
+   "file": "server/jobs.mjs",
+   "mutant": "due-now-nopush",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/jobs-node-retry.test.js",
+    "tests/jobs-parity.test.js",
+    "tests/node-jobs-health.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  },
+  {
+   "unit": "m1",
+   "file": "server/jobs.mjs",
+   "mutant": "drop-cadence",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/jobs-node-retry.test.js",
+    "tests/jobs-parity.test.js",
+    "tests/node-jobs-health.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  }
+ ]
+}

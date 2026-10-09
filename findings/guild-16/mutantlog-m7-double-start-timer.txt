@@ -1,0 +1,128 @@
+✔ rejects invalid watcher, intervalMs and onAlert (2.183888ms)
+✔ start() is a no-op when intervalMs is 0 or negative (disabled) (0.387692ms)
+✖ start/stop are idempotent and isRunning tracks state (7.717041ms)
+✔ ticks the watcher on the interval (89.414575ms)
+✔ a throwing watcher.tick is logged and counted; the scheduler survives (32.842608ms)
+✔ onAlert is called once per triggered hit with the hit and context (23.899025ms)
+✔ a throwing onAlert does not stop delivery of the remaining hits (15.589476ms)
+✔ the timer is unref'd so it never keeps the process alive (0.492089ms)
+✔ defaultOnAlert logs one structured line with the hit fields (0.383645ms)
+✔ defaultGrowthRules returns a frozen, usable rule set (9.394839ms)
+✔ default rules drive a real watcher over a collector (10.90784ms)
+✔ DEFAULT_INTERVAL_MS is the documented 5-minute default (3.015365ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 11
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1324.679725
+
+✖ failing tests:
+
+test at tests/growth-scheduler.test.js:56:1
+✖ start/stop are idempotent and isRunning tracks state (7.717041ms)
+  AssertionError [ERR_ASSERTION]: second start must not replace the timer
+  + actual - expected
+  
+  + <ref *1> Timeout {
+  +   Symbol(asyncId): 147,
+  - <ref *2> Timeout {
+  -   Symbol(asyncId): 146,
+      Symbol(kAsyncContextFrame): undefined,
+      Symbol(kHasPrimitive): false,
+      Symbol(refed): false,
+      Symbol(triggerId): 24,
+      _destroyed: false,
+  +   _idleNext: <ref *3> Timeout {
+  +     Symbol(asyncId): 146,
+  +     Symbol(kAsyncContextFrame): undefined,
+  +     Symbol(kHasPrimitive): false,
+  +     Symbol(refed): false,
+  +     Symbol(triggerId): 24,
+  +     _destroyed: false,
+  +     _idleNext: <ref *2> TimersList {
+  +       _idleNext: [Circular *1],
+  +       _idlePrev: [Circular *3],
+  +       expiry: 868,
+  +       id: -9007199254740991,
+  +       msecs: 50,
+  +       priorityQueuePosition: 1
+  +     },
+  +     _idlePrev: [Circular *1],
+  +     _idleStart: 818,
+  +     _idleTimeout: 50,
+  +     _onTimeout: [Function: runTick],
+  +     _repeat: 50,
+  +     _timerArgs: undefined
+  +   },
+  +   _idlePrev: <ref *2> TimersList {
+  +     _idleNext: [Circular *1],
+  +     _idlePrev: Timeout {
+  +       Symbol(asyncId): 146,
+  -   _idleNext: <ref *3> TimersList {
+  -     _idleNext: <ref *1> Timeout {
+  -       Symbol(asyncId): 147,
+          Symbol(kAsyncContextFrame): undefined,
+          Symbol(kHasPrimitive): false,
+          Symbol(refed): false,
+          Symbol(triggerId): 24,
+          _destroyed: false,
+          _idleNext: [Circular *2],
+  +       _idlePrev: [Circular *1],
+  -       _idlePrev: [Circular *3],
+          _idleStart: 818,
+          _idleTimeout: 50,
+          _onTimeout: [Function: runTick],
+          _repeat: 50,
+          _timerArgs: undefined
+        },
+  -     _idlePrev: [Circular *2],
+        expiry: 868,
+        id: -9007199254740991,
+        msecs: 50,
+        priorityQueuePosition: 1
+      },
+  -   _idlePrev: <ref *1> Timeout {
+  -     Symbol(asyncId): 147,
+  -     Symbol(kAsyncContextFrame): undefined,
+  -     Symbol(kHasPrimitive): false,
+  -     Symbol(refed): false,
+  -     Symbol(triggerId): 24,
+  -     _destroyed: false,
+  -     _idleNext: [Circular *2],
+  -     _idlePrev: TimersList {
+  -       _idleNext: [Circular *1],
+  -       _idlePrev: [Circular *2],
+  -       expiry: 868,
+  -       id: -9007199254740991,
+  -       msecs: 50,
+  -       priorityQueuePosition: 1
+  -     },
+  -     _idleStart: 818,
+  -     _idleTimeout: 50,
+  -     _onTimeout: [Function: runTick],
+  -     _repeat: 50,
+  -     _timerArgs: undefined
+  -   },
+      _idleStart: 818,
+      _idleTimeout: 50,
+      _onTimeout: [Function: runTick],
+      _repeat: 50,
+      _timerArgs: undefined
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-16/tests/growth-scheduler.test.js:62:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [Timeout],
+    expected: [Timeout],
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

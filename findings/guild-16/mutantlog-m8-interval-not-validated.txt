@@ -1,0 +1,37 @@
+✖ rejects invalid watcher, intervalMs and onAlert (3.382236ms)
+✔ start() is a no-op when intervalMs is 0 or negative (disabled) (0.435053ms)
+✔ start/stop are idempotent and isRunning tracks state (0.608153ms)
+✔ ticks the watcher on the interval (115.465159ms)
+✔ a throwing watcher.tick is logged and counted; the scheduler survives (78.140977ms)
+✔ onAlert is called once per triggered hit with the hit and context (33.123479ms)
+✔ a throwing onAlert does not stop delivery of the remaining hits (19.012222ms)
+✔ the timer is unref'd so it never keeps the process alive (0.382944ms)
+✔ defaultOnAlert logs one structured line with the hit fields (15.701383ms)
+✔ defaultGrowthRules returns a frozen, usable rule set (16.972901ms)
+✔ default rules drive a real watcher over a collector (18.745201ms)
+✔ DEFAULT_INTERVAL_MS is the documented 5-minute default (6.425743ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 11
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1879.61627
+
+✖ failing tests:
+
+test at tests/growth-scheduler.test.js:34:1
+✖ rejects invalid watcher, intervalMs and onAlert (3.382236ms)
+  AssertionError [ERR_ASSERTION]: Missing expected exception (TypeError).
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-16/tests/growth-scheduler.test.js:39:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.start (node:internal/test_runner/test:1257:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    operator: 'throws',
+    diff: 'simple'
+  }

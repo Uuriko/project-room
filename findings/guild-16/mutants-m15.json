@@ -1,0 +1,50 @@
+{
+ "unit": "m15",
+ "file": "src/growth-scheduler.js",
+ "results": [
+  {
+   "unit": "m15",
+   "file": "src/growth-scheduler.js",
+   "mutant": "isrunning-always",
+   "status": "KILLED",
+   "tests": [
+    "tests/growth-scheduler.test.js"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  },
+  {
+   "unit": "m15",
+   "file": "src/growth-scheduler.js",
+   "mutant": "stop-noop",
+   "status": "KILLED",
+   "tests": [
+    "tests/growth-scheduler.test.js"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  },
+  {
+   "unit": "m15",
+   "file": "src/growth-scheduler.js",
+   "mutant": "context-at-null",
+   "status": "KILLED",
+   "tests": [
+    "tests/growth-scheduler.test.js"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  },
+  {
+   "unit": "m15",
+   "file": "src/growth-scheduler.js",
+   "mutant": "window-throws",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/growth-scheduler.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  }
+ ]
+}

@@ -1,0 +1,64 @@
+{
+ "unit": "f11-scheduler-lifecycle",
+ "inputs": 11,
+ "counts": {
+  "ok": 11
+ },
+ "results": [
+  {
+   "name": "double-start",
+   "verdict": "ok",
+   "ms": 11
+  },
+  {
+   "name": "stop-without-start",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "start-stop-start",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "interval-zero",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "interval-negative",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "not-running-initially",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "bad-watcher-null",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "bad-watcher-nofn",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "bad-interval-nan",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "bad-interval-string",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "bad-onalert",
+   "verdict": "ok",
+   "ms": 0
+  }
+ ]
+}

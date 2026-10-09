@@ -1,0 +1,50 @@
+{
+ "unit": "m13",
+ "file": "server/jobs.mjs",
+ "results": [
+  {
+   "unit": "m13",
+   "file": "server/jobs.mjs",
+   "mutant": "budget-zero",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/jobs-parity.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  },
+  {
+   "unit": "m13",
+   "file": "server/jobs.mjs",
+   "mutant": "jobs-unfrozen",
+   "status": "KILLED",
+   "tests": [
+    "tests/jobs-parity.test.js"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  },
+  {
+   "unit": "m13",
+   "file": "server/jobs.mjs",
+   "mutant": "job-unfrozen",
+   "status": "KILLED",
+   "tests": [
+    "tests/jobs-parity.test.js"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  },
+  {
+   "unit": "m13",
+   "file": "server/jobs.mjs",
+   "mutant": "reason-null",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/jobs-parity.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  }
+ ]
+}

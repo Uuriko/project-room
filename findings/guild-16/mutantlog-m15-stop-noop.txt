@@ -1,0 +1,39 @@
+✔ rejects invalid watcher, intervalMs and onAlert (28.278608ms)
+✔ start() is a no-op when intervalMs is 0 or negative (disabled) (15.655134ms)
+✔ start/stop are idempotent and isRunning tracks state (0.467031ms)
+✖ ticks the watcher on the interval (192.440056ms)
+✔ a throwing watcher.tick is logged and counted; the scheduler survives (51.350732ms)
+✔ onAlert is called once per triggered hit with the hit and context (24.313638ms)
+✔ a throwing onAlert does not stop delivery of the remaining hits (29.927403ms)
+✔ the timer is unref'd so it never keeps the process alive (4.387925ms)
+✔ defaultOnAlert logs one structured line with the hit fields (6.785823ms)
+✔ defaultGrowthRules returns a frozen, usable rule set (13.23428ms)
+✔ default rules drive a real watcher over a collector (25.3282ms)
+✔ DEFAULT_INTERVAL_MS is the documented 5-minute default (0.161713ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 11
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1854.510935
+
+✖ failing tests:
+
+test at tests/growth-scheduler.test.js:69:1
+✖ ticks the watcher on the interval (192.440056ms)
+  AssertionError [ERR_ASSERTION]: no ticks after stop
+  
+  5 !== 2
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-16/tests/growth-scheduler.test.js:78:10)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 5,
+    expected: 2,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

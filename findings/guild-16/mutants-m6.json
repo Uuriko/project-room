@@ -1,0 +1,66 @@
+{
+ "unit": "m6",
+ "file": "server/jobs.mjs",
+ "results": [
+  {
+   "unit": "m6",
+   "file": "server/jobs.mjs",
+   "mutant": "summary-and",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/node-jobs-health.test.js",
+    "tests/demigod-jobs-money.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  },
+  {
+   "unit": "m6",
+   "file": "server/jobs.mjs",
+   "mutant": "failures-start-one",
+   "status": "KILLED",
+   "tests": [
+    "tests/node-jobs-health.test.js",
+    "tests/demigod-jobs-money.test.js"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  },
+  {
+   "unit": "m6",
+   "file": "server/jobs.mjs",
+   "mutant": "drop-lastsuccess",
+   "status": "KILLED",
+   "tests": [
+    "tests/node-jobs-health.test.js",
+    "tests/demigod-jobs-money.test.js"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  },
+  {
+   "unit": "m6",
+   "file": "server/jobs.mjs",
+   "mutant": "period-10x",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/node-jobs-health.test.js",
+    "tests/demigod-jobs-money.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  },
+  {
+   "unit": "m6",
+   "file": "server/jobs.mjs",
+   "mutant": "iso-throws",
+   "status": "KILLED",
+   "tests": [
+    "tests/node-jobs-health.test.js",
+    "tests/demigod-jobs-money.test.js"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  }
+ ]
+}

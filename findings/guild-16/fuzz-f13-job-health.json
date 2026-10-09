@@ -1,0 +1,29 @@
+{
+ "unit": "f13-job-health",
+ "inputs": 4,
+ "counts": {
+  "ok": 4
+ },
+ "results": [
+  {
+   "name": "fresh-default-env",
+   "verdict": "ok",
+   "ms": 8
+  },
+  {
+   "name": "fresh-gmail-on",
+   "verdict": "ok",
+   "ms": 22
+  },
+  {
+   "name": "fresh-growth-on",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "fresh-channel-on",
+   "verdict": "ok",
+   "ms": 12
+  }
+ ]
+}

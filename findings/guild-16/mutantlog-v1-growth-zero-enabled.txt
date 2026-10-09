@@ -1,0 +1,55 @@
+{"event":"room.cold_start","durationMs":2106,"integrity":"eager","phases":{"schema":{"ms":263,"rowsRead":0},"plugin":{"ms":956,"rowsRead":0},"fence":{"ms":529,"rowsRead":0},"verifies":{"ms":72,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":225,"heapBytes":24747488,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.integrity","matched":0,"skipped":0,"verified":0,"budgetExceeded":1,"checked":0,"swept":0}
+[growth-alert] warn dead-window growth:dead-chat: at=1970-01-01T10:00:00.000Z no activity in window for: message.sent
+{"event":"room.cold_start","durationMs":734,"integrity":"eager","phases":{"schema":{"ms":226,"rowsRead":0},"plugin":{"ms":292,"rowsRead":0},"fence":{"ms":50,"rowsRead":0},"verifies":{"ms":7,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":144,"heapBytes":29371088,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.integrity","matched":0,"skipped":0,"verified":0,"budgetExceeded":1,"checked":0,"swept":0}
+[growth-alert] warn dead-window growth:dead-chat: at=1970-01-01T10:00:00.000Z no activity in window for: message.sent
+[growth-alert] warn dead-window growth:dead-chat: at=1970-01-01T10:00:01.000Z no activity in window for: message.sent
+{"event":"room.cold_start","durationMs":1196,"integrity":"eager","phases":{"schema":{"ms":88,"rowsRead":0},"plugin":{"ms":493,"rowsRead":0},"fence":{"ms":396,"rowsRead":0},"verifies":{"ms":63,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":161,"heapBytes":33475944,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+[integrity] boom
+[growth-alert] warn dead-window growth:dead-chat: at=1970-01-01T10:00:00.000Z no activity in window for: message.sent
+{"event":"room.cold_start","durationMs":945,"integrity":"eager","phases":{"schema":{"ms":55,"rowsRead":0},"plugin":{"ms":579,"rowsRead":0},"fence":{"ms":133,"rowsRead":0},"verifies":{"ms":12,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":146,"heapBytes":37717552,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ concurrent runOnce calls run each due job at most once (reentrancy guard) (2614.106364ms)
+✔ lastRan advances on success: no every-tick rerun (cadence memory) (877.982583ms)
+✔ jobNextDue falls back to lastRan + cadenceMs (no immediate-loop) (13.634101ms)
+✔ webhook-dispatch stays disabled when nothing is due (null, not 0) (3.399192ms)
+✔ a job returning {errors:1} without scanError is recorded as failed (1363.355666ms)
+✔ slow jobs never arm the worker alarm, even when due sooner than fast jobs (0.749224ms)
+✔ a past-due job pushes the alarm out by one cadence, never to now (0.557667ms)
+✔ jobIsDue is true at exactly lastRan + cadence (boundary inclusive) (3.703117ms)
+✔ jobIsDue is true when nextDueAt equals now exactly (nextDueAt path) (22.342479ms)
+✖ GROWTH_WATCH_INTERVAL_MS=0 disables growth (not enabled with 0ms) (17.914455ms)
+✔ wireNodeJobs starts the scheduler (1075.004405ms)
+✔ node start() twice arms exactly one timer (no double tick) (13.230505ms)
+✔ growth-scheduler runTick tolerates null and malformed tick results (253.719959ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 12
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 10156.598442
+
+✖ failing tests:
+
+test at tests/jobs-scheduler-invariants.test.js:143:1
+✖ GROWTH_WATCH_INTERVAL_MS=0 disables growth (not enabled with 0ms) (17.914455ms)
+  AssertionError [ERR_ASSERTION]: interval 0 must disable growth, not hot-loop it
+  
+  true !== false
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-16/tests/jobs-scheduler-invariants.test.js:146:12)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

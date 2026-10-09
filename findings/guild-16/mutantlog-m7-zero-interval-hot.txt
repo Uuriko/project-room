@@ -1,0 +1,43 @@
+✔ rejects invalid watcher, intervalMs and onAlert (5.822157ms)
+✖ start() is a no-op when intervalMs is 0 or negative (disabled) (5.48403ms)
+✔ start/stop are idempotent and isRunning tracks state (1.548154ms)
+✔ ticks the watcher on the interval (107.791293ms)
+✔ a throwing watcher.tick is logged and counted; the scheduler survives (31.162035ms)
+✔ onAlert is called once per triggered hit with the hit and context (28.355854ms)
+✔ a throwing onAlert does not stop delivery of the remaining hits (25.362992ms)
+✔ the timer is unref'd so it never keeps the process alive (10.03517ms)
+✔ defaultOnAlert logs one structured line with the hit fields (0.425058ms)
+✔ defaultGrowthRules returns a frozen, usable rule set (50.989269ms)
+✔ default rules drive a real watcher over a collector (36.454287ms)
+✔ DEFAULT_INTERVAL_MS is the documented 5-minute default (0.157246ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 11
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 880.202445
+
+✖ failing tests:
+
+test at tests/growth-scheduler.test.js:45:1
+✖ start() is a no-op when intervalMs is 0 or negative (disabled) (5.48403ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  true !== false
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-16/tests/growth-scheduler.test.js:49:12)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

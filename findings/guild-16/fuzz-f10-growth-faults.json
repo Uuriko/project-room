@@ -1,0 +1,39 @@
+{
+ "unit": "f10-growth-faults",
+ "inputs": 6,
+ "counts": {
+  "ok": 6
+ },
+ "results": [
+  {
+   "name": "tick-throws-always",
+   "verdict": "ok",
+   "ms": 105
+  },
+  {
+   "name": "tick-throws-twice",
+   "verdict": "ok",
+   "ms": 102
+  },
+  {
+   "name": "tick-returns-null",
+   "verdict": "ok",
+   "ms": 99
+  },
+  {
+   "name": "triggered-not-array",
+   "verdict": "ok",
+   "ms": 105
+  },
+  {
+   "name": "triggered-null",
+   "verdict": "ok",
+   "ms": 99
+  },
+  {
+   "name": "onalert-throws",
+   "verdict": "ok",
+   "ms": 100
+  }
+ ]
+}

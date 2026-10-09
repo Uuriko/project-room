@@ -1,0 +1,54 @@
+{"event":"room.cold_start","durationMs":1060,"integrity":"eager","phases":{"schema":{"ms":151,"rowsRead":0},"plugin":{"ms":424,"rowsRead":0},"fence":{"ms":91,"rowsRead":0},"verifies":{"ms":65,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":168,"heapBytes":24315400,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.integrity","matched":0,"skipped":0,"verified":0,"budgetExceeded":1,"checked":0,"swept":0}
+{"event":"room.cold_start","durationMs":2577,"integrity":"eager","phases":{"schema":{"ms":280,"rowsRead":0},"plugin":{"ms":1126,"rowsRead":0},"fence":{"ms":687,"rowsRead":0},"verifies":{"ms":45,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":167,"heapBytes":24740400,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1389,"integrity":"eager","phases":{"schema":{"ms":109,"rowsRead":0},"plugin":{"ms":712,"rowsRead":0},"fence":{"ms":336,"rowsRead":0},"verifies":{"ms":18,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":154,"heapBytes":28887088,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+[integrity] boom
+{"event":"room.cold_start","durationMs":1426,"integrity":"eager","phases":{"schema":{"ms":248,"rowsRead":0},"plugin":{"ms":586,"rowsRead":0},"fence":{"ms":336,"rowsRead":0},"verifies":{"ms":47,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":153,"heapBytes":33014600,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.integrity","matched":0,"skipped":0,"verified":0,"budgetExceeded":1,"checked":0,"swept":0}
+✔ concurrent runOnce calls run each due job at most once (reentrancy guard) (1471.736533ms)
+✔ lastRan advances on success: no every-tick rerun (cadence memory) (2809.379311ms)
+✔ jobNextDue falls back to lastRan + cadenceMs (no immediate-loop) (0.631007ms)
+✔ webhook-dispatch stays disabled when nothing is due (null, not 0) (0.259299ms)
+✔ a job returning {errors:1} without scanError is recorded as failed (1537.808147ms)
+✔ slow jobs never arm the worker alarm, even when overdue (0.765479ms)
+✔ a past-due job pushes the alarm out by one cadence, never to now (0.355914ms)
+✔ jobIsDue is true at exactly lastRan + cadence (boundary inclusive) (5.522037ms)
+✔ wireNodeJobs starts the scheduler (1535.076507ms)
+✔ node start() twice arms exactly one timer (no double tick) (17.451931ms)
+✖ growth-scheduler runTick tolerates null and malformed tick results (70.787681ms)
+ℹ Error: Test "growth-scheduler runTick tolerates null and malformed tick results" at tests/jobs-scheduler-invariants.test.js:155:1 generated asynchronous activity after the test ended. This activity created the error "TypeError: triggered is not iterable" and would have caused the test to fail, but instead triggered an uncaughtException event.
+ℹ Error: Test "growth-scheduler runTick tolerates null and malformed tick results" at tests/jobs-scheduler-invariants.test.js:155:1 generated asynchronous activity after the test ended. This activity created the error "TypeError: triggered is not iterable" and would have caused the test to fail, but instead triggered an uncaughtException event.
+ℹ Error: Test "growth-scheduler runTick tolerates null and malformed tick results" at tests/jobs-scheduler-invariants.test.js:155:1 generated asynchronous activity after the test ended. This activity created the error "TypeError: triggered is not iterable" and would have caused the test to fail, but instead triggered an uncaughtException event.
+ℹ Error: Test "growth-scheduler runTick tolerates null and malformed tick results" at tests/jobs-scheduler-invariants.test.js:155:1 generated asynchronous activity after the test ended. This activity created the error "TypeError: triggered is not iterable" and would have caused the test to fail, but instead triggered an uncaughtException event.
+ℹ Error: Test "growth-scheduler runTick tolerates null and malformed tick results" at tests/jobs-scheduler-invariants.test.js:155:1 generated asynchronous activity after the test ended. This activity created the error "TypeError: triggered is not iterable" and would have caused the test to fail, but instead triggered an uncaughtException event.
+ℹ Error: Test "growth-scheduler runTick tolerates null and malformed tick results" at tests/jobs-scheduler-invariants.test.js:155:1 generated asynchronous activity after the test ended. This activity created the error "TypeError: triggered is not iterable" and would have caused the test to fail, but instead triggered an uncaughtException event.
+ℹ Error: Test "growth-scheduler runTick tolerates null and malformed tick results" at tests/jobs-scheduler-invariants.test.js:155:1 generated asynchronous activity after the test ended. This activity created the error "TypeError: triggered is not iterable" and would have caused the test to fail, but instead triggered an uncaughtException event.
+ℹ Error: Test "growth-scheduler runTick tolerates null and malformed tick results" at tests/jobs-scheduler-invariants.test.js:155:1 generated asynchronous activity after the test ended. This activity created the error "TypeError: triggered is not iterable" and would have caused the test to fail, but instead triggered an uncaughtException event.
+ℹ Error: Test "growth-scheduler runTick tolerates null and malformed tick results" at tests/jobs-scheduler-invariants.test.js:155:1 generated asynchronous activity after the test ended. This activity created the error "TypeError: triggered is not iterable" and would have caused the test to fail, but instead triggered an uncaughtException event.
+ℹ Error: Test "growth-scheduler runTick tolerates null and malformed tick results" at tests/jobs-scheduler-invariants.test.js:155:1 generated asynchronous activity after the test ended. This activity created the error "TypeError: triggered is not iterable" and would have caused the test to fail, but instead triggered an uncaughtException event.
+ℹ Error: Test "growth-scheduler runTick tolerates null and malformed tick results" at tests/jobs-scheduler-invariants.test.js:155:1 generated asynchronous activity after the test ended. This activity created the error "TypeError: triggered is not iterable" and would have caused the test to fail, but instead triggered an uncaughtException event.
+ℹ Error: Test "growth-scheduler runTick tolerates null and malformed tick results" at tests/jobs-scheduler-invariants.test.js:155:1 generated asynchronous activity after the test ended. This activity created the error "TypeError: triggered is not iterable" and would have caused the test to fail, but instead triggered an uncaughtException event.
+ℹ Error: Test "growth-scheduler runTick tolerates null and malformed tick results" at tests/jobs-scheduler-invariants.test.js:155:1 generated asynchronous activity after the test ended. This activity created the error "TypeError: triggered is not iterable" and would have caused the test to fail, but instead triggered an uncaughtException event.
+ℹ Error: Test "growth-scheduler runTick tolerates null and malformed tick results" at tests/jobs-scheduler-invariants.test.js:155:1 generated asynchronous activity after the test ended. This activity created the error "TypeError: triggered is not iterable" and would have caused the test to fail, but instead triggered an uncaughtException event.
+ℹ Error: Test "growth-scheduler runTick tolerates null and malformed tick results" at tests/jobs-scheduler-invariants.test.js:155:1 generated asynchronous activity after the test ended. This activity created the error "TypeError: triggered is not iterable" and would have caused the test to fail, but instead triggered an uncaughtException event.
+ℹ Error: Test "growth-scheduler runTick tolerates null and malformed tick results" at tests/jobs-scheduler-invariants.test.js:155:1 generated asynchronous activity after the test ended. This activity created the error "TypeError: triggered is not iterable" and would have caused the test to fail, but instead triggered an uncaughtException event.
+ℹ Error: Test "growth-scheduler runTick tolerates null and malformed tick results" at tests/jobs-scheduler-invariants.test.js:155:1 generated asynchronous activity after the test ended. This activity created the error "TypeError: triggered is not iterable" and would have caused the test to fail, but instead triggered an uncaughtException event.
+ℹ Error: Test "growth-scheduler runTick tolerates null and malformed tick results" at tests/jobs-scheduler-invariants.test.js:155:1 generated asynchronous activity after the test ended. This activity created the error "TypeError: triggered is not iterable" and would have caused the test to fail, but instead triggered an uncaughtException event.
+ℹ Error: Test "growth-scheduler runTick tolerates null and malformed tick results" at tests/jobs-scheduler-invariants.test.js:155:1 generated asynchronous activity after the test ended. This activity created the error "TypeError: triggered is not iterable" and would have caused the test to fail, but instead triggered an uncaughtException event.
+ℹ tests 11
+ℹ suites 0
+ℹ pass 10
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 11150.172715
+
+✖ failing tests:
+
+test at tests/jobs-scheduler-invariants.test.js:155:1
+✖ growth-scheduler runTick tolerates null and malformed tick results (70.787681ms)
+  TypeError: triggered is not iterable
+      at Timeout.runTick [as _onTimeout] (file:///home/hatch/workspace/pr-wave1000-guild-16/src/growth-scheduler.js:81:23)
+      at listOnTimeout (node:internal/timers:685:17)
+      at process.processTimers (node:internal/timers:618:7)

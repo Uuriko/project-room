@@ -1,0 +1,66 @@
+{
+ "unit": "m2",
+ "file": "server/jobs.mjs",
+ "results": [
+  {
+   "unit": "m2",
+   "file": "server/jobs.mjs",
+   "mutant": "webhook-null-to-zero",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/jobs-parity.test.js",
+    "tests/node-jobs-health.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  },
+  {
+   "unit": "m2",
+   "file": "server/jobs.mjs",
+   "mutant": "land-empty-due-now",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/jobs-parity.test.js",
+    "tests/node-jobs-health.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  },
+  {
+   "unit": "m2",
+   "file": "server/jobs.mjs",
+   "mutant": "claim-empty-due-now",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/jobs-parity.test.js",
+    "tests/node-jobs-health.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  },
+  {
+   "unit": "m2",
+   "file": "server/jobs.mjs",
+   "mutant": "autolink-empty-due-null",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/jobs-parity.test.js",
+    "tests/node-jobs-health.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  },
+  {
+   "unit": "m2",
+   "file": "server/jobs.mjs",
+   "mutant": "claim-nan-to-null",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/jobs-parity.test.js",
+    "tests/node-jobs-health.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  }
+ ]
+}

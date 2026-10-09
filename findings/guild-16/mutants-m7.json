@@ -1,0 +1,61 @@
+{
+ "unit": "m7",
+ "file": "src/growth-scheduler.js",
+ "results": [
+  {
+   "unit": "m7",
+   "file": "src/growth-scheduler.js",
+   "mutant": "double-start-timer",
+   "status": "KILLED",
+   "tests": [
+    "tests/growth-scheduler.test.js"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  },
+  {
+   "unit": "m7",
+   "file": "src/growth-scheduler.js",
+   "mutant": "zero-interval-hot",
+   "status": "KILLED",
+   "tests": [
+    "tests/growth-scheduler.test.js"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  },
+  {
+   "unit": "m7",
+   "file": "src/growth-scheduler.js",
+   "mutant": "drop-tickcount",
+   "status": "KILLED",
+   "tests": [
+    "tests/growth-scheduler.test.js"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  },
+  {
+   "unit": "m7",
+   "file": "src/growth-scheduler.js",
+   "mutant": "drop-errorcount",
+   "status": "KILLED",
+   "tests": [
+    "tests/growth-scheduler.test.js"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  },
+  {
+   "unit": "m7",
+   "file": "src/growth-scheduler.js",
+   "mutant": "no-unref",
+   "status": "KILLED",
+   "tests": [
+    "tests/growth-scheduler.test.js"
+   ],
+   "exitCode": null,
+   "failedTests": "unknown"
+  }
+ ]
+}

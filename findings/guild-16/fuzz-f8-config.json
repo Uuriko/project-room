@@ -1,0 +1,129 @@
+{
+ "unit": "f8-config",
+ "inputs": 24,
+ "counts": {
+  "ok": 24
+ },
+ "results": [
+  {
+   "name": "growth=",
+   "verdict": "ok",
+   "ms": 19
+  },
+  {
+   "name": "growth=abc",
+   "verdict": "ok",
+   "ms": 29
+  },
+  {
+   "name": "growth=NaN",
+   "verdict": "ok",
+   "ms": 16
+  },
+  {
+   "name": "growth=Infinity",
+   "verdict": "ok",
+   "ms": 1
+  },
+  {
+   "name": "growth=-5",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "growth=0",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "growth=1",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "growth=1e18",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "growth=0x10",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "growth=  ",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "growth=null",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "growth=undefined",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "channel=",
+   "verdict": "ok",
+   "ms": 4
+  },
+  {
+   "name": "channel=abc",
+   "verdict": "ok",
+   "ms": 3
+  },
+  {
+   "name": "channel=NaN",
+   "verdict": "ok",
+   "ms": 11
+  },
+  {
+   "name": "channel=Infinity",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "channel=-5",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "channel=0",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "channel=1",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "channel=1e18",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "channel=0x10",
+   "verdict": "ok",
+   "ms": 1
+  },
+  {
+   "name": "channel=  ",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "channel=null",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "channel=undefined",
+   "verdict": "ok",
+   "ms": 0
+  }
+ ]
+}

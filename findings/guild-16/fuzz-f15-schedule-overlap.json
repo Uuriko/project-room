@@ -1,0 +1,472 @@
+{
+ "unit": "f15-schedule-overlap",
+ "inputs": 91,
+ "counts": {
+  "ok": 84,
+  "accept": 7
+ },
+ "results": [
+  {
+   "name": "freq:answer-engine-check.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "freq:deploy-drift.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "freq:listing-check.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "freq:live-smoke.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "freq:mime-fuzz.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "freq:onboarding-probe.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "freq:qa2-agent-eval.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "freq:qa2-fuzz.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "freq:qa2-synthetic.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "freq:qa3-gates.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "freq:room-github-door.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "freq:snippet-adoption.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "freq:soak-test.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:answer-engine-check.yml<>deploy-drift.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:answer-engine-check.yml<>listing-check.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:answer-engine-check.yml<>live-smoke.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:answer-engine-check.yml<>mime-fuzz.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:answer-engine-check.yml<>onboarding-probe.yml",
+   "verdict": "accept",
+   "detail": "answer-engine-check.yml (0 15 * * 1) can fire the same minute as onboarding-probe.yml (0 15 * * 1)",
+   "ms": 0
+  },
+  {
+   "name": "overlap:answer-engine-check.yml<>qa2-agent-eval.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:answer-engine-check.yml<>qa2-fuzz.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:answer-engine-check.yml<>qa2-synthetic.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:answer-engine-check.yml<>qa3-gates.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:answer-engine-check.yml<>room-github-door.yml",
+   "verdict": "accept",
+   "detail": "answer-engine-check.yml (0 15 * * 1) can fire the same minute as room-github-door.yml (*/10 * * * *)",
+   "ms": 0
+  },
+  {
+   "name": "overlap:answer-engine-check.yml<>snippet-adoption.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:answer-engine-check.yml<>soak-test.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:deploy-drift.yml<>listing-check.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:deploy-drift.yml<>live-smoke.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:deploy-drift.yml<>mime-fuzz.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:deploy-drift.yml<>onboarding-probe.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:deploy-drift.yml<>qa2-agent-eval.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:deploy-drift.yml<>qa2-fuzz.yml",
+   "verdict": "accept",
+   "detail": "deploy-drift.yml (23 * * * *) can fire the same minute as qa2-fuzz.yml (23 10 * * *)",
+   "ms": 0
+  },
+  {
+   "name": "overlap:deploy-drift.yml<>qa2-synthetic.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:deploy-drift.yml<>qa3-gates.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:deploy-drift.yml<>room-github-door.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:deploy-drift.yml<>snippet-adoption.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:deploy-drift.yml<>soak-test.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:listing-check.yml<>live-smoke.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:listing-check.yml<>mime-fuzz.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:listing-check.yml<>onboarding-probe.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:listing-check.yml<>qa2-agent-eval.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:listing-check.yml<>qa2-fuzz.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:listing-check.yml<>qa2-synthetic.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:listing-check.yml<>qa3-gates.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:listing-check.yml<>room-github-door.yml",
+   "verdict": "accept",
+   "detail": "listing-check.yml (0 14 * * 1) can fire the same minute as room-github-door.yml (*/10 * * * *)",
+   "ms": 0
+  },
+  {
+   "name": "overlap:listing-check.yml<>snippet-adoption.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:listing-check.yml<>soak-test.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:live-smoke.yml<>mime-fuzz.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:live-smoke.yml<>onboarding-probe.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:live-smoke.yml<>qa2-agent-eval.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:live-smoke.yml<>qa2-fuzz.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:live-smoke.yml<>qa2-synthetic.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:live-smoke.yml<>qa3-gates.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:live-smoke.yml<>room-github-door.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:live-smoke.yml<>snippet-adoption.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:live-smoke.yml<>soak-test.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:mime-fuzz.yml<>onboarding-probe.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:mime-fuzz.yml<>qa2-agent-eval.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:mime-fuzz.yml<>qa2-fuzz.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:mime-fuzz.yml<>qa2-synthetic.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:mime-fuzz.yml<>qa3-gates.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:mime-fuzz.yml<>room-github-door.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:mime-fuzz.yml<>snippet-adoption.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:mime-fuzz.yml<>soak-test.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:onboarding-probe.yml<>qa2-agent-eval.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:onboarding-probe.yml<>qa2-fuzz.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:onboarding-probe.yml<>qa2-synthetic.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:onboarding-probe.yml<>qa3-gates.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:onboarding-probe.yml<>room-github-door.yml",
+   "verdict": "accept",
+   "detail": "onboarding-probe.yml (0 15 * * 1) can fire the same minute as room-github-door.yml (*/10 * * * *)",
+   "ms": 0
+  },
+  {
+   "name": "overlap:onboarding-probe.yml<>snippet-adoption.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:onboarding-probe.yml<>soak-test.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:qa2-agent-eval.yml<>qa2-fuzz.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:qa2-agent-eval.yml<>qa2-synthetic.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:qa2-agent-eval.yml<>qa3-gates.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:qa2-agent-eval.yml<>room-github-door.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:qa2-agent-eval.yml<>snippet-adoption.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:qa2-agent-eval.yml<>soak-test.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:qa2-fuzz.yml<>qa2-synthetic.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:qa2-fuzz.yml<>qa3-gates.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:qa2-fuzz.yml<>room-github-door.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:qa2-fuzz.yml<>snippet-adoption.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:qa2-fuzz.yml<>soak-test.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:qa2-synthetic.yml<>qa3-gates.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:qa2-synthetic.yml<>room-github-door.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:qa2-synthetic.yml<>snippet-adoption.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:qa2-synthetic.yml<>soak-test.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:qa3-gates.yml<>room-github-door.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:qa3-gates.yml<>snippet-adoption.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:qa3-gates.yml<>soak-test.yml",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlap:room-github-door.yml<>snippet-adoption.yml",
+   "verdict": "accept",
+   "detail": "room-github-door.yml (*/10 * * * *) can fire the same minute as snippet-adoption.yml (0 13 * * 1)",
+   "ms": 0
+  },
+  {
+   "name": "overlap:room-github-door.yml<>soak-test.yml",
+   "verdict": "accept",
+   "detail": "room-github-door.yml (*/10 * * * *) can fire the same minute as soak-test.yml (0 9 * * 1)",
+   "ms": 0
+  },
+  {
+   "name": "overlap:snippet-adoption.yml<>soak-test.yml",
+   "verdict": "ok",
+   "ms": 0
+  }
+ ]
+}

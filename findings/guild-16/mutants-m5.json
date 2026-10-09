@@ -1,0 +1,61 @@
+{
+ "unit": "m5",
+ "file": "server/jobs.mjs",
+ "results": [
+  {
+   "unit": "m5",
+   "file": "server/jobs.mjs",
+   "mutant": "growth-zero-enabled",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/jobs-node-retry.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  },
+  {
+   "unit": "m5",
+   "file": "server/jobs.mjs",
+   "mutant": "empty-string-no-fallback",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/jobs-node-retry.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  },
+  {
+   "unit": "m5",
+   "file": "server/jobs.mjs",
+   "mutant": "nan-interval-accepted",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/jobs-node-retry.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  },
+  {
+   "unit": "m5",
+   "file": "server/jobs.mjs",
+   "mutant": "double-start",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/jobs-node-retry.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  },
+  {
+   "unit": "m5",
+   "file": "server/jobs.mjs",
+   "mutant": "channel-zero-enabled",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/jobs-node-retry.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  }
+ ]
+}

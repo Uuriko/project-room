@@ -1,0 +1,73 @@
+✔ rejects invalid watcher, intervalMs and onAlert (8.557553ms)
+✔ start() is a no-op when intervalMs is 0 or negative (disabled) (4.900454ms)
+✔ start/stop are idempotent and isRunning tracks state (8.593436ms)
+✖ ticks the watcher on the interval (438.820871ms)
+✖ a throwing watcher.tick is logged and counted; the scheduler survives (42.090916ms)
+✖ onAlert is called once per triggered hit with the hit and context (22.885044ms)
+✔ a throwing onAlert does not stop delivery of the remaining hits (23.16954ms)
+✔ the timer is unref'd so it never keeps the process alive (0.391508ms)
+✔ defaultOnAlert logs one structured line with the hit fields (0.414322ms)
+✔ defaultGrowthRules returns a frozen, usable rule set (2.609767ms)
+✔ default rules drive a real watcher over a collector (9.514799ms)
+✔ DEFAULT_INTERVAL_MS is the documented 5-minute default (0.682845ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 9
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1728.585928
+
+✖ failing tests:
+
+test at tests/growth-scheduler.test.js:69:1
+✖ ticks the watcher on the interval (438.820871ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  0 !== 2
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-16/tests/growth-scheduler.test.js:75:10)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 2,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/growth-scheduler.test.js:81:1
+✖ a throwing watcher.tick is logged and counted; the scheduler survives (42.090916ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  0 !== 1
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-16/tests/growth-scheduler.test.js:99:12)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/growth-scheduler.test.js:106:1
+✖ onAlert is called once per triggered hit with the hit and context (22.885044ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  0 !== 1
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-16/tests/growth-scheduler.test.js:121:10)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

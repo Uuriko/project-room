@@ -1,0 +1,127 @@
+{
+ "unit": "v1",
+ "file": "server/jobs.mjs",
+ "results": [
+  {
+   "unit": "v1",
+   "file": "server/jobs.mjs",
+   "mutant": "reentrancy",
+   "status": "KILLED",
+   "tests": [
+    "tests/jobs-scheduler-invariants.test.js"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  },
+  {
+   "unit": "v1",
+   "file": "server/jobs.mjs",
+   "mutant": "drop-lastran-success",
+   "status": "KILLED",
+   "tests": [
+    "tests/jobs-scheduler-invariants.test.js"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  },
+  {
+   "unit": "v1",
+   "file": "server/jobs.mjs",
+   "mutant": "drop-cadence",
+   "status": "KILLED",
+   "tests": [
+    "tests/jobs-scheduler-invariants.test.js"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  },
+  {
+   "unit": "v1",
+   "file": "server/jobs.mjs",
+   "mutant": "webhook-null-to-zero",
+   "status": "KILLED",
+   "tests": [
+    "tests/jobs-scheduler-invariants.test.js"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  },
+  {
+   "unit": "v1",
+   "file": "server/jobs.mjs",
+   "mutant": "summary-and",
+   "status": "KILLED",
+   "tests": [
+    "tests/jobs-scheduler-invariants.test.js"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  },
+  {
+   "unit": "v1",
+   "file": "server/jobs.mjs",
+   "mutant": "slow-arms-alarm",
+   "status": "KILLED",
+   "tests": [
+    "tests/jobs-scheduler-invariants.test.js"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  },
+  {
+   "unit": "v1",
+   "file": "server/jobs.mjs",
+   "mutant": "alarm-now-nopush",
+   "status": "KILLED",
+   "tests": [
+    "tests/jobs-scheduler-invariants.test.js"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  },
+  {
+   "unit": "v1",
+   "file": "server/jobs.mjs",
+   "mutant": "due-exact-nodue",
+   "status": "KILLED",
+   "tests": [
+    "tests/jobs-scheduler-invariants.test.js"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  },
+  {
+   "unit": "v1",
+   "file": "server/jobs.mjs",
+   "mutant": "double-start",
+   "status": "KILLED",
+   "tests": [
+    "tests/jobs-scheduler-invariants.test.js"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  },
+  {
+   "unit": "v1",
+   "file": "server/jobs.mjs",
+   "mutant": "scheduler-never-starts",
+   "status": "KILLED",
+   "tests": [
+    "tests/jobs-scheduler-invariants.test.js"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  },
+  {
+   "unit": "v1",
+   "file": "server/jobs.mjs",
+   "mutant": "growth-zero-enabled",
+   "status": "KILLED",
+   "tests": [
+    "tests/jobs-scheduler-invariants.test.js"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  }
+ ]
+}

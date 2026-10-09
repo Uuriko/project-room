@@ -1,0 +1,61 @@
+{
+ "unit": "m3",
+ "file": "server/jobs.mjs",
+ "results": [
+  {
+   "unit": "m3",
+   "file": "server/jobs.mjs",
+   "mutant": "reentrancy",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/jobs-node-retry.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  },
+  {
+   "unit": "m3",
+   "file": "server/jobs.mjs",
+   "mutant": "drop-lastran-success",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/jobs-node-retry.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  },
+  {
+   "unit": "m3",
+   "file": "server/jobs.mjs",
+   "mutant": "record-always-ok",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/jobs-node-retry.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  },
+  {
+   "unit": "m3",
+   "file": "server/jobs.mjs",
+   "mutant": "drop-lastran-fail",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/jobs-node-retry.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  },
+  {
+   "unit": "m3",
+   "file": "server/jobs.mjs",
+   "mutant": "running-stuck",
+   "status": "KILLED",
+   "tests": [
+    "tests/jobs-node-retry.test.js"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  }
+ ]
+}

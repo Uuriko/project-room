@@ -1,0 +1,27 @@
+{
+ "unit": "f6-clock-jump",
+ "inputs": 3,
+ "counts": {
+  "ok": 3
+ },
+ "results": [
+  {
+   "name": "backward",
+   "verdict": "ok",
+   "ms": 2966,
+   "slow": true
+  },
+  {
+   "name": "nan",
+   "verdict": "ok",
+   "ms": 2699,
+   "slow": true
+  },
+  {
+   "name": "zero",
+   "verdict": "ok",
+   "ms": 2925,
+   "slow": true
+  }
+ ]
+}

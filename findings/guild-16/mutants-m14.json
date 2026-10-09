@@ -1,0 +1,50 @@
+{
+ "unit": "m14",
+ "file": "server/jobs.mjs",
+ "results": [
+  {
+   "unit": "m14",
+   "file": "server/jobs.mjs",
+   "mutant": "kick-noop",
+   "status": "KILLED",
+   "tests": [
+    "tests/jobs-node-retry.test.js"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  },
+  {
+   "unit": "m14",
+   "file": "server/jobs.mjs",
+   "mutant": "scheduler-never-starts",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/jobs-node-retry.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  },
+  {
+   "unit": "m14",
+   "file": "server/jobs.mjs",
+   "mutant": "health-throws-unwired",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/jobs-node-retry.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  },
+  {
+   "unit": "m14",
+   "file": "server/jobs.mjs",
+   "mutant": "gmail-always-null",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/jobs-node-retry.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  }
+ ]
+}

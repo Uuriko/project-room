@@ -1,0 +1,39 @@
+{
+ "unit": "f3-alarm",
+ "inputs": 6,
+ "counts": {
+  "ok": 6
+ },
+ "results": [
+  {
+   "name": "idle-room",
+   "verdict": "ok",
+   "ms": 4
+  },
+  {
+   "name": "webhook-due-future",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "webhook-due-past",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "all-cadence-fresh",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "slow-due-ignored",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "one-job-stale",
+   "verdict": "ok",
+   "ms": 0
+  }
+ ]
+}

@@ -1,0 +1,48 @@
+{"event":"room.cold_start","durationMs":1143,"integrity":"eager","phases":{"schema":{"ms":164,"rowsRead":0},"plugin":{"ms":458,"rowsRead":0},"fence":{"ms":261,"rowsRead":0},"verifies":{"ms":68,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":186,"heapBytes":24747752,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.integrity","matched":0,"skipped":0,"verified":0,"budgetExceeded":1,"checked":0,"swept":0}
+{"event":"room.integrity","matched":0,"skipped":0,"verified":0,"budgetExceeded":1,"checked":0,"swept":0}
+{"event":"room.cold_start","durationMs":1342,"integrity":"eager","phases":{"schema":{"ms":472,"rowsRead":0},"plugin":{"ms":584,"rowsRead":0},"fence":{"ms":132,"rowsRead":0},"verifies":{"ms":7,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":159,"heapBytes":24851432,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1054,"integrity":"eager","phases":{"schema":{"ms":168,"rowsRead":0},"plugin":{"ms":444,"rowsRead":0},"fence":{"ms":193,"rowsRead":0},"verifies":{"ms":6,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":145,"heapBytes":29098672,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+[integrity] boom
+{"event":"room.cold_start","durationMs":635,"integrity":"eager","phases":{"schema":{"ms":49,"rowsRead":0},"plugin":{"ms":146,"rowsRead":0},"fence":{"ms":179,"rowsRead":0},"verifies":{"ms":43,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":132,"heapBytes":33386696,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.integrity","matched":0,"skipped":0,"verified":0,"budgetExceeded":1,"checked":0,"swept":0}
+✖ concurrent runOnce calls run each due job at most once (reentrancy guard) (1354.185203ms)
+✔ lastRan advances on success: no every-tick rerun (cadence memory) (1518.551148ms)
+✔ jobNextDue falls back to lastRan + cadenceMs (no immediate-loop) (7.750692ms)
+✔ webhook-dispatch stays disabled when nothing is due (null, not 0) (7.446395ms)
+✔ a job returning {errors:1} without scanError is recorded as failed (1365.380083ms)
+✔ slow jobs never arm the worker alarm, even when due sooner than fast jobs (26.908992ms)
+✔ a past-due job pushes the alarm out by one cadence, never to now (9.233276ms)
+✔ jobIsDue is true at exactly lastRan + cadence (boundary inclusive) (0.259129ms)
+✔ jobIsDue is true when nextDueAt equals now exactly (nextDueAt path) (18.681355ms)
+✔ GROWTH_WATCH_INTERVAL_MS=0 disables growth (not enabled with 0ms) (8.659376ms)
+✔ wireNodeJobs starts the scheduler (726.816918ms)
+✔ node start() twice arms exactly one timer (no double tick) (5.414907ms)
+✔ growth-scheduler runTick tolerates null and malformed tick results (209.626798ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 12
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 8572.1823
+
+✖ failing tests:
+
+test at tests/jobs-scheduler-invariants.test.js:42:1
+✖ concurrent runOnce calls run each due job at most once (reentrancy guard) (1354.185203ms)
+  AssertionError [ERR_ASSERTION]: integrity ran 2x under concurrent ticks
+  
+  2 !== 1
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-16/tests/jobs-scheduler-invariants.test.js:58:12)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 2,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

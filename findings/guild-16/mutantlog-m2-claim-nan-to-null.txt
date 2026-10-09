@@ -1,0 +1,18 @@
+✔ node and worker job names match aside from single-runtime jobs (18.308615ms)
+{"event":"room.cold_start","durationMs":1726,"integrity":"eager","phases":{"schema":{"ms":205,"rowsRead":0},"plugin":{"ms":1024,"rowsRead":0},"fence":{"ms":180,"rowsRead":0},"verifies":{"ms":46,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":185,"heapBytes":36784584,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.integrity","matched":0,"skipped":0,"verified":1,"invitations":0}
+[growth-alert] warn dead-window growth:dead-chat: at=2026-10-09T10:05:24.492Z no activity in window for: message.sent
+{"event":"room.cold_start","durationMs":2435,"integrity":"eager","phases":{"schema":{"ms":410,"rowsRead":0},"plugin":{"ms":995,"rowsRead":0},"fence":{"ms":701,"rowsRead":0},"verifies":{"ms":57,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":183,"heapBytes":41259208,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.integrity","matched":0,"skipped":0,"verified":1,"invitations":0}
+[growth-alert] warn dead-window growth:dead-chat: at=2026-10-09T10:05:27.583Z no activity in window for: message.sent
+✔ scheduler jobHealth lists every registry job and records runs (2298.078489ms)
+✔ GET /api/health/jobs on Node includes the jobs list once the scheduler is wired (3302.665898ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 15587.081367

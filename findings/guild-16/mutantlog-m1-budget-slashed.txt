@@ -1,0 +1,22 @@
+{"event":"room.cold_start","durationMs":903,"integrity":"eager","phases":{"schema":{"ms":192,"rowsRead":0},"plugin":{"ms":462,"rowsRead":0},"fence":{"ms":41,"rowsRead":0},"verifies":{"ms":8,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":163,"heapBytes":36823368,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.integrity","matched":0,"skipped":0,"verified":0,"budgetExceeded":1,"checked":0,"swept":0}
+✔ node scheduler retries a failing webhook receiver then dead-letters it (2643.640265ms)
+✔ node and worker job names match aside from single-runtime jobs (22.717983ms)
+{"event":"room.cold_start","durationMs":1457,"integrity":"eager","phases":{"schema":{"ms":94,"rowsRead":0},"plugin":{"ms":604,"rowsRead":0},"fence":{"ms":479,"rowsRead":0},"verifies":{"ms":95,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":171,"heapBytes":36791480,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.integrity","matched":0,"skipped":0,"verified":1,"budgetExceeded":1,"invitations":0}
+[growth-alert] warn dead-window growth:dead-chat: at=2026-10-09T10:03:23.082Z no activity in window for: message.sent
+{"event":"room.cold_start","durationMs":1132,"integrity":"eager","phases":{"schema":{"ms":27,"rowsRead":0},"plugin":{"ms":371,"rowsRead":0},"fence":{"ms":488,"rowsRead":0},"verifies":{"ms":50,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":144,"heapBytes":41247304,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.integrity","matched":0,"skipped":0,"verified":1,"budgetExceeded":1,"invitations":0}
+[growth-alert] warn dead-window growth:dead-chat: at=2026-10-09T10:03:24.937Z no activity in window for: message.sent
+✔ scheduler jobHealth lists every registry job and records runs (2021.774658ms)
+✔ GET /api/health/jobs on Node includes the jobs list once the scheduler is wired (2544.566685ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 20052.612985

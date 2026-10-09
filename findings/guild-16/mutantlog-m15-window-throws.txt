@@ -1,0 +1,20 @@
+✔ rejects invalid watcher, intervalMs and onAlert (14.581893ms)
+✔ start() is a no-op when intervalMs is 0 or negative (disabled) (8.070492ms)
+✔ start/stop are idempotent and isRunning tracks state (3.231559ms)
+✔ ticks the watcher on the interval (170.861443ms)
+✔ a throwing watcher.tick is logged and counted; the scheduler survives (43.920231ms)
+✔ onAlert is called once per triggered hit with the hit and context (31.62508ms)
+✔ a throwing onAlert does not stop delivery of the remaining hits (34.950801ms)
+✔ the timer is unref'd so it never keeps the process alive (7.857772ms)
+✔ defaultOnAlert logs one structured line with the hit fields (0.535264ms)
+✔ defaultGrowthRules returns a frozen, usable rule set (10.473208ms)
+✔ default rules drive a real watcher over a collector (33.01094ms)
+✔ DEFAULT_INTERVAL_MS is the documented 5-minute default (0.391338ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1778.782098

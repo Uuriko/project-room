@@ -1,0 +1,44 @@
+{
+ "unit": "f14-scheduler-guards",
+ "inputs": 7,
+ "counts": {
+  "ok": 7
+ },
+ "results": [
+  {
+   "name": "no-store",
+   "verdict": "ok",
+   "ms": 29
+  },
+  {
+   "name": "null-store",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "tickms-zero",
+   "verdict": "ok",
+   "ms": 1
+  },
+  {
+   "name": "tickms-negative",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "tickms-nan",
+   "verdict": "ok",
+   "ms": 33
+  },
+  {
+   "name": "tickms-string",
+   "verdict": "ok",
+   "ms": 10
+  },
+  {
+   "name": "defaults",
+   "verdict": "ok",
+   "ms": 0
+  }
+ ]
+}

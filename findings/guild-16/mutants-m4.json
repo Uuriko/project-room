@@ -1,0 +1,66 @@
+{
+ "unit": "m4",
+ "file": "server/jobs.mjs",
+ "results": [
+  {
+   "unit": "m4",
+   "file": "server/jobs.mjs",
+   "mutant": "slow-arms-alarm",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/jobs-parity.test.js",
+    "tests/node-jobs-health.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  },
+  {
+   "unit": "m4",
+   "file": "server/jobs.mjs",
+   "mutant": "alarm-now-nopush",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/jobs-parity.test.js",
+    "tests/node-jobs-health.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  },
+  {
+   "unit": "m4",
+   "file": "server/jobs.mjs",
+   "mutant": "due-exact-nodue",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/jobs-parity.test.js",
+    "tests/node-jobs-health.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  },
+  {
+   "unit": "m4",
+   "file": "server/jobs.mjs",
+   "mutant": "cadence-exact-nodue",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/jobs-parity.test.js",
+    "tests/node-jobs-health.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  },
+  {
+   "unit": "m4",
+   "file": "server/jobs.mjs",
+   "mutant": "earliest-lte",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/jobs-parity.test.js",
+    "tests/node-jobs-health.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  }
+ ]
+}

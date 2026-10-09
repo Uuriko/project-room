@@ -1,0 +1,219 @@
+{
+ "unit": "f2-due-boundary",
+ "inputs": 42,
+ "counts": {
+  "ok": 42
+ },
+ "results": [
+  {
+   "name": "cadence:last=0:now=0",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=0:now=1000000",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=0:now=3600000",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=1:now=0",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=1:now=1000000",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=1:now=3600000",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=-1:now=0",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=-1:now=1000000",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=-1:now=3600000",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=59999:now=0",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=59999:now=1000000",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=59999:now=3600000",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=60000:now=0",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=60000:now=1000000",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=60000:now=3600000",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=60001:now=0",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=60001:now=1000000",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=60001:now=3600000",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=NaN:now=0",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=NaN:now=1000000",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=NaN:now=3600000",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=Infinity:now=0",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=Infinity:now=1000000",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=Infinity:now=3600000",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=-Infinity:now=0",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=-Infinity:now=1000000",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=-Infinity:now=3600000",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=9007199254740991:now=0",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=9007199254740991:now=1000000",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=9007199254740991:now=3600000",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=60000:now=0",
+   "verdict": "ok",
+   "ms": 1
+  },
+  {
+   "name": "cadence:last=60000:now=1000000",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=60000:now=3600000",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=null:now=0",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=null:now=1000000",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=null:now=3600000",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=undefined:now=0",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=undefined:now=1000000",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "cadence:last=undefined:now=3600000",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "dueat:store=null:now=0",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "dueat:store=null:now=1000000",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "dueat:store=null:now=3600000",
+   "verdict": "ok",
+   "ms": 0
+  }
+ ]
+}

@@ -1,0 +1,154 @@
+{
+ "unit": "f1-cron",
+ "inputs": 29,
+ "counts": {
+  "ok": 29
+ },
+ "results": [
+  {
+   "name": "real:answer-engine-check.yml:0 15 * * 1",
+   "verdict": "ok",
+   "ms": 11
+  },
+  {
+   "name": "real:deploy-drift.yml:23 * * * *",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "real:listing-check.yml:0 14 * * 1",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "real:live-smoke.yml:17 */6 * * *",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "real:mime-fuzz.yml:41 7 * * *",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "real:onboarding-probe.yml:0 15 * * 1",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "real:qa2-agent-eval.yml:41 9 * * *",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "real:qa2-fuzz.yml:23 10 * * *",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "real:qa2-synthetic.yml:47 */6 * * *",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "real:qa3-gates.yml:17 8 * * *",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "real:room-github-door.yml:*/10 * * * *",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "real:snippet-adoption.yml:0 13 * * 1",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "real:soak-test.yml:0 9 * * 1",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "real:server/jobs.mjs SAFETY_NET_CRON:*/30 * * * *",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "6-field",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "minute-99",
+   "verdict": "ok",
+   "ms": 1
+  },
+  {
+   "name": "month-13",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "dow-8",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "empty",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "null",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "undefined",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "number",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "every-minute",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "range-step",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "list",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "range",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "step-nan",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "trailing-space",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "l-word",
+   "verdict": "ok",
+   "ms": 0
+  }
+ ]
+}

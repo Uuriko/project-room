@@ -1,0 +1,26 @@
+{
+ "unit": "f4-double-fire",
+ "inputs": 3,
+ "counts": {
+  "ok": 3
+ },
+ "results": [
+  {
+   "name": "double-runOnce",
+   "verdict": "ok",
+   "ms": 3415,
+   "slow": true
+  },
+  {
+   "name": "triple-runOnce",
+   "verdict": "ok",
+   "ms": 3101,
+   "slow": true
+  },
+  {
+   "name": "five-runOnce",
+   "verdict": "ok",
+   "ms": 1975
+  }
+ ]
+}

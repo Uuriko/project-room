@@ -1,0 +1,35 @@
+{"event":"room.cold_start","durationMs":2158,"integrity":"eager","phases":{"schema":{"ms":320,"rowsRead":0},"plugin":{"ms":1056,"rowsRead":0},"fence":{"ms":392,"rowsRead":0},"verifies":{"ms":90,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":201,"heapBytes":24418616,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.integrity","matched":0,"skipped":0,"verified":0,"budgetExceeded":1,"checked":0,"swept":0}
+{"event":"room.cold_start","durationMs":743,"integrity":"eager","phases":{"schema":{"ms":296,"rowsRead":0},"plugin":{"ms":234,"rowsRead":0},"fence":{"ms":43,"rowsRead":0},"verifies":{"ms":7,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":144,"heapBytes":24730080,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1041,"integrity":"eager","phases":{"schema":{"ms":128,"rowsRead":0},"plugin":{"ms":441,"rowsRead":0},"fence":{"ms":337,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":143,"heapBytes":28877056,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+[integrity] boom
+{"event":"room.cold_start","durationMs":1760,"integrity":"eager","phases":{"schema":{"ms":191,"rowsRead":0},"plugin":{"ms":1036,"rowsRead":0},"fence":{"ms":327,"rowsRead":0},"verifies":{"ms":24,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":155,"heapBytes":32998680,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.integrity","matched":0,"skipped":0,"verified":0,"budgetExceeded":1,"checked":0,"swept":0}
+✔ concurrent runOnce calls run each due job at most once (reentrancy guard) (2497.306101ms)
+✔ lastRan advances on success: no every-tick rerun (cadence memory) (888.072075ms)
+✔ jobNextDue falls back to lastRan + cadenceMs (no immediate-loop) (3.924729ms)
+✔ webhook-dispatch stays disabled when nothing is due (null, not 0) (0.338338ms)
+✔ a job returning {errors:1} without scanError is recorded as failed (1188.860199ms)
+✔ slow jobs never arm the worker alarm, even when overdue (1.374373ms)
+✔ a past-due job pushes the alarm out by one cadence, never to now (0.449234ms)
+✔ jobIsDue is true at exactly lastRan + cadence (boundary inclusive) (0.355664ms)
+✔ wireNodeJobs starts the scheduler (1935.964792ms)
+✔ node start() twice arms exactly one timer (no double tick) (6.909248ms)
+✖ growth-scheduler runTick tolerates null and malformed tick results (93.875069ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 10
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 9903.763281
+
+✖ failing tests:
+
+test at tests/jobs-scheduler-invariants.test.js:155:1
+✖ growth-scheduler runTick tolerates null and malformed tick results (93.875069ms)
+  TypeError: Cannot read properties of null (reading 'window')
+      at Timeout.runTick [as _onTimeout] (file:///home/hatch/workspace/pr-wave1000-guild-16/src/growth-scheduler.js:79:22)
+      at listOnTimeout (node:internal/timers:685:17)
+      at process.processTimers (node:internal/timers:618:7)

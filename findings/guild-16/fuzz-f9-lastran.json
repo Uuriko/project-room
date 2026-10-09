@@ -1,0 +1,76 @@
+{
+ "unit": "f9-lastran",
+ "inputs": 13,
+ "counts": {
+  "ok": 12,
+  "crash": 1
+ },
+ "results": [
+  {
+   "name": "null",
+   "verdict": "ok",
+   "ms": 1
+  },
+  {
+   "name": "undefined",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "number",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "array",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "empty-obj",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "nan-ts",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "inf-ts",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "string-ts",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "null-record",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "missing-ts",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "good",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "proto",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "getter",
+   "verdict": "crash",
+   "detail": "Error: x",
+   "ms": 0
+  }
+ ]
+}

@@ -1,0 +1,50 @@
+{
+ "unit": "m8",
+ "file": "src/growth-scheduler.js",
+ "results": [
+  {
+   "unit": "m8",
+   "file": "src/growth-scheduler.js",
+   "mutant": "watcher-not-validated",
+   "status": "KILLED",
+   "tests": [
+    "tests/growth-scheduler.test.js"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  },
+  {
+   "unit": "m8",
+   "file": "src/growth-scheduler.js",
+   "mutant": "interval-not-validated",
+   "status": "KILLED",
+   "tests": [
+    "tests/growth-scheduler.test.js"
+   ],
+   "exitCode": 1,
+   "failedTests": "unknown"
+  },
+  {
+   "unit": "m8",
+   "file": "src/growth-scheduler.js",
+   "mutant": "triggered-null",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/growth-scheduler.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  },
+  {
+   "unit": "m8",
+   "file": "src/growth-scheduler.js",
+   "mutant": "surge-zero-threshold",
+   "status": "SURVIVED",
+   "tests": [
+    "tests/growth-scheduler.test.js"
+   ],
+   "exitCode": 0,
+   "failedTests": 0
+  }
+ ]
+}
