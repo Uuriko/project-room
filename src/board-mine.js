@@ -85,6 +85,37 @@ function nameOf(members, id) {
 
 export const NEEDS_ME_LIMIT = 3;
 
+// Attention flags per claim id for the viewer: the same classification the
+// needs-me panel uses, rendered as badges on the card itself so the attention
+// follows the claim into its board column. Flags: "lease-ending",
+// "lease-ended", "review-requested", "changes-requested". Presentation only:
+// computed from a single myBoardWork pass plus the viewer's open claims with
+// a changes-requested review. Never writes claim state.
+export function attentionMap(items, viewerId, members = {}, now = Date.now()) {
+  const flags = new Map();
+  if (!viewerId) return flags;
+  const list = Array.isArray(items) ? items : [];
+  const work = myBoardWork(list, viewerId, members, now);
+  const add = (id, flag) => flags.set(id, [...(flags.get(id) ?? []), flag]);
+  for (const { item, left } of work.expiring) add(item.id, left <= 0 ? "lease-ended" : "lease-ending");
+  for (const { item } of work.reviews) add(item.id, "review-requested");
+  for (const item of list) {
+    if (!item || typeof item !== "object" || !item.id || item.owner !== viewerId || !OPEN.has(item.state)) continue;
+    const changed = (Array.isArray(item.reviews) ? item.reviews : []).some(review => review?.verdict === "changes_requested");
+    if (changed) add(item.id, "changes-requested");
+  }
+  return flags;
+}
+
+// Urgent needs-you rows: expiring leases, reviews owed, quiet claims — the
+// rows the needs-me panel shows before More. Drives the push soft ask and
+// keeps the count independent of the rendered DOM.
+export function urgentNeedsMeCount(items, viewerId, members = {}, now = Date.now()) {
+  if (!viewerId) return 0;
+  const work = myBoardWork(items, viewerId, members, now);
+  return work.expiring.length + work.reviews.length + work.quiet.length;
+}
+
 // Most urgent first, at most three rows, one primary action each. Nothing urgent
 // and nothing owned renders nothing; the rest of the viewer's work sits behind More.
 export function needsMeHtml(items, viewer, members = {}, now = Date.now()) {

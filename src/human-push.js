@@ -34,6 +34,15 @@ async function subscribe(client, publicKey, current) {
   return true;
 }
 
+// Soft-ask path (push-ask.js): request-free subscribe for a surface that
+// already decided the human wants notifications. Throws when push is not
+// configured server-side, so the ask can hide instead of stranding the user.
+export async function subscribeHumanPush(client, current = () => true) {
+  const config = await client.humanPushConfig();
+  if (!config?.configured || typeof config.publicKey !== "string") throw new Error(uiText("push.copy.007"));
+  return subscribe(client, config.publicKey, current);
+}
+
 export function installHumanPush({ client, button, note, eligible, prefs = null }) {
   let serial = 0;
   let resolvedFor = null;
