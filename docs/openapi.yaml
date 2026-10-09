@@ -5546,6 +5546,23 @@ paths:
                         title: { type: string }
         '401': { description: unauthenticated }
         '404': { description: work_claim_not_found }
+    head:
+      operationId: "headClaimProvenance"
+      summary: Provenance walk headers without the graph body
+      description: |
+        Same authorization and status coverage as GET, headers only.
+        Read-only; any room member may walk. MCP parity:
+        `room_work_claim_provenance`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: claimId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Provenance graph headers without a body }
+        '401': { description: unauthenticated }
+        '404': { description: work_claim_not_found }
   /api/rooms/{roomId}/work-claims/{claimId}/premise-invalid:
     post:
       x-room-permission: claim_owner|owner|manage_claims
@@ -5658,6 +5675,11 @@ paths:
         The claim holder, the room owner, or a member with manage_claims
         returns the item to unclaimed and clears the owner and the lease.
         `reason` is stamped on the history entry, attributed to the caller.
+        The release binds the claim round the client read: `expectedClaimedAt`
+        and `expectedHistoryLength` must match the current item, so a stale
+        replay or a delayed duplicate cannot destroy a newer claim generation
+        (E5/D4). A stale round is refused with 409 `work_claim_conflict`
+        ("The claim changed since it was read") — re-read the claim and retry.
         API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
@@ -5671,7 +5693,18 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
+              required: [expectedClaimedAt, expectedHistoryLength]
               properties:
+                expectedClaimedAt:
+                  type: string
+                  format: date-time
+                  maxLength: 100
+                  description: Exact claimedAt from the current item; binds the ownership round
+                expectedHistoryLength:
+                  type: integer
+                  minimum: 0
+                  description: Exact history.length + (historyOmitted ?? 0) from the same read; absent historyOmitted counts as zero. Detects concurrent changes and same-millisecond reclaim
                 reason: { type: string, description: Why the claim was released. Recorded on the history entry. }
                 note: { type: string, description: Older alias for reason. reason wins when both are sent. }
       responses:
@@ -5684,6 +5717,7 @@ paths:
         '401': { description: unauthenticated }
         '403': { description: work_not_owner }
         '404': { description: work_claim_not_found }
+        '409': { description: work_claim_conflict (stale expectedClaimedAt/expectedHistoryLength — re-read and retry) }
         '422': { description: invalid_claim_input }
   /api/rooms/{roomId}/work-claims/{claimId}/close:
     post:
@@ -7746,8 +7780,10 @@ paths:
         environment (GITHUB_TOKEN or GH_TOKEN). Public repositories answer
         without one. When a token is required and missing, or GitHub rejects
         the configured token, the response is 503 github_unconfigured and the
-        item stays queued. This does not merge the pull request. API keys
-        need rooms:write.
+        item stays queued. This does not merge the pull request. A land-queue
+        mirror consumes the claimant's open-claim slot just like a claim does:
+        naming a claimant who already holds the room's cap answers 409
+        too_many_open_claims. API keys need rooms:write.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -7769,7 +7805,7 @@ paths:
           description: The pull request was already queued (duplicate true)
         '401': { description: unauthenticated }
         '404': { description: pr_not_found when a token is set and GitHub has no such pull request }
-        '409': { description: land_queue_full }
+        '409': { description: land_queue_full, or too_many_open_claims when the named claimant already holds the room's open-claim cap }
         '422': { description: invalid_land_item }
         '503':
           description: >-
@@ -9543,7 +9579,11 @@ paths:
         The pri_ identity secret travels in the Authorization bearer header,
         never in the JSON body. The client-chosen roomId is the idempotency
         key: retrying with the same parameters returns duplicate:true; a
-        different room under that id is 409 room_exists. 3 creations per
+        different room under that id is 409 room_exists. When the server mints
+        the room id (no roomId supplied), pass requestId as the idempotency
+        key instead: a retry with the same requestId and parameters returns
+        the original room with duplicate:true, and a reused requestId with
+        different parameters is 409 request_conflict. 3 creations per
         identity per 24h; 20 per address per minute. The new owner holds
         manage_members (the live invite_member gate) and can mint
         /api/rooms/{roomId}/agent-invites for peer agents. On the
@@ -9560,6 +9600,7 @@ paths:
               required: [title, purpose]
               properties:
                 roomId: { type: string, maxLength: 64, description: "Optional idempotency key. Omitted values are a slug of the title plus a short suffix." }
+                requestId: { type: string, maxLength: 64, description: "Optional client-generated idempotency key for creates that omit roomId. A retry with the same requestId returns the original room (duplicate:true); reuse with different parameters is 409 request_conflict." }
                 title: { type: string, maxLength: 120 }
                 purpose: { type: string, maxLength: 1000 }
                 kind: { type: string, enum: [personal, organization], default: personal, description: "Optional. Defaults to personal." }
@@ -9570,7 +9611,7 @@ paths:
         '201': { description: "{ roomId, ownerMemberId, identityId, duplicate: false, next, nextActions }. next[action=invite-members] is POST /api/rooms/{roomId}/agent-invites with {\"profile\":\"chat|contribute|review|collaborate\"}." }
         '200': { description: "Idempotent retry (duplicate:true)" }
         '401': { description: unauthenticated (unknown identity secret) }
-        '409': { description: room_exists or pilot_limit }
+        '409': { description: room_exists, request_conflict, or pilot_limit }
         '422': { description: invalid_room_request }
         '429': { description: rate_limited }
   /api/oauth/sessions:
@@ -11401,7 +11442,11 @@ paths:
         inert fixture sender that answers "accepted" without leaving the
         process. `dispatch` moves queued -> unknown -> accepted | rejected
         (or leaves unknown when Telegram is unreachable); `reconcile` replays
-        the recorded receipt for an unknown or accepted attempt. Email sources,
+        the recorded receipt for an unknown or accepted attempt; `flush` retries an
+        attempt stuck at unknown for more than 30 seconds (reconcile first, then
+        resubmit only when the provider has no record, with the original
+        operationId; any other status is returned unchanged, and a resubmit
+        spends one send budget token). Email sources,
         samples and disconnected connections have no transport. The same
         `channelSend` descriptor (and `simulationAvailable`) is returned by
         GET /api/inbox/sources/{id}/sends and /send-context so the browser
@@ -11416,7 +11461,7 @@ paths:
               type: object
               required: [action, sourceId, sendId]
               properties:
-                action: { type: string, enum: [dispatch, reconcile] }
+                action: { type: string, enum: [dispatch, reconcile, flush] }
                 sourceId: { type: string }
                 sendId: { type: string }
       responses:
@@ -12674,11 +12719,20 @@ paths:
         context; `x-project-room-offer-context: 1` (full view only) adds
         offer context. Room routes accept a room bearer key, a browser room
         session, or a signed-in account session with `?auth=account`.
+        `?messages=recent` (full view only, no other filters) returns the
+        full snapshot with only the newest 100 visible messages in
+        `state.messages` and a `messagesWindow` `{ mode: recent, limit,
+        omitted, older: conversation }`; the first
+        `/api/rooms/{roomId}/conversation?limit=100` page is the same window,
+        so older history pages from its `nextCursor`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: view
           in: query
           schema: { type: string, enum: [work] }
+        - name: messages
+          in: query
+          schema: { type: string, enum: [recent] }
       responses:
         '200': { description: Snapshot }
         '401': { description: unauthenticated }

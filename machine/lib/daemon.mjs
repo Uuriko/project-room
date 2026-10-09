@@ -23,6 +23,10 @@ function machineTag(label) {
   return TAG_PATTERN.test(tag) ? tag : "machine-host";
 }
 
+function frameType(text) {
+  try { return JSON.parse(text)?.type ?? null; } catch { return null; }
+}
+
 function slotTag(slot) {
   const tag = `slot-${slot}`.slice(0, 32);
   return TAG_PATTERN.test(tag) ? tag : "slot-desk";
@@ -45,6 +49,7 @@ export class MachineDaemon {
     this.lastInbound = 0;
     this.socket = null;
     this.queue = Promise.resolve();
+    this.control = Promise.resolve();
     this.frameStops = new Map();
     this.connections = 0;
   }
@@ -99,9 +104,7 @@ export class MachineDaemon {
               label: this.config.label, version: DAEMON_VERSION,
             }));
           },
-          onText: text => {
-            this.queue = this.queue.then(() => spawnContext.run({ env: this.env }, () => this.handleRaw(text))).catch(() => {});
-          },
+          onText: text => { this.receive(text); },
           onClose: done,
         });
       });
@@ -110,6 +113,22 @@ export class MachineDaemon {
       return step();
     };
     this.loop = step();
+  }
+
+  // Calls run one at a time, but control frames must not wait behind them: a
+  // call can take minutes (an owner approval wait, a slow guest command), and
+  // a Halt or Pause queued behind it lands only after that call has acted.
+  // Control frames get their own queue; a call still waits for the control
+  // frames that arrived before it, so a halt finishes before the next call.
+  receive(text) {
+    const run = () => spawnContext.run({ env: this.env }, () => this.handleRaw(text));
+    if (frameType(text) === "call") {
+      const control = this.control;
+      this.queue = this.queue.then(() => control).then(run).catch(() => {});
+      return this.queue;
+    }
+    this.control = this.control.then(run).catch(() => {});
+    return this.control;
   }
 
   async handleRaw(text) {
@@ -142,7 +161,7 @@ export class MachineDaemon {
     if (message.type === "pause") {
       const until = pauseUntilFromMinutes(message.minutes);
       if (until == null) return;
-      this.state.pausedUntil = until;
+      this.holdPause(until);
       await suspendGuests(this.state);
       return;
     }
@@ -150,6 +169,7 @@ export class MachineDaemon {
       this.state.halted = false;
       this.state.pausedUntil = null;
       this.config.halted = false;
+      this.config.pausedUntil = null;
       saveConfig(this.config, this.home);
       return;
     }
@@ -164,12 +184,18 @@ export class MachineDaemon {
     this.socket?.send(encoded);
   }
 
-  async call(message) {
-    const id = message.id;
-    if (!this.featureOn()) return errorResult(id, ERROR.DISABLED, "room-machine is off");
+  refusal(id) {
     if (this.state.halted) return errorResult(id, ERROR.HALTED, "This machine is halted");
     if (this.state.pausedUntil && Date.now() < this.state.pausedUntil) return errorResult(id, ERROR.PAUSED, "This machine is paused");
     if (this.state.deadman) return errorResult(id, ERROR.DEADMAN, "Relay link exceeded the dead-man window");
+    return null;
+  }
+
+  async call(message) {
+    const id = message.id;
+    if (!this.featureOn()) return errorResult(id, ERROR.DISABLED, "room-machine is off");
+    const refused = this.refusal(id);
+    if (refused) return refused;
     const caller = message.caller;
     if (!caller || caller.verified !== true || typeof caller.identityId !== "string"
       || typeof caller.claimId !== "string" || !SLOTS.includes(caller.slot)) {
@@ -195,13 +221,17 @@ export class MachineDaemon {
       const budget = Number.isFinite(waitMs) && waitMs >= 0 ? waitMs : APPROVAL_TTL_MS;
       const deadline = Date.now() + budget;
       let taken = { ok: false, reason: ERROR.APPROVAL_REQUIRED };
-      while (Date.now() <= deadline) {
+      while (Date.now() <= deadline && !this.refusal(id)) {
         taken = await takeApproval({
           home: this.home, origin: this.config.roomOrigin, roomId: this.config.roomId, secret, code: requested.code,
         });
         if (taken.ok || taken.reason === ERROR.APPROVAL_DENIED) break;
         await new Promise(resolve => setTimeout(resolve, 40));
       }
+      // A Halt, Pause or dead-man that landed during the wait outranks the
+      // approval: the relay already told the caller the call was stopped.
+      const late = this.refusal(id);
+      if (late) return late;
       if (!taken.ok) return errorResult(id, taken.reason, "The owner has not approved this");
     }
     if (caller.slot && !this.frameStops.has(caller.claimId) && tool.startsWith("desktop.")) {
@@ -269,15 +299,24 @@ export class MachineDaemon {
   async pause(minutes) {
     const until = pauseUntilFromMinutes(minutes);
     if (until == null) return { pausedUntil: this.state.pausedUntil };
-    this.state.pausedUntil = until;
+    this.holdPause(until);
     await suspendGuests(this.state);
     return { pausedUntil: this.state.pausedUntil };
+  }
+
+  // Like halt, a pause is written to config so a daemon restarted by launchd
+  // (crash, reboot) mid-pause comes back paused instead of quietly resuming.
+  holdPause(until) {
+    this.state.pausedUntil = until;
+    this.config.pausedUntil = until;
+    saveConfig(this.config, this.home);
   }
 
   async resume() {
     this.state.halted = false;
     this.state.pausedUntil = null;
     this.config.halted = false;
+    this.config.pausedUntil = null;
     saveConfig(this.config, this.home);
     return { halted: false };
   }

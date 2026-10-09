@@ -30,6 +30,13 @@
 .join-permissions { margin: .5rem 0; padding-left: 1.25rem; }
 .join-permissions li { margin: .2rem 0; }
 .join-secret-row { display: flex; gap: .5rem; margin: .75rem 0; }
-.join-secret-row input { flex: 1; font-family: monospace; }
+/* min-width: 0 lets the flex item shrink below its intrinsic ~20ch width so
+   the access-key row cannot overflow the card on narrow viewports or under
+   enlarged text (same overflow class .key-field already guards). */
+.join-secret-row input { flex: 1; min-width: 0; font-family: monospace; }
 .join-actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: 1rem; }
+/* M-01 (mobile onboarding): the self-serve door on the signed-in Rooms panel
+   must meet the coarse-pointer touch floor. The sibling .account-room-create
+   summary already had it; this one rendered about one line tall. */
+#account-request-access summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; }
 h1.join-brand { text-align: center; margin: 0 0 1.5rem; font-size: 1rem; font-weight: 650; opacity: .85; }

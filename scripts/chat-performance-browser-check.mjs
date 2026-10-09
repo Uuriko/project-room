@@ -180,3 +180,42 @@ test('large room history completes initial render with a bounded live message DO
   assert.deepEqual(errors, [], 'initial render completes without browser errors');
   console.log(`render window workload: 2,000 messages, ~1.7 MB text, ${rendered} live nodes, ${initialRenderMs.toFixed(0)} ms until sentinel`);
 });
+
+test('typing in the composer leaves unchanged reply text untouched', { timeout: 30000 }, async t => {
+  // Every keystroke runs updateReply(). Rewriting an unchanged text node there
+  // forced a layout of the whole timeline per key (~600 ms per key at 5,000
+  // messages on a throttled phone CPU), so typing lagged in big rooms.
+  const f = createAcceptanceFixture();
+  for (let i = 0; i < 20; i++) f.store.command(f.keys[i % 2 ? 'producer' : 'owner'], 'commons', { id: `typing-${i}`, type: 'message.posted', data: { messageId: `typing-${i}`, body: `Message ${i}` } });
+  const server = createRoomServer({ store: f.store, streamInterval: 50 });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+  t.after(async () => {
+    await browser.close(); server.closeStreams(); server.closeAllConnections();
+    if (server.listening) await new Promise(resolve => server.close(resolve));
+    f.store.close(); rmSync(f.directory, { recursive: true, force: true });
+  });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await signInFixture(page, f.keys.owner);
+  await page.locator('[data-message-record-id="typing-19"]').waitFor();
+  const watch = () => page.evaluate(() => {
+    globalThis.replyWrites = 0;
+    globalThis.replyObserver?.disconnect();
+    globalThis.replyObserver = new MutationObserver(rows => { globalThis.replyWrites += rows.length; });
+    for (const id of ['reply-context', 'reply-mention']) globalThis.replyObserver.observe(document.getElementById(id), { childList: true, characterData: true, subtree: true });
+  });
+  const writes = () => page.evaluate(() => globalThis.replyWrites);
+  const input = page.locator('#message-input');
+  await input.click(); await input.pressSequentially('a'); await watch();
+  await input.pressSequentially('nother thought', { delay: 5 });
+  assert.equal(await writes(), 0, 'no reply target: typing rewrites no reply text');
+  await page.locator('[data-message-record-id="typing-19"] [data-message-action="reply"]').evaluate(node => node.click());
+  await page.waitForFunction(() => document.getElementById('reply-mention').textContent.startsWith('Also @ '));
+  await input.pressSequentially(' x'); await watch();
+  await input.pressSequentially(' and more', { delay: 5 });
+  assert.equal(await writes(), 0, 'replying: plain typing rewrites no reply text');
+  assert.match(await page.locator('#reply-mention').textContent(), /^Also @ /);
+  assert.deepEqual(errors, []);
+});

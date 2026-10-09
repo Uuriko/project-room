@@ -261,6 +261,8 @@ const JSON_BODY_BYTES = 16384;
 const rateHash = value => createHash("sha256").update(String(value)).digest("hex");
 // A lagging stream that still has not drained its final event by now is dropped.
 const STREAM_DRAIN_GRACE_MS = 5000;
+// Messages a `?messages=recent` room snapshot carries (the /conversation page maximum).
+const SNAPSHOT_RECENT_MESSAGES = 100;
 
 // Least-recently-used bookkeeping for small internal caches (channel senders).
 // Returns the cached value for key, marking it most-recently-used; when key is
@@ -2671,6 +2673,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         checkOrigin(req, !carriesBearer(req));
         rate(`link-agent-join:${remoteAddress}`, 20);
         const identitySecret = bearer(req);
+        if (identitySecret?.startsWith(API_KEY_PREFIX)) reject(401, "room_token_not_identity", ROOM_TOKEN_NOT_IDENTITY);
         if (!store.identities.resolveGlobalIdentitySecret(identitySecret)) reject(401, "unauthenticated", "Active agent identity required");
         const data = await body(req);
         if (!exact(data, ["linkToken", "displayName"])) reject(422, "invalid_join", "Invitation link and agent name required");
@@ -4053,6 +4056,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (!route && req.method === "GET") {
         const params = url.searchParams;
+        // `?messages=recent`: the full snapshot with only the newest
+        // SNAPSHOT_RECENT_MESSAGES visible messages. A busy room's full
+        // history (muse-room: 5,300+ messages, ~5 MB) no longer has to ship
+        // on every open; older history pages through /conversation.
+        const recentMessages = params.has("messages");
+        if (recentMessages && (params.has("view") || params.get("messages") !== "recent"
+          || [...params.keys()].some(key => !["messages", "auth"].includes(key) || params.getAll(key).length !== 1))) {
+          reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
+        }
         if (params.has("view") && (params.getAll("view").length !== 1 || params.get("view") !== "work"
           || [...params.keys()].some(key => !["view", "auth"].includes(key) || params.getAll(key).length !== 1))) {
           reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
@@ -4072,12 +4084,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           // existence. The work view carries none of these.
           const visibleMessages = (snapshot.state.messages ?? []).filter(dmMessageVisible);
           const visibleIds = new Set(visibleMessages.map(message => message.id));
+          // The recent window trims after DM filtering, so hidden DMs never
+          // count toward it; pins still follow every visible message.
+          const windowed = recentMessages ? visibleMessages.slice(-SNAPSHOT_RECENT_MESSAGES) : visibleMessages;
           const nextState = { ...snapshot.state,
-            messages: visibleMessages,
+            messages: windowed,
             eventLog: (snapshot.state.eventLog ?? []).filter(roomEventVisible),
             pins: (snapshot.state.pins ?? []).filter(pin => visibleIds.has(pin.messageId)) };
           if (snapshot.state.bonds) nextState.bonds = visibleBonds(snapshot.state.bonds, peerContext);
           snapshot.state = redactSnapshotState(nextState);
+          if (recentMessages) snapshot.messagesWindow = { mode: "recent", limit: SNAPSHOT_RECENT_MESSAGES,
+            omitted: visibleMessages.length - windowed.length, older: "conversation" };
         }
         return json(res, 200, snapshot);
       }

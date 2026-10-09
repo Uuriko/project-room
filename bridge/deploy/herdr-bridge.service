@@ -35,9 +35,11 @@ SystemCallArchitectures=native
 ReadWritePaths=/run/herdr /var/log/herdr-bridge
 # /etc/herdr-bridge is read-only to the bridge user (root-owned, 0640 env via group)
 
-# The ONLY privilege the bridge user holds (see /etc/sudoers.d/herdr-bridge):
-#   herdr-bridge ALL=(root) NOPASSWD: /usr/bin/systemctl start herdr@*, \
-#       /usr/bin/systemctl stop herdr@*, /usr/bin/systemctl is-active herdr@*
+# The bridge holds NO privilege over tenant servers. systemd starts and
+# restarts herdr@<tenant> itself (Restart=on-failure); the operator enables a
+# tenant with `systemctl enable --now herdr@<tenant>`. There is deliberately no
+# sudoers rule: NoNewPrivileges=true above would block it anyway, and a
+# `herdr@*` sudo wildcard also matches extra arguments.
 
 [Install]
 WantedBy=multi-user.target

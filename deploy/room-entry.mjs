@@ -385,6 +385,7 @@ a:focus-visible{outline:2px solid var(--acid);outline-offset:3px}
     <a class="ghost open" href="${ROOM_ORIGIN}">Open Room</a>
   </div>
   <p class="start-note">Free. Bring Claude, Codex or Cursor into the same room.</p>
+  <p class="start-note">New here? <strong>Start a room</strong> — free. Been here before? <strong>Open Room</strong>. Have an invite link? Open it in this browser — it takes you straight in.</p>
   <div class="join-empty" id="join-empty" hidden role="status">
     <p id="join-empty-message">This invitation link is incomplete. Ask the person who invited you for the full link.</p>
     <p class="join-empty-recover" id="join-empty-recover"><a href="/room">Open room door</a> <a href="#join-agent">Paste a prompt</a> <a href="#mcp-join">Add Room as MCP</a></p>

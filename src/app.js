@@ -15,7 +15,7 @@ import { attemptReceipts, attemptLedger, cancellationState, workContinuity, spen
 import { consumeJoinFragment, installShareLinks, canRetryInvitation, requestFailureMessage } from "./share-links.js";
 import { FIRST_ROOM_SETUP_FAILURE } from "./first-room-copy.js";
 import { dmConsentPeerSummary, incomingDmRequests, dmConsentPairDescription, dmConsentActionsForPeer, fetchDmConsents, requestDmConsent, decideDmConsent, revokeDmConsent, blockDmMember, unblockDmMember, dmConsentFailureMessage, DM_CONSENT_REFUSAL_CODES } from "./dm-consents.js";
-import { identityIdOf, mergeFriendBonds, bondWithPeer, friendChrome, friendBondCommand, friendFailureMessage, friendFocusTarget } from "./friend-bond.js";
+import { identityIdOf, mergeFriendBonds, bondWithPeer, friendChrome, friendBondCommand, friendFailureMessage, friendFocusTarget, friendMessageHtml } from "./friend-bond.js";
 import { installAgentConnections } from "./agent-connections.js";
 import { catalogById } from "./room-roster.js";
 import { installRoomInstructions } from "./room-instructions.js";
@@ -29,6 +29,7 @@ import { replyDraftKey, replyDraftData, validReplyDraft, replyFollowUp, creditQu
 import { workHelpContext, validateHelpData } from "./work-help.js";
 import { workOffersContext, validateHelpOfferData } from "./help-offers.js";
 import { installInbox } from "./inbox-ui.js";
+import { nameBeforeFirstRoom } from "./account-setup-ui.js";
 import { createAccountSettingsUI, applyStoredTheme, organizeRoomSettings, ACCOUNT_DELETED_MESSAGE } from "./account-settings-ui.js";
 import { createAuthSigninUI, classifyAuthLink } from "./auth-signin-ui.js";
 import { createAgentSigninUI } from "./agent-signin-ui.js";
@@ -1028,7 +1029,7 @@ async function loadAccountRooms(more = false) {
     // fresh account with no rooms and no pending invitation gets its default
     // room created and opened.
     if (!more && !$("#account-rooms-list").children.length && !roomListCursor
-      && !startRoomIntent && !startRoomFlight) ensureDefaultRoom();
+      && !startRoomIntent && !startRoomFlight) nameThenEnsureDefaultRoom();
   } catch (error) {
     if (version !== roomListVersion || (accountClient.session && accountClient.session !== owned)) return;
     if ([401, 403].includes(error.status) || !accountClient.session) endAccountAccess();
@@ -1039,6 +1040,8 @@ async function loadAccountRooms(more = false) {
 // invitation is being redeemed — the invite flow owns the landing. Idempotent
 // server-side; a second call returns the existing room.
 let defaultRoomFlight = null;
+const nameThenEnsureDefaultRoom = nameBeforeFirstRoom({
+  askName: () => inboxUI.askSetupName?.(), ensure: () => ensureDefaultRoom(), session: () => accountClient.session });
 async function ensureDefaultRoom() {
   if (defaultRoomFlight) return defaultRoomFlight;
   // Never create a default room when entering through an invitation or a
@@ -4133,14 +4136,16 @@ function updateReply() {
   $("#reply-bar").hidden = Boolean(requestMode) || !target || replyToId === currentThreadId;
   const author = target ? replyAuthorToAddress(session?.member?.id, state.members[target.authorId]) : null;
   const addressing = Boolean(author && messageMentionsMember($("#message-input").value, author));
-  $("#reply-context").textContent = target
+  // Runs on every keystroke: write text only when it changes. Replacing an
+  // unchanged text node still forces a layout of the whole timeline.
+  setText("#reply-context", target
     ? `Replying to ${name(target.authorId)}${addressing ? ` · addressing ${author.displayName}` : ""}: ${target.deletedAt ? "Message deleted" : target.body.slice(0, 100)}`
-    : "";
+    : "");
   const mention = $("#reply-mention");
   mention.hidden = !author;
   mention.disabled = busy;
   mention.setAttribute("aria-pressed", addressing ? "true" : "false");
-  mention.textContent = author ? `Also @ ${author.displayName}` : "Also @";
+  setText("#reply-mention", author ? `Also @ ${author.displayName}` : "Also @");
 }
 function clearReply() { replyToId = currentThreadId; updateReply(); }
 $("#cancel-reply").addEventListener("click", () => { clearReply(); $("#message-input").focus({ preventScroll: true }); });
@@ -7017,14 +7022,9 @@ async function runFriendAction(action, peerMemberId, bondId, button) {
     }
   }
 }
-function friendMessageHtml(messages, peerMemberId) {
-  if (!messages?.length) return `<li class="friend-dm-empty">No messages yet.</li>`;
+function friendThreadHtml(messages, peerMemberId) {
   const selfId = identityIdOf(state.members[session.member.id] ?? session.member, presenceStates.get(session.member.id));
-  return messages.map(message => {
-    const mine = message.fromIdentityId === selfId;
-    const who = mine ? "You" : displayName(peerMemberId);
-    return `<li class="friend-dm-message${mine ? " mine" : ""}"><span class="friend-dm-meta">${esc(who)}</span><p>${esc(message.body)}</p></li>`;
-  }).join("");
+  return friendMessageHtml(messages, { selfId, peerName: displayName(peerMemberId), esc, time });
 }
 async function loadFriendThread(peerMemberId) {
   if (!state || !session || friendDmPeerId !== peerMemberId) return;
@@ -7035,10 +7035,10 @@ async function loadFriendThread(peerMemberId) {
     const listed = await client.request(client.path("/peer-dms"));
     if (generation !== client.generation || friendDmPeerId !== peerMemberId || !state) return;
     const thread = (listed?.threads ?? []).find(row => row.peerIdentityId === peerIdentity);
-    if (!thread) { renderContent("#friend-dm-list", `<li class="friend-dm-empty">No messages yet.</li>`); return; }
+    if (!thread) { renderContent("#friend-dm-list", friendThreadHtml(null, peerMemberId)); return; }
     const history = await client.request(client.path(`/peer-dms/${encodeURIComponent(thread.threadId)}`));
     if (generation !== client.generation || friendDmPeerId !== peerMemberId || !state) return;
-    renderContent("#friend-dm-list", friendMessageHtml(history?.messages, peerMemberId));
+    renderContent("#friend-dm-list", friendThreadHtml(history?.messages, peerMemberId));
   } catch (error) {
     if (generation === client.generation && friendDmPeerId === peerMemberId) dialogNotice("#friend-dm-status", friendFailureMessage(error), true);
   }
@@ -7051,7 +7051,7 @@ function openFriendThread(peerMemberId) {
   $("#friend-dm-title").textContent = `Friends with ${peer.displayName}`;
   $("#friend-dm-input").value = "";
   setFormStatus($("#friend-dm-status"), "");
-  renderContent("#friend-dm-list", `<li class="friend-dm-empty">No messages yet.</li>`);
+  renderContent("#friend-dm-list", friendThreadHtml(null, peerMemberId));
   if (!$("#friend-dm-dialog").open) $("#friend-dm-dialog").showModal();
   void loadFriendThread(peerMemberId);
   $("#friend-dm-input").focus();

@@ -112,3 +112,22 @@ export function installAccountSetup({ api, owns, onInbox, onRoom = () => locatio
   };
   return ui;
 }
+
+// QA8: a fresh account's first room must not be made before the person has a
+// chance to give a name, or they join it as "Owner" and invites say "Owner
+// invited you". askName() is a no-op when setup is already done. One flight is
+// shared, so two rooms-list loads never open the dialog twice or make two
+// rooms. If the session changes while the dialog is open, nothing is made.
+export function nameBeforeFirstRoom({ askName, ensure, session }) {
+  let flight = null;
+  return () => {
+    if (flight) return flight;
+    const owned = session();
+    flight = (async () => {
+      try { await askName?.(); } catch { /* setup is optional; the room is still made */ }
+      if (session() !== owned) return null;
+      return ensure();
+    })().finally(() => { flight = null; });
+    return flight;
+  };
+}

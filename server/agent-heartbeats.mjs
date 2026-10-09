@@ -194,6 +194,12 @@ const signalView = row => {
   });
 };
 
+// A pre-migration or read-only DB lacks these tables; that is the only error the
+// fail-closed reads below may absorb. Busy, locked and I/O errors must surface.
+function isMissingTable(error) {
+  return /no such (table|column)/i.test(String(error?.message ?? ""));
+}
+
 export class AgentHeartbeats {
   constructor(store, { staleAfterMs = HEARTBEAT_STALE_AFTER_MS } = {}) {
     this.store = store;
@@ -263,7 +269,8 @@ export class AgentHeartbeats {
     try {
       row = this.db.prepare(
         "SELECT last_polled_at AS lastPolledAt FROM agent_wake_polls WHERE agent_id=?").get(agentId);
-    } catch {
+    } catch (error) {
+      if (!isMissingTable(error)) throw error;
       // Pre-migration DB without agent_wake_polls (read-only opens never
       // migrate): read as not wakeable, mirroring wakeStatusList.
       row = null;
@@ -287,12 +294,14 @@ export class AgentHeartbeats {
         FROM (SELECT DISTINCT agent_id FROM agent_hosts) h
         LEFT JOIN agent_wake_polls p ON p.agent_id = h.agent_id
         ORDER BY h.agent_id`).all();
-    } catch {
+    } catch (error) {
+      if (!isMissingTable(error)) throw error;
       rows = [];
       try {
         rows = this.db.prepare("SELECT DISTINCT agent_id AS agentId FROM agent_hosts ORDER BY agent_id")
           .all().map(row => ({ agentId: row.agentId, lastPolledAt: null }));
-      } catch {
+      } catch (error) {
+        if (!isMissingTable(error)) throw error;
         // Pre-heartbeat DB without agent_hosts either (read-only opens
         // never migrate): nobody registered, both lists stay empty.
       }
@@ -582,7 +591,8 @@ export class AgentHeartbeats {
         targets.push(Object.freeze({ agentId, hostId: host.hostId, url: config.pushUrl, token: config.pushToken }));
       }
       return Object.freeze(targets);
-    } catch {
+    } catch (error) {
+      if (!isMissingTable(error)) throw error;
       return Object.freeze([]);
     }
   }
@@ -738,7 +748,8 @@ export class AgentHeartbeats {
     let known = null;
     try {
       known = this.db.prepare("SELECT 1 FROM agent_hosts WHERE agent_id=? LIMIT 1").get(agentId);
-    } catch {
+    } catch (error) {
+      if (!isMissingTable(error)) throw error;
       // Pre-heartbeat DB without agent_hosts (read-only opens never
       // migrate): no host ever reported, so the agent is unregistered.
     }
@@ -748,7 +759,7 @@ export class AgentHeartbeats {
     // The pending-wake read below still serves; only the stamp is skipped.
     // recordPollActivity stays loud for its write-path caller heartbeat():
     // a missing stamp table there is a real problem, not a legacy DB.
-    try { this.recordPollActivity(agentId); } catch { /* no stamp table yet */ }
+    try { this.recordPollActivity(agentId); } catch (error) { if (!isMissingTable(error)) throw error; /* no stamp table yet */ }
     // WAVE-500 W6: idle liveness. An authenticated poll proves the agent is
     // alive and listening — refresh the most recently seen host so presence
     // doesn't decay while the agent polls instead of heartbeating. Only the
@@ -828,7 +839,8 @@ export class AgentHeartbeats {
     try {
       hosts = this.db.prepare("SELECT * FROM agent_hosts WHERE agent_id=? ORDER BY last_seen_at DESC")
         .all(agentId);
-    } catch {
+    } catch (error) {
+      if (!isMissingTable(error)) throw error;
       // Pre-heartbeat DB without agent_hosts (read-only opens never
       // migrate): no host ever reported — read as unregistered, never an
       // error. presenceForCard promises null for absent heartbeat tables;
@@ -843,7 +855,8 @@ export class AgentHeartbeats {
       cadences = new Map(this.db.prepare(
         "SELECT host_id AS hostId, cadence_seconds AS cadenceSeconds FROM agent_push_configs WHERE agent_id=?")
         .all(agentId).map(row => [row.hostId, row.cadenceSeconds]));
-    } catch {
+    } catch (error) {
+      if (!isMissingTable(error)) throw error;
       // Older database without the push table: every host reads the
       // default window (read-only never migrates).
     }

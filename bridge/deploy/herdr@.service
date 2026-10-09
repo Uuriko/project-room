@@ -14,9 +14,12 @@ Group=%i
 # shape where the OS enforces the multi-tenant boundary).
 Environment=HERDR_SOCKET_PATH=/run/herdr/%i/herdr.sock
 Environment=TMPDIR=/var/lib/herdr/%i/tmp
-UMask=0077
+# 0007: the socket is created 0660. The directory below is setgid
+# herdr-bridge, so the socket's group is herdr-bridge and the bridge (a member
+# of nothing else) can connect. Other tenants' UIDs get no bits on the dir.
+UMask=0007
 ExecStart=/opt/herdr/bin/herdr-server --socket /run/herdr/%i/herdr.sock
-ExecStartPre=/usr/bin/install -d -m 0700 -o %i -g %i /run/herdr/%i
+ExecStartPre=/usr/bin/install -d -m 2750 -o %i -g herdr-bridge /run/herdr/%i
 ExecStartPre=/usr/bin/install -d -m 0700 -o %i -g %i /var/lib/herdr/%i/tmp
 Restart=on-failure
 RestartSec=5

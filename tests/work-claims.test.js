@@ -1,7 +1,7 @@
 // B006/B007: work claim + update. Pure state-machine tests; no store.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { claimWork, updateWork, reassignWork, workOwnedBy, unclaimedWork, ClaimError, STATES } from "../server/work-claims.mjs";
+import { claimWork, updateWork, reassignWork, releaseWork, workOwnedBy, unclaimedWork, ClaimError, STATES } from "../server/work-claims.mjs";
 
 const throwsCode = (fn, code) => assert.throws(fn, error => error instanceof ClaimError && error.code === code);
 
@@ -112,4 +112,53 @@ test("append PR refuses stale rounds, unsafe input and stopped ownership without
   const fullInput = { ...input, expectedHistoryLength: full.history.length };
   assert.equal(appendWorkPullRequest(full, "quill", fullInput), full);
   throwsCode(() => appendWorkPullRequest(full, "quill", { ...fullInput, pullRequest: "https://github.com/acme/repo/pull/17" }), "invalid_claim_input");
+});
+
+// E5/D4 (QA-200 2026-10-08): a release binds the claim round it was read
+// from. A stale replay (timed-out retry) or a delayed duplicate landing
+// after an intervening release + re-claim must be refused instead of
+// silently destroying the fresh claim.
+test("release binds the claim round: stale generations are refused", () => {
+  const now = Date.parse("2026-10-08T02:00:00Z");
+  const fresh1 = claimWork({ id: "e5" }, "quill", { now, leaseHours: 6 });
+  const round1 = { expectedClaimedAt: fresh1.claimedAt, expectedHistoryLength: fresh1.history.length };
+  // the round the client read releases cleanly
+  const released1 = releaseWork(fresh1, "quill", { ...round1, note: "done", now });
+  assert.equal(released1.state, "unclaimed");
+  assert.equal(released1.owner, null);
+  // re-claim: a new generation. A same-ms re-claim keeps the old claimedAt
+  // (claimWork stamps now), so history length is the round discriminator.
+  const fresh2 = claimWork(released1, "quill", { now, leaseHours: 6 });
+  assert.equal(fresh2.state, "claimed");
+  assert.equal(fresh2.owner, "quill");
+  assert.ok(fresh2.history.length > round1.expectedHistoryLength);
+  const before = JSON.stringify(fresh2);
+  // E5: replaying the stale release payload is refused; the fresh claim is untouched
+  throwsCode(() => releaseWork(fresh2, "quill", { ...round1, note: "done", now }), "work_claim_conflict");
+  assert.equal(JSON.stringify(fresh2), before);
+  // D4: the same stale payload arriving late, after an intervening
+  // release + re-claim by the same owner, is refused the same way
+  const released2 = releaseWork(fresh2, "quill",
+    { expectedClaimedAt: fresh2.claimedAt, expectedHistoryLength: fresh2.history.length, note: "mid", now });
+  const fresh3 = claimWork(released2, "quill", { now, leaseHours: 6 });
+  throwsCode(() => releaseWork(fresh3, "quill", { ...round1, note: "late duplicate", now }), "work_claim_conflict");
+  assert.equal(fresh3.owner, "quill");
+  assert.equal(fresh3.state, "claimed");
+  // the fresh round releases cleanly
+  const released3 = releaseWork(fresh3, "quill",
+    { expectedClaimedAt: fresh3.claimedAt, expectedHistoryLength: fresh3.history.length, note: "done", now });
+  assert.equal(released3.state, "unclaimed");
+  // malformed round tokens
+  for (const fields of [{ expectedClaimedAt: null }, { expectedClaimedAt: "not-a-date" },
+      { expectedHistoryLength: -1 }, { expectedHistoryLength: 1.5 }, { expectedHistoryLength: "3" }]) {
+    throwsCode(() => releaseWork(fresh3, "quill", { expectedClaimedAt: fresh3.claimedAt,
+      expectedHistoryLength: fresh3.history.length, ...fields, now }), "invalid_claim_input");
+  }
+  // releasing an in_progress claim keeps the pause transition, bound to the read round
+  const active = updateWork(claimWork({ id: "e5b" }, "quill", { now, leaseHours: 6 }), "quill", { state: "in_progress", now });
+  const done = releaseWork(active, "quill",
+    { expectedClaimedAt: active.claimedAt, expectedHistoryLength: active.history.length, note: "wrap", now });
+  assert.equal(done.state, "unclaimed");
+  const actions = done.history.map(entry => entry.action);
+  assert.ok(actions.includes("state:claimed") && actions.at(-1) === "state:unclaimed");
 });

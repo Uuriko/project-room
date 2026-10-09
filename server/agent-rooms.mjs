@@ -47,10 +47,24 @@ CREATE TABLE IF NOT EXISTS agent_room_ownership (
   identity_id TEXT NOT NULL,
   room_id TEXT NOT NULL,
   created_at INTEGER NOT NULL,
+  request_id TEXT,
   PRIMARY KEY (identity_id, room_id)
 );`;
 
-const CREATE_FIELDS = Object.freeze(["roomId", "title", "purpose", "kind", "displayName", "starter"]);
+// Additive migration for databases created before request_id existed: the
+// table is purely additive (server/writer-fence.mjs), so an in-place column
+// plus a partial unique index is safe. Called from the store open path next
+// to the schema exec.
+export function ensureAgentRoomRequestIdColumn(db) {
+  try { db.exec("ALTER TABLE agent_room_ownership ADD COLUMN request_id TEXT"); }
+  catch (error) {
+    if (!/duplicate column name/i.test(String(error?.message))) throw error;
+  }
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS agent_room_ownership_request
+    ON agent_room_ownership(identity_id, request_id) WHERE request_id IS NOT NULL`);
+}
+
+const CREATE_FIELDS = Object.freeze(["roomId", "title", "purpose", "kind", "displayName", "starter", "requestId"]);
 const AGENT_STARTER_ID = "starter";
 const AGENT_STARTER_TITLE = "Post your plan, then close this task";
 
@@ -144,6 +158,16 @@ export class AgentRooms {
     return { identityId: identity.identityId, rooms, nextCursor: links.length > 100 ? links[99].roomId : null };
   }
 
+  // Shared shape for both idempotency keys (client roomId, client requestId):
+  // the original room, a fresh onboarding token, and the duplicate flag so
+  // the HTTP layer answers 200 on a replay.
+  #duplicateCreateResponse(roomId, memberId, identityId, displayName) {
+    return { roomId, ownerMemberId: memberId, identityId, duplicate: true,
+      mcpToken: this.store.agentPlugin.issueOnboardingMcpToken({ identityId, roomId, label: displayName }),
+      starter: starterView(this.store, roomId),
+      next: roomCreateNext(roomId), nextActions: nextActionsForRoomCreate(roomId) };
+  }
+
   // Self-serve room creation. secret is the caller's pri_ identity secret
   // (from the bearer header). title and purpose are required. kind defaults
   // to personal, roomId is a slug of the title plus a short suffix, and
@@ -169,6 +193,11 @@ export class AgentRooms {
     if (!ROOM_KINDS.includes(kind)) fail(422, "invalid_room_request", `kind must be one of: ${ROOM_KINDS.join(", ")}`);
     const roomId = Object.hasOwn(request, "roomId") ? request.roomId : slugFromTitle(request.title);
     if (!validId(roomId) || roomId.length > 64) fail(422, "invalid_room_request", "roomId must be 1 to 64 letters, digits, dots, colons, underscores or hyphens");
+    // requestId is the client-generated idempotency key for creates that let
+    // the server mint the room id: a dropped response retried with the same
+    // key returns the original room instead of minting a second one.
+    const requestId = Object.hasOwn(request, "requestId") ? request.requestId : null;
+    if (requestId !== null && !validId(requestId)) fail(422, "invalid_room_request", "requestId must be 1 to 64 letters, digits, dots, colons, underscores or hyphens");
     const title = request.title.trim(), purpose = request.purpose.trim();
     return this.store.transaction(() => {
       const identity = this.store.identities.resolveGlobalIdentitySecret(secret);
@@ -178,16 +207,24 @@ export class AgentRooms {
       if (!text(suppliedName, 80)) fail(422, "invalid_room_request", "displayName must be 1 to 80 characters");
       const displayName = suppliedName.trim();
       const memberId = identity.identityId;
+      if (requestId !== null) {
+        const prior = this.store.db.prepare(
+          "SELECT room_id FROM agent_room_ownership WHERE identity_id=? AND request_id=?").get(identity.identityId, requestId);
+        if (prior) {
+          const state = this.store.room(prior.room_id).state;
+          const same = state && state.room.ownerId === memberId && state.room.title === title && state.room.purpose === purpose
+            && state.room.kind === kind && state.members[memberId]?.displayName === displayName;
+          if (!same) fail(409, "request_conflict", "requestId was already used for a different room");
+          return this.#duplicateCreateResponse(prior.room_id, memberId, identity.identityId, displayName);
+        }
+      }
       if (this.store.db.prepare("SELECT 1 FROM rooms WHERE id=?").get(roomId)) {
         const created = this.store.db.prepare("SELECT 1 FROM agent_room_ownership WHERE identity_id=? AND room_id=?").get(identity.identityId, roomId);
         const state = created ? this.store.room(roomId).state : null;
         const same = state && state.room.ownerId === memberId && state.room.title === title && state.room.purpose === purpose
           && state.room.kind === kind && state.members[memberId]?.displayName === displayName;
         if (!same) fail(409, "room_exists", "That room id is already in use");
-        return { roomId, ownerMemberId: memberId, identityId: identity.identityId, duplicate: true,
-          mcpToken: this.store.agentPlugin.issueOnboardingMcpToken({ identityId: identity.identityId, roomId, label: displayName }),
-          starter: starterView(this.store, roomId),
-          next: roomCreateNext(roomId), nextActions: nextActionsForRoomCreate(roomId) };
+        return this.#duplicateCreateResponse(roomId, memberId, identity.identityId, displayName);
       }
       // The creation budget is spent here, past the idempotency short-circuit,
       // because it is a budget on rooms created and a replay creates none.
@@ -218,8 +255,8 @@ export class AgentRooms {
       // Link the identity so its pri_ secret authenticates to the new room.
       this.store.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
         .run(roomId, identity.identityId, memberId, this.store.now());
-      this.store.db.prepare("INSERT INTO agent_room_ownership(identity_id,room_id,created_at) VALUES(?,?,?)")
-        .run(identity.identityId, roomId, this.store.now());
+      this.store.db.prepare("INSERT INTO agent_room_ownership(identity_id,room_id,created_at,request_id) VALUES(?,?,?,?)")
+        .run(identity.identityId, roomId, this.store.now(), requestId);
       if (fundedByGrowth) {
         this.store.db.prepare("UPDATE agent_room_ownership SET funded_by=? WHERE identity_id=? AND room_id=?")
           .run(GROWTH_FUNDING, identity.identityId, roomId);
@@ -243,7 +280,24 @@ export class AgentRooms {
       // owner_required like the other owner-gated routes; the reducer keeps
       // its own guard for the generic command path.
       const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
-      if (auth.member.id !== this.store.roomAuthority(roomId).ownerId) fail(403, "owner_required", "Only the Room owner may transfer ownership");
+      const authority = this.store.roomAuthority(roomId);
+      // Retry of a dropped success response: the caller's transfer already
+      // landed, so it is no longer the owner and the plain owner check below
+      // would 403 a replay that changed nothing. The projection's
+      // previousOwnerId names the actor of the latest transfer — when the
+      // room's current owner is the requested member and the previous owner
+      // is the caller, this exact transfer already happened: answer the
+      // duplicate instead of failing the retry. A later transfer-back in
+      // between clears previousOwnerId to someone else, so a genuine new
+      // transfer never matches.
+      if (authority.ownerId === toMemberId) {
+        const previousOwnerId = this.store.room(roomId).state.room?.previousOwnerId;
+        if (previousOwnerId === auth.member.id) {
+          return { roomId, ownerId: toMemberId, previousOwnerId: auth.member.id,
+            sequence: this.store.room(roomId).sequence, duplicate: true };
+        }
+      }
+      if (auth.member.id !== authority.ownerId) fail(403, "owner_required", "Only the Room owner may transfer ownership");
       let result;
       try {
         result = this.store.command(token, roomId, {

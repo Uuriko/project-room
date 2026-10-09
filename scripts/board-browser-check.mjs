@@ -855,7 +855,12 @@ test("owners link a draft PR, reconcile held responses, and refresh a changed cl
   };
   await page.route(listPattern, holdRefresh);
   try {
-    await post(page, origin, "/work-claims/link-draft/release", {});
+    // E5/D4 (QA-200 2026-10-08): /release binds the claim round — send the
+    // round the script read, like the board UI does.
+    const held = fixture.store.workClaims.get("commons", "link-draft");
+    await post(page, origin, "/work-claims/link-draft/release", {
+      expectedClaimedAt: held.claimedAt,
+      expectedHistoryLength: held.history.length + (held.historyOmitted ?? 0) });
     await refreshArrived.promise;
     await post(page, origin, "/work-claims/link-draft/claim", {});
     const newRound = fixture.store.workClaims.get("commons", "link-draft");

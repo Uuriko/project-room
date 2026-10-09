@@ -118,8 +118,20 @@ jobs:
             fi
           done
           if [ "$EVENT" != "workflow_dispatch" ]; then
-            LIVE="$(curl -fsS -A 'Mozilla/5.0 project-room-deploy-gate' "$PROD_ORIGIN/api/version" | jq -r '.sourceRevision // empty' || true)"
-            [ "$LIVE" != "$SHA" ] || skip "auto: production already reports $SHA"
+            # Read BOTH version doors. /api/version is answered by the Durable
+            # Object and can lag the Worker by about a minute after a deploy, so
+            # one door alone can show the previous revision for a build that is
+            # already rolling out. A converged or still-rolling-out deploy of
+            # this sha is not redeployed; a worker-stale or other state is.
+            set +e
+            node scripts/check-version-doors.mjs --origin "$PROD_ORIGIN" --sha "$SHA" --wait-ms 0 > doors.json
+            DOORS_RC=$?
+            set -e
+            cat doors.json
+            case "$DOORS_RC" in
+              0) skip "auto: production already reports $SHA on both version doors" ;;
+              3) skip "auto: $SHA is rolling out, the Durable Object door is still on its old revision" ;;
+            esac
           fi
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           echo "go=true" >> "$GITHUB_OUTPUT"

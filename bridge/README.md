@@ -10,7 +10,8 @@ protocol. It runs on lane-worker hosts; the Cloudflare Worker (B4's
 Worker ──HTTPS + bearer──▶ herdr-bridge.mjs (127.0.0.1:8443)
                               │ auth, fencing, audit, idempotency
                               ▼ Unix socket (newline-delimited JSON)
-                           per-tenant herdr server (own UID, 0700 socket dir)
+                           per-tenant herdr server (own UID; socket dir 2750 tenant:herdr-bridge,
+                           socket 0660)
 ```
 
 ## Layout
@@ -70,8 +71,9 @@ a repeated key returns the original response without re-executing.
 - **Send/keys/wait** take an opaque bridge-issued handle and re-verify the
   pane occupant via `pane.process_info` on every call (`OccupantChangedError`,
   handle invalidated).
-- **Report** requires `herdrPaneId === targetPaneId`; resume argv must match a
-  kind template.
+- **Report** targets an issued occupant-pinned `handle` (like send/keys/wait);
+  caller-asserted pane ids are not accepted. Metadata is a flat object: <=16
+  fields, scalar values, <=2048 bytes. Resume argv must match a kind template.
 
 ## Dependencies on sibling lanes (not this lane)
 
@@ -85,6 +87,19 @@ a repeated key returns the original response without re-executing.
 - **B10:** fork-audit verifications (socket auth absence, argv shape, …).
 - **B15/ops:** tenant UID provisioning, `/etc/herdr-bridge/env` (0600),
   `wrangler secret` distribution, cgroup/disk quotas.
+
+## Deployment notes
+
+- Socket access uses a shared group: `/run/herdr/<tenant>` is `2750
+  <tenant>:herdr-bridge` and the socket is `0660` (`UMask=0007` plus the setgid
+  directory). The bridge user is `herdr-bridge`; other tenant UIDs cannot
+  traverse another tenant's directory. Install `deploy/herdr-tmpfiles.conf`.
+- The bridge does not control tenant servers. systemd owns `herdr@<tenant>`
+  (`Restart=on-failure`); enable a tenant with
+  `systemctl enable --now herdr@<tenant>`. There is no sudoers rule and no
+  `BRIDGE_ALLOW_SYSTEMCTL`.
+- Audit lines keep length and sha256 for prompt text, wait patterns and report
+  metadata, never the content.
 
 ## Failure semantics
 

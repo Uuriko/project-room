@@ -26,13 +26,13 @@ const defs = {
   pane_not_found: [404, 'pane not found for this tenant'],
   handle_not_found: [404, 'occupant handle unknown or expired'],
   occupant_changed: [409, 'pane occupant changed since the handle was issued'],
-  binding_mismatch: [409, 'self-report binding failed: HERDR_PANE_ID != target'],
   method_blocked: [403, 'socket method is never exposed'],
   method_unsupported: [422, 'unknown socket method'],
   idempotency_conflict: [409, 'idempotency key reused with different input'],
   timeout: [504, 'herdr socket call timed out', true],
   transport_error: [502, 'herdr socket transport failure', true],
   bridge_circuit_open: [503, 'tenant circuit breaker is open'],
+  too_many_streams: [429, 'too many concurrent event streams for this tenant'],
   tenant_unavailable: [503, 'tenant herdr server is unreachable'],
 };
 

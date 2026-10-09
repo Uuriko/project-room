@@ -204,6 +204,14 @@ export function verifyClaim(record, { memberId, now } = {}) {
   return claim;
 }
 
+// The claim round a release binds to (E5/D4, QA-200 2026-10-08): the
+// exact claimedAt plus the full history length (stored entries plus any
+// omitted), mirroring the server's claimHistoryLength.
+const claimRound = claim => ({
+  expectedClaimedAt: claim?.claimedAt,
+  expectedHistoryLength: (claim?.history?.length ?? 0) + (claim?.historyOmitted ?? 0),
+});
+
 // Claim (creating the item if it is new), then read it back and verify.
 // Conflicting live claims on the same files fail before anything is written
 // unless allowOverlap is set.
@@ -246,7 +254,8 @@ export async function claimAndVerify(client, id, { memberId, title, files, lease
     if (conflicts.length) {
       let released = false;
       try {
-        await client.releaseWorkItem(claimId, { note: "released after a conflicting claim won the race", signal });
+        await client.releaseWorkItem(claimId, { note: "released after a conflicting claim won the race",
+          ...claimRound(claim), signal });
         released = true;
       } catch { released = false; }
       throw new CoordError("claim_conflict", "Another member holds a live claim on these files", { conflicts, released });
@@ -304,7 +313,8 @@ export async function handoff(client, id, { to, toHandle, summary, next, now, si
 export async function releaseAndVerify(client, id, { note, signal } = {}) {
   assertClient(client, ["releaseWorkItem", "workClaimGet"]);
   const claimId = assertId(id, "Claim id");
-  await callRoom(() => client.releaseWorkItem(claimId, { note, signal }));
+  const before = await callRoom(() => client.workClaimGet(claimId, { signal }));
+  await callRoom(() => client.releaseWorkItem(claimId, { note, ...claimRound(before?.claim ?? before), signal }));
   const record = await callRoom(() => client.workClaimGet(claimId, { signal }));
   const claim = record?.claim ?? record;
   if (claim?.state !== "unclaimed") throw new CoordError("claim_not_verified", "Room did not confirm the release", { claim: claim ?? null });

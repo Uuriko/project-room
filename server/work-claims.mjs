@@ -566,9 +566,11 @@ export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, p
   // the message — "release it first" was destructive for the holder and
   // unactionable for anyone else, and it never named the holder. The code
   // stays invalid_claim_input (internal callers pin it).
-  check(item.state === "unclaimed", item.owner === agent
-    ? `work "${item.id}" is already claimed by you — no new claim was saved; read the item to confirm`
-    : `work "${item.id}" is held by ${item.owner ?? "someone else"} — ask them to reassign or release it`);
+  check(item.state === "unclaimed", item.state !== "claimed"
+    ? `work "${item.id}" is already ${item.state}`
+    : item.owner === agent
+      ? `work "${item.id}" is already claimed by you — no new claim was saved; read the item to confirm`
+      : `work "${item.id}" is held by ${item.owner ?? "someone else"} — ask them to reassign or release it`);
   // QA D-1: the 4000-char bound applies to every note stored on a history
   // stamp, not just create — an unbounded claim note is the same
   // storage/amplification vector the SEC2 create cap closed.
@@ -756,6 +758,28 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     blobs: state === "done" && blobs != null ? blobsOf(blobs) : item.blobs,
     ...withProvenance };
   return withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note);
+}
+// Release a claim, bound to the claim round the caller read (E5/D4, QA-200
+// 2026-10-08): expectedClaimedAt + expectedHistoryLength must match the
+// current item, so a stale replay (timed-out retry) or a delayed duplicate
+// landing after an intervening release + re-claim is refused instead of
+// silently destroying the fresh claim. Mirrors appendWorkPullRequest's
+// round check — the history length also discriminates same-millisecond
+// re-claims, which keep the previous round's claimedAt. Claims held
+// in_progress/blocked are routed through the internal pause transition
+// first (W2); both steps are stamped in history.
+export function releaseWork(work, agentId, { expectedClaimedAt, expectedHistoryLength, note, now, authority = false } = {}) {
+  const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  check(typeof expectedClaimedAt === "string" && expectedClaimedAt.length <= 100 && Number.isFinite(Date.parse(expectedClaimedAt)), "expectedClaimedAt must be the current claim timestamp");
+  check(Number.isSafeInteger(expectedHistoryLength) && expectedHistoryLength >= 0, "expectedHistoryLength must be a non-negative integer");
+  if (item.claimedAt !== expectedClaimedAt || claimHistoryLength(item) !== expectedHistoryLength) {
+    fail("work_claim_conflict", "The claim changed since it was read");
+  }
+  let current = item;
+  if (current.state === "in_progress" || current.state === "blocked") {
+    current = updateWork(current, agent, { state: "claimed", note: "paused for release", now: atMs, authority });
+  }
+  return updateWork(current, agent, { state: "unclaimed", note, now: atMs, authority });
 }
 // Retire open work without delivering it. close: the room's claim managers
 // (authority) or the current holder. cancel: whoever opened the item while

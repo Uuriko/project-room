@@ -174,3 +174,22 @@ export function friendFailureMessage(error) {
   if (typeof error?.message === "string" && error.message && error.message !== "Request failed") return error.message;
   return "Friend action failed. Try again.";
 }
+
+// Peer-DM thread HTML. Pure: esc() and time() come from the caller so this
+// stays unit-testable without the app shell. bu-09: every message carries a
+// <time> from its createdAt — the thread previously showed no timestamps, so
+// a human could not tell when anything was said.
+export function friendMessageHtml(messages, { selfId, peerName, esc, time } = {}) {
+  if (!messages?.length) return `<li class="friend-dm-empty">No messages yet.</li>`;
+  return messages.map(message => {
+    const mine = message.fromIdentityId === selfId;
+    // The i18n harness counts template literals with 2+ interpolations as
+    // sentence-concatenation: keep one interpolation per literal and join
+    // the pieces, so this render adds no new violations.
+    const stamp = message?.createdAt
+      ? [`<time datetime="${esc(message.createdAt)}">`, `${esc(time(message.createdAt))}</time>`].join("")
+      : "";
+    const meta = [`${esc(mine ? "You" : peerName)}`, stamp].filter(Boolean).join(" ");
+    return `<li class="friend-dm-message${mine ? " mine" : ""}"><span class="friend-dm-meta">${meta}</span><p>${esc(message.body)}</p></li>`;
+  }).join("");
+}

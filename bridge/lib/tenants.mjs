@@ -4,15 +4,15 @@
  * Tenants come from the operator-managed `/etc/herdr-bridge/tenants.json`
  * (never from caller input). The bridge never execs a server binary itself;
  * per-tenant servers are systemd template units (`herdr@<tenant>.service`)
- * started via a tightly-scoped sudoers rule (see bridge/deploy/).
+ * that systemd itself starts and restarts; the bridge holds no privilege to
+ * control them (see bridge/deploy/).
  *
- * SO_PEERCRED dependency (B1's fork work, threat-model §4.2): the fork must
- * check the connecting UID on socket accept. The bridge connects as its own
- * user (`herdr-bridge`), NOT as the tenant UID — so the fork's accept gate
- * must explicitly permit the bridge UID (operator-configured allowlist in the
- * fork), while still rejecting every other non-tenant UID. Until B1 lands the
- * gate, socket-dir 0700 + socket 0600 owned by the tenant UID is the only
- * enforcement, and it is advisory against same-UID processes.
+ * Socket boundary (shared-group model): /run/herdr/<tenant> is 0750, owned by
+ * the tenant UID, group `herdr-bridge`, setgid, and the socket is 0660 (so it
+ * inherits group herdr-bridge). The tenant UID and the bridge can reach it;
+ * every other tenant UID has no bits on the directory and cannot traverse it.
+ * The fork's SO_PEERCRED accept gate (B1) stays defense in depth: it must
+ * permit the tenant UID and the bridge UID only.
  */
 import { readFile, stat } from 'node:fs/promises';
 import { dirname } from 'node:path';
@@ -39,8 +39,9 @@ export async function loadTenants(file) {
 }
 
 /**
- * Best-effort audit of the socket-dir boundary: dir should be 0700 owned by
- * the tenant UID, socket 0600. Returns warning strings (warn-only: the bridge
+ * Best-effort audit of the socket-dir boundary: dir 0750 (no access for other
+ * UIDs, group r-x) owned by the tenant UID, socket 0660 with no access for
+ * others. The setgid bit is ignored in the comparison. Returns warning strings (warn-only: the bridge
  * must not refuse service over a drift it cannot fix — the drift itself is
  * the signal, surfaced in the ops log and audit trail).
  */
@@ -50,7 +51,7 @@ export async function checkSocketDir(tenant) {
   try {
     const st = await stat(dir);
     const mode = st.mode & 0o777;
-    if (mode !== 0o700) warnings.push(`socket dir ${dir} mode is ${mode.toString(8)}, want 700`);
+    if (mode !== 0o750) warnings.push(`socket dir ${dir} mode is ${mode.toString(8)}, want 750`);
     if (typeof tenant.uid === 'number' && st.uid !== tenant.uid) {
       warnings.push(`socket dir ${dir} owned by uid ${st.uid}, want ${tenant.uid}`);
     }
@@ -59,8 +60,8 @@ export async function checkSocketDir(tenant) {
   }
   try {
     const st = await stat(tenant.socketPath);
-    if ((st.mode & 0o777) !== 0o600) {
-      warnings.push(`socket ${tenant.socketPath} mode is ${(st.mode & 0o777).toString(8)}, want 600`);
+    if ((st.mode & 0o777) !== 0o660) {
+      warnings.push(`socket ${tenant.socketPath} mode is ${(st.mode & 0o777).toString(8)}, want 660`);
     }
   } catch { /* socket may not exist yet — ping will report that */ }
   return warnings;

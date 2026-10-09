@@ -6,9 +6,14 @@
 // revision, or a lag inside both budgets, is not drift. An unhealthy probe
 // still fails. Exit 0 = no drift and healthy.
 // Intended for cron/CI: `git fetch origin main` first, then run this.
-// Usage: node scripts/watch-deploy-drift.mjs [--base URL] [--ref origin/main] [--max-prs 5] [--max-hours 24]
+// /api/version (Durable Object) and /api/version/worker can briefly disagree
+// right after a deploy. A disagreement is given --settle-ms (default 0) to
+// converge; one that persists is reported as door_split and fails the run, with
+// door_state "do-stale" when the worker revision descends from the DO revision.
+// Usage: node scripts/watch-deploy-drift.mjs [--base URL] [--ref origin/main] [--max-prs 5] [--max-hours 24] [--settle-ms 0]
 import { execFileSync } from "node:child_process";
 import { probeProd } from "./probe-prod-lib.mjs";
+import { readDoors } from "./check-version-doors.mjs";
 
 const args = process.argv.slice(2);
 function option(name) {
@@ -29,6 +34,7 @@ const BASE = option("--base") ?? "https://room.trydemigod.com";
 const REF = option("--ref") ?? "origin/main";
 const maxPrs = integerOption("--max-prs", 5);
 const maxHours = integerOption("--max-hours", 24);
+const settleMs = integerOption("--settle-ms", 0);
 
 function git(args, encoding) {
   return execFileSync("git", args, encoding ? { encoding, stdio: ["ignore", "pipe", "pipe"] } : { stdio: "ignore" });
@@ -52,6 +58,20 @@ function lag(prod, ref, nowSeconds) {
 
 const mainTip = git(["rev-parse", "--verify", REF], "utf8").trim();
 const report = await probeProd(BASE);
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const differ = d => Boolean(d.doRev && d.workerRev && d.doRev !== d.workerRev);
+let doors = await readDoors(BASE);
+for (const deadline = Date.now() + settleMs; differ(doors) && Date.now() < deadline;) {
+  await sleep(Math.min(10000, Math.max(0, deadline - Date.now())));
+  doors = await readDoors(BASE);
+}
+const doorSplit = differ(doors);
+let doorState = null;
+if (doorSplit) {
+  try { git(["merge-base", "--is-ancestor", doors.doRev, doors.workerRev]); doorState = "do-stale"; }
+  catch { doorState = "split"; }
+}
+if (doors.doRev) report.sourceRevision = doors.doRev;
 const measured = report.sourceRevision ? lag(report.sourceRevision, REF, Date.now() / 1000) : null;
 const drift = Boolean(measured?.reason);
 const out = {
@@ -67,9 +87,13 @@ const out = {
   lag: measured?.reason ?? null,
   drift,
   probe_verdict: report.verdict,
+  door_revisions: { do: doors.doRev, worker: doors.workerRev },
+  door_split: doorSplit,
+  door_state: doorState,
   incident_window: report.verdict === "do-rpc-fail"
 };
 console.log(JSON.stringify(out, null, 2));
 if (drift) console.error(`DRIFT: prod ${report.sourceRevision} lags ${REF} ${mainTip} (${measured.reason})`);
+if (doorSplit) console.error(`${doorState === "do-stale" ? "DO still on old revision" : "VERSION DOORS DISAGREE"}: /api/version ${doors.doRev} vs /api/version/worker ${doors.workerRev}`);
 if (out.incident_window) console.error("1101 WINDOW: do-rpc-fail signature present - docs/INCIDENT-1101-RUNBOOK.md");
-process.exit(drift || out.incident_window || report.verdict !== "healthy" ? 1 : 0);
+process.exit(drift || doorSplit || out.incident_window || report.verdict !== "healthy" ? 1 : 0);

@@ -851,9 +851,10 @@ export class RoomAgentClient {
     if (maxMemberOpenClaims === undefined) return this.#request("/work-claims/config", undefined, signal);
     return this.#request("/work-claims/config", { maxMemberOpenClaims }, signal);
   }
-  releaseWorkItem(id, { note, reason, signal } = {}) {
+  releaseWorkItem(id, { note, reason, expectedClaimedAt, expectedHistoryLength, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/release`,
-      { ...(note === undefined ? {} : { note }), ...(reason === undefined ? {} : { reason }) }, signal);
+      { ...(note === undefined ? {} : { note }), ...(reason === undefined ? {} : { reason }),
+        expectedClaimedAt, expectedHistoryLength }, signal);
   }
   reassignWorkItem(id, { newOwner, note, signal } = {}) {
     if (typeof newOwner !== "string" || !newOwner) throw new Error("Choose the new owner");
@@ -875,7 +876,9 @@ export class RoomAgentClient {
   async workComplete(id, { deliveryMode, note, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, signal } = {}) {
     return this.updateWorkItem(id, { state: "done", note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, signal });
   }
-  async workRelease(id, { note, reason, signal } = {}) { return this.releaseWorkItem(id, { note, reason, signal }); }
+  async workRelease(id, { note, reason, expectedClaimedAt, expectedHistoryLength, signal } = {}) {
+    return this.releaseWorkItem(id, { note, reason, expectedClaimedAt, expectedHistoryLength, signal });
+  }
   // Selected task only; the normal authenticated snapshot never leaves this client.
   async workPacket(workItemId, options = {}) {
     return workPacket((await this.snapshot()).state, workItemId, options);

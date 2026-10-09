@@ -5,6 +5,7 @@
 
 import { DurableObject } from "cloudflare:workers";
 import { authorize } from "./auth.mjs";
+import { controlFrameOnLink } from "./protocol.mjs";
 import { bytesToB64url, sha256Hex, timingEqual } from "./bytes.mjs";
 import { RelayError, relayError } from "./errors.mjs";
 import { verifyLinkSignature } from "./hmac.mjs";
@@ -13,8 +14,8 @@ import { initializeResult, parseRpc, requireToolName, rpcError, rpcResult, toolE
 import { redact } from "./redact.mjs";
 import { assertFreshControlSignature } from "./replay-guard.mjs";
 import {
-  CALL_TIMEOUT_MS, HEARTBEAT_MS, HMAC_SKEW_SEC, MAX_CALL_BYTES, MAX_RESULT_BYTES, MAX_SMALL_BYTES, PROTOCOL_VERSION,
-  isResourceId, isSlot, listedTools, toolAllowed,
+  CALL_TIMEOUT_MS, HEARTBEAT_MS, HMAC_SKEW_SEC, MAX_CALL_BYTES, MAX_PAUSE_MINUTES, MAX_RESULT_BYTES, MAX_SMALL_BYTES, PROTOCOL_VERSION,
+  isPauseMinutes, isResourceId, isSlot, listedTools, toolAllowed,
 } from "./protocol.mjs";
 
 // L4: no wildcard CORS with Authorization allowed. The request origin is
@@ -165,11 +166,13 @@ export class MachineLink extends DurableObject {
     }
     if (msg.type !== "hello" && msg.type !== "heartbeat") return;
     let accepted = false;
+    let control = null;
     await this.exclusive(() => {
       if (!this.state) return;
       if (msg.type === "hello") {
         if (msg.protocol !== PROTOCOL_VERSION || msg.machineId !== this.state.machineId) return;
         if (typeof msg.label !== "string" || typeof msg.version !== "string") return;
+        control = controlFrameOnLink(this.state, Date.now());
       }
       this.state.lastHeartbeat = new Date().toISOString();
       this.dirty = true;
@@ -178,6 +181,8 @@ export class MachineLink extends DurableObject {
     if (msg.type === "hello" && !accepted) {
       try { ws.close(1002, "protocol"); } catch { /* already closed */ }
     }
+    // A halt or pause issued while the daemon was offline reaches it now.
+    if (accepted && control) this.send(ws, control);
   }
 
   async webSocketClose(ws) {
@@ -491,8 +496,8 @@ export class MachineLink extends DurableObject {
       if (!this.state) throw relayError(404, "machine_unknown", "No such machine");
       await verifyLinkSignature(this.env.RELAY_LINK_SECRET, request, raw, Math.floor(Date.now() / 1000));
       this.rejectReplayedControl(request, Math.floor(Date.now() / 1000));
-      if (!Number.isSafeInteger(value.minutes) || value.minutes < 0 || value.minutes > 10_080) {
-        throw relayError(422, "invalid_pause", "minutes must be an integer from 0 to 10080");
+      if (!isPauseMinutes(value.minutes)) {
+        throw relayError(422, "invalid_pause", `minutes must be an integer from 1 to ${MAX_PAUSE_MINUTES}`);
       }
       this.state.pausedUntil = Date.now() + value.minutes * 60 * 1000;
       this.dirty = true;

@@ -97,8 +97,9 @@ export function parseDiff(diffText) {
     if (line.startsWith("+")) {
       added.push({ path: file, line: newLine, text: line.slice(1) });
       newLine++;
-    } else if (line.startsWith("-") && !line.startsWith("---")) {
-      // removed line: the new-side line number does not advance
+    } else if (line.startsWith("-")) {
+      // removed line: the new-side line number does not advance. Inside a
+      // hunk this includes removed text that itself starts with "--".
     } else if (!line.startsWith("\\")) {
       newLine++; // context line
     }

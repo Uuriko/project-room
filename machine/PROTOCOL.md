@@ -52,7 +52,7 @@ The relay sends:
 
 - `{ "type": "heartbeat" }` — marks the link healthy and clears a dead-man refusal.
 - `{ "type": "halt", "epoch": 1 }` — the daemon stops every guest and refuses later calls with `halted`.
-- `{ "type": "pause", "minutes": 30 }` — suspends guests and refuses calls with `paused` until the window ends.
+- `{ "type": "pause", "minutes": 30 }` — suspends guests and refuses calls with `paused` until the window ends. `minutes` is a whole number from 1 to 10080; the relay refuses 0, and the daemon ignores a pause with no real duration.
 - `{ "type": "resume" }` — clears halt and pause.
 - `{ "type": "bye" }` — the daemon keeps the process up and reconnects if the socket drops.
 - `{ "type": "call", "id": "c1", "tool": "machine.status", "args": {}, "caller": { "identityId": "ai_...", "claimId": "lease1", "slot": "desk", "verified": true } }`
@@ -61,7 +61,7 @@ The daemon answers `{ "type": "result", "id": "c1", "ok": true, "result": {} }` 
 
 `verified` must be exactly `true`. The relay sets it only after its own Phase 0 check. The daemon also refuses a second claim on a slot that is already held (`slot_held`). Slots are `desk` and `scratch`.
 
-Messages are handled one at a time. A halt finishes, including `lume stop`, before the next call is dispatched.
+Calls are handled one at a time. Control frames (`heartbeat`, `halt`, `pause`, `resume`, `bye`) are applied as they arrive, even while a call is still running, so a long owner-approval wait or a slow guest command cannot hold back a Halt or Pause. A call still waits for the control frames that arrived before it: a halt finishes, including `lume stop`, before the next call is dispatched. A call that waited for owner approval checks halt, pause and the dead-man again before it dispatches, and answers `halted`, `paused` or `deadman` instead of running.
 
 The daemon reconnects with backoff (`reconnectBackoffMs`, default 1000). No inbound relay message for `ROOM_MACHINE_DEADMAN_SECONDS` (default 120) suspends guests and refuses calls with `deadman` until a later heartbeat or hello. A call does not clear that refusal.
 

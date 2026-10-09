@@ -34,6 +34,7 @@ async function fixture(t, { reviewerPermissions = [] } = {}) {
 
 const invalid = error => error.status === 422 && error.code === 'invalid_claim_input';
 
+const roundOf = c => ({ expectedClaimedAt: c.claimedAt ?? c.claim?.claimedAt, expectedHistoryLength: (c.history?.length ?? c.claim?.history?.length ?? 0) + (c.historyOmitted ?? c.claim?.historyOmitted ?? 0) });
 test('SDK retains declared files, overlap warnings, and completion receipt metadata over HTTP', async t => {
   const { owner: client } = await fixture(t);
   const created = await client.workClaimCreate({ id: 'holder', files: ['./src//shared.js'], tags: ['migration'] });
@@ -69,7 +70,7 @@ test('SDK convenience claim and completion preserve creation metadata and explic
   assert.deepEqual(made.files, ['src/first.js']);
   assert.deepEqual(made.tags, ['created']);
   assert.equal(made.reviewPolicy, 'distinct_member');
-  await client.workRelease('convenience');
+  await client.workRelease('convenience', roundOf(await client.workClaimGet('convenience')));
   const reclaimed = await client.workClaim('convenience', { files: [] });
   assert.deepEqual(reclaimed.files, []);
   assert.deepEqual(reclaimed.tags, ['created']);
