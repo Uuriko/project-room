@@ -7653,6 +7653,11 @@ if (initialInvitationFragment && !initialPasswordReset) openInvitation(initialIn
     // JDOT-COH-NAV begin
     install: module => {
       const controller = module.installWorkBoard({ client, getState: () => state, getSession: () => session });
+      // BU-14: power-user keyboard navigation (j/k moves between claim cards).
+      // Separate dynamic import so board-keyboard.mjs is its own registered
+      // runtime asset; attach is idempotent and survives board repaints.
+      import("./board-keyboard.mjs").then(keynav => keynav.attachBoardKeyboard(document.querySelector("#work-board")))
+        .catch(() => { /* keyboard nav is progressive enhancement; the board works without it */ });
       navigationBoardReady = () => controller.whenReady();
       return controller;
     },

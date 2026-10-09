@@ -33,3 +33,8 @@
 .join-secret-row input { flex: 1; font-family: monospace; }
 .join-actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: 1rem; }
 h1.join-brand { text-align: center; margin: 0 0 1.5rem; font-size: 1rem; font-weight: 650; opacity: .85; }
+/* BU-14: claim-card headings carry tabindex="-1" as the programmatic focus
+   target after board re-renders (src/board-ui.js focus stick) and for j/k
+   keyboard card navigation (src/board-keyboard.mjs). Keep the ring visible
+   so keyboard users can see where focus landed. */
+.claim-card h4:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: .3rem; }

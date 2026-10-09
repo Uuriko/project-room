@@ -436,3 +436,23 @@ These rules hold on every Board write and read.
 - **Content trust.** List, single-claim and receipts reads add
   `contentTrust`. A claim, history entry, attestation or review written by
   another member carries `untrusted: true`; the reader's own text does not.
+
+## Keyboard navigation (human board UI)
+
+Every board action — Claim, Renew, Mark in progress, Done, Release, Close,
+Link PR, Move, Add item — is a native button or form control, so the full
+claim → complete → verify cycle works keyboard-only with Tab/Enter alone.
+On top of that, the board adds power-user card navigation:
+
+- **j** / **k** — move focus to the next / previous claim card heading
+  (clamped at the ends; no wraparound).
+- The shortcuts are ignored inside text fields, textareas, selects and
+  contenteditable regions, and while Ctrl/Cmd/Alt is held, so typing URLs,
+  notes and file lists never triggers them.
+- After a board action re-renders the list, focus returns to the card
+  heading (`tabindex="-1"`) with a visible `:focus-visible` ring — the same
+  heading j/k navigation targets.
+
+Wiring: `src/board-keyboard.mjs` (`attachBoardKeyboard`), loaded alongside
+`src/board-ui.js` from `src/app.js` and registered as a runtime public
+asset in `scripts/runtime-package.mjs`.
