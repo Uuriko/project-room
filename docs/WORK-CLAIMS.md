@@ -102,7 +102,15 @@ Open claims are everything that is not `done`.
   it `unclaimed`, which still counts.
 - Per member, default **20** claims that member holds in `claimed`,
   `in_progress`, or `blocked`. The next claim is **409**
-  `too_many_open_claims`.
+  `too_many_open_claims`. The count is evaluated against the live board on
+  every claim path (claim, create-with-assignee, reassign, the land-queue
+  mirror) — there is no cached counter, so a release frees the slot
+  immediately and a re-claim in the next request succeeds. If you see
+  `too_many_open_claims` right after releasing, re-read the board: the
+  refusal reflects the true board state at that moment, most often
+  concurrent claims held under the same member id (for example sibling
+  workers sharing one credential). Retry once the board shows you under
+  cap.
 
 These are not `file_lease_conflict`. The room owner sets the per-member cap
 with `POST /api/rooms/{roomId}/work-claims/config` and
