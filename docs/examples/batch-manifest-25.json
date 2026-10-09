@@ -1,0 +1,130 @@
+{
+ "sharedContext": "WAVE-500 receipt-conformance sweep (batch dispatch 25-worker example). Goal: verify that recent lane receipts conform to the v1 receipt contract {workerId, status, summary<=280 chars, filesChanged[], testsRun, openQuestions[]} so the coordinator can trust batch fan-in instead of re-parsing free text. Sampling frame: the 10 most recent receipts per lane as found on the live work-claims board (uuriko/project-room#266, REST numeric comment ids, paginate oldest-first) plus the lane's wave ledger under ~/workspace where one exists. Conformance checks per receipt: (1) all six v1 fields present; (2) summary <= 280 chars; (3) status in {done, error, timeout, cancelled}; (4) filesChanged entries are real repo paths at the receipt's claimed SHA; (5) testsRun names an actual command with a pass/fail count. Conventions: read-only \u2014 never edit another lane's receipt; write your findings to docs/measurements/receipt-conformance/<workerId>.md as a 10-row pass/fail table quoting offending fields verbatim. First-claim-wins: confirm no sibling owns your lane slice before starting. Your own completion uses the same v1 receipt contract. One worker failing never blocks the others; the coordinator aggregates per-worker status.",
+ "workers": [
+  {
+   "id": "receipt-check-jill",
+   "brief": "Audit the 10 most recent jill lane receipts for v1 conformance: summary length, required fields present, filesChanged paths real. Record pass/fail per receipt.",
+   "doneCondition": "docs/measurements/receipt-conformance/receipt-check-jill.md committed with 10 pass/fail rows; receipt posted."
+  },
+  {
+   "id": "receipt-check-quill",
+   "brief": "Audit the 10 most recent quill lane receipts for v1 conformance: summary length, required fields present, filesChanged paths real. Record pass/fail per receipt.",
+   "doneCondition": "docs/measurements/receipt-conformance/receipt-check-quill.md committed with 10 pass/fail rows; receipt posted."
+  },
+  {
+   "id": "receipt-check-instinct",
+   "brief": "Audit the 10 most recent instinct lane receipts for v1 conformance: summary length, required fields present, filesChanged paths real. Record pass/fail per receipt.",
+   "doneCondition": "docs/measurements/receipt-conformance/receipt-check-instinct.md committed with 10 pass/fail rows; receipt posted."
+  },
+  {
+   "id": "receipt-check-codex",
+   "brief": "Audit the 10 most recent codex lane receipts for v1 conformance: summary length, required fields present, filesChanged paths real. Record pass/fail per receipt.",
+   "doneCondition": "docs/measurements/receipt-conformance/receipt-check-codex.md committed with 10 pass/fail rows; receipt posted."
+  },
+  {
+   "id": "receipt-check-grok",
+   "brief": "Audit the 10 most recent grok lane receipts for v1 conformance: summary length, required fields present, filesChanged paths real. Record pass/fail per receipt.",
+   "doneCondition": "docs/measurements/receipt-conformance/receipt-check-grok.md committed with 10 pass/fail rows; receipt posted."
+  },
+  {
+   "id": "receipt-check-grok-build",
+   "brief": "Audit the 10 most recent grok-build lane receipts for v1 conformance: summary length, required fields present, filesChanged paths real. Record pass/fail per receipt.",
+   "doneCondition": "docs/measurements/receipt-conformance/receipt-check-grok-build.md committed with 10 pass/fail rows; receipt posted."
+  },
+  {
+   "id": "receipt-check-claude",
+   "brief": "Audit the 10 most recent claude lane receipts for v1 conformance: summary length, required fields present, filesChanged paths real. Record pass/fail per receipt.",
+   "doneCondition": "docs/measurements/receipt-conformance/receipt-check-claude.md committed with 10 pass/fail rows; receipt posted."
+  },
+  {
+   "id": "receipt-check-fo",
+   "brief": "Audit the 10 most recent fo lane receipts for v1 conformance: summary length, required fields present, filesChanged paths real. Record pass/fail per receipt.",
+   "doneCondition": "docs/measurements/receipt-conformance/receipt-check-fo.md committed with 10 pass/fail rows; receipt posted."
+  },
+  {
+   "id": "receipt-check-tab",
+   "brief": "Audit the 10 most recent tab lane receipts for v1 conformance: summary length, required fields present, filesChanged paths real. Record pass/fail per receipt.",
+   "doneCondition": "docs/measurements/receipt-conformance/receipt-check-tab.md committed with 10 pass/fail rows; receipt posted."
+  },
+  {
+   "id": "receipt-check-dot",
+   "brief": "Audit the 10 most recent dot lane receipts for v1 conformance: summary length, required fields present, filesChanged paths real. Record pass/fail per receipt.",
+   "doneCondition": "docs/measurements/receipt-conformance/receipt-check-dot.md committed with 10 pass/fail rows; receipt posted."
+  },
+  {
+   "id": "receipt-check-lane-a",
+   "brief": "Audit the 10 most recent lane-a lane receipts for v1 conformance: summary length, required fields present, filesChanged paths real. Record pass/fail per receipt.",
+   "doneCondition": "docs/measurements/receipt-conformance/receipt-check-lane-a.md committed with 10 pass/fail rows; receipt posted."
+  },
+  {
+   "id": "receipt-check-lane-b",
+   "brief": "Audit the 10 most recent lane-b lane receipts for v1 conformance: summary length, required fields present, filesChanged paths real. Record pass/fail per receipt.",
+   "doneCondition": "docs/measurements/receipt-conformance/receipt-check-lane-b.md committed with 10 pass/fail rows; receipt posted."
+  },
+  {
+   "id": "receipt-check-lane-c",
+   "brief": "Audit the 10 most recent lane-c lane receipts for v1 conformance: summary length, required fields present, filesChanged paths real. Record pass/fail per receipt.",
+   "doneCondition": "docs/measurements/receipt-conformance/receipt-check-lane-c.md committed with 10 pass/fail rows; receipt posted."
+  },
+  {
+   "id": "receipt-check-lane-d",
+   "brief": "Audit the 10 most recent lane-d lane receipts for v1 conformance: summary length, required fields present, filesChanged paths real. Record pass/fail per receipt.",
+   "doneCondition": "docs/measurements/receipt-conformance/receipt-check-lane-d.md committed with 10 pass/fail rows; receipt posted."
+  },
+  {
+   "id": "receipt-check-qa2",
+   "brief": "Audit the 10 most recent qa2 lane receipts for v1 conformance: summary length, required fields present, filesChanged paths real. Record pass/fail per receipt.",
+   "doneCondition": "docs/measurements/receipt-conformance/receipt-check-qa2.md committed with 10 pass/fail rows; receipt posted."
+  },
+  {
+   "id": "receipt-check-qa3",
+   "brief": "Audit the 10 most recent qa3 lane receipts for v1 conformance: summary length, required fields present, filesChanged paths real. Record pass/fail per receipt.",
+   "doneCondition": "docs/measurements/receipt-conformance/receipt-check-qa3.md committed with 10 pass/fail rows; receipt posted."
+  },
+  {
+   "id": "receipt-check-qa5",
+   "brief": "Audit the 10 most recent qa5 lane receipts for v1 conformance: summary length, required fields present, filesChanged paths real. Record pass/fail per receipt.",
+   "doneCondition": "docs/measurements/receipt-conformance/receipt-check-qa5.md committed with 10 pass/fail rows; receipt posted."
+  },
+  {
+   "id": "receipt-check-qa8",
+   "brief": "Audit the 10 most recent qa8 lane receipts for v1 conformance: summary length, required fields present, filesChanged paths real. Record pass/fail per receipt.",
+   "doneCondition": "docs/measurements/receipt-conformance/receipt-check-qa8.md committed with 10 pass/fail rows; receipt posted."
+  },
+  {
+   "id": "receipt-check-help1",
+   "brief": "Audit the 10 most recent help1 lane receipts for v1 conformance: summary length, required fields present, filesChanged paths real. Record pass/fail per receipt.",
+   "doneCondition": "docs/measurements/receipt-conformance/receipt-check-help1.md committed with 10 pass/fail rows; receipt posted."
+  },
+  {
+   "id": "receipt-check-help2",
+   "brief": "Audit the 10 most recent help2 lane receipts for v1 conformance: summary length, required fields present, filesChanged paths real. Record pass/fail per receipt.",
+   "doneCondition": "docs/measurements/receipt-conformance/receipt-check-help2.md committed with 10 pass/fail rows; receipt posted."
+  },
+  {
+   "id": "receipt-check-help3",
+   "brief": "Audit the 10 most recent help3 lane receipts for v1 conformance: summary length, required fields present, filesChanged paths real. Record pass/fail per receipt.",
+   "doneCondition": "docs/measurements/receipt-conformance/receipt-check-help3.md committed with 10 pass/fail rows; receipt posted."
+  },
+  {
+   "id": "receipt-check-prod1",
+   "brief": "Audit the 10 most recent prod1 lane receipts for v1 conformance: summary length, required fields present, filesChanged paths real. Record pass/fail per receipt.",
+   "doneCondition": "docs/measurements/receipt-conformance/receipt-check-prod1.md committed with 10 pass/fail rows; receipt posted."
+  },
+  {
+   "id": "receipt-check-prod2",
+   "brief": "Audit the 10 most recent prod2 lane receipts for v1 conformance: summary length, required fields present, filesChanged paths real. Record pass/fail per receipt.",
+   "doneCondition": "docs/measurements/receipt-conformance/receipt-check-prod2.md committed with 10 pass/fail rows; receipt posted."
+  },
+  {
+   "id": "receipt-check-prod3",
+   "brief": "Audit the 10 most recent prod3 lane receipts for v1 conformance: summary length, required fields present, filesChanged paths real. Record pass/fail per receipt.",
+   "doneCondition": "docs/measurements/receipt-conformance/receipt-check-prod3.md committed with 10 pass/fail rows; receipt posted."
+  },
+  {
+   "id": "receipt-check-prod4",
+   "brief": "Audit the 10 most recent prod4 lane receipts for v1 conformance: summary length, required fields present, filesChanged paths real. Record pass/fail per receipt.",
+   "doneCondition": "docs/measurements/receipt-conformance/receipt-check-prod4.md committed with 10 pass/fail rows; receipt posted."
+  }
+ ]
+}
