@@ -8,7 +8,22 @@
  */
 import { appendFile, mkdir, readdir, stat, unlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { redactValue } from './redact.mjs';
+
+// Free-text fields that carry private content (prompts, wait patterns, report
+// metadata). Like pane reads, they are logged as length + sha256 only.
+const BODY_FIELDS = ['text', 'pattern', 'metadata'];
+export function scrubBodies(params) {
+  if (!params || typeof params !== 'object' || Array.isArray(params)) return params;
+  const out = { ...params };
+  for (const k of BODY_FIELDS) {
+    if (out[k] === undefined) continue;
+    const raw = typeof out[k] === 'string' ? out[k] : JSON.stringify(out[k]);
+    out[k] = { bytes: Buffer.byteLength(raw, 'utf8'), sha256: createHash('sha256').update(raw).digest('hex') };
+  }
+  return out;
+}
 
 export class AuditLog {
   constructor(path) {
@@ -25,7 +40,7 @@ export class AuditLog {
       route: entry.route ?? null,
       socketMethod: entry.socketMethod ?? null,
       target: entry.target ?? null,
-      params: redactValue(entry.params ?? {}),
+      params: redactValue(scrubBodies(entry.params ?? {})),
       result: entry.result ?? null,
       denyReason: entry.denyReason ?? undefined,
       latencyMs: entry.latencyMs ?? null,
