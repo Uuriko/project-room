@@ -9,7 +9,7 @@ import { validId } from "../../src/events.js";
 import { GmailSync } from "../gmail-sync.mjs";
 import { GmailActions } from "../gmail-actions.mjs";
 import { GmailSender, gmailCredentialsFor, sendTelegramDirect } from "../inbox-transport.mjs";
-import { validateDirectSend, recordDirectSend, completeDirectSend, publicDirectSend, getDirectSendByRequestId } from "../inbox-outbox.mjs";
+import { validateDirectSend, recordDirectSend, completeDirectSend, publicDirectSend, getDirectSendByRequestId, isDirectSendKeyConflict } from "../inbox-outbox.mjs";
 import { channelSyncLimits, syncTelegramConnection } from "../channel-import.mjs";
 import { telegramLiveView } from "../channel-adapters/telegram-config.mjs";
 import { webhookAcceptsHash, webhookRotationDefaults } from "../channel-adapters/telegram-rotation.mjs";
@@ -347,8 +347,11 @@ export async function handleInboxMount(ctx) {
         } catch (error) {
           // Lost race: a concurrent request with the same requestId won the
           // unique index. Replay the winner's journaled send, never a second
-          // provider delivery.
-          const winner = error?.code === "SQLITE_CONSTRAINT_UNIQUE" && typeof data.requestId === "string"
+          // provider delivery. isDirectSendKeyConflict is driver-agnostic:
+          // the old inline check only recognized better-sqlite3's
+          // SQLITE_CONSTRAINT_UNIQUE, but the production driver is
+          // node:sqlite (ERR_SQLITE_ERROR), so the replay path never fired.
+          const winner = isDirectSendKeyConflict(error) && typeof data.requestId === "string"
             ? getDirectSendByRequestId(store.db, auth.account.id, data.requestId) : null;
           if (!winner) throw error;
           if (!sameContent(winner)) reject(409, "direct_send_idempotency_conflict",

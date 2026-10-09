@@ -326,3 +326,26 @@ test("flushSend: only an unknown attempt moves, and a very recent one is left to
   assert.equal(f.provider.submits, 1);
   assert.doesNotThrow(() => auditRecovery(f.store));
 });
+
+test("isDirectSendKeyConflict recognizes the idempotency-key race on both sqlite drivers", async t => {
+  // Regression: server/routes/inbox.mjs used to inline
+  // error?.code === "SQLITE_CONSTRAINT_UNIQUE" for the lost idempotency race,
+  // but the production driver is node:sqlite, which reports ERR_SQLITE_ERROR —
+  // so the loser's replay-the-winner path never fired and the retry 500'd
+  // instead of returning the journaled send. The helper is driver-agnostic.
+  const { isDirectSendKeyConflict } = await import("../server/inbox-outbox.mjs");
+  const nodeSqliteRace = Object.assign(
+    new Error("UNIQUE constraint failed: direct_channel_sends.account_id, direct_channel_sends.request_id"),
+    { code: "ERR_SQLITE_ERROR" });
+  const betterSqliteRace = Object.assign(
+    new Error("UNIQUE constraint failed: direct_channel_sends.account_id, direct_channel_sends.request_id"),
+    { code: "SQLITE_CONSTRAINT_UNIQUE" });
+  assert.equal(isDirectSendKeyConflict(nodeSqliteRace), true,
+    "node:sqlite (production driver) key race must be recognized");
+  assert.equal(isDirectSendKeyConflict(betterSqliteRace), true,
+    "better-sqlite3 key race must still be recognized");
+  assert.equal(isDirectSendKeyConflict(Object.assign(new Error("disk I/O error"), { code: "ERR_SQLITE_ERROR" })), false,
+    "a non-constraint sqlite error is not a key conflict");
+  assert.equal(isDirectSendKeyConflict(null), false);
+  assert.equal(isDirectSendKeyConflict(undefined), false);
+});

@@ -10,6 +10,7 @@
 
 import { roomWorkClaimConfig } from "./work-claims.mjs";
 import { encodeRow, decodeRow } from "./persisted-row.mjs";
+import { chaosFaultPoint } from "./chaos-fault.mjs";
 
 // Replay-safe row kind for claim items (RC-2026-09-27-2730). The fields mirror
 // the workOf() output shape in work-claims.mjs; unknown fields are dropped on
@@ -97,7 +98,13 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
     },
     set(roomId, item) {
       if (!item || typeof item.id !== "string") throw new TypeError("work claim item needs an id");
+      // TEST-ONLY chaos hook (server/chaos-fault.mjs): no-op unless a test
+      // armed it. before-write simulates a crash before the claim row
+      // commits; after-write simulates a crash after the row commits but
+      // before the commit closure's room-event receipt.
+      chaosFaultPoint("work-claim-set:before-write", { roomId, claimId: item.id, state: item.state });
       upsert.run(roomId, item.id, JSON.stringify(encodeRow(WORK_CLAIM_ROW_KIND, item)), now());
+      chaosFaultPoint("work-claim-set:after-write", { roomId, claimId: item.id, state: item.state });
       if (typeof onChange === "function") onChange(roomId);
       return item;
     },
