@@ -58,9 +58,6 @@ export async function handleInboxMount(ctx) {
     sendBudgets, sendBudgetChannelFor, syntheticInboxTransport,
     resolveChannelTransport, directSendFetch,
   } = ctx;
-  // The shared write gate for account-session inbox mutations: CSRF plus the
-  // per-account inbox write rate limit.
-  const inboxWrite = () => { protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60); };
   // { quarantineId, note? } payload shared by the three quarantine mutations.
   const quarantineNote = data => data && typeof data === "object" && !Array.isArray(data)
     && (exact(data, ["quarantineId"]) || exact(data, ["quarantineId", "note"]))
@@ -93,6 +90,9 @@ export async function handleInboxMount(ctx) {
     if (req.headers.authorization) reject(401, "account_session_required", "Use your current account session.");
     const token = cookie(req, accountCookieName), binding = accountBinding(req);
     const auth = store.authenticateAccountSession(token, null, binding);
+    // The shared write gate for account-session inbox mutations: CSRF plus the
+    // per-account inbox write rate limit.
+    const inboxWrite = () => { protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60); };
     if (url.pathname === "/api/inbox/setup") {
       if (!['GET', 'POST'].includes(req.method)) reject(405, 'method_not_allowed', 'Method not allowed');
       if (req.method === 'POST') {
