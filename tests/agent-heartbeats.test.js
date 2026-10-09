@@ -72,14 +72,18 @@ test("heartbeat upserts hosts and derives online/offline/unregistered status", t
   status = hb.statusOf("ai_testagent");
   assert.equal(status.status, "offline", "stale host reads offline");
   assert.equal(status.hosts[0].state, "stale");
-  // A fresh heartbeat from a second host brings the agent back online;
-  // the stale host keeps its own state.
+  // A fresh heartbeat from a second host brings the agent back online.
+  // WAVE-500 W6: the ghost-row reaper rides the heartbeat, so host-1 — stale
+  // past its window — is pruned instead of lingering. statusOf() still
+  // reports "stale" for expired rows it observes between reaps (asserted
+  // above); the reaper deletes exactly the rows presence already considers
+  // stale, which is what keeps agent_hosts bounded under churn.
   hb.heartbeat(wakeable("host-2"));
   status = hb.statusOf("ai_testagent");
   assert.equal(status.status, "online");
-  assert.equal(status.hosts.length, 2);
-  assert.deepEqual(status.hosts.map(h => h.state).sort(), ["online", "stale"]);
-  // Re-heartbeat updates the existing host row instead of duplicating it.
+  assert.equal(status.hosts.length, 1);
+  assert.deepEqual(status.hosts.map(h => h.state), ["online"]);
+  // Re-heartbeat re-registers the pruned host instead of duplicating it.
   hb.heartbeat(wakeable("host-1"));
   assert.equal(hb.statusOf("ai_testagent").hosts.length, 2);
 });

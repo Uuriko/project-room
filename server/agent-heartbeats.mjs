@@ -29,6 +29,12 @@ const STATUSES = Object.freeze(["online", "offline", "unregistered"]);
 // RC-2026-09-24-203: the default reachability window is 180s (was 60s).
 // Per host the window is max(180s, cadenceSeconds * 1.5).
 export const HEARTBEAT_STALE_AFTER_MS = 180000;
+// WAVE-500 W6: ghost-row cleanup. The reaper that prunes expired agent_hosts
+// rows runs piggybacked on heartbeat()/notePoll(), throttled to at most one
+// sweep per interval of (injected) clock. 60s keeps the per-heartbeat write
+// budget flat (the 500-heartbeat scale test allows <=6 writes/heartbeat;
+// heartbeat() itself does 3) while bounding ghost-row lifetime to ~TTL+60s.
+export const PRESENCE_REAP_INTERVAL_MS = 60_000;
 // plan-wake-live: an agent is "wakeable" when it polled (GET
 // /api/agent-wakes/poll) or heartbeated within the last 24h. Deliberately
 // far wider than the 180s presence window: presence measures host
@@ -209,6 +215,16 @@ export class AgentHeartbeats {
     // different host's wait is never disturbed. In-memory only — a restart
     // drops waiters, never the durable signals they wait on.
     this._wakeWaiters = new Map();
+    // WAVE-500 W6: server-side presence delta subscriptions. Each entry is
+    // { agentIds: Set|null, onDelta, online: Set } — `online` is the
+    // subscriber's believed-online set, so every subscriber sees exact
+    // join/leave alternation starting from its own subscribe time, even if
+    // it subscribes mid-session. In-process only; a restart drops
+    // subscribers, never the durable host rows they observe.
+    this._deltaSubscribers = new Set();
+    // WAVE-500 W6: ghost-row cleanup throttle. The piggybacked reaper runs
+    // at most once per PRESENCE_REAP_INTERVAL_MS of (injected) clock.
+    this._lastReapAt = Number.NEGATIVE_INFINITY;
   }
 
   now() { return this.store.now(); }
@@ -332,6 +348,16 @@ export class AgentHeartbeats {
       fail(422, "invalid_heartbeat", "pull-only hosts cannot register a wake URL");
     }
     const at = this.now();
+    // WAVE-500 W6: delta subscription. Capture the agent's pre-heartbeat
+    // online state only when someone is listening — statusOf is two indexed
+    // reads we skip entirely otherwise, keeping the subscriber-free path at
+    // its 3-upsert write budget.
+    const listening = this._deltaSubscribers.size > 0;
+    let wasOnline = false;
+    if (listening) {
+      try { wasOnline = this.statusOf(agentId).status === "online"; }
+      catch { wasOnline = false; }
+    }
     this.db.prepare(`INSERT INTO agent_hosts
       (agent_id, host_id, mode, wake_url, last_seen_at, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -357,6 +383,13 @@ export class AgentHeartbeats {
         .run(push.url, push.token, push.authJson, at, agentId, hostId);
     }
     if (workWakes !== undefined) this.store.workWakes.setHost(agentId, hostId, workWakes, workScopeRoomId);
+    // WAVE-500 W6: ghost-row cleanup rides the heartbeat, throttled so the
+    // per-heartbeat write budget stays flat.
+    this._maybeReap(at);
+    // A heartbeat always leaves the host fresh, so the agent is online
+    // afterwards. Emit join only on an actual offline->online transition:
+    // reconnects on a new host while already online produce no flap.
+    if (listening && !wasOnline) this._announceDelta({ type: "join", agentId, hostId, at });
     const cadence = cadenceSeconds ?? null;
     const host = hostView(this.db.prepare(
       "SELECT * FROM agent_hosts WHERE agent_id=? AND host_id=?").get(agentId, hostId), cadence);
@@ -390,6 +423,116 @@ export class AgentHeartbeats {
     const cadence = Number(cadenceSeconds);
     const cadenceMs = Number.isFinite(cadence) && cadence > 0 ? cadence * 1500 : 0;
     return Math.max(this.staleAfterMs, cadenceMs);
+  }
+
+  // WAVE-500 W6: subscribe to server-side presence deltas. onDelta receives
+  // frozen { type: "join"|"leave", agentId, hostId, at } objects.
+  // agentIds (optional) scopes the subscription to those agents; omit for
+  // the whole fleet. Each subscriber keeps its own believed-online set, so
+  // the join/leave alternation contract holds per subscriber starting from
+  // its own subscribe time: the first event for an agent is always a join,
+  // transitions never duplicate, and the believed set always agrees with
+  // the last delivered event. Returns an idempotent unsubscribe function.
+  // In-process only — a restart drops subscribers, never the durable rows.
+  subscribeDeltas({ agentIds = null, onDelta } = {}) {
+    check(typeof onDelta === "function", 422, "invalid_heartbeat",
+      "onDelta must be a function");
+    let filter = null;
+    if (agentIds !== null && agentIds !== undefined) {
+      check(Array.isArray(agentIds) && agentIds.every(id => typeof id === "string"),
+        422, "invalid_heartbeat", "agentIds must be an array of agent id strings");
+      filter = new Set(agentIds);
+    }
+    const entry = { agentIds: filter, onDelta, online: new Set() };
+    this._deltaSubscribers.add(entry);
+    let active = true;
+    return () => {
+      if (!active) return;
+      active = false;
+      this._deltaSubscribers.delete(entry);
+    };
+  }
+
+  // Deliver one global presence transition to every subscriber, reconciled
+  // against each subscriber's own believed-online set. A throwing
+  // subscriber never breaks heartbeats or other subscribers.
+  _announceDelta({ type, agentId, hostId = null, at }) {
+    if (this._deltaSubscribers.size === 0) return;
+    const event = Object.freeze({ type, agentId, hostId, at });
+    for (const sub of [...this._deltaSubscribers]) {
+      if (sub.agentIds && !sub.agentIds.has(agentId)) continue;
+      if (type === "join") {
+        if (sub.online.has(agentId)) continue; // already believed online: no flap
+        sub.online.add(agentId);
+      } else {
+        if (!sub.online.has(agentId)) continue; // never announced: no phantom leave
+        sub.online.delete(agentId);
+      }
+      try { sub.onDelta(event); } catch { /* subscribers are best-effort */ }
+    }
+  }
+
+  // WAVE-500 W6: ghost-row cleanup. Deletes agent_hosts rows whose last
+  // heartbeat is older than their own reachability window (the same
+  // staleness statusOf() computes — the reaper deletes exactly the rows
+  // presence already considers stale), plus push configs orphaned by the
+  // sweep. For every agent left with no surviving host row, announces a
+  // `leave` delta: its hosts were all stale, so the server just observed
+  // the departure. Idempotent; returns the number of host rows pruned.
+  // Runs piggybacked on heartbeat()/notePoll() via _maybeReap(), throttled
+  // to PRESENCE_REAP_INTERVAL_MS — call it directly for an immediate sweep
+  // (operators, tests).
+  reapStaleHosts({ now = this.now() } = {}) {
+    let rows;
+    try {
+      rows = this.db.prepare(`
+        SELECT h.agent_id AS agentId, h.host_id AS hostId, h.last_seen_at AS lastSeenAt,
+               p.cadence_seconds AS cadenceSeconds
+        FROM agent_hosts h LEFT JOIN agent_push_configs p
+          ON p.agent_id = h.agent_id AND p.host_id = h.host_id`).all();
+    } catch {
+      return 0; // Pre-heartbeat DB without agent_hosts (read-only never migrates).
+    }
+    const stale = rows.filter(row => now - row.lastSeenAt > this.windowFor(row.cadenceSeconds));
+    if (stale.length === 0) return 0;
+    const delHost = this.db.prepare(
+      "DELETE FROM agent_hosts WHERE agent_id=? AND host_id=? AND last_seen_at=?");
+    const affected = new Set();
+    let pruned = 0;
+    for (const row of stale) {
+      // Guard on last_seen_at: a row refreshed since the scan is not deleted.
+      if (delHost.run(row.agentId, row.hostId, row.lastSeenAt).changes > 0) {
+        pruned++;
+        affected.add(row.agentId);
+      }
+    }
+    // Push configs for hosts that no longer exist are ghosts too.
+    try {
+      this.db.prepare(`DELETE FROM agent_push_configs WHERE NOT EXISTS (
+        SELECT 1 FROM agent_hosts h
+        WHERE h.agent_id = agent_push_configs.agent_id AND h.host_id = agent_push_configs.host_id)`).run();
+    } catch { /* older DB without the push table: nothing to sweep */ }
+    if (this._deltaSubscribers.size > 0 && affected.size > 0) {
+      let survivors = new Set();
+      try {
+        survivors = new Set(this.db.prepare("SELECT DISTINCT agent_id AS agentId FROM agent_hosts")
+          .all().map(row => row.agentId));
+      } catch { /* pre-heartbeat DB: no survivors */ }
+      // Sorted: leave announcement order is deterministic regardless of the
+      // table scan order, so subscribers see a stable cross-agent sequence.
+      for (const agentId of [...affected].sort()) {
+        if (!survivors.has(agentId)) this._announceDelta({ type: "leave", agentId, at: now });
+      }
+    }
+    return pruned;
+  }
+
+  // Throttled piggyback for the write paths. Never throws: the reaper is
+  // hygiene, and hygiene must not fail a heartbeat.
+  _maybeReap(at) {
+    if (at - this._lastReapAt < PRESENCE_REAP_INTERVAL_MS) return;
+    this._lastReapAt = at;
+    try { this.reapStaleHosts({ now: at }); } catch { /* reaper never fails the caller */ }
   }
 
   // Async subscribe-time DNS-rebinding check for a push url. The route
@@ -606,6 +749,24 @@ export class AgentHeartbeats {
     // recordPollActivity stays loud for its write-path caller heartbeat():
     // a missing stamp table there is a real problem, not a legacy DB.
     try { this.recordPollActivity(agentId); } catch { /* no stamp table yet */ }
+    // WAVE-500 W6: idle liveness. An authenticated poll proves the agent is
+    // alive and listening — refresh the most recently seen host so presence
+    // doesn't decay while the agent polls instead of heartbeating. Only the
+    // freshest host is revived; long-dead hosts stay dead.
+    const at = this.now();
+    const listening = this._deltaSubscribers.size > 0;
+    let wasOnline = true;
+    if (listening) {
+      try { wasOnline = this.statusOf(agentId).status === "online"; }
+      catch { wasOnline = true; }
+    }
+    try {
+      this.db.prepare(`UPDATE agent_hosts SET last_seen_at=?, updated_at=?
+        WHERE agent_id=? AND last_seen_at=(SELECT MAX(last_seen_at) FROM agent_hosts WHERE agent_id=?)`)
+        .run(at, at, agentId, agentId);
+    } catch { /* pre-heartbeat DB: nothing to refresh */ }
+    if (listening && !wasOnline) this._announceDelta({ type: "join", agentId, at });
+    this._maybeReap(at);
     return Object.freeze({
       agentId, registered: true, pendingWakes: this.pendingWakes(agentId, { roomId }),
     });

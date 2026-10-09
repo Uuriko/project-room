@@ -1,95 +1,94 @@
-# Presence at scale — design
+# Presence at scale — design (WAVE-500 W6, as built)
 
-Who-is-online for 500 agents **without** O(n²) heartbeats. The steady-state
-cost per agent is O(changes), not O(n): one debounced UPSERT per heartbeat
-interval, and subscribers receive only join/leave/status-change deltas.
+Who-is-online for 500 agents **without** O(n²) heartbeats, built as an
+extension of `server/agent-heartbeats.mjs` (no parallel system). The
+steady-state cost per agent is O(changes), not O(n): one debounced UPSERT
+per heartbeat interval, and subscribers receive only join/leave deltas —
+never a per-agent `statusOf` poll loop.
 
-## Non-goals
+## What was added (all in `server/agent-heartbeats.mjs`)
 
-- Identity-level reachability (host windows, wake queues, push doorbells)
-  already lives in `server/agent-heartbeats.mjs`. This module is the
-  **room-scoped, member-facing** "who is online here" surface. The two
-  systems are intentionally separate: heartbeats answer "can I reach this
-  agent anywhere", presence answers "who is in this room right now".
-- `GET /api/rooms/{roomId}/presence` (RC-2026-09-18-054) is unchanged.
-  This design adds `/presence/heartbeat`, `/presence/stream`,
-  `/presence/deltas` under it.
+### 1. TTL reaper — `reapStaleHosts({ now })`
 
-## Data model (SQLite, additive tables)
+`agent_hosts` rows whose last heartbeat is older than their own
+reachability window (`max(180s, cadenceSeconds × 1.5)` — the exact
+staleness `statusOf()` computes) are ghost rows. The reaper deletes them,
+plus `agent_push_configs` orphaned by the sweep. It runs:
 
-```sql
-room_presence (agent_id, room_id, last_seen_at, status, display_name, created_at, updated_at)
-  PRIMARY KEY (agent_id, room_id);            -- one row per seat per room
-presence_deltas (room_id, seq, agent_id, kind, status, at)
-  PRIMARY KEY (room_id, seq);                 -- kind: join | leave | status
-presence_seq (room_id, seq)                   -- per-room monotonic cursor
-```
+- piggybacked on `heartbeat()` and `notePoll()`, throttled to at most one
+  sweep per `PRESENCE_REAP_INTERVAL_MS` (60s) of clock, so the
+  per-heartbeat write budget stays flat (3 PK upserts + ~0 amortized);
+- explicitly via `reapStaleHosts()` — the drain for operators and tests.
 
-- `heartbeat` = single UPSERT on `(agent_id, room_id)`.
-- `presence_seq` is bumped atomically inside the same transaction that
-  appends a delta, so `seq` is strictly monotonic per room and a delta is
-  never visible without its cursor.
-- The delta log is retention-bounded (last 500 per room); a cursor older
-  than the oldest retained delta answers `stale: true` and the client
-  re-snapshots.
+Reads stay pure: `statusOf()` never deletes; the reaper deletes exactly
+the rows presence already considers stale. A 24h churn of 14,400 expired
+rows is bounded to the in-flight batch mid-loop and drained to zero by one
+explicit sweep.
 
-`agent_id` is the room **member id** (humans and agents alike). TTL and
-windows are wall-clock, in `store.now()` time so tests can inject a clock.
+### 2. Server-side delta subscription — `subscribeDeltas({ agentIds?, onDelta })`
 
-## Deltas, not snapshots
+`onDelta` receives frozen `{ type: "join"|"leave", agentId, hostId, at }`.
+Emission points:
 
-- `GET /api/rooms/{roomId}/presence/stream` (SSE):
-  1. First event is `presence-snapshot` — the full online list plus the
-     current `presenceSeq`. This is the ONLY full-list read a client does.
-  2. Then `presence-delta` events, each with `id: <seq>` (the monotonic
-     per-room cursor) for `join`, `leave`, and `status` changes only.
-  3. `Last-Event-ID` / `?after=N` resumes from a cursor; a stale cursor
-     re-sends the snapshot.
-- `GET /api/rooms/{roomId}/presence/deltas?after=N&limit=K` is the
-  long-poll-friendly equivalent for clients without SSE: pure read, no
-  deletes, returns `{ from, to, stale, deltas }`.
+- `heartbeat()`: a join is announced only on a real offline→online
+  transition. Reconnects on a new host while already online emit nothing
+  (no flap). The pre-heartbeat online check (two indexed reads) runs only
+  when at least one subscriber exists — the subscriber-free path keeps its
+  3-upsert write budget.
+- `reapStaleHosts()`: when the sweep leaves an agent with no surviving
+  host row, a leave is announced — the server's observed departure.
+  Leave latency is therefore bounded by ~TTL + reap interval, documented
+  honestly: there are no per-agent timers.
+- `notePoll()` revive of an offline agent announces a join.
 
-Heartbeat refreshes of an already-online member emit **no** delta — the
-log only moves on real changes.
+Each subscriber keeps its own believed-online set, so the snapshot-diff
+contract holds per subscriber from its own subscribe time: the first
+event for an agent is always a join, transitions never duplicate, events
+are tick-ordered, and the believed set always agrees with the last
+delivered event. A throwing subscriber never breaks heartbeats or other
+subscribers. In-process only — a restart drops subscribers, never the
+durable rows. Returns an idempotent unsubscribe function.
 
-## Heartbeat aggregation
+### 3. Idle liveness — `notePoll()` refreshes `last_seen_at`
 
-- Any authenticated room traffic refreshes `last_seen`: message commands,
-  typing beats, and the presence stream pump all call
-  `presence.touch({ agentId, roomId, displayName })`.
-- `touch()` is debounced: one indexed SELECT per call, and a write at most
-  every 15s per agent (or immediately on join/rejoin/status change). Steady
-  state per agent per request: one PK lookup, amortized ~zero writes.
-- The dedicated `POST /api/rooms/{roomId}/presence/heartbeat` exists for
-  idle agents (no other traffic). Sane interval: 60s against a 120s TTL.
+An authenticated poll proves the agent is alive and listening. `notePoll`
+now refreshes the agent's **most recently seen** host (one indexed
+UPDATE), so presence doesn't decay while an agent polls instead of
+heartbeating. Only the freshest host is revived; long-dead hosts stay
+dead. Poll-revive of an offline agent re-announces the join to
+subscribers (subject to the believed-online rule above).
 
-## TTL expiry — server-side reaper tick
+## What was deliberately NOT built
 
-- Reads (`snapshot`, `deltasSince`) are **pure**: they compute online from
-  `last_seen_at >= now - TTL` and never delete rows.
-- Expiry is a server-side reaper, `presence.reap({ roomId })`, which deletes
-  expired rows and emits `leave` deltas — same pattern as the spend-grants
-  crash-reaper: it runs on the write paths (heartbeat endpoint, `touch`
-  when it writes, each presence-stream pump cycle), never on reads.
-- `leave` deltas are therefore durable and ordered; a client that missed
-  the reaper tick still learns about the leave from the delta log.
+- No new tables, no new HTTP routes, no writer-fence or runtime-package
+  changes: the extension is code-only inside the existing module, so it
+  is fully backward compatible and additive.
+- No durable delta log / SSE fan-out in this slice: the in-process
+  subscription is the primitive an SSE or long-poll layer would consume.
+  W7's snapshot-diff tests define the semantics that layer must preserve.
 
-## Cost model (500 agents, one room)
+## Cost model (500 agents, measured by tests/presence-scale.test.js)
 
 | Path | Per-agent steady state |
 |---|---|
-| Heartbeat (60s interval) | 1 UPSERT/min, no delta when unchanged |
-| Traffic piggyback (`touch`) | 1 indexed SELECT per request, ≤1 write/15s |
-| Stream pump (1s) | 1 indexed delta-range SELECT per connection per tick; reaper DELETE only when rows actually expired |
-| Snapshot | one full read **per connect**, never per tick |
+| Heartbeat | 3 PK upserts, ≤6 writes budget; no extra reads without subscribers |
+| Reaper | 1 sweep per 60s of clock max, only on heartbeat/poll traffic |
+| notePoll | 1 indexed UPDATE |
+| Subscriber | 0 polling; deltas pushed on real transitions only |
 
-Total write traffic is O(agents × heartbeat-rate), independent of room
-size. Fan-out is server-side: one delta row per real change, fanned to
-subscribers on their existing pump tick. No client ever polls the full
-list to detect a change.
+Measured: 500 heartbeats → ~1502 writes total (~3.0/heartbeat, linear);
+per-heartbeat time flat as the table warms (no O(n²)); 500 `statusOf`
+reads in ~40ms; claim mutations unmoved by interleaved heartbeats.
 
-## Statuses
+## Tests
 
-`online | away | busy` are present; a heartbeat with a changed status emits
-a `status` delta. An explicit `offline` heartbeat (or TTL expiry via the
-reaper) removes the row and emits a `leave` delta.
+- `tests/presence-scale.test.js` — W7's suite (provenance + one documented
+  adaptation in the header): convergence, TTL expiry, ghost cleanup,
+  delta contract, reconnect, write-load isolation.
+- `tests/presence-deltas.test.js` — the new API surface: subscription
+  semantics (join/leave/no-flap/filter/unsubscribe/throwing listener/late
+  subscriber), reaper behavior (cadence windows, orphan push configs,
+  idempotence), idle liveness, write budget.
+- `tests/agent-heartbeats.test.js` — one assertion updated: a heartbeat
+  now prunes the 180s-stale host row it supersedes (the old expectation
+  encoded absence-of-cleanup, which criterion 1 declares a bug).
