@@ -96,6 +96,12 @@ function main() {
         if (path.startsWith(from + "/")) {
           return { path, status: "renamed", current: to + path.slice(from.length) };
         }
+        if (from.startsWith(path + "/")) {
+          // Whole directory renamed: git reports it as individual file
+          // renames, so map the directory prefix onto the new location.
+          // (First matching rename wins when files scattered to several dirs.)
+          return { path, status: "renamed", current: to.slice(0, to.length - (from.length - path.length)) };
+        }
       }
       if (existsAt(repo, base, path)) return { path, status: "deleted", current: null };
       return { path, status: "not-found", current: null };

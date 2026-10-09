@@ -21,25 +21,28 @@ function git(cwd, ...args) {
   return r.stdout.trim();
 }
 
-// Builds: origin repo with commit1 (old-widget, keep, doomed), an agent clone
-// pinned at commit1, then origin advances to commit2 (old-widget renamed to
-// new-widget, doomed deleted, keep untouched).
+// Builds: origin repo with commit1 (old-widget, keep, doomed, widgets/w),
+// an agent clone pinned at commit1, then origin advances to commit2
+// (old-widget renamed to new-widget, doomed deleted, keep untouched,
+// server/widgets renamed to server/gadgets).
 function fixture(t) {
   const dir = mkdtempSync(join(tmpdir(), "path-restat-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const origin = join(dir, "origin");
-  mkdirSync(join(origin, "server"), { recursive: true });
+  mkdirSync(join(origin, "server", "widgets"), { recursive: true });
   git(dir, "init", "-b", "main", "origin");
   writeFileSync(join(origin, "server", "old-widget.mjs"), "export const w = 1;\n");
   writeFileSync(join(origin, "server", "keep.mjs"), "export const k = 1;\n");
   writeFileSync(join(origin, "server", "doomed.mjs"), "export const d = 1;\n");
+  writeFileSync(join(origin, "server", "widgets", "w.mjs"), "export const g = 1;\n");
   git(origin, "add", "-A");
   git(origin, "commit", "-m", "commit1");
   const agent = join(dir, "agent");
   git(dir, "clone", "--quiet", origin, "agent");
   git(origin, "mv", "server/old-widget.mjs", "server/new-widget.mjs");
   git(origin, "rm", "--quiet", "server/doomed.mjs");
-  git(origin, "commit", "--quiet", "-m", "commit2: rename + delete");
+  git(origin, "mv", "server/widgets", "server/gadgets");
+  git(origin, "commit", "--quiet", "-m", "commit2: rename + delete + dir rename");
   return { agent };
 }
 
@@ -90,6 +93,24 @@ test("path that never existed fails as not-found", t => {
   assert.equal(r.status, 1);
   const out = JSON.parse(r.stdout);
   assert.equal(out.paths[0].status, "not-found");
+});
+
+test("renamed directory is reported with the new location, not deleted", t => {
+  const { agent } = fixture(t);
+  const r = restat(agent, "--json", "server/widgets");
+  assert.equal(r.status, 1, `expected exit 1, got ${r.status}: ${r.stdout} ${r.stderr}`);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.paths[0].status, "renamed");
+  assert.equal(out.paths[0].current, "server/gadgets");
+});
+
+test("file under a renamed directory maps onto the new directory", t => {
+  const { agent } = fixture(t);
+  const r = restat(agent, "--json", "server/widgets/w.mjs");
+  assert.equal(r.status, 1);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.paths[0].status, "renamed");
+  assert.equal(out.paths[0].current, "server/gadgets/w.mjs");
 });
 
 test("mixed batch exits non-zero and reports each stale path", t => {
