@@ -143,9 +143,9 @@ export async function readBoardDeployStatus(store, { fetchImpl, token, nowMs = D
   const flight = statusFlights.get(key);
   if (flight?.promise) return flight.promise;
   const cached = readCachedDeployStatus(store);
-  const cachedAt = cached.checkedAt ? Date.parse(cached.checkedAt) : NaN;
+  const cachedAt = Date.parse(cached.checkedAt ?? "");
   const fresh = (flight && nowMs - flight.atMs < DEPLOY_STATUS_MAX_AGE_MS)
-    || (Number.isFinite(cachedAt) && nowMs - cachedAt >= 0 && nowMs - cachedAt < DEPLOY_STATUS_MAX_AGE_MS);
+    || (Number.isFinite(cachedAt) && cachedAt <= nowMs && nowMs - cachedAt < DEPLOY_STATUS_MAX_AGE_MS);
   if (fresh && !force) return { ...cached, stale: false };
   const entry = { atMs: nowMs, promise: null };
   entry.promise = readRoomDeployStatus(store, { fetchImpl, token, nowMs })

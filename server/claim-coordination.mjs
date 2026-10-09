@@ -40,12 +40,12 @@ export function usableEtag(value) {
 export function rateLimitUntil({ status, remaining, reset, retryAfter, message } = {}, nowMs) {
   const limited = status === 429 || (status === 403 && (remaining === "0" || /rate limit/i.test(message ?? "")));
   if (!limited) return null;
-  let until = null;
-  if (typeof reset === "string" && /^\d+$/.test(reset.trim())) {
-    const value = Number(reset.trim());
-    until = value > 1e12 ? value : value * 1000;
-  } else if (typeof retryAfter === "string" && /^\d+$/.test(retryAfter.trim())) {
-    until = nowMs + Number(retryAfter.trim()) * 1000;
+  const epoch = header => typeof header === "string" && /^\d+$/.test(header.trim()) ? Number(header.trim()) : null;
+  const fromReset = epoch(reset);
+  let until = fromReset === null ? null : fromReset > 1e12 ? fromReset : fromReset * 1000;
+  if (until === null) {
+    const retry = epoch(retryAfter);
+    if (retry !== null) until = nowMs + retry * 1000;
   }
   if (!until || until <= nowMs) until = nowMs + PULL_POLL_BACKOFF_MS;
   return until;
@@ -70,13 +70,14 @@ export function parsePullRequestUrl(value) {
   });
 }
 
+const isRecord = value => value !== null && typeof value === "object" && !Array.isArray(value);
+
 // GitHub pull_request webhook: only a close settles a claim. merged completes
 // it; a close without a merge releases it. Every other action is ignored.
 export function pullRequestOutcomeFromWebhook(payload) {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
-  if (payload.action !== "closed") return null;
+  if (!isRecord(payload) || payload.action !== "closed") return null;
   const pull = payload.pull_request;
-  if (!pull || typeof pull !== "object" || Array.isArray(pull)) return null;
+  if (!isRecord(pull)) return null;
   const parsed = parsePullRequestUrl(pull.html_url);
   if (!parsed) return null;
   return Object.freeze({ ...parsed, outcome: pull.merged === true ? "merged" : "closed" });
@@ -84,15 +85,16 @@ export function pullRequestOutcomeFromWebhook(payload) {
 
 // Polled GET /repos/{owner}/{repo}/pulls/{n} body. An open pull settles nothing.
 export function pullRequestOutcomeFromApi(body) {
-  if (!body || typeof body !== "object" || Array.isArray(body)) return "open";
+  if (!isRecord(body)) return "open";
   if (body.merged === true) return "merged";
-  if (body.state === "closed") return "closed";
-  return "open";
+  return body.state === "closed" ? "closed" : "open";
 }
 
 const stamp = (atMs, agentId, action, note) => Object.freeze({
   at: new Date(atMs).toISOString(), agentId, action, note
 });
+
+const compareBy = select => (a, b) => (select(a) < select(b) ? -1 : select(a) > select(b) ? 1 : 0);
 
 // Apply a merged or closed outcome to a live claim. Merged completes the claim
 // (deliveryMode merged). Closed releases it the same way a holder release does:
@@ -104,9 +106,8 @@ export function settlePullRequest(item, outcome, nowMs) {
   // auto-releases expired claims before any settlement read; the cron must
   // match it, so a merged PR on a dead round is not credited as done (the
   // lease_expired event and its flake signal stand instead).
-  if (typeof item.leaseExpiresAt === "string"
-    && Number.isFinite(Date.parse(item.leaseExpiresAt))
-    && Date.parse(item.leaseExpiresAt) <= nowMs) return null;
+  const leaseMs = typeof item.leaseExpiresAt === "string" ? Date.parse(item.leaseExpiresAt) : NaN;
+  if (Number.isFinite(leaseMs) && leaseMs <= nowMs) return null;
   if (!pullsReadyToSettle(item)) return null;
   if (outcome !== "merged" && outcome !== "closed") return null;
   const at = new Date(nowMs).toISOString();
@@ -119,39 +120,25 @@ export function settlePullRequest(item, outcome, nowMs) {
   const pullRequest = Object.freeze({
     ...current, outcome: current.outcome ?? outcome, syncedAt: current.syncedAt ?? at, nextPollAt: null, rateLimitedUntil: null
   });
-  const agentId = item.owner ?? "system";
+  const action = outcome === "merged" ? "pr_merged" : "pr_closed";
+  const note = outcome === "merged" ? `pull request merged: ${current.url}` : `pull request closed: ${current.url}`;
+  const settled = {
+    ...item,
+    pullRequest,
+    history: Object.freeze([...(item.history ?? []), stamp(nowMs, item.owner ?? "system", action, note)])
+  };
   if (outcome === "merged") {
-    const note = `pull request merged: ${current.url}`;
     return {
-      action: "pr_merged",
-      previousOwnerId: null,
-      paths: [...(item.files ?? [])],
-      item: {
-        ...item,
-        state: "done",
-        deliveryMode: "merged",
-        pullRequest,
-        history: Object.freeze([...(item.history ?? []), stamp(nowMs, agentId, "pr_merged", note)])
-      }
+      action, previousOwnerId: null, paths: [...(item.files ?? [])],
+      item: { ...settled, state: "done", deliveryMode: "merged" }
     };
   }
-  const note = `pull request closed: ${current.url}`;
   return {
-    action: "pr_closed",
-    previousOwnerId: item.owner ?? null,
-    paths: [...(item.files ?? [])],
+    action, previousOwnerId: item.owner ?? null, paths: [...(item.files ?? [])],
     item: {
-      ...item,
-      state: "unclaimed",
-      owner: null,
-      leaseStartAt: null,
-      leaseExpiresAt: null,
-      files: Object.freeze([]),
-      fileBlocks: Object.freeze({}),
-      attestations: Object.freeze([]),
-      reviews: Object.freeze([]),
-      pullRequest,
-      history: Object.freeze([...(item.history ?? []), stamp(nowMs, agentId, "pr_closed", note)])
+      ...settled, state: "unclaimed", owner: null, leaseStartAt: null, leaseExpiresAt: null,
+      files: Object.freeze([]), fileBlocks: Object.freeze({}),
+      attestations: Object.freeze([]), reviews: Object.freeze([])
     }
   };
 }
@@ -213,10 +200,7 @@ export function rollupClaimCi({ status = null, checkRuns = [], pullUrl = null } 
     else if (status.state === "success") success += 1;
     else pending = true;
   }
-  let state = "neutral";
-  if (failure) state = "failure";
-  else if (pending) state = "pending";
-  else if (success > 0) state = "success";
+  const state = failure ? "failure" : pending ? "pending" : success > 0 ? "success" : "neutral";
   const statuses = Array.isArray(status?.statuses) ? status.statuses : [];
   const target = statuses.find(entry => typeof entry?.target_url === "string" && entry.target_url.startsWith("https://"));
   const url = target?.target_url || (typeof pullUrl === "string" ? pullUrl : null);
@@ -286,7 +270,7 @@ export function fileLeaseConflicts(items, claimed) {
       leaseExpiresAt: item.leaseExpiresAt ?? null
     }));
   }
-  conflicts.sort((a, b) => (a.holder.claimId < b.holder.claimId ? -1 : a.holder.claimId > b.holder.claimId ? 1 : 0));
+  conflicts.sort(compareBy(conflict => conflict.holder.claimId));
   return conflicts;
 }
 
@@ -312,5 +296,5 @@ export function readyClaims(items) {
     if (!item || item.state !== "unclaimed" || item.owner) return false;
     const deps = Array.isArray(item.dependsOn) ? item.dependsOn : [];
     return deps.every(id => byId.get(id)?.state === "done");
-  }).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  }).sort(compareBy(item => item.id));
 }

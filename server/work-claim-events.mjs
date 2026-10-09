@@ -17,6 +17,10 @@ import { resolveNamedReviewers, hasCurrentReview } from "./work-claims.mjs";
 
 export const WORK_CLAIM_ACTIONS = WORK_CLAIM_EVENT_ACTIONS;
 
+// Null on any throw: several store reads degrade gracefully on a partial store.
+const attempt = fn => { try { return fn(); } catch { return null; } };
+const reportFailure = (label, error) => console.error(label, error?.message ?? error);
+
 // A title of only whitespace is a legal claim (the state machine stores it)
 // but the event envelope rejects a blank string. Fall back to the id so the
 // claim write is not rolled back by its own receipt.
@@ -48,13 +52,9 @@ export function workClaimEventData(item, action, { previousOwnerId = null, paths
       outcome: action === "pr_merged" ? "merged" : "closed"
     };
   }
-  if (reason) data.reason = reason;
-  if (ciState) data.ciState = ciState;
-  if (verdict) data.verdict = verdict;
-  // Updates reads attention on this event. A paused or read-only assignee
-  // still gets the item; the wake below is what pause and autonomy skip.
-  if (attention) data.attention = attention;
-  if (attentionMemberId) data.attentionMemberId = attentionMemberId;
+  for (const [key, value] of [["reason", reason], ["ciState", ciState], ["verdict", verdict], ["attention", attention], ["attentionMemberId", attentionMemberId]]) {
+    if (value) data[key] = value;
+  }
   return data;
 }
 
@@ -70,29 +70,21 @@ export function workClaimEventData(item, action, { previousOwnerId = null, paths
 // The queue coalesces on message id, which is the per-signal rate limit
 // this path already has.
 function linkedIdentityId(store, roomId, memberId) {
-  try {
-    return store.db.prepare(
-      "SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?"
-    ).get(roomId, memberId)?.identityId ?? null;
-  } catch {
-    return null;
-  }
+  return attempt(() => store.db.prepare(
+    "SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?"
+  ).get(roomId, memberId)?.identityId) ?? null;
 }
 
 function claimWakeSkip(store, roomId, memberId, actorId) {
-  try {
-    if (store.wakeQueue?.pauseStatus?.(roomId, memberId)) return "paused";
-  } catch { /* pause table absent on a partial store */ }
-  try {
-    if (getTier(store.db, roomId, memberId)?.autonomyTier === "t1_readonly") return "readonly";
-  } catch { /* tier table absent */ }
-  try {
+  if (attempt(() => store.wakeQueue?.pauseStatus?.(roomId, memberId))) return "paused";
+  if (attempt(() => getTier(store.db, roomId, memberId))?.autonomyTier === "t1_readonly") return "readonly";
+  return attempt(() => {
     if (actorId && typeof store.room === "function") {
       const state = store.room(roomId)?.state;
       if (state && firstBlockedWakeTarget(state, actorId, [memberId])) return "trust";
     }
-  } catch { /* room unread */ }
-  return null;
+    return null;
+  });
 }
 
 export function enqueueClaimWake(store, roomId, memberId, messageId, { reason, actorId } = {}) {
@@ -116,17 +108,19 @@ export function enqueueClaimWake(store, roomId, memberId, messageId, { reason, a
     }
     return result;
   } catch (error) {
-    console.error("work claim wake failed:", error?.message ?? error);
+    reportFailure("work claim wake failed:", error);
     return null;
   }
 }
+
+const SETTLED_STATES = new Set(["done", "closed"]);
 
 // hw-h2-needs-me-review-asks (3): one wake per new head for each reviewer the
 // item names (tag rev-<memberId>) who has not reviewed that head yet. Ready
 // means in_progress or a linked PR, the same rule as needs-me reviewAsks. The
 // message id carries the head, so repeats coalesce and a new head wakes again.
 export function wakeNamedReviewers(store, roomId, item, { actorId } = {}) {
-  if (!item || item.state === "done" || item.state === "closed" || !item.owner || item.supersededBy) return [];
+  if (!item || SETTLED_STATES.has(item.state) || !item.owner || item.supersededBy) return [];
   if (!(item.state === "in_progress" || item.pullRequest || (item.pullRequests ?? []).length)) return [];
   const head = item.ci?.headSha ?? item.revision ?? item.claimedAt ?? "none";
   let members = {};
@@ -192,14 +186,14 @@ export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previ
   try {
     if (store.agentPlugin) store.agentPlugin.fanoutRoomEvent({ roomId, event: incoming });
   } catch (error) {
-    console.error("work claim fan-out failed:", error?.message ?? error);
+    reportFailure("work claim fan-out failed:", error);
   }
   // ACT-1a: in-room receipt for every done claim (result, merged, production).
   // Posted here, not in the Board done branch, while BF is open on work-claim-routes.
   // A receipt failure must not roll back the claim.
   if (action === "state_changed" && item.state === "done") {
     try { postReceiptCard(store, roomId, item, stamp); }
-    catch (error) { console.error("work claim receipt card failed:", error?.message ?? error); }
+    catch (error) { reportFailure("work claim receipt card failed:", error); }
   }
   return { sequence, event: incoming };
 }
