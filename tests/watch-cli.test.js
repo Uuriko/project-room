@@ -44,6 +44,9 @@ function runCli(args, { data, credentials = false, failure } = {}) {
   const env = { ...process.env };
   for (const name of Object.keys(env)) if (name.startsWith("ROOM_AGENT_") || name === "NODE_OPTIONS") delete env[name];
   if (credentials) Object.assign(env, { ROOM_AGENT_ORIGIN: origin, ROOM_AGENT_ROOM: roomId, ROOM_AGENT_TOKEN: token });
+  // The child's stderr is parsed as JSON, so a Node runtime warning (e.g. NO_COLOR
+  // ignored because FORCE_COLOR is set) must not land there. Same as room-listen.
+  env.NODE_NO_WARNINGS = "1";
   const source = `
     const data = ${JSON.stringify(data ?? null)};
     globalThis.fetch = async (input, options) => {

@@ -237,7 +237,7 @@ test("selected client does exactly one cancellable GET and rejects mismatched co
 test("work CLI prints one selected context and rejects extra arguments without disclosing keys", async t => {
   const f = await fixture(t);
   const run = args => new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ["scripts/agent-inbox.mjs", ...args], { env: { ...process.env, ROOM_AGENT_ORIGIN: f.origin, ROOM_AGENT_ROOM: "commons", ROOM_AGENT_TOKEN: f.keys.producer } });
+    const child = spawn(process.execPath, ["scripts/agent-inbox.mjs", ...args], { env: { ...process.env, NODE_NO_WARNINGS: "1", ROOM_AGENT_ORIGIN: f.origin, ROOM_AGENT_ROOM: "commons", ROOM_AGENT_TOKEN: f.keys.producer } });
     let stdout = "", stderr = ""; child.stdout.on("data", chunk => stdout += chunk); child.stderr.on("data", chunk => stderr += chunk);
     child.on("error", reject); child.on("close", code => resolve({ code, stdout, stderr }));
   });
