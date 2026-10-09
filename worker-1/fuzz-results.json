@@ -1,0 +1,640 @@
+{
+ "cases": [
+  {
+   "name": "sec GET /.well-known/security.txt",
+   "expect": 404,
+   "got": 404,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 10,
+   "bodyHead": "Not found "
+  },
+  {
+   "name": "sec HEAD /.well-known/security.txt",
+   "expect": 404,
+   "got": 404,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 0,
+   "bodyHead": ""
+  },
+  {
+   "name": "sec POST /.well-known/security.txt",
+   "expect": 405,
+   "got": 405,
+   "ok": true,
+   "allow": "GET, HEAD",
+   "bodyLen": 539,
+   "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_al"
+  },
+  {
+   "name": "sec PUT /.well-known/security.txt",
+   "expect": 405,
+   "got": 405,
+   "ok": true,
+   "allow": "GET, HEAD",
+   "bodyLen": 539,
+   "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_al"
+  },
+  {
+   "name": "sec DELETE /.well-known/security.txt",
+   "expect": 405,
+   "got": 405,
+   "ok": true,
+   "allow": "GET, HEAD",
+   "bodyLen": 539,
+   "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_al"
+  },
+  {
+   "name": "sec OPTIONS /.well-known/security.txt",
+   "expect": 405,
+   "got": 405,
+   "ok": true,
+   "allow": "GET, HEAD",
+   "bodyLen": 539,
+   "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_al"
+  },
+  {
+   "name": "sec PATCH /.well-known/security.txt",
+   "expect": 405,
+   "got": 405,
+   "ok": true,
+   "allow": "GET, HEAD",
+   "bodyLen": 539,
+   "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_al"
+  },
+  {
+   "name": "sec GET /security.txt",
+   "expect": 404,
+   "got": 404,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 10,
+   "bodyHead": "Not found "
+  },
+  {
+   "name": "sec HEAD /security.txt",
+   "expect": 404,
+   "got": 404,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 0,
+   "bodyHead": ""
+  },
+  {
+   "name": "sec POST /security.txt",
+   "expect": 405,
+   "got": 405,
+   "ok": true,
+   "allow": "GET, HEAD",
+   "bodyLen": 539,
+   "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_al"
+  },
+  {
+   "name": "sec PUT /security.txt",
+   "expect": 405,
+   "got": 405,
+   "ok": true,
+   "allow": "GET, HEAD",
+   "bodyLen": 539,
+   "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_al"
+  },
+  {
+   "name": "sec DELETE /security.txt",
+   "expect": 405,
+   "got": 405,
+   "ok": true,
+   "allow": "GET, HEAD",
+   "bodyLen": 539,
+   "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_al"
+  },
+  {
+   "name": "sec OPTIONS /security.txt",
+   "expect": 405,
+   "got": 405,
+   "ok": true,
+   "allow": "GET, HEAD",
+   "bodyLen": 539,
+   "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_al"
+  },
+  {
+   "name": "sec PATCH /security.txt",
+   "expect": 405,
+   "got": 405,
+   "ok": true,
+   "allow": "GET, HEAD",
+   "bodyLen": 539,
+   "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_al"
+  },
+  {
+   "name": "sec GET /room/.well-known/security.txt",
+   "expect": 404,
+   "got": 404,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 10,
+   "bodyHead": "Not found "
+  },
+  {
+   "name": "sec HEAD /room/.well-known/security.txt",
+   "expect": 404,
+   "got": 404,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 0,
+   "bodyHead": ""
+  },
+  {
+   "name": "sec POST /room/.well-known/security.txt",
+   "expect": 405,
+   "got": 405,
+   "ok": true,
+   "allow": "GET, HEAD",
+   "bodyLen": 539,
+   "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_al"
+  },
+  {
+   "name": "sec PUT /room/.well-known/security.txt",
+   "expect": 405,
+   "got": 405,
+   "ok": true,
+   "allow": "GET, HEAD",
+   "bodyLen": 539,
+   "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_al"
+  },
+  {
+   "name": "sec DELETE /room/.well-known/security.txt",
+   "expect": 405,
+   "got": 405,
+   "ok": true,
+   "allow": "GET, HEAD",
+   "bodyLen": 539,
+   "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_al"
+  },
+  {
+   "name": "sec OPTIONS /room/.well-known/security.txt",
+   "expect": 405,
+   "got": 405,
+   "ok": true,
+   "allow": "GET, HEAD",
+   "bodyLen": 539,
+   "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_al"
+  },
+  {
+   "name": "sec PATCH /room/.well-known/security.txt",
+   "expect": 405,
+   "got": 405,
+   "ok": true,
+   "allow": "GET, HEAD",
+   "bodyLen": 539,
+   "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_al"
+  },
+  {
+   "name": "sec GET trailing slash",
+   "expect": 404,
+   "got": 404,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 10,
+   "bodyHead": "Not found "
+  },
+  {
+   "name": "sec GET double slash",
+   "expect": 404,
+   "got": 404,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 430,
+   "bodyHead": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or"
+  },
+  {
+   "name": "sec GET query",
+   "expect": 404,
+   "got": 404,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 10,
+   "bodyHead": "Not found "
+  },
+  {
+   "name": "sec GET case",
+   "expect": 404,
+   "got": 404,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 430,
+   "bodyHead": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or"
+  },
+  {
+   "name": "sec GET dotdot",
+   "expect": 404,
+   "got": 404,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 10,
+   "bodyHead": "Not found "
+  },
+  {
+   "name": "gh GET anon",
+   "expect": 401,
+   "got": 401,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 1083,
+   "bodyHead": "{\"error\":{\"code\":\"account_session_required\",\"message\":\"Sign in to manage your account\"},\"status\":\"action_required\",\"reas"
+  },
+  {
+   "name": "gh HEAD anon",
+   "expect": 405,
+   "got": 405,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 0,
+   "bodyHead": ""
+  },
+  {
+   "name": "gh POST anon",
+   "expect": 405,
+   "got": 405,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 539,
+   "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_al"
+  },
+  {
+   "name": "gh PUT anon",
+   "expect": 405,
+   "got": 405,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 539,
+   "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_al"
+  },
+  {
+   "name": "gh DELETE anon",
+   "expect": 405,
+   "got": 405,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 539,
+   "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_al"
+  },
+  {
+   "name": "gh PATCH anon",
+   "expect": 405,
+   "got": 405,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 539,
+   "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_al"
+  },
+  {
+   "name": "gh OPTIONS anon",
+   "expect": 405,
+   "got": 405,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 539,
+   "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_al"
+  },
+  {
+   "name": "gh GET trailing slash",
+   "expect": 401,
+   "got": 401,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 1083,
+   "bodyHead": "{\"error\":{\"code\":\"account_session_required\",\"message\":\"Sign in to manage your account\"},\"status\":\"action_required\",\"reas"
+  },
+  {
+   "name": "gh GET junk bearer",
+   "expect": 401,
+   "got": 401,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 1083,
+   "bodyHead": "{\"error\":{\"code\":\"account_session_required\",\"message\":\"Sign in to manage your account\"},\"status\":\"action_required\",\"reas"
+  },
+  {
+   "name": "gh GET identity bearer (not account)",
+   "expect": 401,
+   "got": 401,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 1083,
+   "bodyHead": "{\"error\":{\"code\":\"account_session_required\",\"message\":\"Sign in to manage your account\"},\"status\":\"action_required\",\"reas"
+  },
+  {
+   "name": "gh GET huge query",
+   "expect": 401,
+   "got": 401,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 1083,
+   "bodyHead": "{\"error\":{\"code\":\"account_session_required\",\"message\":\"Sign in to manage your account\"},\"status\":\"action_required\",\"reas"
+  },
+  {
+   "name": "gh GET junk cookie",
+   "expect": 401,
+   "got": 401,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 1083,
+   "bodyHead": "{\"error\":{\"code\":\"account_session_required\",\"message\":\"Sign in to manage your account\"},\"status\":\"action_required\",\"reas"
+  },
+  {
+   "name": "up GET anon",
+   "expect": 401,
+   "got": 401,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 1087,
+   "bodyHead": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Identity secret or account session required\"},\"status\":\"action_required\",\""
+  },
+  {
+   "name": "up HEAD anon",
+   "expect": 401,
+   "got": 401,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 0,
+   "bodyHead": ""
+  },
+  {
+   "name": "up POST anon",
+   "expect": 405,
+   "got": 405,
+   "ok": true,
+   "allow": "GET",
+   "bodyLen": 539,
+   "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_al"
+  },
+  {
+   "name": "up PUT anon",
+   "expect": 405,
+   "got": 405,
+   "ok": true,
+   "allow": "GET",
+   "bodyLen": 539,
+   "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_al"
+  },
+  {
+   "name": "up DELETE anon",
+   "expect": 405,
+   "got": 405,
+   "ok": true,
+   "allow": "GET",
+   "bodyLen": 539,
+   "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_al"
+  },
+  {
+   "name": "up OPTIONS anon",
+   "expect": 405,
+   "got": 405,
+   "ok": true,
+   "allow": "GET",
+   "bodyLen": 539,
+   "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_al"
+  },
+  {
+   "name": "up GET garbage bearer",
+   "expect": 401,
+   "got": 401,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 1072,
+   "bodyHead": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauth"
+  },
+  {
+   "name": "up GET bare bearer",
+   "expect": 401,
+   "got": 401,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 1072,
+   "bodyHead": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauth"
+  },
+  {
+   "name": "up GET basic",
+   "expect": 401,
+   "got": 401,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 1072,
+   "bodyHead": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauth"
+  },
+  {
+   "name": "up GET authed",
+   "expect": 200,
+   "got": 200,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 228,
+   "bodyHead": "{\"untrusted\":true,\"incompleteSources\":{\"mentions\":false,\"peerDms\":false,\"claims\":false,\"invites\":false,\"accessRequests\":"
+  },
+  {
+   "name": "up HEAD authed",
+   "expect": 200,
+   "got": 200,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 0,
+   "bodyHead": ""
+  },
+  {
+   "name": "up GET limit=50",
+   "expect": 200,
+   "got": 200,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 228,
+   "bodyHead": "{\"untrusted\":true,\"incompleteSources\":{\"mentions\":false,\"peerDms\":false,\"claims\":false,\"invites\":false,\"accessRequests\":"
+  },
+  {
+   "name": "up GET limit=abc",
+   "expect": 422,
+   "got": 422,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 404,
+   "bodyHead": "{\"error\":{\"code\":\"invalid_updates_query\",\"message\":\"limit must be an integer from 1 to 100\"},\"status\":\"action_required\","
+  },
+  {
+   "name": "up GET limit=-1",
+   "expect": 422,
+   "got": 422,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 404,
+   "bodyHead": "{\"error\":{\"code\":\"invalid_updates_query\",\"message\":\"limit must be an integer from 1 to 100\"},\"status\":\"action_required\","
+  },
+  {
+   "name": "up GET limit=0",
+   "expect": 422,
+   "got": 422,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 404,
+   "bodyHead": "{\"error\":{\"code\":\"invalid_updates_query\",\"message\":\"limit must be an integer from 1 to 100\"},\"status\":\"action_required\","
+  },
+  {
+   "name": "up GET limit=1.5",
+   "expect": 422,
+   "got": 422,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 404,
+   "bodyHead": "{\"error\":{\"code\":\"invalid_updates_query\",\"message\":\"limit must be an integer from 1 to 100\"},\"status\":\"action_required\","
+  },
+  {
+   "name": "up GET limit=huge",
+   "expect": 422,
+   "got": 422,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 404,
+   "bodyHead": "{\"error\":{\"code\":\"invalid_updates_query\",\"message\":\"limit must be an integer from 1 to 100\"},\"status\":\"action_required\","
+  },
+  {
+   "name": "up GET limit=101",
+   "expect": 422,
+   "got": 422,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 404,
+   "bodyHead": "{\"error\":{\"code\":\"invalid_updates_query\",\"message\":\"limit must be an integer from 1 to 100\"},\"status\":\"action_required\","
+  },
+  {
+   "name": "up GET limit=Infinity",
+   "expect": 422,
+   "got": 422,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 404,
+   "bodyHead": "{\"error\":{\"code\":\"invalid_updates_query\",\"message\":\"limit must be an integer from 1 to 100\"},\"status\":\"action_required\","
+  },
+  {
+   "name": "up GET limit dup",
+   "expect": 422,
+   "got": 422,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 430,
+   "bodyHead": "{\"error\":{\"code\":\"invalid_updates_query\",\"message\":\"state, kinds, cursor, and limit are the updates query parameters\"},\""
+  },
+  {
+   "name": "up GET bogus param",
+   "expect": 422,
+   "got": 422,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 430,
+   "bodyHead": "{\"error\":{\"code\":\"invalid_updates_query\",\"message\":\"state, kinds, cursor, and limit are the updates query parameters\"},\""
+  },
+  {
+   "name": "up GET state=all",
+   "expect": 200,
+   "got": 200,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 221,
+   "bodyHead": "{\"untrusted\":true,\"incompleteSources\":{\"mentions\":false,\"peerDms\":false,\"claims\":false,\"invites\":false,\"accessRequests\":"
+  },
+  {
+   "name": "up GET state=bogus",
+   "expect": 422,
+   "got": 422,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 397,
+   "bodyHead": "{\"error\":{\"code\":\"invalid_updates_query\",\"message\":\"state must be actionable or all\"},\"status\":\"action_required\",\"reason"
+  },
+  {
+   "name": "up GET kinds=request",
+   "expect": 200,
+   "got": 200,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 228,
+   "bodyHead": "{\"untrusted\":true,\"incompleteSources\":{\"mentions\":false,\"peerDms\":false,\"claims\":false,\"invites\":false,\"accessRequests\":"
+  },
+  {
+   "name": "up GET kinds=nope",
+   "expect": 422,
+   "got": 422,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 394,
+   "bodyHead": "{\"error\":{\"code\":\"invalid_updates_query\",\"message\":\"kinds must name update kinds\"},\"status\":\"action_required\",\"reason\":\""
+  },
+  {
+   "name": "up GET kinds giant",
+   "expect": 422,
+   "got": "ERR:ECONNRESET",
+   "ok": false,
+   "bodyLen": 0,
+   "bodyHead": ""
+  },
+  {
+   "name": "up GET cursor=junk",
+   "expect": 422,
+   "got": 422,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 381,
+   "bodyHead": "{\"error\":{\"code\":\"invalid_cursor\",\"message\":\"Invalid updates cursor\"},\"status\":\"action_required\",\"reason\":\"input_refused"
+  },
+  {
+   "name": "up GET cursor=v2shape",
+   "expect": 422,
+   "got": 422,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 381,
+   "bodyHead": "{\"error\":{\"code\":\"invalid_cursor\",\"message\":\"Invalid updates cursor\"},\"status\":\"action_required\",\"reason\":\"input_refused"
+  },
+  {
+   "name": "up GET state giant",
+   "expect": 422,
+   "got": 422,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 397,
+   "bodyHead": "{\"error\":{\"code\":\"invalid_updates_query\",\"message\":\"state must be actionable or all\"},\"status\":\"action_required\",\"reason"
+  },
+  {
+   "name": "up GET empty limit",
+   "expect": 422,
+   "got": 422,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 404,
+   "bodyHead": "{\"error\":{\"code\":\"invalid_updates_query\",\"message\":\"limit must be an integer from 1 to 100\"},\"status\":\"action_required\","
+  },
+  {
+   "name": "up GET huge body (framed)",
+   "expect": 200,
+   "got": 200,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 228,
+   "bodyHead": "{\"untrusted\":true,\"incompleteSources\":{\"mentions\":false,\"peerDms\":false,\"claims\":false,\"invites\":false,\"accessRequests\":"
+  },
+  {
+   "name": "up GET small body (framed)",
+   "expect": 200,
+   "got": 200,
+   "ok": true,
+   "allow": null,
+   "bodyLen": 228,
+   "bodyHead": "{\"untrusted\":true,\"incompleteSources\":{\"mentions\":false,\"peerDms\":false,\"claims\":false,\"invites\":false,\"accessRequests\":"
+  },
+  {
+   "name": "liveness /api/health after fuzz",
+   "expect": 200,
+   "got": 200,
+   "ok": true
+  }
+ ],
+ "anomalous": 1
+}

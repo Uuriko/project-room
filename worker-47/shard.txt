@@ -1,0 +1,2 @@
+    46	2248:      if (url.pathname === "/api/auth/methods") {
+    96	3112:      if (url.pathname === "/api/agent-rooms" && req.method === "GET") {

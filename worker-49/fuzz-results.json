@@ -1,0 +1,317 @@
+[
+  {
+    "name": "WH valid POST",
+    "actual": 202,
+    "expected": 202,
+    "pass": true,
+    "note": " body={\"contractVersion\":1,\"connectionId\":\"telegram-fixture\",\"received\":1,\"pending\":1}"
+  },
+  {
+    "name": "WH no secret",
+    "actual": 401,
+    "expected": 401,
+    "pass": true,
+    "note": " body={\"error\":{\"code\":\"channel_webhook_denied\",\"message\":\"Webhook not accepted.\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved conne"
+  },
+  {
+    "name": "WH wrong secret (well-formed)",
+    "actual": 401,
+    "expected": 401,
+    "pass": true,
+    "note": " body={\"error\":{\"code\":\"channel_webhook_denied\",\"message\":\"Webhook not accepted.\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved conne"
+  },
+  {
+    "name": "WH weak short secret",
+    "actual": 401,
+    "expected": 401,
+    "pass": true,
+    "note": " body={\"error\":{\"code\":\"channel_webhook_denied\",\"message\":\"Webhook not accepted.\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved conne"
+  },
+  {
+    "name": "WH wrong content-type",
+    "actual": 415,
+    "expected": 415,
+    "pass": true,
+    "note": " body={\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in t"
+  },
+  {
+    "name": "WH invalid JSON",
+    "actual": 400,
+    "expected": 400,
+    "pass": true,
+    "note": " body={\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in "
+  },
+  {
+    "name": "WH empty body",
+    "actual": 400,
+    "expected": 400,
+    "pass": true,
+    "note": " body={\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in "
+  },
+  {
+    "name": "WH array body",
+    "actual": 400,
+    "expected": 400,
+    "pass": true,
+    "note": " body={\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in "
+  },
+  {
+    "name": "WH {} body",
+    "actual": 422,
+    "expected": 422,
+    "pass": true,
+    "note": " body={\"error\":{\"code\":\"invalid_channel_update\",\"message\":\"Supply Telegram Update objects.\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refus"
+  },
+  {
+    "name": "WH empty updates",
+    "actual": 422,
+    "expected": 422,
+    "pass": true,
+    "note": " body={\"error\":{\"code\":\"invalid_channel_update\",\"message\":\"Supply Telegram Update objects.\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refus"
+  },
+  {
+    "name": "WH negative update_id",
+    "actual": 422,
+    "expected": 422,
+    "pass": true,
+    "note": " body={\"error\":{\"code\":\"invalid_channel_update\",\"message\":\"Supply Telegram Update objects.\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refus"
+  },
+  {
+    "name": "WH float update_id",
+    "actual": 422,
+    "expected": 422,
+    "pass": true,
+    "note": " body={\"error\":{\"code\":\"invalid_channel_update\",\"message\":\"Supply Telegram Update objects.\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refus"
+  },
+  {
+    "name": "WH 101 updates",
+    "actual": 422,
+    "expected": 422,
+    "pass": true,
+    "note": " body={\"error\":{\"code\":\"invalid_channel_update\",\"message\":\"Supply Telegram Update objects.\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refus"
+  },
+  {
+    "name": "WH oversize body",
+    "actual": 413,
+    "expected": 413,
+    "pass": true,
+    "note": " body={\"error\":{\"code\":\"too_large\",\"message\":\"Request body is 70000 bytes; the limit is 65536 bytes\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"The "
+  },
+  {
+    "name": "WH extra top-level key",
+    "actual": 422,
+    "expected": 422,
+    "pass": true,
+    "note": " body={\"error\":{\"code\":\"invalid_channel_update\",\"message\":\"Supply Telegram Update objects.\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refus"
+  },
+  {
+    "name": "WH unknown connectionId",
+    "actual": 401,
+    "expected": 401,
+    "pass": true,
+    "note": " body={\"error\":{\"code\":\"channel_webhook_denied\",\"message\":\"Webhook not accepted.\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved conne"
+  },
+  {
+    "name": "WH traversal connectionId",
+    "actual": 404,
+    "expected": 404,
+    "pass": true,
+    "note": "WHATWG URL normalizes encoded dot-segments -> /api/ -> 404; no escape body={\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed"
+  },
+  {
+    "name": "WH overlong connectionId",
+    "actual": 422,
+    "expected": "observe",
+    "pass": null,
+    "note": "pattern limit is 384 chars body={\"error\":{\"code\":\"session_binding_required\",\"message\":\"Current account session binding required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fi"
+  },
+  {
+    "name": "WH no connectionId",
+    "actual": 422,
+    "expected": "observe",
+    "pass": null,
+    "note": " body={\"error\":{\"code\":\"session_binding_required\",\"message\":\"Current account session binding required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fi"
+  },
+  {
+    "name": "WH subpath extra",
+    "actual": 422,
+    "expected": "observe",
+    "pass": null,
+    "note": " body={\"error\":{\"code\":\"session_binding_required\",\"message\":\"Current account session binding required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fi"
+  },
+  {
+    "name": "WH GET with valid secret+body",
+    "actual": 405,
+    "expected": 405,
+    "pass": true,
+    "note": "row is POST-only; handler has no method check body={\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accep"
+  },
+  {
+    "name": "WH PUT with valid secret+body",
+    "actual": 405,
+    "expected": 405,
+    "pass": true,
+    "note": "row is POST-only; handler has no method check body={\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accep"
+  },
+  {
+    "name": "WH DELETE with valid secret+body",
+    "actual": 405,
+    "expected": 405,
+    "pass": true,
+    "note": "row is POST-only; handler has no method check body={\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accep"
+  },
+  {
+    "name": "WH PATCH with valid secret+body",
+    "actual": 405,
+    "expected": 405,
+    "pass": true,
+    "note": "row is POST-only; handler has no method check body={\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accep"
+  },
+  {
+    "name": "WH GET no secret",
+    "actual": 405,
+    "expected": 405,
+    "pass": true,
+    "note": "method check precedes secret check body={\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accep"
+  },
+  {
+    "name": "DIS no credential",
+    "actual": 401,
+    "expected": 401,
+    "pass": true,
+    "note": " body={\"error\":{\"code\":\"unauthenticated\",\"message\":\"No credential. Agents can self-mint an identity at POST /api/agent-identities.\"},\"status\":\"action_required\",\"reaso"
+  },
+  {
+    "name": "DIS guest non-owner",
+    "actual": 403,
+    "expected": 403,
+    "pass": true,
+    "note": " body={\"error\":{\"code\":\"squad_owner_required\",\"message\":\"Only the squad owner can disband it\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This creden"
+  },
+  {
+    "name": "DIS helper non-owner",
+    "actual": 403,
+    "expected": 403,
+    "pass": true,
+    "note": " body={\"error\":{\"code\":\"squad_owner_required\",\"message\":\"Only the squad owner can disband it\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This creden"
+  },
+  {
+    "name": "DIS unknown squad",
+    "actual": 404,
+    "expected": 404,
+    "pass": true,
+    "note": " body={\"error\":{\"code\":\"squad_not_found\",\"message\":\"No such squad in this room\"},\"status\":\"action_required\",\"reason\":\"squad_not_found\",\"hint\":\"Unknown error 'squad_no"
+  },
+  {
+    "name": "DIS unknown room",
+    "actual": 403,
+    "expected": "observe",
+    "pass": null,
+    "note": " body={\"error\":{\"code\":\"access_denied\",\"message\":\"This credential does not grant access to that room\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"Thi"
+  },
+  {
+    "name": "DIS bad auth mode",
+    "actual": 200,
+    "expected": 422,
+    "pass": false,
+    "note": " body={\"roomId\":\"commons\",\"squad\":{\"id\":\"sq_5be4ffcd8386\",\"name\":\"fuzzcrew\",\"goal\":\"fuzz\",\"members\":[\"guest\",\"owner\"],\"channel\":\"ac896d5b-fee2-43bf-8d81-474d6358f749\""
+  },
+  {
+    "name": "DIS owner happy",
+    "actual": 200,
+    "expected": 200,
+    "pass": true,
+    "note": " body={\"roomId\":\"commons\",\"squad\":{\"id\":\"sq_5be4ffcd8386\",\"name\":\"fuzzcrew\",\"goal\":\"fuzz\",\"members\":[\"guest\",\"owner\"],\"channel\":\"ac896d5b-fee2-43bf-8d81-474d6358f749\""
+  },
+  {
+    "name": "DIS double disband",
+    "actual": 200,
+    "expected": 200,
+    "pass": true,
+    "note": "idempotent -> changed:false body={\"roomId\":\"commons\",\"squad\":{\"id\":\"sq_5be4ffcd8386\",\"name\":\"fuzzcrew\",\"goal\":\"fuzz\",\"members\":[\"guest\",\"owner\"],\"channel\":\"ac896d5b-fee2-43bf-8d81-474d6358f749\""
+  },
+  {
+    "name": "DIS GET wrong method",
+    "actual": 405,
+    "expected": 405,
+    "pass": true,
+    "note": " body={\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accep"
+  },
+  {
+    "name": "DIS GET Allow header",
+    "actual": "POST",
+    "expected": "POST",
+    "pass": true,
+    "note": "dispatcher should advertise Allow"
+  },
+  {
+    "name": "DIS PUT wrong method",
+    "actual": 405,
+    "expected": 405,
+    "pass": true,
+    "note": " body={\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accep"
+  },
+  {
+    "name": "DIS DELETE wrong method",
+    "actual": 405,
+    "expected": 405,
+    "pass": true,
+    "note": " body={\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accep"
+  },
+  {
+    "name": "DIS PATCH wrong method",
+    "actual": 405,
+    "expected": 405,
+    "pass": true,
+    "note": " body={\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accep"
+  },
+  {
+    "name": "DIS invalid JSON body",
+    "actual": 200,
+    "expected": "observe",
+    "pass": null,
+    "note": "handler never reads body body={\"roomId\":\"commons\",\"squad\":{\"id\":\"sq_5be4ffcd8386\",\"name\":\"fuzzcrew\",\"goal\":\"fuzz\",\"members\":[\"guest\",\"owner\"],\"channel\":\"ac896d5b-fee2-43bf-8d81-474d6358f749\""
+  },
+  {
+    "name": "DIS 1MB body",
+    "actual": 200,
+    "expected": "observe",
+    "pass": null,
+    "note": "handler never reads body body={\"roomId\":\"commons\",\"squad\":{\"id\":\"sq_5be4ffcd8386\",\"name\":\"fuzzcrew\",\"goal\":\"fuzz\",\"members\":[\"guest\",\"owner\"],\"channel\":\"ac896d5b-fee2-43bf-8d81-474d6358f749\""
+  },
+  {
+    "name": "DIS encoded ..",
+    "actual": 404,
+    "expected": 404,
+    "pass": true,
+    "note": " body={\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed"
+  },
+  {
+    "name": "DIS NUL byte",
+    "actual": 404,
+    "expected": 404,
+    "pass": true,
+    "note": " body={\"error\":{\"code\":\"squad_not_found\",\"message\":\"No such squad in this room\"},\"status\":\"action_required\",\"reason\":\"squad_not_found\",\"hint\":\"Unknown error 'squad_no"
+  },
+  {
+    "name": "DIS 1000-char squadId",
+    "actual": 404,
+    "expected": 404,
+    "pass": true,
+    "note": " body={\"error\":{\"code\":\"squad_not_found\",\"message\":\"No such squad in this room\"},\"status\":\"action_required\",\"reason\":\"squad_not_found\",\"hint\":\"Unknown error 'squad_no"
+  },
+  {
+    "name": "DIS trailing slash",
+    "actual": 200,
+    "expected": "observe",
+    "pass": null,
+    "note": "trie filters empty segments body={\"roomId\":\"commons\",\"squad\":{\"id\":\"sq_5be4ffcd8386\",\"name\":\"fuzzcrew\",\"goal\":\"fuzz\",\"members\":[\"guest\",\"owner\"],\"channel\":\"ac896d5b-fee2-43bf-8d81-474d6358f749\""
+  },
+  {
+    "name": "DIS disbanded by non-owner after disband",
+    "actual": 403,
+    "expected": 403,
+    "pass": true,
+    "note": "owner check precedes disbanded check body={\"error\":{\"code\":\"squad_owner_required\",\"message\":\"Only the squad owner can disband it\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This creden"
+  }
+]

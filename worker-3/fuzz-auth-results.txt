@@ -1,0 +1,49 @@
+view: {"authenticated":false,"account":null,"csrf":"048297e0bc80b16e2700c65c69adedd210deb970f1daf608813d5a24b5bfebbc","sessionBinding":"caf127cd1e52ef5d180af9a2f3354db8c6cce42ffb57870c52957b730ebc296e","ses
+signup: 202 {"status":"check_email","mailConfigured":false}
+authed: false
+login: 200 {"authenticated":true,"account":{"id":"email:65c2afac4acef7aaa1b870c2a4dcb30feac3d1b1ed84e4e0b1c3793a48b3dae9","revision":0,"authEpoch":0},"csrf":"36ec95e34a23dc79e5994a10604e3dfc3e51b2e3ce74f2a4cce0c
+login-authed: true
+csrf: 36ec95e34a23 binding: 14b0f7d4a4c4
+200  profile:valid  "{\"id\":\"email:65c2afac4acef7aaa1b870c2a4dcb30feac3d1b1ed84e4e0b1c3793a48b3dae9\",\"displayName\":\"fuzz\",\"avatarUrl\":null,\"onboardingComplete\":false}"
+422  profile:empty-obj  "{\"error\":{\"code\":\"invalid_profile\",\"message\":\"Supply displayName and/or avatarUrl\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hin
+400  profile:array  "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the re
+400  profile:null  "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the re
+422  profile:num-name  "{\"error\":{\"code\":\"invalid_profile\",\"message\":\"displayName must be a string\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"F
+422  profile:obj-name  "{\"error\":{\"code\":\"invalid_profile\",\"message\":\"displayName must be a string\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"F
+422  profile:arr-name  "{\"error\":{\"code\":\"invalid_profile\",\"message\":\"displayName must be a string\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"F
+413  profile:huge-name  "{\"error\":{\"code\":\"too_large\",\"message\":\"Request body is 100018 bytes; the limit is 16384 bytes\"},\"status\":\"action_required\",\"reason\":\"input_re
+ECONNRESET  profile:huge-avatar  ""
+422  profile:proto  "{\"error\":{\"code\":\"invalid_profile\",\"message\":\"Supply displayName and/or avatarUrl\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hin
+422  profile:proto-name  "{\"error\":{\"code\":\"invalid_profile\",\"message\":\"Unknown profile field \\\"__proto__\\\"\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\
+422  profile:constructor  "{\"error\":{\"code\":\"invalid_profile\",\"message\":\"Unknown profile field \\\"constructor\\\"\"},\"status\":\"action_required\",\"reason\":\"input_refused\"
+400  profile:deep-nest  "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the re
+413  profile:deep-obj  "{\"error\":{\"code\":\"too_large\",\"message\":\"Request body is 18001 bytes; the limit is 16384 bytes\"},\"status\":\"action_required\",\"reason\":\"input_ref
+ECONNRESET  profile:unicode  ""
+422  profile:bad-url  "{\"error\":{\"code\":\"invalid_profile\",\"message\":\"avatarUrl must be an https URL\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\
+422  profile:file-url  "{\"error\":{\"code\":\"invalid_profile\",\"message\":\"avatarUrl must be an https URL\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\
+422  profile:extra-fields  "{\"error\":{\"code\":\"invalid_profile\",\"message\":\"Unknown profile field \\\"admin\\\"\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hin
+200  profile:dup-keys  "{\"id\":\"email:65c2afac4acef7aaa1b870c2a4dcb30feac3d1b1ed84e4e0b1c3793a48b3dae9\",\"displayName\":\"b\",\"avatarUrl\":null,\"onboardingComplete\":false}"
+422  profile:bool  "{\"error\":{\"code\":\"invalid_profile\",\"message\":\"displayName must be a string\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"F
+400  profile:trailing-garbage  "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the re
+400  profile:two-json  "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the re
+400  profile:empty-string  "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the re
+400  profile:whitespace  "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the re
+422  updates?limit=abc  "{\"error\":{\"code\":\"invalid_updates_query\",\"message\":\"limit must be an integer from 1 to 100\"},\"status\":\"action_required\",\"reason\":\"input_refuse
+422  updates?limit=-1  "{\"error\":{\"code\":\"invalid_updates_query\",\"message\":\"limit must be an integer from 1 to 100\"},\"status\":\"action_required\",\"reason\":\"input_refuse
+422  updates?limit=0  "{\"error\":{\"code\":\"invalid_updates_query\",\"message\":\"limit must be an integer from 1 to 100\"},\"status\":\"action_required\",\"reason\":\"input_refuse
+422  updates?limit=999999999  "{\"error\":{\"code\":\"invalid_updates_query\",\"message\":\"limit must be an integer from 1 to 100\"},\"status\":\"action_required\",\"reason\":\"input_refuse
+422  updates?limit=1e3  "{\"error\":{\"code\":\"invalid_updates_query\",\"message\":\"limit must be an integer from 1 to 100\"},\"status\":\"action_required\",\"reason\":\"input_refuse
+422  updates?limit=  "{\"error\":{\"code\":\"invalid_updates_query\",\"message\":\"limit must be an integer from 1 to 100\"},\"status\":\"action_required\",\"reason\":\"input_refuse
+422  updates?limit=1&limit=2  "{\"error\":{\"code\":\"invalid_updates_query\",\"message\":\"state, kinds, cursor, and limit are the updates query parameters\"},\"status\":\"action_required\"
+422  updates?state=x&state=y  "{\"error\":{\"code\":\"invalid_updates_query\",\"message\":\"state, kinds, cursor, and limit are the updates query parameters\"},\"status\":\"action_required\"
+422  updates?kinds=a&kinds=b  "{\"error\":{\"code\":\"invalid_updates_query\",\"message\":\"state, kinds, cursor, and limit are the updates query parameters\"},\"status\":\"action_required\"
+422  updates?unknown=1  "{\"error\":{\"code\":\"invalid_updates_query\",\"message\":\"state, kinds, cursor, and limit are the updates query parameters\"},\"status\":\"action_required\"
+422  updates?cursor=cccccccccccccccccccccc  "{\"error\":{\"code\":\"invalid_cursor\",\"message\":\"Invalid updates cursor\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the 
+422  updates?limit=%2e  "{\"error\":{\"code\":\"invalid_updates_query\",\"message\":\"limit must be an integer from 1 to 100\"},\"status\":\"action_required\",\"reason\":\"input_refuse
+200  updates?limit=+5  "{\"untrusted\":true,\"incompleteSources\":{\"mentions\":false,\"peerDms\":false,\"claims\":false,\"invites\":false,\"accessRequests\":false,\"wakes\":false,\"r
+200  updates?limit=0x10  "{\"untrusted\":true,\"incompleteSources\":{\"mentions\":false,\"peerDms\":false,\"claims\":false,\"invites\":false,\"accessRequests\":false,\"wakes\":false,\"r
+422  updates?state=sssssssssssssssssssssss  "{\"error\":{\"code\":\"invalid_updates_query\",\"message\":\"state must be actionable or all\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"h
+422  updates?kinds=kkkkkkkkkkkkkkkkkkkkkkk  "{\"error\":{\"code\":\"invalid_updates_query\",\"message\":\"kinds must name update kinds\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint
+200  updates-HEAD  ""
+200  profile-GET  "{\"id\":\"email:65c2afac4acef7aaa1b870c2a4dcb30feac3d1b1ed84e4e0b1c3793a48b3dae9\",\"displayName\":\"b\",\"avatarUrl\":null,\"onboardingComplete\":false}"
+DONE

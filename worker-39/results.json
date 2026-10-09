@@ -1,0 +1,380 @@
+[
+  {
+    "name": "B control valid -> 201",
+    "got": 201,
+    "want": "201",
+    "pass": true,
+    "body": "{\"roomId\":\"personal-ai_1I3rKPxI2rLQ6T0O\",\"identityId\":\"ai_befOSQwx1YbmQXYl\",\"memberId\":\"ai_befOSQwx1YbmQXYl\",\"permissions\":[],\"duplicate\":false,\"next\":[{\"action\":\"see-who-is-around\",\"method\":\"GET\",\"path\":\"/api/rooms/personal-ai_1I3rKPxI2rLQ6T0O/presence\",\"description\":\"Orient: list the room's members, who is online, and who is holding which work sessions.\"},{\"action\":\"say-hello\",\"method\":\"POST\",\"path\":\"/api/rooms/personal-ai_1I3rKPxI2rLQ6T0O/commands\",\"description\":\"Say hello: { id: <uuid>, type"
+  },
+  {
+    "name": "B duplicate join -> 200",
+    "got": 200,
+    "want": "200",
+    "pass": true,
+    "body": "{\"roomId\":\"personal-ai_1I3rKPxI2rLQ6T0O\",\"identityId\":\"ai_befOSQwx1YbmQXYl\",\"memberId\":\"ai_befOSQwx1YbmQXYl\",\"permissions\":[],\"duplicate\":true,\"next\":[{\"action\":\"see-who-is-around\",\"method\":\"GET\",\"path\":\"/api/rooms/personal-ai_1I3rKPxI2rLQ6T0O/presence\",\"description\":\"Orient: list the room's members, who is online, and who is holding which work sessions.\"},{\"action\":\"say-hello\",\"method\":\"POST\",\"path\":\"/api/rooms/personal-ai_1I3rKPxI2rLQ6T0O/commands\",\"description\":\"Say hello: { id: <uuid>, type:"
+  },
+  {
+    "name": "B linkToken number -> 410",
+    "got": 410,
+    "want": "410",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This invite link has expired, been cancelled, or reached its join limit. Ask for a new invite link.\"},\"status\":\"action_required\",\"reason\":\"link_unavailable\",\"hint\":\"This guest invite is not live. Ask the owner to mint a new one or Add agent.\",\"next\":[{\"path\":\"/api/guest-agent-links\"},{\"command\":\"Ask the owner to mint a guest invite or Add agent\"}],\"operationId\":\"op_QRVUe08a\",\"category\":\"input\"}"
+  },
+  {
+    "name": "B linkToken null -> 410",
+    "got": 410,
+    "want": "410",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This invite link has expired, been cancelled, or reached its join limit. Ask for a new invite link.\"},\"status\":\"action_required\",\"reason\":\"link_unavailable\",\"hint\":\"This guest invite is not live. Ask the owner to mint a new one or Add agent.\",\"next\":[{\"path\":\"/api/guest-agent-links\"},{\"command\":\"Ask the owner to mint a guest invite or Add agent\"}],\"operationId\":\"op_XQDgLoG5\",\"category\":\"input\"}"
+  },
+  {
+    "name": "B linkToken bool -> 410",
+    "got": 410,
+    "want": "410",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This invite link has expired, been cancelled, or reached its join limit. Ask for a new invite link.\"},\"status\":\"action_required\",\"reason\":\"link_unavailable\",\"hint\":\"This guest invite is not live. Ask the owner to mint a new one or Add agent.\",\"next\":[{\"path\":\"/api/guest-agent-links\"},{\"command\":\"Ask the owner to mint a guest invite or Add agent\"}],\"operationId\":\"op_qcX3xezx\",\"category\":\"input\"}"
+  },
+  {
+    "name": "B linkToken array -> 410",
+    "got": 410,
+    "want": "410",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This invite link has expired, been cancelled, or reached its join limit. Ask for a new invite link.\"},\"status\":\"action_required\",\"reason\":\"link_unavailable\",\"hint\":\"This guest invite is not live. Ask the owner to mint a new one or Add agent.\",\"next\":[{\"path\":\"/api/guest-agent-links\"},{\"command\":\"Ask the owner to mint a guest invite or Add agent\"}],\"operationId\":\"op_pC8ffpk2\",\"category\":\"input\"}"
+  },
+  {
+    "name": "B linkToken object -> 410",
+    "got": 410,
+    "want": "410",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This invite link has expired, been cancelled, or reached its join limit. Ask for a new invite link.\"},\"status\":\"action_required\",\"reason\":\"link_unavailable\",\"hint\":\"This guest invite is not live. Ask the owner to mint a new one or Add agent.\",\"next\":[{\"path\":\"/api/guest-agent-links\"},{\"command\":\"Ask the owner to mint a guest invite or Add agent\"}],\"operationId\":\"op_Mbj3RoSO\",\"category\":\"input\"}"
+  },
+  {
+    "name": "B linkToken empty -> 410",
+    "got": 410,
+    "want": "410",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This invite link has expired, been cancelled, or reached its join limit. Ask for a new invite link.\"},\"status\":\"action_required\",\"reason\":\"link_unavailable\",\"hint\":\"This guest invite is not live. Ask the owner to mint a new one or Add agent.\",\"next\":[{\"path\":\"/api/guest-agent-links\"},{\"command\":\"Ask the owner to mint a guest invite or Add agent\"}],\"operationId\":\"op_w1gU-c21\",\"category\":\"input\"}"
+  },
+  {
+    "name": "B linkToken garbage -> 410",
+    "got": 410,
+    "want": "410",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This invite link has expired, been cancelled, or reached its join limit. Ask for a new invite link.\"},\"status\":\"action_required\",\"reason\":\"link_unavailable\",\"hint\":\"This guest invite is not live. Ask the owner to mint a new one or Add agent.\",\"next\":[{\"path\":\"/api/guest-agent-links\"},{\"command\":\"Ask the owner to mint a guest invite or Add agent\"}],\"operationId\":\"op_uvZZaZ21\",\"category\":\"input\"}"
+  },
+  {
+    "name": "B linkToken huge -> 410",
+    "got": 413,
+    "want": "413",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"too_large\",\"message\":\"Request body is 100034 bytes; the limit is 16384 bytes\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"The request body is 100034 bytes; the limit is 16384 bytes. Send a smaller body and resend.\",\"next\":[{\"command\":\"Shrink the body under 16384 bytes — split the payload or drop fields — then resend\"}],\"operationId\":\"op_gsQiKKer\",\"category\":\"input\"}"
+  },
+  {
+    "name": "B linkToken 10k chars -> 410",
+    "got": 410,
+    "want": "410",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This invite link has expired, been cancelled, or reached its join limit. Ask for a new invite link.\"},\"status\":\"action_required\",\"reason\":\"link_unavailable\",\"hint\":\"This guest invite is not live. Ask the owner to mint a new one or Add agent.\",\"next\":[{\"path\":\"/api/guest-agent-links\"},{\"command\":\"Ask the owner to mint a guest invite or Add agent\"}],\"operationId\":\"op_yL3Yjx2i\",\"category\":\"input\"}"
+  },
+  {
+    "name": "B linkToken guest-agent kind -> 422",
+    "got": 422,
+    "want": "422",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"wrong_link_kind\",\"message\":\"Guest invites are not human invite links.\"},\"status\":\"action_required\",\"reason\":\"wrong_link_kind\",\"hint\":\"That is a human invite link. Ask the owner for a guest invite or Add agent.\",\"next\":[{\"path\":\"/api/guest-agent-links\"},{\"command\":\"Ask the owner to mint a guest invite or Add agent\"}],\"operationId\":\"op_rtVga-2h\",\"category\":\"input\"}"
+  },
+  {
+    "name": "B displayName number -> 422",
+    "got": 422,
+    "want": "422",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"invalid_join\",\"message\":\"Choose an agent name of 1–80 characters\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_kPTgPY__\",\"category\":\"input\"}"
+  },
+  {
+    "name": "B displayName null -> 422",
+    "got": 422,
+    "want": "422",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"invalid_join\",\"message\":\"Choose an agent name of 1–80 characters\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_ykDvawlM\",\"category\":\"input\"}"
+  },
+  {
+    "name": "B displayName object -> 422",
+    "got": 422,
+    "want": "422",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"invalid_join\",\"message\":\"Choose an agent name of 1–80 characters\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_dV1YxWmu\",\"category\":\"input\"}"
+  },
+  {
+    "name": "B displayName blank -> 422",
+    "got": 422,
+    "want": "422",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"invalid_join\",\"message\":\"Choose an agent name of 1–80 characters\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_YMRgZ8VK\",\"category\":\"input\"}"
+  },
+  {
+    "name": "B displayName control char -> 422?",
+    "got": 200,
+    "want": "422",
+    "pass": false,
+    "body": "{\"roomId\":\"personal-ai_1I3rKPxI2rLQ6T0O\",\"identityId\":\"ai_befOSQwx1YbmQXYl\",\"memberId\":\"ai_befOSQwx1YbmQXYl\",\"permissions\":[],\"duplicate\":true,\"next\":[{\"action\":\"see-who-is-around\",\"method\":\"GET\",\"path\":\"/api/rooms/personal-ai_1I3rKPxI2rLQ6T0O/presence\",\"description\":\"Orient: list the room's members, who is online, and who is holding which work sessions.\"},{\"action\":\"say-hello\",\"method\":\"POST\",\"path\":\"/api/rooms/personal-ai_1I3rKPxI2rLQ6T0O/commands\",\"description\":\"Say hello: { id: <uuid>, type:"
+  },
+  {
+    "name": "B displayName newline -> 422?",
+    "got": 200,
+    "want": "422",
+    "pass": false,
+    "body": "{\"roomId\":\"personal-ai_1I3rKPxI2rLQ6T0O\",\"identityId\":\"ai_befOSQwx1YbmQXYl\",\"memberId\":\"ai_befOSQwx1YbmQXYl\",\"permissions\":[],\"duplicate\":true,\"next\":[{\"action\":\"see-who-is-around\",\"method\":\"GET\",\"path\":\"/api/rooms/personal-ai_1I3rKPxI2rLQ6T0O/presence\",\"description\":\"Orient: list the room's members, who is online, and who is holding which work sessions.\"},{\"action\":\"say-hello\",\"method\":\"POST\",\"path\":\"/api/rooms/personal-ai_1I3rKPxI2rLQ6T0O/commands\",\"description\":\"Say hello: { id: <uuid>, type:"
+  },
+  {
+    "name": "B displayName 80 chars -> 200",
+    "got": 200,
+    "want": "200",
+    "pass": true,
+    "body": "{\"roomId\":\"personal-ai_1I3rKPxI2rLQ6T0O\",\"identityId\":\"ai_befOSQwx1YbmQXYl\",\"memberId\":\"ai_befOSQwx1YbmQXYl\",\"permissions\":[],\"duplicate\":true,\"next\":[{\"action\":\"see-who-is-around\",\"method\":\"GET\",\"path\":\"/api/rooms/personal-ai_1I3rKPxI2rLQ6T0O/presence\",\"description\":\"Orient: list the room's members, who is online, and who is holding which work sessions.\"},{\"action\":\"say-hello\",\"method\":\"POST\",\"path\":\"/api/rooms/personal-ai_1I3rKPxI2rLQ6T0O/commands\",\"description\":\"Say hello: { id: <uuid>, type:"
+  },
+  {
+    "name": "B displayName 81 chars -> 422",
+    "got": 422,
+    "want": "422",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"invalid_join\",\"message\":\"Choose an agent name of 1–80 characters\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_lUAkg_5p\",\"category\":\"input\"}"
+  },
+  {
+    "name": "B displayName 100k chars -> 413-or-422",
+    "got": 413,
+    "want": "413/422",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"too_large\",\"message\":\"Request body is 100076 bytes; the limit is 16384 bytes\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"The request body is 100076 bytes; the limit is 16384 bytes. Send a smaller body and resend.\",\"next\":[{\"command\":\"Shrink the body under 16384 bytes — split the payload or drop fields — then resend\"}],\"operationId\":\"op_Xx6spnoR\",\"category\":\"input\"}"
+  },
+  {
+    "name": "B missing keys {} -> 422",
+    "got": 422,
+    "want": "422",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"invalid_join\",\"message\":\"Invitation link and agent name required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_0OTvMlhX\",\"category\":\"input\"}"
+  },
+  {
+    "name": "B extra key -> 422",
+    "got": 422,
+    "want": "422",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"invalid_join\",\"message\":\"Invitation link and agent name required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_bEDJbljl\",\"category\":\"input\"}"
+  },
+  {
+    "name": "B no bearer w/ Origin -> 401",
+    "got": 401,
+    "want": "401",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Active agent identity required\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/session\"},{\"command\":\"Keep the saved credential and intended room. Verify the configured origin. For an identity secret, GET /api/agent-rooms with the same Bearer credenti"
+  },
+  {
+    "name": "B no bearer no origin -> 403",
+    "got": 403,
+    "want": "403",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"origin_denied\",\"message\":\"Origin header is required\"},\"status\":\"action_required\",\"reason\":\"origin_denied\",\"hint\":\"Send Origin: https://room.trydemigod.com. This route does not accept a missing or different Origin header.\",\"next\":[{\"command\":\"Retry with Origin: https://room.trydemigod.com. Do not omit the Origin header.\"}],\"operationId\":\"op_KOwLXKLw\",\"category\":\"access\"}"
+  },
+  {
+    "name": "B rak_ room token bearer -> 401",
+    "got": 401,
+    "want": "401",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"room_token_not_identity\",\"message\":\"This is a room-scoped token (rak_), not an identity secret. It works on /mcp (room_check_access, room_needs_me) and on /api/rooms/{roomId}/ routes for its room. This route needs the identity secret, which invite joins do not reveal. Keep using the room token; do not mint a replacement identity.\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creat"
+  },
+  {
+    "name": "B garbage bearer -> 401",
+    "got": 401,
+    "want": "401",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/session\"},{\"command\":\"Keep the saved credential and intended room. Verify the configured origin. For an identity secret, GET /api/agent-rooms with the same Bearer credential"
+  },
+  {
+    "name": "B GET -> 405",
+    "got": 405,
+    "want": "405",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an allowed method (Allow header or route docs); do not retry the same method.\",\"next\":[{\"command\":\"Read the 405 response's Allow header when present — otherwise the route docs — for the accepted methods, then resend with an allowed method; do not retry the same method\"}],\"operationId\":"
+  },
+  {
+    "name": "B OPTIONS -> 405",
+    "got": 405,
+    "want": "405",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an allowed method (Allow header or route docs); do not retry the same method.\",\"next\":[{\"command\":\"Read the 405 response's Allow header when present — otherwise the route docs — for the accepted methods, then resend with an allowed method; do not retry the same method\"}],\"operationId\":"
+  },
+  {
+    "name": "B malformed JSON -> 400",
+    "got": 400,
+    "want": "400",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_rntXu1qi\",\"category\":\"input\"}"
+  },
+  {
+    "name": "B JSON array body -> 400",
+    "got": 400,
+    "want": "400",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_dQNI6WPq\",\"category\":\"input\"}"
+  },
+  {
+    "name": "B empty body -> 400",
+    "got": 400,
+    "want": "400",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_MmYO6lPn\",\"category\":\"input\"}"
+  },
+  {
+    "name": "B oversize body -> 413",
+    "got": 413,
+    "want": "413",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"too_large\",\"message\":\"Request body is 20000 bytes; the limit is 16384 bytes\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"The request body is 20000 bytes; the limit is 16384 bytes. Send a smaller body and resend.\",\"next\":[{\"command\":\"Shrink the body under 16384 bytes — split the payload or drop fields — then resend\"}],\"operationId\":\"op_y54ETl8m\",\"category\":\"input\"}"
+  },
+  {
+    "name": "B wrong content-type -> 415",
+    "got": 415,
+    "want": "415",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op__zYu76HH\",\"category\":\"input\"}"
+  },
+  {
+    "name": "B wrong origin + valid bearer -> 403 (forged origin denied)",
+    "got": 403,
+    "want": "403",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"origin_denied\",\"message\":\"Request origin is not allowed\"},\"status\":\"action_required\",\"reason\":\"origin_denied\",\"hint\":\"Use Origin: https://room.trydemigod.com or omit the Origin header.\",\"next\":[{\"command\":\"Retry with Origin: https://room.trydemigod.com or omit the Origin header\"}],\"operationId\":\"op_l4dTXol7\",\"category\":\"access\"}"
+  },
+  {
+    "name": "B missing origin + valid bearer -> 200/201 (bearer waives origin)",
+    "got": 200,
+    "want": "200/201",
+    "pass": true,
+    "body": "{\"roomId\":\"personal-ai_1I3rKPxI2rLQ6T0O\",\"identityId\":\"ai_befOSQwx1YbmQXYl\",\"memberId\":\"ai_befOSQwx1YbmQXYl\",\"permissions\":[],\"duplicate\":true,\"next\":[{\"action\":\"see-who-is-around\",\"method\":\"GET\",\"path\":\"/api/rooms/personal-ai_1I3rKPxI2rLQ6T0O/presence\",\"description\":\"Orient: list the room's members, who is online, and who is holding which work sessions.\"},{\"action\":\"say-hello\",\"method\":\"POST\",\"path\":\"/api/rooms/personal-ai_1I3rKPxI2rLQ6T0O/commands\",\"description\":\"Say hello: { id: <uuid>, type:"
+  },
+  {
+    "name": "A control valid -> 201",
+    "got": 201,
+    "want": "201",
+    "pass": true,
+    "body": "{\"authMode\":\"room\",\"account\":null,\"member\":{\"id\":\"ai_1I3rKPxI2rLQ6T0O\",\"displayName\":\"fuzzowner39\",\"kind\":\"agent\",\"identityId\":\"ai_1I3rKPxI2rLQ6T0O\",\"accountableHumanId\":\"ai_1I3rKPxI2rLQ6T0O\",\"permissions\":[\"steer\",\"decide\",\"manage_members\",\"manage_claims\",\"accept_work\",\"complete_work\",\"verify\",\"write_external\",\"invite_member\"],\"availability\":\"unknown\",\"active\":true,\"revision\":0},\"roomId\":\"personal-ai_1I3rKPxI2rLQ6T0O\",\"csrf\":\"eaa495024429970c74f311149138fea33c3e9e85bbd6ea8cf88a2a0ef0a97fa3\",\"se"
+  },
+  {
+    "name": "A {} -> 422",
+    "got": 422,
+    "want": "422",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"invalid_login\",\"message\":\"An agent identity ID and room are required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_OUNpM76X\",\"category\":\"input\"}"
+  },
+  {
+    "name": "A extra key -> 422",
+    "got": 422,
+    "want": "422",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"invalid_login\",\"message\":\"An agent identity ID and room are required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_bM_yJWb6\",\"category\":\"input\"}"
+  },
+  {
+    "name": "A identityId number -> 422",
+    "got": 422,
+    "want": "422",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"invalid_login\",\"message\":\"An agent identity ID and room are required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_EFFyJ6Ds\",\"category\":\"input\"}"
+  },
+  {
+    "name": "A roomId null -> 422",
+    "got": 422,
+    "want": "422",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"invalid_login\",\"message\":\"An agent identity ID and room are required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_x9gsDQdd\",\"category\":\"input\"}"
+  },
+  {
+    "name": "A no bearer -> 401",
+    "got": 401,
+    "want": "401",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Agent identity secret required. Agents can self-mint an identity at POST /api/agent-identities.\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/session\"},{\"command\":\"Keep the saved credential and intended room. Verify the configured origin. For an id"
+  },
+  {
+    "name": "A wrong secret -> 401",
+    "got": 401,
+    "want": "401",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/session\"},{\"command\":\"Keep the saved credential and intended room. Verify the configured origin. For an identity secret, GET /api/agent-rooms with the same Bearer credential"
+  },
+  {
+    "name": "A unknown identityId -> 401",
+    "got": 401,
+    "want": "401",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Unknown or revoked agent identity secret\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/session\"},{\"command\":\"Keep the saved credential and intended room. Verify the configured origin. For an identity secret, GET /api/agent-rooms with the same Beare"
+  },
+  {
+    "name": "A bogus roomId -> 403",
+    "got": 403,
+    "want": "403",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"access_denied\",\"message\":\"This agent identity is not linked to that room\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this identity can do, then ask the owner for the missing permission.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/session\"},{\"command\":\"Ask the owner to mint a guest invite or Add agent\"}],\"operationId\":\"op_oB19X6Kg\",\"category\":\"access\"}"
+  },
+  {
+    "name": "A identityId garbage -> 401",
+    "got": 401,
+    "want": "401",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Unknown agent identity\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/session\"},{\"command\":\"Keep the saved credential and intended room. Verify the configured origin. For an identity secret, GET /api/agent-rooms with the same Bearer credential; for "
+  },
+  {
+    "name": "A swapped ids -> 401",
+    "got": 401,
+    "want": "401",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Unknown or revoked agent identity secret\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/session\"},{\"command\":\"Keep the saved credential and intended room. Verify the configured origin. For an identity secret, GET /api/agent-rooms with the same Beare"
+  },
+  {
+    "name": "A no origin -> 403",
+    "got": 403,
+    "want": "403",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"origin_denied\",\"message\":\"Origin header is required\"},\"status\":\"action_required\",\"reason\":\"origin_denied\",\"hint\":\"Send Origin: https://room.trydemigod.com. This route does not accept a missing or different Origin header.\",\"next\":[{\"command\":\"Retry with Origin: https://room.trydemigod.com. Do not omit the Origin header.\"}],\"operationId\":\"op_63m8a3oq\",\"category\":\"access\"}"
+  },
+  {
+    "name": "A malformed JSON -> 400",
+    "got": 400,
+    "want": "400",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_2ulJsBHM\",\"category\":\"input\"}"
+  },
+  {
+    "name": "A JSON array -> 400",
+    "got": 400,
+    "want": "400",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_C7WmzZ86\",\"category\":\"input\"}"
+  },
+  {
+    "name": "A empty body -> 400",
+    "got": 400,
+    "want": "400",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_s2TIoRSj\",\"category\":\"input\"}"
+  },
+  {
+    "name": "A oversize body -> 413",
+    "got": 413,
+    "want": "413",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"too_large\",\"message\":\"Request body is 20000 bytes; the limit is 16384 bytes\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"The request body is 20000 bytes; the limit is 16384 bytes. Send a smaller body and resend.\",\"next\":[{\"command\":\"Shrink the body under 16384 bytes — split the payload or drop fields — then resend\"}],\"operationId\":\"op_t5YnQGGf\",\"category\":\"input\"}"
+  },
+  {
+    "name": "A wrong content-type -> 415",
+    "got": 415,
+    "want": "415",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_zKZ-yi2E\",\"category\":\"input\"}"
+  },
+  {
+    "name": "A GET -> 404 (no 405 twin)",
+    "got": 404,
+    "want": "404",
+    "pass": true,
+    "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids\"},{\"tool\":\"room_check_access\"}],\"operationId\":\"op_FSjpV0Nv\",\"category\":\"not_found\"}"
+  }
+]

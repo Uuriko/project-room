@@ -1,0 +1,13 @@
+# WORKER 10 shard — WAVE-2000 guild-02 (server/http.mjs legacy chain)
+# Enumeration: worker-1/routes_all.txt, 102 inline-conditional route entries,
+# numbered 1..102 in file order (the task's `app.(get|...)` grep yields 0 here;
+# this codebase dispatches on url.pathname in one legacy if-chain + route table).
+# Shard rule: (idx mod 50) == 9  →  idx 9, 59 (same 1-based convention as worker-3).
+#
+# idx 9 : http.mjs:1260 — if (url.pathname === GITHUB_START_PATH)   [GET only; 405 otherwise]
+#         GITHUB_START_PATH = "/api/auth/github/start"  (server/github-oauth.mjs:17)
+#         Locally GitHub OAuth is unconfigured → GET answers 503 (JSON, or HTML
+#         when Accept includes text/html). Non-GET → 405.
+# idx 59: http.mjs:2416 — if (url.pathname === "/api/guest-agent-links" && ["GET","HEAD"].includes(req.method))
+#         → 200 JSON guestAgentLinkContract(). POST is a different row (idx 60,
+#         worker-11's shard); PUT/DELETE/etc fall through to the generic chain.

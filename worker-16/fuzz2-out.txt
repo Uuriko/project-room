@@ -1,0 +1,18 @@
+{"event":"room.cold_start","durationMs":1306,"integrity":"eager","phases":{"schema":{"ms":242,"rowsRead":0},"plugin":{"ms":527,"rowsRead":0},"fence":{"ms":228,"rowsRead":0},"verifies":{"ms":91,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":171,"heapBytes":36304504,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+rooms columns: id,sequence,projection,archived_at
+no JSON state column; row keys: id,sequence,projection,archived_at
+file:///home/hatch/workspace/pr-wave2000-guild-02/server/store.mjs:2598
+          const result = run(...args);
+                         ^
+
+Error: NOT NULL constraint failed: rooms.sequence
+    at stmt.run (file:///home/hatch/workspace/pr-wave2000-guild-02/server/store.mjs:2598:26)
+    at file:///home/hatch/workspace/pr-wave2000-guild-02/worker-16/fuzz2.mjs:80:57
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  code: 'ERR_SQLITE_ERROR',
+  errcode: 1299,
+  errstr: 'constraint failed'
+}
+
+Node.js v24.20.0

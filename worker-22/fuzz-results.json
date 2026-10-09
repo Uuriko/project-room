@@ -1,0 +1,512 @@
+[
+  {
+    "name": "session GET (method guard)",
+    "method": "GET",
+    "path": "/api/session",
+    "status": 401,
+    "ms": 389,
+    "verdict": "UNEXPECTED(want 404)",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"No credential. Agents can self-mint an identity at POST /api/agent-identities.\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"n"
+  },
+  {
+    "name": "session POST no Origin",
+    "method": "POST",
+    "path": "/api/session",
+    "status": 403,
+    "ms": 90,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"origin_denied\",\"message\":\"Origin header is required\"},\"status\":\"action_required\",\"reason\":\"origin_denied\",\"hint\":\"Send Origin: https://room.trydemigod.com. This route does not accept a missing or different Origin header.\",\"next\":[{\"command\":\"Retry with Origin: https://room.trydemig"
+  },
+  {
+    "name": "session POST wrong Origin",
+    "method": "POST",
+    "path": "/api/session",
+    "status": 403,
+    "ms": 58,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"origin_denied\",\"message\":\"Request origin is not allowed\"},\"status\":\"action_required\",\"reason\":\"origin_denied\",\"hint\":\"Use Origin: https://room.trydemigod.com or omit the Origin header.\",\"next\":[{\"command\":\"Retry with Origin: https://room.trydemigod.com or omit the Origin header\"}],"
+  },
+  {
+    "name": "session POST Origin, no content-type",
+    "method": "POST",
+    "path": "/api/session",
+    "status": 415,
+    "ms": 93,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any e"
+  },
+  {
+    "name": "session POST truncated JSON",
+    "method": "POST",
+    "path": "/api/session",
+    "status": 400,
+    "ms": 508,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any "
+  },
+  {
+    "name": "session POST JSON array body",
+    "method": "POST",
+    "path": "/api/session",
+    "status": 400,
+    "ms": 33,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any "
+  },
+  {
+    "name": "session POST {}",
+    "method": "POST",
+    "path": "/api/session",
+    "status": 422,
+    "ms": 43,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"invalid_login\",\"message\":\"An access key is required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep "
+  },
+  {
+    "name": "session POST accessKey non-string",
+    "method": "POST",
+    "path": "/api/session",
+    "status": 422,
+    "ms": 6,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"invalid_login\",\"message\":\"An access key is required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep "
+  },
+  {
+    "name": "session POST accessKey null",
+    "method": "POST",
+    "path": "/api/session",
+    "status": 422,
+    "ms": 121,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"invalid_login\",\"message\":\"An access key is required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep "
+  },
+  {
+    "name": "session POST bogus key",
+    "method": "POST",
+    "path": "/api/session",
+    "status": 401,
+    "ms": 17,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Sign in with an active room key or agent identity secret\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_ch"
+  },
+  {
+    "name": "session POST empty accessKey",
+    "method": "POST",
+    "path": "/api/session",
+    "status": 401,
+    "ms": 111,
+    "verdict": "OBSERVE",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"No credential. Agents can self-mint an identity at POST /api/agent-identities.\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"n"
+  },
+  {
+    "name": "session POST 50k-char accessKey",
+    "method": "POST",
+    "path": "/api/session",
+    "status": 413,
+    "ms": 41,
+    "verdict": "OBSERVE",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"too_large\",\"message\":\"Request body is 50016 bytes; the limit is 16384 bytes\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"The request body is 50016 bytes; the limit is 16384 bytes. Send a smaller body and resend.\",\"next\":[{\"command\":\"Shrink the body under 16384 byte"
+  },
+  {
+    "name": "session POST extra field",
+    "method": "POST",
+    "path": "/api/session",
+    "status": 422,
+    "ms": 55,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"invalid_login\",\"message\":\"An access key is required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep "
+  },
+  {
+    "name": "session POST unicode/control key",
+    "method": "POST",
+    "path": "/api/session",
+    "status": 429,
+    "ms": 131,
+    "verdict": "OBSERVE",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same request unchanged.\",\"next\":[{\"command\":\"Retry after Retry-After\"}],\"operationId\":\"op_fUZV1BlH\",\"categ"
+  },
+  {
+    "name": "session PUT (wrong method)",
+    "method": "PUT",
+    "path": "/api/session",
+    "status": 401,
+    "ms": 106,
+    "verdict": "UNEXPECTED(want 404)",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"No credential. Agents can self-mint an identity at POST /api/agent-identities.\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"n"
+  },
+  {
+    "name": "match GET (method guard)",
+    "method": "GET",
+    "path": "/api/public-work/match",
+    "status": 405,
+    "ms": 25,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an allowed method (Allow header or route docs); do not retry the same method.\",\"next\":"
+  },
+  {
+    "name": "match HEAD",
+    "method": "HEAD",
+    "path": "/api/public-work/match",
+    "status": 405,
+    "ms": 36,
+    "verdict": "PASS",
+    "error": null,
+    "body": ""
+  },
+  {
+    "name": "match POST with query param",
+    "method": "POST",
+    "path": "/api/public-work/match?x=1",
+    "status": 422,
+    "ms": 23,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"invalid_public_work\",\"message\":\"No matching query parameters accepted\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields"
+  },
+  {
+    "name": "match POST {} anonymous",
+    "method": "POST",
+    "path": "/api/public-work/match",
+    "status": 200,
+    "ms": 28,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"recommendations\":[],\"claim\":null,\"inspected\":0,\"hasMore\":false,\"nextCursor\":null,\"supportedRewards\":[\"volunteer\"]}"
+  },
+  {
+    "name": "match POST skills not array",
+    "method": "POST",
+    "path": "/api/public-work/match",
+    "status": 422,
+    "ms": 26,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"invalid_public_work\",\"message\":\"Invalid matching preferences\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and rese"
+  },
+  {
+    "name": "match POST limit 6",
+    "method": "POST",
+    "path": "/api/public-work/match",
+    "status": 422,
+    "ms": 25,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"invalid_public_work\",\"message\":\"Invalid matching preferences\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and rese"
+  },
+  {
+    "name": "match POST limit 0",
+    "method": "POST",
+    "path": "/api/public-work/match",
+    "status": 422,
+    "ms": 24,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"invalid_public_work\",\"message\":\"Invalid matching preferences\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and rese"
+  },
+  {
+    "name": "match POST limit 1.5",
+    "method": "POST",
+    "path": "/api/public-work/match",
+    "status": 422,
+    "ms": 17,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"invalid_public_work\",\"message\":\"Invalid matching preferences\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and rese"
+  },
+  {
+    "name": "match POST limit '3' string",
+    "method": "POST",
+    "path": "/api/public-work/match",
+    "status": 422,
+    "ms": 22,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"invalid_public_work\",\"message\":\"Invalid matching preferences\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and rese"
+  },
+  {
+    "name": "match POST bad reward",
+    "method": "POST",
+    "path": "/api/public-work/match",
+    "status": 422,
+    "ms": 18,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"invalid_public_work\",\"message\":\"Invalid matching preferences\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and rese"
+  },
+  {
+    "name": "match POST reward cash (filters to empty)",
+    "method": "POST",
+    "path": "/api/public-work/match",
+    "status": 200,
+    "ms": 26,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"recommendations\":[],\"claim\":null,\"inspected\":0,\"hasMore\":false,\"nextCursor\":null,\"supportedRewards\":[\"volunteer\"]}"
+  },
+  {
+    "name": "match POST autoClaim string",
+    "method": "POST",
+    "path": "/api/public-work/match",
+    "status": 422,
+    "ms": 23,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"invalid_public_work\",\"message\":\"autoClaim must be explicit boolean\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields an"
+  },
+  {
+    "name": "match POST autoClaim true, no secret",
+    "method": "POST",
+    "path": "/api/public-work/match",
+    "status": 401,
+    "ms": 28,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Unknown or revoked identity\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/ag"
+  },
+  {
+    "name": "match POST autoClaim true, bogus bearer",
+    "method": "POST",
+    "path": "/api/public-work/match",
+    "status": 401,
+    "ms": 18,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/a"
+  },
+  {
+    "name": "match POST invalid JSON",
+    "method": "POST",
+    "path": "/api/public-work/match",
+    "status": 400,
+    "ms": 28,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any "
+  },
+  {
+    "name": "match POST no content-type",
+    "method": "POST",
+    "path": "/api/public-work/match",
+    "status": 415,
+    "ms": 15,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any e"
+  },
+  {
+    "name": "match POST oversized skill string",
+    "method": "POST",
+    "path": "/api/public-work/match",
+    "status": 422,
+    "ms": 23,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"invalid_public_work\",\"message\":\"Invalid matching preferences\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and rese"
+  },
+  {
+    "name": "match POST 21 skills",
+    "method": "POST",
+    "path": "/api/public-work/match",
+    "status": 422,
+    "ms": 30,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"invalid_public_work\",\"message\":\"Invalid matching preferences\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and rese"
+  },
+  {
+    "name": "match POST null skill",
+    "method": "POST",
+    "path": "/api/public-work/match",
+    "status": 422,
+    "ms": 5,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"invalid_public_work\",\"message\":\"Invalid matching preferences\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and rese"
+  },
+  {
+    "name": "match POST whitespace-only skill",
+    "method": "POST",
+    "path": "/api/public-work/match",
+    "status": 422,
+    "ms": 13,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"invalid_public_work\",\"message\":\"Invalid matching preferences\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and rese"
+  },
+  {
+    "name": "match POST control char skill",
+    "method": "POST",
+    "path": "/api/public-work/match",
+    "status": 422,
+    "ms": 15,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"invalid_public_work\",\"message\":\"Invalid matching preferences\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and rese"
+  },
+  {
+    "name": "match POST requestId number",
+    "method": "POST",
+    "path": "/api/public-work/match",
+    "status": 422,
+    "ms": 10,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"invalid_public_work\",\"message\":\"Invalid request ID\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep a"
+  },
+  {
+    "name": "match POST requestId valid string",
+    "method": "POST",
+    "path": "/api/public-work/match",
+    "status": 200,
+    "ms": 7,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"recommendations\":[],\"claim\":null,\"inspected\":0,\"hasMore\":false,\"nextCursor\":null,\"supportedRewards\":[\"volunteer\"]}"
+  },
+  {
+    "name": "match POST leaseHours '6h'",
+    "method": "POST",
+    "path": "/api/public-work/match",
+    "status": 422,
+    "ms": 5,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"invalid_public_work\",\"message\":\"leaseHours must be a JSON number of hours, like 6, not \\\"6h\\\"\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\""
+  },
+  {
+    "name": "match POST leaseHours 0",
+    "method": "POST",
+    "path": "/api/public-work/match",
+    "status": 422,
+    "ms": 6,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"invalid_public_work\",\"message\":\"leaseHours must be greater than zero and at most 24\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct th"
+  },
+  {
+    "name": "match POST leaseHours 25",
+    "method": "POST",
+    "path": "/api/public-work/match",
+    "status": 422,
+    "ms": 5,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"invalid_public_work\",\"message\":\"leaseHours must be greater than zero and at most 24\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct th"
+  },
+  {
+    "name": "match POST leaseHours Infinity->null",
+    "method": "POST",
+    "path": "/api/public-work/match",
+    "status": 422,
+    "ms": 5,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"invalid_public_work\",\"message\":\"leaseHours must be a JSON number of hours, like 6, not null\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Co"
+  },
+  {
+    "name": "match POST unknown field",
+    "method": "POST",
+    "path": "/api/public-work/match",
+    "status": 422,
+    "ms": 18,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"invalid_public_work\",\"message\":\"Unexpected or missing fields\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and rese"
+  },
+  {
+    "name": "match POST after number",
+    "method": "POST",
+    "path": "/api/public-work/match",
+    "status": 422,
+    "ms": 16,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"invalid_public_work\",\"message\":\"Invalid matching cursor\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. K"
+  },
+  {
+    "name": "match POST interests object",
+    "method": "POST",
+    "path": "/api/public-work/match",
+    "status": 422,
+    "ms": 12,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"invalid_public_work\",\"message\":\"Invalid matching preferences\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and rese"
+  },
+  {
+    "name": "match POST nested-array skill",
+    "method": "POST",
+    "path": "/api/public-work/match",
+    "status": 422,
+    "ms": 25,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"invalid_public_work\",\"message\":\"Invalid matching preferences\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and rese"
+  },
+  {
+    "name": "match POST array body",
+    "method": "POST",
+    "path": "/api/public-work/match",
+    "status": 400,
+    "ms": 41,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any "
+  },
+  {
+    "name": "match POST 1MB JSON object body (>16KiB cap)",
+    "method": "POST",
+    "path": "/api/public-work/match",
+    "status": 413,
+    "ms": 41,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"too_large\",\"message\":\"Request body is 1048584 bytes; the limit is 16384 bytes\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"The request body is 1048584 bytes; the limit is 16384 bytes. Send a smaller body and resend.\",\"next\":[{\"command\":\"Shrink the body under 16384 "
+  },
+  {
+    "name": "match POST valid preferences",
+    "method": "POST",
+    "path": "/api/public-work/match",
+    "status": 200,
+    "ms": 32,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"recommendations\":[],\"claim\":null,\"inspected\":0,\"hasMore\":false,\"nextCursor\":null,\"supportedRewards\":[\"volunteer\"]}"
+  },
+  {
+    "name": "match POST bearer non-Bearer prefix",
+    "method": "POST",
+    "path": "/api/public-work/match",
+    "status": 401,
+    "ms": 36,
+    "verdict": "UNEXPECTED(want 200)",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/a"
+  },
+  {
+    "name": "match DELETE",
+    "method": "DELETE",
+    "path": "/api/public-work/match",
+    "status": 405,
+    "ms": 10,
+    "verdict": "PASS",
+    "error": null,
+    "body": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an allowed method (Allow header or route docs); do not retry the same method.\",\"next\":"
+  }
+]

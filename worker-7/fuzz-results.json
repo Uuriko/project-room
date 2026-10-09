@@ -1,0 +1,250 @@
+[
+  {
+    "name": "wellknown GET",
+    "expect": 200,
+    "got": 200,
+    "ms": 146,
+    "ok": true,
+    "body": "{\"issuer\":\"http://127.0.0.1:45971\",\"authorization_endpoint\":\"http://127.0.0.1:45971/oauth/authorize\",\"token_endpoint\":\"http://127.0.0.1:45971/oauth/token\",\"revocation_endpoint\":\"http://127.0.0.1:45971/oauth/revoke\",\"response_types_supported\":[\"code\"],\"grant_types_supported\":[\"authorization_code\",\"re"
+  },
+  {
+    "name": "wellknown GET+query",
+    "expect": 200,
+    "got": 200,
+    "ms": 54,
+    "ok": true,
+    "body": "{\"issuer\":\"http://127.0.0.1:45971\",\"authorization_endpoint\":\"http://127.0.0.1:45971/oauth/authorize\",\"token_endpoint\":\"http://127.0.0.1:45971/oauth/token\",\"revocation_endpoint\":\"http://127.0.0.1:45971/oauth/revoke\",\"response_types_supported\":[\"code\"],\"grant_types_supported\":[\"authorization_code\",\"re"
+  },
+  {
+    "name": "wellknown HEAD",
+    "expect": 404,
+    "got": 404,
+    "ms": 35,
+    "ok": true,
+    "body": ""
+  },
+  {
+    "name": "wellknown POST",
+    "expect": 404,
+    "got": 404,
+    "ms": 56,
+    "ok": true,
+    "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) a"
+  },
+  {
+    "name": "wellknown trailing slash",
+    "expect": 404,
+    "got": 200,
+    "ms": 24,
+    "ok": false,
+    "body": "{\"issuer\":\"http://127.0.0.1:45971\",\"authorization_endpoint\":\"http://127.0.0.1:45971/oauth/authorize\",\"token_endpoint\":\"http://127.0.0.1:45971/oauth/token\",\"revocation_endpoint\":\"http://127.0.0.1:45971/oauth/revoke\",\"response_types_supported\":[\"code\"],\"grant_types_supported\":[\"authorization_code\",\"re"
+  },
+  {
+    "name": "wellknown uppercase",
+    "expect": 404,
+    "got": 404,
+    "ms": 85,
+    "ok": true,
+    "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) a"
+  },
+  {
+    "name": "preview wellformed-nonexistent",
+    "expect": 410,
+    "got": 410,
+    "ms": 36,
+    "ok": true,
+    "body": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This guest invite is not valid.\"},\"status\":\"action_required\",\"reason\":\"link_unavailable\",\"hint\":\"This guest invite is not live. Ask the owner to mint a new one or Add agent.\",\"next\":[{\"path\":\"/api/guest-agent-links\"},{\"command\":\"Ask the owner to mint a "
+  },
+  {
+    "name": "preview garbage-string",
+    "expect": 410,
+    "got": 410,
+    "ms": 14,
+    "ok": true,
+    "body": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This guest invite is not valid.\"},\"status\":\"action_required\",\"reason\":\"link_unavailable\",\"hint\":\"This guest invite is not live. Ask the owner to mint a new one or Add agent.\",\"next\":[{\"path\":\"/api/guest-agent-links\"},{\"command\":\"Ask the owner to mint a "
+  },
+  {
+    "name": "preview human-share-kind",
+    "expect": 422,
+    "got": 422,
+    "ms": 18,
+    "ok": true,
+    "body": "{\"error\":{\"code\":\"wrong_link_kind\",\"message\":\"Human invitation links are not agent credentials.\"},\"status\":\"action_required\",\"reason\":\"wrong_link_kind\",\"hint\":\"That is a human invite link. Ask the owner for a guest invite or Add agent.\",\"next\":[{\"path\":\"/api/guest-agent-links\"},{\"command\":\"Ask the o"
+  },
+  {
+    "name": "preview missing key",
+    "expect": 422,
+    "got": 422,
+    "ms": 16,
+    "ok": true,
+    "body": "{\"error\":{\"code\":\"invalid_link\",\"message\":\"Guest-agent link required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep a"
+  },
+  {
+    "name": "preview extra key",
+    "expect": 422,
+    "got": 422,
+    "ms": 15,
+    "ok": true,
+    "body": "{\"error\":{\"code\":\"invalid_link\",\"message\":\"Guest-agent link required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep a"
+  },
+  {
+    "name": "preview null token",
+    "expect": 410,
+    "got": 410,
+    "ms": 24,
+    "ok": true,
+    "body": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This guest invite is not valid.\"},\"status\":\"action_required\",\"reason\":\"link_unavailable\",\"hint\":\"This guest invite is not live. Ask the owner to mint a new one or Add agent.\",\"next\":[{\"path\":\"/api/guest-agent-links\"},{\"command\":\"Ask the owner to mint a "
+  },
+  {
+    "name": "preview number token",
+    "expect": 410,
+    "got": 410,
+    "ms": 37,
+    "ok": true,
+    "body": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This guest invite is not valid.\"},\"status\":\"action_required\",\"reason\":\"link_unavailable\",\"hint\":\"This guest invite is not live. Ask the owner to mint a new one or Add agent.\",\"next\":[{\"path\":\"/api/guest-agent-links\"},{\"command\":\"Ask the owner to mint a "
+  },
+  {
+    "name": "preview array token",
+    "expect": 410,
+    "got": 410,
+    "ms": 14,
+    "ok": true,
+    "body": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This guest invite is not valid.\"},\"status\":\"action_required\",\"reason\":\"link_unavailable\",\"hint\":\"This guest invite is not live. Ask the owner to mint a new one or Add agent.\",\"next\":[{\"path\":\"/api/guest-agent-links\"},{\"command\":\"Ask the owner to mint a "
+  },
+  {
+    "name": "preview object token",
+    "expect": 410,
+    "got": 410,
+    "ms": 8,
+    "ok": true,
+    "body": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This guest invite is not valid.\"},\"status\":\"action_required\",\"reason\":\"link_unavailable\",\"hint\":\"This guest invite is not live. Ask the owner to mint a new one or Add agent.\",\"next\":[{\"path\":\"/api/guest-agent-links\"},{\"command\":\"Ask the owner to mint a "
+  },
+  {
+    "name": "preview bool token",
+    "expect": 410,
+    "got": 410,
+    "ms": 41,
+    "ok": true,
+    "body": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This guest invite is not valid.\"},\"status\":\"action_required\",\"reason\":\"link_unavailable\",\"hint\":\"This guest invite is not live. Ask the owner to mint a new one or Add agent.\",\"next\":[{\"path\":\"/api/guest-agent-links\"},{\"command\":\"Ask the owner to mint a "
+  },
+  {
+    "name": "preview huge token",
+    "expect": 410,
+    "got": 413,
+    "ms": 61,
+    "ok": false,
+    "body": "{\"error\":{\"code\":\"too_large\",\"message\":\"Request body is 200020 bytes; the limit is 16384 bytes\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"The request body is 200020 bytes; the limit is 16384 bytes. Send a smaller body and resend.\",\"next\":[{\"command\":\"Shrink the body under 16384 by"
+  },
+  {
+    "name": "preview unicode token",
+    "expect": 410,
+    "got": 410,
+    "ms": 46,
+    "ok": true,
+    "body": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This guest invite is not valid.\"},\"status\":\"action_required\",\"reason\":\"link_unavailable\",\"hint\":\"This guest invite is not live. Ask the owner to mint a new one or Add agent.\",\"next\":[{\"path\":\"/api/guest-agent-links\"},{\"command\":\"Ask the owner to mint a "
+  },
+  {
+    "name": "preview no origin",
+    "expect": 403,
+    "got": 403,
+    "ms": 51,
+    "ok": true,
+    "body": "{\"error\":{\"code\":\"origin_denied\",\"message\":\"Origin header is required\"},\"status\":\"action_required\",\"reason\":\"origin_denied\",\"hint\":\"Send Origin: https://room.trydemigod.com. This route does not accept a missing or different Origin header.\",\"next\":[{\"command\":\"Retry with Origin: https://room.trydemig"
+  },
+  {
+    "name": "preview wrong origin",
+    "expect": 403,
+    "got": 403,
+    "ms": 25,
+    "ok": true,
+    "body": "{\"error\":{\"code\":\"origin_denied\",\"message\":\"Request origin is not allowed\"},\"status\":\"action_required\",\"reason\":\"origin_denied\",\"hint\":\"Use Origin: https://room.trydemigod.com or omit the Origin header.\",\"next\":[{\"command\":\"Retry with Origin: https://room.trydemigod.com or omit the Origin header\"}],"
+  },
+  {
+    "name": "preview no content-type",
+    "expect": 415,
+    "got": 415,
+    "ms": 45,
+    "ok": true,
+    "body": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any e"
+  },
+  {
+    "name": "preview text/plain",
+    "expect": 415,
+    "got": 415,
+    "ms": 29,
+    "ok": true,
+    "body": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any e"
+  },
+  {
+    "name": "preview empty body",
+    "expect": 400,
+    "got": 415,
+    "ms": 15,
+    "ok": false,
+    "body": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any e"
+  },
+  {
+    "name": "preview malformed json",
+    "expect": 400,
+    "got": 415,
+    "ms": 17,
+    "ok": false,
+    "body": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any e"
+  },
+  {
+    "name": "preview array body",
+    "expect": 400,
+    "got": 415,
+    "ms": 9,
+    "ok": false,
+    "body": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any e"
+  },
+  {
+    "name": "preview null body",
+    "expect": 400,
+    "got": 415,
+    "ms": 58,
+    "ok": false,
+    "body": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any e"
+  },
+  {
+    "name": "preview string body",
+    "expect": 400,
+    "got": 415,
+    "ms": 58,
+    "ok": false,
+    "body": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any e"
+  },
+  {
+    "name": "preview number body",
+    "expect": 400,
+    "got": 415,
+    "ms": 23,
+    "ok": false,
+    "body": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any e"
+  },
+  {
+    "name": "preview dup keys",
+    "expect": 410,
+    "got": 415,
+    "ms": 32,
+    "ok": false,
+    "body": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any e"
+  },
+  {
+    "name": "preview oversized",
+    "expect": 413,
+    "got": 415,
+    "ms": 21,
+    "ok": false,
+    "body": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any e"
+  },
+  {
+    "name": "preview GET method",
+    "expect": 404,
+    "got": 404,
+    "ms": 32,
+    "ok": true,
+    "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) a"
+  }
+]

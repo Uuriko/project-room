@@ -1,0 +1,4 @@
+Worker 3 shard (index mod 50 == 2, 103 inline-conditional route entries):
+- idx 2: line 1073 — GET/HEAD /api/health (+ aliases: /api/health/, /room/health[/], /room/api/health[/], /api/healthz, /healthz, /room/healthz[/], /room/api/healthz[/])
+- idx 52: line 2356 — /api/account/profile (GET: requires account session; POST: checkOrigin+rate+protectWrite+body)
+- idx 102: line 3181 — GET/HEAD /api/updates (bearer identity secret or account session cookie; query params state,kinds,cursor,limit)

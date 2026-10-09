@@ -1,0 +1,665 @@
+{
+ "results": [
+  {
+   "group": "api-ready",
+   "name": "get ok",
+   "method": "GET",
+   "path": "/api/ready",
+   "expect": 200,
+   "got": 200,
+   "flag": false,
+   "extra": "{\"status\":\"ready\"}"
+  },
+  {
+   "group": "api-ready",
+   "name": "head ok",
+   "method": "HEAD",
+   "path": "/api/ready",
+   "expect": 200,
+   "got": 200,
+   "flag": false,
+   "extra": ""
+  },
+  {
+   "group": "api-ready",
+   "name": "post method",
+   "method": "POST",
+   "path": "/api/ready",
+   "expect": null,
+   "got": 404,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current"
+  },
+  {
+   "group": "api-ready",
+   "name": "junk query",
+   "method": "GET",
+   "path": "/api/ready?...",
+   "expect": 200,
+   "got": 200,
+   "flag": false,
+   "extra": "{\"status\":\"ready\"}"
+  },
+  {
+   "group": "api-ready",
+   "name": "uppercase path",
+   "method": "GET",
+   "path": "/API/READY",
+   "expect": null,
+   "got": 404,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current"
+  },
+  {
+   "group": "api-ready",
+   "name": "options",
+   "method": "OPTIONS",
+   "path": "/api/ready",
+   "expect": null,
+   "got": 404,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current"
+  },
+  {
+   "group": "guest-invites-rotate",
+   "name": "no auth at all",
+   "method": "POST",
+   "path": "/api/guest-invites/rotate",
+   "expect": 401,
+   "got": 401,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Present your guest credential as a Bearer token\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the serv"
+  },
+  {
+   "group": "guest-invites-rotate",
+   "name": "text/plain body",
+   "method": "POST",
+   "path": "/api/guest-invites/rotate",
+   "expect": 415,
+   "got": 401,
+   "flag": true,
+   "extra": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Present your guest credential as a Bearer token\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the serv"
+  },
+  {
+   "group": "guest-invites-rotate",
+   "name": "malformed json",
+   "method": "POST",
+   "path": "/api/guest-invites/rotate",
+   "expect": 400,
+   "got": 401,
+   "flag": true,
+   "extra": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Present your guest credential as a Bearer token\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the serv"
+  },
+  {
+   "group": "guest-invites-rotate",
+   "name": "json array",
+   "method": "POST",
+   "path": "/api/guest-invites/rotate",
+   "expect": 401,
+   "got": 401,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Present your guest credential as a Bearer token\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the serv"
+  },
+  {
+   "group": "guest-invites-rotate",
+   "name": "json null",
+   "method": "POST",
+   "path": "/api/guest-invites/rotate",
+   "expect": 401,
+   "got": 401,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Present your guest credential as a Bearer token\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the serv"
+  },
+  {
+   "group": "guest-invites-rotate",
+   "name": "json string",
+   "method": "POST",
+   "path": "/api/guest-invites/rotate",
+   "expect": 401,
+   "got": 401,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Present your guest credential as a Bearer token\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the serv"
+  },
+  {
+   "group": "guest-invites-rotate",
+   "name": "empty object unauth",
+   "method": "POST",
+   "path": "/api/guest-invites/rotate",
+   "expect": 401,
+   "got": 401,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Present your guest credential as a Bearer token\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the serv"
+  },
+  {
+   "group": "guest-invites-rotate",
+   "name": "empty object bearer",
+   "method": "POST",
+   "path": "/api/guest-invites/rotate",
+   "expect": 422,
+   "got": 422,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"invalid_guest_invite\",\"message\":\"Supply the room\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep"
+  },
+  {
+   "group": "guest-invites-rotate",
+   "name": "roomId number",
+   "method": "POST",
+   "path": "/api/guest-invites/rotate",
+   "expect": 422,
+   "got": 422,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"invalid_guest_invite\",\"message\":\"Supply the room\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep"
+  },
+  {
+   "group": "guest-invites-rotate",
+   "name": "roomId null",
+   "method": "POST",
+   "path": "/api/guest-invites/rotate",
+   "expect": 422,
+   "got": 422,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"invalid_guest_invite\",\"message\":\"Supply the room\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep"
+  },
+  {
+   "group": "guest-invites-rotate",
+   "name": "roomId empty",
+   "method": "POST",
+   "path": "/api/guest-invites/rotate",
+   "expect": 422,
+   "got": 429,
+   "flag": true,
+   "extra": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same r"
+  },
+  {
+   "group": "guest-invites-rotate",
+   "name": "roomId array",
+   "method": "POST",
+   "path": "/api/guest-invites/rotate",
+   "expect": 422,
+   "got": 429,
+   "flag": true,
+   "extra": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same r"
+  },
+  {
+   "group": "guest-invites-rotate",
+   "name": "roomId traversal",
+   "method": "POST",
+   "path": "/api/guest-invites/rotate",
+   "expect": 422,
+   "got": 429,
+   "flag": true,
+   "extra": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same r"
+  },
+  {
+   "group": "guest-invites-rotate",
+   "name": "roomId huge",
+   "method": "POST",
+   "path": "/api/guest-invites/rotate",
+   "expect": 422,
+   "got": 429,
+   "flag": true,
+   "extra": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same r"
+  },
+  {
+   "group": "guest-invites-rotate",
+   "name": "roomId valid unknown room",
+   "method": "POST",
+   "path": "/api/guest-invites/rotate",
+   "expect": null,
+   "got": 429,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same r"
+  },
+  {
+   "group": "guest-invites-rotate",
+   "name": "roomId commons",
+   "method": "POST",
+   "path": "/api/guest-invites/rotate",
+   "expect": null,
+   "got": 429,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same r"
+  },
+  {
+   "group": "guest-invites-rotate",
+   "name": "extra keys",
+   "method": "POST",
+   "path": "/api/guest-invites/rotate",
+   "expect": null,
+   "got": 429,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same r"
+  },
+  {
+   "group": "guest-invites-rotate",
+   "name": "duplicate keys",
+   "method": "POST",
+   "path": "/api/guest-invites/rotate",
+   "expect": null,
+   "got": 429,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same r"
+  },
+  {
+   "group": "guest-invites-rotate",
+   "name": "GET method",
+   "method": "GET",
+   "path": "/api/guest-invites/rotate",
+   "expect": null,
+   "got": 404,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current"
+  },
+  {
+   "group": "guest-invites-rotate",
+   "name": "bearer malformed",
+   "method": "POST",
+   "path": "/api/guest-invites/rotate",
+   "expect": 401,
+   "got": 429,
+   "flag": true,
+   "extra": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same r"
+  },
+  {
+   "group": "guest-invites-rotate",
+   "name": "oversize body",
+   "method": "POST",
+   "path": "/api/guest-invites/rotate",
+   "expect": 413,
+   "got": 429,
+   "flag": true,
+   "extra": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same r"
+  },
+  {
+   "group": "capabilities",
+   "name": "no auth",
+   "method": "GET",
+   "path": "/api/rooms/commons/capabilities",
+   "expect": 401,
+   "got": 401,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"No credential. Agents can self-mint an identity at POST /api/agent-identities.\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your s"
+  },
+  {
+   "group": "capabilities",
+   "name": "owner",
+   "method": "GET",
+   "path": "/api/rooms/commons/capabilities",
+   "expect": 200,
+   "got": 200,
+   "flag": false,
+   "extra": "{\"members\":[],\"next\":[{\"action\":\"advertise-capabilities\",\"description\":\"No members advertise capabilities yet. Members publish theirs with the capabilities.advertised command.\"}]}"
+  },
+  {
+   "group": "capabilities",
+   "name": "unknown room",
+   "method": "GET",
+   "path": "/api/rooms/no-such-room-xyz/capabilities",
+   "expect": 404,
+   "got": 403,
+   "flag": true,
+   "extra": "{\"error\":{\"code\":\"access_denied\",\"message\":\"This credential does not grant access to that room\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_ch"
+  },
+  {
+   "group": "capabilities",
+   "name": "room traversal",
+   "method": "GET",
+   "path": "/api/rooms/../capabilities",
+   "expect": null,
+   "got": 404,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current"
+  },
+  {
+   "group": "capabilities",
+   "name": "search normal",
+   "method": "GET",
+   "path": "/api/rooms/commons/capabilities?search=test",
+   "expect": 200,
+   "got": 200,
+   "flag": false,
+   "extra": "{\"members\":[],\"next\":[{\"action\":\"advertise-capabilities\",\"description\":\"No members advertise capabilities yet. Members publish theirs with the capabilities.advertised command.\"}]}"
+  },
+  {
+   "group": "capabilities",
+   "name": "search special",
+   "method": "GET",
+   "path": "/api/rooms/commons/capabilities?search=%22%3E%3Cscript%3E%F0%9F%98%80",
+   "expect": 200,
+   "got": 200,
+   "flag": false,
+   "extra": "{\"members\":[],\"next\":[{\"action\":\"advertise-capabilities\",\"description\":\"No members advertise capabilities yet. Members publish theirs with the capabilities.advertised command.\"}]}"
+  },
+  {
+   "group": "capabilities",
+   "name": "search nul",
+   "method": "GET",
+   "path": "/api/rooms/commons/capabilities?search=a%00b",
+   "expect": 200,
+   "got": 200,
+   "flag": false,
+   "extra": "{\"members\":[],\"next\":[{\"action\":\"advertise-capabilities\",\"description\":\"No members advertise capabilities yet. Members publish theirs with the capabilities.advertised command.\"}]}"
+  },
+  {
+   "group": "capabilities",
+   "name": "search dup",
+   "method": "GET",
+   "path": "/api/rooms/commons/capabilities?search=a&search=b",
+   "expect": null,
+   "got": 200,
+   "flag": false,
+   "extra": "{\"members\":[],\"next\":[{\"action\":\"advertise-capabilities\",\"description\":\"No members advertise capabilities yet. Members publish theirs with the capabilities.advertised command.\"}]}"
+  },
+  {
+   "group": "capabilities",
+   "name": "search many dup",
+   "method": "GET",
+   "path": "/api/rooms/commons/capabilities?search=a&search=a&search=a&search=a&search=a&sea",
+   "expect": null,
+   "got": 200,
+   "flag": false,
+   "extra": "{\"members\":[],\"next\":[{\"action\":\"advertise-capabilities\",\"description\":\"No members advertise capabilities yet. Members publish theirs with the capabilities.advertised command.\"}]}"
+  },
+  {
+   "group": "capabilities",
+   "name": "unknown param",
+   "method": "GET",
+   "path": "/api/rooms/commons/capabilities?bogus=1",
+   "expect": null,
+   "got": 200,
+   "flag": false,
+   "extra": "{\"members\":[],\"next\":[{\"action\":\"advertise-capabilities\",\"description\":\"No members advertise capabilities yet. Members publish theirs with the capabilities.advertised command.\"}]}"
+  },
+  {
+   "group": "capabilities",
+   "name": "head",
+   "method": "HEAD",
+   "path": "/api/rooms/commons/capabilities",
+   "expect": 200,
+   "got": 405,
+   "flag": true,
+   "extra": ""
+  },
+  {
+   "group": "capabilities",
+   "name": "post",
+   "method": "POST",
+   "path": "/api/rooms/commons/capabilities",
+   "expect": null,
+   "got": 405,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed"
+  },
+  {
+   "group": "capabilities",
+   "name": "search huge",
+   "method": "GET",
+   "path": "/api/rooms/commons/capabilities?search=sssssssssssssssssssssssssssssssssssssssss",
+   "expect": null,
+   "got": 422,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"invalid_search\",\"message\":\"Search is 1 to 80 characters\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resen"
+  },
+  {
+   "group": "agent-pause",
+   "name": "no auth",
+   "method": "GET",
+   "path": "/api/rooms/commons/agent-pause",
+   "expect": 401,
+   "got": 401,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"No credential. Agents can self-mint an identity at POST /api/agent-identities.\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your s"
+  },
+  {
+   "group": "agent-pause",
+   "name": "owner",
+   "method": "GET",
+   "path": "/api/rooms/commons/agent-pause",
+   "expect": 200,
+   "got": 200,
+   "flag": false,
+   "extra": "{\"roomId\":\"commons\",\"viewerId\":\"owner\",\"memberId\":\"owner\",\"evaluatedAt\":1791566937203,\"pause\":null,\"wakes\":[],\"pending\":[],\"running\":[],\"recentOutcomes\":[],\"paused\":[]}"
+  },
+  {
+   "group": "agent-pause",
+   "name": "unknown room",
+   "method": "GET",
+   "path": "/api/rooms/no-such-room-xyz/agent-pause",
+   "expect": 404,
+   "got": 403,
+   "flag": true,
+   "extra": "{\"error\":{\"code\":\"access_denied\",\"message\":\"This credential does not grant access to that room\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_ch"
+  },
+  {
+   "group": "agent-pause",
+   "name": "unknown param",
+   "method": "GET",
+   "path": "/api/rooms/commons/agent-pause?bogus=1",
+   "expect": 422,
+   "got": 422,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"invalid_pause_selection\",\"message\":\"Choose at most one member\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then"
+  },
+  {
+   "group": "agent-pause",
+   "name": "dup memberId",
+   "method": "GET",
+   "path": "/api/rooms/commons/agent-pause?memberId=a&memberId=b",
+   "expect": 422,
+   "got": 422,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"invalid_pause_selection\",\"message\":\"Choose at most one member\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then"
+  },
+  {
+   "group": "agent-pause",
+   "name": "memberId empty",
+   "method": "GET",
+   "path": "/api/rooms/commons/agent-pause?memberId=",
+   "expect": null,
+   "got": 422,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"invalid_member\",\"message\":\"Choose one member\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any"
+  },
+  {
+   "group": "agent-pause",
+   "name": "memberId weird",
+   "method": "GET",
+   "path": "/api/rooms/commons/agent-pause?memberId=..%2Fx",
+   "expect": null,
+   "got": 422,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"invalid_member\",\"message\":\"Choose one member\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any"
+  },
+  {
+   "group": "agent-pause",
+   "name": "memberId huge",
+   "method": "GET",
+   "path": "/api/rooms/commons/agent-pause?memberId=mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+   "expect": null,
+   "got": 422,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"invalid_member\",\"message\":\"Choose one member\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any"
+  },
+  {
+   "group": "agent-pause",
+   "name": "head",
+   "method": "HEAD",
+   "path": "/api/rooms/commons/agent-pause",
+   "expect": 200,
+   "got": 405,
+   "flag": true,
+   "extra": ""
+  },
+  {
+   "group": "commands",
+   "name": "no auth",
+   "method": "POST",
+   "path": "/api/rooms/commons/commands",
+   "expect": 401,
+   "got": 401,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"No credential. Agents can self-mint an identity at POST /api/agent-identities.\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your s"
+  },
+  {
+   "group": "commands",
+   "name": "malformed json",
+   "method": "POST",
+   "path": "/api/rooms/commons/commands",
+   "expect": 400,
+   "got": 400,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep "
+  },
+  {
+   "group": "commands",
+   "name": "text/plain",
+   "method": "POST",
+   "path": "/api/rooms/commons/commands",
+   "expect": 415,
+   "got": 415,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep a"
+  },
+  {
+   "group": "commands",
+   "name": "json null",
+   "method": "POST",
+   "path": "/api/rooms/commons/commands",
+   "expect": 400,
+   "got": 400,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep "
+  },
+  {
+   "group": "commands",
+   "name": "json array",
+   "method": "POST",
+   "path": "/api/rooms/commons/commands",
+   "expect": 400,
+   "got": 400,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep "
+  },
+  {
+   "group": "commands",
+   "name": "json string",
+   "method": "POST",
+   "path": "/api/rooms/commons/commands",
+   "expect": 400,
+   "got": 400,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep "
+  },
+  {
+   "group": "commands",
+   "name": "empty object",
+   "method": "POST",
+   "path": "/api/rooms/commons/commands",
+   "expect": null,
+   "got": 422,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"invalid_command\",\"message\":\"Invalid command id or type\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend"
+  },
+  {
+   "group": "commands",
+   "name": "unknown type",
+   "method": "POST",
+   "path": "/api/rooms/commons/commands",
+   "expect": null,
+   "got": 422,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"invalid_command\",\"message\":\"Unknown command type \\\"nope.nothing\\\". Types include message.posted, message.edited, message.deleted, message.reaction_set, message.pinned, message.unpinn"
+  },
+  {
+   "group": "commands",
+   "name": "type number",
+   "method": "POST",
+   "path": "/api/rooms/commons/commands",
+   "expect": null,
+   "got": 422,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"invalid_command\",\"message\":\"Unknown command type. Types include message.posted, message.edited, message.deleted, message.reaction_set, message.pinned, message.unpinned.\"},\"status\":\"a"
+  },
+  {
+   "group": "commands",
+   "name": "type missing",
+   "method": "POST",
+   "path": "/api/rooms/commons/commands",
+   "expect": null,
+   "got": 422,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"invalid_command\",\"message\":\"Unknown command type. Types include message.posted, message.edited, message.deleted, message.reaction_set, message.pinned, message.unpinned.\"},\"status\":\"a"
+  },
+  {
+   "group": "commands",
+   "name": "dup keys",
+   "method": "POST",
+   "path": "/api/rooms/commons/commands",
+   "expect": null,
+   "got": 422,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"invalid_command\",\"message\":\"message.posted requires data.body (a string), not text\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Use data.body (a string), not text.\","
+  },
+  {
+   "group": "commands",
+   "name": "oversize body",
+   "method": "POST",
+   "path": "/api/rooms/commons/commands",
+   "expect": 413,
+   "got": 413,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"too_large\",\"message\":\"Request body is 2000053 bytes; the limit is 524288 bytes\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"The request body is 2000053 bytes; the li"
+  },
+  {
+   "group": "commands",
+   "name": "deep nesting 5000",
+   "method": "POST",
+   "path": "/api/rooms/commons/commands",
+   "expect": null,
+   "got": 422,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"invalid_command\",\"message\":\"Supply only id, type, data, and optional causationId\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this er"
+  },
+  {
+   "group": "commands",
+   "name": "deep nesting 100000",
+   "method": "POST",
+   "path": "/api/rooms/commons/commands",
+   "expect": null,
+   "got": 413,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"too_large\",\"message\":\"Request body is 600007 bytes; the limit is 524288 bytes\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"The request body is 600007 bytes; the limi"
+  },
+  {
+   "group": "commands",
+   "name": "trailing garbage",
+   "method": "POST",
+   "path": "/api/rooms/commons/commands",
+   "expect": 400,
+   "got": 400,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep "
+  },
+  {
+   "group": "commands",
+   "name": "unknown room",
+   "method": "POST",
+   "path": "/api/rooms/no-such-room-xyz/commands",
+   "expect": 404,
+   "got": 403,
+   "flag": true,
+   "extra": "{\"error\":{\"code\":\"access_denied\",\"message\":\"This credential does not grant access to that room\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_ch"
+  },
+  {
+   "group": "commands",
+   "name": "get method",
+   "method": "GET",
+   "path": "/api/rooms/commons/commands",
+   "expect": null,
+   "got": 405,
+   "flag": false,
+   "extra": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed"
+  }
+ ],
+ "crashedAt": null
+}

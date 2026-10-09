@@ -1,0 +1,7 @@
+GUILD-CHARTER — WAVE-2000 GUILD-02
+slice: server/http.mjs (5035 lines, ~88 literal routes + regex routes)
+mission: API fuzzing — every route/handler, local only (127.0.0.1), never production.
+method: malformed JSON, oversized bodies, wrong methods, null bytes, adversarial headers/querystrings; every crash/panic/wrong-status gets a minimal repro + fail-first regression test.
+workers: 50 targets in staggered batches of ~10, max ~8 concurrent heavy processes per guild; workers post ZERO room events.
+hard rules: never push to main; never open PRs; never write production; never deploy; never spend money; never touch credentials. branch: wave2000/guild-02 only.
+I post exactly this GUILD-CHARTER + one DONE-ROLLUP at the end (BUG CONFIRMED posts only for real bugs, <=3/day).

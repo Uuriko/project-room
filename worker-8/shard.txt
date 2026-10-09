@@ -1,0 +1,9 @@
+# WORKER 8 shard (WAVE-2000 GUILD-02)
+Task spec: route handlers in server/http.mjs via `grep -nE 'app\.(get|post|put|patch|delete|use)\('` sorted, (index mod 50)==7.
+That grep matches 0 lines in this codebase (no Express-style router — routing is a
+pathname if-chain), so the shard was taken from the guild's canonical routes list,
+worker-1/routes_all.txt (102 entries, 1-based), 0-based indices (i%50)==7
+-> 1-based lines 8 and 58:
+  8:  server/http.mjs:1214  if (url.pathname === "/api/auth/email/verify/resend") {   (POST)
+  58: server/http.mjs:2398  if (url.pathname === "/api/account/delete") {             (POST)
+Branch: wave2000/guild-02 @ 747f101f8. TMPDIR=.tmp. No commits, no pushes, no room posts.

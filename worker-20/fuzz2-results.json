@@ -1,0 +1,93 @@
+[
+ {
+  "name": "A16 20k path suffix -> not 5xx, fast",
+  "status": 431,
+  "ms": 76,
+  "pass": true,
+  "sample": ""
+ },
+ {
+  "name": "A17 128-char session id DELETE (no cookie) -> 401 not 5xx",
+  "status": 401,
+  "ms": 32,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"account_session_required\",\"message\":\"Sign in to manage connected sessions\"},\"statu"
+ },
+ {
+  "name": "A18 DELETE 200-char id -> not 5xx",
+  "status": 404,
+  "ms": 59,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\","
+ },
+ {
+  "name": "A19 DELETE id with dots/enc slash -> not 5xx",
+  "status": 401,
+  "ms": 80,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"account_session_required\",\"message\":\"Sign in to manage connected sessions\"},\"statu"
+ },
+ {
+  "name": "B28 dup JSON keys -> not 5xx",
+  "status": 410,
+  "ms": 41,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This guest invite is not valid.\"},\"status\":\"action_re"
+ },
+ {
+  "name": "B29 ga1. prefix only -> 410",
+  "status": 410,
+  "ms": 19,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This guest invite is not valid.\"},\"status\":\"action_re"
+ },
+ {
+  "name": "B30 token w/ invalid chars -> 410",
+  "status": 410,
+  "ms": 30,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This guest invite is not valid.\"},\"status\":\"action_re"
+ },
+ {
+  "name": "B31 charset content-type accepted -> 410 (not 415)",
+  "status": 410,
+  "ms": 17,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This guest invite is not valid.\"},\"status\":\"action_re"
+ },
+ {
+  "name": "B32 nested object body -> 422",
+  "status": 422,
+  "ms": 81,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"invalid_link\",\"message\":\"Guest-agent link required\"},\"status\":\"action_required\",\"r"
+ },
+ {
+  "name": "B33 proto-pollution keys -> 422",
+  "status": 422,
+  "ms": 85,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"invalid_link\",\"message\":\"Guest-agent link required\"},\"status\":\"action_required\",\"r"
+ },
+ {
+  "name": "B34 trailing garbage after JSON -> 400",
+  "status": 400,
+  "ms": 14,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reas"
+ },
+ {
+  "name": "B35 double-encoded token -> 410",
+  "status": 410,
+  "ms": 12,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This guest invite is not valid.\"},\"status\":\"action_re"
+ },
+ {
+  "name": "Z2 health after round2 -> 200",
+  "status": 200,
+  "ms": 3,
+  "pass": true,
+  "sample": "{\"status\":\"ok\",\"mode\":\"single-node-pilot\"}"
+ }
+]

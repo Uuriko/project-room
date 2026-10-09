@@ -1,0 +1,234 @@
+[
+  {
+    "name": "match POST unknown-but-wellformed secret",
+    "status": null,
+    "ms": 46,
+    "verdict": "UNEXPECTED(want 401)",
+    "error": "TypeError: fetch failed",
+    "body": ""
+  },
+  {
+    "name": "match POST lowercase 'bearer' scheme",
+    "status": null,
+    "ms": 5,
+    "verdict": "UNEXPECTED(want 401)",
+    "error": "TypeError: fetch failed",
+    "body": ""
+  },
+  {
+    "name": "match POST rak_ prefix shape unknown",
+    "status": null,
+    "ms": 5,
+    "verdict": "UNEXPECTED(want 401)",
+    "error": "TypeError: fetch failed",
+    "body": ""
+  },
+  {
+    "name": "match POST duplicate query keys",
+    "status": null,
+    "ms": 4,
+    "verdict": "UNEXPECTED(want 422)",
+    "error": "TypeError: fetch failed",
+    "body": ""
+  },
+  {
+    "name": "match POST empty query key",
+    "status": null,
+    "ms": 72,
+    "verdict": "UNEXPECTED(want 422)",
+    "error": "TypeError: fetch failed",
+    "body": ""
+  },
+  {
+    "name": "match POST 20 skills ok",
+    "status": null,
+    "ms": 2,
+    "verdict": "UNEXPECTED(want 200)",
+    "error": "TypeError: fetch failed",
+    "body": ""
+  },
+  {
+    "name": "match POST limit 5 boundary",
+    "status": null,
+    "ms": 6,
+    "verdict": "UNEXPECTED(want 200)",
+    "error": "TypeError: fetch failed",
+    "body": ""
+  },
+  {
+    "name": "match POST leaseHours 24 boundary",
+    "status": null,
+    "ms": 4,
+    "verdict": "UNEXPECTED(want 200)",
+    "error": "TypeError: fetch failed",
+    "body": ""
+  },
+  {
+    "name": "match POST leaseHours 0.5 ok",
+    "status": null,
+    "ms": 8,
+    "verdict": "UNEXPECTED(want 200)",
+    "error": "TypeError: fetch failed",
+    "body": ""
+  },
+  {
+    "name": "match POST leaseHours -1",
+    "status": null,
+    "ms": 20,
+    "verdict": "UNEXPECTED(want 422)",
+    "error": "TypeError: fetch failed",
+    "body": ""
+  },
+  {
+    "name": "match POST requestId '__proto__'",
+    "status": null,
+    "ms": 9,
+    "verdict": "UNEXPECTED(want 422)",
+    "error": "TypeError: fetch failed",
+    "body": ""
+  },
+  {
+    "name": "match POST requestId 129 chars",
+    "status": null,
+    "ms": 2,
+    "verdict": "UNEXPECTED(want 422)",
+    "error": "TypeError: fetch failed",
+    "body": ""
+  },
+  {
+    "name": "match POST requestId starts with '-'",
+    "status": null,
+    "ms": 3,
+    "verdict": "UNEXPECTED(want 422)",
+    "error": "TypeError: fetch failed",
+    "body": ""
+  },
+  {
+    "name": "match POST after valid cursor format",
+    "status": null,
+    "ms": 2,
+    "verdict": "UNEXPECTED(want 200)",
+    "error": "TypeError: fetch failed",
+    "body": ""
+  },
+  {
+    "name": "match POST skill 100-char boundary",
+    "status": null,
+    "ms": 7,
+    "verdict": "UNEXPECTED(want 200)",
+    "error": "TypeError: fetch failed",
+    "body": ""
+  },
+  {
+    "name": "match POST skill with DEL char",
+    "status": null,
+    "ms": 325,
+    "verdict": "UNEXPECTED(want 422)",
+    "error": "TypeError: fetch failed",
+    "body": ""
+  },
+  {
+    "name": "match POST duplicate skills",
+    "status": null,
+    "ms": 6,
+    "verdict": "UNEXPECTED(want 200)",
+    "error": "TypeError: fetch failed",
+    "body": ""
+  },
+  {
+    "name": "match POST empty string skill",
+    "status": null,
+    "ms": 10,
+    "verdict": "UNEXPECTED(want 422)",
+    "error": "TypeError: fetch failed",
+    "body": ""
+  },
+  {
+    "name": "match POST null body fields",
+    "status": null,
+    "ms": 9,
+    "verdict": "UNEXPECTED(want 422)",
+    "error": "TypeError: fetch failed",
+    "body": ""
+  },
+  {
+    "name": "match POST charset content-type",
+    "status": null,
+    "ms": 6,
+    "verdict": "UNEXPECTED(want 200)",
+    "error": "TypeError: fetch failed",
+    "body": ""
+  },
+  {
+    "name": "match POST x-www-form-urlencoded",
+    "status": null,
+    "ms": 4,
+    "verdict": "UNEXPECTED(want 415)",
+    "error": "TypeError: fetch failed",
+    "body": ""
+  },
+  {
+    "name": "session POST charset content-type",
+    "status": null,
+    "ms": 1,
+    "verdict": "UNEXPECTED(want 401)",
+    "error": "TypeError: fetch failed",
+    "body": ""
+  },
+  {
+    "name": "session POST trailing slash path",
+    "status": null,
+    "ms": 2,
+    "verdict": "OBSERVE",
+    "error": "TypeError: fetch failed",
+    "body": ""
+  },
+  {
+    "name": "session POST Origin uppercase host",
+    "status": null,
+    "ms": 1,
+    "verdict": "UNEXPECTED(want 403)",
+    "error": "TypeError: fetch failed",
+    "body": ""
+  },
+  {
+    "name": "session POST Origin trailing slash",
+    "status": null,
+    "ms": 3,
+    "verdict": "UNEXPECTED(want 403)",
+    "error": "TypeError: fetch failed",
+    "body": ""
+  },
+  {
+    "name": "session POST empty body",
+    "status": null,
+    "ms": 1,
+    "verdict": "UNEXPECTED(want 400)",
+    "error": "TypeError: fetch failed",
+    "body": ""
+  },
+  {
+    "name": "session POST body 'null'",
+    "status": null,
+    "ms": 1,
+    "verdict": "UNEXPECTED(want 400)",
+    "error": "TypeError: fetch failed",
+    "body": ""
+  },
+  {
+    "name": "session POST accessKey boolean",
+    "status": null,
+    "ms": 3,
+    "verdict": "UNEXPECTED(want 422)",
+    "error": "TypeError: fetch failed",
+    "body": ""
+  },
+  {
+    "name": "session POST deeply nested accessKey",
+    "status": null,
+    "ms": 2,
+    "verdict": "UNEXPECTED(want 422)",
+    "error": "TypeError: fetch failed",
+    "body": ""
+  }
+]

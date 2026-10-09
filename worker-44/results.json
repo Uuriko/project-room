@@ -1,0 +1,2436 @@
+{
+ "total": 265,
+ "findings": [
+  {
+   "route": "wants-work",
+   "name": "ww:body-dup",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": "FETCH-ERROR",
+   "ms": 21,
+   "head": "fetch failed",
+   "verdict": "transport-anomaly",
+   "stackLeak": false
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:method-TRACE",
+   "method": "TRACE",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": "FETCH-ERROR",
+   "ms": 0,
+   "head": "'TRACE' HTTP method is unsupported.",
+   "verdict": "transport-anomaly",
+   "stackLeak": false
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:method-GET",
+   "method": "GET",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": "FETCH-ERROR",
+   "ms": 4,
+   "head": "Request with GET/HEAD method cannot have body.",
+   "verdict": "transport-anomaly",
+   "stackLeak": false
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:method-TRACE",
+   "method": "TRACE",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": "FETCH-ERROR",
+   "ms": 10,
+   "head": "'TRACE' HTTP method is unsupported.",
+   "verdict": "transport-anomaly",
+   "stackLeak": false
+  }
+ ],
+ "results": [
+  {
+   "route": "wants-work",
+   "name": "ww:valid-empty",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 629,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent0\",\"wantsWork\":{\"labels\":[],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:valid-labels",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 10,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent1\",\"wantsWork\":{\"labels\":[\"docs\",\"go\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:labels-not-array",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 422,
+   "ms": 16,
+   "head": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"labels must be a list of at most 16 entries\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. K"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:labels-17",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 422,
+   "ms": 40,
+   "head": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"labels must be a list of at most 16 entries\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. K"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:label-41chars",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 422,
+   "ms": 85,
+   "head": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"labels entries are 1 to 40 characters of a-z, 0-9, \\\".\\\", \\\"_\\\", \\\":\\\" or \\\"-\\\"\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in "
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:label-badchars",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 422,
+   "ms": 183,
+   "head": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"labels entries are 1 to 40 characters of a-z, 0-9, \\\".\\\", \\\"_\\\", \\\":\\\" or \\\"-\\\"\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in "
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:labels-nonstring",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 422,
+   "ms": 125,
+   "head": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"labels entries are 1 to 40 characters of a-z, 0-9, \\\".\\\", \\\"_\\\", \\\":\\\" or \\\"-\\\"\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in "
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:caps-invalid",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 422,
+   "ms": 68,
+   "head": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"capabilities entries are one of work, land, deploy\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then re"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:caps-notarray",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 422,
+   "ms": 55,
+   "head": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"capabilities must be a list of at most 16 entries\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then res"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:extra-key",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 422,
+   "ms": 91,
+   "head": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"Send { labels?, capabilities? }\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earl"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:body-null",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 400,
+   "ms": 93,
+   "head": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertai"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:body-array",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 400,
+   "ms": 32,
+   "head": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertai"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:body-string",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 400,
+   "ms": 86,
+   "head": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertai"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:body-number",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 400,
+   "ms": 76,
+   "head": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertai"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:body-deepnest",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 422,
+   "ms": 64,
+   "head": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"Send { labels?, capabilities? }\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earl"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:body-proto",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 422,
+   "ms": 25,
+   "head": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"Send { labels?, capabilities? }\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earl"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:body-oversize-20k",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 413,
+   "ms": 13,
+   "head": "{\"error\":{\"code\":\"too_large\",\"message\":\"Request body is 20495 bytes; the limit is 16384 bytes\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"The request body is 20495 bytes; the limit is 16384 bytes. Send "
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:body-oversize-100k",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 413,
+   "ms": 80,
+   "head": "{\"error\":{\"code\":\"too_large\",\"message\":\"Request body is 102408 bytes; the limit is 16384 bytes\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"The request body is 102408 bytes; the limit is 16384 bytes. Sen"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:body-1mb",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 413,
+   "ms": 133,
+   "head": "{\"error\":{\"code\":\"too_large\",\"message\":\"Request body is 1048584 bytes; the limit is 16384 bytes\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"The request body is 1048584 bytes; the limit is 16384 bytes. S"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:body-bom",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 400,
+   "ms": 63,
+   "head": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertai"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:body-dup",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": "FETCH-ERROR",
+   "ms": 21,
+   "head": "fetch failed"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:body-unicode-label",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 422,
+   "ms": 33,
+   "head": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"labels entries are 1 to 40 characters of a-z, 0-9, \\\".\\\", \\\"_\\\", \\\":\\\" or \\\"-\\\"\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in "
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:labels-null",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 26,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent2\",\"wantsWork\":{\"labels\":[],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:caps-null",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 36,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent3\",\"wantsWork\":{\"labels\":[],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:labels-dup",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 50,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent4\",\"wantsWork\":{\"labels\":[\"docs\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:labels-16ok",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 34,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent5\",\"wantsWork\":{\"labels\":[\"l0\",\"l1\",\"l2\",\"l3\",\"l4\",\"l5\",\"l6\",\"l7\",\"l8\",\"l9\",\"l10\",\"l11\",\"l12\",\"l13\",\"l14\",\"l15\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:truncated",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 400,
+   "ms": 38,
+   "head": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertai"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:bare-brace",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 400,
+   "ms": 43,
+   "head": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertai"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:empty",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 400,
+   "ms": 22,
+   "head": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertai"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:whitespace",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 400,
+   "ms": 69,
+   "head": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertai"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:invalid-utf8",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 422,
+   "ms": 37,
+   "head": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"labels entries are 1 to 40 characters of a-z, 0-9, \\\".\\\", \\\"_\\\", \\\":\\\" or \\\"-\\\"\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in "
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:ct-text-plain",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 415,
+   "ms": 34,
+   "head": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:ct-none",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 415,
+   "ms": 14,
+   "head": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:ct-urlencoded",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 415,
+   "ms": 14,
+   "head": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:ct-multipart",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 415,
+   "ms": 10,
+   "head": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:human-put",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 403,
+   "ms": 61,
+   "head": "{\"error\":{\"code\":\"agent_only\",\"message\":\"Only agent members can ask to be woken for new ready work\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to se"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:no-auth",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 401,
+   "ms": 33,
+   "head": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"No credential. Agents can self-mint an identity at POST /api/agent-identities.\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Che"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:bad-bearer",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 401,
+   "ms": 65,
+   "head": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before "
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:get-ok",
+   "method": "GET",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 61,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent15\",\"wantsWork\":null,\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:delete-ok",
+   "method": "DELETE",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 36,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent16\",\"wantsWork\":null,\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:method-POST",
+   "method": "POST",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 405,
+   "ms": 38,
+   "head": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an all"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:method-PATCH",
+   "method": "PATCH",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 405,
+   "ms": 13,
+   "head": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an all"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:method-OPTIONS",
+   "method": "OPTIONS",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 405,
+   "ms": 9,
+   "head": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an all"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:method-TRACE",
+   "method": "TRACE",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": "FETCH-ERROR",
+   "ms": 0,
+   "head": "'TRACE' HTTP method is unsupported."
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:trailing-slash",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work/",
+   "status": 200,
+   "ms": 6,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent1\",\"wantsWork\":{\"labels\":[],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:huge-query",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work?q=yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+   "status": 200,
+   "ms": 9,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent2\",\"wantsWork\":{\"labels\":[],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:query-nullbyte",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work?a=%00",
+   "status": 200,
+   "ms": 14,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent3\",\"wantsWork\":{\"labels\":[],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:big-header",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 431,
+   "ms": 20,
+   "head": ""
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:other-member",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/other/wants-work",
+   "status": 404,
+   "ms": 42,
+   "head": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess id"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-0",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 65,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent6\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-1",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 11,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent7\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-2",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 10,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent8\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-3",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 12,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent9\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-4",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 33,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent10\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-5",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 35,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent11\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-6",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 22,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent12\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-7",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 13,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent13\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-8",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 14,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent14\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-9",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 21,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent15\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-10",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 26,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent16\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-11",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 40,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent17\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-12",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 22,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent18\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-13",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 24,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent19\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-14",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 25,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent0\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-15",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 3,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent1\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-16",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 4,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent2\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-17",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 5,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent3\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-18",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 6,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent4\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-19",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 5,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent5\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-20",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 3,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent6\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-21",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 8,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent7\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-22",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 11,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent8\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-23",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 6,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent9\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-24",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 8,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent10\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-25",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 8,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent11\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-26",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 7,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent12\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-27",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 14,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent13\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-28",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 19,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent14\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-29",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 13,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent15\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-30",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 7,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent16\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-31",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 23,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent17\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-32",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 35,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent18\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-33",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 37,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent19\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-34",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 15,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent0\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-35",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 10,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent1\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-36",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 15,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent2\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-37",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 34,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent3\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-38",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 30,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent4\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-39",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 9,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent5\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-40",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 32,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent6\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-41",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 20,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent7\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-42",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 38,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent8\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-43",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 101,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent9\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-44",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 31,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent10\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-45",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 23,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent11\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-46",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 27,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent12\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-47",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 36,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent13\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-48",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 39,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent14\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-49",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 23,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent15\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-50",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 38,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent16\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-51",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 40,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent17\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-52",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 63,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent18\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-53",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 48,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent19\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-54",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 18,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent0\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-55",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 7,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent1\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-56",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 13,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent2\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-57",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 8,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent3\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-58",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 6,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent4\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-59",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 7,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent5\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-60",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 12,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent6\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-61",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 6,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent7\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-62",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 39,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent8\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-63",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 40,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent9\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-64",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 35,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent10\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-65",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 13,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent11\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-66",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 15,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent12\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-67",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 10,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent13\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-68",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 11,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent14\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "wants-work",
+   "name": "ww:burst-69",
+   "method": "PUT",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": 200,
+   "ms": 23,
+   "head": "{\"roomId\":\"commons\",\"memberId\":\"fuzzworker44agent15\",\"wantsWork\":{\"labels\":[\"b\"],\"capabilities\":[]},\"lastWakeAt\":null,\"foldedSinceWake\":0}"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:valid",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 29,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:missing-summary",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 422,
+   "ms": 8,
+   "head": "{\"error\":{\"code\":\"invalid_signoff\",\"message\":\"Unexpected or missing fields\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:extra-field",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 422,
+   "ms": 5,
+   "head": "{\"error\":{\"code\":\"invalid_signoff\",\"message\":\"Unexpected or missing fields\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:body-null",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 400,
+   "ms": 24,
+   "head": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertai"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:body-array",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 400,
+   "ms": 77,
+   "head": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertai"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:body-string",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 400,
+   "ms": 69,
+   "head": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertai"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:body-number",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 400,
+   "ms": 39,
+   "head": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertai"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:body-deepnest",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 422,
+   "ms": 17,
+   "head": "{\"error\":{\"code\":\"invalid_signoff\",\"message\":\"Unexpected or missing fields\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:body-proto",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 422,
+   "ms": 77,
+   "head": "{\"error\":{\"code\":\"invalid_signoff\",\"message\":\"Unexpected or missing fields\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:sha256-upper",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 422,
+   "ms": 71,
+   "head": "{\"error\":{\"code\":\"invalid_signoff\",\"message\":\"sha256 must be 64 lowercase hex\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earl"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:sha256-63",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 422,
+   "ms": 133,
+   "head": "{\"error\":{\"code\":\"invalid_signoff\",\"message\":\"sha256 must be 64 lowercase hex\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earl"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:sha256-nonhex",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 422,
+   "ms": 107,
+   "head": "{\"error\":{\"code\":\"invalid_signoff\",\"message\":\"sha256 must be 64 lowercase hex\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earl"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:sha256-number",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 422,
+   "ms": 27,
+   "head": "{\"error\":{\"code\":\"invalid_signoff\",\"message\":\"sha256 must be 64 lowercase hex\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earl"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:ref-empty",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 422,
+   "ms": 78,
+   "head": "{\"error\":{\"code\":\"invalid_signoff\",\"message\":\"Invalid deliverableRef or credential-shaped content\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then r"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:ref-2001",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 422,
+   "ms": 65,
+   "head": "{\"error\":{\"code\":\"invalid_signoff\",\"message\":\"Invalid deliverableRef or credential-shaped content\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then r"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:ref-control",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 422,
+   "ms": 35,
+   "head": "{\"error\":{\"code\":\"invalid_signoff\",\"message\":\"Invalid deliverableRef or credential-shaped content\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then r"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:ref-cred-shaped",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 422,
+   "ms": 18,
+   "head": "{\"error\":{\"code\":\"invalid_signoff\",\"message\":\"Invalid deliverableRef or credential-shaped content\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then r"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:candidate-missing",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 422,
+   "ms": 51,
+   "head": "{\"error\":{\"code\":\"invalid_signoff\",\"message\":\"Unexpected or missing fields\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:candidate-mismatch",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 104,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:candidate-invalid",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 422,
+   "ms": 35,
+   "head": "{\"error\":{\"code\":\"invalid_signoff\",\"message\":\"Invalid identifier\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:requestid-invalid",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 422,
+   "ms": 81,
+   "head": "{\"error\":{\"code\":\"invalid_signoff\",\"message\":\"Invalid identifier\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:requestid-129",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 422,
+   "ms": 55,
+   "head": "{\"error\":{\"code\":\"invalid_signoff\",\"message\":\"Invalid identifier\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:body-oversize-20k",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 413,
+   "ms": 14,
+   "head": "{\"error\":{\"code\":\"too_large\",\"message\":\"Request body is 20488 bytes; the limit is 16384 bytes\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"The request body is 20488 bytes; the limit is 16384 bytes. Send "
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:body-oversize-1mb",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 413,
+   "ms": 46,
+   "head": "{\"error\":{\"code\":\"too_large\",\"message\":\"Request body is 1048584 bytes; the limit is 16384 bytes\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"The request body is 1048584 bytes; the limit is 16384 bytes. S"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:body-bom",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 400,
+   "ms": 77,
+   "head": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertai"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:body-dupkeys",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 89,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:truncated",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 400,
+   "ms": 192,
+   "head": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertai"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:bare-brace",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 400,
+   "ms": 7,
+   "head": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertai"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:empty",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 400,
+   "ms": 38,
+   "head": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertai"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:whitespace",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 400,
+   "ms": 53,
+   "head": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertai"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:invalid-utf8",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 422,
+   "ms": 54,
+   "head": "{\"error\":{\"code\":\"invalid_signoff\",\"message\":\"Unexpected or missing fields\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:ct-text-plain",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 415,
+   "ms": 73,
+   "head": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:ct-none",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 415,
+   "ms": 12,
+   "head": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:ct-urlencoded",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 415,
+   "ms": 12,
+   "head": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:no-auth",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 401,
+   "ms": 10,
+   "head": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"No credential. Agents can self-mint an identity at POST /api/agent-identities.\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Che"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:bad-bearer",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 401,
+   "ms": 8,
+   "head": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before "
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:rid-missing",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/nosuchloop/submit",
+   "status": 404,
+   "ms": 34,
+   "head": "{\"error\":{\"code\":\"signoff_not_found\",\"message\":\"Sign-off loop not found\"},\"status\":\"action_required\",\"reason\":\"signoff_not_found\",\"hint\":\"Unknown error 'signoff_not_found'. Re-check access and current work; if it repeats"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:rid-129",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/lllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllll",
+   "status": 422,
+   "ms": 26,
+   "head": "{\"error\":{\"code\":\"invalid_signoff\",\"message\":\"Invalid identifier\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:rid-10k",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/lllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllll",
+   "status": 422,
+   "ms": 38,
+   "head": "{\"error\":{\"code\":\"invalid_signoff\",\"message\":\"Invalid identifier\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:rid-nullbyte",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/a%00b/submit",
+   "status": 422,
+   "ms": 62,
+   "head": "{\"error\":{\"code\":\"invalid_signoff\",\"message\":\"Invalid identifier\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:rid-dotdot",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/../submit",
+   "status": 404,
+   "ms": 56,
+   "head": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess id"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:rid-unicode",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/%F0%9F%AA%94/submit",
+   "status": 422,
+   "ms": 9,
+   "head": "{\"error\":{\"code\":\"invalid_signoff\",\"message\":\"Invalid identifier\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:rid-traversal",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/a%2f..%2fb/submit",
+   "status": 422,
+   "ms": 27,
+   "head": "{\"error\":{\"code\":\"invalid_signoff\",\"message\":\"Invalid identifier\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:room-missing",
+   "method": "POST",
+   "path": "/api/rooms/nosuchroom/signoff-loops/fuzzloop1/submit",
+   "status": 403,
+   "ms": 24,
+   "head": "{\"error\":{\"code\":\"access_denied\",\"message\":\"This credential does not grant access to that room\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see wh"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:room-400",
+   "method": "POST",
+   "path": "/api/rooms/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+   "status": 403,
+   "ms": 37,
+   "head": "{\"error\":{\"code\":\"access_denied\",\"message\":\"This credential does not grant access to that room\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see wh"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:room-empty",
+   "method": "POST",
+   "path": "/api/rooms//signoff-loops/fuzzloop1/submit",
+   "status": 404,
+   "ms": 63,
+   "head": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess id"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:room-nullbyte",
+   "method": "POST",
+   "path": "/api/rooms/a%00b/signoff-loops/fuzzloop1/submit",
+   "status": 403,
+   "ms": 23,
+   "head": "{\"error\":{\"code\":\"access_denied\",\"message\":\"This credential does not grant access to that room\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see wh"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:method-GET",
+   "method": "GET",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": "FETCH-ERROR",
+   "ms": 4,
+   "head": "Request with GET/HEAD method cannot have body."
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:method-PUT",
+   "method": "PUT",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 405,
+   "ms": 83,
+   "head": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an all"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:method-DELETE",
+   "method": "DELETE",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 405,
+   "ms": 37,
+   "head": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an all"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:method-PATCH",
+   "method": "PATCH",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 405,
+   "ms": 78,
+   "head": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an all"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:method-OPTIONS",
+   "method": "OPTIONS",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 405,
+   "ms": 55,
+   "head": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an all"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:method-TRACE",
+   "method": "TRACE",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": "FETCH-ERROR",
+   "ms": 10,
+   "head": "'TRACE' HTTP method is unsupported."
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:trailing-slash",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit/",
+   "status": 422,
+   "ms": 29,
+   "head": "{\"error\":{\"code\":\"invalid_signoff\",\"message\":\"Unexpected or missing fields\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:huge-query",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit?q=yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+   "status": 403,
+   "ms": 153,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:replay-same",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 182,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:replay-same-again",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 12,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:replay-diff",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 16,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:transition-first",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 19,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:transition-second",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 14,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:candidate-as-owner",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop1/submit",
+   "status": 403,
+   "ms": 13,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:candidate-own",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop1/submit",
+   "status": 200,
+   "ms": 12,
+   "head": "{\"schema\":\"buyer-signoff-loop/1\",\"loopId\":\"fuzzloop1\",\"trialTaskId\":\"trial-1\",\"contractId\":null,\"buyerId\":\"fuzzworker44agent0\",\"status\":\"submitted\",\"round\":1,\"maxRounds\":3,\"rounds\":[{\"round\":1,\"submittedAt\":\"2026-10-09T1"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-0",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 15,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-1",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 25,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-2",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 14,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-3",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 14,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-4",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 16,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-5",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 18,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-6",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 14,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-7",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 13,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-8",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 24,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-9",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 15,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-10",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 22,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-11",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 18,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-12",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 17,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-13",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 12,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-14",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 18,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-15",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 30,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-16",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 19,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-17",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 13,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-18",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 19,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-19",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 7,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-20",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 15,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-21",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 55,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-22",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 61,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-23",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 53,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-24",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 115,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-25",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 64,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-26",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 60,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-27",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 40,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-28",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 19,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-29",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 37,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-30",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 26,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-31",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 20,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-32",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 51,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-33",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 52,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-34",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 34,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-35",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 115,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-36",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 69,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-37",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 56,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-38",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 9,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-39",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 13,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-40",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 17,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-41",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 23,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-42",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 12,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-43",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 14,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-44",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 13,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-45",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 16,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-46",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 10,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-47",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 8,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-48",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 15,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-49",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 27,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-50",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 15,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-51",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 10,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-52",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 6,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-53",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 9,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-54",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 7,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-55",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 12,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-56",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 7,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-57",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 25,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-58",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 5,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-59",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 27,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-60",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 68,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-61",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 75,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-62",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 21,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-63",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 11,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-64",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 21,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-65",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 43,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-66",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 48,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-67",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 65,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-68",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 15,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "signoff-submit",
+   "name": "ss:burst-69",
+   "method": "POST",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": 403,
+   "ms": 8,
+   "head": "{\"error\":{\"code\":\"candidate_mismatch\",\"message\":\"Only the bound candidate may deliver\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this i"
+  },
+  {
+   "route": "raw",
+   "name": "raw:bad-request-line :: /api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "method": "RAW",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": "CLOSED",
+   "ms": null,
+   "head": "HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n"
+  },
+  {
+   "route": "raw",
+   "name": "raw:truncated :: /api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "method": "RAW",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": "RESP",
+   "ms": null,
+   "head": "HTTP/1.1 403 Forbidden\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Se"
+  },
+  {
+   "route": "raw",
+   "name": "raw:cl-lie-big :: /api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "method": "RAW",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": "RESP",
+   "ms": null,
+   "head": "HTTP/1.1 403 Forbidden\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Se"
+  },
+  {
+   "route": "raw",
+   "name": "raw:cl-lie-small :: /api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "method": "RAW",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": "CLOSED",
+   "ms": null,
+   "head": "HTTP/1.1 403 Forbidden\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Se"
+  },
+  {
+   "route": "raw",
+   "name": "raw:double-cl :: /api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "method": "RAW",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": "CLOSED",
+   "ms": null,
+   "head": "HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n"
+  },
+  {
+   "route": "raw",
+   "name": "raw:chunked-invalid :: /api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "method": "RAW",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": "CLOSED",
+   "ms": null,
+   "head": "HTTP/1.1 403 Forbidden\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Se"
+  },
+  {
+   "route": "raw",
+   "name": "raw:null-in-path :: /api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "method": "RAW",
+   "path": "/api/rooms/commons/signoff-loops/fuzzloop2/submit",
+   "status": "CLOSED",
+   "ms": null,
+   "head": "HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n"
+  },
+  {
+   "route": "raw",
+   "name": "raw:bad-request-line :: /api/rooms/commons/members/me/wants-work",
+   "method": "RAW",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": "CLOSED",
+   "ms": null,
+   "head": "HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n"
+  },
+  {
+   "route": "raw",
+   "name": "raw:truncated :: /api/rooms/commons/members/me/wants-work",
+   "method": "RAW",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": "RESP",
+   "ms": null,
+   "head": "HTTP/1.1 403 Forbidden\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Se"
+  },
+  {
+   "route": "raw",
+   "name": "raw:cl-lie-big :: /api/rooms/commons/members/me/wants-work",
+   "method": "RAW",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": "RESP",
+   "ms": null,
+   "head": "HTTP/1.1 403 Forbidden\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Se"
+  },
+  {
+   "route": "raw",
+   "name": "raw:cl-lie-small :: /api/rooms/commons/members/me/wants-work",
+   "method": "RAW",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": "CLOSED",
+   "ms": null,
+   "head": "HTTP/1.1 403 Forbidden\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Se"
+  },
+  {
+   "route": "raw",
+   "name": "raw:double-cl :: /api/rooms/commons/members/me/wants-work",
+   "method": "RAW",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": "CLOSED",
+   "ms": null,
+   "head": "HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n"
+  },
+  {
+   "route": "raw",
+   "name": "raw:chunked-invalid :: /api/rooms/commons/members/me/wants-work",
+   "method": "RAW",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": "CLOSED",
+   "ms": null,
+   "head": "HTTP/1.1 403 Forbidden\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Se"
+  },
+  {
+   "route": "raw",
+   "name": "raw:null-in-path :: /api/rooms/commons/members/me/wants-work",
+   "method": "RAW",
+   "path": "/api/rooms/commons/members/me/wants-work",
+   "status": "CLOSED",
+   "ms": null,
+   "head": "HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n"
+  }
+ ]
+}

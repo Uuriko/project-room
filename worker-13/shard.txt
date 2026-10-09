@@ -1,0 +1,6 @@
+WAVE-2000 G02 WORKER 13 shard (route handlers in server/http.mjs, index mod 50 == 12):
+NOTE: server/http.mjs uses raw node:http with `if (url.pathname ...)` dispatch blocks
+(no express-style app.get/post) — shard = dispatch blocks sorted by line, 0-based index % 50 == 12.
+- block #13  (line 1214): if (url.pathname === "/api/auth/email/verify/resend")
+- block #63  (line 2381): if (url.pathname === "/api/account/retention")
+Total dispatch blocks: 111

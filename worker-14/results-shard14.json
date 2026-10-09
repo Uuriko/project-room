@@ -1,0 +1,782 @@
+{
+  "startedAt": "2026-10-09T19:02:36.410Z",
+  "totals": {
+    "cases": 57,
+    "anomalies": 15
+  },
+  "cases": [
+    {
+      "name": "revoke-all method=GET (authed)",
+      "status": 404,
+      "ms": 65,
+      "head": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the reso",
+      "expect": [
+        404,
+        405
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "revoke-all method=PUT (authed)",
+      "status": 404,
+      "ms": 8,
+      "head": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the reso",
+      "expect": [
+        404,
+        405
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "revoke-all method=PATCH (authed)",
+      "status": 404,
+      "ms": 10,
+      "head": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the reso",
+      "expect": [
+        404,
+        405
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "revoke-all method=OPTIONS (authed)",
+      "status": 404,
+      "ms": 7,
+      "head": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the reso",
+      "expect": [
+        404,
+        405
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "revoke-all method=HEAD (authed)",
+      "status": 404,
+      "ms": 33,
+      "head": "",
+      "expect": [
+        404,
+        405
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "revoke-all DELETE (authed) — hits :familyId regex alias",
+      "status": 404,
+      "ms": 401,
+      "head": "{\"error\":{\"code\":\"session_not_found\",\"message\":\"No such active session\"},\"status\":\"action_required\",\"reason\":\"session_not_found\",\"hint\":\"Unknown error 'session_not_found'. Re-check access and current work; if it repeats, report the code and full message to the",
+      "expect": [
+        404
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "revoke-all no cookie",
+      "status": 401,
+      "ms": 5,
+      "head": "{\"error\":{\"code\":\"account_session_required\",\"message\":\"Sign in to manage connected sessions\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identi",
+      "expect": [
+        401
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "revoke-all garbage cookie + binding hdr",
+      "status": 401,
+      "ms": 5,
+      "head": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Account session expired, revoked, or account access ended\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating an",
+      "expect": [
+        401
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "revoke-all garbage cookie, no binding hdr",
+      "status": 422,
+      "ms": 7,
+      "head": "{\"error\":{\"code\":\"session_binding_required\",\"message\":\"Current account session binding required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestI",
+      "expect": [
+        422
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "revoke-all empty cookie value",
+      "status": 401,
+      "ms": 26,
+      "head": "{\"error\":{\"code\":\"account_session_required\",\"message\":\"Sign in to manage connected sessions\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identi",
+      "expect": [
+        401
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "revoke-all malformed binding header",
+      "status": 422,
+      "ms": 12,
+      "head": "{\"error\":{\"code\":\"invalid_session_binding\",\"message\":\"Invalid session response binding\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next",
+      "expect": [
+        422
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "revoke-all no csrf",
+      "status": 403,
+      "ms": 9,
+      "head": "{\"error\":{\"code\":\"csrf_denied\",\"message\":\"Session confirmation required; sign in again\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this identity can do, then ask the owner for ",
+      "expect": [
+        403
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "revoke-all body: {} JSON object",
+      "status": 200,
+      "ms": 12,
+      "head": "{\"revoked\":0}",
+      "expect": [
+        200
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "revoke-all body: empty body no content-type",
+      "status": 200,
+      "ms": 4,
+      "head": "{\"revoked\":0}",
+      "expect": [
+        200
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "revoke-all body: JSON array",
+      "status": 200,
+      "ms": 8,
+      "head": "{\"revoked\":0}",
+      "expect": [
+        200
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "revoke-all body: JSON scalar number",
+      "status": 200,
+      "ms": 6,
+      "head": "{\"revoked\":0}",
+      "expect": [
+        200
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "revoke-all body: JSON string",
+      "status": 200,
+      "ms": 9,
+      "head": "{\"revoked\":0}",
+      "expect": [
+        200
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "revoke-all body: JSON null",
+      "status": 200,
+      "ms": 14,
+      "head": "{\"revoked\":0}",
+      "expect": [
+        200
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "revoke-all body: malformed JSON",
+      "status": 200,
+      "ms": 15,
+      "head": "{\"revoked\":0}",
+      "expect": [
+        200
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "revoke-all body: empty body with JSON ct",
+      "status": 200,
+      "ms": 6,
+      "head": "{\"revoked\":0}",
+      "expect": [
+        200
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "revoke-all body: null bytes",
+      "status": 200,
+      "ms": 9,
+      "head": "{\"revoked\":0}",
+      "expect": [
+        200
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "revoke-all body: deep nesting",
+      "status": 200,
+      "ms": 44,
+      "head": "{\"revoked\":0}",
+      "expect": [
+        200
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "revoke-all body: text/plain body",
+      "status": 200,
+      "ms": 8,
+      "head": "{\"revoked\":0}",
+      "expect": [
+        200
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "revoke-all body: huge body 200KB",
+      "status": 200,
+      "ms": 35,
+      "head": "{\"revoked\":0}",
+      "expect": [
+        200
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "revoke-all 16KB cookie",
+      "status": 431,
+      "ms": 29,
+      "head": "",
+      "expect": [
+        401,
+        422,
+        431
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "revoke-all oversize bearer",
+      "status": 431,
+      "ms": 18,
+      "head": "",
+      "expect": [
+        200,
+        400,
+        401
+      ],
+      "serverAlive": true,
+      "anomaly": true
+    },
+    {
+      "name": "sessions list (authed, pre-revoke)",
+      "status": 422,
+      "ms": 11,
+      "head": "{\"error\":{\"code\":\"session_binding_required\",\"message\":\"Current account session binding required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestI",
+      "expect": [
+        200
+      ],
+      "serverAlive": true,
+      "anomaly": true
+    },
+    {
+      "name": "revoke-all authed valid",
+      "status": 422,
+      "ms": 21,
+      "head": "{\"error\":{\"code\":\"session_binding_required\",\"message\":\"Current account session binding required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestI",
+      "expect": [
+        200
+      ],
+      "serverAlive": true,
+      "anomaly": true
+    },
+    {
+      "name": "revoke-all authed second call",
+      "status": 422,
+      "ms": 9,
+      "head": "{\"error\":{\"code\":\"session_binding_required\",\"message\":\"Current account session binding required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestI",
+      "expect": [
+        200
+      ],
+      "serverAlive": true,
+      "anomaly": true
+    },
+    {
+      "name": "rotate method=GET",
+      "status": 404,
+      "ms": 10,
+      "head": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the reso",
+      "expect": [
+        404,
+        405
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "rotate method=PUT",
+      "status": 404,
+      "ms": 11,
+      "head": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the reso",
+      "expect": [
+        404,
+        405
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "rotate method=DELETE",
+      "status": 404,
+      "ms": 7,
+      "head": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the reso",
+      "expect": [
+        404,
+        405
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "rotate method=PATCH",
+      "status": 404,
+      "ms": 10,
+      "head": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the reso",
+      "expect": [
+        404,
+        405
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "rotate method=OPTIONS",
+      "status": 404,
+      "ms": 7,
+      "head": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the reso",
+      "expect": [
+        404,
+        405
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "rotate method=HEAD",
+      "status": 404,
+      "ms": 8,
+      "head": "",
+      "expect": [
+        404,
+        405
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "rotate no bearer",
+      "status": 401,
+      "ms": 15,
+      "head": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Present your guest credential as a Bearer token\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another iden",
+      "expect": [
+        401
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "rotate malformed bearer shape",
+      "status": 401,
+      "ms": 24,
+      "head": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"to",
+      "expect": [
+        401
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "rotate shape-valid fake guest token",
+      "status": 401,
+      "ms": 25,
+      "head": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Session or key expired or revoked\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":",
+      "expect": [
+        410
+      ],
+      "serverAlive": true,
+      "anomaly": true
+    },
+    {
+      "name": "rotate owner key as bearer",
+      "status": 410,
+      "ms": 22,
+      "head": "{\"error\":{\"code\":\"invite_unavailable\",\"message\":\"This guest credential is not valid.\"},\"status\":\"action_required\",\"reason\":\"invite_unavailable\",\"hint\":\"Unknown error 'invite_unavailable'. Re-check access and current work; if it repeats, report the code and ful",
+      "expect": [
+        403,
+        410
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "rotate missing roomId",
+      "status": 422,
+      "ms": 8,
+      "head": "{\"error\":{\"code\":\"invalid_guest_invite\",\"message\":\"Supply the room\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Corre",
+      "expect": [
+        422
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "rotate roomId number",
+      "status": 422,
+      "ms": 7,
+      "head": "{\"error\":{\"code\":\"invalid_guest_invite\",\"message\":\"Supply the room\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Corre",
+      "expect": [
+        422
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "rotate roomId null",
+      "status": 422,
+      "ms": 8,
+      "head": "{\"error\":{\"code\":\"invalid_guest_invite\",\"message\":\"Supply the room\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Corre",
+      "expect": [
+        422
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "rotate roomId empty",
+      "status": 422,
+      "ms": 16,
+      "head": "{\"error\":{\"code\":\"invalid_guest_invite\",\"message\":\"Supply the room\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Corre",
+      "expect": [
+        422
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "rotate roomId array",
+      "status": 422,
+      "ms": 11,
+      "head": "{\"error\":{\"code\":\"invalid_guest_invite\",\"message\":\"Supply the room\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Corre",
+      "expect": [
+        422
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "rotate roomId bad chars",
+      "status": 422,
+      "ms": 9,
+      "head": "{\"error\":{\"code\":\"invalid_guest_invite\",\"message\":\"Supply the room\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Corre",
+      "expect": [
+        422
+      ],
+      "serverAlive": true
+    },
+    {
+      "name": "rotate roomId 384 chars",
+      "status": 429,
+      "ms": 11,
+      "head": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same request unchanged.\",\"next\":[{\"command\":\"Retry after Retry-Aft",
+      "expect": [
+        404,
+        410,
+        422
+      ],
+      "serverAlive": true,
+      "anomaly": true
+    },
+    {
+      "name": "rotate roomId unknown",
+      "status": 429,
+      "ms": 5,
+      "head": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same request unchanged.\",\"next\":[{\"command\":\"Retry after Retry-Aft",
+      "expect": [
+        404,
+        410,
+        422
+      ],
+      "serverAlive": true,
+      "anomaly": true
+    },
+    {
+      "name": "rotate non-JSON body",
+      "status": 429,
+      "ms": 10,
+      "head": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same request unchanged.\",\"next\":[{\"command\":\"Retry after Retry-Aft",
+      "expect": [
+        400
+      ],
+      "serverAlive": true,
+      "anomaly": true
+    },
+    {
+      "name": "rotate text/plain",
+      "status": 429,
+      "ms": 8,
+      "head": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same request unchanged.\",\"next\":[{\"command\":\"Retry after Retry-Aft",
+      "expect": [
+        415
+      ],
+      "serverAlive": true,
+      "anomaly": true
+    },
+    {
+      "name": "rotate huge body",
+      "status": 429,
+      "ms": 13,
+      "head": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same request unchanged.\",\"next\":[{\"command\":\"Retry after Retry-Aft",
+      "expect": [
+        413
+      ],
+      "serverAlive": true,
+      "anomaly": true
+    },
+    {
+      "name": "rotate null bytes",
+      "status": 429,
+      "ms": 8,
+      "head": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same request unchanged.\",\"next\":[{\"command\":\"Retry after Retry-Aft",
+      "expect": [
+        400
+      ],
+      "serverAlive": true,
+      "anomaly": true
+    },
+    {
+      "name": "rotate JSON array body",
+      "status": 429,
+      "ms": 10,
+      "head": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same request unchanged.\",\"next\":[{\"command\":\"Retry after Retry-Aft",
+      "expect": [
+        422
+      ],
+      "serverAlive": true,
+      "anomaly": true
+    },
+    {
+      "name": "rotate no content-type",
+      "status": 429,
+      "ms": 5,
+      "head": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same request unchanged.\",\"next\":[{\"command\":\"Retry after Retry-Aft",
+      "expect": [
+        415
+      ],
+      "serverAlive": true,
+      "anomaly": true
+    },
+    {
+      "name": "rotate happy path",
+      "status": 429,
+      "ms": 8,
+      "head": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same request unchanged.\",\"next\":[{\"command\":\"Retry after Retry-Aft",
+      "expect": [
+        200
+      ],
+      "serverAlive": true,
+      "anomaly": true
+    },
+    {
+      "name": "rotate new token shape",
+      "ga1Prefix": false,
+      "differs": false
+    },
+    {
+      "name": "rotate with revoked old token",
+      "status": 429,
+      "ms": 8,
+      "head": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same request unchanged.\",\"next\":[{\"command\":\"Retry after Retry-Aft",
+      "expect": [
+        410
+      ],
+      "serverAlive": true,
+      "anomaly": true
+    },
+    {
+      "name": "final health check",
+      "status": 200,
+      "ms": 5,
+      "head": "{\"status\":\"ok\",\"mode\":\"single-node-pilot\"}",
+      "expect": [
+        200
+      ],
+      "serverAlive": true
+    }
+  ],
+  "anomalies": [
+    {
+      "name": "revoke-all oversize bearer",
+      "status": 431,
+      "ms": 18,
+      "head": "",
+      "expect": [
+        200,
+        400,
+        401
+      ],
+      "serverAlive": true,
+      "anomaly": true
+    },
+    {
+      "name": "sessions list (authed, pre-revoke)",
+      "status": 422,
+      "ms": 11,
+      "head": "{\"error\":{\"code\":\"session_binding_required\",\"message\":\"Current account session binding required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestI",
+      "expect": [
+        200
+      ],
+      "serverAlive": true,
+      "anomaly": true
+    },
+    {
+      "name": "revoke-all authed valid",
+      "status": 422,
+      "ms": 21,
+      "head": "{\"error\":{\"code\":\"session_binding_required\",\"message\":\"Current account session binding required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestI",
+      "expect": [
+        200
+      ],
+      "serverAlive": true,
+      "anomaly": true
+    },
+    {
+      "name": "revoke-all authed second call",
+      "status": 422,
+      "ms": 9,
+      "head": "{\"error\":{\"code\":\"session_binding_required\",\"message\":\"Current account session binding required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestI",
+      "expect": [
+        200
+      ],
+      "serverAlive": true,
+      "anomaly": true
+    },
+    {
+      "name": "rotate shape-valid fake guest token",
+      "status": 401,
+      "ms": 25,
+      "head": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Session or key expired or revoked\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":",
+      "expect": [
+        410
+      ],
+      "serverAlive": true,
+      "anomaly": true
+    },
+    {
+      "name": "rotate roomId 384 chars",
+      "status": 429,
+      "ms": 11,
+      "head": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same request unchanged.\",\"next\":[{\"command\":\"Retry after Retry-Aft",
+      "expect": [
+        404,
+        410,
+        422
+      ],
+      "serverAlive": true,
+      "anomaly": true
+    },
+    {
+      "name": "rotate roomId unknown",
+      "status": 429,
+      "ms": 5,
+      "head": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same request unchanged.\",\"next\":[{\"command\":\"Retry after Retry-Aft",
+      "expect": [
+        404,
+        410,
+        422
+      ],
+      "serverAlive": true,
+      "anomaly": true
+    },
+    {
+      "name": "rotate non-JSON body",
+      "status": 429,
+      "ms": 10,
+      "head": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same request unchanged.\",\"next\":[{\"command\":\"Retry after Retry-Aft",
+      "expect": [
+        400
+      ],
+      "serverAlive": true,
+      "anomaly": true
+    },
+    {
+      "name": "rotate text/plain",
+      "status": 429,
+      "ms": 8,
+      "head": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same request unchanged.\",\"next\":[{\"command\":\"Retry after Retry-Aft",
+      "expect": [
+        415
+      ],
+      "serverAlive": true,
+      "anomaly": true
+    },
+    {
+      "name": "rotate huge body",
+      "status": 429,
+      "ms": 13,
+      "head": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same request unchanged.\",\"next\":[{\"command\":\"Retry after Retry-Aft",
+      "expect": [
+        413
+      ],
+      "serverAlive": true,
+      "anomaly": true
+    },
+    {
+      "name": "rotate null bytes",
+      "status": 429,
+      "ms": 8,
+      "head": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same request unchanged.\",\"next\":[{\"command\":\"Retry after Retry-Aft",
+      "expect": [
+        400
+      ],
+      "serverAlive": true,
+      "anomaly": true
+    },
+    {
+      "name": "rotate JSON array body",
+      "status": 429,
+      "ms": 10,
+      "head": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same request unchanged.\",\"next\":[{\"command\":\"Retry after Retry-Aft",
+      "expect": [
+        422
+      ],
+      "serverAlive": true,
+      "anomaly": true
+    },
+    {
+      "name": "rotate no content-type",
+      "status": 429,
+      "ms": 5,
+      "head": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same request unchanged.\",\"next\":[{\"command\":\"Retry after Retry-Aft",
+      "expect": [
+        415
+      ],
+      "serverAlive": true,
+      "anomaly": true
+    },
+    {
+      "name": "rotate happy path",
+      "status": 429,
+      "ms": 8,
+      "head": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same request unchanged.\",\"next\":[{\"command\":\"Retry after Retry-Aft",
+      "expect": [
+        200
+      ],
+      "serverAlive": true,
+      "anomaly": true
+    },
+    {
+      "name": "rotate with revoked old token",
+      "status": 429,
+      "ms": 8,
+      "head": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same request unchanged.\",\"next\":[{\"command\":\"Retry after Retry-Aft",
+      "expect": [
+        410
+      ],
+      "serverAlive": true,
+      "anomaly": true
+    }
+  ]
+}

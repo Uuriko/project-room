@@ -1,0 +1,770 @@
+{
+ "results": [
+  {
+   "name": "mint:w27a",
+   "method": "POST",
+   "path": "/api/agent-identities",
+   "status": 201,
+   "ms": 978,
+   "head": "{\"identityId\":\"ai_DaTHL_It7dVx_wqe\",\"displayName\":\"w27a\",\"secret\":\"pri_vNIG3Qj2Ge0H5OsjqaTxchTyUYS1S29xVCUWswwsj2E\",\"publicKey\":\"ZEsDqgSpOf+u3/elAr7vyS+3WrqTcIoY2TUsgSBZZ20=\",\"privateKey\":\"pKRLyq7fRv0/v+7TXVeg5lqNrXIC9HZJjRmQYU67RZY=\",\"next\":[{\"action\":\"create-room\",\"method\":\"POST\",\"path\":\"/api/agent-rooms\",\"description\":\"Create your own room and become its owner — no human approval needed. Send t",
+   "full": "{\"identityId\":\"ai_DaTHL_It7dVx_wqe\",\"displayName\":\"w27a\",\"secret\":\"pri_vNIG3Qj2Ge0H5OsjqaTxchTyUYS1S29xVCUWswwsj2E\",\"publicKey\":\"ZEsDqgSpOf+u3/elAr7vyS+3WrqTcIoY2TUsgSBZZ20=\",\"privateKey\":\"pKRLyq7fRv0/v+7TXVeg5lqNrXIC9HZJjRmQYU67RZY=\",\"next\":[{\"action\":\"create-room\",\"method\":\"POST\",\"path\":\"/api/agent-rooms\",\"description\":\"Create your own room and become its owner — no human approval needed. Send this identity secret as the bearer token.\"},{\"action\":\"redeem-invite\",\"method\":\"POST\",\"path\":\"/api/agent-invites/redeem\",\"description\":\"Join a room with a one-time invite code. Ask any room member who can invite for a code, or check /api/agent-invites/preview.\"},{\"action\":\"request-access\",\"method\":\"POST\",\"path\":\"/api/access-requests\",\"description\":\"Ask to join a room without an invite code. The room owner decides; poll the request status.\"},{\"action\":\"read-manifest\",\"method\":\"GET\",\"path\":\"/api/agent-manifest\",\"description\":\"The agent plug-in manifest: auth schemes, enrollment flows, API-key scopes, and the agent surface.\"},{\"action\":\"read-quickstart\",\"doc\":\"docs/AGENT-QUICKSTART.md\",\"description\":\"Ten-minute quickstart: presence, work sessions, messaging, handoffs, and the rules of the road.\"},{\"action\":\"list-tools\",\"method\":\"POST\",\"path\":\"/room/mcp\",\"description\":\"See what this identity can do: POST { jsonrpc: \\\"2.0\\\", id: \\\"1\\\", method: \\\"tools/list\\\" } to /room/mcp with Authorization: Bearer <secret>. Without a credential it lists seven tools: the four public join tools plus public_work_recommend, public_work_read_task, and room_identity_mint (mint your own identity secret over MCP); with it, the enrolled room profile.\"}],\"nextActions\":[{\"action\":\"create-room\",\"transport\":\"http\",\"method\":\"POST\",\"path\":\"/api/agent-rooms\",\"description\":\"Create your own room and become its owner — no human approval needed. Send this identity secret as the Bearer <redacted>\"},{\"action\":\"list-tools\",\"transport\":\"mcp\",\"tool\":\"tools/list\",\"path\":\"/room/mcp\",\"description\":\"See what this identity can do: POST { jsonrpc: \\\"2.0\\\", id: \\\"1\\\", method: \\\"tools/list\\\" } to /room/mcp.\"}]}",
+   "timeout": false
+  },
+  {
+   "name": "mint:w27b",
+   "method": "POST",
+   "path": "/api/agent-identities",
+   "status": 201,
+   "ms": 111,
+   "head": "{\"identityId\":\"ai_n4ZLycoWBd33-kxk\",\"displayName\":\"w27b\",\"secret\":\"pri_9tWUV33vzK6NQlW_r_5_-9s04BzT_FwtTvvkCFffv3Y\",\"publicKey\":\"Wkh+3BvGcCMdxGQaw+BxTFpSSdjlab7SQjplALaGFs0=\",\"privateKey\":\"mbEfcILQW6/sUUmrMTTwOjBrf/fxP/dZTrYHXuhpW1I=\",\"next\":[{\"action\":\"create-room\",\"method\":\"POST\",\"path\":\"/api/agent-rooms\",\"description\":\"Create your own room and become its owner — no human approval needed. Send t",
+   "full": "{\"identityId\":\"ai_n4ZLycoWBd33-kxk\",\"displayName\":\"w27b\",\"secret\":\"pri_9tWUV33vzK6NQlW_r_5_-9s04BzT_FwtTvvkCFffv3Y\",\"publicKey\":\"Wkh+3BvGcCMdxGQaw+BxTFpSSdjlab7SQjplALaGFs0=\",\"privateKey\":\"mbEfcILQW6/sUUmrMTTwOjBrf/fxP/dZTrYHXuhpW1I=\",\"next\":[{\"action\":\"create-room\",\"method\":\"POST\",\"path\":\"/api/agent-rooms\",\"description\":\"Create your own room and become its owner — no human approval needed. Send this identity secret as the bearer token.\"},{\"action\":\"redeem-invite\",\"method\":\"POST\",\"path\":\"/api/agent-invites/redeem\",\"description\":\"Join a room with a one-time invite code. Ask any room member who can invite for a code, or check /api/agent-invites/preview.\"},{\"action\":\"request-access\",\"method\":\"POST\",\"path\":\"/api/access-requests\",\"description\":\"Ask to join a room without an invite code. The room owner decides; poll the request status.\"},{\"action\":\"read-manifest\",\"method\":\"GET\",\"path\":\"/api/agent-manifest\",\"description\":\"The agent plug-in manifest: auth schemes, enrollment flows, API-key scopes, and the agent surface.\"},{\"action\":\"read-quickstart\",\"doc\":\"docs/AGENT-QUICKSTART.md\",\"description\":\"Ten-minute quickstart: presence, work sessions, messaging, handoffs, and the rules of the road.\"},{\"action\":\"list-tools\",\"method\":\"POST\",\"path\":\"/room/mcp\",\"description\":\"See what this identity can do: POST { jsonrpc: \\\"2.0\\\", id: \\\"1\\\", method: \\\"tools/list\\\" } to /room/mcp with Authorization: Bearer <secret>. Without a credential it lists seven tools: the four public join tools plus public_work_recommend, public_work_read_task, and room_identity_mint (mint your own identity secret over MCP); with it, the enrolled room profile.\"}],\"nextActions\":[{\"action\":\"create-room\",\"transport\":\"http\",\"method\":\"POST\",\"path\":\"/api/agent-rooms\",\"description\":\"Create your own room and become its owner — no human approval needed. Send this identity secret as the Bearer <redacted>\"},{\"action\":\"list-tools\",\"transport\":\"mcp\",\"tool\":\"tools/list\",\"path\":\"/room/mcp\",\"description\":\"See what this identity can do: POST { jsonrpc: \\\"2.0\\\", id: \\\"1\\\", method: \\\"tools/list\\\" } to /room/mcp.\"}]}",
+   "timeout": false
+  },
+  {
+   "name": "A:valid",
+   "method": "POST",
+   "path": "/api/auth/agent/rooms",
+   "status": 200,
+   "ms": 112,
+   "head": "{\"identityId\":\"ai_DaTHL_It7dVx_wqe\",\"displayName\":\"w27a\",\"rooms\":[]}",
+   "timeout": false
+  },
+  {
+   "name": "A:no-origin",
+   "method": "POST",
+   "path": "/api/auth/agent/rooms",
+   "status": 403,
+   "ms": 95,
+   "head": "{\"error\":{\"code\":\"origin_denied\",\"message\":\"Request origin is not allowed\"},\"status\":\"action_required\",\"reason\":\"origin_denied\",\"hint\":\"Use Origin: https://room.trydemigod.com or omit the Origin header.\",\"next\":[{\"command\":\"Retry with Origin: https://room.trydemigod.com or omit the Origin header\"}],\"operationId\":\"op_3BQQbWM1\",\"category\":\"access\"}",
+   "timeout": false
+  },
+  {
+   "name": "A:origin-evil",
+   "method": "POST",
+   "path": "/api/auth/agent/rooms",
+   "status": 403,
+   "ms": 29,
+   "head": "{\"error\":{\"code\":\"origin_denied\",\"message\":\"Request origin is not allowed\"},\"status\":\"action_required\",\"reason\":\"origin_denied\",\"hint\":\"Use Origin: https://room.trydemigod.com or omit the Origin header.\",\"next\":[{\"command\":\"Retry with Origin: https://room.trydemigod.com or omit the Origin header\"}],\"operationId\":\"op_o51VsIVO\",\"category\":\"access\"}",
+   "timeout": false
+  },
+  {
+   "name": "A:origin-null",
+   "method": "POST",
+   "path": "/api/auth/agent/rooms",
+   "status": 403,
+   "ms": 24,
+   "head": "{\"error\":{\"code\":\"origin_denied\",\"message\":\"Request origin is not allowed\"},\"status\":\"action_required\",\"reason\":\"origin_denied\",\"hint\":\"Use Origin: https://room.trydemigod.com or omit the Origin header.\",\"next\":[{\"command\":\"Retry with Origin: https://room.trydemigod.com or omit the Origin header\"}],\"operationId\":\"op_NIXiqdp9\",\"category\":\"access\"}",
+   "timeout": false
+  },
+  {
+   "name": "A:origin-trailing-slash",
+   "method": "POST",
+   "path": "/api/auth/agent/rooms",
+   "status": 403,
+   "ms": 28,
+   "head": "{\"error\":{\"code\":\"origin_denied\",\"message\":\"Request origin is not allowed\"},\"status\":\"action_required\",\"reason\":\"origin_denied\",\"hint\":\"Use Origin: https://room.trydemigod.com or omit the Origin header.\",\"next\":[{\"command\":\"Retry with Origin: https://room.trydemigod.com or omit the Origin header\"}],\"operationId\":\"op_vvD_GwNF\",\"category\":\"access\"}",
+   "timeout": false
+  },
+  {
+   "name": "A:origin-noprot-port",
+   "method": "POST",
+   "path": "/api/auth/agent/rooms",
+   "status": 403,
+   "ms": 14,
+   "head": "{\"error\":{\"code\":\"origin_denied\",\"message\":\"Request origin is not allowed\"},\"status\":\"action_required\",\"reason\":\"origin_denied\",\"hint\":\"Use Origin: https://room.trydemigod.com or omit the Origin header.\",\"next\":[{\"command\":\"Retry with Origin: https://room.trydemigod.com or omit the Origin header\"}],\"operationId\":\"op_Wx8To1gu\",\"category\":\"access\"}",
+   "timeout": false
+  },
+  {
+   "name": "A:origin-case-host",
+   "method": "POST",
+   "path": "/api/auth/agent/rooms",
+   "status": 403,
+   "ms": 14,
+   "head": "{\"error\":{\"code\":\"origin_denied\",\"message\":\"Request origin is not allowed\"},\"status\":\"action_required\",\"reason\":\"origin_denied\",\"hint\":\"Use Origin: https://room.trydemigod.com or omit the Origin header.\",\"next\":[{\"command\":\"Retry with Origin: https://room.trydemigod.com or omit the Origin header\"}],\"operationId\":\"op_xOS5yuCz\",\"category\":\"access\"}",
+   "timeout": false
+  },
+  {
+   "name": "mint:w27a1",
+   "method": "POST",
+   "path": "/api/agent-identities",
+   "status": 201,
+   "ms": 281,
+   "head": "{\"identityId\":\"ai_QBolhNUFTp5ZXM8C\",\"displayName\":\"w27a1\",\"secret\":\"pri_9jJtBBUXZedkJM6b-I8Jzr9Of289tZvGFfiHJO0ARP0\",\"publicKey\":\"8dlTi7dbmGbAR9/7kcsXBqJVSpYBNEUqj+eUbK5hDU4=\",\"privateKey\":\"Oofzq+UPmRmomfYU9ryqLeSzZ/DfzeA8VcbsSVCVa0Q=\",\"next\":[{\"action\":\"create-room\",\"method\":\"POST\",\"path\":\"/api/agent-rooms\",\"description\":\"Create your own room and become its owner — no human approval needed. Send ",
+   "full": "{\"identityId\":\"ai_QBolhNUFTp5ZXM8C\",\"displayName\":\"w27a1\",\"secret\":\"pri_9jJtBBUXZedkJM6b-I8Jzr9Of289tZvGFfiHJO0ARP0\",\"publicKey\":\"8dlTi7dbmGbAR9/7kcsXBqJVSpYBNEUqj+eUbK5hDU4=\",\"privateKey\":\"Oofzq+UPmRmomfYU9ryqLeSzZ/DfzeA8VcbsSVCVa0Q=\",\"next\":[{\"action\":\"create-room\",\"method\":\"POST\",\"path\":\"/api/agent-rooms\",\"description\":\"Create your own room and become its owner — no human approval needed. Send this identity secret as the bearer token.\"},{\"action\":\"redeem-invite\",\"method\":\"POST\",\"path\":\"/api/agent-invites/redeem\",\"description\":\"Join a room with a one-time invite code. Ask any room member who can invite for a code, or check /api/agent-invites/preview.\"},{\"action\":\"request-access\",\"method\":\"POST\",\"path\":\"/api/access-requests\",\"description\":\"Ask to join a room without an invite code. The room owner decides; poll the request status.\"},{\"action\":\"read-manifest\",\"method\":\"GET\",\"path\":\"/api/agent-manifest\",\"description\":\"The agent plug-in manifest: auth schemes, enrollment flows, API-key scopes, and the agent surface.\"},{\"action\":\"read-quickstart\",\"doc\":\"docs/AGENT-QUICKSTART.md\",\"description\":\"Ten-minute quickstart: presence, work sessions, messaging, handoffs, and the rules of the road.\"},{\"action\":\"list-tools\",\"method\":\"POST\",\"path\":\"/room/mcp\",\"description\":\"See what this identity can do: POST { jsonrpc: \\\"2.0\\\", id: \\\"1\\\", method: \\\"tools/list\\\" } to /room/mcp with Authorization: Bearer <secret>. Without a credential it lists seven tools: the four public join tools plus public_work_recommend, public_work_read_task, and room_identity_mint (mint your own identity secret over MCP); with it, the enrolled room profile.\"}],\"nextActions\":[{\"action\":\"create-room\",\"transport\":\"http\",\"method\":\"POST\",\"path\":\"/api/agent-rooms\",\"description\":\"Create your own room and become its owner — no human approval needed. Send this identity secret as the Bearer <redacted>\"},{\"action\":\"list-tools\",\"transport\":\"mcp\",\"tool\":\"tools/list\",\"path\":\"/room/mcp\",\"description\":\"See what this identity can do: POST { jsonrpc: \\\"2.0\\\", id: \\\"1\\\", method: \\\"tools/list\\\" } to /room/mcp.\"}]}",
+   "timeout": false
+  },
+  {
+   "name": "mint:w27b1",
+   "method": "POST",
+   "path": "/api/agent-identities",
+   "status": 201,
+   "ms": 147,
+   "head": "{\"identityId\":\"ai_f6-KrIynU6OJvDbx\",\"displayName\":\"w27b1\",\"secret\":\"pri__ZRPFE2DbLFUO3hJJoR22TWn8f614dg351lZ4yRTG8g\",\"publicKey\":\"ncOl/rDQkYqN8fowfUccdhlwaig/qhhxXRRYeekWBO0=\",\"privateKey\":\"RMS65vNZ/wiVx7Lg1vk6d/WKotnejHLEyKwywUbDTYI=\",\"next\":[{\"action\":\"create-room\",\"method\":\"POST\",\"path\":\"/api/agent-rooms\",\"description\":\"Create your own room and become its owner — no human approval needed. Send ",
+   "full": "{\"identityId\":\"ai_f6-KrIynU6OJvDbx\",\"displayName\":\"w27b1\",\"secret\":\"pri__ZRPFE2DbLFUO3hJJoR22TWn8f614dg351lZ4yRTG8g\",\"publicKey\":\"ncOl/rDQkYqN8fowfUccdhlwaig/qhhxXRRYeekWBO0=\",\"privateKey\":\"RMS65vNZ/wiVx7Lg1vk6d/WKotnejHLEyKwywUbDTYI=\",\"next\":[{\"action\":\"create-room\",\"method\":\"POST\",\"path\":\"/api/agent-rooms\",\"description\":\"Create your own room and become its owner — no human approval needed. Send this identity secret as the bearer token.\"},{\"action\":\"redeem-invite\",\"method\":\"POST\",\"path\":\"/api/agent-invites/redeem\",\"description\":\"Join a room with a one-time invite code. Ask any room member who can invite for a code, or check /api/agent-invites/preview.\"},{\"action\":\"request-access\",\"method\":\"POST\",\"path\":\"/api/access-requests\",\"description\":\"Ask to join a room without an invite code. The room owner decides; poll the request status.\"},{\"action\":\"read-manifest\",\"method\":\"GET\",\"path\":\"/api/agent-manifest\",\"description\":\"The agent plug-in manifest: auth schemes, enrollment flows, API-key scopes, and the agent surface.\"},{\"action\":\"read-quickstart\",\"doc\":\"docs/AGENT-QUICKSTART.md\",\"description\":\"Ten-minute quickstart: presence, work sessions, messaging, handoffs, and the rules of the road.\"},{\"action\":\"list-tools\",\"method\":\"POST\",\"path\":\"/room/mcp\",\"description\":\"See what this identity can do: POST { jsonrpc: \\\"2.0\\\", id: \\\"1\\\", method: \\\"tools/list\\\" } to /room/mcp with Authorization: Bearer <secret>. Without a credential it lists seven tools: the four public join tools plus public_work_recommend, public_work_read_task, and room_identity_mint (mint your own identity secret over MCP); with it, the enrolled room profile.\"}],\"nextActions\":[{\"action\":\"create-room\",\"transport\":\"http\",\"method\":\"POST\",\"path\":\"/api/agent-rooms\",\"description\":\"Create your own room and become its owner — no human approval needed. Send this identity secret as the Bearer <redacted>\"},{\"action\":\"list-tools\",\"transport\":\"mcp\",\"tool\":\"tools/list\",\"path\":\"/room/mcp\",\"description\":\"See what this identity can do: POST { jsonrpc: \\\"2.0\\\", id: \\\"1\\\", method: \\\"tools/list\\\" } to /room/mcp.\"}]}",
+   "timeout": false
+  },
+  {
+   "name": "A:happy",
+   "method": "POST",
+   "path": "/api/auth/agent/rooms",
+   "status": 200,
+   "ms": 136,
+   "head": "{\"identityId\":\"ai_QBolhNUFTp5ZXM8C\",\"displayName\":\"w27a1\",\"rooms\":[]}",
+   "timeout": false
+  },
+  {
+   "name": "A:no-bearer",
+   "method": "POST",
+   "path": "/api/auth/agent/rooms",
+   "status": 401,
+   "ms": 283,
+   "head": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Agent identity secret required. Agents can self-mint an identity at POST /api/agent-identities.\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/sessio",
+   "timeout": false
+  },
+  {
+   "name": "A:bearer-short",
+   "method": "POST",
+   "path": "/api/auth/agent/rooms",
+   "status": 401,
+   "ms": 18,
+   "head": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/session\"},{\"command\":\"Keep the saved credential and intended room. Verify",
+   "timeout": false
+  },
+  {
+   "name": "A:bearer-basic",
+   "method": "POST",
+   "path": "/api/auth/agent/rooms",
+   "status": 401,
+   "ms": 74,
+   "head": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/session\"},{\"command\":\"Keep the saved credential and intended room. Verify",
+   "timeout": false
+  },
+  {
+   "name": "A:bearer-empty-scheme",
+   "method": "POST",
+   "path": "/api/auth/agent/rooms",
+   "status": 401,
+   "ms": 13,
+   "head": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/session\"},{\"command\":\"Keep the saved credential and intended room. Verify",
+   "timeout": false
+  },
+  {
+   "name": "A:bearer-lowercase",
+   "method": "POST",
+   "path": "/api/auth/agent/rooms",
+   "status": 200,
+   "ms": 122,
+   "head": "{\"identityId\":\"ai_QBolhNUFTp5ZXM8C\",\"displayName\":\"w27a1\",\"rooms\":[]}",
+   "timeout": false
+  },
+  {
+   "name": "A:wrong-secret",
+   "method": "POST",
+   "path": "/api/auth/agent/rooms",
+   "status": 401,
+   "ms": 27,
+   "head": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Unknown agent identity\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/session\"},{\"command\":\"Keep the saved credential and intended room. Verify the c",
+   "timeout": false
+  },
+  {
+   "name": "A:mismatch-id",
+   "method": "POST",
+   "path": "/api/auth/agent/rooms",
+   "status": 401,
+   "ms": 63,
+   "head": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Unknown or revoked agent identity secret\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/session\"},{\"command\":\"Keep the saved credential and intended ",
+   "timeout": false
+  },
+  {
+   "name": "mint:w27a2",
+   "method": "POST",
+   "path": "/api/agent-identities",
+   "status": 201,
+   "ms": 111,
+   "head": "{\"identityId\":\"ai_HlibqmkLAKV7B0Pd\",\"displayName\":\"w27a2\",\"secret\":\"pri_RAd-tZWG-08axpV_SwnwKBmgGKb0oqbZMBY6tyTyzus\",\"publicKey\":\"hHr8W55nSA7OGz0WCn5wwdhUdXc4Hw9t7n8GUYQ0X68=\",\"privateKey\":\"Qc1LaYaAUo2KBcYov+012dMZxDpqH2z9eU7siQKdisg=\",\"next\":[{\"action\":\"create-room\",\"method\":\"POST\",\"path\":\"/api/agent-rooms\",\"description\":\"Create your own room and become its owner — no human approval needed. Send ",
+   "full": "{\"identityId\":\"ai_HlibqmkLAKV7B0Pd\",\"displayName\":\"w27a2\",\"secret\":\"pri_RAd-tZWG-08axpV_SwnwKBmgGKb0oqbZMBY6tyTyzus\",\"publicKey\":\"hHr8W55nSA7OGz0WCn5wwdhUdXc4Hw9t7n8GUYQ0X68=\",\"privateKey\":\"Qc1LaYaAUo2KBcYov+012dMZxDpqH2z9eU7siQKdisg=\",\"next\":[{\"action\":\"create-room\",\"method\":\"POST\",\"path\":\"/api/agent-rooms\",\"description\":\"Create your own room and become its owner — no human approval needed. Send this identity secret as the bearer token.\"},{\"action\":\"redeem-invite\",\"method\":\"POST\",\"path\":\"/api/agent-invites/redeem\",\"description\":\"Join a room with a one-time invite code. Ask any room member who can invite for a code, or check /api/agent-invites/preview.\"},{\"action\":\"request-access\",\"method\":\"POST\",\"path\":\"/api/access-requests\",\"description\":\"Ask to join a room without an invite code. The room owner decides; poll the request status.\"},{\"action\":\"read-manifest\",\"method\":\"GET\",\"path\":\"/api/agent-manifest\",\"description\":\"The agent plug-in manifest: auth schemes, enrollment flows, API-key scopes, and the agent surface.\"},{\"action\":\"read-quickstart\",\"doc\":\"docs/AGENT-QUICKSTART.md\",\"description\":\"Ten-minute quickstart: presence, work sessions, messaging, handoffs, and the rules of the road.\"},{\"action\":\"list-tools\",\"method\":\"POST\",\"path\":\"/room/mcp\",\"description\":\"See what this identity can do: POST { jsonrpc: \\\"2.0\\\", id: \\\"1\\\", method: \\\"tools/list\\\" } to /room/mcp with Authorization: Bearer <secret>. Without a credential it lists seven tools: the four public join tools plus public_work_recommend, public_work_read_task, and room_identity_mint (mint your own identity secret over MCP); with it, the enrolled room profile.\"}],\"nextActions\":[{\"action\":\"create-room\",\"transport\":\"http\",\"method\":\"POST\",\"path\":\"/api/agent-rooms\",\"description\":\"Create your own room and become its owner — no human approval needed. Send this identity secret as the Bearer <redacted>\"},{\"action\":\"list-tools\",\"transport\":\"mcp\",\"tool\":\"tools/list\",\"path\":\"/room/mcp\",\"description\":\"See what this identity can do: POST { jsonrpc: \\\"2.0\\\", id: \\\"1\\\", method: \\\"tools/list\\\" } to /room/mcp.\"}]}",
+   "timeout": false
+  },
+  {
+   "name": "A:body-empty-obj",
+   "method": "POST",
+   "path": "/api/auth/agent/rooms",
+   "status": 422,
+   "ms": 33,
+   "head": "{\"error\":{\"code\":\"invalid_login\",\"message\":\"An agent identity ID is required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_dQe2qU6c\",\"category\":\"input\"}",
+   "timeout": false
+  },
+  {
+   "name": "A:body-extra-key",
+   "method": "POST",
+   "path": "/api/auth/agent/rooms",
+   "status": 422,
+   "ms": 177,
+   "head": "{\"error\":{\"code\":\"invalid_login\",\"message\":\"An agent identity ID is required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_difpRY6w\",\"category\":\"input\"}",
+   "timeout": false
+  },
+  {
+   "name": "A:body-id-number",
+   "method": "POST",
+   "path": "/api/auth/agent/rooms",
+   "status": 422,
+   "ms": 79,
+   "head": "{\"error\":{\"code\":\"invalid_login\",\"message\":\"An agent identity ID is required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_BYi2QAt9\",\"category\":\"input\"}",
+   "timeout": false
+  },
+  {
+   "name": "A:body-id-null",
+   "method": "POST",
+   "path": "/api/auth/agent/rooms",
+   "status": 422,
+   "ms": 117,
+   "head": "{\"error\":{\"code\":\"invalid_login\",\"message\":\"An agent identity ID is required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_mGgZk4r-\",\"category\":\"input\"}",
+   "timeout": false
+  },
+  {
+   "name": "A:body-id-bool",
+   "method": "POST",
+   "path": "/api/auth/agent/rooms",
+   "status": 422,
+   "ms": 56,
+   "head": "{\"error\":{\"code\":\"invalid_login\",\"message\":\"An agent identity ID is required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_Zc31uYIL\",\"category\":\"input\"}",
+   "timeout": false
+  },
+  {
+   "name": "A:body-id-empty-str",
+   "method": "POST",
+   "path": "/api/auth/agent/rooms",
+   "status": 401,
+   "ms": 68,
+   "head": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Unknown agent identity\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/session\"},{\"command\":\"Keep the saved credential and intended room. Verify the c",
+   "timeout": false
+  },
+  {
+   "name": "A:body-id-long",
+   "method": "POST",
+   "path": "/api/auth/agent/rooms",
+   "status": 401,
+   "ms": 14,
+   "head": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Unknown agent identity\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/session\"},{\"command\":\"Keep the saved credential and intended room. Verify the c",
+   "timeout": false
+  },
+  {
+   "name": "A:body-id-nul",
+   "method": "POST",
+   "path": "/api/auth/agent/rooms",
+   "status": 401,
+   "ms": 68,
+   "head": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Unknown agent identity\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/session\"},{\"command\":\"Keep the saved credential and intended room. Verify the c",
+   "timeout": false
+  },
+  {
+   "name": "mint:w27a3",
+   "method": "POST",
+   "path": "/api/agent-identities",
+   "status": 201,
+   "ms": 132,
+   "head": "{\"identityId\":\"ai_NgN4C0p8J9flX3Jp\",\"displayName\":\"w27a3\",\"secret\":\"pri_cuhhlCWwWP3cIqVP0Ko6OBKHonObxn4fJjzV7jyJnvs\",\"publicKey\":\"On9CTgKh0+LS3M419s0c62q+Np+xtafBmQt4VDl2IDI=\",\"privateKey\":\"R1WAT+xaDCEJodqvw6pWXrrqbNX5h56f94itmMGirko=\",\"next\":[{\"action\":\"create-room\",\"method\":\"POST\",\"path\":\"/api/agent-rooms\",\"description\":\"Create your own room and become its owner — no human approval needed. Send ",
+   "full": "{\"identityId\":\"ai_NgN4C0p8J9flX3Jp\",\"displayName\":\"w27a3\",\"secret\":\"pri_cuhhlCWwWP3cIqVP0Ko6OBKHonObxn4fJjzV7jyJnvs\",\"publicKey\":\"On9CTgKh0+LS3M419s0c62q+Np+xtafBmQt4VDl2IDI=\",\"privateKey\":\"R1WAT+xaDCEJodqvw6pWXrrqbNX5h56f94itmMGirko=\",\"next\":[{\"action\":\"create-room\",\"method\":\"POST\",\"path\":\"/api/agent-rooms\",\"description\":\"Create your own room and become its owner — no human approval needed. Send this identity secret as the bearer token.\"},{\"action\":\"redeem-invite\",\"method\":\"POST\",\"path\":\"/api/agent-invites/redeem\",\"description\":\"Join a room with a one-time invite code. Ask any room member who can invite for a code, or check /api/agent-invites/preview.\"},{\"action\":\"request-access\",\"method\":\"POST\",\"path\":\"/api/access-requests\",\"description\":\"Ask to join a room without an invite code. The room owner decides; poll the request status.\"},{\"action\":\"read-manifest\",\"method\":\"GET\",\"path\":\"/api/agent-manifest\",\"description\":\"The agent plug-in manifest: auth schemes, enrollment flows, API-key scopes, and the agent surface.\"},{\"action\":\"read-quickstart\",\"doc\":\"docs/AGENT-QUICKSTART.md\",\"description\":\"Ten-minute quickstart: presence, work sessions, messaging, handoffs, and the rules of the road.\"},{\"action\":\"list-tools\",\"method\":\"POST\",\"path\":\"/room/mcp\",\"description\":\"See what this identity can do: POST { jsonrpc: \\\"2.0\\\", id: \\\"1\\\", method: \\\"tools/list\\\" } to /room/mcp with Authorization: Bearer <secret>. Without a credential it lists seven tools: the four public join tools plus public_work_recommend, public_work_read_task, and room_identity_mint (mint your own identity secret over MCP); with it, the enrolled room profile.\"}],\"nextActions\":[{\"action\":\"create-room\",\"transport\":\"http\",\"method\":\"POST\",\"path\":\"/api/agent-rooms\",\"description\":\"Create your own room and become its owner — no human approval needed. Send this identity secret as the Bearer <redacted>\"},{\"action\":\"list-tools\",\"transport\":\"mcp\",\"tool\":\"tools/list\",\"path\":\"/room/mcp\",\"description\":\"See what this identity can do: POST { jsonrpc: \\\"2.0\\\", id: \\\"1\\\", method: \\\"tools/list\\\" } to /room/mcp.\"}]}",
+   "timeout": false
+  },
+  {
+   "name": "A:body-id-unicode",
+   "method": "POST",
+   "path": "/api/auth/agent/rooms",
+   "status": 401,
+   "ms": 55,
+   "head": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Unknown agent identity\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/session\"},{\"command\":\"Keep the saved credential and intended room. Verify the c",
+   "timeout": false
+  },
+  {
+   "name": "A:body-id-whitespace",
+   "method": "POST",
+   "path": "/api/auth/agent/rooms",
+   "status": 401,
+   "ms": 852,
+   "head": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Unknown agent identity\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/session\"},{\"command\":\"Keep the saved credential and intended room. Verify the c",
+   "timeout": false
+  },
+  {
+   "name": "A:body-id-proto-pollution",
+   "method": "POST",
+   "path": "/api/auth/agent/rooms",
+   "status": 422,
+   "ms": 11,
+   "head": "{\"error\":{\"code\":\"invalid_login\",\"message\":\"An agent identity ID is required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_o2SoJNfI\",\"category\":\"input\"}",
+   "timeout": false
+  },
+  {
+   "name": "A:body-dup-keys",
+   "method": "POST",
+   "path": "/api/auth/agent/rooms",
+   "status": 200,
+   "ms": 132,
+   "head": "{\"identityId\":\"ai_NgN4C0p8J9flX3Jp\",\"displayName\":\"w27a3\",\"rooms\":[]}",
+   "timeout": false
+  },
+  {
+   "name": "A:body-deep-nest",
+   "method": "POST",
+   "path": "/api/auth/agent/rooms",
+   "status": 422,
+   "ms": 24,
+   "head": "{\"error\":{\"code\":\"invalid_login\",\"message\":\"An agent identity ID is required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_V998r9kk\",\"category\":\"input\"}",
+   "timeout": false
+  },
+  {
+   "name": "A:body-array",
+   "method": "POST",
+   "path": "/api/auth/agent/rooms",
+   "status": 400,
+   "ms": 61,
+   "head": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_xlP6omTz\",\"category\":\"input\"}",
+   "timeout": false
+  },
+  {
+   "name": "A:body-scalar",
+   "method": "POST",
+   "path": "/api/auth/agent/rooms",
+   "status": 400,
+   "ms": 31,
+   "head": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_0XH0c8Ck\",\"category\":\"input\"}",
+   "timeout": false
+  },
+  {
+   "name": "A:body-empty-str",
+   "method": "POST",
+   "path": "/api/auth/agent/rooms",
+   "status": 400,
+   "ms": 58,
+   "head": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_1Ppcbx5-\",\"category\":\"input\"}",
+   "timeout": false
+  },
+  {
+   "name": "mint:w27a4",
+   "method": "POST",
+   "path": "/api/agent-identities",
+   "status": 201,
+   "ms": 121,
+   "head": "{\"identityId\":\"ai_2PoqHRfmo8kOZYek\",\"displayName\":\"w27a4\",\"secret\":\"pri_2YGaRM-WT6UDDAlAAMqSW4bHX6sHSicPiPqUwUpFRM8\",\"publicKey\":\"fiqFJfVXfteC/QpqfJDK47SlU1iciY1Srl4RFB/uvaw=\",\"privateKey\":\"WGam9lOx9GtEH9zgvYpu40jetLOo42CrdfP/uDSg6RU=\",\"next\":[{\"action\":\"create-room\",\"method\":\"POST\",\"path\":\"/api/agent-rooms\",\"description\":\"Create your own room and become its owner — no human approval needed. Send ",
+   "full": "{\"identityId\":\"ai_2PoqHRfmo8kOZYek\",\"displayName\":\"w27a4\",\"secret\":\"pri_2YGaRM-WT6UDDAlAAMqSW4bHX6sHSicPiPqUwUpFRM8\",\"publicKey\":\"fiqFJfVXfteC/QpqfJDK47SlU1iciY1Srl4RFB/uvaw=\",\"privateKey\":\"WGam9lOx9GtEH9zgvYpu40jetLOo42CrdfP/uDSg6RU=\",\"next\":[{\"action\":\"create-room\",\"method\":\"POST\",\"path\":\"/api/agent-rooms\",\"description\":\"Create your own room and become its owner — no human approval needed. Send this identity secret as the bearer token.\"},{\"action\":\"redeem-invite\",\"method\":\"POST\",\"path\":\"/api/agent-invites/redeem\",\"description\":\"Join a room with a one-time invite code. Ask any room member who can invite for a code, or check /api/agent-invites/preview.\"},{\"action\":\"request-access\",\"method\":\"POST\",\"path\":\"/api/access-requests\",\"description\":\"Ask to join a room without an invite code. The room owner decides; poll the request status.\"},{\"action\":\"read-manifest\",\"method\":\"GET\",\"path\":\"/api/agent-manifest\",\"description\":\"The agent plug-in manifest: auth schemes, enrollment flows, API-key scopes, and the agent surface.\"},{\"action\":\"read-quickstart\",\"doc\":\"docs/AGENT-QUICKSTART.md\",\"description\":\"Ten-minute quickstart: presence, work sessions, messaging, handoffs, and the rules of the road.\"},{\"action\":\"list-tools\",\"method\":\"POST\",\"path\":\"/room/mcp\",\"description\":\"See what this identity can do: POST { jsonrpc: \\\"2.0\\\", id: \\\"1\\\", method: \\\"tools/list\\\" } to /room/mcp with Authorization: Bearer <secret>. Without a credential it lists seven tools: the four public join tools plus public_work_recommend, public_work_read_task, and room_identity_mint (mint your own identity secret over MCP); with it, the enrolled room profile.\"}],\"nextActions\":[{\"action\":\"create-room\",\"transport\":\"http\",\"method\":\"POST\",\"path\":\"/api/agent-rooms\",\"description\":\"Create your own room and become its owner — no human approval needed. Send this identity secret as the Bearer <redacted>\"},{\"action\":\"list-tools\",\"transport\":\"mcp\",\"tool\":\"tools/list\",\"path\":\"/room/mcp\",\"description\":\"See what this identity can do: POST { jsonrpc: \\\"2.0\\\", id: \\\"1\\\", method: \\\"tools/list\\\" } to /room/mcp.\"}]}",
+   "timeout": false
+  },
+  {
+   "name": "A:method-GET",
+   "method": "GET",
+   "path": "/api/auth/agent/rooms",
+   "status": 404,
+   "ms": 88,
+   "head": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids\"},{\"tool\":\"room_check_access\"}],\"operationId\":\"op_a2U2c",
+   "timeout": false
+  },
+  {
+   "name": "A:method-PUT",
+   "method": "PUT",
+   "path": "/api/auth/agent/rooms",
+   "status": 404,
+   "ms": 85,
+   "head": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids\"},{\"tool\":\"room_check_access\"}],\"operationId\":\"op_Aj7Xq",
+   "timeout": false
+  },
+  {
+   "name": "A:method-DELETE",
+   "method": "DELETE",
+   "path": "/api/auth/agent/rooms",
+   "status": 404,
+   "ms": 71,
+   "head": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids\"},{\"tool\":\"room_check_access\"}],\"operationId\":\"op_w7zB4",
+   "timeout": false
+  },
+  {
+   "name": "A:method-OPTIONS",
+   "method": "OPTIONS",
+   "path": "/api/auth/agent/rooms",
+   "status": 404,
+   "ms": 5,
+   "head": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids\"},{\"tool\":\"room_check_access\"}],\"operationId\":\"op_2q_k6",
+   "timeout": false
+  },
+  {
+   "name": "A:method-PATCH",
+   "method": "PATCH",
+   "path": "/api/auth/agent/rooms",
+   "status": 404,
+   "ms": 3,
+   "head": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids\"},{\"tool\":\"room_check_access\"}],\"operationId\":\"op_il2B_",
+   "timeout": false
+  },
+  {
+   "name": "A:method-HEAD",
+   "method": "HEAD",
+   "path": "/api/auth/agent/rooms",
+   "status": 404,
+   "ms": 9,
+   "head": "",
+   "timeout": false
+  },
+  {
+   "name": "A:ct-text-plain",
+   "method": "POST",
+   "path": "/api/auth/agent/rooms",
+   "status": 415,
+   "ms": 7,
+   "head": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_WiSpBcud\",\"category\":\"input\"}",
+   "timeout": false
+  },
+  {
+   "name": "A:ct-charset",
+   "method": "POST",
+   "path": "/api/auth/agent/rooms",
+   "status": 200,
+   "ms": 185,
+   "head": "{\"identityId\":\"ai_2PoqHRfmo8kOZYek\",\"displayName\":\"w27a4\",\"rooms\":[]}",
+   "timeout": false
+  },
+  {
+   "name": "A:ct-upper",
+   "method": "POST",
+   "path": "/api/auth/agent/rooms",
+   "status": 200,
+   "ms": 32,
+   "head": "{\"identityId\":\"ai_2PoqHRfmo8kOZYek\",\"displayName\":\"w27a4\",\"rooms\":[]}",
+   "timeout": false
+  },
+  {
+   "name": "A:ct-missing",
+   "method": "POST",
+   "path": "/api/auth/agent/rooms",
+   "status": 200,
+   "ms": 41,
+   "head": "{\"identityId\":\"ai_2PoqHRfmo8kOZYek\",\"displayName\":\"w27a4\",\"rooms\":[]}",
+   "timeout": false
+  },
+  {
+   "name": "A:raw-oversize-declared",
+   "method": "RAW",
+   "path": "(socket)",
+   "status": "RESP",
+   "head": "HTTP/1.1 403 Forbidden\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manife"
+  },
+  {
+   "name": "A:raw-huge-body",
+   "method": "RAW",
+   "path": "(socket)",
+   "status": "RESP",
+   "head": "HTTP/1.1 403 Forbidden\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manife"
+  },
+  {
+   "name": "A:raw-trickle",
+   "method": "RAW",
+   "path": "(socket)",
+   "status": "RESP",
+   "head": "HTTP/1.1 403 Forbidden\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manife"
+  },
+  {
+   "name": "A:raw-chunked",
+   "method": "RAW",
+   "path": "(socket)",
+   "status": "CLOSED",
+   "head": "HTTP/1.1 403 Forbidden\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manife"
+  },
+  {
+   "name": "B:no-cookie",
+   "method": "POST",
+   "path": "/api/share-links/join",
+   "status": 401,
+   "ms": 15,
+   "head": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid account session slot\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/session\"},{\"command\":\"Keep the saved credential and intended room. Verify",
+   "timeout": false
+  },
+  {
+   "name": "B:cookie-garbage",
+   "method": "POST",
+   "path": "/api/share-links/join",
+   "status": 401,
+   "ms": 25,
+   "head": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid account session slot\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/session\"},{\"command\":\"Keep the saved credential and intended room. Verify",
+   "timeout": false
+  },
+  {
+   "name": "B:slot-no-csrf",
+   "method": "POST",
+   "path": "/api/share-links/join",
+   "status": 403,
+   "ms": 31,
+   "head": "{\"error\":{\"code\":\"csrf_denied\",\"message\":\"Session confirmation required; sign in again\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this identity can do, then ask the owner for the missing permission.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/session\"},{\"command\":\"Ask the owner to mint a guest invite or Ad",
+   "timeout": false
+  },
+  {
+   "name": "B:slot-bad-csrf",
+   "method": "POST",
+   "path": "/api/share-links/join",
+   "status": 403,
+   "ms": 25,
+   "head": "{\"error\":{\"code\":\"csrf_denied\",\"message\":\"Session confirmation required; sign in again\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this identity can do, then ask the owner for the missing permission.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/session\"},{\"command\":\"Ask the owner to mint a guest invite or Ad",
+   "timeout": false
+  },
+  {
+   "name": "B:slot-ok-no-binding",
+   "method": "POST",
+   "path": "/api/share-links/join",
+   "status": 422,
+   "ms": 44,
+   "head": "{\"error\":{\"code\":\"session_binding_required\",\"message\":\"Current account session binding required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_-EcqhVFK\",\"category\"",
+   "timeout": false
+  },
+  {
+   "name": "B:body-missing-all",
+   "method": "POST",
+   "path": "/api/share-links/join",
+   "status": 422,
+   "ms": 66,
+   "head": "{\"error\":{\"code\":\"invalid_join\",\"message\":\"Supply the invitation link and your name\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_9ahV6Kgw\",\"category\":\"input\"}",
+   "timeout": false
+  },
+  {
+   "name": "B:body-extra-key",
+   "method": "POST",
+   "path": "/api/share-links/join",
+   "status": 422,
+   "ms": 23,
+   "head": "{\"error\":{\"code\":\"invalid_join\",\"message\":\"Supply the invitation link and your name\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_C7ruRnhs\",\"category\":\"input\"}",
+   "timeout": false
+  },
+  {
+   "name": "B:body-link-missing",
+   "method": "POST",
+   "path": "/api/share-links/join",
+   "status": 422,
+   "ms": 18,
+   "head": "{\"error\":{\"code\":\"invalid_join\",\"message\":\"Supply the invitation link and your name\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_y6kHtWxo\",\"category\":\"input\"}",
+   "timeout": false
+  },
+  {
+   "name": "B:bogus-link",
+   "method": "POST",
+   "path": "/api/share-links/join",
+   "status": 410,
+   "ms": 47,
+   "head": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This invite link has expired, been cancelled, or reached its join limit. Ask for a new invite link.\"},\"status\":\"action_required\",\"reason\":\"link_unavailable\",\"hint\":\"This guest invite is not live. Ask the owner to mint a new one or Add agent.\",\"next\":[{\"path\":\"/api/guest-agent-links\"},{\"command\":\"Ask the owner to mint a guest invite or Add agent\"}],\"op",
+   "timeout": false
+  },
+  {
+   "name": "B:link-null",
+   "method": "POST",
+   "path": "/api/share-links/join",
+   "status": 410,
+   "ms": 19,
+   "head": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This invite link has expired, been cancelled, or reached its join limit. Ask for a new invite link.\"},\"status\":\"action_required\",\"reason\":\"link_unavailable\",\"hint\":\"This guest invite is not live. Ask the owner to mint a new one or Add agent.\",\"next\":[{\"path\":\"/api/guest-agent-links\"},{\"command\":\"Ask the owner to mint a guest invite or Add agent\"}],\"op",
+   "timeout": false
+  },
+  {
+   "name": "B:name-empty",
+   "method": "POST",
+   "path": "/api/share-links/join",
+   "status": 422,
+   "ms": 46,
+   "head": "{\"error\":{\"code\":\"invalid_join\",\"message\":\"Enter a name of 1–80 characters and try joining again\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_zpzWkU_z\",\"category",
+   "timeout": false
+  },
+  {
+   "name": "B:name-long",
+   "method": "POST",
+   "path": "/api/share-links/join",
+   "status": 422,
+   "ms": 24,
+   "head": "{\"error\":{\"code\":\"invalid_join\",\"message\":\"Enter a name of 1–80 characters and try joining again\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_akMEOjhL\",\"category",
+   "timeout": false
+  },
+  {
+   "name": "B:redemption-bad-uuid",
+   "method": "POST",
+   "path": "/api/share-links/join",
+   "status": 422,
+   "ms": 129,
+   "head": "{\"error\":{\"code\":\"invalid_join\",\"message\":\"Enter a name of 1–80 characters and try joining again\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_9S0pMDQI\",\"category",
+   "timeout": false
+  },
+  {
+   "name": "B:revision-float",
+   "method": "POST",
+   "path": "/api/share-links/join",
+   "status": 422,
+   "ms": 67,
+   "head": "{\"error\":{\"code\":\"invalid_join\",\"message\":\"Enter a name of 1–80 characters and try joining again\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_0m1hW7Fv\",\"category",
+   "timeout": false
+  },
+  {
+   "name": "B:revision-string",
+   "method": "POST",
+   "path": "/api/share-links/join",
+   "status": 422,
+   "ms": 18,
+   "head": "{\"error\":{\"code\":\"invalid_join\",\"message\":\"Enter a name of 1–80 characters and try joining again\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_Nga_C-Fb\",\"category",
+   "timeout": false
+  },
+  {
+   "name": "B:revision-negative",
+   "method": "POST",
+   "path": "/api/share-links/join",
+   "status": 409,
+   "ms": 14,
+   "head": "{\"error\":{\"code\":\"session_binding_changed\",\"message\":\"Your browser identity changed. Review the invitation again.\"},\"status\":\"action_required\",\"reason\":\"session_binding_changed\",\"hint\":\"Unknown error 'session_binding_changed'. Re-check access and current work; if it repeats, report the code and full message to the room owner.\",\"next\":[{\"tool\":\"room_check_access\"},{\"tool\":\"room_list_work\"},{\"comman",
+   "timeout": false
+  },
+  {
+   "name": "B:revision-huge",
+   "method": "POST",
+   "path": "/api/share-links/join",
+   "status": 422,
+   "ms": 57,
+   "head": "{\"error\":{\"code\":\"invalid_join\",\"message\":\"Enter a name of 1–80 characters and try joining again\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_GpIdIQZW\",\"category",
+   "timeout": false
+  },
+  {
+   "name": "B:revision-mismatch",
+   "method": "POST",
+   "path": "/api/share-links/join",
+   "status": 409,
+   "ms": 145,
+   "head": "{\"error\":{\"code\":\"session_binding_changed\",\"message\":\"Your browser identity changed. Review the invitation again.\"},\"status\":\"action_required\",\"reason\":\"session_binding_changed\",\"hint\":\"Unknown error 'session_binding_changed'. Re-check access and current work; if it repeats, report the code and full message to the room owner.\",\"next\":[{\"tool\":\"room_check_access\"},{\"tool\":\"room_list_work\"},{\"comman",
+   "timeout": false
+  },
+  {
+   "name": "B:link-sql",
+   "method": "POST",
+   "path": "/api/share-links/join",
+   "status": 410,
+   "ms": 50,
+   "head": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This invite link has expired, been cancelled, or reached its join limit. Ask for a new invite link.\"},\"status\":\"action_required\",\"reason\":\"link_unavailable\",\"hint\":\"This guest invite is not live. Ask the owner to mint a new one or Add agent.\",\"next\":[{\"path\":\"/api/guest-agent-links\"},{\"command\":\"Ask the owner to mint a guest invite or Add agent\"}],\"op",
+   "timeout": false
+  },
+  {
+   "name": "B:link-long",
+   "method": "POST",
+   "path": "/api/share-links/join",
+   "status": 410,
+   "ms": 25,
+   "head": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This invite link has expired, been cancelled, or reached its join limit. Ask for a new invite link.\"},\"status\":\"action_required\",\"reason\":\"link_unavailable\",\"hint\":\"This guest invite is not live. Ask the owner to mint a new one or Add agent.\",\"next\":[{\"path\":\"/api/guest-agent-links\"},{\"command\":\"Ask the owner to mint a guest invite or Add agent\"}],\"op",
+   "timeout": false
+  },
+  {
+   "name": "B:link-nul",
+   "method": "POST",
+   "path": "/api/share-links/join",
+   "status": 410,
+   "ms": 21,
+   "head": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This invite link has expired, been cancelled, or reached its join limit. Ask for a new invite link.\"},\"status\":\"action_required\",\"reason\":\"link_unavailable\",\"hint\":\"This guest invite is not live. Ask the owner to mint a new one or Add agent.\",\"next\":[{\"path\":\"/api/guest-agent-links\"},{\"command\":\"Ask the owner to mint a guest invite or Add agent\"}],\"op",
+   "timeout": false
+  },
+  {
+   "name": "join:setup",
+   "method": "POST",
+   "path": "/join",
+   "status": 201,
+   "ms": 216,
+   "head": "{\"identityId\":\"ai_vRKjwOejc8LsyGCH\",\"identitySecret\":\"pri_M6LXg-U5F4SZuvTLVHiOx6QWUD1eppONr2uyHZv-h8c\",\"roomId\":\"personal-ai_vRKjwOejc8LsyGCH\",\"memberId\":\"ai_vRKjwOejc8LsyGCH\",\"displayName\":\"w27owner\",\"via\":\"first-room\",\"duplicate\":false,\"session\":true,\"sessionExpiresAt\":1791601925694,\"next\":[\"You are signed in — open the room below\",\"Save identitySecret too — it is shown once and never again, for",
+   "full": "{\"identityId\":\"ai_vRKjwOejc8LsyGCH\",\"identitySecret\":\"pri_M6LXg-U5F4SZuvTLVHiOx6QWUD1eppONr2uyHZv-h8c\",\"roomId\":\"personal-ai_vRKjwOejc8LsyGCH\",\"memberId\":\"ai_vRKjwOejc8LsyGCH\",\"displayName\":\"w27owner\",\"via\":\"first-room\",\"duplicate\":false,\"session\":true,\"sessionExpiresAt\":1791601925694,\"next\":[\"You are signed in — open the room below\",\"Save identitySecret too — it is shown once and never again, for agent tooling\",\"Authenticate: Authorization: Bearer <identitySecret> on /api/rooms/personal-ai_vRKjwOejc8LsyGCH/…\",\"Orient: GET /api/rooms/personal-ai_vRKjwOejc8LsyGCH/activation-pack\",\"Read the room: GET /api/rooms/personal-ai_vRKjwOejc8LsyGCH?view=work\"]}",
+   "timeout": false
+  },
+  {
+   "name": "B:method-GET",
+   "method": "GET",
+   "path": "/api/share-links/join",
+   "status": 404,
+   "ms": 18,
+   "head": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids\"},{\"tool\":\"room_check_access\"}],\"operationId\":\"op_j42BO",
+   "timeout": false
+  },
+  {
+   "name": "B:method-PUT",
+   "method": "PUT",
+   "path": "/api/share-links/join",
+   "status": 404,
+   "ms": 56,
+   "head": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids\"},{\"tool\":\"room_check_access\"}],\"operationId\":\"op_g1JJI",
+   "timeout": false
+  },
+  {
+   "name": "B:method-DELETE",
+   "method": "DELETE",
+   "path": "/api/share-links/join",
+   "status": 404,
+   "ms": 24,
+   "head": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids\"},{\"tool\":\"room_check_access\"}],\"operationId\":\"op_1-XjT",
+   "timeout": false
+  },
+  {
+   "name": "B:method-OPTIONS",
+   "method": "OPTIONS",
+   "path": "/api/share-links/join",
+   "status": 404,
+   "ms": 23,
+   "head": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids\"},{\"tool\":\"room_check_access\"}],\"operationId\":\"op_nQRDo",
+   "timeout": false
+  },
+  {
+   "name": "B:method-PATCH",
+   "method": "PATCH",
+   "path": "/api/share-links/join",
+   "status": 404,
+   "ms": 17,
+   "head": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids\"},{\"tool\":\"room_check_access\"}],\"operationId\":\"op_IIe4S",
+   "timeout": false
+  },
+  {
+   "name": "B:method-HEAD",
+   "method": "HEAD",
+   "path": "/api/share-links/join",
+   "status": 404,
+   "ms": 12,
+   "head": "",
+   "timeout": false
+  },
+  {
+   "name": "B:origin-missing",
+   "method": "POST",
+   "path": "/api/share-links/join",
+   "status": 403,
+   "ms": 7,
+   "head": "{\"error\":{\"code\":\"origin_denied\",\"message\":\"Request origin is not allowed\"},\"status\":\"action_required\",\"reason\":\"origin_denied\",\"hint\":\"Use Origin: https://room.trydemigod.com or omit the Origin header.\",\"next\":[{\"command\":\"Retry with Origin: https://room.trydemigod.com or omit the Origin header\"}],\"operationId\":\"op_j82NxVN7\",\"category\":\"access\"}",
+   "timeout": false
+  },
+  {
+   "name": "B:origin-evil",
+   "method": "POST",
+   "path": "/api/share-links/join",
+   "status": 403,
+   "ms": 36,
+   "head": "{\"error\":{\"code\":\"origin_denied\",\"message\":\"Request origin is not allowed\"},\"status\":\"action_required\",\"reason\":\"origin_denied\",\"hint\":\"Use Origin: https://room.trydemigod.com or omit the Origin header.\",\"next\":[{\"command\":\"Retry with Origin: https://room.trydemigod.com or omit the Origin header\"}],\"operationId\":\"op_r47TXw3v\",\"category\":\"access\"}",
+   "timeout": false
+  },
+  {
+   "name": "B:happy-join",
+   "method": "POST",
+   "path": "/api/share-links/join",
+   "status": 201,
+   "ms": 123,
+   "head": "{\"roomId\":\"personal-ai_vRKjwOejc8LsyGCH\",\"duplicate\":false,\"session\":{\"account\":{\"id\":\"guest-5a49afd8-6bf8-4cc2-98ed-92ea12467217\",\"active\":true,\"revision\":0,\"authEpoch\":0},\"member\":{\"id\":\"guest-007e3071-e7d5-4ab9-a88f-560fddf50c5c\",\"displayName\":\"fuzz guest\",\"kind\":\"human\",\"role\":\"guest\",\"accountableHumanId\":\"guest-007e3071-e7d5-4ab9-a88f-560fddf50c5c\",\"permissions\":[],\"availability\":\"unknown\",\"a",
+   "timeout": false
+  },
+  {
+   "name": "B:replay-same-redemption",
+   "method": "POST",
+   "path": "/api/share-links/join",
+   "status": 403,
+   "ms": 80,
+   "head": "{\"error\":{\"code\":\"csrf_denied\",\"message\":\"Session confirmation required; sign in again\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this identity can do, then ask the owner for the missing permission.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/session\"},{\"command\":\"Ask the owner to mint a guest invite or Ad",
+   "timeout": false
+  },
+  {
+   "name": "B:cross-session-replay",
+   "method": "POST",
+   "path": "/api/share-links/join",
+   "status": 409,
+   "ms": 26,
+   "head": "{\"error\":{\"code\":\"join_session_lost\",\"message\":\"Your earlier join used another browser session. Return to that session or sign in with the same account. No additional guest was created. Agents should reuse their saved agent identity.\"},\"status\":\"action_required\",\"reason\":\"join_session_lost\",\"hint\":\"Unknown error 'join_session_lost'. Re-check access and current work; if it repeats, report the code ",
+   "timeout": false
+  }
+ ],
+ "interesting": 0
+}

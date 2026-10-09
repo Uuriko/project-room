@@ -1,0 +1,46 @@
+[
+ {
+  "name": "empty-body-json-ct",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 400,
+  "got": 400,
+  "ms": 305,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any "
+ },
+ {
+  "name": "used2-409",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 409,
+  "got": 409,
+  "ms": 409,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"invite_already_used\",\"message\":\"Invite code was already used\"},\"status\":\"action_required\",\"reason\":\"invite_already_used\",\"hint\":\"Unknown error 'invite_already_used'. Re-check access and current work; if it repeats, report the code and full message to the room owner.\",\"next\":[{\"tool"
+ },
+ {
+  "name": "duplicate-true",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 201,
+  "got": 403,
+  "ms": 267,
+  "verdict": "FAIL(wrong-status got 403, want 201)",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"access_ended\",\"message\":\"Membership is no longer active\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this identity can do, then ask the owner for the missing permission.\",\"next\":[{\"tool\":\"room_check_"
+ },
+ {
+  "name": "unknown-token-401",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 401,
+  "got": 401,
+  "ms": 56,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Active identity credential required\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Send the one-time invite code as { code, displayName } in the POST body. Ask the room owner or a member with invite rights to mint one.\",\"next\":[{\"command"
+ }
+]

@@ -1,0 +1,414 @@
+[
+ {
+  "label": "A-01 baseline GET",
+  "status": 503,
+  "ms": 52,
+  "len": 57,
+  "location": null
+ },
+ {
+  "label": "A-02 POST (expect 405)",
+  "status": 405,
+  "ms": 85,
+  "len": 539,
+  "location": null
+ },
+ {
+  "label": "A-03 PUT (expect 405)",
+  "status": 405,
+  "ms": 26,
+  "len": 539,
+  "location": null
+ },
+ {
+  "label": "A-04 DELETE (expect 405)",
+  "status": 405,
+  "ms": 9,
+  "len": 539,
+  "location": null
+ },
+ {
+  "label": "A-05 PATCH (expect 405)",
+  "status": 405,
+  "ms": 7,
+  "len": 539,
+  "location": null
+ },
+ {
+  "label": "A-06 OPTIONS (expect 405)",
+  "status": 405,
+  "ms": 4,
+  "len": 539,
+  "location": null
+ },
+ {
+  "label": "A-07 HEAD (expect 405)",
+  "status": 405,
+  "ms": 8,
+  "len": 0,
+  "location": null
+ },
+ {
+  "label": "A-08 trailing slash",
+  "status": 503,
+  "ms": 9,
+  "len": 57,
+  "location": null
+ },
+ {
+  "label": "A-09 double slash",
+  "status": 404,
+  "ms": 18,
+  "len": 430,
+  "location": null
+ },
+ {
+  "label": "A-10 encoded slash",
+  "status": 404,
+  "ms": 12,
+  "len": 430,
+  "location": null
+ },
+ {
+  "label": "A-11 uppercase path",
+  "status": 404,
+  "ms": 3,
+  "len": 430,
+  "location": null
+ },
+ {
+  "label": "A-12 huge query (8k)",
+  "status": 503,
+  "ms": 6,
+  "len": 57,
+  "location": null
+ },
+ {
+  "label": "A-13 many query params",
+  "status": 503,
+  "ms": 3,
+  "len": 57,
+  "location": null
+ },
+ {
+  "label": "A-14 unicode query",
+  "status": 503,
+  "ms": 4,
+  "len": 57,
+  "location": null
+ },
+ {
+  "label": "A-15 Accept text/html",
+  "status": 302,
+  "ms": 6,
+  "len": 0,
+  "location": "/?google=unavailable"
+ },
+ {
+  "label": "A-16 huge Cookie (8k)",
+  "status": 503,
+  "ms": 3,
+  "len": 57,
+  "location": null
+ },
+ {
+  "label": "A-17 malformed cookie",
+  "status": 503,
+  "ms": 3,
+  "len": 57,
+  "location": null
+ },
+ {
+  "label": "A-18 cookie control chars",
+  "status": 503,
+  "ms": 4,
+  "len": 57,
+  "location": null
+ },
+ {
+  "label": "A-19 duplicate cookie names",
+  "status": 503,
+  "ms": 13,
+  "len": 57,
+  "location": null
+ },
+ {
+  "label": "A-20 huge Accept",
+  "status": 302,
+  "ms": 8,
+  "len": 0,
+  "location": "/?google=unavailable"
+ },
+ {
+  "label": "A-21 weird method FROB",
+  "status": 400,
+  "ms": 8,
+  "len": 0,
+  "location": null
+ },
+ {
+  "label": "A-22 empty query",
+  "status": 503,
+  "ms": 14,
+  "len": 57,
+  "location": null
+ },
+ {
+  "label": "A-23 GET with JSON body",
+  "status": 503,
+  "ms": 3,
+  "len": 57,
+  "location": null
+ },
+ {
+  "label": "A-24 X-Forwarded-For spoof",
+  "status": 503,
+  "ms": 5,
+  "len": 57,
+  "location": null
+ },
+ {
+  "label": "A-25 auth header junk",
+  "status": 503,
+  "ms": 8,
+  "len": 57,
+  "location": null
+ },
+ {
+  "label": "B-01 no body, no CT (expect 415)",
+  "status": 403,
+  "ms": 30,
+  "len": 390,
+  "location": null
+ },
+ {
+  "label": "B-02 empty body, CT json (expect 400)",
+  "status": 403,
+  "ms": 13,
+  "len": 390,
+  "location": null
+ },
+ {
+  "label": "B-03 malformed JSON",
+  "status": 403,
+  "ms": 19,
+  "len": 390,
+  "location": null
+ },
+ {
+  "label": "B-04 JSON array body (expect 400)",
+  "status": 403,
+  "ms": 32,
+  "len": 390,
+  "location": null
+ },
+ {
+  "label": "B-05 JSON string body (expect 400)",
+  "status": 403,
+  "ms": 39,
+  "len": 390,
+  "location": null
+ },
+ {
+  "label": "B-06 JSON number body (expect 400)",
+  "status": 403,
+  "ms": 19,
+  "len": 390,
+  "location": null
+ },
+ {
+  "label": "B-07 JSON null (expect 400)",
+  "status": 403,
+  "ms": 12,
+  "len": 390,
+  "location": null
+ },
+ {
+  "label": "B-08 {} empty object (expect 401)",
+  "status": 403,
+  "ms": 18,
+  "len": 390,
+  "location": null
+ },
+ {
+  "label": "B-09 wrong types (expect 422)",
+  "status": 403,
+  "ms": 14,
+  "len": 390,
+  "location": null
+ },
+ {
+  "label": "B-10 proto pollution",
+  "status": 403,
+  "ms": 10,
+  "len": 390,
+  "location": null
+ },
+ {
+  "label": "B-11 oversize declared (expect 413)",
+  "status": 403,
+  "ms": 8,
+  "len": 390,
+  "location": null
+ },
+ {
+  "label": "B-12 huge roomId string",
+  "status": "ERR:socket hang up",
+  "ms": 6019
+ },
+ {
+  "label": "B-13 deeply nested JSON",
+  "status": 403,
+  "ms": 20,
+  "len": 390,
+  "location": null
+ },
+ {
+  "label": "B-14 roomId unicode/emoji",
+  "status": 403,
+  "ms": 44,
+  "len": 390,
+  "location": null
+ },
+ {
+  "label": "B-15 bearer junk token",
+  "status": 401,
+  "ms": 61,
+  "len": 1072,
+  "location": null
+ },
+ {
+  "label": "B-16 bearer empty",
+  "status": 403,
+  "ms": 20,
+  "len": 390,
+  "location": null
+ },
+ {
+  "label": "B-17 wrong CT text/plain",
+  "status": 403,
+  "ms": 3,
+  "len": 390,
+  "location": null
+ },
+ {
+  "label": "B-18 GET (expect 200 contract)",
+  "status": 200,
+  "ms": 6,
+  "len": 262,
+  "location": null
+ },
+ {
+  "label": "B-19 HEAD",
+  "status": 200,
+  "ms": 2,
+  "len": 0,
+  "location": null
+ },
+ {
+  "label": "B-20 PUT (expect 404/405)",
+  "status": 404,
+  "ms": 6,
+  "len": 430,
+  "location": null
+ },
+ {
+  "label": "B-21 null bytes in roomId",
+  "status": 403,
+  "ms": 1,
+  "len": 390,
+  "location": null
+ },
+ {
+  "label": "B-22 extra fields galore",
+  "status": 403,
+  "ms": 2,
+  "len": 390,
+  "location": null
+ },
+ {
+  "label": "B-23 fake Origin cross-site",
+  "status": 403,
+  "ms": 1,
+  "len": 348,
+  "location": null
+ },
+ {
+  "label": "B-24 duplicate keys",
+  "status": 403,
+  "ms": 7,
+  "len": 390,
+  "location": null
+ },
+ {
+  "label": "RAW-01 bad percent",
+  "status": "end :: HTTP/1.1 404 Not Found",
+  "ms": 6042
+ },
+ {
+  "label": "RAW-02 null byte path",
+  "status": "end :: HTTP/1.1 400 Bad Request",
+  "ms": 14
+ },
+ {
+  "label": "RAW-03 space in path",
+  "status": "end :: HTTP/1.1 400 Bad Request",
+  "ms": 9
+ },
+ {
+  "label": "RAW-04 HTTP/1.0 no host",
+  "status": "end :: HTTP/1.1 403 Forbidden",
+  "ms": 21
+ },
+ {
+  "label": "RAW-05 absolute URI",
+  "status": "end :: HTTP/1.1 503 Service Unavailable",
+  "ms": 6033
+ },
+ {
+  "label": "RAW-06 wrong host",
+  "status": "end :: HTTP/1.1 403 Forbidden",
+  "ms": 6041
+ },
+ {
+  "label": "RAW-07 giant header line",
+  "status": "end :: HTTP/1.1 431 Request Header Fields Too Large",
+  "ms": 9
+ },
+ {
+  "label": "RAW-08 giant path 10k",
+  "status": "end :: HTTP/1.1 404 Not Found",
+  "ms": 6019
+ },
+ {
+  "label": "RAW-09 POST dangling CL",
+  "status": "end :: HTTP/1.1 403 Forbidden",
+  "ms": 6032
+ },
+ {
+  "label": "RAW-10 truncated headers",
+  "status": "timeout :: ",
+  "ms": 8012
+ },
+ {
+  "label": "RAW-11 bad version",
+  "status": "end :: HTTP/1.1 400 Bad Request",
+  "ms": 25
+ },
+ {
+  "label": "RAW-12 chunked body",
+  "status": "end :: HTTP/1.1 403 Forbidden",
+  "ms": 6005
+ },
+ {
+  "label": "RAW-13 dup content-length",
+  "status": "end :: HTTP/1.1 400 Bad Request",
+  "ms": 6
+ },
+ {
+  "label": "A-RATE-HAMMER",
+  "distribution": {
+   "503": 25
+  }
+ }
+]

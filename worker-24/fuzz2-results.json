@@ -1,0 +1,66 @@
+[
+ {
+  "name": "valid-format bearer + malformed json",
+  "method": "POST",
+  "expect": 400,
+  "got": 400,
+  "flag": false,
+  "snippet": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in "
+ },
+ {
+  "name": "valid-format bearer + text/plain",
+  "method": "POST",
+  "expect": 415,
+  "got": 415,
+  "flag": false,
+  "snippet": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in t"
+ },
+ {
+  "name": "valid-format bearer + empty object",
+  "method": "POST",
+  "expect": 422,
+  "got": 422,
+  "flag": false,
+  "snippet": "{\"error\":{\"code\":\"invalid_guest_invite\",\"message\":\"Supply the room\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in"
+ },
+ {
+  "name": "valid-format bearer + unknown room",
+  "method": "POST",
+  "expect": 410,
+  "got": 401,
+  "flag": true,
+  "snippet": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Session or key expired or revoked\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved "
+ },
+ {
+  "name": "valid-format bearer + commons",
+  "method": "POST",
+  "expect": 410,
+  "got": 401,
+  "flag": true,
+  "snippet": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Session or key expired or revoked\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved "
+ },
+ {
+  "name": "no origin no bearer",
+  "method": "POST",
+  "expect": 403,
+  "got": 403,
+  "flag": false,
+  "snippet": "{\"error\":{\"code\":\"origin_denied\",\"message\":\"Origin header is required\"},\"status\":\"action_required\",\"reason\":\"origin_denied\",\"hint\":\"Send Origin: https://room.tr"
+ },
+ {
+  "name": "duplicate keys",
+  "method": "POST",
+  "expect": 410,
+  "got": 401,
+  "flag": true,
+  "snippet": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Session or key expired or revoked\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved "
+ },
+ {
+  "name": "head",
+  "method": "HEAD",
+  "expect": null,
+  "got": 404,
+  "flag": false,
+  "snippet": ""
+ }
+]

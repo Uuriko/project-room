@@ -1,0 +1,167 @@
+[
+ {
+  "name": "good-redeem",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 201,
+  "got": 201,
+  "ms": 973,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"identityId\":\"ai_vxebnB3LnYOQsoG9\",\"mcpToken\":{\"credential\":\"rak_ctvj-uLv6U3icepNeRjA7P_niZU3aIjo\",\"scopes\":[\"mcp:room:commons\",\"rooms:read\",\"rooms:write\",\"mcp:inbox\",\"mcp:wake\"],\"expiresAt\":1794163862379,\"label\":\"fuzz-bot-1\",\"keyId\":\"rak_IpaXJwlN0299iaHV\"},\"roomId\":\"commons\",\"memberId\":\"ai_vxebnB3"
+ },
+ {
+  "name": "empty-object",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 422,
+  "got": 422,
+  "ms": 158,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"invalid_invite\",\"message\":\"Invalid invite redeem (missing required fields: code, displayName). Send exactly {code, displayName}.\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncerta"
+ },
+ {
+  "name": "missing-displayName",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 422,
+  "got": 422,
+  "ms": 24,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"invalid_invite\",\"message\":\"Invalid invite redeem (missing required field: displayName). Send exactly {code, displayName}.\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requ"
+ },
+ {
+  "name": "missing-code",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 422,
+  "got": 422,
+  "ms": 11,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"invalid_invite\",\"message\":\"Invalid invite redeem (missing required field: code). Send exactly {code, displayName}.\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\""
+ },
+ {
+  "name": "extra-field",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 422,
+  "got": 422,
+  "ms": 302,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"invalid_invite\",\"message\":\"Invalid invite redeem (unexpected field: z). Send exactly {code, displayName}.\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":["
+ },
+ {
+  "name": "code-number",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 422,
+  "got": 422,
+  "ms": 139,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"invalid_invite\",\"message\":\"Invalid invite redeem (code: wrong type). Send exactly {code, displayName}.\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"c"
+ },
+ {
+  "name": "code-null",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 422,
+  "got": 422,
+  "ms": 23,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"invalid_invite\",\"message\":\"Invalid invite redeem (code: wrong type). Send exactly {code, displayName}.\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"c"
+ },
+ {
+  "name": "code-object",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 422,
+  "got": 422,
+  "ms": 54,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"invalid_invite\",\"message\":\"Invalid invite redeem (code: wrong type). Send exactly {code, displayName}.\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"c"
+ },
+ {
+  "name": "code-array",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 422,
+  "got": 422,
+  "ms": 38,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"invalid_invite\",\"message\":\"Invalid invite redeem (code: wrong type). Send exactly {code, displayName}.\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"c"
+ },
+ {
+  "name": "displayName-number",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 422,
+  "got": 422,
+  "ms": 73,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"invalid_invite\",\"message\":\"Invalid invite redeem (displayName: wrong type). Send exactly {code, displayName}.\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"nex"
+ },
+ {
+  "name": "displayName-null",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 422,
+  "got": 422,
+  "ms": 12,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"invalid_invite\",\"message\":\"Invalid invite redeem (displayName: wrong type). Send exactly {code, displayName}.\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"nex"
+ },
+ {
+  "name": "displayName-object",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 422,
+  "got": 422,
+  "ms": 10,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"invalid_invite\",\"message\":\"Invalid invite redeem (displayName: wrong type). Send exactly {code, displayName}.\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"nex"
+ },
+ {
+  "name": "displayName-array",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 422,
+  "got": 422,
+  "ms": 6,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"invalid_invite\",\"message\":\"Invalid invite redeem (displayName: wrong type). Send exactly {code, displayName}.\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"nex"
+ },
+ {
+  "name": "body-array",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 400,
+  "got": 400,
+  "ms": 37,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any "
+ },
+ {
+  "name": "lowercase-code-after-use",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 409,
+  "got": 409,
+  "ms": 159,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"invite_already_used\",\"message\":\"Invite code was already used\"},\"status\":\"action_required\",\"reason\":\"invite_already_used\",\"hint\":\"Unknown error 'invite_already_used'. Re-check access and current work; if it repeats, report the code and full message to the room owner.\",\"next\":[{\"tool"
+ }
+]

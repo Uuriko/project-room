@@ -1,0 +1,2 @@
+36: 1929:      if ((url.pathname === "/favicon.ico" || url.pathname === "/room/favicon.ico") && ["GET", "HEAD"].includes(req.method)) {
+86: 2880:      if (url.pathname === "/api/claims/validate") {

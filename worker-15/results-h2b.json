@@ -1,0 +1,165 @@
+{
+ "total": 13,
+ "failed": 1,
+ "results": [
+  {
+   "name": "h2:extra-field",
+   "status": 422,
+   "code": "invalid_invite",
+   "detail": "roomId, optional numeric maxDepth and optional requestId are the accepted fields",
+   "ms": 687,
+   "expect": [
+    422
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:proto-pollution",
+   "status": 422,
+   "code": "invalid_invite",
+   "detail": "roomId, optional numeric maxDepth and optional requestId are the accepted fields",
+   "ms": 66,
+   "expect": [
+    201,
+    422
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:requestid-short",
+   "status": 422,
+   "code": "invalid_invite",
+   "detail": "requestId must be 8-128 characters: letters, digits, _ . : -",
+   "ms": 41,
+   "expect": [
+    422
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:requestid-badchars",
+   "status": 422,
+   "code": "invalid_invite",
+   "detail": "requestId must be 8-128 characters: letters, digits, _ . : -",
+   "ms": 29,
+   "expect": [
+    422
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:requestid-nonstring",
+   "status": 422,
+   "code": "invalid_invite",
+   "detail": "requestId must be 8-128 characters: letters, digits, _ . : -",
+   "ms": 116,
+   "expect": [
+    422
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:requestid-minlen",
+   "status": 201,
+   "code": null,
+   "detail": null,
+   "ms": 153,
+   "expect": [
+    201
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:valid-mint",
+   "status": 201,
+   "code": null,
+   "detail": null,
+   "ms": 90,
+   "expect": [
+    201
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:idempotent-retry",
+   "status": 201,
+   "code": null,
+   "detail": null,
+   "ms": 31,
+   "expect": [
+    200
+   ],
+   "ok": false
+  },
+  {
+   "name": "h2:idempotent-conflict",
+   "status": 409,
+   "code": "referral_mint_idempotency_conflict",
+   "detail": "That requestId was already used with a different maxDepth",
+   "ms": 107,
+   "expect": [
+    409
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:valid-keyless",
+   "status": 201,
+   "code": null,
+   "detail": null,
+   "ms": 58,
+   "expect": [
+    201
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:malformed-json",
+   "status": 400,
+   "code": "invalid_json",
+   "detail": "Expected a JSON object",
+   "ms": 54,
+   "expect": [
+    400
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:huge-json",
+   "status": 413,
+   "code": "too_large",
+   "detail": "Request body is 2000029 bytes; the limit is 16384 bytes",
+   "ms": 199,
+   "expect": [
+    413,
+    422
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:no-origin",
+   "status": 201,
+   "code": null,
+   "detail": null,
+   "ms": 194,
+   "expect": [
+    201,
+    403
+   ],
+   "ok": true
+  }
+ ],
+ "findings": [
+  {
+   "name": "h2:idempotent-retry",
+   "status": 201,
+   "code": null,
+   "detail": null,
+   "ms": 31,
+   "expect": [
+    200
+   ],
+   "ok": false
+  }
+ ]
+}

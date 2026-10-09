@@ -1,0 +1,31 @@
+# WORKER 19 shard
+
+## Launcher shard definition (verbatim from task)
+route handlers in server/http.mjs via
+  grep -nE 'app\.(get|post|put|patch|delete|use)\(' server/http.mjs | sort
+handlers where (index mod 50) == 18
+
+## Result of applying the definition
+0 matches. server/http.mjs is a raw node:http dispatch
+(`createServer(async (req, res) => {...})`, line 920); there is no Express
+app, no app.get/post/put/patch/delete/use anywhere in server/ or server.mjs,
+and `git log -S 'app.get('` shows the pattern never existed in server/http.mjs
+history. The partition as written is vacuous for ALL 50 workers.
+
+## Resolution used by worker 19
+The guild's own fuzz plan (fuzz/targets.mjs, committed by the guild setup)
+enumerates 50 real route targets over server/http.mjs, ids 1..50, with the
+guild runner fuzz/run.mjs. Worker k of 50 maps to target id k-1+? — the
+partition rule (index mod 50) == 18 gives worker 19 target id 18
+(18 mod 50 == 18).
+
+shard = fuzz target 18: "account-rooms + from-template"
+  - GET  /api/account-rooms            (http.mjs:2049)
+  - POST /api/account-rooms            (http.mjs:2054)
+  - POST /api/account-rooms/from-template (http.mjs:2066)
+
+Runner: node fuzz/run.mjs 18 18 worker-19/target-18.json
+(TMPDIR=$PWD/.tmp). Case generators from fuzz/adversarial.mjs:
+methodMatrix x6 + TRACE raw, queryCases x6, get:plain on the GET path;
+methodMatrix x6 + TRACE, jsonCases x18, invalid-utf8, headerCases x7,
+queryCases x6 on the POST path.

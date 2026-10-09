@@ -1,0 +1,227 @@
+[
+  {
+    "name": "valid planOnly",
+    "got": 200,
+    "pass": true
+  },
+  {
+    "name": "valid planOnly w/ sources+tags+maxEvidence",
+    "got": 200,
+    "pass": true
+  },
+  {
+    "name": "cookie (session) no CSRF -> 403 csrf_denied",
+    "got": 403,
+    "pass": true
+  },
+  {
+    "name": "cookie wrong Origin value -> ?",
+    "got": 403,
+    "pass": true
+  },
+  {
+    "name": "empty body -> 400 invalid_json",
+    "got": 400,
+    "pass": true
+  },
+  {
+    "name": "malformed JSON -> 400",
+    "got": 400,
+    "pass": true
+  },
+  {
+    "name": "JSON null -> 400",
+    "got": 400,
+    "pass": true
+  },
+  {
+    "name": "JSON array -> 400",
+    "got": 400,
+    "pass": true
+  },
+  {
+    "name": "JSON string -> 400",
+    "got": 400,
+    "pass": true
+  },
+  {
+    "name": "JSON number -> 400",
+    "got": 400,
+    "pass": true
+  },
+  {
+    "name": "no content-type -> 415",
+    "got": 415,
+    "pass": true
+  },
+  {
+    "name": "text/plain body -> 415",
+    "got": 415,
+    "pass": true
+  },
+  {
+    "name": "charset suffix content-type -> ok",
+    "got": 200,
+    "pass": true
+  },
+  {
+    "name": "17KB body -> 413 too_large",
+    "got": 413,
+    "pass": true
+  },
+  {
+    "name": "missing question -> 422",
+    "got": 422,
+    "pass": true
+  },
+  {
+    "name": "empty question -> 422",
+    "got": 422,
+    "pass": true
+  },
+  {
+    "name": "non-string question -> 422",
+    "got": 422,
+    "pass": true
+  },
+  {
+    "name": "2001-char question -> 422",
+    "got": 422,
+    "pass": true
+  },
+  {
+    "name": "2000-char question -> 200",
+    "got": 200,
+    "pass": true
+  },
+  {
+    "name": "unknown field -> 422",
+    "got": 422,
+    "pass": true
+  },
+  {
+    "name": "__proto__ field -> 422 or safe",
+    "got": 422,
+    "pass": true
+  },
+  {
+    "name": "sources not array -> 422",
+    "got": 422,
+    "pass": true
+  },
+  {
+    "name": "sources empty -> 422",
+    "got": 422,
+    "pass": true
+  },
+  {
+    "name": "sources bogus -> 422",
+    "got": 422,
+    "pass": true
+  },
+  {
+    "name": "sources [null] -> 422",
+    "got": 422,
+    "pass": true
+  },
+  {
+    "name": "sources dupes -> 200",
+    "got": 200,
+    "pass": true
+  },
+  {
+    "name": "urls not array -> 422",
+    "got": 422,
+    "pass": true
+  },
+  {
+    "name": "urls [123] -> 422",
+    "got": 422,
+    "pass": true
+  },
+  {
+    "name": "urls 11 entries -> 422",
+    "got": 422,
+    "pass": true
+  },
+  {
+    "name": "urls 10 entries planOnly -> 200",
+    "got": 200,
+    "pass": true
+  },
+  {
+    "name": "maxEvidence 0 -> 422",
+    "got": 422,
+    "pass": true
+  },
+  {
+    "name": "maxEvidence 1.5 -> 422",
+    "got": 422,
+    "pass": true
+  },
+  {
+    "name": "maxEvidence '5' -> 422",
+    "got": 422,
+    "pass": true
+  },
+  {
+    "name": "maxEvidence 21 -> 422",
+    "got": 422,
+    "pass": true
+  },
+  {
+    "name": "maxEvidence 20 -> 200",
+    "got": 200,
+    "pass": true
+  },
+  {
+    "name": "maxAgeMs -1 -> 422",
+    "got": 422,
+    "pass": true
+  },
+  {
+    "name": "maxAgeMs 1.5 -> 422",
+    "got": 422,
+    "pass": true
+  },
+  {
+    "name": "maxAgeMs 2^53 -> 200",
+    "got": 200,
+    "pass": true
+  },
+  {
+    "name": "tags not array -> 422",
+    "got": 422,
+    "pass": true
+  },
+  {
+    "name": "tags 21 entries -> 422",
+    "got": 422,
+    "pass": true
+  },
+  {
+    "name": "planOnly 'yes' truthy -> 200 plan",
+    "got": 200,
+    "pass": true
+  },
+  {
+    "name": "planOnly 0 -> executes (local sources only)",
+    "got": 200,
+    "pass": true
+  },
+  {
+    "name": "unicode question -> 200",
+    "got": 200,
+    "pass": true
+  },
+  {
+    "name": "question with newline/control chars -> 200",
+    "got": 200,
+    "pass": true
+  },
+  {
+    "name": "planOnly latency < 3s",
+    "got": 200,
+    "pass": true
+  }
+]

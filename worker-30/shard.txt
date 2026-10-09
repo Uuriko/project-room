@@ -1,0 +1,20 @@
+WAVE-2000 G02 WORKER 30 shard (route handlers in server/http.mjs, index mod 50 == 29):
+
+SHARD-DEFINITION NOTE: the task's literal grep
+`grep -nE 'app\.(get|post|put|patch|delete|use)\(' server/http.mjs` matches
+ZERO lines — this codebase uses raw node:http with inline
+`if (url.pathname === ...)` dispatch blocks (no express-style app object).
+Substitution (documented, deterministic): handler list =
+  grep -nE '^\s*if \(\(?url\.pathname === ' server/http.mjs | sort
+100 entries; 0-based index % 50 == 29 -> entries #30 and #80 (1-based).
+
+- idx 29, sort-pos 30, line 1925:
+    if ((url.pathname === "/join.html" || url.pathname === "/room/join.html") && ["GET","HEAD"].includes(req.method)) {
+        -> 301 redirect to pathname-minus-".html" + url.search
+- idx 79, sort-pos 80, line 2899:
+    if ((url.pathname === "/api/agent-identities" || url.pathname === "/api/identity-create") && req.method === "POST") {
+        -> rate(30/min); JSON body; 422/401/428/201; non-POST -> 405 {Allow: POST}
+
+Fuzz harness: worker-30/fuzz-w30.mjs (51 cases, node http client).
+Local server: node server.mjs on 127.0.0.1:4330-4332, throwaway DBs under .tmp/w30*/.
+Results: worker-30/findings.md — NO reproducible crashes, hangs, or wrong statuses.

@@ -1,0 +1,74 @@
+[
+  {
+    "name": "empty body",
+    "expect": 400,
+    "got": 400,
+    "ms": 89,
+    "ok": true,
+    "body": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any "
+  },
+  {
+    "name": "malformed json",
+    "expect": 400,
+    "got": 400,
+    "ms": 20,
+    "ok": true,
+    "body": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any "
+  },
+  {
+    "name": "array body",
+    "expect": 400,
+    "got": 400,
+    "ms": 18,
+    "ok": true,
+    "body": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any "
+  },
+  {
+    "name": "null body",
+    "expect": 400,
+    "got": 400,
+    "ms": 10,
+    "ok": true,
+    "body": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any "
+  },
+  {
+    "name": "string body",
+    "expect": 400,
+    "got": 400,
+    "ms": 19,
+    "ok": true,
+    "body": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any "
+  },
+  {
+    "name": "number body",
+    "expect": 400,
+    "got": 400,
+    "ms": 17,
+    "ok": true,
+    "body": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any "
+  },
+  {
+    "name": "dup keys",
+    "expect": 410,
+    "got": 410,
+    "ms": 28,
+    "ok": true,
+    "body": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This guest invite is not valid.\"},\"status\":\"action_required\",\"reason\":\"link_unavailable\",\"hint\":\"This guest invite is not live. Ask the owner to mint a new one or Add agent.\",\"next\":[{\"path\":\"/api/guest-agent-links\"},{\"command\":\"Ask the owner to mint a "
+  },
+  {
+    "name": "oversized",
+    "expect": 413,
+    "got": 413,
+    "ms": 43,
+    "ok": true,
+    "body": "{\"error\":{\"code\":\"too_large\",\"message\":\"Request body is 20016 bytes; the limit is 16384 bytes\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"The request body is 20016 bytes; the limit is 16384 bytes. Send a smaller body and resend.\",\"next\":[{\"command\":\"Shrink the body under 16384 byte"
+  },
+  {
+    "name": "wellknown fields",
+    "expect": 200,
+    "got": 200,
+    "ms": 79,
+    "ok": true,
+    "body": "{\"issuer\":\"http://127.0.0.1:45971\",\"authorization_endpoint\":\"http://127.0.0.1:45971/oauth/authorize\",\"token_endpoint\":\"http://127.0.0.1:45971/oauth/token\",\"revocation_endpoint\":\"http://127.0.0.1:45971/oauth/revoke\",\"response_types_supported\":[\"code\"],\"grant_types_supported\":[\"authorization_code\",\"re"
+  }
+]

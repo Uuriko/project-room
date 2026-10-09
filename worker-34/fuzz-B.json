@@ -1,0 +1,167 @@
+[
+ {
+  "name": "body-string",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 400,
+  "got": 400,
+  "ms": 544,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any "
+ },
+ {
+  "name": "body-number",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 400,
+  "got": 400,
+  "ms": 145,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any "
+ },
+ {
+  "name": "body-null",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 400,
+  "got": 400,
+  "ms": 56,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any "
+ },
+ {
+  "name": "body-true",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 400,
+  "got": 400,
+  "ms": 29,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any "
+ },
+ {
+  "name": "empty-body",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 400,
+  "got": 415,
+  "ms": 93,
+  "verdict": "FAIL(wrong-status got 415, want 400)",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any e"
+ },
+ {
+  "name": "invalid-json",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 400,
+  "got": 400,
+  "ms": 35,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any "
+ },
+ {
+  "name": "no-content-type",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 415,
+  "got": 415,
+  "ms": 43,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any e"
+ },
+ {
+  "name": "text-plain",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 415,
+  "got": 415,
+  "ms": 14,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any e"
+ },
+ {
+  "name": "oversize-body",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 413,
+  "got": 413,
+  "ms": 58,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"too_large\",\"message\":\"Request body is 17047 bytes; the limit is 16384 bytes\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"The request body is 17047 bytes; the limit is 16384 bytes. Send a smaller body and resend.\",\"next\":[{\"command\":\"Shrink the body under 16384 byte"
+ },
+ {
+  "name": "displayName-81",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 422,
+  "got": 422,
+  "ms": 807,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"invalid_invite_name\",\"message\":\"displayName must be 1-80 characters\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields a"
+ },
+ {
+  "name": "displayName-3000",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 422,
+  "got": 422,
+  "ms": 654,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"invalid_invite_name\",\"message\":\"displayName must be 1-80 characters\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields a"
+ },
+ {
+  "name": "code-empty-string",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 404,
+  "got": 404,
+  "ms": 76,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"invite_unavailable\",\"message\":\"Invite code has the wrong format: invite codes are two letters, a dash, then 16 characters (no I, L, O, or U). Check for typos or ask the inviter for a fresh code\"},\"status\":\"action_required\",\"reason\":\"invite_unavailable\",\"hint\":\"Unknown error 'invite"
+ },
+ {
+  "name": "code-malformed",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 404,
+  "got": 404,
+  "ms": 64,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"invite_unavailable\",\"message\":\"Invite code has the wrong format: invite codes are two letters, a dash, then 16 characters (no I, L, O, or U). Check for typos or ask the inviter for a fresh code\"},\"status\":\"action_required\",\"reason\":\"invite_unavailable\",\"hint\":\"Unknown error 'invite"
+ },
+ {
+  "name": "code-unknown",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 404,
+  "got": 404,
+  "ms": 555,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"invite_unavailable\",\"message\":\"No invite was issued for this code. Ask the inviter for a fresh code\"},\"status\":\"action_required\",\"reason\":\"invite_unavailable\",\"hint\":\"Unknown error 'invite_unavailable'. Re-check access and current work; if it repeats, report the code and full messa"
+ },
+ {
+  "name": "good-again",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 409,
+  "got": 409,
+  "ms": 615,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"invite_already_used\",\"message\":\"Invite code was already used\"},\"status\":\"action_required\",\"reason\":\"invite_already_used\",\"hint\":\"Unknown error 'invite_already_used'. Re-check access and current work; if it repeats, report the code and full message to the room owner.\",\"next\":[{\"tool"
+ }
+]

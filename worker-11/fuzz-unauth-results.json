@@ -1,0 +1,263 @@
+[
+ {
+  "name": "R10 base",
+  "method": "GET",
+  "path": "/.well-known/oauth-authorization-server",
+  "status": 200,
+  "ms": 106,
+  "note": "allow=- ct=application/json; charset=utf-8",
+  "bodyText": "{\"issuer\":\"http://127.0.0.1:18011\",\"authorization_endpoint\":\"http://127.0.0.1:18011/oauth/authorize\",\"token_endpoint\":\"http://127.0.0.1:18011/oauth/token\",\"revocation_endpoint\":\"http://127.0.0.1:18011"
+ },
+ {
+  "name": "R10 HEAD",
+  "method": "HEAD",
+  "path": "/.well-known/oauth-authorization-server",
+  "status": 404,
+  "ms": 8,
+  "note": "allow=- ct=application/json; charset=utf-8",
+  "bodyText": ""
+ },
+ {
+  "name": "R10 POST",
+  "method": "POST",
+  "path": "/.well-known/oauth-authorization-server",
+  "status": 404,
+  "ms": 13,
+  "note": "allow=- ct=application/json; charset=utf-8",
+  "bodyText": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current"
+ },
+ {
+  "name": "R10 query",
+  "method": "GET",
+  "path": "/.well-known/oauth-authorization-server?x=1&evil=<script>",
+  "status": 200,
+  "ms": 61,
+  "note": "allow=- ct=application/json; charset=utf-8",
+  "bodyText": "{\"issuer\":\"http://127.0.0.1:18011\",\"authorization_endpoint\":\"http://127.0.0.1:18011/oauth/authorize\",\"token_endpoint\":\"http://127.0.0.1:18011/oauth/token\",\"revocation_endpoint\":\"http://127.0.0.1:18011"
+ },
+ {
+  "name": "R10 trailing-slash",
+  "method": "GET",
+  "path": "/.well-known/oauth-authorization-server/",
+  "status": 200,
+  "ms": 71,
+  "note": "allow=- ct=application/json; charset=utf-8",
+  "bodyText": "{\"issuer\":\"http://127.0.0.1:18011\",\"authorization_endpoint\":\"http://127.0.0.1:18011/oauth/authorize\",\"token_endpoint\":\"http://127.0.0.1:18011/oauth/token\",\"revocation_endpoint\":\"http://127.0.0.1:18011"
+ },
+ {
+  "name": "R10 longquery",
+  "method": "GET",
+  "path": "/.well-known/oauth-authorization-server?a=a=a=a=a=a=a=a=a=a=a=a=a=a=a=a=a=a=a=a=",
+  "status": 200,
+  "ms": 32,
+  "note": "allow=- ct=application/json; charset=utf-8",
+  "bodyText": "{\"issuer\":\"http://127.0.0.1:18011\",\"authorization_endpoint\":\"http://127.0.0.1:18011/oauth/authorize\",\"token_endpoint\":\"http://127.0.0.1:18011/oauth/token\",\"revocation_endpoint\":\"http://127.0.0.1:18011"
+ },
+ {
+  "name": "R10 DELETE",
+  "method": "DELETE",
+  "path": "/.well-known/oauth-authorization-server",
+  "status": 404,
+  "ms": 32,
+  "note": "allow=- ct=application/json; charset=utf-8",
+  "bodyText": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current"
+ },
+ {
+  "name": "R60 GET",
+  "method": "GET",
+  "path": "/api/auth/methods/remove",
+  "status": 405,
+  "ms": 24,
+  "note": "allow=- ct=application/json; charset=utf-8",
+  "bodyText": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed"
+ },
+ {
+  "name": "R60 POST empty",
+  "method": "POST",
+  "path": "/api/auth/methods/remove",
+  "status": 403,
+  "ms": 23,
+  "note": "allow=- ct=application/json; charset=utf-8",
+  "bodyText": "{\"error\":{\"code\":\"origin_denied\",\"message\":\"Origin header is required\"},\"status\":\"action_required\",\"reason\":\"origin_denied\",\"hint\":\"Send Origin: https://room.trydemigod.com. This route does not accept"
+ },
+ {
+  "name": "R60 POST nonjson",
+  "method": "POST",
+  "path": "/api/auth/methods/remove",
+  "status": 403,
+  "ms": 12,
+  "note": "allow=- ct=application/json; charset=utf-8",
+  "bodyText": "{\"error\":{\"code\":\"origin_denied\",\"message\":\"Origin header is required\"},\"status\":\"action_required\",\"reason\":\"origin_denied\",\"hint\":\"Send Origin: https://room.trydemigod.com. This route does not accept"
+ },
+ {
+  "name": "R60 POST bogus-bearer",
+  "method": "POST",
+  "path": "/api/auth/methods/remove",
+  "status": 403,
+  "ms": 12,
+  "note": "allow=- ct=application/json; charset=utf-8",
+  "bodyText": "{\"error\":{\"code\":\"origin_denied\",\"message\":\"Origin header is required\"},\"status\":\"action_required\",\"reason\":\"origin_denied\",\"hint\":\"Send Origin: https://room.trydemigod.com. This route does not accept"
+ },
+ {
+  "name": "R60 OPTIONS",
+  "method": "OPTIONS",
+  "path": "/api/auth/methods/remove",
+  "status": 405,
+  "ms": 4,
+  "note": "allow=- ct=application/json; charset=utf-8",
+  "bodyText": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed"
+ },
+ {
+  "name": "R110 GET",
+  "method": "GET",
+  "path": "/api/access-requests",
+  "status": 405,
+  "ms": 9,
+  "note": "allow=POST ct=application/json; charset=utf-8",
+  "bodyText": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed"
+ },
+ {
+  "name": "R110 HEAD",
+  "method": "HEAD",
+  "path": "/api/access-requests",
+  "status": 405,
+  "ms": 19,
+  "note": "allow=POST ct=application/json; charset=utf-8",
+  "bodyText": ""
+ },
+ {
+  "name": "R110 PUT",
+  "method": "PUT",
+  "path": "/api/access-requests",
+  "status": 405,
+  "ms": 12,
+  "note": "allow=POST ct=application/json; charset=utf-8",
+  "bodyText": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed"
+ },
+ {
+  "name": "R110 DELETE",
+  "method": "DELETE",
+  "path": "/api/access-requests",
+  "status": 405,
+  "ms": 7,
+  "note": "allow=POST ct=application/json; charset=utf-8",
+  "bodyText": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed"
+ },
+ {
+  "name": "R110 PATCH",
+  "method": "PATCH",
+  "path": "/api/access-requests",
+  "status": 405,
+  "ms": 10,
+  "note": "allow=POST ct=application/json; charset=utf-8",
+  "bodyText": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed"
+ },
+ {
+  "name": "R110 OPTIONS",
+  "method": "OPTIONS",
+  "path": "/api/access-requests",
+  "status": 405,
+  "ms": 11,
+  "note": "allow=POST ct=application/json; charset=utf-8",
+  "bodyText": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed"
+ },
+ {
+  "name": "R160 GET noauth",
+  "method": "GET",
+  "path": "/api/rooms/commons/mentions/evt123/ack",
+  "status": 401,
+  "ms": 6,
+  "note": "allow=- ct=application/json; charset=utf-8",
+  "bodyText": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"No credential. Agents can self-mint an identity at POST /api/agent-identities.\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your s"
+ },
+ {
+  "name": "R160 POST noauth",
+  "method": "POST",
+  "path": "/api/rooms/commons/mentions/evt123/ack",
+  "status": 401,
+  "ms": 14,
+  "note": "allow=- ct=application/json; charset=utf-8",
+  "bodyText": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"No credential. Agents can self-mint an identity at POST /api/agent-identities.\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your s"
+ },
+ {
+  "name": "R160 POST badbearer",
+  "method": "POST",
+  "path": "/api/rooms/commons/mentions/evt123/ack",
+  "status": 401,
+  "ms": 9,
+  "note": "allow=- ct=application/json; charset=utf-8",
+  "bodyText": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and exi"
+ },
+ {
+  "name": "R160 POST badroom",
+  "method": "POST",
+  "path": "/api/rooms/!bad!/mentions/evt123/ack",
+  "status": 404,
+  "ms": 17,
+  "note": "allow=- ct=application/json; charset=utf-8",
+  "bodyText": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current"
+ },
+ {
+  "name": "R160 POST longroom",
+  "method": "POST",
+  "path": "/api/rooms/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+  "status": 404,
+  "ms": 13,
+  "note": "allow=- ct=application/json; charset=utf-8",
+  "bodyText": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current"
+ },
+ {
+  "name": "R160 POST encoded",
+  "method": "POST",
+  "path": "/api/rooms/%2e%2e/mentions/%2f/ack",
+  "status": 404,
+  "ms": 8,
+  "note": "allow=- ct=application/json; charset=utf-8",
+  "bodyText": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current"
+ },
+ {
+  "name": "R210 GET noauth",
+  "method": "GET",
+  "path": "/api/rooms/commons/bounties",
+  "status": 401,
+  "ms": 10,
+  "note": "allow=- ct=application/json; charset=utf-8",
+  "bodyText": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"No credential. Agents can self-mint an identity at POST /api/agent-identities.\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your s"
+ },
+ {
+  "name": "R210 POST noauth-garbage",
+  "method": "POST",
+  "path": "/api/rooms/commons/bounties",
+  "status": 401,
+  "ms": 26,
+  "note": "allow=- ct=application/json; charset=utf-8",
+  "bodyText": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"No credential. Agents can self-mint an identity at POST /api/agent-identities.\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your s"
+ },
+ {
+  "name": "R210 PUT noauth",
+  "method": "PUT",
+  "path": "/api/rooms/commons/bounties",
+  "status": 401,
+  "ms": 99,
+  "note": "allow=- ct=application/json; charset=utf-8",
+  "bodyText": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"No credential. Agents can self-mint an identity at POST /api/agent-identities.\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your s"
+ },
+ {
+  "name": "R210 GET weirdqs",
+  "method": "GET",
+  "path": "/api/rooms/commons/bounties?limit=abc&group=<b>",
+  "status": 401,
+  "ms": 41,
+  "note": "allow=- ct=application/json; charset=utf-8",
+  "bodyText": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"No credential. Agents can self-mint an identity at POST /api/agent-identities.\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your s"
+ },
+ {
+  "name": "R210 GET badroom",
+  "method": "GET",
+  "path": "/api/rooms/..%2f..%2f/bounties",
+  "status": 404,
+  "ms": 35,
+  "note": "allow=- ct=application/json; charset=utf-8",
+  "bodyText": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current"
+ }
+]

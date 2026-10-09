@@ -1,0 +1,178 @@
+[
+ {
+  "name": "expired",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 410,
+  "got": 410,
+  "ms": 459,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"invite_expired\",\"message\":\"Invite code expired\"},\"status\":\"action_required\",\"reason\":\"invite_expired\",\"hint\":\"Unknown error 'invite_expired'. Re-check access and current work; if it repeats, report the code and full message to the room owner.\",\"next\":[{\"tool\":\"room_check_access\"},{"
+ },
+ {
+  "name": "revoked",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 410,
+  "got": 410,
+  "ms": 760,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"invite_revoked\",\"message\":\"Invite code was revoked\"},\"status\":\"action_required\",\"reason\":\"invite_revoked\",\"hint\":\"Unknown error 'invite_revoked'. Re-check access and current work; if it repeats, report the code and full message to the room owner.\",\"next\":[{\"tool\":\"room_check_access"
+ },
+ {
+  "name": "used",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 409,
+  "got": 410,
+  "ms": 684,
+  "verdict": "FAIL(wrong-status got 410, want 409)",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"invite_expired\",\"message\":\"Invite code expired\"},\"status\":\"action_required\",\"reason\":\"invite_expired\",\"hint\":\"Unknown error 'invite_expired'. Re-check access and current work; if it repeats, report the code and full message to the room owner.\",\"next\":[{\"tool\":\"room_check_access\"},{"
+ },
+ {
+  "name": "confusable-I",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 409,
+  "got": 410,
+  "ms": 748,
+  "verdict": "FAIL(wrong-status got 410, want 409)",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"invite_expired\",\"message\":\"Invite code expired\"},\"status\":\"action_required\",\"reason\":\"invite_expired\",\"hint\":\"Unknown error 'invite_expired'. Re-check access and current work; if it repeats, report the code and full message to the room owner.\",\"next\":[{\"tool\":\"room_check_access\"},{"
+ },
+ {
+  "name": "code-with-spaces",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 409,
+  "got": 410,
+  "ms": 1375,
+  "verdict": "FAIL(wrong-status got 410, want 409)",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"invite_expired\",\"message\":\"Invite code expired\"},\"status\":\"action_required\",\"reason\":\"invite_expired\",\"hint\":\"Unknown error 'invite_expired'. Re-check access and current work; if it repeats, report the code and full message to the room owner.\",\"next\":[{\"tool\":\"room_check_access\"},{"
+ },
+ {
+  "name": "displayName-empty",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 201,
+  "got": 201,
+  "ms": 889,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"identityId\":\"ai_PvQN1kl7SK1mIJzC\",\"mcpToken\":{\"credential\":\"rak_l-42liUxOfZT6tggERokImdY9-4no0t1\",\"scopes\":[\"mcp:room:commons\",\"rooms:read\",\"rooms:write\",\"mcp:inbox\",\"mcp:wake\"],\"expiresAt\":1794165668994,\"label\":\"Seed Good2\",\"keyId\":\"rak_bjKARBU2OPG42-39\"},\"roomId\":\"commons\",\"memberId\":\"ai_PvQN1kl"
+ },
+ {
+  "name": "displayName-whitespace",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 409,
+  "got": 409,
+  "ms": 299,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"invite_already_used\",\"message\":\"Invite code was already used\"},\"status\":\"action_required\",\"reason\":\"invite_already_used\",\"hint\":\"Unknown error 'invite_already_used'. Re-check access and current work; if it repeats, report the code and full message to the room owner.\",\"next\":[{\"tool"
+ },
+ {
+  "name": "displayName-control",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 422,
+  "got": 422,
+  "ms": 261,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"display_name_unavailable\",\"message\":\"That display name contains hidden or control characters. Suggested name: ab.\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\","
+ },
+ {
+  "name": "displayName-emoji",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 201,
+  "got": 201,
+  "ms": 402,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"identityId\":\"ai_iIpmmIzWpl19Zy9_\",\"mcpToken\":{\"credential\":\"rak_UQ7Ru3EgT82lW1ZDKTvvIcRs7y5ugi1e\",\"scopes\":[\"mcp:room:commons\",\"rooms:read\",\"rooms:write\",\"mcp:inbox\",\"mcp:wake\"],\"expiresAt\":1794165670004,\"label\":\"🤖 fuzz\",\"keyId\":\"rak_WE3dez7wCVHO4Yto\"},\"roomId\":\"commons\",\"memberId\":\"ai_iIpmmIzWpl"
+ },
+ {
+  "name": "proto-pollution",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 422,
+  "got": 422,
+  "ms": 54,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"invalid_invite\",\"message\":\"Invalid invite redeem (unexpected field: __proto__). Send exactly {code, displayName}.\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\","
+ },
+ {
+  "name": "empty-body-json-ct",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 400,
+  "got": 415,
+  "ms": 68,
+  "verdict": "FAIL(wrong-status got 415, want 400)",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any e"
+ },
+ {
+  "name": "bogus-bearer",
+  "method": "POST",
+  "path": "/api/agent-invites/redeem",
+  "expected": 401,
+  "got": 401,
+  "ms": 68,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Send the one-time invite code as { code, displayName } in the POST body. Ask the room owner or a member with invite rights to mint one.\",\"next\":[{\"command\":\"Ask "
+ },
+ {
+  "name": "get-method",
+  "method": "GET",
+  "path": "/api/agent-invites/redeem",
+  "expected": 405,
+  "got": 405,
+  "ms": 29,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an allowed method (Allow header or route docs); do not retry the same method.\",\"next\":"
+ },
+ {
+  "name": "put-method",
+  "method": "PUT",
+  "path": "/api/agent-invites/redeem",
+  "expected": 405,
+  "got": 405,
+  "ms": 36,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an allowed method (Allow header or route docs); do not retry the same method.\",\"next\":"
+ },
+ {
+  "name": "delete-method",
+  "method": "DELETE",
+  "path": "/api/agent-invites/redeem",
+  "expected": 405,
+  "got": 405,
+  "ms": 20,
+  "verdict": "ok",
+  "err": null,
+  "body": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an allowed method (Allow header or route docs); do not retry the same method.\",\"next\":"
+ },
+ {
+  "name": "head-method",
+  "method": "HEAD",
+  "path": "/api/agent-invites/redeem",
+  "expected": 405,
+  "got": 405,
+  "ms": 91,
+  "verdict": "ok",
+  "err": null,
+  "body": ""
+ }
+]

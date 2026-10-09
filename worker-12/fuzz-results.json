@@ -1,0 +1,1262 @@
+[
+  {
+    "route": "magic.request",
+    "vector": "no-cookie",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 401,
+    "ms": 896,
+    "bodyHead": "{\"error\":{\"code\":\"account_session_required\",\"message\":\"Start an account browser session before signing in\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service addr",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "cookie-no-origin",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 403,
+    "ms": 213,
+    "bodyHead": "{\"error\":{\"code\":\"origin_denied\",\"message\":\"Origin header is required\"},\"status\":\"action_required\",\"reason\":\"origin_denied\",\"hint\":\"Send Origin: https://room.trydemigod.com. This route does not accept a missing or differ",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "cookie-no-csrf",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 403,
+    "ms": 61,
+    "bodyHead": "{\"error\":{\"code\":\"csrf_denied\",\"message\":\"Session confirmation required; sign in again\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this ",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "cookie-bad-csrf",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 403,
+    "ms": 32,
+    "bodyHead": "{\"error\":{\"code\":\"csrf_denied\",\"message\":\"Session confirmation required; sign in again\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this ",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "bogus-cookie",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 401,
+    "ms": 19,
+    "bodyHead": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid account session slot\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before ",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "body-empty-object",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 422,
+    "ms": 27,
+    "bodyHead": "{\"error\":{\"code\":\"invalid_email_request\",\"message\":\"An email address is required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any e",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "body-missing-email",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 422,
+    "ms": 26,
+    "bodyHead": "{\"error\":{\"code\":\"invalid_email_request\",\"message\":\"An email address is required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any e",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "body-array",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 400,
+    "ms": 49,
+    "bodyHead": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertai",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "body-string",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 400,
+    "ms": 41,
+    "bodyHead": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertai",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "body-number",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 400,
+    "ms": 83,
+    "bodyHead": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertai",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "body-null",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 400,
+    "ms": 68,
+    "bodyHead": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertai",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "body-bool",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 400,
+    "ms": 40,
+    "bodyHead": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertai",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "body-email-number",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 422,
+    "ms": 56,
+    "bodyHead": "{\"error\":{\"code\":\"invalid_email_request\",\"message\":\"An email address is required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any e",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "body-email-null",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 422,
+    "ms": 39,
+    "bodyHead": "{\"error\":{\"code\":\"invalid_email_request\",\"message\":\"An email address is required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any e",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "body-email-array",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 422,
+    "ms": 56,
+    "bodyHead": "{\"error\":{\"code\":\"invalid_email_request\",\"message\":\"An email address is required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any e",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "body-email-nested",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 422,
+    "ms": 21,
+    "bodyHead": "{\"error\":{\"code\":\"invalid_email_request\",\"message\":\"An email address is required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any e",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "body-email-empty",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 422,
+    "ms": 33,
+    "bodyHead": "{\"error\":{\"code\":\"invalid_email\",\"message\":\"A valid email address is required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earl",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "body-email-bare",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 422,
+    "ms": 31,
+    "bodyHead": "{\"error\":{\"code\":\"invalid_email\",\"message\":\"A valid email address is required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earl",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "body-email-no-domain",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 422,
+    "ms": 46,
+    "bodyHead": "{\"error\":{\"code\":\"invalid_email\",\"message\":\"A valid email address is required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earl",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "body-email-spaces",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 200,
+    "ms": 28,
+    "bodyHead": "{\"status\":\"unavailable\",\"reason\":\"mail_not_configured\",\"message\":\"Email delivery is not configured on this Room; magic links are disabled until an operator configures a mail provider.\"}",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "body-email-upper",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 200,
+    "ms": 46,
+    "bodyHead": "{\"status\":\"unavailable\",\"reason\":\"mail_not_configured\",\"message\":\"Email delivery is not configured on this Room; magic links are disabled until an operator configures a mail provider.\"}",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "body-email-nul",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 200,
+    "ms": 40,
+    "bodyHead": "{\"status\":\"unavailable\",\"reason\":\"mail_not_configured\",\"message\":\"Email delivery is not configured on this Room; magic links are disabled until an operator configures a mail provider.\"}",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "body-email-unicode",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 200,
+    "ms": 46,
+    "bodyHead": "{\"status\":\"unavailable\",\"reason\":\"mail_not_configured\",\"message\":\"Email delivery is not configured on this Room; magic links are disabled until an operator configures a mail provider.\"}",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "body-email-100k",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 413,
+    "ms": 155,
+    "bodyHead": "{\"error\":{\"code\":\"too_large\",\"message\":\"Request body is 100017 bytes; the limit is 16384 bytes\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"The request body is 100017 bytes; the limit is 16384 bytes. Sen",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "body-extra-field",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 422,
+    "ms": 68,
+    "bodyHead": "{\"error\":{\"code\":\"invalid_email_request\",\"message\":\"An email address is required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any e",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "body-email-null-proto",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 200,
+    "ms": 28,
+    "bodyHead": "{\"status\":\"unavailable\",\"reason\":\"mail_not_configured\",\"message\":\"Email delivery is not configured on this Room; magic links are disabled until an operator configures a mail provider.\"}",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "body-returnTo-absolute-evil",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 422,
+    "ms": 15,
+    "bodyHead": "{\"error\":{\"code\":\"invalid_return_target\",\"message\":\"A valid local return target is required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend.",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "body-returnTo-js",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 422,
+    "ms": 21,
+    "bodyHead": "{\"error\":{\"code\":\"invalid_return_target\",\"message\":\"A valid local return target is required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend.",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "body-returnTo-protocol-relative",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 422,
+    "ms": 25,
+    "bodyHead": "{\"error\":{\"code\":\"invalid_return_target\",\"message\":\"A valid local return target is required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend.",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "body-returnTo-backslash",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 422,
+    "ms": 21,
+    "bodyHead": "{\"error\":{\"code\":\"invalid_return_target\",\"message\":\"A valid local return target is required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend.",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "body-returnTo-ok",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 422,
+    "ms": 13,
+    "bodyHead": "{\"error\":{\"code\":\"invalid_return_target\",\"message\":\"A valid local return target is required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend.",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "body-returnTo-number",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 422,
+    "ms": 57,
+    "bodyHead": "{\"error\":{\"code\":\"invalid_return_target\",\"message\":\"A valid local return target is required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend.",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "body-returnTo-empty",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 422,
+    "ms": 15,
+    "bodyHead": "{\"error\":{\"code\":\"invalid_return_target\",\"message\":\"A valid local return target is required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend.",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "malformed-json",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 400,
+    "ms": 84,
+    "bodyHead": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertai",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "empty-body",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 400,
+    "ms": 12,
+    "bodyHead": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertai",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "text-plain-body",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 415,
+    "ms": 8,
+    "bodyHead": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "no-content-type",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 415,
+    "ms": 23,
+    "bodyHead": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "huge-body-2mb",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 413,
+    "ms": 60,
+    "bodyHead": "{\"error\":{\"code\":\"too_large\",\"message\":\"Request body is 2097179 bytes; the limit is 16384 bytes\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"The request body is 2097179 bytes; the limit is 16384 bytes. S",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "huge-body-12mb",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 413,
+    "ms": 298,
+    "bodyHead": "{\"error\":{\"code\":\"too_large\",\"message\":\"Request body is 12582939 bytes; the limit is 16384 bytes\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"The request body is 12582939 bytes; the limit is 16384 bytes.",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "method-GET",
+    "method": "GET",
+    "url": "/api/auth/magic/request",
+    "status": -1,
+    "ms": 60,
+    "bodyHead": "FETCH-ERROR: TypeError fetch failed",
+    "flag": "HANG/TRANSPORT-FAIL"
+  },
+  {
+    "route": "magic.request",
+    "vector": "method-GET-allow-header",
+    "method": "GET",
+    "url": "/api/auth/magic/request",
+    "status": -1,
+    "ms": 0,
+    "bodyHead": "allow=(absent)",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "method-PUT",
+    "method": "PUT",
+    "url": "/api/auth/magic/request",
+    "status": 405,
+    "ms": 20,
+    "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an all",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "method-PUT-allow-header",
+    "method": "PUT",
+    "url": "/api/auth/magic/request",
+    "status": 405,
+    "ms": 0,
+    "bodyHead": "allow=POST",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "method-DELETE",
+    "method": "DELETE",
+    "url": "/api/auth/magic/request",
+    "status": 405,
+    "ms": 11,
+    "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an all",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "method-DELETE-allow-header",
+    "method": "DELETE",
+    "url": "/api/auth/magic/request",
+    "status": 405,
+    "ms": 0,
+    "bodyHead": "allow=POST",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "method-PATCH",
+    "method": "PATCH",
+    "url": "/api/auth/magic/request",
+    "status": 405,
+    "ms": 4,
+    "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an all",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "method-PATCH-allow-header",
+    "method": "PATCH",
+    "url": "/api/auth/magic/request",
+    "status": 405,
+    "ms": 0,
+    "bodyHead": "allow=POST",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "method-OPTIONS",
+    "method": "OPTIONS",
+    "url": "/api/auth/magic/request",
+    "status": 405,
+    "ms": 15,
+    "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an all",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "method-HEAD",
+    "method": "HEAD",
+    "url": "/api/auth/magic/request",
+    "status": 405,
+    "ms": 11,
+    "bodyHead": "",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "method-HEAD-allow-header",
+    "method": "HEAD",
+    "url": "/api/auth/magic/request",
+    "status": 405,
+    "ms": 0,
+    "bodyHead": "allow=POST",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "trailing-slash",
+    "method": "POST",
+    "url": "/api/auth/magic/request/",
+    "status": 429,
+    "ms": 15,
+    "bodyHead": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same request unchanged.\",\"",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "query-noise",
+    "method": "POST",
+    "url": "/api/auth/magic/request?email=a@b.co&debug=1",
+    "status": 429,
+    "ms": 15,
+    "bodyHead": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same request unchanged.\",\"",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "valid-rate-1",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 429,
+    "ms": 30,
+    "bodyHead": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same request unchanged.\",\"",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "valid-rate-2",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 429,
+    "ms": 38,
+    "bodyHead": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same request unchanged.\",\"",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "valid-rate-3",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 429,
+    "ms": 15,
+    "bodyHead": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same request unchanged.\",\"",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "valid-rate-4",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 429,
+    "ms": 13,
+    "bodyHead": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same request unchanged.\",\"",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "valid-rate-5",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 429,
+    "ms": 11,
+    "bodyHead": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same request unchanged.\",\"",
+    "flag": ""
+  },
+  {
+    "route": "magic.request",
+    "vector": "valid-rate-6",
+    "method": "POST",
+    "url": "/api/auth/magic/request",
+    "status": 429,
+    "ms": 32,
+    "bodyHead": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same request unchanged.\",\"",
+    "flag": ""
+  },
+  {
+    "route": "inbox.gmail.connect",
+    "vector": "setup-signup",
+    "method": "POST",
+    "url": "/api/auth/password/signup",
+    "status": 202,
+    "ms": 672,
+    "bodyHead": "{\"status\":\"check_email\",\"mailConfigured\":false}",
+    "flag": ""
+  },
+  {
+    "route": "inbox.gmail.connect",
+    "vector": "no-auth",
+    "method": "POST",
+    "url": "/api/inbox/gmail/connect",
+    "status": 422,
+    "ms": 60,
+    "bodyHead": "{\"error\":{\"code\":\"session_binding_required\",\"message\":\"Current account session binding required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then res",
+    "flag": ""
+  },
+  {
+    "route": "inbox.gmail.connect",
+    "vector": "bogus-bearer",
+    "method": "POST",
+    "url": "/api/inbox/gmail/connect",
+    "status": 401,
+    "ms": 22,
+    "bodyHead": "{\"error\":{\"code\":\"account_session_required\",\"message\":\"Use your current account session.\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing ",
+    "flag": ""
+  },
+  {
+    "route": "inbox.gmail.connect",
+    "vector": "method-GET-noauth",
+    "method": "GET",
+    "url": "/api/inbox/gmail/connect",
+    "status": 422,
+    "ms": 6,
+    "bodyHead": "{\"error\":{\"code\":\"session_binding_required\",\"message\":\"Current account session binding required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then res",
+    "flag": ""
+  },
+  {
+    "route": "inbox.gmail.connect",
+    "vector": "method-PUT-noauth",
+    "method": "PUT",
+    "url": "/api/inbox/gmail/connect",
+    "status": 422,
+    "ms": 23,
+    "bodyHead": "{\"error\":{\"code\":\"session_binding_required\",\"message\":\"Current account session binding required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then res",
+    "flag": ""
+  },
+  {
+    "route": "inbox.gmail.connect",
+    "vector": "method-DELETE-noauth",
+    "method": "DELETE",
+    "url": "/api/inbox/gmail/connect",
+    "status": 422,
+    "ms": 20,
+    "bodyHead": "{\"error\":{\"code\":\"session_binding_required\",\"message\":\"Current account session binding required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then res",
+    "flag": ""
+  },
+  {
+    "route": "inbox.gmail.connect",
+    "vector": "method-PATCH-noauth",
+    "method": "PATCH",
+    "url": "/api/inbox/gmail/connect",
+    "status": 422,
+    "ms": 24,
+    "bodyHead": "{\"error\":{\"code\":\"session_binding_required\",\"message\":\"Current account session binding required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then res",
+    "flag": ""
+  },
+  {
+    "route": "inbox.gmail.connect",
+    "vector": "authed-empty",
+    "method": "POST",
+    "url": "/api/inbox/gmail/connect",
+    "status": 503,
+    "ms": 37,
+    "bodyHead": "{\"error\":{\"code\":\"gmail_not_configured\",\"message\":\"Gmail is not available on this service yet.\"},\"status\":\"failed\",\"reason\":\"gmail_not_configured\",\"hint\":\"No success is claimed. Reconcile or retry the exact command.\",\"ne",
+    "flag": "5XX"
+  },
+  {
+    "route": "inbox.gmail.connect",
+    "vector": "authed-array",
+    "method": "POST",
+    "url": "/api/inbox/gmail/connect",
+    "status": 503,
+    "ms": 12,
+    "bodyHead": "{\"error\":{\"code\":\"gmail_not_configured\",\"message\":\"Gmail is not available on this service yet.\"},\"status\":\"failed\",\"reason\":\"gmail_not_configured\",\"hint\":\"No success is claimed. Reconcile or retry the exact command.\",\"ne",
+    "flag": "5XX"
+  },
+  {
+    "route": "inbox.gmail.connect",
+    "vector": "authed-huge",
+    "method": "POST",
+    "url": "/api/inbox/gmail/connect",
+    "status": 503,
+    "ms": 28,
+    "bodyHead": "{\"error\":{\"code\":\"gmail_not_configured\",\"message\":\"Gmail is not available on this service yet.\"},\"status\":\"failed\",\"reason\":\"gmail_not_configured\",\"hint\":\"No success is claimed. Reconcile or retry the exact command.\",\"ne",
+    "flag": "5XX"
+  },
+  {
+    "route": "inbox.gmail.connect",
+    "vector": "authed-no-csrf",
+    "method": "POST",
+    "url": "/api/inbox/gmail/connect",
+    "status": 422,
+    "ms": 15,
+    "bodyHead": "{\"error\":{\"code\":\"session_binding_required\",\"message\":\"Current account session binding required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then res",
+    "flag": ""
+  },
+  {
+    "route": "inbox.gmail.connect",
+    "vector": "method-GET-authed",
+    "method": "GET",
+    "url": "/api/inbox/gmail/connect",
+    "status": 503,
+    "ms": 19,
+    "bodyHead": "{\"error\":{\"code\":\"gmail_not_configured\",\"message\":\"Gmail is not available on this service yet.\"},\"status\":\"failed\",\"reason\":\"gmail_not_configured\",\"hint\":\"No success is claimed. Reconcile or retry the exact command.\",\"ne",
+    "flag": "5XX"
+  },
+  {
+    "route": "inbox.gmail.connect",
+    "vector": "method-PUT-authed",
+    "method": "PUT",
+    "url": "/api/inbox/gmail/connect",
+    "status": 503,
+    "ms": 23,
+    "bodyHead": "{\"error\":{\"code\":\"gmail_not_configured\",\"message\":\"Gmail is not available on this service yet.\"},\"status\":\"failed\",\"reason\":\"gmail_not_configured\",\"hint\":\"No success is claimed. Reconcile or retry the exact command.\",\"ne",
+    "flag": "5XX"
+  },
+  {
+    "route": "inbox.gmail.connect",
+    "vector": "gmail-status",
+    "method": "GET",
+    "url": "/api/inbox/gmail",
+    "status": 200,
+    "ms": 9,
+    "bodyHead": "{\"contractVersion\":1,\"viewer\":{\"accountId\":\"email:6443c08c142264a65cc792152e1f8c21d0ac002bcd777f6b547702093c7862b6\",\"authEpoch\":0,\"sessionBinding\":\"487f6929c92de131094b773bab6c4bff1d5a907c7937bb2ed47398b0a7ea0192\",\"sessi",
+    "flag": ""
+  },
+  {
+    "route": "inbox.gmail.connect",
+    "vector": "bound-empty",
+    "method": "POST",
+    "url": "/api/inbox/gmail/connect",
+    "status": 409,
+    "ms": 10,
+    "bodyHead": "{\"error\":{\"code\":\"session_binding_changed\",\"message\":\"Account session changed; discard the stale response or stream\"},\"status\":\"action_required\",\"reason\":\"stale_revision\",\"hint\":\"Re-read workContext. Use the current revi",
+    "flag": ""
+  },
+  {
+    "route": "inbox.gmail.connect",
+    "vector": "bound-array",
+    "method": "POST",
+    "url": "/api/inbox/gmail/connect",
+    "status": 409,
+    "ms": 6,
+    "bodyHead": "{\"error\":{\"code\":\"session_binding_changed\",\"message\":\"Account session changed; discard the stale response or stream\"},\"status\":\"action_required\",\"reason\":\"stale_revision\",\"hint\":\"Re-read workContext. Use the current revi",
+    "flag": ""
+  },
+  {
+    "route": "inbox.gmail.connect",
+    "vector": "bound-malformed-json",
+    "method": "POST",
+    "url": "/api/inbox/gmail/connect",
+    "status": 409,
+    "ms": 43,
+    "bodyHead": "{\"error\":{\"code\":\"session_binding_changed\",\"message\":\"Account session changed; discard the stale response or stream\"},\"status\":\"action_required\",\"reason\":\"stale_revision\",\"hint\":\"Re-read workContext. Use the current revi",
+    "flag": ""
+  },
+  {
+    "route": "inbox.gmail.connect",
+    "vector": "bound-huge",
+    "method": "POST",
+    "url": "/api/inbox/gmail/connect",
+    "status": 409,
+    "ms": 49,
+    "bodyHead": "{\"error\":{\"code\":\"session_binding_changed\",\"message\":\"Account session changed; discard the stale response or stream\"},\"status\":\"action_required\",\"reason\":\"stale_revision\",\"hint\":\"Re-read workContext. Use the current revi",
+    "flag": ""
+  },
+  {
+    "route": "inbox.gmail.connect",
+    "vector": "bound-no-csrf",
+    "method": "POST",
+    "url": "/api/inbox/gmail/connect",
+    "status": 409,
+    "ms": 68,
+    "bodyHead": "{\"error\":{\"code\":\"session_binding_changed\",\"message\":\"Account session changed; discard the stale response or stream\"},\"status\":\"action_required\",\"reason\":\"stale_revision\",\"hint\":\"Re-read workContext. Use the current revi",
+    "flag": ""
+  },
+  {
+    "route": "inbox.gmail.connect",
+    "vector": "bound-no-origin",
+    "method": "POST",
+    "url": "/api/inbox/gmail/connect",
+    "status": 409,
+    "ms": 165,
+    "bodyHead": "{\"error\":{\"code\":\"session_binding_changed\",\"message\":\"Account session changed; discard the stale response or stream\"},\"status\":\"action_required\",\"reason\":\"stale_revision\",\"hint\":\"Re-read workContext. Use the current revi",
+    "flag": ""
+  },
+  {
+    "route": "inbox.gmail.connect",
+    "vector": "binding-query",
+    "method": "POST",
+    "url": "/api/inbox/gmail/connect?binding=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "status": 503,
+    "ms": 111,
+    "bodyHead": "{\"error\":{\"code\":\"gmail_not_configured\",\"message\":\"Gmail is not available on this service yet.\"},\"status\":\"failed\",\"reason\":\"gmail_not_configured\",\"hint\":\"No success is claimed. Reconcile or retry the exact command.\",\"ne",
+    "flag": "5XX"
+  },
+  {
+    "route": "inbox.gmail.connect",
+    "vector": "binding-malformed",
+    "method": "POST",
+    "url": "/api/inbox/gmail/connect",
+    "status": 422,
+    "ms": 21,
+    "bodyHead": "{\"error\":{\"code\":\"invalid_session_binding\",\"message\":\"Invalid session response binding\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep",
+    "flag": ""
+  },
+  {
+    "route": "inbox.gmail.connect",
+    "vector": "binding-double-query",
+    "method": "POST",
+    "url": "/api/inbox/gmail/connect?binding=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&binding=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "status": 503,
+    "ms": 33,
+    "bodyHead": "{\"error\":{\"code\":\"gmail_not_configured\",\"message\":\"Gmail is not available on this service yet.\"},\"status\":\"failed\",\"reason\":\"gmail_not_configured\",\"hint\":\"No success is claimed. Reconcile or retry the exact command.\",\"ne",
+    "flag": "5XX"
+  },
+  {
+    "route": "inbox.gmail.connect",
+    "vector": "binding-query-mismatch",
+    "method": "POST",
+    "url": "/api/inbox/gmail/connect?binding=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "status": 409,
+    "ms": 20,
+    "bodyHead": "{\"error\":{\"code\":\"session_binding_changed\",\"message\":\"Account session changed; discard the stale response or stream\"},\"status\":\"action_required\",\"reason\":\"stale_revision\",\"hint\":\"Re-read workContext. Use the current revi",
+    "flag": ""
+  },
+  {
+    "route": "inbox.gmail.connect",
+    "vector": "bound-method-GET",
+    "method": "GET",
+    "url": "/api/inbox/gmail/connect",
+    "status": 409,
+    "ms": 19,
+    "bodyHead": "{\"error\":{\"code\":\"session_binding_changed\",\"message\":\"Account session changed; discard the stale response or stream\"},\"status\":\"action_required\",\"reason\":\"stale_revision\",\"hint\":\"Re-read workContext. Use the current revi",
+    "flag": ""
+  },
+  {
+    "route": "inbox.gmail.connect",
+    "vector": "bound-method-GET-allow",
+    "method": "GET",
+    "url": "-",
+    "status": 409,
+    "ms": 0,
+    "bodyHead": "allow=(absent)",
+    "flag": ""
+  },
+  {
+    "route": "inbox.gmail.connect",
+    "vector": "bound-method-PUT",
+    "method": "PUT",
+    "url": "/api/inbox/gmail/connect",
+    "status": 409,
+    "ms": 18,
+    "bodyHead": "{\"error\":{\"code\":\"session_binding_changed\",\"message\":\"Account session changed; discard the stale response or stream\"},\"status\":\"action_required\",\"reason\":\"stale_revision\",\"hint\":\"Re-read workContext. Use the current revi",
+    "flag": ""
+  },
+  {
+    "route": "inbox.gmail.connect",
+    "vector": "bound-method-PUT-allow",
+    "method": "PUT",
+    "url": "-",
+    "status": 409,
+    "ms": 0,
+    "bodyHead": "allow=(absent)",
+    "flag": ""
+  },
+  {
+    "route": "inbox.gmail.connect",
+    "vector": "bound-method-DELETE",
+    "method": "DELETE",
+    "url": "/api/inbox/gmail/connect",
+    "status": 409,
+    "ms": 31,
+    "bodyHead": "{\"error\":{\"code\":\"session_binding_changed\",\"message\":\"Account session changed; discard the stale response or stream\"},\"status\":\"action_required\",\"reason\":\"stale_revision\",\"hint\":\"Re-read workContext. Use the current revi",
+    "flag": ""
+  },
+  {
+    "route": "inbox.gmail.connect",
+    "vector": "bound-method-DELETE-allow",
+    "method": "DELETE",
+    "url": "-",
+    "status": 409,
+    "ms": 0,
+    "bodyHead": "allow=(absent)",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "no-auth",
+    "method": "GET",
+    "url": "/api/rooms/commons/code/cd-abcdef012345/raw",
+    "status": 401,
+    "ms": 44,
+    "bodyHead": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"No credential. Agents can self-mint an identity at POST /api/agent-identities.\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Che",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "bogus-bearer",
+    "method": "GET",
+    "url": "/api/rooms/commons/code/cd-abcdef012345/raw",
+    "status": 401,
+    "ms": 71,
+    "bodyHead": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before ",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "setup-share-mbox",
+    "method": "POST",
+    "url": "/api/rooms/commons/code",
+    "status": 201,
+    "ms": 301,
+    "bodyHead": "{\"status\":\"shared\",\"duplicate\":false,\"drop\":{\"id\":\"cd-fbccb01ed820\",\"roomId\":\"commons\",\"title\":\"Fuzz probe\",\"kind\":\"mbox\",\"authorId\":\"author\",\"messageId\":\"code-cd-fbccb01ed820\",\"attachmentId\":\"cd-fbccb01ed820\",\"base\":nul",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "setup-share-unicode",
+    "method": "POST",
+    "url": "/api/rooms/commons/code",
+    "status": 201,
+    "ms": 117,
+    "bodyHead": "{\"status\":\"shared\",\"duplicate\":false,\"drop\":{\"id\":\"cd-cdc4fdb3a045\",\"roomId\":\"commons\",\"title\":\"ünïcode probe\",\"kind\":\"mbox\",\"authorId\":\"author\",\"messageId\":\"code-cd-cdc4fdb3a045\",\"attachmentId\":\"cd-cdc4fdb3a045\",\"base\":",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "valid",
+    "method": "GET",
+    "url": "/api/rooms/commons/code/cd-fbccb01ed820/raw",
+    "status": 200,
+    "ms": 83,
+    "bodyHead": "From 1111111111111111111111111111111111111111 Mon Sep 17 00:00:00 2001\nFrom: Fuzz <fuzz@example.invalid>\nDate: Mon, 5 Oct 2026 12:00:00 +0000\nSubject: [PATCH 1/1] fuzz probe\n\n---\n hello.txt | 2 ++\n 1 file changed, 2 inse",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "valid-content-length-check",
+    "method": "GET",
+    "url": "-",
+    "status": 356,
+    "ms": 0,
+    "bodyHead": "declared=356 received=356 match=true",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "valid-body-exact",
+    "method": "GET",
+    "url": "-",
+    "status": 200,
+    "ms": 0,
+    "bodyHead": "EXACT-MATCH",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "valid-unicode",
+    "method": "GET",
+    "url": "/api/rooms/commons/code/cd-cdc4fdb3a045/raw",
+    "status": 200,
+    "ms": 13,
+    "bodyHead": "From 1111111111111111111111111111111111111111 Mon Sep 17 00:00:00 2001\nFrom: Fuzz <fuzz@example.invalid>\nDate: Mon, 5 Oct 2026 12:00:00 +0000\nSubject: [PATCH 1/1] fuzz probe\n\n---\n héllo→世界🦕.txt | 2 ++\n 1 file changed, 2",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "unicode-content-length-check",
+    "method": "GET",
+    "url": "-",
+    "status": 370,
+    "ms": 0,
+    "bodyHead": "declared=370 received=370 match=true",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "dropid-missing",
+    "method": "GET",
+    "url": "/api/rooms/commons/code/cd-deadbeef1234/raw",
+    "status": 404,
+    "ms": 18,
+    "bodyHead": "{\"error\":{\"code\":\"code_drop_not_found\",\"message\":\"Code drop not found\"},\"status\":\"action_required\",\"reason\":\"code_drop_not_found\",\"hint\":\"Unknown error 'code_drop_not_found'. Re-check access and current work; if it repea",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "dropid-wrong-prefix",
+    "method": "GET",
+    "url": "/api/rooms/commons/code/xx-abcdef012345/raw",
+    "status": 404,
+    "ms": 11,
+    "bodyHead": "{\"error\":{\"code\":\"code_drop_not_found\",\"message\":\"Code drop not found\"},\"status\":\"action_required\",\"reason\":\"code_drop_not_found\",\"hint\":\"Unknown error 'code_drop_not_found'. Re-check access and current work; if it repea",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "dropid-dotdot",
+    "method": "GET",
+    "url": "/api/rooms/commons/code/../raw",
+    "status": 404,
+    "ms": 36,
+    "bodyHead": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess id",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "dropid-dot",
+    "method": "GET",
+    "url": "/api/rooms/commons/code/./raw",
+    "status": 404,
+    "ms": 5,
+    "bodyHead": "{\"error\":{\"code\":\"code_drop_not_found\",\"message\":\"Code drop not found\"},\"status\":\"action_required\",\"reason\":\"code_drop_not_found\",\"hint\":\"Unknown error 'code_drop_not_found'. Re-check access and current work; if it repea",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "dropid-empty-segment",
+    "method": "GET",
+    "url": "/api/rooms/commons/code//raw",
+    "status": 404,
+    "ms": 36,
+    "bodyHead": "{\"error\":{\"code\":\"code_drop_not_found\",\"message\":\"Code drop not found\"},\"status\":\"action_required\",\"reason\":\"code_drop_not_found\",\"hint\":\"Unknown error 'code_drop_not_found'. Re-check access and current work; if it repea",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "dropid-slash-in-id",
+    "method": "GET",
+    "url": "/api/rooms/commons/code/a/b/raw",
+    "status": 404,
+    "ms": 101,
+    "bodyHead": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess id",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "dropid-huge-10k",
+    "method": "GET",
+    "url": "/api/rooms/commons/code/cd-zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz/raw",
+    "status": 404,
+    "ms": 114,
+    "bodyHead": "{\"error\":{\"code\":\"code_drop_not_found\",\"message\":\"Code drop not found\"},\"status\":\"action_required\",\"reason\":\"code_drop_not_found\",\"hint\":\"Unknown error 'code_drop_not_found'. Re-check access and current work; if it repea",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "dropid-unicode",
+    "method": "GET",
+    "url": "/api/rooms/commons/code/cd-héllo🦕/raw",
+    "status": 404,
+    "ms": 48,
+    "bodyHead": "{\"error\":{\"code\":\"code_drop_not_found\",\"message\":\"Code drop not found\"},\"status\":\"action_required\",\"reason\":\"code_drop_not_found\",\"hint\":\"Unknown error 'code_drop_not_found'. Re-check access and current work; if it repea",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "dropid-spaces",
+    "method": "GET",
+    "url": "/api/rooms/commons/code/cd with spaces/raw",
+    "status": 404,
+    "ms": 41,
+    "bodyHead": "{\"error\":{\"code\":\"code_drop_not_found\",\"message\":\"Code drop not found\"},\"status\":\"action_required\",\"reason\":\"code_drop_not_found\",\"hint\":\"Unknown error 'code_drop_not_found'. Re-check access and current work; if it repea",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "dropid-query-tail",
+    "method": "GET",
+    "url": "/api/rooms/commons/code/cd-fbccb01ed820?x=1&y=2/raw",
+    "status": 200,
+    "ms": 36,
+    "bodyHead": "{\"roomId\":\"commons\",\"drop\":{\"id\":\"cd-fbccb01ed820\",\"roomId\":\"commons\",\"title\":\"Fuzz probe\",\"kind\":\"mbox\",\"authorId\":\"author\",\"messageId\":\"code-cd-fbccb01ed820\",\"attachmentId\":\"cd-fbccb01ed820\",\"base\":null,\"branch\":\"fuzz/",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "dropid-semicolon",
+    "method": "GET",
+    "url": "/api/rooms/commons/code/cd-fbccb01ed820;param/raw",
+    "status": 404,
+    "ms": 32,
+    "bodyHead": "{\"error\":{\"code\":\"code_drop_not_found\",\"message\":\"Code drop not found\"},\"status\":\"action_required\",\"reason\":\"code_drop_not_found\",\"hint\":\"Unknown error 'code_drop_not_found'. Re-check access and current work; if it repea",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "dropid-null-byte-pct",
+    "method": "GET",
+    "url": "/api/rooms/commons/code/cd-%00abc/raw",
+    "status": 404,
+    "ms": 13,
+    "bodyHead": "{\"error\":{\"code\":\"code_drop_not_found\",\"message\":\"Code drop not found\"},\"status\":\"action_required\",\"reason\":\"code_drop_not_found\",\"hint\":\"Unknown error 'code_drop_not_found'. Re-check access and current work; if it repea",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "dropid-pct-traversal",
+    "method": "GET",
+    "url": "/api/rooms/commons/code/%2e%2e/%2e%2e/etc/passwd/raw",
+    "status": 404,
+    "ms": 14,
+    "bodyHead": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess id",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "dropid-case",
+    "method": "GET",
+    "url": "/api/rooms/commons/code/CD-FBCCB01ED820/raw",
+    "status": 404,
+    "ms": 16,
+    "bodyHead": "{\"error\":{\"code\":\"code_drop_not_found\",\"message\":\"Code drop not found\"},\"status\":\"action_required\",\"reason\":\"code_drop_not_found\",\"hint\":\"Unknown error 'code_drop_not_found'. Re-check access and current work; if it repea",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "dropid-trailing-space",
+    "method": "GET",
+    "url": "/api/rooms/commons/code/cd-fbccb01ed820 /raw",
+    "status": 404,
+    "ms": 36,
+    "bodyHead": "{\"error\":{\"code\":\"code_drop_not_found\",\"message\":\"Code drop not found\"},\"status\":\"action_required\",\"reason\":\"code_drop_not_found\",\"hint\":\"Unknown error 'code_drop_not_found'. Re-check access and current work; if it repea",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "roomid-missing-room",
+    "method": "GET",
+    "url": "/api/rooms/nope/code/cd-fbccb01ed820/raw",
+    "status": 403,
+    "ms": 14,
+    "bodyHead": "{\"error\":{\"code\":\"access_denied\",\"message\":\"This credential does not grant access to that room\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see wh",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "roomid-case-room",
+    "method": "GET",
+    "url": "/api/rooms/COMMONS/code/cd-fbccb01ed820/raw",
+    "status": 403,
+    "ms": 51,
+    "bodyHead": "{\"error\":{\"code\":\"access_denied\",\"message\":\"This credential does not grant access to that room\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see wh",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "roomid-empty-room",
+    "method": "GET",
+    "url": "/api/rooms//code/cd-fbccb01ed820/raw",
+    "status": 404,
+    "ms": 66,
+    "bodyHead": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess id",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "roomid-dotdot-room",
+    "method": "GET",
+    "url": "/api/rooms/../code/cd-fbccb01ed820/raw",
+    "status": 404,
+    "ms": 67,
+    "bodyHead": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess id",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "method-POST",
+    "method": "POST",
+    "url": "/api/rooms/commons/code/cd-fbccb01ed820/raw",
+    "status": 405,
+    "ms": 113,
+    "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an all",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "method-POST-allow-header",
+    "method": "POST",
+    "url": "-",
+    "status": 405,
+    "ms": 0,
+    "bodyHead": "allow=GET",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "method-PUT",
+    "method": "PUT",
+    "url": "/api/rooms/commons/code/cd-fbccb01ed820/raw",
+    "status": 405,
+    "ms": 129,
+    "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an all",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "method-PUT-allow-header",
+    "method": "PUT",
+    "url": "-",
+    "status": 405,
+    "ms": 0,
+    "bodyHead": "allow=GET",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "method-DELETE",
+    "method": "DELETE",
+    "url": "/api/rooms/commons/code/cd-fbccb01ed820/raw",
+    "status": 405,
+    "ms": 74,
+    "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an all",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "method-DELETE-allow-header",
+    "method": "DELETE",
+    "url": "-",
+    "status": 405,
+    "ms": 0,
+    "bodyHead": "allow=GET",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "method-PATCH",
+    "method": "PATCH",
+    "url": "/api/rooms/commons/code/cd-fbccb01ed820/raw",
+    "status": 405,
+    "ms": 53,
+    "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an all",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "method-PATCH-allow-header",
+    "method": "PATCH",
+    "url": "-",
+    "status": 405,
+    "ms": 0,
+    "bodyHead": "allow=GET",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "trailing-slash",
+    "method": "GET",
+    "url": "/api/rooms/commons/code/cd-fbccb01ed820/raw/",
+    "status": 200,
+    "ms": 26,
+    "bodyHead": "From 1111111111111111111111111111111111111111 Mon Sep 17 00:00:00 2001\nFrom: Fuzz <fuzz@example.invalid>\nDate: Mon, 5 Oct 2026 12:00:00 +0000\nSubject: [PATCH 1/1] fuzz probe\n\n---\n hello.txt | 2 ++\n 1 file changed, 2 inse",
+    "flag": ""
+  },
+  {
+    "route": "code-drop-raw",
+    "vector": "owner-token",
+    "method": "GET",
+    "url": "/api/rooms/commons/code/cd-fbccb01ed820/raw",
+    "status": 200,
+    "ms": 22,
+    "bodyHead": "From 1111111111111111111111111111111111111111 Mon Sep 17 00:00:00 2001\nFrom: Fuzz <fuzz@example.invalid>\nDate: Mon, 5 Oct 2026 12:00:00 +0000\nSubject: [PATCH 1/1] fuzz probe\n\n---\n hello.txt | 2 ++\n 1 file changed, 2 inse",
+    "flag": ""
+  }
+]

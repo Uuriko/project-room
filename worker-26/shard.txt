@@ -1,0 +1,35 @@
+WAVE-2000 G02 WORKER 26 shard (target id 25)
+================================================
+Task shard recipe: route handlers in server/http.mjs via
+  grep -nE 'app\.(get|post|put|patch|delete|use)\(' server/http.mjs | sort
+  handlers where (index mod 50) == 25
+
+Literal result: 0 matches. server/http.mjs is raw node:http
+(createServer(async (req, res) => {...}), line ~920) with `if (url.pathname ...)`
+dispatch blocks — no express-style app.* anywhere (worker-19 verified via
+git log -S 'app.get(' the pattern never existed in this file's history).
+The partition as written is vacuous for ALL 50 workers.
+
+Resolution (matches worker-19's documented guild convention): the guild's
+committed fuzz plan fuzz/targets.mjs enumerates 50 real route targets over
+server/http.mjs, ids 1..50, runnable via fuzz/run.mjs. Worker k (1-based)
+maps to target id k-1, so WORKER 26 -> target id 25.
+
+target 25: "opportunities.json"
+  make: gp("/api/opportunities.json")  (31 cases)
+    - GET: methodMatrix(PUT/DELETE/PATCH/OPTIONS/PROPFIND/TRACE-raw), queryCases x6, get:plain
+    - POST: jsonCases x18, invalid-utf8 raw, headerCases x7, queryCases x6
+  handler: http.mjs:1820-1829
+    if (url.pathname === "/api/opportunities.json" && req.method === "GET") {
+      rate(`opportunities:${remoteAddress}`, 120);
+      return json(res, 200, buildOpportunitiesFeed(store, {
+        now: store.now(),
+        roomId: url.searchParams.get("room"),
+        limit: url.searchParams.get("limit"),
+        since: url.searchParams.get("since"),
+      }));
+    }
+    if (url.pathname === "/api/opportunities.json") reject(405, "method_not_allowed", "Method not allowed");
+
+Run:  node fuzz/run.mjs 25 25 worker-26/target-25.json   (TMPDIR=$PWD/.tmp)
+Supplemental: node worker-26/probe-params.mjs  (63 focused param/path/method cases, output in probe-params.out)

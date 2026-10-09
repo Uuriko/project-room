@@ -1,0 +1,676 @@
+{
+  "crashed": false,
+  "results": [
+    {
+      "phase": "A",
+      "name": "A1-baseline-junk",
+      "method": "POST",
+      "path": "/api/auth/recovery-codes/redeem",
+      "status": 401,
+      "expected": [
+        401,
+        422
+      ],
+      "verdict": "?",
+      "ms": 478,
+      "body": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid account session slot\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/session\"},{\"command\":\"Keep the saved credential and intended room. Verify",
+      "crashed": false
+    },
+    {
+      "phase": "A",
+      "name": "A2-malformed-json",
+      "method": "POST",
+      "path": "/api/auth/recovery-codes/redeem",
+      "status": 400,
+      "expected": [
+        400
+      ],
+      "verdict": "?",
+      "ms": 78,
+      "body": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_qbcvm7MS\",\"category\":\"input\"}",
+      "crashed": false
+    },
+    {
+      "phase": "A",
+      "name": "A3-json-array",
+      "method": "POST",
+      "path": "/api/auth/recovery-codes/redeem",
+      "status": 400,
+      "expected": [
+        400
+      ],
+      "verdict": "?",
+      "ms": 31,
+      "body": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_YYkyDggu\",\"category\":\"input\"}",
+      "crashed": false
+    },
+    {
+      "phase": "A",
+      "name": "A4-json-null",
+      "method": "POST",
+      "path": "/api/auth/recovery-codes/redeem",
+      "status": 400,
+      "expected": [
+        400
+      ],
+      "verdict": "?",
+      "ms": 13,
+      "body": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_3yVXlzDO\",\"category\":\"input\"}",
+      "crashed": false
+    },
+    {
+      "phase": "A",
+      "name": "A5-proto-pollution",
+      "method": "POST",
+      "path": "/api/auth/recovery-codes/redeem",
+      "status": 422,
+      "expected": [
+        401,
+        422
+      ],
+      "verdict": "?",
+      "ms": 13,
+      "body": "{\"error\":{\"code\":\"invalid_recovery_redeem\",\"message\":\"An email, recovery code, session token, and current session revision are required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}",
+      "crashed": false
+    },
+    {
+      "phase": "A",
+      "name": "A6-deep-nest",
+      "method": "POST",
+      "path": "/api/auth/recovery-codes/redeem",
+      "status": 422,
+      "expected": [
+        400,
+        401,
+        422
+      ],
+      "verdict": "?",
+      "ms": 5,
+      "body": "{\"error\":{\"code\":\"invalid_recovery_redeem\",\"message\":\"An email, recovery code, session token, and current session revision are required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}",
+      "crashed": false
+    },
+    {
+      "phase": "A",
+      "name": "A7-missing-fields",
+      "method": "POST",
+      "path": "/api/auth/recovery-codes/redeem",
+      "status": 422,
+      "expected": [
+        422
+      ],
+      "verdict": "?",
+      "ms": 20,
+      "body": "{\"error\":{\"code\":\"invalid_recovery_redeem\",\"message\":\"An email, recovery code, session token, and current session revision are required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}",
+      "crashed": false
+    },
+    {
+      "phase": "A",
+      "name": "A8-bad-types",
+      "method": "POST",
+      "path": "/api/auth/recovery-codes/redeem",
+      "status": 401,
+      "expected": [
+        422
+      ],
+      "verdict": "?",
+      "ms": 9,
+      "body": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid account session slot\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/session\"},{\"command\":\"Keep the saved credential and intended room. Verify",
+      "crashed": false
+    },
+    {
+      "phase": "A",
+      "name": "A9-sessionRevision-huge",
+      "method": "POST",
+      "path": "/api/auth/recovery-codes/redeem",
+      "status": 401,
+      "expected": [
+        422
+      ],
+      "verdict": "?",
+      "ms": 10,
+      "body": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid account session slot\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/session\"},{\"command\":\"Keep the saved credential and intended room. Verify",
+      "crashed": false
+    },
+    {
+      "phase": "B",
+      "name": "B1-no-origin",
+      "method": "POST",
+      "path": "/api/auth/recovery-codes/redeem",
+      "status": 403,
+      "expected": [
+        403
+      ],
+      "verdict": "?",
+      "ms": 86,
+      "body": "{\"error\":{\"code\":\"origin_denied\",\"message\":\"Origin header is required\"},\"status\":\"action_required\",\"reason\":\"origin_denied\",\"hint\":\"Send Origin: https://room.trydemigod.com. This route does not accept a missing or different Origin header.\",\"next\":[{\"command\":\"Retry with Origin: https://room.trydemigod.com. Do not omit the Origin header.\"}],\"operationId\":\"op_UIakPtdX\",\"category\":\"access\"}",
+      "crashed": false
+    },
+    {
+      "phase": "B",
+      "name": "B2-foreign-origin",
+      "method": "POST",
+      "path": "/api/auth/recovery-codes/redeem",
+      "status": 403,
+      "expected": [
+        403
+      ],
+      "verdict": "?",
+      "ms": 14,
+      "body": "{\"error\":{\"code\":\"origin_denied\",\"message\":\"Request origin is not allowed\"},\"status\":\"action_required\",\"reason\":\"origin_denied\",\"hint\":\"Use Origin: https://room.trydemigod.com or omit the Origin header.\",\"next\":[{\"command\":\"Retry with Origin: https://room.trydemigod.com or omit the Origin header\"}],\"operationId\":\"op_D8-l0Uwi\",\"category\":\"access\"}",
+      "crashed": false
+    },
+    {
+      "phase": "B",
+      "name": "B3-GET",
+      "method": "GET",
+      "path": "/api/auth/recovery-codes/redeem",
+      "status": 404,
+      "expected": [
+        404,
+        405
+      ],
+      "verdict": "?",
+      "ms": 65,
+      "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids\"},{\"tool\":\"room_check_access\"}],\"operationId\":\"op_3I44o",
+      "crashed": false
+    },
+    {
+      "phase": "B",
+      "name": "B4-PUT",
+      "method": "PUT",
+      "path": "/api/auth/recovery-codes/redeem",
+      "status": 404,
+      "expected": [
+        404,
+        405
+      ],
+      "verdict": "?",
+      "ms": 20,
+      "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids\"},{\"tool\":\"room_check_access\"}],\"operationId\":\"op_Chf0A",
+      "crashed": false
+    },
+    {
+      "phase": "B",
+      "name": "B5-null-byte-email",
+      "method": "POST",
+      "path": "/api/auth/recovery-codes/redeem",
+      "status": 401,
+      "expected": [
+        401,
+        422
+      ],
+      "verdict": "?",
+      "ms": 9,
+      "body": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid account session slot\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/session\"},{\"command\":\"Keep the saved credential and intended room. Verify",
+      "crashed": false
+    },
+    {
+      "phase": "B",
+      "name": "B6-huge-email",
+      "method": "POST",
+      "path": "/api/auth/recovery-codes/redeem",
+      "status": 401,
+      "expected": [
+        401,
+        422
+      ],
+      "verdict": "?",
+      "ms": 7,
+      "body": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid account session slot\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/session\"},{\"command\":\"Keep the saved credential and intended room. Verify",
+      "crashed": false
+    },
+    {
+      "phase": "B",
+      "name": "B7-no-content-type",
+      "method": "POST",
+      "path": "/api/auth/recovery-codes/redeem",
+      "status": 415,
+      "expected": [
+        415
+      ],
+      "verdict": "?",
+      "ms": 6,
+      "body": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_KNa7koPK\",\"category\":\"input\"}",
+      "crashed": false
+    },
+    {
+      "phase": "B",
+      "name": "B8-oversize",
+      "method": "POST",
+      "path": "/api/auth/recovery-codes/redeem",
+      "status": 413,
+      "expected": [
+        413
+      ],
+      "verdict": "?",
+      "ms": 9,
+      "body": "{\"error\":{\"code\":\"too_large\",\"message\":\"Request body is 20010 bytes; the limit is 16384 bytes\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"The request body is 20010 bytes; the limit is 16384 bytes. Send a smaller body and resend.\",\"next\":[{\"command\":\"Shrink the body under 16384 bytes — split the payload or drop fields — then resend\"}],\"operationId\":\"op_TCsJw7kc\",\"category\":\"input\"",
+      "crashed": false
+    },
+    {
+      "phase": "B",
+      "name": "B9-empty-body",
+      "method": "POST",
+      "path": "/api/auth/recovery-codes/redeem",
+      "status": "REQ-ERR",
+      "expected": [
+        400
+      ],
+      "verdict": "?",
+      "ms": 0,
+      "error": "socket hang up",
+      "crashed": false
+    },
+    {
+      "phase": "C",
+      "name": "C1-baseline",
+      "method": "POST",
+      "path": "/api/access-requests",
+      "status": 422,
+      "expected": [
+        201,
+        400,
+        404,
+        422
+      ],
+      "verdict": "?",
+      "ms": 62,
+      "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"requestedPermissions must be room permissions (valid: steer, decide, manage_members, manage_claims, accept_work, complete_work, verify, write_external, invite_member)\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":",
+      "crashed": false
+    },
+    {
+      "phase": "C",
+      "name": "C2-malformed-json",
+      "method": "POST",
+      "path": "/api/access-requests",
+      "status": 400,
+      "expected": [
+        400
+      ],
+      "verdict": "?",
+      "ms": 21,
+      "body": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_0-CtQABo\",\"category\":\"input\"}",
+      "crashed": false
+    },
+    {
+      "phase": "C",
+      "name": "C3-empty-body",
+      "method": "POST",
+      "path": "/api/access-requests",
+      "status": 400,
+      "expected": [
+        400
+      ],
+      "verdict": "?",
+      "ms": 23,
+      "body": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_IrV1QFgt\",\"category\":\"input\"}",
+      "crashed": false
+    },
+    {
+      "phase": "C",
+      "name": "C4-missing-required",
+      "method": "POST",
+      "path": "/api/access-requests",
+      "status": 422,
+      "expected": [
+        422
+      ],
+      "verdict": "?",
+      "ms": 15,
+      "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"Invalid access request (missing required fields: roomId, identityId, displayName, requestedPermissions). Send {roomId, identityId, displayName, requestedPermissions} with optional {note, referredBy, requestId}; requestId is your idempotency key — reuse it when retrying.\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused field",
+      "crashed": false
+    },
+    {
+      "phase": "C",
+      "name": "C5-extra-field",
+      "method": "POST",
+      "path": "/api/access-requests",
+      "status": 422,
+      "expected": [
+        422
+      ],
+      "verdict": "?",
+      "ms": 34,
+      "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"Invalid access request (unexpected field: admin). Send {roomId, identityId, displayName, requestedPermissions} with optional {note, referredBy, requestId}; requestId is your idempotency key — reuse it when retrying.\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any ",
+      "crashed": false
+    },
+    {
+      "phase": "C",
+      "name": "C6-null-note",
+      "method": "POST",
+      "path": "/api/access-requests",
+      "status": 404,
+      "expected": [
+        201,
+        400,
+        404,
+        422
+      ],
+      "verdict": "?",
+      "ms": 29,
+      "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"No such room or identity\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"No such room or identity. If you have not minted an agent identity, POST /api/agent-identities (no credential needed), save its secret privately, then retry this access request with the returned identityId. Otherwise check the roomId with its owner.\",\"next\":[{\"path\":\"/api/agen",
+      "crashed": false
+    },
+    {
+      "phase": "C",
+      "name": "C7-bad-types",
+      "method": "POST",
+      "path": "/api/access-requests",
+      "status": 422,
+      "expected": [
+        422
+      ],
+      "verdict": "?",
+      "ms": 15,
+      "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"Invalid access request (roomId: wrong type; requestedPermissions: wrong type). Send {roomId, identityId, displayName, requestedPermissions} with optional {note, referredBy, requestId}; requestId is your idempotency key — reuse it when retrying.\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's me",
+      "crashed": false
+    },
+    {
+      "phase": "C",
+      "name": "C8-large-permissions",
+      "method": "POST",
+      "path": "/api/access-requests",
+      "status": 422,
+      "expected": [
+        201,
+        400,
+        404,
+        422
+      ],
+      "verdict": "?",
+      "ms": 83,
+      "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"requestedPermissions must be room permissions (valid: steer, decide, manage_members, manage_claims, accept_work, complete_work, verify, write_external, invite_member)\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":",
+      "crashed": false
+    },
+    {
+      "phase": "C",
+      "name": "C9-proto-pollution",
+      "method": "POST",
+      "path": "/api/access-requests",
+      "status": 422,
+      "expected": [
+        201,
+        400,
+        404,
+        422
+      ],
+      "verdict": "?",
+      "ms": 45,
+      "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"Invalid access request (unexpected field: __proto__). Send {roomId, identityId, displayName, requestedPermissions} with optional {note, referredBy, requestId}; requestId is your idempotency key — reuse it when retrying.\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep ",
+      "crashed": false
+    },
+    {
+      "phase": "C",
+      "name": "C10-deep-nested-perms",
+      "method": "POST",
+      "path": "/api/access-requests",
+      "status": 422,
+      "expected": [
+        201,
+        400,
+        404,
+        422
+      ],
+      "verdict": "?",
+      "ms": 47,
+      "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"Invalid access request (requestedPermissions: wrong type). Send {roomId, identityId, displayName, requestedPermissions} with optional {note, referredBy, requestId}; requestId is your idempotency key — reuse it when retrying.\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. ",
+      "crashed": false
+    },
+    {
+      "phase": "C",
+      "name": "C11-duplicate-requestId-1",
+      "method": "POST",
+      "path": "/api/access-requests",
+      "status": 404,
+      "expected": [
+        201,
+        400,
+        404,
+        422
+      ],
+      "verdict": "?",
+      "ms": 33,
+      "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"No such room or identity\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"No such room or identity. If you have not minted an agent identity, POST /api/agent-identities (no credential needed), save its secret privately, then retry this access request with the returned identityId. Otherwise check the roomId with its owner.\",\"next\":[{\"path\":\"/api/agen",
+      "crashed": false
+    },
+    {
+      "phase": "C",
+      "name": "C12-duplicate-requestId-2",
+      "method": "POST",
+      "path": "/api/access-requests",
+      "status": 404,
+      "expected": [
+        201,
+        400,
+        404,
+        422
+      ],
+      "verdict": "?",
+      "ms": 28,
+      "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"No such room or identity\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"No such room or identity. If you have not minted an agent identity, POST /api/agent-identities (no credential needed), save its secret privately, then retry this access request with the returned identityId. Otherwise check the roomId with its owner.\",\"next\":[{\"path\":\"/api/agen",
+      "crashed": false
+    },
+    {
+      "phase": "C",
+      "name": "C13-null-byte-roomId",
+      "method": "POST",
+      "path": "/api/access-requests",
+      "status": 404,
+      "expected": [
+        201,
+        400,
+        404,
+        422
+      ],
+      "verdict": "?",
+      "ms": 17,
+      "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"No such room or identity\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"No such room or identity. If you have not minted an agent identity, POST /api/agent-identities (no credential needed), save its secret privately, then retry this access request with the returned identityId. Otherwise check the roomId with its owner.\",\"next\":[{\"path\":\"/api/agen",
+      "crashed": false
+    },
+    {
+      "phase": "C",
+      "name": "C14-text-plain",
+      "method": "POST",
+      "path": "/api/access-requests",
+      "status": 415,
+      "expected": [
+        415
+      ],
+      "verdict": "?",
+      "ms": 30,
+      "body": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_02a6MM0_\",\"category\":\"input\"}",
+      "crashed": false
+    },
+    {
+      "phase": "C",
+      "name": "C15-bad-auth-header",
+      "method": "POST",
+      "path": "/api/access-requests",
+      "status": 401,
+      "expected": [
+        401,
+        422
+      ],
+      "verdict": "?",
+      "ms": 11,
+      "body": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/session\"},{\"command\":\"Keep the saved credential and intended room. Verify",
+      "crashed": false
+    },
+    {
+      "phase": "D",
+      "name": "D1-GET",
+      "method": "GET",
+      "path": "/api/access-requests",
+      "status": 405,
+      "expected": [
+        405
+      ],
+      "verdict": "?",
+      "ms": 19,
+      "body": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an allowed method (Allow header or route docs); do not retry the same method.\",\"next\":[{\"command\":\"Read the 405 response's Allow header when present — otherwise the route docs — for the ",
+      "crashed": false
+    },
+    {
+      "phase": "D",
+      "name": "D2-PUT",
+      "method": "PUT",
+      "path": "/api/access-requests",
+      "status": 405,
+      "expected": [
+        405
+      ],
+      "verdict": "?",
+      "ms": 23,
+      "body": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an allowed method (Allow header or route docs); do not retry the same method.\",\"next\":[{\"command\":\"Read the 405 response's Allow header when present — otherwise the route docs — for the ",
+      "crashed": false
+    },
+    {
+      "phase": "D",
+      "name": "D3-DELETE",
+      "method": "DELETE",
+      "path": "/api/access-requests",
+      "status": 405,
+      "expected": [
+        405
+      ],
+      "verdict": "?",
+      "ms": 35,
+      "body": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an allowed method (Allow header or route docs); do not retry the same method.\",\"next\":[{\"command\":\"Read the 405 response's Allow header when present — otherwise the route docs — for the ",
+      "crashed": false
+    },
+    {
+      "phase": "D",
+      "name": "D4-OPTIONS",
+      "method": "OPTIONS",
+      "path": "/api/access-requests",
+      "status": 405,
+      "expected": [
+        405
+      ],
+      "verdict": "?",
+      "ms": 14,
+      "body": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an allowed method (Allow header or route docs); do not retry the same method.\",\"next\":[{\"command\":\"Read the 405 response's Allow header when present — otherwise the route docs — for the ",
+      "crashed": false
+    },
+    {
+      "phase": "D",
+      "name": "D5-HEAD",
+      "method": "HEAD",
+      "path": "/api/access-requests",
+      "status": 405,
+      "expected": [
+        405
+      ],
+      "verdict": "?",
+      "ms": 7,
+      "body": "",
+      "crashed": false
+    },
+    {
+      "phase": "D",
+      "name": "D6-PATCH",
+      "method": "PATCH",
+      "path": "/api/access-requests",
+      "status": 405,
+      "expected": [
+        405
+      ],
+      "verdict": "?",
+      "ms": 19,
+      "body": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an allowed method (Allow header or route docs); do not retry the same method.\",\"next\":[{\"command\":\"Read the 405 response's Allow header when present — otherwise the route docs — for the ",
+      "crashed": false
+    },
+    {
+      "phase": "D",
+      "name": "D7-trailing-slash-POST",
+      "method": "POST",
+      "path": "/api/access-requests/",
+      "status": 422,
+      "expected": [
+        201,
+        400,
+        404,
+        422
+      ],
+      "verdict": "?",
+      "ms": 43,
+      "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"requestedPermissions must be room permissions (valid: steer, decide, manage_members, manage_claims, accept_work, complete_work, verify, write_external, invite_member)\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":",
+      "crashed": false
+    },
+    {
+      "phase": "D",
+      "name": "D8-double-slash",
+      "method": "GET",
+      "path": "/api//access-requests",
+      "status": 404,
+      "expected": [
+        400,
+        404,
+        405
+      ],
+      "verdict": "?",
+      "ms": 29,
+      "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids\"},{\"tool\":\"room_check_access\"}],\"operationId\":\"op_J4cMm",
+      "crashed": false
+    },
+    {
+      "phase": "D",
+      "name": "D9-query-junk",
+      "method": "POST",
+      "path": "/api/access-requests?x=%00&y[]=%zz",
+      "status": 422,
+      "expected": [
+        201,
+        400,
+        404,
+        422
+      ],
+      "verdict": "?",
+      "ms": 30,
+      "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"requestedPermissions must be room permissions (valid: steer, decide, manage_members, manage_claims, accept_work, complete_work, verify, write_external, invite_member)\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":",
+      "crashed": false
+    },
+    {
+      "phase": "D",
+      "name": "D10-oversize",
+      "method": "POST",
+      "path": "/api/access-requests",
+      "status": 413,
+      "expected": [
+        413
+      ],
+      "verdict": "?",
+      "ms": 30,
+      "body": "{\"error\":{\"code\":\"too_large\",\"message\":\"Request body is 20010 bytes; the limit is 16384 bytes\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"The request body is 20010 bytes; the limit is 16384 bytes. Send a smaller body and resend.\",\"next\":[{\"command\":\"Shrink the body under 16384 bytes — split the payload or drop fields — then resend\"}],\"operationId\":\"op_En9l9Pxd\",\"category\":\"input\"",
+      "crashed": false
+    },
+    {
+      "phase": "D",
+      "name": "D11-xff-spoof",
+      "method": "GET",
+      "path": "/api/access-requests",
+      "status": "REQ-ERR",
+      "expected": [
+        405
+      ],
+      "verdict": "?",
+      "ms": 0,
+      "error": "socket hang up",
+      "crashed": false
+    },
+    {
+      "phase": "D",
+      "name": "D12-host-mismatch",
+      "method": "GET",
+      "path": "/api/access-requests",
+      "status": 403,
+      "expected": [
+        403
+      ],
+      "verdict": "?",
+      "ms": 75,
+      "body": "{\"error\":{\"code\":\"host_denied\",\"message\":\"Unexpected host\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this identity can do, then ask the owner for the missing permission.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/session\"},{\"command\":\"Ask the owner to mint a guest invite or Add agent\"}],\"operationId\":\"op_",
+      "crashed": false
+    }
+  ]
+}

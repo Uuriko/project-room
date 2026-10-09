@@ -1,0 +1,2 @@
+    28	2054:      if (url.pathname === "/api/account-rooms" && req.method === "POST") {
+    78	3032:      if (url.pathname === "/api/referral-invites/preview" && req.method !== "POST") {

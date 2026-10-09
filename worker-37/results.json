@@ -1,0 +1,556 @@
+{
+  "results": [
+    {
+      "name": "A01 GET /favicon.ico -> 301 /favicon.svg",
+      "path": "/favicon.ico",
+      "status": 301,
+      "ms": 212,
+      "loc": "/favicon.svg",
+      "body": "",
+      "expect": "custom"
+    },
+    {
+      "name": "A02 GET /room/favicon.ico -> 301 /room/favicon.svg",
+      "path": "/room/favicon.ico",
+      "status": 301,
+      "ms": 43,
+      "loc": "/room/favicon.svg",
+      "body": "",
+      "expect": "custom"
+    },
+    {
+      "name": "A03 HEAD /favicon.ico -> 301 empty",
+      "method": "HEAD",
+      "path": "/favicon.ico",
+      "status": 301,
+      "ms": 16,
+      "loc": "/favicon.svg",
+      "body": "",
+      "expect": "custom"
+    },
+    {
+      "name": "A04 POST /favicon.ico (fallthrough, observe)",
+      "method": "POST",
+      "path": "/favicon.ico",
+      "status": 404,
+      "ms": 95,
+      "loc": null,
+      "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids\"},{\"tool\":\"room_check_access\"}],\"operationId\":\"op_zNztj",
+      "expect": "none"
+    },
+    {
+      "name": "A05 PUT /favicon.ico (fallthrough, observe)",
+      "method": "PUT",
+      "path": "/favicon.ico",
+      "status": 404,
+      "ms": 75,
+      "loc": null,
+      "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids\"},{\"tool\":\"room_check_access\"}],\"operationId\":\"op_sFN6s",
+      "expect": "none"
+    },
+    {
+      "name": "A06 DELETE /room/favicon.ico (fallthrough, observe)",
+      "method": "DELETE",
+      "path": "/room/favicon.ico",
+      "status": 404,
+      "ms": 19,
+      "loc": null,
+      "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids\"},{\"tool\":\"room_check_access\"}],\"operationId\":\"op_SyOCC",
+      "expect": "none"
+    },
+    {
+      "name": "A07 OPTIONS /favicon.ico (observe)",
+      "method": "OPTIONS",
+      "path": "/favicon.ico",
+      "status": 404,
+      "ms": 22,
+      "loc": null,
+      "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids\"},{\"tool\":\"room_check_access\"}],\"operationId\":\"op_ZAKmI",
+      "expect": "none"
+    },
+    {
+      "name": "A08 GET /FAVICON.ICO (case, observe)",
+      "path": "/FAVICON.ICO",
+      "status": 404,
+      "ms": 46,
+      "loc": null,
+      "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids\"},{\"tool\":\"room_check_access\"}],\"operationId\":\"op_gzQEl",
+      "expect": "none"
+    },
+    {
+      "name": "A09 GET /favicon.ico/ (trailing slash, observe)",
+      "path": "/favicon.ico/",
+      "status": 301,
+      "ms": 31,
+      "loc": "/favicon.svg",
+      "body": "",
+      "expect": "none"
+    },
+    {
+      "name": "A10 GET //favicon.ico (double slash, observe)",
+      "path": "//favicon.ico",
+      "status": 200,
+      "ms": 74,
+      "loc": null,
+      "body": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, interactive-widget=resizes-content\">\n    <meta name=\"description\" content=\"Project Room: an open shared space where people and AI agents hang out, talk, and do accountable work together.\">\n    <link rel=\"canonical\" href=\"https://room.trydemigod.com/\">\n    <me",
+      "expect": "none"
+    },
+    {
+      "name": "A11 GET /favicon.ico?x=100k (query echo in Location)",
+      "path": "/favicon.ico?x=qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq",
+      "status": "ERR:read ECONNRESET",
+      "ms": 23,
+      "loc": null,
+      "body": "",
+      "expect": "custom"
+    },
+    {
+      "name": "A12 GET /%66avicon.ico (encoded f, observe)",
+      "path": "/%66avicon.ico",
+      "status": 404,
+      "ms": 49,
+      "loc": null,
+      "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids\"},{\"tool\":\"room_check_access\"}],\"operationId\":\"op_EQW5U",
+      "expect": "none"
+    },
+    {
+      "name": "A13 GET /favicon.ico%00 (encoded null, observe)",
+      "path": "/favicon.ico%00",
+      "status": 404,
+      "ms": 32,
+      "loc": null,
+      "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids\"},{\"tool\":\"room_check_access\"}],\"operationId\":\"op_iW0Y1",
+      "expect": "none"
+    },
+    {
+      "name": "A14 GET /favicon.ico + 8000 chars (long path)",
+      "path": "/favicon.icoaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "status": 404,
+      "ms": 41,
+      "loc": null,
+      "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids\"},{\"tool\":\"room_check_access\"}],\"operationId\":\"op_Ejb1a",
+      "expect": "none"
+    },
+    {
+      "name": "A15 GET /room/room/favicon.ico (nested, observe)",
+      "path": "/room/room/favicon.ico",
+      "status": 404,
+      "ms": 15,
+      "loc": null,
+      "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids\"},{\"tool\":\"room_check_access\"}],\"operationId\":\"op_PiWG9",
+      "expect": "none"
+    },
+    {
+      "name": "A16 GET /ROOM/favicon.ico (case room, observe)",
+      "path": "/ROOM/favicon.ico",
+      "status": 404,
+      "ms": 15,
+      "loc": null,
+      "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids\"},{\"tool\":\"room_check_access\"}],\"operationId\":\"op_WjLn4",
+      "expect": "none"
+    },
+    {
+      "name": "A17 GET /favicon.svg (redirect target itself)",
+      "path": "/favicon.svg",
+      "status": 200,
+      "ms": 25,
+      "loc": null,
+      "body": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\" role=\"img\" aria-label=\"Project Room\">\n  <rect width=\"32\" height=\"32\" rx=\"6\" fill=\"#5555bd\"/>\n  <text x=\"16\" y=\"21\" text-anchor=\"middle\" fill=\"#ffffff\" font-family=\"Inter, ui-sans-serif, system-ui, sans-serif\" font-size=\"12\" font-weight=\"700\">PR</text>\n</svg>\n",
+      "expect": "none"
+    },
+    {
+      "name": "A18 GET /favicon.ico?x=%00%ff (weird query)",
+      "path": "/favicon.ico?x=%00%ff",
+      "status": 301,
+      "ms": 8,
+      "loc": "/favicon.svg",
+      "body": "",
+      "expect": "custom"
+    },
+    {
+      "name": "B01 GET -> 405 Allow: POST",
+      "method": "GET",
+      "path": "/api/claims/validate",
+      "status": 405,
+      "ms": 18,
+      "loc": null,
+      "body": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an allowed method (Allow header or route docs); do not retry the same method.\",\"next\":[{\"command\":\"Read the 405 response's Allow header when present — otherwise the route docs — for the ",
+      "expect": "custom"
+    },
+    {
+      "name": "B02 PUT -> 405",
+      "method": "PUT",
+      "path": "/api/claims/validate",
+      "status": 405,
+      "ms": 32,
+      "loc": null,
+      "body": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an allowed method (Allow header or route docs); do not retry the same method.\",\"next\":[{\"command\":\"Read the 405 response's Allow header when present — otherwise the route docs — for the ",
+      "expect": "custom"
+    },
+    {
+      "name": "B03 DELETE -> 405",
+      "method": "DELETE",
+      "path": "/api/claims/validate",
+      "status": 405,
+      "ms": 17,
+      "loc": null,
+      "body": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an allowed method (Allow header or route docs); do not retry the same method.\",\"next\":[{\"command\":\"Read the 405 response's Allow header when present — otherwise the route docs — for the ",
+      "expect": "custom"
+    },
+    {
+      "name": "B04 PATCH -> 405",
+      "method": "PATCH",
+      "path": "/api/claims/validate",
+      "status": 405,
+      "ms": 60,
+      "loc": null,
+      "body": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an allowed method (Allow header or route docs); do not retry the same method.\",\"next\":[{\"command\":\"Read the 405 response's Allow header when present — otherwise the route docs — for the ",
+      "expect": "custom"
+    },
+    {
+      "name": "B05 OPTIONS -> 405",
+      "method": "OPTIONS",
+      "path": "/api/claims/validate",
+      "status": 405,
+      "ms": 45,
+      "loc": null,
+      "body": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an allowed method (Allow header or route docs); do not retry the same method.\",\"next\":[{\"command\":\"Read the 405 response's Allow header when present — otherwise the route docs — for the ",
+      "expect": "custom"
+    },
+    {
+      "name": "B06 HEAD -> 405",
+      "method": "HEAD",
+      "path": "/api/claims/validate",
+      "status": 405,
+      "ms": 40,
+      "loc": null,
+      "body": "",
+      "expect": "custom"
+    },
+    {
+      "name": "B07 POST no content-type -> 415",
+      "method": "POST",
+      "path": "/api/claims/validate",
+      "status": 415,
+      "ms": 41,
+      "loc": null,
+      "body": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_APaB034l\",\"category\":\"input\"}",
+      "expect": "custom"
+    },
+    {
+      "name": "B08 POST text/plain -> 415",
+      "method": "POST",
+      "path": "/api/claims/validate",
+      "status": 415,
+      "ms": 30,
+      "loc": null,
+      "body": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_78VvOHFt\",\"category\":\"input\"}",
+      "expect": "custom"
+    },
+    {
+      "name": "B09 POST empty body + json ct -> 400 invalid_json",
+      "method": "POST",
+      "path": "/api/claims/validate",
+      "status": 400,
+      "ms": 64,
+      "loc": null,
+      "body": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_DkxJZAav\",\"category\":\"input\"}",
+      "expect": "custom"
+    },
+    {
+      "name": "B10 POST {} -> 422 invalid_claim_text",
+      "method": "POST",
+      "path": "/api/claims/validate",
+      "status": 422,
+      "ms": 100,
+      "loc": null,
+      "body": "{\"error\":{\"code\":\"invalid_claim_text\",\"message\":\"A claim text string is required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_sd9iVrZX\",\"category\":\"input\"}",
+      "expect": "custom"
+    },
+    {
+      "name": "B11 POST {text:123} -> 422",
+      "method": "POST",
+      "path": "/api/claims/validate",
+      "status": 422,
+      "ms": 34,
+      "loc": null,
+      "body": "{\"error\":{\"code\":\"invalid_claim_text\",\"message\":\"A claim text string is required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_09hvSkC9\",\"category\":\"input\"}",
+      "expect": "custom"
+    },
+    {
+      "name": "B12 POST {text:null} -> 422",
+      "method": "POST",
+      "path": "/api/claims/validate",
+      "status": 422,
+      "ms": 29,
+      "loc": null,
+      "body": "{\"error\":{\"code\":\"invalid_claim_text\",\"message\":\"A claim text string is required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_oYVeLrtO\",\"category\":\"input\"}",
+      "expect": "custom"
+    },
+    {
+      "name": "B13 POST {text:'ok',extra:1} -> 422 (strict fields)",
+      "method": "POST",
+      "path": "/api/claims/validate",
+      "status": 422,
+      "ms": 29,
+      "loc": null,
+      "body": "{\"error\":{\"code\":\"invalid_claim_text\",\"message\":\"A claim text string is required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_kkUpwooE\",\"category\":\"input\"}",
+      "expect": "custom"
+    },
+    {
+      "name": "B14 POST [] -> 400 invalid_json",
+      "method": "POST",
+      "path": "/api/claims/validate",
+      "status": 400,
+      "ms": 10,
+      "loc": null,
+      "body": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_OX2WOS3k\",\"category\":\"input\"}",
+      "expect": "custom"
+    },
+    {
+      "name": "B15 POST 'str' -> 400",
+      "method": "POST",
+      "path": "/api/claims/validate",
+      "status": 400,
+      "ms": 17,
+      "loc": null,
+      "body": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_MeI6vB0W\",\"category\":\"input\"}",
+      "expect": "custom"
+    },
+    {
+      "name": "B16 POST null -> 400",
+      "method": "POST",
+      "path": "/api/claims/validate",
+      "status": 400,
+      "ms": 39,
+      "loc": null,
+      "body": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_f5TF0yso\",\"category\":\"input\"}",
+      "expect": "custom"
+    },
+    {
+      "name": "B17 POST malformed JSON -> 400",
+      "method": "POST",
+      "path": "/api/claims/validate",
+      "status": 400,
+      "ms": 35,
+      "loc": null,
+      "body": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_UqqW7zGM\",\"category\":\"input\"}",
+      "expect": "custom"
+    },
+    {
+      "name": "B18 POST valid claim -> 200 valid:true",
+      "method": "POST",
+      "path": "/api/claims/validate",
+      "status": 200,
+      "ms": 33,
+      "loc": null,
+      "body": "{\"valid\":true,\"taskId\":\"RC-2026-10-09-001\",\"fields\":{\"task-id\":\"RC-2026-10-09-001\",\"lane\":\"fuzz\",\"files\":\"server/http.mjs\",\"lease\":\"lease=2h\",\"state\":\"working\",\"reason\":\"fuzzing\"}}",
+      "expect": "custom"
+    },
+    {
+      "name": "B19 POST claim missing fields -> 200 valid:false + errors",
+      "method": "POST",
+      "path": "/api/claims/validate",
+      "status": 200,
+      "ms": 19,
+      "loc": null,
+      "body": "{\"valid\":false,\"taskId\":\"RC-2026-10-09-002\",\"fields\":{\"task-id\":\"RC-2026-10-09-002\"},\"errors\":[\"missing lane\",\"missing files\",\"missing lease\",\"missing state\",\"missing reason\"]}",
+      "expect": "custom"
+    },
+    {
+      "name": "B20 POST no fence block -> 200 valid:false",
+      "method": "POST",
+      "path": "/api/claims/validate",
+      "status": 200,
+      "ms": 33,
+      "loc": null,
+      "body": "{\"valid\":false,\"taskId\":null,\"fields\":{},\"errors\":[\"no room-claim fenced block found\"]}",
+      "expect": "custom"
+    },
+    {
+      "name": "B21 POST text exactly MAX chars -> 200 (length ok)",
+      "method": "POST",
+      "path": "/api/claims/validate",
+      "status": 200,
+      "ms": 23,
+      "loc": null,
+      "body": "{\"valid\":false,\"taskId\":null,\"fields\":{},\"errors\":[\"no room-claim fenced block found\"]}",
+      "expect": "custom"
+    },
+    {
+      "name": "B22 POST text MAX+1 chars -> 422 text_too_long",
+      "method": "POST",
+      "path": "/api/claims/validate",
+      "status": 422,
+      "ms": 36,
+      "loc": null,
+      "body": "{\"error\":{\"code\":\"text_too_long\",\"message\":\"Claim text must be at most 65536 characters\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_2YH3-fV0\",\"category\":\"input\"",
+      "expect": "custom"
+    },
+    {
+      "name": "B23 POST body ~LIMIT-100 bytes -> 200",
+      "method": "POST",
+      "path": "/api/claims/validate",
+      "status": 422,
+      "ms": 30,
+      "loc": null,
+      "body": "{\"error\":{\"code\":\"text_too_long\",\"message\":\"Claim text must be at most 65536 characters\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_4l9surjn\",\"category\":\"input\"",
+      "expect": "custom"
+    },
+    {
+      "name": "B24 POST body LIMIT+1000 bytes -> 413 too_large",
+      "method": "POST",
+      "path": "/api/claims/validate",
+      "status": 413,
+      "ms": 39,
+      "loc": null,
+      "body": "{\"error\":{\"code\":\"too_large\",\"message\":\"Request body is 74739 bytes; the limit is 73728 bytes\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"The request body is 74739 bytes; the limit is 73728 bytes. Send a smaller body and resend.\",\"next\":[{\"command\":\"Shrink the body under 73728 bytes — split the payload or drop fields — then resend\"}],\"operationId\":\"op_7b1wyuKx\",\"category\":\"input\"",
+      "expect": "custom"
+    },
+    {
+      "name": "B25 POST nested text {text:{a:1}} -> 422",
+      "method": "POST",
+      "path": "/api/claims/validate",
+      "status": "ERR:socket hang up",
+      "ms": 1,
+      "loc": null,
+      "body": "",
+      "expect": "custom"
+    },
+    {
+      "name": "B26 POST charset param ct -> accepted",
+      "method": "POST",
+      "path": "/api/claims/validate",
+      "status": 200,
+      "ms": 58,
+      "loc": null,
+      "body": "{\"valid\":true,\"taskId\":\"RC-2026-10-09-001\",\"fields\":{\"task-id\":\"RC-2026-10-09-001\",\"lane\":\"fuzz\",\"files\":\"server/http.mjs\",\"lease\":\"lease=2h\",\"state\":\"working\",\"reason\":\"fuzzing\"}}",
+      "expect": "custom"
+    },
+    {
+      "name": "B27 POST ct case-insensitive -> accepted",
+      "method": "POST",
+      "path": "/api/claims/validate",
+      "status": 200,
+      "ms": 16,
+      "loc": null,
+      "body": "{\"valid\":true,\"taskId\":\"RC-2026-10-09-001\",\"fields\":{\"task-id\":\"RC-2026-10-09-001\",\"lane\":\"fuzz\",\"files\":\"server/http.mjs\",\"lease\":\"lease=2h\",\"state\":\"working\",\"reason\":\"fuzzing\"}}",
+      "expect": "custom"
+    },
+    {
+      "name": "B28 POST text with null byte -> 200 (observe)",
+      "method": "POST",
+      "path": "/api/claims/validate",
+      "status": 200,
+      "ms": 16,
+      "loc": null,
+      "body": "{\"valid\":false,\"taskId\":null,\"fields\":{},\"errors\":[\"no room-claim fenced block found\"]}",
+      "expect": "none"
+    },
+    {
+      "name": "B29 POST text with unpaired surrogate -> (observe)",
+      "method": "POST",
+      "path": "/api/claims/validate",
+      "status": 200,
+      "ms": 47,
+      "loc": null,
+      "body": "{\"valid\":false,\"taskId\":null,\"fields\":{},\"errors\":[\"no room-claim fenced block found\"]}",
+      "expect": "none"
+    },
+    {
+      "name": "B30 POST text with astral chars -> (observe)",
+      "method": "POST",
+      "path": "/api/claims/validate",
+      "status": 200,
+      "ms": 4,
+      "loc": null,
+      "body": "{\"valid\":false,\"taskId\":null,\"fields\":{},\"errors\":[\"no room-claim fenced block found\"]}",
+      "expect": "none"
+    },
+    {
+      "name": "B31 POST 100 nested fences -> (observe perf)",
+      "method": "POST",
+      "path": "/api/claims/validate",
+      "status": 200,
+      "ms": 34,
+      "loc": null,
+      "body": "{\"valid\":false,\"taskId\":null,\"fields\":{\"k\":\"v\"},\"errors\":[\"missing task-id\",\"missing lane\",\"missing files\",\"missing lease\",\"missing state\",\"missing reason\"]}",
+      "expect": "none"
+    },
+    {
+      "name": "B32 POST bare failed state -> 'failed requires a failure code'",
+      "method": "POST",
+      "path": "/api/claims/validate",
+      "status": 200,
+      "ms": 22,
+      "loc": null,
+      "body": "{\"valid\":false,\"taskId\":\"RC-2026-10-09-001\",\"fields\":{\"task-id\":\"RC-2026-10-09-001\",\"lane\":\"fuzz\",\"files\":\"server/http.mjs\",\"lease\":\"lease=2h\",\"state\":\"failed\",\"reason\":\"fuzzing\"},\"errors\":[\"failed requires a failure code\"]}",
+      "expect": "custom"
+    },
+    {
+      "name": "B33 POST failed(code) state -> valid",
+      "method": "POST",
+      "path": "/api/claims/validate",
+      "status": 200,
+      "ms": 21,
+      "loc": null,
+      "body": "{\"valid\":true,\"taskId\":\"RC-2026-10-09-001\",\"fields\":{\"task-id\":\"RC-2026-10-09-001\",\"lane\":\"fuzz\",\"files\":\"server/http.mjs\",\"lease\":\"lease=2h\",\"state\":\"failed(OOM)\",\"reason\":\"fuzzing\"}}",
+      "expect": "custom"
+    },
+    {
+      "name": "B34 POST lease=0h -> out of range",
+      "method": "POST",
+      "path": "/api/claims/validate",
+      "status": 200,
+      "ms": 19,
+      "loc": null,
+      "body": "{\"valid\":false,\"taskId\":\"RC-2026-10-09-001\",\"fields\":{\"task-id\":\"RC-2026-10-09-001\",\"lane\":\"fuzz\",\"files\":\"server/http.mjs\",\"lease\":\"lease=0h\",\"state\":\"working\",\"reason\":\"fuzzing\"},\"errors\":[\"lease out of range 1-72h\"]}",
+      "expect": "custom"
+    },
+    {
+      "name": "B35 POST chunked body -> (observe)",
+      "method": "POST",
+      "path": "/api/claims/validate",
+      "status": 200,
+      "ms": 24,
+      "loc": null,
+      "body": "{\"valid\":true,\"taskId\":\"RC-2026-10-09-001\",\"fields\":{\"task-id\":\"RC-2026-10-09-001\",\"lane\":\"fuzz\",\"files\":\"server/http.mjs\",\"lease\":\"lease=2h\",\"state\":\"working\",\"reason\":\"fuzzing\"}}",
+      "expect": "custom"
+    },
+    {
+      "name": "B36 rate-limit burst: 429 observed",
+      "status": 429
+    }
+  ],
+  "anomalies": [
+    {
+      "name": "A11 GET /favicon.ico?x=100k (query echo in Location)",
+      "status": "ERR:read ECONNRESET",
+      "ms": 23,
+      "body": "",
+      "opts": {
+        "path": "/favicon.ico?x=qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"
+      }
+    },
+    {
+      "name": "B23 POST body ~LIMIT-100 bytes -> 200",
+      "status": 422,
+      "ms": 30,
+      "body": "{\"error\":{\"code\":\"text_too_long\",\"message\":\"Claim text must be at most 65536 characters\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_4l9surjn\",\"category\":\"input\"",
+      "opts": {
+        "method": "POST",
+        "path": "/api/claims/validate"
+      }
+    },
+    {
+      "name": "B25 POST nested text {text:{a:1}} -> 422",
+      "status": "ERR:socket hang up",
+      "ms": 1,
+      "body": "",
+      "opts": {
+        "method": "POST",
+        "path": "/api/claims/validate"
+      }
+    }
+  ]
+}

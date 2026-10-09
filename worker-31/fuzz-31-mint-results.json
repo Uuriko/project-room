@@ -1,0 +1,122 @@
+[
+ {
+  "nm": "ok-min",
+  "status": 401,
+  "ms": 316,
+  "head": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Session or key expired or revoked\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/"
+ },
+ {
+  "nm": "ok-cap",
+  "status": 401,
+  "ms": 22,
+  "head": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Session or key expired or revoked\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/"
+ },
+ {
+  "nm": "missing-roomId",
+  "status": 422,
+  "ms": 11,
+  "head": "{\"error\":{\"code\":\"invalid_invite\",\"message\":\"roomId, optional numeric maxDepth and optional requestId are the accepted fields\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\""
+ },
+ {
+  "nm": "roomId-num",
+  "status": 422,
+  "ms": 15,
+  "head": "{\"error\":{\"code\":\"invalid_invite\",\"message\":\"roomId, optional numeric maxDepth and optional requestId are the accepted fields\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\""
+ },
+ {
+  "nm": "roomId-null",
+  "status": 422,
+  "ms": 61,
+  "head": "{\"error\":{\"code\":\"invalid_invite\",\"message\":\"roomId, optional numeric maxDepth and optional requestId are the accepted fields\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\""
+ },
+ {
+  "nm": "extra-key",
+  "status": 422,
+  "ms": 17,
+  "head": "{\"error\":{\"code\":\"invalid_invite\",\"message\":\"roomId, optional numeric maxDepth and optional requestId are the accepted fields\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\""
+ },
+ {
+  "nm": "maxDepth-str",
+  "status": 422,
+  "ms": 69,
+  "head": "{\"error\":{\"code\":\"invalid_invite\",\"message\":\"roomId, optional numeric maxDepth and optional requestId are the accepted fields\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\""
+ },
+ {
+  "nm": "maxDepth-neg",
+  "status": 401,
+  "ms": 20,
+  "head": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Session or key expired or revoked\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/"
+ },
+ {
+  "nm": "maxDepth-float",
+  "status": 401,
+  "ms": 17,
+  "head": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Session or key expired or revoked\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/"
+ },
+ {
+  "nm": "maxDepth-huge",
+  "status": 401,
+  "ms": 78,
+  "head": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Session or key expired or revoked\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/"
+ },
+ {
+  "nm": "maxDepth-bool",
+  "status": 422,
+  "ms": 30,
+  "head": "{\"error\":{\"code\":\"invalid_invite\",\"message\":\"roomId, optional numeric maxDepth and optional requestId are the accepted fields\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\""
+ },
+ {
+  "nm": "maxDepth-null",
+  "status": 422,
+  "ms": 31,
+  "head": "{\"error\":{\"code\":\"invalid_invite\",\"message\":\"roomId, optional numeric maxDepth and optional requestId are the accepted fields\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\""
+ },
+ {
+  "nm": "roomId-5k",
+  "status": 401,
+  "ms": 175,
+  "head": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Session or key expired or revoked\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/"
+ },
+ {
+  "nm": "roomId-traversal",
+  "status": 401,
+  "ms": 142,
+  "head": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Session or key expired or revoked\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/"
+ },
+ {
+  "nm": "roomId-empty",
+  "status": 401,
+  "ms": 53,
+  "head": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Session or key expired or revoked\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/"
+ },
+ {
+  "nm": "roomId-unicode",
+  "status": 401,
+  "ms": 59,
+  "head": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Session or key expired or revoked\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/"
+ },
+ {
+  "nm": "arr-body",
+  "status": 400,
+  "ms": 123,
+  "head": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any "
+ },
+ {
+  "nm": "null-body",
+  "status": 400,
+  "ms": 32,
+  "head": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any "
+ },
+ {
+  "nm": "malformed-json",
+  "status": 400,
+  "ms": 301,
+  "head": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any "
+ },
+ {
+  "nm": "empty-body",
+  "status": 400,
+  "ms": 48,
+  "head": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any "
+ }
+]

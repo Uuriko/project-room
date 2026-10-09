@@ -1,0 +1,490 @@
+{
+  "at": "2026-10-09T17:57:22.156Z",
+  "results": [
+    {
+      "name": "gmailcb plain",
+      "status": "conn:ECONNREFUSED",
+      "ms": 95,
+      "bodyHead": "",
+      "pass": false,
+      "note": "CONN-ERR conn:ECONNREFUSED"
+    },
+    {
+      "name": "gmailcb trailing slash",
+      "status": "conn:ECONNREFUSED",
+      "ms": 25,
+      "bodyHead": "",
+      "pass": false,
+      "note": "CONN-ERR conn:ECONNREFUSED"
+    },
+    {
+      "name": "gmailcb code+state",
+      "status": "conn:ECONNREFUSED",
+      "ms": 11,
+      "bodyHead": "",
+      "pass": false,
+      "note": "CONN-ERR conn:ECONNREFUSED"
+    },
+    {
+      "name": "gmailcb error param",
+      "status": "conn:ECONNREFUSED",
+      "ms": 5,
+      "bodyHead": "",
+      "pass": false,
+      "note": "CONN-ERR conn:ECONNREFUSED"
+    },
+    {
+      "name": "gmailcb xss in code",
+      "status": "conn:ECONNREFUSED",
+      "ms": 1,
+      "bodyHead": "",
+      "pass": false,
+      "note": "CONN-ERR conn:ECONNREFUSED"
+    },
+    {
+      "name": "gmailcb long query",
+      "status": "conn:ECONNREFUSED",
+      "ms": 9,
+      "bodyHead": "",
+      "pass": false,
+      "note": "CONN-ERR conn:ECONNREFUSED"
+    },
+    {
+      "name": "gmailcb invalid pct",
+      "status": "conn:ECONNREFUSED",
+      "ms": 5,
+      "bodyHead": "",
+      "pass": false,
+      "note": "CONN-ERR conn:ECONNREFUSED"
+    },
+    {
+      "name": "gmailcb unicode tail",
+      "status": "conn:ECONNREFUSED",
+      "ms": 15,
+      "bodyHead": "",
+      "pass": false,
+      "note": "CONN-ERR conn:ECONNREFUSED"
+    },
+    {
+      "name": "gmailcb double slash",
+      "status": "conn:ECONNREFUSED",
+      "ms": 1,
+      "bodyHead": "",
+      "pass": false,
+      "note": "CONN-ERR conn:ECONNREFUSED"
+    },
+    {
+      "name": "gmailcb cookie garbage",
+      "status": "conn:ECONNREFUSED",
+      "ms": 34,
+      "bodyHead": "",
+      "pass": false,
+      "note": "CONN-ERR conn:ECONNREFUSED"
+    },
+    {
+      "name": "gmailcb cookie long",
+      "status": "conn:ECONNREFUSED",
+      "ms": 13,
+      "bodyHead": "",
+      "pass": false,
+      "note": "CONN-ERR conn:ECONNREFUSED"
+    },
+    {
+      "name": "gmailcb cookie special",
+      "status": "conn:ECONNREFUSED",
+      "ms": 11,
+      "bodyHead": "",
+      "pass": false,
+      "note": "CONN-ERR conn:ECONNREFUSED"
+    },
+    {
+      "name": "gmailcb cookie dup",
+      "status": "conn:ECONNREFUSED",
+      "ms": 30,
+      "bodyHead": "",
+      "pass": false,
+      "note": "CONN-ERR conn:ECONNREFUSED"
+    },
+    {
+      "name": "gmailcb many cookies",
+      "status": "conn:ECONNREFUSED",
+      "ms": 35,
+      "bodyHead": "",
+      "pass": false,
+      "note": "CONN-ERR conn:ECONNREFUSED"
+    },
+    {
+      "name": "gmailcb POST",
+      "status": "conn:ECONNREFUSED",
+      "ms": 13,
+      "bodyHead": "",
+      "pass": false,
+      "note": "CONN-ERR conn:ECONNREFUSED"
+    },
+    {
+      "name": "gmailcb PUT",
+      "status": "conn:ECONNREFUSED",
+      "ms": 3,
+      "bodyHead": "",
+      "pass": false,
+      "note": "CONN-ERR conn:ECONNREFUSED"
+    },
+    {
+      "name": "gmailcb DELETE",
+      "status": "conn:ECONNREFUSED",
+      "ms": 1,
+      "bodyHead": "",
+      "pass": false,
+      "note": "CONN-ERR conn:ECONNREFUSED"
+    },
+    {
+      "name": "gmailcb PATCH",
+      "status": "conn:ECONNREFUSED",
+      "ms": 0,
+      "bodyHead": "",
+      "pass": false,
+      "note": "CONN-ERR conn:ECONNREFUSED"
+    },
+    {
+      "name": "gmailcb HEAD",
+      "status": "conn:ECONNREFUSED",
+      "ms": 25,
+      "bodyHead": "",
+      "pass": false,
+      "note": "CONN-ERR conn:ECONNREFUSED"
+    },
+    {
+      "name": "gmailcb OPTIONS",
+      "status": "conn:ECONNREFUSED",
+      "ms": 0,
+      "bodyHead": "",
+      "pass": false,
+      "note": "CONN-ERR conn:ECONNREFUSED"
+    },
+    {
+      "name": "gmailcb weird accept",
+      "status": "conn:ECONNREFUSED",
+      "ms": 1,
+      "bodyHead": "",
+      "pass": false,
+      "note": "CONN-ERR conn:ECONNREFUSED"
+    },
+    {
+      "name": "gmailcb json accept",
+      "status": "conn:ECONNREFUSED",
+      "ms": 0,
+      "bodyHead": "",
+      "pass": false,
+      "note": "CONN-ERR conn:ECONNREFUSED"
+    },
+    {
+      "name": "onboarding plain",
+      "status": "conn:ECONNREFUSED",
+      "ms": 1,
+      "bodyHead": "",
+      "pass": false,
+      "note": "CONN-ERR conn:ECONNREFUSED"
+    },
+    {
+      "name": "onboarding trailing slash",
+      "status": "conn:ECONNREFUSED",
+      "ms": 12,
+      "bodyHead": "",
+      "pass": false,
+      "note": "CONN-ERR conn:ECONNREFUSED"
+    },
+    {
+      "name": "onboarding query",
+      "status": "conn:ECONNREFUSED",
+      "ms": 8,
+      "bodyHead": "",
+      "pass": false,
+      "note": "CONN-ERR conn:ECONNREFUSED"
+    },
+    {
+      "name": "onboarding garbage cookie",
+      "status": "conn:ECONNREFUSED",
+      "ms": 19,
+      "bodyHead": "",
+      "pass": false,
+      "note": "CONN-ERR conn:ECONNREFUSED"
+    },
+    {
+      "name": "onboarding long cookie",
+      "status": "conn:ECONNREFUSED",
+      "ms": 12,
+      "bodyHead": "",
+      "pass": false,
+      "note": "CONN-ERR conn:ECONNREFUSED"
+    },
+    {
+      "name": "onboarding dup cookie",
+      "status": "conn:ECONNREFUSED",
+      "ms": 1,
+      "bodyHead": "",
+      "pass": false,
+      "note": "CONN-ERR conn:ECONNREFUSED"
+    },
+    {
+      "name": "onboarding empty cookie",
+      "status": "conn:ECONNREFUSED",
+      "ms": 10,
+      "bodyHead": "",
+      "pass": false,
+      "note": "CONN-ERR conn:ECONNREFUSED"
+    },
+    {
+      "name": "onboarding POST",
+      "status": "conn:ECONNREFUSED",
+      "ms": 3,
+      "bodyHead": "",
+      "pass": false,
+      "note": "CONN-ERR conn:ECONNREFUSED"
+    },
+    {
+      "name": "onboarding PUT",
+      "status": "conn:ECONNREFUSED",
+      "ms": 17,
+      "bodyHead": "",
+      "pass": false,
+      "note": "CONN-ERR conn:ECONNREFUSED"
+    },
+    {
+      "name": "onboarding DELETE",
+      "status": "conn:ECONNREFUSED",
+      "ms": 1,
+      "bodyHead": "",
+      "pass": false,
+      "note": "CONN-ERR conn:ECONNREFUSED"
+    },
+    {
+      "name": "onboarding HEAD",
+      "status": "conn:ECONNREFUSED",
+      "ms": 14,
+      "bodyHead": "",
+      "pass": false,
+      "note": "CONN-ERR conn:ECONNREFUSED"
+    },
+    {
+      "name": "onboarding OPTIONS",
+      "status": "conn:ECONNREFUSED",
+      "ms": 1,
+      "bodyHead": "",
+      "pass": false,
+      "note": "CONN-ERR conn:ECONNREFUSED"
+    }
+  ],
+  "findings": [
+    {
+      "case": "gmailcb plain",
+      "note": "CONN-ERR conn:ECONNREFUSED",
+      "method": "GET",
+      "path": "/api/auth/gmail/callback"
+    },
+    {
+      "case": "gmailcb trailing slash",
+      "note": "CONN-ERR conn:ECONNREFUSED",
+      "method": "GET",
+      "path": "/api/auth/gmail/callback/"
+    },
+    {
+      "case": "gmailcb code+state",
+      "note": "CONN-ERR conn:ECONNREFUSED",
+      "method": "GET",
+      "path": "/api/auth/gmail/callback?code=abc123&state=xyz"
+    },
+    {
+      "case": "gmailcb error param",
+      "note": "CONN-ERR conn:ECONNREFUSED",
+      "method": "GET",
+      "path": "/api/auth/gmail/callback?error=access_denied&error_description=no"
+    },
+    {
+      "case": "gmailcb xss in code",
+      "note": "CONN-ERR conn:ECONNREFUSED",
+      "method": "GET",
+      "path": "/api/auth/gmail/callback?code=%3Cscript%3Ealert(1)%3C/script%3E"
+    },
+    {
+      "case": "gmailcb long query",
+      "note": "CONN-ERR conn:ECONNREFUSED",
+      "method": "GET",
+      "path": "/api/auth/gmail/callback?x=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "case": "gmailcb invalid pct",
+      "note": "CONN-ERR conn:ECONNREFUSED",
+      "method": "GET",
+      "path": "/api/auth/gmail/callback?code=%ff%fe"
+    },
+    {
+      "case": "gmailcb unicode tail",
+      "note": "CONN-ERR conn:ECONNREFUSED",
+      "method": "GET",
+      "path": "/api/auth/gmail/callback/%E2%82%AC"
+    },
+    {
+      "case": "gmailcb double slash",
+      "note": "CONN-ERR conn:ECONNREFUSED",
+      "method": "GET",
+      "path": "/api/auth//gmail/callback"
+    },
+    {
+      "case": "gmailcb cookie garbage",
+      "note": "CONN-ERR conn:ECONNREFUSED",
+      "method": "GET",
+      "path": "/api/auth/gmail/callback"
+    },
+    {
+      "case": "gmailcb cookie long",
+      "note": "CONN-ERR conn:ECONNREFUSED",
+      "method": "GET",
+      "path": "/api/auth/gmail/callback"
+    },
+    {
+      "case": "gmailcb cookie special",
+      "note": "CONN-ERR conn:ECONNREFUSED",
+      "method": "GET",
+      "path": "/api/auth/gmail/callback"
+    },
+    {
+      "case": "gmailcb cookie dup",
+      "note": "CONN-ERR conn:ECONNREFUSED",
+      "method": "GET",
+      "path": "/api/auth/gmail/callback"
+    },
+    {
+      "case": "gmailcb many cookies",
+      "note": "CONN-ERR conn:ECONNREFUSED",
+      "method": "GET",
+      "path": "/api/auth/gmail/callback"
+    },
+    {
+      "case": "gmailcb POST",
+      "note": "CONN-ERR conn:ECONNREFUSED",
+      "method": "POST",
+      "path": "/api/auth/gmail/callback"
+    },
+    {
+      "case": "gmailcb PUT",
+      "note": "CONN-ERR conn:ECONNREFUSED",
+      "method": "PUT",
+      "path": "/api/auth/gmail/callback"
+    },
+    {
+      "case": "gmailcb DELETE",
+      "note": "CONN-ERR conn:ECONNREFUSED",
+      "method": "DELETE",
+      "path": "/api/auth/gmail/callback"
+    },
+    {
+      "case": "gmailcb PATCH",
+      "note": "CONN-ERR conn:ECONNREFUSED",
+      "method": "PATCH",
+      "path": "/api/auth/gmail/callback"
+    },
+    {
+      "case": "gmailcb HEAD",
+      "note": "CONN-ERR conn:ECONNREFUSED",
+      "method": "HEAD",
+      "path": "/api/auth/gmail/callback"
+    },
+    {
+      "case": "gmailcb OPTIONS",
+      "note": "CONN-ERR conn:ECONNREFUSED",
+      "method": "OPTIONS",
+      "path": "/api/auth/gmail/callback"
+    },
+    {
+      "case": "gmailcb weird accept",
+      "note": "CONN-ERR conn:ECONNREFUSED",
+      "method": "GET",
+      "path": "/api/auth/gmail/callback"
+    },
+    {
+      "case": "gmailcb json accept",
+      "note": "CONN-ERR conn:ECONNREFUSED",
+      "method": "GET",
+      "path": "/api/auth/gmail/callback"
+    },
+    {
+      "case": "onboarding plain",
+      "note": "CONN-ERR conn:ECONNREFUSED",
+      "method": "GET",
+      "path": "/api/account/onboarding"
+    },
+    {
+      "case": "onboarding trailing slash",
+      "note": "CONN-ERR conn:ECONNREFUSED",
+      "method": "GET",
+      "path": "/api/account/onboarding/"
+    },
+    {
+      "case": "onboarding query",
+      "note": "CONN-ERR conn:ECONNREFUSED",
+      "method": "GET",
+      "path": "/api/account/onboarding?foo=bar"
+    },
+    {
+      "case": "onboarding garbage cookie",
+      "note": "CONN-ERR conn:ECONNREFUSED",
+      "method": "GET",
+      "path": "/api/account/onboarding"
+    },
+    {
+      "case": "onboarding long cookie",
+      "note": "CONN-ERR conn:ECONNREFUSED",
+      "method": "GET",
+      "path": "/api/account/onboarding"
+    },
+    {
+      "case": "onboarding dup cookie",
+      "note": "CONN-ERR conn:ECONNREFUSED",
+      "method": "GET",
+      "path": "/api/account/onboarding"
+    },
+    {
+      "case": "onboarding empty cookie",
+      "note": "CONN-ERR conn:ECONNREFUSED",
+      "method": "GET",
+      "path": "/api/account/onboarding"
+    },
+    {
+      "case": "onboarding POST",
+      "note": "CONN-ERR conn:ECONNREFUSED",
+      "method": "POST",
+      "path": "/api/account/onboarding"
+    },
+    {
+      "case": "onboarding PUT",
+      "note": "CONN-ERR conn:ECONNREFUSED",
+      "method": "PUT",
+      "path": "/api/account/onboarding"
+    },
+    {
+      "case": "onboarding DELETE",
+      "note": "CONN-ERR conn:ECONNREFUSED",
+      "method": "DELETE",
+      "path": "/api/account/onboarding"
+    },
+    {
+      "case": "onboarding HEAD",
+      "note": "CONN-ERR conn:ECONNREFUSED",
+      "method": "HEAD",
+      "path": "/api/account/onboarding"
+    },
+    {
+      "case": "onboarding OPTIONS",
+      "note": "CONN-ERR conn:ECONNREFUSED",
+      "method": "OPTIONS",
+      "path": "/api/account/onboarding"
+    },
+    {
+      "case": "gmailcb rate burst",
+      "note": "expected ~20x200+429s, got {\"conn:ECONNREFUSED\":25}"
+    }
+  ],
+  "rateBurst": {
+    "conn:ECONNREFUSED": 25
+  }
+}

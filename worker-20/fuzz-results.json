@@ -1,0 +1,432 @@
+[
+ {
+  "name": "A1 no cookie -> 401",
+  "method": "GET",
+  "path": "/api/oauth/sessions",
+  "status": 401,
+  "ms": 370,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"account_session_required\",\"message\":\"Sign in to manage connected sessions\"},\"status\":\"action_required\""
+ },
+ {
+  "name": "A2 empty cookie -> 401",
+  "method": "GET",
+  "path": "/api/oauth/sessions",
+  "status": 401,
+  "ms": 10,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"account_session_required\",\"message\":\"Sign in to manage connected sessions\"},\"status\":\"action_required\""
+ },
+ {
+  "name": "A3 garbage cookie -> 401",
+  "method": "GET",
+  "path": "/api/oauth/sessions",
+  "status": 401,
+  "ms": 6,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"account_session_required\",\"message\":\"Sign in to manage connected sessions\"},\"status\":\"action_required\""
+ },
+ {
+  "name": "A4 long cookie (10KB) -> 401, no hang",
+  "method": "GET",
+  "path": "/api/oauth/sessions",
+  "status": 401,
+  "ms": 17,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"account_session_required\",\"message\":\"Sign in to manage connected sessions\"},\"status\":\"action_required\""
+ },
+ {
+  "name": "A5 sqli cookie -> 401",
+  "method": "GET",
+  "path": "/api/oauth/sessions",
+  "status": 401,
+  "ms": 29,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"account_session_required\",\"message\":\"Sign in to manage connected sessions\"},\"status\":\"action_required\""
+ },
+ {
+  "name": "A6 unicode cookie -> 401",
+  "method": "GET",
+  "path": "/api/oauth/sessions",
+  "status": 401,
+  "ms": 14,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"account_session_required\",\"message\":\"Sign in to manage connected sessions\"},\"status\":\"action_required\""
+ },
+ {
+  "name": "A7 query string -> 401 (no crash)",
+  "method": "GET",
+  "path": "/api/oauth/sessions?foo=bar&limit=9999",
+  "status": 401,
+  "ms": 14,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"account_session_required\",\"message\":\"Sign in to manage connected sessions\"},\"status\":\"action_required\""
+ },
+ {
+  "name": "A8 trailing slash -> not 5xx",
+  "method": "GET",
+  "path": "/api/oauth/sessions/",
+  "status": 401,
+  "ms": 26,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"account_session_required\",\"message\":\"Sign in to manage connected sessions\"},\"status\":\"action_required\""
+ },
+ {
+  "name": "A9 uppercase path -> not 5xx",
+  "method": "GET",
+  "path": "/api/OAUTH/SESSIONS",
+  "status": 404,
+  "ms": 71,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or"
+ },
+ {
+  "name": "A10 POST -> not 5xx",
+  "method": "POST",
+  "path": "/api/oauth/sessions",
+  "status": 404,
+  "ms": 60,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or"
+ },
+ {
+  "name": "A11 PUT -> not 5xx",
+  "method": "PUT",
+  "path": "/api/oauth/sessions",
+  "status": 404,
+  "ms": 18,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or"
+ },
+ {
+  "name": "A12 DELETE -> not 5xx",
+  "method": "DELETE",
+  "path": "/api/oauth/sessions",
+  "status": 404,
+  "ms": 35,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or"
+ },
+ {
+  "name": "A13 PATCH -> not 5xx",
+  "method": "PATCH",
+  "path": "/api/oauth/sessions",
+  "status": 404,
+  "ms": 24,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or"
+ },
+ {
+  "name": "A14 HEAD -> not 5xx",
+  "method": "HEAD",
+  "path": "/api/oauth/sessions",
+  "status": 404,
+  "ms": 84,
+  "code": null,
+  "pass": true,
+  "sample": ""
+ },
+ {
+  "name": "A15 OPTIONS -> not 5xx",
+  "method": "OPTIONS",
+  "path": "/api/oauth/sessions",
+  "status": 404,
+  "ms": 34,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or"
+ },
+ {
+  "name": "B1 no origin -> 403 origin_denied",
+  "method": "POST",
+  "path": "/api/guest-agent-links/preview",
+  "status": 403,
+  "ms": 47,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"origin_denied\",\"message\":\"Origin header is required\"},\"status\":\"action_required\",\"reason\":\"origin_deni"
+ },
+ {
+  "name": "B2 evil origin -> 403",
+  "method": "POST",
+  "path": "/api/guest-agent-links/preview",
+  "status": 403,
+  "ms": 34,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"origin_denied\",\"message\":\"Request origin is not allowed\"},\"status\":\"action_required\",\"reason\":\"origin_"
+ },
+ {
+  "name": "B3 origin null -> 403",
+  "method": "POST",
+  "path": "/api/guest-agent-links/preview",
+  "status": 403,
+  "ms": 16,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"origin_denied\",\"message\":\"Request origin is not allowed\"},\"status\":\"action_required\",\"reason\":\"origin_"
+ },
+ {
+  "name": "B4 origin trailing slash -> 403",
+  "method": "POST",
+  "path": "/api/guest-agent-links/preview",
+  "status": 403,
+  "ms": 23,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"origin_denied\",\"message\":\"Request origin is not allowed\"},\"status\":\"action_required\",\"reason\":\"origin_"
+ },
+ {
+  "name": "B5 wrong content-type -> 415",
+  "method": "POST",
+  "path": "/api/guest-agent-links/preview",
+  "status": 415,
+  "ms": 45,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\""
+ },
+ {
+  "name": "B6 no content-type -> 415",
+  "method": "POST",
+  "path": "/api/guest-agent-links/preview",
+  "status": 415,
+  "ms": 10,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\""
+ },
+ {
+  "name": "B7 invalid JSON -> 400",
+  "method": "POST",
+  "path": "/api/guest-agent-links/preview",
+  "status": 400,
+  "ms": 23,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\","
+ },
+ {
+  "name": "B8 empty body -> 400",
+  "method": "POST",
+  "path": "/api/guest-agent-links/preview",
+  "status": 400,
+  "ms": 14,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\","
+ },
+ {
+  "name": "B9 JSON array -> 400",
+  "method": "POST",
+  "path": "/api/guest-agent-links/preview",
+  "status": 400,
+  "ms": 14,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\","
+ },
+ {
+  "name": "B10 JSON null -> 400",
+  "method": "POST",
+  "path": "/api/guest-agent-links/preview",
+  "status": 400,
+  "ms": 9,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\","
+ },
+ {
+  "name": "B11 JSON string -> 400",
+  "method": "POST",
+  "path": "/api/guest-agent-links/preview",
+  "status": 400,
+  "ms": 13,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\","
+ },
+ {
+  "name": "B12 missing linkToken -> 422",
+  "method": "POST",
+  "path": "/api/guest-agent-links/preview",
+  "status": 422,
+  "ms": 20,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"invalid_link\",\"message\":\"Guest-agent link required\"},\"status\":\"action_required\",\"reason\":\"input_refuse"
+ },
+ {
+  "name": "B13 extra keys -> 422",
+  "method": "POST",
+  "path": "/api/guest-agent-links/preview",
+  "status": 422,
+  "ms": 17,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"invalid_link\",\"message\":\"Guest-agent link required\"},\"status\":\"action_required\",\"reason\":\"input_refuse"
+ },
+ {
+  "name": "B14 null linkToken -> 410 (type-safe)",
+  "method": "POST",
+  "path": "/api/guest-agent-links/preview",
+  "status": 410,
+  "ms": 25,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This guest invite is not valid.\"},\"status\":\"action_required\",\"reason\":\"li"
+ },
+ {
+  "name": "B15 number linkToken -> 410 (type-safe)",
+  "method": "POST",
+  "path": "/api/guest-agent-links/preview",
+  "status": 410,
+  "ms": 22,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This guest invite is not valid.\"},\"status\":\"action_required\",\"reason\":\"li"
+ },
+ {
+  "name": "B16 bool linkToken -> 410 (type-safe)",
+  "method": "POST",
+  "path": "/api/guest-agent-links/preview",
+  "status": 410,
+  "ms": 5,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This guest invite is not valid.\"},\"status\":\"action_required\",\"reason\":\"li"
+ },
+ {
+  "name": "B17 array linkToken -> 410 (type-safe)",
+  "method": "POST",
+  "path": "/api/guest-agent-links/preview",
+  "status": 410,
+  "ms": 12,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This guest invite is not valid.\"},\"status\":\"action_required\",\"reason\":\"li"
+ },
+ {
+  "name": "B18 object linkToken -> 410 (type-safe)",
+  "method": "POST",
+  "path": "/api/guest-agent-links/preview",
+  "status": 410,
+  "ms": 13,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This guest invite is not valid.\"},\"status\":\"action_required\",\"reason\":\"li"
+ },
+ {
+  "name": "B19 empty string token -> 410",
+  "method": "POST",
+  "path": "/api/guest-agent-links/preview",
+  "status": 410,
+  "ms": 16,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This guest invite is not valid.\"},\"status\":\"action_required\",\"reason\":\"li"
+ },
+ {
+  "name": "B20 garbage token -> 410",
+  "method": "POST",
+  "path": "/api/guest-agent-links/preview",
+  "status": 410,
+  "ms": 10,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This guest invite is not valid.\"},\"status\":\"action_required\",\"reason\":\"li"
+ },
+ {
+  "name": "B21 well-formed unknown ga1 token -> 410",
+  "method": "POST",
+  "path": "/api/guest-agent-links/preview",
+  "status": 410,
+  "ms": 57,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This guest invite is not valid.\"},\"status\":\"action_required\",\"reason\":\"li"
+ },
+ {
+  "name": "B22 human-share-shaped token -> 422 wrong_link_kind",
+  "method": "POST",
+  "path": "/api/guest-agent-links/preview",
+  "status": 422,
+  "ms": 33,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"wrong_link_kind\",\"message\":\"Human invitation links are not agent credentials.\"},\"status\":\"action_requi"
+ },
+ {
+  "name": "B23 huge token (100KB) -> no hang, not 5xx",
+  "method": "POST",
+  "path": "/api/guest-agent-links/preview",
+  "status": 413,
+  "ms": 24,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"too_large\",\"message\":\"Request body is 100020 bytes; the limit is 16384 bytes\"},\"status\":\"action_requir"
+ },
+ {
+  "name": "B24 unicode token -> not 5xx",
+  "method": "POST",
+  "path": "/api/guest-agent-links/preview",
+  "status": 410,
+  "ms": 17,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This guest invite is not valid.\"},\"status\":\"action_required\",\"reason\":\"li"
+ },
+ {
+  "name": "B25 oversized body (20KB) -> 413",
+  "method": "POST",
+  "path": "/api/guest-agent-links/preview",
+  "status": 413,
+  "ms": 11,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"too_large\",\"message\":\"Request body is 20016 bytes; the limit is 16384 bytes\"},\"status\":\"action_require"
+ },
+ {
+  "name": "B26 GET method -> not 5xx",
+  "method": "GET",
+  "path": "/api/guest-agent-links/preview",
+  "status": 404,
+  "ms": 11,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or"
+ },
+ {
+  "name": "B27 DELETE method -> not 5xx",
+  "method": "DELETE",
+  "path": "/api/guest-agent-links/preview",
+  "status": 404,
+  "ms": 22,
+  "code": null,
+  "pass": true,
+  "sample": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or"
+ },
+ {
+  "name": "Z1 health after fuzz -> 200",
+  "method": "GET",
+  "path": "/api/health",
+  "status": 200,
+  "ms": 5,
+  "code": null,
+  "pass": true,
+  "sample": "{\"status\":\"ok\",\"mode\":\"single-node-pilot\"}"
+ }
+]

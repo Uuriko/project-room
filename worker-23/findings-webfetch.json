@@ -1,0 +1,94 @@
+{
+ "cases": 58,
+ "findings": [
+  {
+   "case": "auth:guest",
+   "method": "POST",
+   "status": 200,
+   "ms": 388,
+   "head": "{\"url\":\"http://127.0.0.1:46139/ok\",\"markdown\":{\"requested\":true,\"data\":\"hello world\"},\"highlights\":{\"requested\":false,\"data\":[]},\"metadata\":{\"title\":\"\",\"description\":\"\",\"language\":\"\",\"headings\":[]},\"c",
+   "expect": [
+    403
+   ],
+   "verdict": "wrong-status (expected [403], got 200)"
+  },
+  {
+   "case": "b:url-number",
+   "method": "POST",
+   "status": 422,
+   "ms": 17,
+   "head": "{\"error\":{\"code\":\"invalid_fetch_input\",\"message\":\"formats must be an object\"},\"request_id\":\"wf_f1c23a59-fb19-489d-a3d4-5e3aa5b60bbc\"}",
+   "expect": [
+    400
+   ],
+   "verdict": "wrong-status (expected [400], got 422)"
+  },
+  {
+   "case": "b:url-null",
+   "method": "POST",
+   "status": 422,
+   "ms": 17,
+   "head": "{\"error\":{\"code\":\"invalid_fetch_input\",\"message\":\"formats must be an object\"},\"request_id\":\"wf_0b2e2dc0-9407-4b6c-a6e2-19f0f5f3194e\"}",
+   "expect": [
+    400
+   ],
+   "verdict": "wrong-status (expected [400], got 422)"
+  },
+  {
+   "case": "b:url-array",
+   "method": "POST",
+   "status": 422,
+   "ms": 15,
+   "head": "{\"error\":{\"code\":\"invalid_fetch_input\",\"message\":\"formats must be an object\"},\"request_id\":\"wf_5c12946f-90de-4792-90c9-2a0ec39bf151\"}",
+   "expect": [
+    400
+   ],
+   "verdict": "wrong-status (expected [400], got 422)"
+  },
+  {
+   "case": "b:url-nohost",
+   "method": "POST",
+   "status": 403,
+   "ms": 67,
+   "head": "{\"error\":{\"code\":\"blocked_host\",\"message\":\"Refusing to fetch a host that resolves to a private, loopback, or otherwise reserved address\"},\"request_id\":\"wf_a608da1f-f1ce-4a69-89a3-24ca69a46c5c\"}",
+   "expect": [
+    400
+   ],
+   "verdict": "wrong-status (expected [400], got 403)"
+  },
+  {
+   "case": "s:decimal-loopback-port",
+   "method": "POST",
+   "status": 200,
+   "ms": 43,
+   "head": "{\"url\":\"http://127.0.0.1:46139/ok\",\"markdown\":{\"requested\":true,\"data\":\"hello world\"},\"highlights\":{\"requested\":false,\"data\":[]},\"metadata\":{\"title\":\"\",\"description\":\"\",\"language\":\"\",\"headings\":[]},\"c",
+   "expect": [
+    400
+   ],
+   "verdict": "wrong-status (expected [400], got 200)"
+  },
+  {
+   "case": "s:hex-loopback-port",
+   "method": "POST",
+   "status": 200,
+   "ms": 46,
+   "head": "{\"url\":\"http://127.0.0.1:46139/ok\",\"markdown\":{\"requested\":true,\"data\":\"hello world\"},\"highlights\":{\"requested\":false,\"data\":[]},\"metadata\":{\"title\":\"\",\"description\":\"\",\"language\":\"\",\"headings\":[]},\"c",
+   "expect": [
+    400
+   ],
+   "verdict": "wrong-status (expected [400], got 200)"
+  },
+  {
+   "case": "o:redir-file",
+   "method": "POST",
+   "status": 400,
+   "ms": 134,
+   "head": "{\"error\":{\"code\":\"invalid_url\",\"message\":\"Only http and https URLs can be fetched\"},\"request_id\":\"wf_93fbfeba-6d68-4e50-9498-9141f2768977\"}",
+   "expect": [
+    403,
+    502
+   ],
+   "verdict": "wrong-status (expected [403,502], got 400)"
+  }
+ ]
+}

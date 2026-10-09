@@ -1,0 +1,238 @@
+[
+ {
+  "n": "agents",
+  "m": "GET",
+  "p": "/agents",
+  "s": 200,
+  "ms": 40,
+  "x": "text/html; charset=utf-8"
+ },
+ {
+  "n": "agents",
+  "m": "HEAD",
+  "p": "/agents",
+  "s": 200,
+  "ms": 346
+ },
+ {
+  "n": "agents",
+  "m": "POST",
+  "p": "/agents",
+  "s": 405,
+  "ms": 25,
+  "x": ""
+ },
+ {
+  "n": "agents",
+  "m": "PUT",
+  "p": "/agents",
+  "s": 405,
+  "ms": 13,
+  "x": ""
+ },
+ {
+  "n": "agents",
+  "m": "DELETE",
+  "p": "/agents",
+  "s": 405,
+  "ms": 9,
+  "x": ""
+ },
+ {
+  "n": "agents",
+  "m": "GET",
+  "p": "/agents/",
+  "s": 200,
+  "ms": 6
+ },
+ {
+  "n": "agents",
+  "m": "GET",
+  "p": "/AGENTS",
+  "s": 404,
+  "ms": 17
+ },
+ {
+  "n": "agents",
+  "m": "GET",
+  "p": "/agents?cursor=3k",
+  "s": 422,
+  "ms": 25
+ },
+ {
+  "n": "agents",
+  "m": "GET",
+  "p": "/agents?ref=xss",
+  "s": 200,
+  "ms": 9,
+  "x": "not-reflected/raw"
+ },
+ {
+  "n": "redeem",
+  "m": "POST",
+  "p": "valid-shape-bogus",
+  "s": 404,
+  "ms": 36,
+  "x": "{\"error\":{\"code\":\"invite_unavailable\",\"message\":\"Invite code has the wrong format: invite codes are two letters, a dash, then 16 characters (no I, L, O, or U). Check for typos or ask the inviter for a"
+ },
+ {
+  "n": "redeem",
+  "m": "POST",
+  "p": "code-empty",
+  "s": 404,
+  "ms": 4,
+  "x": "{\"error\":{\"code\":\"invite_unavailable\",\"message\":\"Invite code has the wrong format: invite codes are two letters, a dash, then 16 characters (no I, L, O, or U). Check for typos or ask the inviter for a"
+ },
+ {
+  "n": "redeem",
+  "m": "POST",
+  "p": "code-5k",
+  "s": 404,
+  "ms": 3,
+  "x": "{\"error\":{\"code\":\"invite_unavailable\",\"message\":\"Invite code has the wrong format: invite codes are two letters, a dash, then 16 characters (no I, L, O, or U). Check for typos or ask the inviter for a"
+ },
+ {
+  "n": "redeem",
+  "m": "POST",
+  "p": "code-traversal",
+  "s": 404,
+  "ms": 3,
+  "x": "{\"error\":{\"code\":\"invite_unavailable\",\"message\":\"Invite code has the wrong format: invite codes are two letters, a dash, then 16 characters (no I, L, O, or U). Check for typos or ask the inviter for a"
+ },
+ {
+  "n": "redeem",
+  "m": "POST",
+  "p": "code-num",
+  "s": 422,
+  "ms": 128,
+  "x": "{\"error\":{\"code\":\"invalid_invite\",\"message\":\"Invalid invite redeem (code: wrong type). Send exactly {code, displayName}.\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused f"
+ },
+ {
+  "n": "redeem",
+  "m": "POST",
+  "p": "code-null",
+  "s": 422,
+  "ms": 32,
+  "x": "{\"error\":{\"code\":\"invalid_invite\",\"message\":\"Invalid invite redeem (code: wrong type). Send exactly {code, displayName}.\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused f"
+ },
+ {
+  "n": "redeem",
+  "m": "POST",
+  "p": "name-5k",
+  "s": 404,
+  "ms": 56,
+  "x": "{\"error\":{\"code\":\"invite_unavailable\",\"message\":\"Invite code has the wrong format: invite codes are two letters, a dash, then 16 characters (no I, L, O, or U). Check for typos or ask the inviter for a"
+ },
+ {
+  "n": "redeem",
+  "m": "POST",
+  "p": "name-empty",
+  "s": 404,
+  "ms": 109,
+  "x": "{\"error\":{\"code\":\"invite_unavailable\",\"message\":\"Invite code has the wrong format: invite codes are two letters, a dash, then 16 characters (no I, L, O, or U). Check for typos or ask the inviter for a"
+ },
+ {
+  "n": "redeem",
+  "m": "POST",
+  "p": "name-num",
+  "s": 422,
+  "ms": 62,
+  "x": "{\"error\":{\"code\":\"invalid_invite\",\"message\":\"Invalid invite redeem (displayName: wrong type). Send exactly {code, displayName}.\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the re"
+ },
+ {
+  "n": "redeem",
+  "m": "POST",
+  "p": "missing-code",
+  "s": 422,
+  "ms": 34,
+  "x": "{\"error\":{\"code\":\"invalid_invite\",\"message\":\"Invalid invite redeem (missing required field: code). Send exactly {code, displayName}.\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix t"
+ },
+ {
+  "n": "redeem",
+  "m": "POST",
+  "p": "missing-name",
+  "s": 422,
+  "ms": 41,
+  "x": "{\"error\":{\"code\":\"invalid_invite\",\"message\":\"Invalid invite redeem (missing required field: displayName). Send exactly {code, displayName}.\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\""
+ },
+ {
+  "n": "redeem",
+  "m": "POST",
+  "p": "empty-obj",
+  "s": 422,
+  "ms": 28,
+  "x": "{\"error\":{\"code\":\"invalid_invite\",\"message\":\"Invalid invite redeem (missing required fields: code, displayName). Send exactly {code, displayName}.\"},\"status\":\"action_required\",\"reason\":\"input_refused\""
+ },
+ {
+  "n": "redeem",
+  "m": "POST",
+  "p": "extra-key",
+  "s": 422,
+  "ms": 17,
+  "x": "{\"error\":{\"code\":\"invalid_invite\",\"message\":\"Invalid invite redeem (unexpected field: admin). Send exactly {code, displayName}.\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the re"
+ },
+ {
+  "n": "redeem",
+  "m": "POST",
+  "p": "arr-body",
+  "s": 400,
+  "ms": 8,
+  "x": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep "
+ },
+ {
+  "n": "redeem",
+  "m": "POST",
+  "p": "malformed",
+  "s": 400,
+  "ms": 49,
+  "x": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep "
+ },
+ {
+  "n": "redeem",
+  "m": "POST",
+  "p": "empty-body",
+  "s": 400,
+  "ms": 22,
+  "x": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep "
+ },
+ {
+  "n": "redeem",
+  "m": "POST",
+  "p": "wrong-ctype",
+  "s": 415,
+  "ms": 7,
+  "x": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in t"
+ },
+ {
+  "n": "redeem",
+  "m": "GET",
+  "p": "/api/agent-invites/redeem",
+  "s": 405,
+  "ms": 4,
+  "x": "allow=POST"
+ },
+ {
+  "n": "redeem",
+  "m": "PUT",
+  "p": "/api/agent-invites/redeem",
+  "s": 405,
+  "ms": 18,
+  "x": "allow=POST"
+ },
+ {
+  "n": "redeem",
+  "m": "DELETE",
+  "p": "/api/agent-invites/redeem",
+  "s": 405,
+  "ms": 8,
+  "x": "allow=POST"
+ },
+ {
+  "n": "redeem",
+  "m": "HEAD",
+  "p": "/api/agent-invites/redeem",
+  "s": 405,
+  "ms": 4,
+  "x": "allow=POST"
+ }
+]

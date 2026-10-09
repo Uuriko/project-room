@@ -1,0 +1,102 @@
+     1	953:      if (url.pathname === "/.well-known/security.txt" || url.pathname === "/security.txt" || url.pathname === "/room/.well-known/security.txt") {
+     2	1073:      if ((url.pathname === "/api/health" || url.pathname === "/api/health/" || isHealthAliasPath(inboundPath) || isHealthAliasPath(url.pathname)) && ["GET", "HEAD"].includes(req.method)) {
+     3	1076:      if (url.pathname === "/api/version" && ["GET", "HEAD"].includes(req.method)) {
+     4	1090:      if (url.pathname === "/api/auth/gmail/callback" && req.method === "GET") {
+     5	1106:      if (url.pathname === GOOGLE_START_PATH) {
+     6	1140:      if (url.pathname === GOOGLE_CALLBACK_PATH) {
+     7	1195:      if (url.pathname === "/api/auth/email/verify") {
+     8	1214:      if (url.pathname === "/api/auth/email/verify/resend") {
+     9	1260:      if (url.pathname === GITHUB_START_PATH) {
+    10	1298:      if (url.pathname === GITHUB_CALLBACK_PATH) {
+    11	1367:      if (url.pathname === "/.well-known/oauth-authorization-server" && req.method === "GET") {
+    12	1389:      if (url.pathname === "/.well-known/feedback" && ["GET", "HEAD"].includes(req.method)) {
+    13	1405:      if (url.pathname === "/oauth/authorize" && req.method === "GET") {
+    14	1466:      if (url.pathname === "/oauth/authorize" && req.method === "POST") {
+    15	1541:      if (url.pathname === "/oauth/token" && req.method === "POST") {
+    16	1588:      if (url.pathname === "/oauth/revoke" && req.method === "POST") {
+    17	1598:      if (url.pathname === "/api/oauth/sessions" && req.method === "GET") {
+    18	1608:      if (url.pathname === "/api/oauth/sessions/revoke-all" && req.method === "POST") {
+    19	1631:      if (url.pathname === "/api/ready" && ["GET", "HEAD"].includes(req.method)) {
+    20	1713:      if (url.pathname === "/openapi.json" || url.pathname === "/room/openapi.json") {
+    21	1722:      if (url.pathname === "/api/public/rooms/directory" && req.method === "GET") {
+    22	1729:      if (url.pathname === "/api/public/rooms/directory") reject(405, "method_not_allowed", "Method not allowed");
+    23	1730:      if (url.pathname === "/api/public-work/match") {
+    24	1747:      if (url.pathname === "/api/public-work/tasks" || publicWorkTaskMatch || publicWorkReceiptMatch) {
+    25	1796:      if (url.pathname === "/api/project-offers" || projectOfferPublicMatch) {
+    26	1820:      if (url.pathname === "/api/opportunities.json" && req.method === "GET") {
+    27	1829:      if (url.pathname === "/api/opportunities.json") reject(405, "method_not_allowed", "Method not allowed");
+    28	1877:      if ((url.pathname === "/receipts" || url.pathname === "/api/public/receipts" || receiptDetail) && ["GET", "HEAD"].includes(req.method)) {
+    29	1912:        if (url.pathname === "/api/public/receipts") {
+    30	1924:      if (url.pathname === "/receipts" || url.pathname === "/api/public/receipts" || receiptDetail) reject(405, "method_not_allowed", "Method not allowed");
+    31	1925:      if ((url.pathname === "/join.html" || url.pathname === "/room/join.html") && ["GET", "HEAD"].includes(req.method)) {
+    32	1929:      if ((url.pathname === "/favicon.ico" || url.pathname === "/room/favicon.ico") && ["GET", "HEAD"].includes(req.method)) {
+    33	1942:      if (url.pathname === "/sitemap.xml" && ["GET", "HEAD"].includes(req.method)) {
+    34	1971:      const acquisition = url.pathname === "/templates" || url.pathname === "/templates.json"
+    35	1972:        || url.pathname === "/agents" || templateDetail || roomPage;
+    36	1992:        if (url.pathname === "/templates" || url.pathname === "/templates.json") {
+    37	2001:        if (url.pathname === "/agents") {
+    38	2049:      if (url.pathname === "/api/account-rooms" && req.method === "GET") {
+    39	2054:      if (url.pathname === "/api/account-rooms" && req.method === "POST") {
+    40	2066:      if (url.pathname === "/api/account-rooms/from-template" && req.method === "POST") {
+    41	2075:      if (url.pathname === "/api/account/ensure-default-room" && req.method === "POST") {
+    42	2095:      if (url.pathname === "/api/account-session") {
+    43	2164:      if (url.pathname === "/api/auth/recovery-codes/generate" && req.method === "POST") {
+    44	2173:      if (url.pathname === "/api/auth/recovery-codes/status" && req.method === "GET") {
+    45	2181:      if (url.pathname === "/api/auth/recovery-codes/redeem" && req.method === "POST") {
+    46	2248:      if (url.pathname === "/api/auth/methods") {
+    47	2268:      if (url.pathname === "/api/auth/methods/disable") {
+    48	2277:      if (url.pathname === "/api/auth/methods/enable") {
+    49	2286:      if (url.pathname === "/api/auth/methods/remove") {
+    50	2295:      if (url.pathname === "/api/auth/password/set") {
+    51	2317:      if (url.pathname === "/api/auth/github/link/start") {
+    52	2335:      if (url.pathname === "/api/auth/google/link/start") {
+    53	2356:      if (url.pathname === "/api/account/profile") {
+    54	2368:      if (url.pathname === "/api/account/onboarding") {
+    55	2373:      if (url.pathname === "/api/account/onboarding/complete") {
+    56	2381:      if (url.pathname === "/api/account/retention") {
+    57	2386:      if (url.pathname === "/api/account/deletion/plan") {
+    58	2398:      if (url.pathname === "/api/account/delete") {
+    59	2416:      if (url.pathname === "/api/guest-agent-links" && ["GET", "HEAD"].includes(req.method)) {
+    60	2419:      if (url.pathname === "/api/guest-agent-links" && req.method === "POST") {
+    61	2434:      if (url.pathname === "/api/guest-agent-links/preview" && req.method === "POST") {
+    62	2441:      if (url.pathname === "/api/guest-agent-links/join" && req.method === "POST") {
+    63	2455:      if (url.pathname === "/api/guest-agent-links/refresh" && req.method === "POST") {
+    64	2471:      if (url.pathname === "/api/guest-invites" && ["GET", "HEAD"].includes(req.method)) {
+    65	2474:      if (url.pathname === "/api/guest-invites/preview" && req.method === "POST") {
+    66	2481:      if (url.pathname === "/api/guest-invites/redeem" && req.method === "POST") {
+    67	2501:      if (url.pathname === "/api/guest-invites/request" && req.method === "POST") {
+    68	2519:      if (url.pathname === "/api/guest-invites/rotate" && req.method === "POST") {
+    69	2529:      if (url.pathname === "/api/share-links/preview" && req.method === "POST") {
+    70	2536:      if (url.pathname === "/api/share-links/join-agent" && req.method === "POST") {
+    71	2566:      if (url.pathname === "/api/share-links/join-agent" && req.method !== "POST") {
+    72	2569:      if (url.pathname === "/api/share-links/join" && req.method === "POST") {
+    73	2583:      if (url.pathname === "/api/invitations/preview" && req.method === "POST") {
+    74	2590:      if (url.pathname === "/api/invitations/accept" && req.method === "POST") {
+    75	2601:      if (url.pathname === "/api/session" && req.method === "POST") {
+    76	2614:      if (url.pathname === "/api/auth/agent/rooms" && req.method === "POST") {
+    77	2627:      if (url.pathname === "/api/auth/agent/session" && req.method === "POST") {
+    78	2656:      if ((url.pathname === "/join" || url.pathname === "/room/join" || url.pathname === "/api/join") && req.method === "POST") {
+    79	2784:      if (url.pathname === "/api/session") {
+    80	2808:      if (url.pathname === "/api/web/fetch") {
+    81	2846:      if (url.pathname === "/api/web/research") {
+    82	2880:      if (url.pathname === "/api/claims/validate") {
+    83	2899:      if ((url.pathname === "/api/agent-identities" || url.pathname === "/api/identity-create") && req.method === "POST") {
+    84	2935:      if ((url.pathname === "/api/agent-identities" || url.pathname === "/api/identity-create") && req.method !== "POST") {
+    85	2940:      if (url.pathname === "/api/agent-invites/redeem" && req.method === "POST") {
+    86	2966:      if (url.pathname === "/api/agent-invites/redeem" && req.method !== "POST") {
+    87	2973:      if (url.pathname === "/api/referral-invites/mint" && req.method === "POST") {
+    88	2988:      if (url.pathname === "/api/referral-invites/mint" && req.method !== "POST") {
+    89	2991:      if (url.pathname === "/api/referral-invites/redeem" && req.method === "POST") {
+    90	3019:      if (url.pathname === "/api/referral-invites/redeem" && req.method !== "POST") {
+    91	3026:      if (url.pathname === "/api/referral-invites/preview" && req.method === "POST") {
+    92	3032:      if (url.pathname === "/api/referral-invites/preview" && req.method !== "POST") {
+    93	3038:      if (url.pathname === "/api/agent-invites/preview" && req.method === "GET") {
+    94	3047:      if (url.pathname === "/api/access-requests" && req.method === "POST") {
+    95	3105:      if (url.pathname === "/api/access-requests" && req.method !== "POST") {
+    96	3112:      if (url.pathname === "/api/agent-rooms" && req.method === "GET") {
+    97	3116:      if (url.pathname === "/api/agent-rooms" && req.method === "POST") {
+    98	3126:      if (url.pathname === "/api/agent-rooms") {
+    99	3130:      if (url.pathname === "/api/needs-me" && (req.method === "GET" || req.method === "HEAD")) {
+   100	3145:      if (url.pathname === "/api/needs-me") {
+   101	3170:      if (url.pathname === "/api/updates" && (req.method === "GET" || req.method === "HEAD")) {
+   102	3181:      if (url.pathname === "/api/updates") reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });

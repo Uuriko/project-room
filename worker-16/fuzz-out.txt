@@ -1,0 +1,59 @@
+{"event":"room.cold_start","durationMs":1622,"integrity":"eager","phases":{"schema":{"ms":266,"rowsRead":0},"plugin":{"ms":651,"rowsRead":0},"fence":{"ms":418,"rowsRead":0},"verifies":{"ms":68,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":203,"heapBytes":36917888,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+
+==== 55 checks, 0 failures ====
+PASS signup sanity — status=202 ms=1453 body={"status":"check_email","mailConfigured":false}
+PASS signup issued session+csrf — token=true csrf=true
+PASS A1 baseline GET 200 + shape — status=200 ms=63 body={"rooms":[],"nextCursor":null}
+PASS A2 method POST -> 405 — status=405 ms=20 body={"error":{"code":"method_not_allowed","message":"Method not allowed"},"status":"action_required","reason":"method_not_al
+PASS A2 method PUT -> 405 — status=405 ms=8 body={"error":{"code":"method_not_allowed","message":"Method not allowed"},"status":"action_required","reason":"method_not_al
+PASS A2 method DELETE -> 405 — status=405 ms=6 body={"error":{"code":"method_not_allowed","message":"Method not allowed"},"status":"action_required","reason":"method_not_al
+PASS A2 method HEAD -> 405 — status=405 ms=15 body=
+PASS A2 method PATCH -> 405 — status=405 ms=27 body={"error":{"code":"method_not_allowed","message":"Method not allowed"},"status":"action_required","reason":"method_not_al
+PASS A2 method OPTIONS -> 405 — status=405 ms=51 body={"error":{"code":"method_not_allowed","message":"Method not allowed"},"status":"action_required","reason":"method_not_al
+PASS A3 limit="abc" -> 200 — status=200 ms=16 body={"rooms":[],"nextCursor":null}
+PASS A3 limit="-5" -> 200 — status=200 ms=54 body={"rooms":[],"nextCursor":null}
+PASS A3 limit="0" -> 200 — status=200 ms=51 body={"rooms":[],"nextCursor":null}
+PASS A3 limit="999999999999" -> 200 — status=200 ms=30 body={"rooms":[],"nextCursor":null}
+PASS A3 limit="1e3" -> 200 — status=200 ms=64 body={"rooms":[],"nextCursor":null}
+PASS A3 limit="Infinity" -> 200 — status=200 ms=44 body={"rooms":[],"nextCursor":null}
+PASS A3 limit="NaN" -> 200 — status=200 ms=52 body={"rooms":[],"nextCursor":null}
+PASS A3 limit="" -> 200 — status=200 ms=30 body={"rooms":[],"nextCursor":null}
+PASS A3 limit="10.9" -> 200 — status=200 ms=24 body={"rooms":[],"nextCursor":null}
+PASS A3 limit="0x10" -> 200 — status=200 ms=36 body={"rooms":[],"nextCursor":null}
+PASS A3 limit="５" -> 200 — status=200 ms=26 body={"rooms":[],"nextCursor":null}
+PASS A3 limit="%00" -> 200 — status=200 ms=22 body={"rooms":[],"nextCursor":null}
+PASS A3 limit="%20" -> 200 — status=200 ms=11 body={"rooms":[],"nextCursor":null}
+PASS A3 limit="1%202" -> 200 — status=200 ms=36 body={"rooms":[],"nextCursor":null}
+PASS A4 limit=10k-digit string -> 200 — status=200 ms=37 body={"rooms":[],"nextCursor":null}
+PASS A5 duplicate limit -> 200 (first wins) — status=200 ms=40 body={"rooms":[],"nextCursor":null}
+PASS A6 limit[]=5 -> 200 — status=200 ms=46 body={"rooms":[],"nextCursor":null}
+PASS A7 after=385 chars -> 422 invalid_cursor — status=422 ms=42 body={"error":{"code":"invalid_cursor","message":"Use the nextCursor returned by the previous page"},"status":"action_require
+PASS A8 after=384 chars -> 200 — status=200 ms=46 body={"rooms":[],"nextCursor":null}
+PASS A9 after=SQLi probe -> 200 (prepared stmt) — status=200 ms=26 body={"rooms":[],"nextCursor":null}
+PASS A10 after= (empty) -> 200 — status=200 ms=29 body={"rooms":[],"nextCursor":null}
+PASS A11 after=emoji -> 200 — status=200 ms=25 body={"rooms":[],"nextCursor":null}
+PASS A12 duplicate after -> 200 — status=200 ms=13 body={"rooms":[],"nextCursor":null}
+PASS A13 after=CRLF -> 200 — status=200 ms=35 body={"rooms":[],"nextCursor":null}
+PASS A14 after=NUL -> 200 — status=200 ms=18 body={"rooms":[],"nextCursor":null}
+PASS A15 unknown query param -> 200 (accepted) — status=200 ms=31 body={"rooms":[],"nextCursor":null}
+PASS A16 after=zzz&limit=-0 -> 200 — status=200 ms=20 body={"rooms":[],"nextCursor":null}
+PASS B1 method GET -> 405 — status=405 ms=44 body={"error":{"code":"method_not_allowed","message":"Method not allowed"},"status":"action_required","reason":"method_not_al
+PASS B1 method PUT -> 405 — status=405 ms=23 body={"error":{"code":"method_not_allowed","message":"Method not allowed"},"status":"action_required","reason":"method_not_al
+PASS B1 method DELETE -> 405 — status=405 ms=34 body={"error":{"code":"method_not_allowed","message":"Method not allowed"},"status":"action_required","reason":"method_not_al
+PASS B1 method HEAD -> 405 — status=405 ms=21 body=
+PASS B1 method OPTIONS -> 405 — status=405 ms=22 body={"error":{"code":"method_not_allowed","message":"Method not allowed"},"status":"action_required","reason":"method_not_al
+PASS B1 method PATCH -> 405 — status=405 ms=35 body={"error":{"code":"method_not_allowed","message":"Method not allowed"},"status":"action_required","reason":"method_not_al
+PASS B2 POST no Origin no cookie -> 403 origin_denied — status=403 ms=10 body={"error":{"code":"origin_denied","message":"Origin header is required"},"status":"action_required","reason":"origin_deni
+PASS B3 POST foreign Origin -> 403 origin_denied — status=403 ms=9 body={"error":{"code":"origin_denied","message":"Request origin is not allowed"},"status":"action_required","reason":"origin_
+PASS B4 POST good Origin no cookie -> 401 account_session_required — status=401 ms=11 body={"error":{"code":"account_session_required","message":"Sign in to manage your account"},"status":"action_required","reas
+PASS B5 POST garbage cookie -> 401 invalid_session — status=401 ms=18 body={"error":{"code":"invalid_session","message":"That session is no longer valid; sign in again"},"status":"action_required
+PASS B6 POST valid cookie but no Origin -> 403 (origin checked first) — status=403 ms=117 body={"error":{"code":"origin_denied","message":"Origin header is required"},"status":"action_required","reason":"origin_deni
+PASS B7 POST valid cookie, no CSRF -> 403 csrf_denied — status=403 ms=44 body={"error":{"code":"csrf_denied","message":"Session confirmation required; sign in again"},"status":"action_required","rea
+PASS B8 happy path -> 200 completed=true — status=200 ms=86 body={"accountId":"email:7c46cb454efa49aeb71e4f75ad3a4de968bd7d24fc7fbf4a738157db68904341","completed":true,"steps":[{"id":"s
+PASS B9 idempotent re-complete -> 200 completed=true — status=200 ms=54 body={"accountId":"email:7c46cb454efa49aeb71e4f75ad3a4de968bd7d24fc7fbf4a738157db68904341","completed":true,"steps":[{"id":"s
+PASS B10 invalid JSON body -> 200 (body never parsed) — status=200 ms=69 body={"accountId":"email:7c46cb454efa49aeb71e4f75ad3a4de968bd7d24fc7fbf4a738157db68904341","completed":true,"steps":[{"id":"s
+PASS B11 5MB body unread -> 200 fast (<3s) — status=200 ms=265 body={"accountId":"email:7c46cb454efa49aeb71e4f75ad3a4de968bd7d24fc7fbf4a738157db68904341","completed":true,"steps":[{"id":"s
+PASS B12 5k-char garbage cookie -> 401 — status=401 ms=146 body={"error":{"code":"invalid_session","message":"That session is no longer valid; sign in again"},"status":"action_required
+PASS B13 query params ignored -> 200 — status=200 ms=117 body={"accountId":"email:7c46cb454efa49aeb71e4f75ad3a4de968bd7d24fc7fbf4a738157db68904341","completed":true,"steps":[{"id":"s
+PASS B14 Origin with trailing slash -> 403 (exact match) — status=403 ms=14 body={"error":{"code":"origin_denied","message":"Request origin is not allowed"},"status":"action_required","reason":"origin_

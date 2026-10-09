@@ -1,0 +1,26 @@
+{
+  "main": {
+    "slotToken": "v5drHlpcDN1M1lVN9hz2zGAWunenMXbq0wXcM1J_xeY",
+    "csrf": "288017b71c79ed847f5c920f8486e54a8cd30d1cdd3c201df06988f5bdaad8a0",
+    "accountId": "w5-fuzz-account-01",
+    "email": "fuzz-test@example.com"
+  },
+  "extra1": {
+    "slotToken": "Vrns9-DYVOyoCp10bQKt74buXCyyjIEN8YFPTtBebGo",
+    "csrf": "f5eb83cb17e56de7ee9e109f5ea0a91f96ff7e13496a3f5ad6f94e25778d5a6e",
+    "accountId": "w5-fuzz-account-02",
+    "email": "verified@example.com"
+  },
+  "extra2": {
+    "slotToken": "GvBGn0MoVfqvRNiaAO1UJdULLJls8m3Cqjrx-03y4uA",
+    "csrf": "6882d8778dbfd46ee9be0ed209593c5260c302ab9291d6eb3e70f6da67bc3b7b",
+    "accountId": "w5-fuzz-account-03",
+    "email": null
+  },
+  "extra3": {
+    "slotToken": "nTXu9GClL7YKLCWC-c0XWJ59pUrJk3RM1Z0_l9mwPSM",
+    "csrf": "7c4c445a5fbbb293079ffd6ef8216f365d381b1b95eefc45be432bf2b5bbff94",
+    "accountId": "w5-fuzz-account-04",
+    "email": "not-an-email"
+  }
+}

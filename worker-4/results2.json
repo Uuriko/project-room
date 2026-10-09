@@ -1,0 +1,301 @@
+[
+ {
+  "label": "C-10 raw method with space",
+  "status": "end :: HTTP/1.1 400 Bad Request",
+  "ms": 49
+ },
+ {
+  "label": "C-11 raw lowercase frob",
+  "status": "end :: HTTP/1.1 400 Bad Request",
+  "ms": 25
+ },
+ {
+  "label": "C-12 raw empty method",
+  "status": "end :: HTTP/1.1 400 Bad Request",
+  "ms": 18
+ },
+ {
+  "label": "C-13 raw method 64k token",
+  "status": "end :: HTTP/1.1 400 Bad Request",
+  "ms": 10
+ },
+ {
+  "label": "C-01 baseline configured",
+  "status": 302,
+  "ms": 131,
+  "len": 0,
+  "location": "https://accounts.google.com/o/oauth2/v2/auth?client_id=12345-abc.apps.googleusercontent.com&redirect_uri=http%3A%2F%2F127.0.0.1%3A44217%2Fapi%2Fauth%2Fgoogle%2Fcallback&response_type=code&scope=openid+email+profile&access_type=online&prompt=select_account&include_granted_scopes=false&state=KPqZUuy1qT3s00LP3Mv35QXa0M1OPQVPW4O_Lp85wak&code_challenge=U5tu42gGB8lmBtAaj62UG2GyDHLYbZxbMRHJalnnm4Q&code_challenge_method=S256",
+  "setCookie": 1,
+  "code": null
+ },
+ {
+  "label": "C-02 huge cookie 8k",
+  "status": 302,
+  "ms": 77,
+  "len": 0,
+  "location": "https://accounts.google.com/o/oauth2/v2/auth?client_id=12345-abc.apps.googleusercontent.com&redirect_uri=http%3A%2F%2F127.0.0.1%3A44217%2Fapi%2Fauth%2Fgoogle%2Fcallback&response_type=code&scope=openid+email+profile&access_type=online&prompt=select_account&include_granted_scopes=false&state=L61vE-J3o8mcz5SCODvgQlHIHS6-0OjRqPb6FVCDQ9k&code_challenge=KtoIItbX-aCDKDr8TzPL3xcUd_xCFoRCOh7eAR2Fqug&code_challenge_method=S256",
+  "setCookie": 1,
+  "code": null
+ },
+ {
+  "label": "C-03 dup session cookie",
+  "status": 401,
+  "ms": 24,
+  "len": 1133,
+  "location": null,
+  "setCookie": 0
+ },
+ {
+  "label": "C-04 cookie garbage",
+  "status": 302,
+  "ms": 52,
+  "len": 0,
+  "location": "https://accounts.google.com/o/oauth2/v2/auth?client_id=12345-abc.apps.googleusercontent.com&redirect_uri=http%3A%2F%2F127.0.0.1%3A44217%2Fapi%2Fauth%2Fgoogle%2Fcallback&response_type=code&scope=openid+email+profile&access_type=online&prompt=select_account&include_granted_scopes=false&state=DIEmLpBVbgGPGMw7ZqWrm2j00BQ6o7JYetTXHvKuN0Q&code_challenge=5LWdmpJC9w4NPkwioSLji-xOPDnXwYVPiLLcLioD9M8&code_challenge_method=S256",
+  "setCookie": 1,
+  "code": null
+ },
+ {
+  "label": "C-05 cookie empty val",
+  "status": 302,
+  "ms": 62,
+  "len": 0,
+  "location": "https://accounts.google.com/o/oauth2/v2/auth?client_id=12345-abc.apps.googleusercontent.com&redirect_uri=http%3A%2F%2F127.0.0.1%3A44217%2Fapi%2Fauth%2Fgoogle%2Fcallback&response_type=code&scope=openid+email+profile&access_type=online&prompt=select_account&include_granted_scopes=false&state=cMFFXo1twSGj-ZTdergBgc8B0zEM76RwpMX8bGAp0Eo&code_challenge=_MDSTLrkfSQtIvh_VSEeGAgi6_pAAI0pdaryFL1QkFg&code_challenge_method=S256",
+  "setCookie": 1,
+  "code": null
+ },
+ {
+  "label": "C-06 cookie 43char token (stale)",
+  "status": 302,
+  "ms": 120,
+  "len": 0,
+  "location": "https://accounts.google.com/o/oauth2/v2/auth?client_id=12345-abc.apps.googleusercontent.com&redirect_uri=http%3A%2F%2F127.0.0.1%3A44217%2Fapi%2Fauth%2Fgoogle%2Fcallback&response_type=code&scope=openid+email+profile&access_type=online&prompt=select_account&include_granted_scopes=false&state=v7X8oaHqULaMwojkCJWFhx6YbZM7KyqnEv8RslOUe3o&code_challenge=nuHcjdK7U_X2WWwCWDuPkOqn3OmEHc27sk2CEEdUeZA&code_challenge_method=S256",
+  "setCookie": 1,
+  "code": null
+ },
+ {
+  "label": "C-07 FROB method",
+  "status": 400,
+  "ms": 18,
+  "len": 0,
+  "location": null,
+  "setCookie": 0,
+  "code": null
+ },
+ {
+  "label": "C-08 FROB on preview",
+  "status": 400,
+  "ms": 32,
+  "len": 0,
+  "location": null,
+  "setCookie": 0,
+  "code": null
+ },
+ {
+  "label": "C-09 lower method get",
+  "status": 302,
+  "ms": 101,
+  "len": 0,
+  "location": "https://accounts.google.com/o/oauth2/v2/auth?client_id=12345-abc.apps.googleusercontent.com&redirect_uri=http%3A%2F%2F127.0.0.1%3A44217%2Fapi%2Fauth%2Fgoogle%2Fcallback&response_type=code&scope=openid+email+profile&access_type=online&prompt=select_account&include_granted_scopes=false&state=KGK9s7En6xAnm6bWwWOw32t7oyAewsps7ZvhqYmczRA&code_challenge=U7yUWBD0gk7kLhm68LSQxM1XMgLLnfGe9t5PoZZu948&code_challenge_method=S256",
+  "setCookie": 1,
+  "code": null
+ },
+ {
+  "label": "D-01 POST Origin, no body (415)",
+  "status": 401,
+  "ms": 20,
+  "len": 1094,
+  "location": null,
+  "setCookie": 0
+ },
+ {
+  "label": "D-02 POST Origin, malformed JSON (400)",
+  "status": 401,
+  "ms": 10,
+  "len": 1094,
+  "location": null,
+  "setCookie": 0
+ },
+ {
+  "label": "D-03 POST Origin, array (400)",
+  "status": 401,
+  "ms": 21,
+  "len": 1094,
+  "location": null,
+  "setCookie": 0
+ },
+ {
+  "label": "D-04 POST Origin, {} (401)",
+  "status": 401,
+  "ms": 18,
+  "len": 1094,
+  "location": null,
+  "setCookie": 0
+ },
+ {
+  "label": "D-05 POST Origin, proto pollution",
+  "status": 401,
+  "ms": 64,
+  "len": 1094,
+  "location": null,
+  "setCookie": 0
+ },
+ {
+  "label": "D-06 POST Origin, oversize declared (413)",
+  "status": 401,
+  "ms": 73,
+  "len": 1094,
+  "location": null,
+  "setCookie": 0
+ },
+ {
+  "label": "D-07 POST Origin, huge roomId 15k",
+  "status": "ERR:socket hang up",
+  "ms": 6008
+ },
+ {
+  "label": "D-08 POST Origin, bearer junk (401)",
+  "status": 401,
+  "ms": 17,
+  "len": 1072,
+  "location": null,
+  "setCookie": 0
+ },
+ {
+  "label": "D-09 POST Origin, auth=bogus (422)",
+  "status": 422,
+  "ms": 15,
+  "len": 394,
+  "location": null,
+  "setCookie": 0
+ },
+ {
+  "label": "D-10 POST Origin, auth=ROOM upper (422?)",
+  "status": 422,
+  "ms": 5,
+  "len": 394,
+  "location": null,
+  "setCookie": 0
+ },
+ {
+  "label": "D-11 POST Origin, valid-shaped no roomId",
+  "status": 401,
+  "ms": 4,
+  "len": 1094,
+  "location": null,
+  "setCookie": 0
+ },
+ {
+  "label": "D-12 POST Origin, roomId number (422)",
+  "status": 401,
+  "ms": 13,
+  "len": 1094,
+  "location": null,
+  "setCookie": 0
+ },
+ {
+  "label": "D-13 POST Origin, trailing-slash path",
+  "status": 401,
+  "ms": 8,
+  "len": 1094,
+  "location": null,
+  "setCookie": 0
+ },
+ {
+  "label": "D-14 POST no Origin but bearer junk (401, Origin not required)",
+  "status": 401,
+  "ms": 24,
+  "len": 1072,
+  "location": null,
+  "setCookie": 0
+ },
+ {
+  "label": "E-01 preview malformed JSON (400)",
+  "status": 400,
+  "ms": 9,
+  "len": 379,
+  "location": null,
+  "setCookie": 0
+ },
+ {
+  "label": "E-02 preview array (400)",
+  "status": 400,
+  "ms": 15,
+  "len": 379,
+  "location": null,
+  "setCookie": 0
+ },
+ {
+  "label": "E-03 preview {} (422 invalid_link)",
+  "status": 400,
+  "ms": 13,
+  "len": 379,
+  "location": null,
+  "setCookie": 0
+ },
+ {
+  "label": "E-04 preview oversize declared (413)",
+  "status": 413,
+  "ms": 32,
+  "len": 405,
+  "location": null,
+  "setCookie": 0
+ },
+ {
+  "label": "E-05 preview oversize actual stream (413)",
+  "status": "ERR:socket hang up",
+  "ms": 1009
+ },
+ {
+  "label": "E-06 preview no CT (415)",
+  "status": 415,
+  "ms": 17,
+  "len": 378,
+  "location": null,
+  "setCookie": 0
+ },
+ {
+  "label": "E-07 preview deep nesting",
+  "status": 400,
+  "ms": 10,
+  "len": 379,
+  "location": null,
+  "setCookie": 0
+ },
+ {
+  "label": "E-08 preview linkToken non-string (422)",
+  "status": 400,
+  "ms": 7,
+  "len": 379,
+  "location": null,
+  "setCookie": 0
+ },
+ {
+  "label": "E-09 preview linkToken bogus (store error?)",
+  "status": 400,
+  "ms": 10,
+  "len": 379,
+  "location": null,
+  "setCookie": 0
+ },
+ {
+  "label": "E-10 preview huge linkToken 15k",
+  "status": 400,
+  "ms": 20,
+  "len": 379,
+  "location": null,
+  "setCookie": 0
+ },
+ {
+  "label": "C-RATE-HAMMER",
+  "distribution": {
+   "302": 3,
+   "429": 22
+  }
+ },
+ {
+  "label": "C-FLOOD",
+  "distribution": {
+   "429:": 110
+  }
+ }
+]

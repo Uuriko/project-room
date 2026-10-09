@@ -1,0 +1,31 @@
+agents GET /agents -> 200 (40ms) text/html; charset=utf-8
+agents HEAD /agents -> 200 (346ms) 
+agents POST /agents -> 405 (25ms) 
+agents PUT /agents -> 405 (13ms) 
+agents DELETE /agents -> 405 (9ms) 
+agents GET /agents/ -> 200 (6ms) 
+agents GET /AGENTS -> 404 (17ms) 
+agents GET /agents?cursor=3k -> 422 (25ms) 
+agents GET /agents?ref=xss -> 200 (9ms) not-reflected/raw
+redeem POST valid-shape-bogus -> 404 (36ms) {"error":{"code":"invite_unavailable","message":"Invite code has the wrong format: invite codes are two letters, a dash, then 16 characters (no I, L, O, or U). Check for typos or ask the inviter for a
+redeem POST code-empty -> 404 (4ms) {"error":{"code":"invite_unavailable","message":"Invite code has the wrong format: invite codes are two letters, a dash, then 16 characters (no I, L, O, or U). Check for typos or ask the inviter for a
+redeem POST code-5k -> 404 (3ms) {"error":{"code":"invite_unavailable","message":"Invite code has the wrong format: invite codes are two letters, a dash, then 16 characters (no I, L, O, or U). Check for typos or ask the inviter for a
+redeem POST code-traversal -> 404 (3ms) {"error":{"code":"invite_unavailable","message":"Invite code has the wrong format: invite codes are two letters, a dash, then 16 characters (no I, L, O, or U). Check for typos or ask the inviter for a
+redeem POST code-num -> 422 (128ms) {"error":{"code":"invalid_invite","message":"Invalid invite redeem (code: wrong type). Send exactly {code, displayName}."},"status":"action_required","reason":"input_refused","hint":"Fix the refused f
+redeem POST code-null -> 422 (32ms) {"error":{"code":"invalid_invite","message":"Invalid invite redeem (code: wrong type). Send exactly {code, displayName}."},"status":"action_required","reason":"input_refused","hint":"Fix the refused f
+redeem POST name-5k -> 404 (56ms) {"error":{"code":"invite_unavailable","message":"Invite code has the wrong format: invite codes are two letters, a dash, then 16 characters (no I, L, O, or U). Check for typos or ask the inviter for a
+redeem POST name-empty -> 404 (109ms) {"error":{"code":"invite_unavailable","message":"Invite code has the wrong format: invite codes are two letters, a dash, then 16 characters (no I, L, O, or U). Check for typos or ask the inviter for a
+redeem POST name-num -> 422 (62ms) {"error":{"code":"invalid_invite","message":"Invalid invite redeem (displayName: wrong type). Send exactly {code, displayName}."},"status":"action_required","reason":"input_refused","hint":"Fix the re
+redeem POST missing-code -> 422 (34ms) {"error":{"code":"invalid_invite","message":"Invalid invite redeem (missing required field: code). Send exactly {code, displayName}."},"status":"action_required","reason":"input_refused","hint":"Fix t
+redeem POST missing-name -> 422 (41ms) {"error":{"code":"invalid_invite","message":"Invalid invite redeem (missing required field: displayName). Send exactly {code, displayName}."},"status":"action_required","reason":"input_refused","hint"
+redeem POST empty-obj -> 422 (28ms) {"error":{"code":"invalid_invite","message":"Invalid invite redeem (missing required fields: code, displayName). Send exactly {code, displayName}."},"status":"action_required","reason":"input_refused"
+redeem POST extra-key -> 422 (17ms) {"error":{"code":"invalid_invite","message":"Invalid invite redeem (unexpected field: admin). Send exactly {code, displayName}."},"status":"action_required","reason":"input_refused","hint":"Fix the re
+redeem POST arr-body -> 400 (8ms) {"error":{"code":"invalid_json","message":"Expected a JSON object"},"status":"action_required","reason":"input_refused","hint":"Fix the refused fields named in this error's message, then resend. Keep 
+redeem POST malformed -> 400 (49ms) {"error":{"code":"invalid_json","message":"Expected a JSON object"},"status":"action_required","reason":"input_refused","hint":"Fix the refused fields named in this error's message, then resend. Keep 
+redeem POST empty-body -> 400 (22ms) {"error":{"code":"invalid_json","message":"Expected a JSON object"},"status":"action_required","reason":"input_refused","hint":"Fix the refused fields named in this error's message, then resend. Keep 
+redeem POST wrong-ctype -> 415 (7ms) {"error":{"code":"json_required","message":"Use application/json"},"status":"action_required","reason":"input_refused","hint":"Fix the refused fields named in t
+redeem GET /api/agent-invites/redeem -> 405 (4ms) allow=POST
+redeem PUT /api/agent-invites/redeem -> 405 (18ms) allow=POST
+redeem DELETE /api/agent-invites/redeem -> 405 (8ms) allow=POST
+redeem HEAD /api/agent-invites/redeem -> 405 (4ms) allow=POST
+ANOMALIES: 0 []

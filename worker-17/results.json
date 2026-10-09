@@ -1,0 +1,709 @@
+{
+  "target": "http://127.0.0.1:39775",
+  "ran": 71,
+  "failures": 0,
+  "results": [
+    {
+      "route": "ready",
+      "desc": "method GET /api/ready",
+      "verdict": "PASS",
+      "status": 200,
+      "outcome": "response",
+      "ms": 49,
+      "note": "",
+      "head": "HTTP/1.1 200 OK\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: camera=(), "
+    },
+    {
+      "route": "ready",
+      "desc": "method HEAD /api/ready",
+      "verdict": "PASS",
+      "status": 200,
+      "outcome": "response",
+      "ms": 24,
+      "note": "",
+      "head": "HTTP/1.1 200 OK\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: camera=(), "
+    },
+    {
+      "route": "ready",
+      "desc": "method POST /api/ready",
+      "verdict": "PASS",
+      "status": 404,
+      "outcome": "response",
+      "ms": 55,
+      "note": "",
+      "head": "HTTP/1.1 404 Not Found\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: came"
+    },
+    {
+      "route": "ready",
+      "desc": "method PUT /api/ready",
+      "verdict": "PASS",
+      "status": 404,
+      "outcome": "response",
+      "ms": 103,
+      "note": "",
+      "head": "HTTP/1.1 404 Not Found\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: came"
+    },
+    {
+      "route": "ready",
+      "desc": "method DELETE /api/ready",
+      "verdict": "PASS",
+      "status": 404,
+      "outcome": "response",
+      "ms": 96,
+      "note": "",
+      "head": "HTTP/1.1 404 Not Found\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: came"
+    },
+    {
+      "route": "ready",
+      "desc": "method PATCH /api/ready",
+      "verdict": "PASS",
+      "status": 404,
+      "outcome": "response",
+      "ms": 47,
+      "note": "",
+      "head": "HTTP/1.1 404 Not Found\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: came"
+    },
+    {
+      "route": "ready",
+      "desc": "method OPTIONS /api/ready",
+      "verdict": "PASS",
+      "status": 404,
+      "outcome": "response",
+      "ms": 190,
+      "note": "",
+      "head": "HTTP/1.1 404 Not Found\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: came"
+    },
+    {
+      "route": "ready",
+      "desc": "method TRACE /api/ready",
+      "verdict": "PASS",
+      "status": 404,
+      "outcome": "response",
+      "ms": 59,
+      "note": "",
+      "head": "HTTP/1.1 404 Not Found\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: came"
+    },
+    {
+      "route": "ready",
+      "desc": "method FROBNICATE /api/ready",
+      "verdict": "PASS",
+      "status": 400,
+      "outcome": "response",
+      "ms": 17,
+      "note": "",
+      "head": "HTTP/1.1 400 Bad Request\r\nConnection: close"
+    },
+    {
+      "route": "ready",
+      "desc": "method get /api/ready",
+      "verdict": "PASS",
+      "status": 400,
+      "outcome": "response",
+      "ms": 7,
+      "note": "",
+      "head": "HTTP/1.1 400 Bad Request\r\nConnection: close"
+    },
+    {
+      "route": "ready",
+      "desc": "trailing slash /api/ready/",
+      "verdict": "PASS",
+      "status": 200,
+      "outcome": "response",
+      "ms": 61,
+      "note": "",
+      "head": "HTTP/1.1 200 OK\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: camera=(), "
+    },
+    {
+      "route": "ready",
+      "desc": "case variant /api/READY",
+      "verdict": "PASS",
+      "status": 404,
+      "outcome": "response",
+      "ms": 33,
+      "note": "",
+      "head": "HTTP/1.1 404 Not Found\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: came"
+    },
+    {
+      "route": "ready",
+      "desc": "double slash /api//ready",
+      "verdict": "PASS",
+      "status": 404,
+      "outcome": "response",
+      "ms": 7,
+      "note": "",
+      "head": "HTTP/1.1 404 Not Found\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: came"
+    },
+    {
+      "route": "ready",
+      "desc": "query string",
+      "verdict": "PASS",
+      "status": 200,
+      "outcome": "response",
+      "ms": 4,
+      "note": "",
+      "head": "HTTP/1.1 200 OK\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: camera=(), "
+    },
+    {
+      "route": "ready",
+      "desc": "query bomb 5k params",
+      "verdict": "PASS",
+      "status": 431,
+      "outcome": "response",
+      "ms": 3,
+      "note": "",
+      "head": "HTTP/1.1 431 Request Header Fields Too Large\r\nConnection: close"
+    },
+    {
+      "route": "ready",
+      "desc": "10KB path",
+      "verdict": "PASS",
+      "status": 404,
+      "outcome": "response",
+      "ms": 5,
+      "note": "",
+      "head": "HTTP/1.1 404 Not Found\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: came"
+    },
+    {
+      "route": "ready",
+      "desc": "encoded slash /api%2fready",
+      "verdict": "PASS",
+      "status": 404,
+      "outcome": "response",
+      "ms": 5,
+      "note": "",
+      "head": "HTTP/1.1 404 Not Found\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: came"
+    },
+    {
+      "route": "ready",
+      "desc": "dot segment /api/./ready",
+      "verdict": "PASS",
+      "status": 200,
+      "outcome": "response",
+      "ms": 4,
+      "note": "",
+      "head": "HTTP/1.1 200 OK\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: camera=(), "
+    },
+    {
+      "route": "ready",
+      "desc": "HEAD with query",
+      "verdict": "PASS",
+      "status": 200,
+      "outcome": "response",
+      "ms": 4,
+      "note": "",
+      "head": "HTTP/1.1 200 OK\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: camera=(), "
+    },
+    {
+      "route": "ready",
+      "desc": "huge User-Agent",
+      "verdict": "PASS",
+      "status": 431,
+      "outcome": "response",
+      "ms": 4,
+      "note": "",
+      "head": "HTTP/1.1 431 Request Header Fields Too Large\r\nConnection: close"
+    },
+    {
+      "route": "ready",
+      "desc": "NUL in path",
+      "verdict": "PASS",
+      "status": 400,
+      "outcome": "response",
+      "ms": 4,
+      "note": "",
+      "head": "HTTP/1.1 400 Bad Request\r\nConnection: close"
+    },
+    {
+      "route": "ready",
+      "desc": "no Host header",
+      "verdict": "PASS",
+      "status": 400,
+      "outcome": "response",
+      "ms": 3,
+      "note": "",
+      "head": "HTTP/1.1 400 Bad Request\r\nConnection: close\r\nDate: Fri, 09 Oct 2026 19:41:48 GMT\r\nTransfer-Encoding: chunked"
+    },
+    {
+      "route": "ready",
+      "desc": "HTTP/1.0",
+      "verdict": "PASS",
+      "status": 200,
+      "outcome": "response",
+      "ms": 8,
+      "note": "",
+      "head": "HTTP/1.1 200 OK\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: camera=(), "
+    },
+    {
+      "route": "preview",
+      "desc": "POST no Origin -> 403",
+      "verdict": "PASS",
+      "status": 403,
+      "outcome": "response",
+      "ms": 8,
+      "note": "",
+      "head": "HTTP/1.1 403 Forbidden\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: came"
+    },
+    {
+      "route": "preview",
+      "desc": "POST wrong Origin -> 403",
+      "verdict": "PASS",
+      "status": 403,
+      "outcome": "response",
+      "ms": 7,
+      "note": "",
+      "head": "HTTP/1.1 403 Forbidden\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: came"
+    },
+    {
+      "route": "preview",
+      "desc": "POST empty Origin -> 403",
+      "verdict": "PASS",
+      "status": 403,
+      "outcome": "response",
+      "ms": 5,
+      "note": "",
+      "head": "HTTP/1.1 403 Forbidden\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: came"
+    },
+    {
+      "route": "preview",
+      "desc": "POST correct Origin, unknown token -> 404",
+      "verdict": "PASS",
+      "status": 404,
+      "outcome": "response",
+      "ms": 10,
+      "note": "",
+      "head": "HTTP/1.1 404 Not Found\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: came"
+    },
+    {
+      "route": "preview",
+      "desc": "POST bad-char token -> 404",
+      "verdict": "PASS",
+      "status": 404,
+      "outcome": "response",
+      "ms": 7,
+      "note": "",
+      "head": "HTTP/1.1 404 Not Found\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: came"
+    },
+    {
+      "route": "preview",
+      "desc": "POST short token -> 404",
+      "verdict": "PASS",
+      "status": 404,
+      "outcome": "response",
+      "ms": 3,
+      "note": "",
+      "head": "HTTP/1.1 404 Not Found\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: came"
+    },
+    {
+      "route": "preview",
+      "desc": "empty body",
+      "verdict": "PASS",
+      "status": 400,
+      "outcome": "response",
+      "ms": 3,
+      "note": "",
+      "head": "HTTP/1.1 400 Bad Request\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: ca"
+    },
+    {
+      "route": "preview",
+      "desc": "malformed JSON",
+      "verdict": "PASS",
+      "status": 400,
+      "outcome": "response",
+      "ms": 4,
+      "note": "",
+      "head": "HTTP/1.1 400 Bad Request\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: ca"
+    },
+    {
+      "route": "preview",
+      "desc": "JSON array body",
+      "verdict": "PASS",
+      "status": 400,
+      "outcome": "response",
+      "ms": 10,
+      "note": "",
+      "head": "HTTP/1.1 400 Bad Request\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: ca"
+    },
+    {
+      "route": "preview",
+      "desc": "JSON string body",
+      "verdict": "PASS",
+      "status": 400,
+      "outcome": "response",
+      "ms": 3,
+      "note": "",
+      "head": "HTTP/1.1 400 Bad Request\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: ca"
+    },
+    {
+      "route": "preview",
+      "desc": "JSON number body",
+      "verdict": "PASS",
+      "status": 400,
+      "outcome": "response",
+      "ms": 3,
+      "note": "",
+      "head": "HTTP/1.1 400 Bad Request\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: ca"
+    },
+    {
+      "route": "preview",
+      "desc": "JSON null body",
+      "verdict": "PASS",
+      "status": 400,
+      "outcome": "response",
+      "ms": 6,
+      "note": "",
+      "head": "HTTP/1.1 400 Bad Request\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: ca"
+    },
+    {
+      "route": "preview",
+      "desc": "missing key {}",
+      "verdict": "PASS",
+      "status": 422,
+      "outcome": "response",
+      "ms": 8,
+      "note": "",
+      "head": "HTTP/1.1 422 Unprocessable Entity\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-P"
+    },
+    {
+      "route": "preview",
+      "desc": "extra key",
+      "verdict": "PASS",
+      "status": 422,
+      "outcome": "response",
+      "ms": 11,
+      "note": "",
+      "head": "HTTP/1.1 422 Unprocessable Entity\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-P"
+    },
+    {
+      "route": "preview",
+      "desc": "__proto__ key",
+      "verdict": "PASS",
+      "status": 422,
+      "outcome": "response",
+      "ms": 6,
+      "note": "",
+      "head": "HTTP/1.1 422 Unprocessable Entity\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-P"
+    },
+    {
+      "route": "preview",
+      "desc": "token as number",
+      "verdict": "PASS",
+      "status": 422,
+      "outcome": "response",
+      "ms": 9,
+      "note": "",
+      "head": "HTTP/1.1 422 Unprocessable Entity\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-P"
+    },
+    {
+      "route": "preview",
+      "desc": "token as null",
+      "verdict": "PASS",
+      "status": 422,
+      "outcome": "response",
+      "ms": 6,
+      "note": "",
+      "head": "HTTP/1.1 422 Unprocessable Entity\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-P"
+    },
+    {
+      "route": "preview",
+      "desc": "token as array",
+      "verdict": "PASS",
+      "status": 422,
+      "outcome": "response",
+      "ms": 3,
+      "note": "",
+      "head": "HTTP/1.1 422 Unprocessable Entity\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-P"
+    },
+    {
+      "route": "preview",
+      "desc": "token as object",
+      "verdict": "PASS",
+      "status": 422,
+      "outcome": "response",
+      "ms": 4,
+      "note": "",
+      "head": "HTTP/1.1 422 Unprocessable Entity\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-P"
+    },
+    {
+      "route": "preview",
+      "desc": "token as bool",
+      "verdict": "PASS",
+      "status": 422,
+      "outcome": "response",
+      "ms": 3,
+      "note": "",
+      "head": "HTTP/1.1 422 Unprocessable Entity\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-P"
+    },
+    {
+      "route": "preview",
+      "desc": "duplicate keys",
+      "verdict": "PASS",
+      "status": 404,
+      "outcome": "response",
+      "ms": 4,
+      "note": "",
+      "head": "HTTP/1.1 404 Not Found\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: came"
+    },
+    {
+      "route": "preview",
+      "desc": "deeply nested token",
+      "verdict": "PASS",
+      "status": 422,
+      "outcome": "response",
+      "ms": 3,
+      "note": "",
+      "head": "HTTP/1.1 422 Unprocessable Entity\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-P"
+    },
+    {
+      "route": "preview",
+      "desc": "10k-char token",
+      "verdict": "PASS",
+      "status": 404,
+      "outcome": "response",
+      "ms": 2,
+      "note": "",
+      "head": "HTTP/1.1 404 Not Found\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: came"
+    },
+    {
+      "route": "preview",
+      "desc": "unicode token",
+      "verdict": "PASS",
+      "status": 404,
+      "outcome": "response",
+      "ms": 31,
+      "note": "",
+      "head": "HTTP/1.1 404 Not Found\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: came"
+    },
+    {
+      "route": "preview",
+      "desc": "token with spaces",
+      "verdict": "PASS",
+      "status": 404,
+      "outcome": "response",
+      "ms": 39,
+      "note": "",
+      "head": "HTTP/1.1 404 Not Found\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: came"
+    },
+    {
+      "route": "preview",
+      "desc": "wrong content-type text/plain",
+      "verdict": "PASS",
+      "status": 415,
+      "outcome": "response",
+      "ms": 66,
+      "note": "",
+      "head": "HTTP/1.1 415 Unsupported Media Type\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions"
+    },
+    {
+      "route": "preview",
+      "desc": "missing content-type",
+      "verdict": "PASS",
+      "status": 415,
+      "outcome": "response",
+      "ms": 9,
+      "note": "",
+      "head": "HTTP/1.1 415 Unsupported Media Type\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions"
+    },
+    {
+      "route": "preview",
+      "desc": "content-type with charset",
+      "verdict": "PASS",
+      "status": 404,
+      "outcome": "response",
+      "ms": 28,
+      "note": "",
+      "head": "HTTP/1.1 404 Not Found\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: came"
+    },
+    {
+      "route": "preview",
+      "desc": "content-type application/jsonx",
+      "verdict": "PASS",
+      "status": 415,
+      "outcome": "response",
+      "ms": 32,
+      "note": "",
+      "head": "HTTP/1.1 415 Unsupported Media Type\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions"
+    },
+    {
+      "route": "preview",
+      "desc": "oversize body 20KB -> 413",
+      "verdict": "PASS",
+      "status": 413,
+      "outcome": "response",
+      "ms": 25,
+      "note": "",
+      "head": "HTTP/1.1 413 Payload Too Large\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Poli"
+    },
+    {
+      "route": "preview",
+      "desc": "declared CL larger than actual",
+      "verdict": "PASS",
+      "status": 400,
+      "outcome": "response",
+      "ms": 66,
+      "note": "",
+      "head": "HTTP/1.1 400 Bad Request\r\nConnection: close"
+    },
+    {
+      "route": "preview",
+      "desc": "chunked body",
+      "verdict": "PASS",
+      "status": 404,
+      "outcome": "response",
+      "ms": 14,
+      "note": "",
+      "head": "HTTP/1.1 404 Not Found\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: came"
+    },
+    {
+      "route": "preview",
+      "desc": "NUL byte in JSON body",
+      "verdict": "PASS",
+      "status": 400,
+      "outcome": "response",
+      "ms": 56,
+      "note": "",
+      "head": "HTTP/1.1 400 Bad Request\r\nConnection: close"
+    },
+    {
+      "route": "preview",
+      "desc": "method GET",
+      "verdict": "PASS",
+      "status": 404,
+      "outcome": "response",
+      "ms": 45,
+      "note": "",
+      "head": "HTTP/1.1 404 Not Found\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: came"
+    },
+    {
+      "route": "preview",
+      "desc": "method HEAD",
+      "verdict": "PASS",
+      "status": 404,
+      "outcome": "response",
+      "ms": 27,
+      "note": "",
+      "head": "HTTP/1.1 404 Not Found\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: came"
+    },
+    {
+      "route": "preview",
+      "desc": "method PUT",
+      "verdict": "PASS",
+      "status": 404,
+      "outcome": "response",
+      "ms": 21,
+      "note": "",
+      "head": "HTTP/1.1 404 Not Found\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: came"
+    },
+    {
+      "route": "preview",
+      "desc": "method DELETE",
+      "verdict": "PASS",
+      "status": 404,
+      "outcome": "response",
+      "ms": 38,
+      "note": "",
+      "head": "HTTP/1.1 404 Not Found\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: came"
+    },
+    {
+      "route": "preview",
+      "desc": "method PATCH",
+      "verdict": "PASS",
+      "status": 404,
+      "outcome": "response",
+      "ms": 24,
+      "note": "",
+      "head": "HTTP/1.1 404 Not Found\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: came"
+    },
+    {
+      "route": "preview",
+      "desc": "method OPTIONS",
+      "verdict": "PASS",
+      "status": 404,
+      "outcome": "response",
+      "ms": 7,
+      "note": "",
+      "head": "HTTP/1.1 404 Not Found\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Robots-Tag: noindex, nofollow\r\nStrict-Transport-Security: max-age=31536000\r\nContent-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'\r\nPermissions-Policy: came"
+    },
+    {
+      "route": "preview",
+      "desc": "absolute-URI request target",
+      "verdict": "PASS",
+      "status": 404,
+      "outcome": "response",
+      "ms": 40,
+      "note": ""
+    },
+    {
+      "route": "ready",
+      "desc": "absolute-URI request target",
+      "verdict": "PASS",
+      "status": 200,
+      "outcome": "response",
+      "ms": 12,
+      "note": ""
+    },
+    {
+      "route": "ready",
+      "desc": "GET with foreign Origin -> 403 (global preamble guard)",
+      "verdict": "PASS",
+      "status": 403,
+      "outcome": "response",
+      "ms": 5,
+      "note": ""
+    },
+    {
+      "route": "preview",
+      "desc": "Origin case: trailing slash",
+      "verdict": "PASS",
+      "status": 403,
+      "outcome": "response",
+      "ms": 8,
+      "note": ""
+    },
+    {
+      "route": "preview",
+      "desc": "Origin: null",
+      "verdict": "PASS",
+      "status": 403,
+      "outcome": "response",
+      "ms": 4,
+      "note": ""
+    },
+    {
+      "route": "preview",
+      "desc": "duplicate Content-Length",
+      "verdict": "PASS",
+      "status": 400,
+      "outcome": "response",
+      "ms": 4,
+      "note": ""
+    },
+    {
+      "route": "ready",
+      "desc": "pipelined 2x GET keep-alive",
+      "verdict": "PASS",
+      "status": null,
+      "outcome": "closed",
+      "ms": 0,
+      "note": "[\"HTTP/1.1 200\",\"HTTP/1.1 200\"]"
+    },
+    {
+      "route": "preview",
+      "desc": "slow drip body (informational; known F07 hang)",
+      "verdict": "KNOWN-HANG",
+      "status": null,
+      "outcome": "timeout",
+      "ms": 0,
+      "note": "coordinator F07 already covers; Node-level, not shard-specific"
+    },
+    {
+      "route": "preview",
+      "desc": "20-concurrent burst",
+      "verdict": "PASS",
+      "status": null,
+      "outcome": "response",
+      "ms": 0,
+      "note": "{\"404\":20}"
+    }
+  ],
+  "rateLimitOk": true
+}

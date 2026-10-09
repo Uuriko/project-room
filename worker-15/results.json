@@ -1,0 +1,1382 @@
+{
+ "total": 96,
+ "failed": 14,
+ "results": [
+  {
+   "name": "h1:no-cookie",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 401,
+   "code": "account_session_required",
+   "ms": 242,
+   "expect": [
+    401
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:bogus-cookie",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 401,
+   "code": "invalid_session",
+   "ms": 196,
+   "expect": [
+    401
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:empty-cookie",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 401,
+   "code": "account_session_required",
+   "ms": 62,
+   "expect": [
+    401
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:no-origin",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 403,
+   "code": "origin_denied",
+   "ms": 64,
+   "expect": [
+    403
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:foreign-origin",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 403,
+   "code": "origin_denied",
+   "ms": 72,
+   "expect": [
+    403
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:no-csrf",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 403,
+   "code": "csrf_denied",
+   "ms": 84,
+   "expect": [
+    403
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:bad-csrf",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 403,
+   "code": "csrf_denied",
+   "ms": 69,
+   "expect": [
+    403
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:valid",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 200,
+   "code": null,
+   "ms": 144,
+   "expect": [
+    200
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:repeat-complete",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 200,
+   "code": null,
+   "ms": 48,
+   "expect": [
+    200
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:garbage-body-not-read",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 200,
+   "code": null,
+   "ms": 44,
+   "expect": [
+    200
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:non-json-body",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 200,
+   "code": null,
+   "ms": 24,
+   "expect": [
+    200
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:huge-body-unread",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 200,
+   "code": null,
+   "ms": 30,
+   "expect": [
+    200,
+    413
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:query-string",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete?x=1&y=%00",
+   "status": 200,
+   "code": null,
+   "ms": 10,
+   "expect": [
+    200
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:trailing-slash",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete/",
+   "status": 200,
+   "code": null,
+   "ms": 8,
+   "expect": [
+    404
+   ],
+   "ok": false
+  },
+  {
+   "name": "h1:case-variant",
+   "method": "POST",
+   "path": "/api/account/Onboarding/complete",
+   "status": 404,
+   "code": "not_found",
+   "ms": 74,
+   "expect": [
+    404
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:double-slash",
+   "method": "POST",
+   "path": "/api//account/onboarding/complete",
+   "status": 404,
+   "code": "not_found",
+   "ms": 59,
+   "expect": [
+    404
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:get",
+   "method": "GET",
+   "path": "/api/account/onboarding/complete",
+   "status": 405,
+   "code": "method_not_allowed",
+   "ms": 24,
+   "expect": [
+    405
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:put",
+   "method": "PUT",
+   "path": "/api/account/onboarding/complete",
+   "status": 405,
+   "code": "method_not_allowed",
+   "ms": 10,
+   "expect": [
+    405
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:delete",
+   "method": "DELETE",
+   "path": "/api/account/onboarding/complete",
+   "status": 405,
+   "code": "method_not_allowed",
+   "ms": 8,
+   "expect": [
+    405
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:patch",
+   "method": "PATCH",
+   "path": "/api/account/onboarding/complete",
+   "status": 405,
+   "code": "method_not_allowed",
+   "ms": 38,
+   "expect": [
+    405
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:head",
+   "method": "HEAD",
+   "path": "/api/account/onboarding/complete",
+   "status": 405,
+   "code": null,
+   "ms": 118,
+   "expect": [
+    405
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:options",
+   "method": "OPTIONS",
+   "path": "/api/account/onboarding/complete",
+   "status": 405,
+   "code": "method_not_allowed",
+   "ms": 29,
+   "expect": [
+    405
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:trace",
+   "method": "TRACE",
+   "path": "/api/account/onboarding/complete",
+   "status": "FETCH-ERROR",
+   "code": "TypeError",
+   "ms": 5,
+   "expect": [
+    405
+   ],
+   "ok": false
+  },
+  {
+   "name": "h1:malformed-json-valid-auth",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 200,
+   "code": null,
+   "ms": 19,
+   "expect": [
+    200,
+    400
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:rate-0",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 200,
+   "code": null,
+   "ms": 18,
+   "expect": [
+    200,
+    429
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:rate-1",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 200,
+   "code": null,
+   "ms": 7,
+   "expect": [
+    200,
+    429
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:rate-2",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 200,
+   "code": null,
+   "ms": 8,
+   "expect": [
+    200,
+    429
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:rate-3",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 200,
+   "code": null,
+   "ms": 8,
+   "expect": [
+    200,
+    429
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:rate-4",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 200,
+   "code": null,
+   "ms": 8,
+   "expect": [
+    200,
+    429
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:rate-5",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 200,
+   "code": null,
+   "ms": 6,
+   "expect": [
+    200,
+    429
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:rate-6",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 200,
+   "code": null,
+   "ms": 7,
+   "expect": [
+    200,
+    429
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:rate-7",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 200,
+   "code": null,
+   "ms": 6,
+   "expect": [
+    200,
+    429
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:rate-8",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 200,
+   "code": null,
+   "ms": 8,
+   "expect": [
+    200,
+    429
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:rate-9",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 200,
+   "code": null,
+   "ms": 12,
+   "expect": [
+    200,
+    429
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:rate-10",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 200,
+   "code": null,
+   "ms": 25,
+   "expect": [
+    200,
+    429
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:rate-11",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 200,
+   "code": null,
+   "ms": 23,
+   "expect": [
+    200,
+    429
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:rate-12",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 200,
+   "code": null,
+   "ms": 12,
+   "expect": [
+    200,
+    429
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:rate-13",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 200,
+   "code": null,
+   "ms": 14,
+   "expect": [
+    200,
+    429
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:rate-14",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 200,
+   "code": null,
+   "ms": 12,
+   "expect": [
+    200,
+    429
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:rate-15",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 200,
+   "code": null,
+   "ms": 9,
+   "expect": [
+    200,
+    429
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:rate-16",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 200,
+   "code": null,
+   "ms": 15,
+   "expect": [
+    200,
+    429
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:rate-17",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 16,
+   "expect": [
+    200,
+    429
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:rate-18",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 14,
+   "expect": [
+    200,
+    429
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:rate-19",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 20,
+   "expect": [
+    200,
+    429
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:rate-20",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 12,
+   "expect": [
+    200,
+    429
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:rate-21",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 22,
+   "expect": [
+    200,
+    429
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:rate-22",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 21,
+   "expect": [
+    200,
+    429
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:rate-23",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 30,
+   "expect": [
+    200,
+    429
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:rate-24",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 38,
+   "expect": [
+    200,
+    429
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:rate-25",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 20,
+   "expect": [
+    200,
+    429
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:rate-26",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 24,
+   "expect": [
+    200,
+    429
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:rate-27",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 31,
+   "expect": [
+    200,
+    429
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:rate-28",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 47,
+   "expect": [
+    200,
+    429
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:rate-29",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 32,
+   "expect": [
+    200,
+    429
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:rate-30",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 29,
+   "expect": [
+    200,
+    429
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:rate-31",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 22,
+   "expect": [
+    200,
+    429
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:rate-32",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 44,
+   "expect": [
+    200,
+    429
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:rate-33",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 42,
+   "expect": [
+    200,
+    429
+   ],
+   "ok": true
+  },
+  {
+   "name": "h1:rate-34",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 47,
+   "expect": [
+    200,
+    429
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:no-bearer",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 401,
+   "code": "unauthenticated",
+   "ms": 22,
+   "expect": [
+    401
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:garbage-bearer",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 401,
+   "code": "unauthenticated",
+   "ms": 12,
+   "expect": [
+    401
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:empty-bearer",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 401,
+   "code": "unauthenticated",
+   "ms": 11,
+   "expect": [
+    401
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:missing-roomid",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 422,
+   "code": "invalid_invite",
+   "ms": 12,
+   "expect": [
+    422
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:roomid-nonstring",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 422,
+   "code": "invalid_invite",
+   "ms": 143,
+   "expect": [
+    422
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:roomid-null",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 422,
+   "code": "invalid_invite",
+   "ms": 21,
+   "expect": [
+    422
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:roomid-object",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 422,
+   "code": "invalid_invite",
+   "ms": 62,
+   "expect": [
+    422
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:roomid-array",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 422,
+   "code": "invalid_invite",
+   "ms": 37,
+   "expect": [
+    422
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:roomid-empty",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 404,
+   "code": "room_not_found",
+   "ms": 38,
+   "expect": [
+    401,
+    403,
+    404,
+    422
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:roomid-unknown",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 403,
+   "code": "access_denied",
+   "ms": 83,
+   "expect": [
+    401,
+    403,
+    404
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:roomid-huge",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 403,
+   "code": "access_denied",
+   "ms": 56,
+   "expect": [
+    401,
+    403,
+    404,
+    422
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:roomid-traversal",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 403,
+   "code": "access_denied",
+   "ms": 36,
+   "expect": [
+    401,
+    403,
+    404
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:maxdepth-string",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 422,
+   "code": "invalid_invite",
+   "ms": 33,
+   "expect": [
+    422
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:maxdepth-zero",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 422,
+   "code": "invalid_max_depth",
+   "ms": 71,
+   "expect": [
+    422
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:maxdepth-negative",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 422,
+   "code": "invalid_max_depth",
+   "ms": 54,
+   "expect": [
+    422
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:maxdepth-fraction",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 422,
+   "code": "invalid_max_depth",
+   "ms": 66,
+   "expect": [
+    422
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:maxdepth-huge",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 422,
+   "code": "invalid_max_depth",
+   "ms": 23,
+   "expect": [
+    422,
+    409
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:maxdepth-bool",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 422,
+   "code": "invalid_invite",
+   "ms": 20,
+   "expect": [
+    422
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:maxdepth-null",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 422,
+   "code": "invalid_invite",
+   "ms": 19,
+   "expect": [
+    422
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:maxdepth-nan-str",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 422,
+   "code": "invalid_invite",
+   "ms": 63,
+   "expect": [
+    422
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:extra-field",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 60,
+   "expect": [
+    422
+   ],
+   "ok": false
+  },
+  {
+   "name": "h2:proto-pollution",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 46,
+   "expect": [
+    201,
+    422
+   ],
+   "ok": false
+  },
+  {
+   "name": "h2:requestid-short",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 38,
+   "expect": [
+    422
+   ],
+   "ok": false
+  },
+  {
+   "name": "h2:requestid-badchars",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 25,
+   "expect": [
+    422
+   ],
+   "ok": false
+  },
+  {
+   "name": "h2:requestid-nonstring",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 33,
+   "expect": [
+    422
+   ],
+   "ok": false
+  },
+  {
+   "name": "h2:valid-mint",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 41,
+   "expect": [
+    201
+   ],
+   "ok": false
+  },
+  {
+   "name": "h2:idempotent-retry",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 35,
+   "expect": [
+    200
+   ],
+   "ok": false
+  },
+  {
+   "name": "h2:idempotent-conflict",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 26,
+   "expect": [
+    409
+   ],
+   "ok": false
+  },
+  {
+   "name": "h2:valid-keyless",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 30,
+   "expect": [
+    201
+   ],
+   "ok": false
+  },
+  {
+   "name": "h2:malformed-json",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 35,
+   "expect": [
+    400
+   ],
+   "ok": false
+  },
+  {
+   "name": "h2:huge-json",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 47,
+   "expect": [
+    413,
+    422
+   ],
+   "ok": false
+  },
+  {
+   "name": "h2:get",
+   "method": "GET",
+   "path": "/api/referral-invites/mint",
+   "status": 405,
+   "code": "method_not_allowed",
+   "ms": 10,
+   "expect": [
+    405
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:put",
+   "method": "PUT",
+   "path": "/api/referral-invites/mint",
+   "status": 405,
+   "code": "method_not_allowed",
+   "ms": 6,
+   "expect": [
+    405
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:delete",
+   "method": "DELETE",
+   "path": "/api/referral-invites/mint",
+   "status": 405,
+   "code": "method_not_allowed",
+   "ms": 11,
+   "expect": [
+    405
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:options",
+   "method": "OPTIONS",
+   "path": "/api/referral-invites/mint",
+   "status": 405,
+   "code": "method_not_allowed",
+   "ms": 7,
+   "expect": [
+    405
+   ],
+   "ok": true
+  },
+  {
+   "name": "h2:no-origin",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 79,
+   "expect": [
+    201,
+    403
+   ],
+   "ok": false
+  },
+  {
+   "name": "h2:foreign-origin",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 403,
+   "code": "origin_denied",
+   "ms": 44,
+   "expect": [
+    403
+   ],
+   "ok": true
+  }
+ ],
+ "findings": [
+  {
+   "name": "h1:trailing-slash",
+   "method": "POST",
+   "path": "/api/account/onboarding/complete/",
+   "status": 200,
+   "code": null,
+   "ms": 8,
+   "expect": [
+    404
+   ],
+   "ok": false
+  },
+  {
+   "name": "h1:trace",
+   "method": "TRACE",
+   "path": "/api/account/onboarding/complete",
+   "status": "FETCH-ERROR",
+   "code": "TypeError",
+   "ms": 5,
+   "expect": [
+    405
+   ],
+   "ok": false
+  },
+  {
+   "name": "h2:extra-field",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 60,
+   "expect": [
+    422
+   ],
+   "ok": false
+  },
+  {
+   "name": "h2:proto-pollution",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 46,
+   "expect": [
+    201,
+    422
+   ],
+   "ok": false
+  },
+  {
+   "name": "h2:requestid-short",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 38,
+   "expect": [
+    422
+   ],
+   "ok": false
+  },
+  {
+   "name": "h2:requestid-badchars",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 25,
+   "expect": [
+    422
+   ],
+   "ok": false
+  },
+  {
+   "name": "h2:requestid-nonstring",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 33,
+   "expect": [
+    422
+   ],
+   "ok": false
+  },
+  {
+   "name": "h2:valid-mint",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 41,
+   "expect": [
+    201
+   ],
+   "ok": false
+  },
+  {
+   "name": "h2:idempotent-retry",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 35,
+   "expect": [
+    200
+   ],
+   "ok": false
+  },
+  {
+   "name": "h2:idempotent-conflict",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 26,
+   "expect": [
+    409
+   ],
+   "ok": false
+  },
+  {
+   "name": "h2:valid-keyless",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 30,
+   "expect": [
+    201
+   ],
+   "ok": false
+  },
+  {
+   "name": "h2:malformed-json",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 35,
+   "expect": [
+    400
+   ],
+   "ok": false
+  },
+  {
+   "name": "h2:huge-json",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 47,
+   "expect": [
+    413,
+    422
+   ],
+   "ok": false
+  },
+  {
+   "name": "h2:no-origin",
+   "method": "POST",
+   "path": "/api/referral-invites/mint",
+   "status": 429,
+   "code": "rate_limited",
+   "ms": 79,
+   "expect": [
+    201,
+    403
+   ],
+   "ok": false
+  }
+ ]
+}

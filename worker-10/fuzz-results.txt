@@ -1,0 +1,95 @@
+fuzz target: http://127.0.0.1:39403 (tmp /home/hatch/workspace/pr-wave2000-guild-02/.tmp/w10fuzz-KOqCqH)
+GET /api/auth/github/start => 503 len=143 [{"status":"unavailable","reason":"github_not_configured","error":{"code":"github_not_confi]
+HEAD /api/auth/github/start => 405
+POST /api/auth/github/start => 405 len=539 [{"error":{"code":"method_not_allowed","message":"Method not allowed"},"status":"action_req]
+PUT /api/auth/github/start => 405 len=539 [{"error":{"code":"method_not_allowed","message":"Method not allowed"},"status":"action_req]
+DELETE /api/auth/github/start => 405 len=539 [{"error":{"code":"method_not_allowed","message":"Method not allowed"},"status":"action_req]
+PATCH /api/auth/github/start => 405 len=539 [{"error":{"code":"method_not_allowed","message":"Method not allowed"},"status":"action_req]
+OPTIONS /api/auth/github/start => 405 len=539 [{"error":{"code":"method_not_allowed","message":"Method not allowed"},"status":"action_req]
+TRACE /api/auth/github/start => 405 len=539 [{"error":{"code":"method_not_allowed","message":"Method not allowed"},"status":"action_req]
+FOOBAR /api/auth/github/start => 400
+GET /api/auth/github/start/ => 503 len=143 [{"status":"unavailable","reason":"github_not_configured","error":{"code":"github_not_confi]
+GET /api/auth/github/start// => 503 len=143 [{"status":"unavailable","reason":"github_not_configured","error":{"code":"github_not_confi]
+GET /api/auth/GITHUB/start => 404 len=430 [{"error":{"code":"not_found","message":"Not found"},"status":"action_required","reason":"n]
+GET /api/auth/github/START => 404 len=430 [{"error":{"code":"not_found","message":"Not found"},"status":"action_required","reason":"n]
+GET /api/auth/github/start%2f => 404 len=430 [{"error":{"code":"not_found","message":"Not found"},"status":"action_required","reason":"n]
+GET /api/auth/github%2fstart => 404 len=430 [{"error":{"code":"not_found","message":"Not found"},"status":"action_required","reason":"n]
+GET /api/auth/github/start%00 => 404 len=430 [{"error":{"code":"not_found","message":"Not found"},"status":"action_required","reason":"n]
+GET /api/auth/github/start%00.json => 404 len=430 [{"error":{"code":"not_found","message":"Not found"},"status":"action_required","reason":"n]
+GET //api/auth/github/start => 404 len=430 [{"error":{"code":"not_found","message":"Not found"},"status":"action_required","reason":"n]
+GET /api//auth/github/start => 404 len=430 [{"error":{"code":"not_found","message":"Not found"},"status":"action_required","reason":"n]
+GET /api/./auth/github/start => 503 len=143 [{"status":"unavailable","reason":"github_not_configured","error":{"code":"github_not_confi]
+GET /api/../api/auth/github/start => 503 len=143 [{"status":"unavailable","reason":"github_not_configured","error":{"code":"github_not_confi]
+GET /%61pi/auth/github/start => 404 len=430 [{"error":{"code":"not_found","message":"Not found"},"status":"action_required","reason":"n]
+GET /api/auth/github/start? => 503 len=143 [{"status":"unavailable","reason":"github_not_configured","error":{"code":"github_not_confi]
+GET /api/auth/github/start?x=yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy…(40025) => 431
+GET /api/auth/github/startxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…(4022) => 404 len=430 [{"error":{"code":"not_found","message":"Not found"},"status":"action_required","reason":"n]
+GET /api/auth/github/start/.. => 404 len=430 [{"error":{"code":"not_found","message":"Not found"},"status":"action_required","reason":"n]
+GET /api/auth/github/star => 404 len=430 [{"error":{"code":"not_found","message":"Not found"},"status":"action_required","reason":"n]
+GET /api/auth/github/start%c0%af => 404 len=430 [{"error":{"code":"not_found","message":"Not found"},"status":"action_required","reason":"n]
+GET /api/auth/github/start%252f => 404 len=430 [{"error":{"code":"not_found","message":"Not found"},"status":"action_required","reason":"n]
+GET /api/auth/github/start?sessionToken=abc => 503 len=143 [{"status":"unavailable","reason":"github_not_configured","error":{"code":"github_not_confi]
+GET /api/auth/github/start?sessionToken= => 503 len=143 [{"status":"unavailable","reason":"github_not_configured","error":{"code":"github_not_confi]
+GET /api/auth/github/start?sessionToken=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…(7036) => 503 len=143 [{"status":"unavailable","reason":"github_not_configured","error":{"code":"github_not_confi]
+GET /api/auth/github/start?sessionToken=%zz => 503 len=143 [{"status":"unavailable","reason":"github_not_configured","error":{"code":"github_not_confi]
+GET /api/auth/github/start?sessionToken=%00 => 503 len=143 [{"status":"unavailable","reason":"github_not_configured","error":{"code":"github_not_confi]
+GET /api/auth/github/start?sessionToken[]=1 => 503 len=143 [{"status":"unavailable","reason":"github_not_configured","error":{"code":"github_not_confi]
+GET /api/auth/github/start?sessionToken=1&sessionToken=2 => 503 len=143 [{"status":"unavailable","reason":"github_not_configured","error":{"code":"github_not_confi]
+GET /api/auth/github/start?SESSIONTOKEN=abc => 503 len=143 [{"status":"unavailable","reason":"github_not_configured","error":{"code":"github_not_confi]
+GET /api/auth/github/start?ppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp…(30023) => 431
+GET /api/auth/github/start?sessionToken=%2e%2e => 503 len=143 [{"status":"unavailable","reason":"github_not_configured","error":{"code":"github_not_confi]
+GET /api/auth/github/start => 503 len=364 [<!doctype html><html lang="en"><head><meta charset="utf-8"><title>GitHub sign-in unavailab]
+GET /api/auth/github/start => 503 len=364 [<!doctype html><html lang="en"><head><meta charset="utf-8"><title>GitHub sign-in unavailab]
+GET /api/auth/github/start => 503 len=143 [{"status":"unavailable","reason":"github_not_configured","error":{"code":"github_not_confi]
+GET /api/auth/github/start => 403 len=348 [{"error":{"code":"origin_denied","message":"Request origin is not allowed"},"status":"acti]
+GET /api/auth/github/start => 503 len=143 [{"status":"unavailable","reason":"github_not_configured","error":{"code":"github_not_confi]
+GET /api/auth/github/start => 431
+GET /api/auth/github/start => 503 len=143 [{"status":"unavailable","reason":"github_not_configured","error":{"code":"github_not_confi]
+GET /api/auth/github/start => 503 len=143 [{"status":"unavailable","reason":"github_not_configured","error":{"code":"github_not_confi]
+POST /api/auth/github/start => 405 len=539 [{"error":{"code":"method_not_allowed","message":"Method not allowed"},"status":"action_req]
+POST /api/auth/github/start => 405 len=539 [{"error":{"code":"method_not_allowed","message":"Method not allowed"},"status":"action_req]
+GET /api/guest-agent-links => 200 len=262 [{"status":"live","kind":"agent","permissions":[],"access":"read_chat","ttlMs":7200000,"max]
+HEAD /api/guest-agent-links => 200
+POST /api/guest-agent-links => 403 len=390 [{"error":{"code":"origin_denied","message":"Origin header is required"},"status":"action_r]
+PUT /api/guest-agent-links => 404 len=430 [{"error":{"code":"not_found","message":"Not found"},"status":"action_required","reason":"n]
+DELETE /api/guest-agent-links => 404 len=430 [{"error":{"code":"not_found","message":"Not found"},"status":"action_required","reason":"n]
+PATCH /api/guest-agent-links => 404 len=430 [{"error":{"code":"not_found","message":"Not found"},"status":"action_required","reason":"n]
+OPTIONS /api/guest-agent-links => 404 len=430 [{"error":{"code":"not_found","message":"Not found"},"status":"action_required","reason":"n]
+TRACE /api/guest-agent-links => 404 len=430 [{"error":{"code":"not_found","message":"Not found"},"status":"action_required","reason":"n]
+FOOBAR /api/guest-agent-links => 400
+GET /api/guest-agent-links/ => 200 len=262 [{"status":"live","kind":"agent","permissions":[],"access":"read_chat","ttlMs":7200000,"max]
+GET /api/guest-agent-links// => 200 len=262 [{"status":"live","kind":"agent","permissions":[],"access":"read_chat","ttlMs":7200000,"max]
+GET /api/GUEST-AGENT-LINKS => 404 len=430 [{"error":{"code":"not_found","message":"Not found"},"status":"action_required","reason":"n]
+GET /api/guest-agent-links%2f => 404 len=430 [{"error":{"code":"not_found","message":"Not found"},"status":"action_required","reason":"n]
+GET /api/guest-agent-links%00 => 404 len=430 [{"error":{"code":"not_found","message":"Not found"},"status":"action_required","reason":"n]
+GET //api/guest-agent-links => 404 len=430 [{"error":{"code":"not_found","message":"Not found"},"status":"action_required","reason":"n]
+GET /api//guest-agent-links => 404 len=430 [{"error":{"code":"not_found","message":"Not found"},"status":"action_required","reason":"n]
+GET /%61pi/guest-agent-links => 404 len=430 [{"error":{"code":"not_found","message":"Not found"},"status":"action_required","reason":"n]
+GET /api/guest-agent-links?a=1&a=1&a=1&a=1&a=1&a=1&a=1&a=1&a=1&a=1&a=1&a=1&a=1&a=1&a=1&a=1&a=1&a=1&a=1&a=1&a=1&a=1…(226) => 200 len=262 [{"status":"live","kind":"agent","permissions":[],"access":"read_chat","ttlMs":7200000,"max]
+GET /api/guest-agent-linksxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…(4022) => 404 len=430 [{"error":{"code":"not_found","message":"Not found"},"status":"action_required","reason":"n]
+GET /api/guest-agent-links%c0%af => 404 len=430 [{"error":{"code":"not_found","message":"Not found"},"status":"action_required","reason":"n]
+GET /api/guest-agent-link => 404 len=430 [{"error":{"code":"not_found","message":"Not found"},"status":"action_required","reason":"n]
+GET /api/guest-agent-links => 200 len=262 [{"status":"live","kind":"agent","permissions":[],"access":"read_chat","ttlMs":7200000,"max]
+GET /api/guest-agent-links => 403 len=348 [{"error":{"code":"origin_denied","message":"Request origin is not allowed"},"status":"acti]
+GET /api/guest-agent-links => 200 len=262 [{"status":"live","kind":"agent","permissions":[],"access":"read_chat","ttlMs":7200000,"max]
+GET /api/guest-agent-links => 431
+POST /api/guest-agent-links => 403 len=390 [{"error":{"code":"origin_denied","message":"Origin header is required"},"status":"action_r]
+PUT /api/guest-agent-links => 404 len=430 [{"error":{"code":"not_found","message":"Not found"},"status":"action_required","reason":"n]
+HEAD /api/guest-agent-links/ => 200
+ gh:garbage-verb => HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n
+ gh:http10-no-host => HTTP/1.1 403 Forbidden\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff
+ gh:no-version => HTTP/1.1 403 Forbidden\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff
+ gh:huge-target => HTTP/1.1 403 Forbidden\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff
+ gh:huge-header => HTTP/1.1 431 Request Header Fields Too Large\r\nConnection: close\r\n\r\n
+ gh:dup-host => HTTP/1.1 403 Forbidden\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff
+ gh:null-prefix => HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n
+ gh:null-in-target => HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n
+ gl:huge-cookie => HTTP/1.1 431 Request Header Fields Too Large\r\nConnection: close\r\n\r\n
+ gl:null-pct => HTTP/1.1 403 Forbidden\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff
+ gl:lowercase-verb => HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n
+ gl:chunked-get => HTTP/1.1 403 Forbidden\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff
+GET /api/health => 200 len=42 [{"status":"ok","mode":"single-node-pilot"}]
+
+TOTAL: 90
+timeouts: 0 []
+transport-errors: []

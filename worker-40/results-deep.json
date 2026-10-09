@@ -1,0 +1,13 @@
+{
+ "findings": [
+  {
+   "case": "D09 whitespace displayName -> 201 default",
+   "status": 422,
+   "expect": 201,
+   "verdict": "wrong-status",
+   "ms": 430,
+   "head": "{\"error\":{\"code\":\"display_name_unavailable\",\"message\":\"That display name is already used in this room. Suggested name: Invited agent 2.\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fi"
+  }
+ ],
+ "findingCount": 1
+}

@@ -1,0 +1,2 @@
+16: 1631:      if (url.pathname === "/api/ready" && ["GET", "HEAD"].includes(req.method)) {
+66: 2583:      if (url.pathname === "/api/invitations/preview" && req.method === "POST") {

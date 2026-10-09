@@ -1,0 +1,518 @@
+[
+ {
+  "name": "resend GET no-auth",
+  "method": "GET",
+  "path": "/api/auth/email/verify/resend",
+  "expect": 405,
+  "status": 405,
+  "body": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an allowed method (Allow header or route docs); do not retry the same method.\",\"next\":",
+  "code": {
+   "code": "method_not_allowed",
+   "message": "Method not allowed"
+  },
+  "pass": true
+ },
+ {
+  "name": "resend HEAD no-auth",
+  "method": "HEAD",
+  "path": "/api/auth/email/verify/resend",
+  "expect": 405,
+  "status": 405,
+  "body": "",
+  "code": null,
+  "pass": true
+ },
+ {
+  "name": "resend OPTIONS",
+  "method": "OPTIONS",
+  "path": "/api/auth/email/verify/resend",
+  "expect": 405,
+  "status": 405,
+  "body": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an allowed method (Allow header or route docs); do not retry the same method.\",\"next\":",
+  "code": {
+   "code": "method_not_allowed",
+   "message": "Method not allowed"
+  },
+  "pass": true
+ },
+ {
+  "name": "resend POST no-origin no-cookie",
+  "method": "POST",
+  "path": "/api/auth/email/verify/resend",
+  "expect": 403,
+  "status": 403,
+  "body": "{\"error\":{\"code\":\"origin_denied\",\"message\":\"Origin header is required\"},\"status\":\"action_required\",\"reason\":\"origin_denied\",\"hint\":\"Send Origin: https://room.trydemigod.com. This route does not accept a missing or different Origin header.\",\"next\":[{\"command\":\"Retry with Origin: https://room.trydemig",
+  "code": {
+   "code": "origin_denied",
+   "message": "Origin header is required"
+  },
+  "pass": true
+ },
+ {
+  "name": "resend POST bad-origin",
+  "method": "POST",
+  "path": "/api/auth/email/verify/resend",
+  "expect": 403,
+  "status": 403,
+  "body": "{\"error\":{\"code\":\"origin_denied\",\"message\":\"Request origin is not allowed\"},\"status\":\"action_required\",\"reason\":\"origin_denied\",\"hint\":\"Use Origin: https://room.trydemigod.com or omit the Origin header.\",\"next\":[{\"command\":\"Retry with Origin: https://room.trydemigod.com or omit the Origin header\"}],",
+  "code": {
+   "code": "origin_denied",
+   "message": "Request origin is not allowed"
+  },
+  "pass": true
+ },
+ {
+  "name": "resend POST origin-case",
+  "method": "POST",
+  "path": "/api/auth/email/verify/resend",
+  "expect": 403,
+  "status": 403,
+  "body": "{\"error\":{\"code\":\"origin_denied\",\"message\":\"Request origin is not allowed\"},\"status\":\"action_required\",\"reason\":\"origin_denied\",\"hint\":\"Use Origin: https://room.trydemigod.com or omit the Origin header.\",\"next\":[{\"command\":\"Retry with Origin: https://room.trydemigod.com or omit the Origin header\"}],",
+  "code": {
+   "code": "origin_denied",
+   "message": "Request origin is not allowed"
+  },
+  "pass": true
+ },
+ {
+  "name": "resend POST origin+no-cookie",
+  "method": "POST",
+  "path": "/api/auth/email/verify/resend",
+  "expect": 401,
+  "status": 401,
+  "body": "{\"error\":{\"code\":\"account_session_required\",\"message\":\"Sign in before verifying your email\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"}",
+  "code": {
+   "code": "account_session_required",
+   "message": "Sign in before verifying your email"
+  },
+  "pass": true
+ },
+ {
+  "name": "resend POST origin+garbage-cookie",
+  "method": "POST",
+  "path": "/api/auth/email/verify/resend",
+  "expect": 401,
+  "status": 401,
+  "body": "{\"error\":{\"code\":\"invalid_session\",\"message\":\"That session is no longer valid; sign in again\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access",
+  "code": {
+   "code": "invalid_session",
+   "message": "That session is no longer valid; sign in again"
+  },
+  "pass": true
+ },
+ {
+  "name": "resend POST origin+empty-cookie",
+  "method": "POST",
+  "path": "/api/auth/email/verify/resend",
+  "expect": 401,
+  "status": 401,
+  "body": "{\"error\":{\"code\":\"account_session_required\",\"message\":\"Sign in before verifying your email\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"}",
+  "code": {
+   "code": "account_session_required",
+   "message": "Sign in before verifying your email"
+  },
+  "pass": true
+ },
+ {
+  "name": "resend POST origin+cookie-no-csrf",
+  "method": "POST",
+  "path": "/api/auth/email/verify/resend",
+  "expect": 403,
+  "status": 403,
+  "body": "{\"error\":{\"code\":\"csrf_denied\",\"message\":\"Session confirmation required; sign in again\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this identity can do, then ask the owner for the missing permission.\",\"next\":[{\"tool\"",
+  "code": {
+   "code": "csrf_denied",
+   "message": "Session confirmation required; sign in again"
+  },
+  "pass": true
+ },
+ {
+  "name": "resend POST origin+cookie-bad-csrf",
+  "method": "POST",
+  "path": "/api/auth/email/verify/resend",
+  "expect": 403,
+  "status": 403,
+  "body": "{\"error\":{\"code\":\"csrf_denied\",\"message\":\"Session confirmation required; sign in again\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this identity can do, then ask the owner for the missing permission.\",\"next\":[{\"tool\"",
+  "code": {
+   "code": "csrf_denied",
+   "message": "Session confirmation required; sign in again"
+  },
+  "pass": true
+ },
+ {
+  "name": "resend POST origin+cookie-csrf-csrf-in-cookie",
+  "method": "POST",
+  "path": "/api/auth/email/verify/resend",
+  "expect": 403,
+  "status": 403,
+  "body": "{\"error\":{\"code\":\"csrf_denied\",\"message\":\"Session confirmation required; sign in again\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this identity can do, then ask the owner for the missing permission.\",\"next\":[{\"tool\"",
+  "code": {
+   "code": "csrf_denied",
+   "message": "Session confirmation required; sign in again"
+  },
+  "pass": true
+ },
+ {
+  "name": "resend POST origin+cookie-wellformed-wrong-csrf",
+  "method": "POST",
+  "path": "/api/auth/email/verify/resend",
+  "expect": 403,
+  "status": 403,
+  "body": "{\"error\":{\"code\":\"csrf_denied\",\"message\":\"Session confirmation required; sign in again\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this identity can do, then ask the owner for the missing permission.\",\"next\":[{\"tool\"",
+  "code": {
+   "code": "csrf_denied",
+   "message": "Session confirmation required; sign in again"
+  },
+  "pass": true
+ },
+ {
+  "name": "resend POST noemail-acct",
+  "method": "POST",
+  "path": "/api/auth/email/verify/resend",
+  "expect": 422,
+  "status": 422,
+  "body": "{\"error\":{\"code\":\"invalid_email\",\"message\":\"This account has no email to verify\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and res",
+  "code": {
+   "code": "invalid_email",
+   "message": "This account has no email to verify"
+  },
+  "pass": true
+ },
+ {
+  "name": "resend POST unverified-acct",
+  "method": "POST",
+  "path": "/api/auth/email/verify/resend",
+  "expect": 503,
+  "status": 503,
+  "body": "{\"error\":{\"code\":\"mail_not_configured\",\"message\":\"Email delivery is not configured; contact the operator to verify this address\"},\"status\":\"failed\",\"reason\":\"mail_not_configured\",\"hint\":\"Email delivery is not configured on this server. Nothing was sent and retrying will not help — contact the room o",
+  "code": {
+   "code": "mail_not_configured",
+   "message": "Email delivery is not configured; contact the operator to verify this address"
+  },
+  "pass": true
+ },
+ {
+  "name": "resend POST verified-acct",
+  "method": "POST",
+  "path": "/api/auth/email/verify/resend",
+  "expect": 200,
+  "status": 200,
+  "body": "{\"status\":\"already_verified\",\"email\":\"verified@example.com\"}",
+  "code": null,
+  "pass": true
+ },
+ {
+  "name": "resend POST dup-cookie",
+  "method": "POST",
+  "path": "/api/auth/email/verify/resend",
+  "expect": 401,
+  "status": 401,
+  "body": "{\"error\":{\"code\":\"ambiguous_session_cookie\",\"message\":\"Conflicting browser session cookies; clear this site's cookies and sign in again\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another id",
+  "code": {
+   "code": "ambiguous_session_cookie",
+   "message": "Conflicting browser session cookies; clear this site's cookies and sign in again"
+  },
+  "pass": true
+ },
+ {
+  "name": "resend POST huge-json-body",
+  "method": "POST",
+  "path": "/api/auth/email/verify/resend",
+  "expect": 422,
+  "status": 422,
+  "body": "{\"error\":{\"code\":\"invalid_email\",\"message\":\"This account has no email to verify\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and res",
+  "code": {
+   "code": "invalid_email",
+   "message": "This account has no email to verify"
+  },
+  "pass": true
+ },
+ {
+  "name": "resend POST garbage-body",
+  "method": "POST",
+  "path": "/api/auth/email/verify/resend",
+  "expect": 422,
+  "status": 422,
+  "body": "{\"error\":{\"code\":\"invalid_email\",\"message\":\"This account has no email to verify\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and res",
+  "code": {
+   "code": "invalid_email",
+   "message": "This account has no email to verify"
+  },
+  "pass": true
+ },
+ {
+  "name": "resend POST text-body",
+  "method": "POST",
+  "path": "/api/auth/email/verify/resend",
+  "expect": 422,
+  "status": 422,
+  "body": "{\"error\":{\"code\":\"invalid_email\",\"message\":\"This account has no email to verify\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and res",
+  "code": {
+   "code": "invalid_email",
+   "message": "This account has no email to verify"
+  },
+  "pass": true
+ },
+ {
+  "name": "resend POST trailing-slash",
+  "method": "POST",
+  "path": "/api/auth/email/verify/resend/",
+  "expect": 200,
+  "status": 200,
+  "body": "{\"status\":\"already_verified\",\"email\":\"verified@example.com\"}",
+  "code": null,
+  "pass": true
+ },
+ {
+  "name": "resend POST query-string",
+  "method": "POST",
+  "path": "/api/auth/email/verify/resend?foo=bar",
+  "expect": 200,
+  "status": 200,
+  "body": "{\"status\":\"already_verified\",\"email\":\"verified@example.com\"}",
+  "code": null,
+  "pass": true
+ },
+ {
+  "name": "resend POST declared-100MB-nobody",
+  "method": "POST",
+  "path": "/api/auth/email/verify/resend",
+  "expect": 422,
+  "status": 422,
+  "body": "{\"error\":{\"code\":\"invalid_email\",\"message\":\"This account has no email to verify\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and res",
+  "code": {
+   "code": "invalid_email",
+   "message": "This account has no email to verify"
+  },
+  "pass": true
+ },
+ {
+  "name": "resend POST rate-exceed-1",
+  "method": "POST",
+  "path": "/api/auth/email/verify/resend",
+  "expect": 429,
+  "status": 429,
+  "body": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same request unchanged.\",\"next\":[{\"command\":\"Retry after Retry-After\"}],\"operationId\":\"op_NorgriEG\",\"categ",
+  "code": {
+   "code": "rate_limited",
+   "message": "Too many requests; retry after a minute"
+  },
+  "pass": true
+ },
+ {
+  "name": "resend POST rate-exceed-2",
+  "method": "POST",
+  "path": "/api/auth/email/verify/resend",
+  "expect": 429,
+  "status": 429,
+  "body": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Retry-After interval, then retry the same request unchanged.\",\"next\":[{\"command\":\"Retry after Retry-After\"}],\"operationId\":\"op_CDpy9-lv\",\"categ",
+  "code": {
+   "code": "rate_limited",
+   "message": "Too many requests; retry after a minute"
+  },
+  "pass": true
+ },
+ {
+  "name": "resend POST other-acct-unaffected",
+  "method": "POST",
+  "path": "/api/auth/email/verify/resend",
+  "expect": 503,
+  "status": 503,
+  "body": "{\"error\":{\"code\":\"mail_not_configured\",\"message\":\"Email delivery is not configured; contact the operator to verify this address\"},\"status\":\"failed\",\"reason\":\"mail_not_configured\",\"hint\":\"Email delivery is not configured on this server. Nothing was sent and retrying will not help — contact the room o",
+  "code": {
+   "code": "mail_not_configured",
+   "message": "Email delivery is not configured; contact the operator to verify this address"
+  },
+  "pass": true
+ },
+ {
+  "name": "retention POST",
+  "method": "POST",
+  "path": "/api/account/retention",
+  "expect": 405,
+  "status": 405,
+  "body": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an allowed method (Allow header or route docs); do not retry the same method.\",\"next\":",
+  "code": {
+   "code": "method_not_allowed",
+   "message": "Method not allowed"
+  },
+  "pass": true
+ },
+ {
+  "name": "retention HEAD",
+  "method": "HEAD",
+  "path": "/api/account/retention",
+  "expect": 405,
+  "status": 405,
+  "body": "",
+  "code": null,
+  "pass": true
+ },
+ {
+  "name": "retention PUT",
+  "method": "PUT",
+  "path": "/api/account/retention",
+  "expect": 405,
+  "status": 405,
+  "body": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an allowed method (Allow header or route docs); do not retry the same method.\",\"next\":",
+  "code": {
+   "code": "method_not_allowed",
+   "message": "Method not allowed"
+  },
+  "pass": true
+ },
+ {
+  "name": "retention DELETE",
+  "method": "DELETE",
+  "path": "/api/account/retention",
+  "expect": 405,
+  "status": 405,
+  "body": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an allowed method (Allow header or route docs); do not retry the same method.\",\"next\":",
+  "code": {
+   "code": "method_not_allowed",
+   "message": "Method not allowed"
+  },
+  "pass": true
+ },
+ {
+  "name": "retention OPTIONS",
+  "method": "OPTIONS",
+  "path": "/api/account/retention",
+  "expect": 405,
+  "status": 405,
+  "body": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an allowed method (Allow header or route docs); do not retry the same method.\",\"next\":",
+  "code": {
+   "code": "method_not_allowed",
+   "message": "Method not allowed"
+  },
+  "pass": true
+ },
+ {
+  "name": "retention GET no-cookie",
+  "method": "GET",
+  "path": "/api/account/retention",
+  "expect": 401,
+  "status": 401,
+  "body": "{\"error\":{\"code\":\"account_session_required\",\"message\":\"Sign in to manage your account\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"pa",
+  "code": {
+   "code": "account_session_required",
+   "message": "Sign in to manage your account"
+  },
+  "pass": true
+ },
+ {
+  "name": "retention GET garbage-cookie",
+  "method": "GET",
+  "path": "/api/account/retention",
+  "expect": 401,
+  "status": 401,
+  "body": "{\"error\":{\"code\":\"invalid_session\",\"message\":\"That session is no longer valid; sign in again\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access",
+  "code": {
+   "code": "invalid_session",
+   "message": "That session is no longer valid; sign in again"
+  },
+  "pass": true
+ },
+ {
+  "name": "retention GET empty-cookie",
+  "method": "GET",
+  "path": "/api/account/retention",
+  "expect": 401,
+  "status": 401,
+  "body": "{\"error\":{\"code\":\"account_session_required\",\"message\":\"Sign in to manage your account\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"pa",
+  "code": {
+   "code": "account_session_required",
+   "message": "Sign in to manage your account"
+  },
+  "pass": true
+ },
+ {
+  "name": "retention GET noemail-acct",
+  "method": "GET",
+  "path": "/api/account/retention",
+  "expect": 200,
+  "status": 200,
+  "body": "{\"policy\":{\"version\":\"1.5.0\",\"summary\":\"Account deletion purges the account's sign-in credentials, sessions, room memberships, connected Gmail data, private inbox content (imported messages, drafts, read state), connected email data, derived stitch data, inbox handoff packets, SLA breach alerts, cha",
+  "code": null,
+  "pass": true
+ },
+ {
+  "name": "retention GET unverified-acct",
+  "method": "GET",
+  "path": "/api/account/retention",
+  "expect": 200,
+  "status": 200,
+  "body": "{\"policy\":{\"version\":\"1.5.0\",\"summary\":\"Account deletion purges the account's sign-in credentials, sessions, room memberships, connected Gmail data, private inbox content (imported messages, drafts, read state), connected email data, derived stitch data, inbox handoff packets, SLA breach alerts, cha",
+  "code": null,
+  "pass": true
+ },
+ {
+  "name": "retention GET dup-cookie",
+  "method": "GET",
+  "path": "/api/account/retention",
+  "expect": 401,
+  "status": 401,
+  "body": "{\"error\":{\"code\":\"ambiguous_session_cookie\",\"message\":\"Conflicting browser session cookies; clear this site's cookies and sign in again\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another id",
+  "code": {
+   "code": "ambiguous_session_cookie",
+   "message": "Conflicting browser session cookies; clear this site's cookies and sign in again"
+  },
+  "pass": true
+ },
+ {
+  "name": "retention GET query",
+  "method": "GET",
+  "path": "/api/account/retention?a=1&b=2",
+  "expect": 200,
+  "status": 200,
+  "body": "{\"policy\":{\"version\":\"1.5.0\",\"summary\":\"Account deletion purges the account's sign-in credentials, sessions, room memberships, connected Gmail data, private inbox content (imported messages, drafts, read state), connected email data, derived stitch data, inbox handoff packets, SLA breach alerts, cha",
+  "code": null,
+  "pass": true
+ },
+ {
+  "name": "retention GET trailing-slash",
+  "method": "GET",
+  "path": "/api/account/retention/",
+  "expect": 200,
+  "status": 200,
+  "body": "{\"policy\":{\"version\":\"1.5.0\",\"summary\":\"Account deletion purges the account's sign-in credentials, sessions, room memberships, connected Gmail data, private inbox content (imported messages, drafts, read state), connected email data, derived stitch data, inbox handoff packets, SLA breach alerts, cha",
+  "code": null,
+  "pass": true
+ },
+ {
+  "name": "retention GET long-path",
+  "method": "GET",
+  "path": "/api/account/retention/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "expect": 404,
+  "status": 404,
+  "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) a",
+  "code": {
+   "code": "not_found",
+   "message": "Not found"
+  },
+  "pass": true
+ },
+ {
+  "name": "retention GET bad-origin-denied",
+  "method": "GET",
+  "path": "/api/account/retention",
+  "expect": 403,
+  "status": 403,
+  "body": "{\"error\":{\"code\":\"origin_denied\",\"message\":\"Request origin is not allowed\"},\"status\":\"action_required\",\"reason\":\"origin_denied\",\"hint\":\"Use Origin: https://room.trydemigod.com or omit the Origin header.\",\"next\":[{\"command\":\"Retry with Origin: https://room.trydemigod.com or omit the Origin header\"}],",
+  "code": {
+   "code": "origin_denied",
+   "message": "Request origin is not allowed"
+  },
+  "pass": true
+ },
+ {
+  "name": "retention GET no-origin-header",
+  "method": "GET",
+  "path": "/api/account/retention",
+  "expect": 200,
+  "status": 200,
+  "body": "{\"policy\":{\"version\":\"1.5.0\",\"summary\":\"Account deletion purges the account's sign-in credentials, sessions, room memberships, connected Gmail data, private inbox content (imported messages, drafts, read state), connected email data, derived stitch data, inbox handoff packets, SLA breach alerts, cha",
+  "code": null,
+  "pass": true
+ }
+]

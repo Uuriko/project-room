@@ -1,0 +1,110 @@
+[
+ {
+  "name": "proto key in data",
+  "method": "POST",
+  "path": "/api/rooms/commons/commands",
+  "expect": null,
+  "got": 422,
+  "flag": false,
+  "snippet": "{\"error\":{\"code\":\"invalid_command\",\"message\":\"Unexpected field: __proto__\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields n"
+ },
+ {
+  "name": "constructor key in data",
+  "method": "POST",
+  "path": "/api/rooms/commons/commands",
+  "expect": null,
+  "got": 400,
+  "flag": false,
+  "snippet": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in "
+ },
+ {
+  "name": "data as string",
+  "method": "POST",
+  "path": "/api/rooms/commons/commands",
+  "expect": null,
+  "got": 422,
+  "flag": false,
+  "snippet": "{\"error\":{\"code\":\"invalid_command\",\"message\":\"Data must be an object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named "
+ },
+ {
+  "name": "id as number",
+  "method": "POST",
+  "path": "/api/rooms/commons/commands",
+  "expect": null,
+  "got": 422,
+  "flag": false,
+  "snippet": "{\"error\":{\"code\":\"invalid_command\",\"message\":\"Invalid command id or type\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields na"
+ },
+ {
+  "name": "type 100KB string",
+  "method": "POST",
+  "path": "/api/rooms/commons/commands",
+  "expect": null,
+  "got": 422,
+  "flag": false,
+  "snippet": "{\"error\":{\"code\":\"invalid_command\",\"message\":\"Unknown command type \\\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\\". Types include message.p"
+ },
+ {
+  "name": "data 1000 keys",
+  "method": "POST",
+  "path": "/api/rooms/commons/commands",
+  "expect": null,
+  "got": 422,
+  "flag": false,
+  "snippet": "{\"error\":{\"code\":\"invalid_command\",\"message\":\"Unexpected field: k0\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in"
+ },
+ {
+  "name": "auth query param bogus",
+  "method": "POST",
+  "path": "/api/rooms/commons/commands?auth=bogus",
+  "expect": null,
+  "got": 422,
+  "flag": false,
+  "snippet": "{\"error\":{\"code\":\"invalid_command\",\"message\":\"message.posted requires data.body (a string), not text\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint"
+ },
+ {
+  "name": "roomId 385 chars",
+  "method": "GET",
+  "path": "/api/rooms/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+  "expect": 404,
+  "got": 404,
+  "flag": false,
+  "snippet": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed"
+ },
+ {
+  "name": "roomId 384 chars",
+  "method": "GET",
+  "path": "/api/rooms/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+  "expect": 403,
+  "got": 404,
+  "flag": true,
+  "snippet": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed"
+ },
+ {
+  "name": "roomId encoded slash",
+  "method": "GET",
+  "path": "/api/rooms/a%2Fb/capabilities",
+  "expect": null,
+  "got": 404,
+  "flag": false,
+  "snippet": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed"
+ },
+ {
+  "name": "commands valid baseline",
+  "method": "POST",
+  "path": "/api/rooms/commons/commands",
+  "expect": null,
+  "got": 422,
+  "flag": false,
+  "snippet": "{\"error\":{\"code\":\"invalid_command\",\"message\":\"message.posted requires data.body (a string), not text\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint"
+ },
+ {
+  "name": "commands dup id replay",
+  "method": "POST",
+  "path": "/api/rooms/commons/commands",
+  "expect": null,
+  "got": 422,
+  "flag": false,
+  "snippet": "{\"error\":{\"code\":\"invalid_command\",\"message\":\"message.posted requires data.body (a string), not text\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint"
+ }
+]

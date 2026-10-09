@@ -1,0 +1,386 @@
+[
+ {
+  "name": "templates",
+  "method": "GET",
+  "path": "/templates",
+  "status": 200,
+  "ms": 155,
+  "extra": "text/html; charset=utf-8"
+ },
+ {
+  "name": "templates",
+  "method": "GET",
+  "path": "/templates.json",
+  "status": 200,
+  "ms": 32,
+  "extra": "application/json; charset=utf-8 bytes=760"
+ },
+ {
+  "name": "templates",
+  "method": "HEAD",
+  "path": "/templates",
+  "status": 200,
+  "ms": 19,
+  "extra": ""
+ },
+ {
+  "name": "templates",
+  "method": "HEAD",
+  "path": "/templates.json",
+  "status": 200,
+  "ms": 8,
+  "extra": ""
+ },
+ {
+  "name": "templates",
+  "method": "POST",
+  "path": "/templates",
+  "status": 405,
+  "ms": 55,
+  "extra": ""
+ },
+ {
+  "name": "templates",
+  "method": "PUT",
+  "path": "/templates",
+  "status": 405,
+  "ms": 28,
+  "extra": ""
+ },
+ {
+  "name": "templates",
+  "method": "PATCH",
+  "path": "/templates",
+  "status": 405,
+  "ms": 40,
+  "extra": ""
+ },
+ {
+  "name": "templates",
+  "method": "DELETE",
+  "path": "/templates",
+  "status": 405,
+  "ms": 37,
+  "extra": ""
+ },
+ {
+  "name": "templates",
+  "method": "OPTIONS",
+  "path": "/templates",
+  "status": 405,
+  "ms": 36,
+  "extra": ""
+ },
+ {
+  "name": "templates",
+  "method": "POST",
+  "path": "/templates.json",
+  "status": 405,
+  "ms": 18,
+  "extra": ""
+ },
+ {
+  "name": "templates",
+  "method": "GET",
+  "path": "/templates?ref=5k",
+  "status": 200,
+  "ms": 25,
+  "extra": ""
+ },
+ {
+  "name": "templates",
+  "method": "GET",
+  "path": "/templates.json?ref=enc",
+  "status": 200,
+  "ms": 13,
+  "extra": ""
+ },
+ {
+  "name": "templates",
+  "method": "GET",
+  "path": "/templates?ref=xss",
+  "status": 200,
+  "ms": 24,
+  "extra": "not-reflected/raw"
+ },
+ {
+  "name": "templates",
+  "method": "GET",
+  "path": "/templates accept=json",
+  "status": 200,
+  "ms": 38,
+  "extra": "text/html; charset=utf-8"
+ },
+ {
+  "name": "templates",
+  "method": "GET",
+  "path": "/templates.json accept=html",
+  "status": 200,
+  "ms": 16,
+  "extra": "application/json; charset=utf-8"
+ },
+ {
+  "name": "templates",
+  "method": "GET",
+  "path": "/TEMPLATES",
+  "status": 404,
+  "ms": 27,
+  "extra": ""
+ },
+ {
+  "name": "templates",
+  "method": "GET",
+  "path": "/templates/",
+  "status": 200,
+  "ms": 12,
+  "extra": ""
+ },
+ {
+  "name": "templates",
+  "method": "GET",
+  "path": "/templates.json.json",
+  "status": 404,
+  "ms": 24,
+  "extra": ""
+ },
+ {
+  "name": "mint",
+  "method": "POST",
+  "path": "/api/referral-invites/mint",
+  "status": 401,
+  "ms": 27,
+  "extra": "no-auth {\"error\":{\"code\":\"unauthenticated\",\"message\":\"Sign in with an active room key or agent identity secret\"},\"status\":\"actio"
+ },
+ {
+  "name": "mint",
+  "method": "POST",
+  "path": "/api/referral-invites/mint empty-body",
+  "status": 401,
+  "ms": 25,
+  "extra": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauth"
+ },
+ {
+  "name": "mint",
+  "method": "POST",
+  "path": "/api/referral-invites/mint malformed-json",
+  "status": 401,
+  "ms": 12,
+  "extra": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauth"
+ },
+ {
+  "name": "mint",
+  "method": "POST",
+  "path": "/api/referral-invites/mint ok-min",
+  "status": 401,
+  "ms": 5,
+  "extra": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your s"
+ },
+ {
+  "name": "mint",
+  "method": "POST",
+  "path": "/api/referral-invites/mint ok-cap",
+  "status": 401,
+  "ms": 132,
+  "extra": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your s"
+ },
+ {
+  "name": "mint",
+  "method": "POST",
+  "path": "/api/referral-invites/mint missing-roomId",
+  "status": 401,
+  "ms": 5,
+  "extra": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your s"
+ },
+ {
+  "name": "mint",
+  "method": "POST",
+  "path": "/api/referral-invites/mint roomId-num",
+  "status": 401,
+  "ms": 13,
+  "extra": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your s"
+ },
+ {
+  "name": "mint",
+  "method": "POST",
+  "path": "/api/referral-invites/mint roomId-null",
+  "status": 401,
+  "ms": 8,
+  "extra": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your s"
+ },
+ {
+  "name": "mint",
+  "method": "POST",
+  "path": "/api/referral-invites/mint extra-key",
+  "status": 401,
+  "ms": 22,
+  "extra": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your s"
+ },
+ {
+  "name": "mint",
+  "method": "POST",
+  "path": "/api/referral-invites/mint maxDepth-str",
+  "status": 401,
+  "ms": 51,
+  "extra": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your s"
+ },
+ {
+  "name": "mint",
+  "method": "POST",
+  "path": "/api/referral-invites/mint maxDepth-neg",
+  "status": 401,
+  "ms": 7,
+  "extra": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your s"
+ },
+ {
+  "name": "mint",
+  "method": "POST",
+  "path": "/api/referral-invites/mint maxDepth-float",
+  "status": 401,
+  "ms": 20,
+  "extra": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your s"
+ },
+ {
+  "name": "mint",
+  "method": "POST",
+  "path": "/api/referral-invites/mint maxDepth-huge",
+  "status": 401,
+  "ms": 16,
+  "extra": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your s"
+ },
+ {
+  "name": "mint",
+  "method": "POST",
+  "path": "/api/referral-invites/mint maxDepth-inf-str",
+  "status": 401,
+  "ms": 6,
+  "extra": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your s"
+ },
+ {
+  "name": "mint",
+  "method": "POST",
+  "path": "/api/referral-invites/mint roomId-empty",
+  "status": 401,
+  "ms": 36,
+  "extra": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your s"
+ },
+ {
+  "name": "mint",
+  "method": "POST",
+  "path": "/api/referral-invites/mint roomId-5k",
+  "status": 401,
+  "ms": 10,
+  "extra": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your s"
+ },
+ {
+  "name": "mint",
+  "method": "POST",
+  "path": "/api/referral-invites/mint roomId-traversal",
+  "status": 401,
+  "ms": 10,
+  "extra": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your s"
+ },
+ {
+  "name": "mint",
+  "method": "POST",
+  "path": "/api/referral-invites/mint roomId-unicode",
+  "status": 401,
+  "ms": 10,
+  "extra": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your s"
+ },
+ {
+  "name": "mint",
+  "method": "POST",
+  "path": "/api/referral-invites/mint arr-body",
+  "status": 401,
+  "ms": 9,
+  "extra": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your s"
+ },
+ {
+  "name": "mint",
+  "method": "POST",
+  "path": "/api/referral-invites/mint null-body",
+  "status": 401,
+  "ms": 49,
+  "extra": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your s"
+ },
+ {
+  "name": "mint",
+  "method": "POST",
+  "path": "/api/referral-invites/mint str-body",
+  "status": 429,
+  "ms": 41,
+  "extra": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait f"
+ },
+ {
+  "name": "mint",
+  "method": "POST",
+  "path": "/api/referral-invites/mint num-body",
+  "status": 429,
+  "ms": 44,
+  "extra": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait f"
+ },
+ {
+  "name": "mint",
+  "method": "POST",
+  "path": "/api/referral-invites/mint text/plain",
+  "status": 429,
+  "ms": 45,
+  "extra": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\""
+ },
+ {
+  "name": "mint",
+  "method": "GET",
+  "path": "/api/referral-invites/mint",
+  "status": 405,
+  "ms": 11,
+  "extra": "allow=POST"
+ },
+ {
+  "name": "mint",
+  "method": "PUT",
+  "path": "/api/referral-invites/mint",
+  "status": 405,
+  "ms": 7,
+  "extra": "allow=POST"
+ },
+ {
+  "name": "mint",
+  "method": "PATCH",
+  "path": "/api/referral-invites/mint",
+  "status": 405,
+  "ms": 11,
+  "extra": "allow=POST"
+ },
+ {
+  "name": "mint",
+  "method": "DELETE",
+  "path": "/api/referral-invites/mint",
+  "status": 405,
+  "ms": 13,
+  "extra": "allow=POST"
+ },
+ {
+  "name": "mint",
+  "method": "HEAD",
+  "path": "/api/referral-invites/mint",
+  "status": 405,
+  "ms": 21,
+  "extra": "allow=POST"
+ },
+ {
+  "name": "mint",
+  "method": "OPTIONS",
+  "path": "/api/referral-invites/mint",
+  "status": 405,
+  "ms": 22,
+  "extra": "allow=POST"
+ },
+ {
+  "name": "mint",
+  "method": "POST",
+  "path": "/api/referral-invites/mint 1MB-body",
+  "status": 429,
+  "ms": 62,
+  "extra": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\""
+ }
+]

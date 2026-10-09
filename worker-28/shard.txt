@@ -1,0 +1,18 @@
+# WORKER 28 shard (of 50)
+
+Shard rule from task: route handlers in server/http.mjs via
+`grep -nE 'app\.(get|post|put|patch|delete|use)\('` sorted, handlers where
+(index mod 50) == 27.
+
+ADAPTATION: server/http.mjs is a manual-router codebase (node:http
+createServer + inline dispatch) — zero `app.get/post/...` matches.
+Faithful equivalent: the sorted list of `req.method === "..."` route
+dispatch lines (`grep -nE 'req\.method === "(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)"'`
+filtered to lines carrying a route/path condition — 161 dispatch lines).
+Shard = dispatch lines at list index 27, 77, 127 (0-based):
+
+- shard-idx 27  → file line 2501: POST /api/guest-invites/request
+- shard-idx 77  → file line 4291: GET  /api/rooms/<id>/agent-grants
+- shard-idx 127 → file line 4685: POST /api/rooms/<id>/guest-invites-revoke-all
+
+Branch: wave2000/guild-02 @ 747f101f8. Base commit SHA recorded at fuzz run.

@@ -1,0 +1,18 @@
+WAVE-2000 guild-02 worker-36 shard definition
+---------------------------------------------
+Task spec: grep -nE 'app\.(get|post|put|patch|delete|use)\(' server/http.mjs | sort
+  -> 0 matches: server/http.mjs uses a raw node:http handler with
+     `if (route === "<name>" && req.method === "<M>")` dispatch blocks,
+     not Express-style app.get/post calls.
+Adapted shard (documented here): all `if (route === "<name>" [&& req.method === "<M>"])`
+  handler blocks in server/http.mjs, numeric line order, index i with (i mod 50) == 35.
+Total handlers: 115. Shard handlers (2):
+  index 35 -> server/http.mjs:4326  GET  /api/rooms/:roomId/reminders
+              if (route === "reminders" && req.method === "GET")
+              return json(res, 200, store.reminders.list(selected.token, roomId, fence));
+  index 85 -> server/http.mjs:4700  POST /api/rooms/:roomId/reports
+              if (route === "reports" && req.method === "POST") {
+                const result = store.moderation.report(selected.token, roomId, await body(req), fence);
+                return json(res, result.duplicate ? 200 : 201, result);
+              }
+Full sorted list: routes-all-sorted.txt (115 lines, "lineno:match" per line).

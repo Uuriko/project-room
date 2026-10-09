@@ -1,0 +1,98 @@
+{
+ "findings": [
+  {
+   "name": "A17 deep-nest json",
+   "status": 422,
+   "expected": [
+    400
+   ],
+   "ms": 114,
+   "head": "{\"error\":{\"code\":\"invalid_method\",\"message\":\"A login method id is required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in this error's message, then resend. Keep any earlier uncertain requestId.\",\"next\":[{\"command\":\"Correct the named fields and resend. Keep any earlier uncertain requestId.\"}],\"operationId\":\"op_KF7RUZ7z\",\"category\":\"input\"}",
+   "allow": null,
+   "note": ""
+  },
+  {
+   "name": "A19 invalid utf8",
+   "status": 404,
+   "expected": [
+    400
+   ],
+   "ms": 6,
+   "head": "{\"error\":{\"code\":\"login_method_not_found\",\"message\":\"Login method not found\"},\"status\":\"action_required\",\"reason\":\"login_method_not_found\",\"hint\":\"Unknown error 'login_method_not_found'. Re-check access and current work; if it repeats, report the code and full message to the room owner.\",\"next\":[{\"tool\":\"room_check_access\"},{\"tool\":\"room_list_work\"},{\"command\":\"If it repeats, report error.code 'lo",
+   "allow": null,
+   "note": ""
+  },
+  {
+   "name": "A25 missing CSRF",
+   "status": 403,
+   "expected": [
+    403
+   ],
+   "ms": 21,
+   "head": "{\"error\":{\"code\":\"csrf_denied\",\"message\":\"Session confirmation required; sign in again\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this identity can do, then ask the owner for the missing permission.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/session\"},{\"command\":\"Ask the owner to mint a guest invite or Ad",
+   "allow": null,
+   "note": "",
+   "leak": true
+  },
+  {
+   "name": "A26 wrong CSRF",
+   "status": 403,
+   "expected": [
+    403
+   ],
+   "ms": 28,
+   "head": "{\"error\":{\"code\":\"csrf_denied\",\"message\":\"Session confirmation required; sign in again\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this identity can do, then ask the owner for the missing permission.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/session\"},{\"command\":\"Ask the owner to mint a guest invite or Ad",
+   "allow": null,
+   "note": "",
+   "leak": true
+  },
+  {
+   "name": "A27 short CSRF",
+   "status": 403,
+   "expected": [
+    403
+   ],
+   "ms": 32,
+   "head": "{\"error\":{\"code\":\"csrf_denied\",\"message\":\"Session confirmation required; sign in again\"},\"status\":\"action_required\",\"reason\":\"access_denied\",\"hint\":\"This credential cannot do that. Run room_check_access to see what this identity can do, then ask the owner for the missing permission.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/session\"},{\"command\":\"Ask the owner to mint a guest invite or Ad",
+   "allow": null,
+   "note": "",
+   "leak": true
+  },
+  {
+   "name": "B1 no auth",
+   "status": 401,
+   "expected": [
+    401
+   ],
+   "ms": 18,
+   "head": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Identity secret or account session required\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/session\"},{\"command\":\"Keep the saved credential and intend",
+   "allow": null,
+   "note": "",
+   "leak": true
+  },
+  {
+   "name": "B3 unknown 43-char bearer",
+   "status": 401,
+   "expected": [
+    401
+   ],
+   "ms": 10,
+   "head": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Cross-room updates need an identity secret or an account session\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/session\"},{\"command\":\"Keep the saved ",
+   "allow": null,
+   "note": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Cross-room updates need an identity secret or an account session\"},\"status",
+   "leak": true
+  },
+  {
+   "name": "B6 wrong binding",
+   "status": 409,
+   "expected": [
+    401,
+    422
+   ],
+   "ms": 17,
+   "head": "{\"error\":{\"code\":\"session_binding_changed\",\"message\":\"Account session changed; discard the stale response or stream\"},\"status\":\"action_required\",\"reason\":\"stale_revision\",\"hint\":\"Re-read workContext. Use the current revision. Do not silently rebase.\",\"next\":[{\"tool\":\"room_read_work\"},{\"path\":\"/api/session\"},{\"command\":\"Re-read workContext; send a new command with current expectedRevision\"}],\"opera",
+   "allow": null,
+   "note": "{\"error\":{\"code\":\"session_binding_changed\",\"message\":\"Account session changed; discard the stale response or stream\"},\"s"
+  }
+ ]
+}

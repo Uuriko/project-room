@@ -1,0 +1,14 @@
+WORKER 40 shard (guild-02, server/http.mjs, 50-way partition)
+
+Launcher spec: grep -nE 'app\.(get|post|put|patch|delete|use)\(' server/http.mjs, sorted,
+handlers where (index mod 50)==39.
+ADAPTATION: that grep matches 0 lines — the server registers routes inline as
+`if (url.pathname === ...)` blocks, not express-style. To stay consistent with
+sibling workers (worker-9/all-pathname-routes.txt, 107 lines), this worker
+shards over that same 107-line list: 0-based indices with (index mod 50)==39
+-> lines 40 and 90 of the list.
+
+39: http.mjs:1972  (acquisition page block)  GET|HEAD /agents
+89: http.mjs:2940  POST /api/agent-invites/redeem
+
+Source list: ../worker-9/all-pathname-routes.txt (guild convention).

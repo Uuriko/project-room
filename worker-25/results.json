@@ -1,0 +1,520 @@
+{
+ "results": [
+  {
+   "name": "a1 GET",
+   "method": "GET",
+   "path": "/openapi.json",
+   "status": 200,
+   "ms": 174,
+   "bodyLen": 95825,
+   "bodyHead": "{\"openapi\":\"3.1.0\",\"info\":{\"title\":\"Uuriko Project Room\",\"version\":\"1\",\"description\":\"Agent-native ledger: Work Items, next actions, and receipts. Agents are Me",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "a2 HEAD",
+   "method": "HEAD",
+   "path": "/openapi.json",
+   "status": 200,
+   "ms": 132,
+   "bodyLen": 0,
+   "bodyHead": "",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "a3 GET alias",
+   "method": "GET",
+   "path": "/room/openapi.json",
+   "status": 200,
+   "ms": 34,
+   "bodyLen": 95825,
+   "bodyHead": "{\"openapi\":\"3.1.0\",\"info\":{\"title\":\"Uuriko Project Room\",\"version\":\"1\",\"description\":\"Agent-native ledger: Work Items, next actions, and receipts. Agents are Me",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "a4 POST",
+   "method": "POST",
+   "path": "/openapi.json",
+   "status": 405,
+   "ms": 19,
+   "bodyLen": 533,
+   "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accep",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "a5 PUT",
+   "method": "PUT",
+   "path": "/openapi.json",
+   "status": 405,
+   "ms": 12,
+   "bodyLen": 533,
+   "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accep",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "a6 DELETE",
+   "method": "DELETE",
+   "path": "/openapi.json",
+   "status": 405,
+   "ms": 85,
+   "bodyLen": 533,
+   "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accep",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "a7 OPTIONS",
+   "method": "OPTIONS",
+   "path": "/openapi.json",
+   "status": 405,
+   "ms": 20,
+   "bodyLen": 533,
+   "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accep",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "a8 query",
+   "method": "GET",
+   "path": "/openapi.json?x=1&y=2",
+   "status": 200,
+   "ms": 44,
+   "bodyLen": 95825,
+   "bodyHead": "{\"openapi\":\"3.1.0\",\"info\":{\"title\":\"Uuriko Project Room\",\"version\":\"1\",\"description\":\"Agent-native ledger: Work Items, next actions, and receipts. Agents are Me",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "a9 case",
+   "method": "GET",
+   "path": "/openapi.JSON",
+   "status": 404,
+   "ms": 9,
+   "bodyLen": 428,
+   "bodyHead": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "a10 trailing slash",
+   "method": "GET",
+   "path": "/openapi.json/",
+   "status": 200,
+   "ms": 54,
+   "bodyLen": 95825,
+   "bodyHead": "{\"openapi\":\"3.1.0\",\"info\":{\"title\":\"Uuriko Project Room\",\"version\":\"1\",\"description\":\"Agent-native ledger: Work Items, next actions, and receipts. Agents are Me",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "a11 double slash",
+   "method": "GET",
+   "path": "//openapi.json",
+   "status": 200,
+   "ms": 61,
+   "bodyLen": 93984,
+   "bodyHead": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, interactive-widget=",
+   "allow": null,
+   "ctype": "text/html; charset=utf-8"
+  },
+  {
+   "name": "a12 long query",
+   "method": "GET",
+   "path": "/openapi.json?x=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+   "status": 200,
+   "ms": 97,
+   "bodyLen": 95825,
+   "bodyHead": "{\"openapi\":\"3.1.0\",\"info\":{\"title\":\"Uuriko Project Room\",\"version\":\"1\",\"description\":\"Agent-native ledger: Work Items, next actions, and receipts. Agents are Me",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "a13 POST+body",
+   "method": "POST",
+   "path": "/openapi.json",
+   "status": 405,
+   "ms": 89,
+   "bodyLen": 533,
+   "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accep",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "a14 evil host",
+   "method": "GET",
+   "path": "/openapi.json",
+   "status": 200,
+   "ms": 30,
+   "bodyLen": 95825,
+   "bodyHead": "{\"openapi\":\"3.1.0\",\"info\":{\"title\":\"Uuriko Project Room\",\"version\":\"1\",\"description\":\"Agent-native ledger: Work Items, next actions, and receipts. Agents are Me",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "b1 no auth no origin",
+   "method": "POST",
+   "path": "/api/share-links/join-agent",
+   "status": 403,
+   "ms": 20,
+   "bodyLen": 390,
+   "bodyHead": "{\"error\":{\"code\":\"origin_denied\",\"message\":\"Origin header is required\"},\"status\":\"action_required\",\"reason\":\"origin_denied\",\"hint\":\"Send Origin: https://room.tr",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "b2 no auth wrong origin",
+   "method": "POST",
+   "path": "/api/share-links/join-agent",
+   "status": 403,
+   "ms": 14,
+   "bodyLen": 348,
+   "bodyHead": "{\"error\":{\"code\":\"origin_denied\",\"message\":\"Request origin is not allowed\"},\"status\":\"action_required\",\"reason\":\"origin_denied\",\"hint\":\"Use Origin: https://room",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "b3 no auth",
+   "method": "POST",
+   "path": "/api/share-links/join-agent",
+   "status": 401,
+   "ms": 27,
+   "bodyLen": 1074,
+   "bodyHead": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Active agent identity required\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved con",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "b4 bad bearer shape",
+   "method": "POST",
+   "path": "/api/share-links/join-agent",
+   "status": 401,
+   "ms": 25,
+   "bodyLen": 1072,
+   "bodyHead": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved conne",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "b5 lowercase bearer",
+   "method": "POST",
+   "path": "/api/share-links/join-agent",
+   "status": 415,
+   "ms": 78,
+   "bodyLen": 378,
+   "bodyHead": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in t",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "b6 room token as identity",
+   "method": "POST",
+   "path": "/api/share-links/join-agent",
+   "status": 401,
+   "ms": 22,
+   "bodyLen": 1347,
+   "bodyHead": "{\"error\":{\"code\":\"room_token_not_identity\",\"message\":\"This is a room-scoped token (rak_), not an identity secret. It works on /mcp (room_check_access, room_need",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "b7 wrong content-type",
+   "method": "POST",
+   "path": "/api/share-links/join-agent",
+   "status": 415,
+   "ms": 25,
+   "bodyLen": 378,
+   "bodyHead": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in t",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "b8 invalid json",
+   "method": "POST",
+   "path": "/api/share-links/join-agent",
+   "status": 400,
+   "ms": 47,
+   "bodyLen": 379,
+   "bodyHead": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in ",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "b9 json array",
+   "method": "POST",
+   "path": "/api/share-links/join-agent",
+   "status": 400,
+   "ms": 25,
+   "bodyLen": 379,
+   "bodyHead": "{\"error\":{\"code\":\"invalid_json\",\"message\":\"Expected a JSON object\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in ",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "b10 empty object",
+   "method": "POST",
+   "path": "/api/share-links/join-agent",
+   "status": 422,
+   "ms": 34,
+   "bodyLen": 396,
+   "bodyHead": "{\"error\":{\"code\":\"invalid_join\",\"message\":\"Invitation link and agent name required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "b11 extra key",
+   "method": "POST",
+   "path": "/api/share-links/join-agent",
+   "status": 422,
+   "ms": 45,
+   "bodyLen": 396,
+   "bodyHead": "{\"error\":{\"code\":\"invalid_join\",\"message\":\"Invitation link and agent name required\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "b12 garbage token",
+   "method": "POST",
+   "path": "/api/share-links/join-agent",
+   "status": 410,
+   "ms": 59,
+   "bodyLen": 444,
+   "bodyHead": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This invite link has expired, been cancelled, or reached its join limit. Ask for a new invite link.\"},\"status\":\"a",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "b13 empty token",
+   "method": "POST",
+   "path": "/api/share-links/join-agent",
+   "status": 410,
+   "ms": 37,
+   "bodyLen": 444,
+   "bodyHead": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This invite link has expired, been cancelled, or reached its join limit. Ask for a new invite link.\"},\"status\":\"a",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "b14 numeric token",
+   "method": "POST",
+   "path": "/api/share-links/join-agent",
+   "status": 410,
+   "ms": 29,
+   "bodyLen": 444,
+   "bodyHead": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This invite link has expired, been cancelled, or reached its join limit. Ask for a new invite link.\"},\"status\":\"a",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "b15 null token",
+   "method": "POST",
+   "path": "/api/share-links/join-agent",
+   "status": 410,
+   "ms": 22,
+   "bodyLen": 444,
+   "bodyHead": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This invite link has expired, been cancelled, or reached its join limit. Ask for a new invite link.\"},\"status\":\"a",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "b16 object displayName",
+   "method": "POST",
+   "path": "/api/share-links/join-agent",
+   "status": 422,
+   "ms": 71,
+   "bodyLen": 396,
+   "bodyHead": "{\"error\":{\"code\":\"invalid_join\",\"message\":\"Choose an agent name of 1–80 characters\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "b17 array displayName",
+   "method": "POST",
+   "path": "/api/share-links/join-agent",
+   "status": 422,
+   "ms": 101,
+   "bodyLen": 396,
+   "bodyHead": "{\"error\":{\"code\":\"invalid_join\",\"message\":\"Choose an agent name of 1–80 characters\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "b18 81char displayName",
+   "method": "POST",
+   "path": "/api/share-links/join-agent",
+   "status": 422,
+   "ms": 107,
+   "bodyLen": 396,
+   "bodyHead": "{\"error\":{\"code\":\"invalid_join\",\"message\":\"Choose an agent name of 1–80 characters\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "b19 blank displayName",
+   "method": "POST",
+   "path": "/api/share-links/join-agent",
+   "status": 422,
+   "ms": 28,
+   "bodyLen": 396,
+   "bodyHead": "{\"error\":{\"code\":\"invalid_join\",\"message\":\"Choose an agent name of 1–80 characters\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "b20 80char displayName",
+   "method": "POST",
+   "path": "/api/share-links/join-agent",
+   "status": 410,
+   "ms": 18,
+   "bodyLen": 444,
+   "bodyHead": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This invite link has expired, been cancelled, or reached its join limit. Ask for a new invite link.\"},\"status\":\"a",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "b21 unicode displayName",
+   "method": "POST",
+   "path": "/api/share-links/join-agent",
+   "status": 410,
+   "ms": 14,
+   "bodyLen": 444,
+   "bodyHead": "{\"error\":{\"code\":\"link_unavailable\",\"message\":\"This invite link has expired, been cancelled, or reached its join limit. Ask for a new invite link.\"},\"status\":\"a",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "b22 GET method",
+   "method": "GET",
+   "path": "/api/share-links/join-agent",
+   "status": 405,
+   "ms": 7,
+   "bodyLen": 533,
+   "bodyHead": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accep",
+   "allow": "POST",
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "b23 oversized body",
+   "method": "POST",
+   "path": "/api/share-links/join-agent",
+   "status": 415,
+   "ms": 8,
+   "bodyLen": 378,
+   "bodyHead": "{\"error\":{\"code\":\"json_required\",\"message\":\"Use application/json\"},\"status\":\"action_required\",\"reason\":\"input_refused\",\"hint\":\"Fix the refused fields named in t",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "rate1 (n=21)",
+   "method": "POST",
+   "path": "/api/share-links/join-agent",
+   "status": 429,
+   "ms": 5,
+   "bodyLen": 320,
+   "bodyHead": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Ret",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "rate2 (n=22)",
+   "method": "POST",
+   "path": "/api/share-links/join-agent",
+   "status": 429,
+   "ms": 12,
+   "bodyLen": 320,
+   "bodyHead": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Ret",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "rate3 (n=23)",
+   "method": "POST",
+   "path": "/api/share-links/join-agent",
+   "status": 429,
+   "ms": 7,
+   "bodyLen": 320,
+   "bodyHead": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Ret",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "rate4 (n=24)",
+   "method": "POST",
+   "path": "/api/share-links/join-agent",
+   "status": 429,
+   "ms": 7,
+   "bodyLen": 320,
+   "bodyHead": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Ret",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "rate5 (n=25)",
+   "method": "POST",
+   "path": "/api/share-links/join-agent",
+   "status": 429,
+   "ms": 7,
+   "bodyLen": 320,
+   "bodyHead": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Ret",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  },
+  {
+   "name": "rate6 (n=26)",
+   "method": "POST",
+   "path": "/api/share-links/join-agent",
+   "status": 429,
+   "ms": 7,
+   "bodyLen": 320,
+   "bodyHead": "{\"error\":{\"code\":\"rate_limited\",\"message\":\"Too many requests; retry after a minute\"},\"status\":\"action_required\",\"reason\":\"rate_limited\",\"hint\":\"Wait for the Ret",
+   "allow": null,
+   "ctype": "application/json; charset=utf-8"
+  }
+ ],
+ "rateOut": [
+  {
+   "i": 1,
+   "n": 21,
+   "status": 429
+  },
+  {
+   "i": 2,
+   "n": 22,
+   "status": 429
+  },
+  {
+   "i": 3,
+   "n": 23,
+   "status": 429
+  },
+  {
+   "i": 4,
+   "n": 24,
+   "status": 429
+  },
+  {
+   "i": 5,
+   "n": 25,
+   "status": 429
+  },
+  {
+   "i": 6,
+   "n": 26,
+   "status": 429
+  }
+ ],
+ "counted": {
+  "joinAgent": 26
+ },
+ "openapiKeys": [
+  "openapi",
+  "info",
+  "servers",
+  "paths",
+  "components"
+ ],
+ "openapiVersion": "3.1.0"
+}

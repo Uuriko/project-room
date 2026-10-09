@@ -1,0 +1,869 @@
+[
+  {
+    "name": "join.html GET -> 301 /join?search",
+    "opts": {
+      "method": "GET",
+      "path": "/join.html"
+    },
+    "got": {
+      "ok": true,
+      "status": 301,
+      "headers": {
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "x-robots-tag": "noindex, nofollow",
+        "strict-transport-security": "max-age=31536000",
+        "content-security-policy": "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        "cross-origin-opener-policy": "same-origin",
+        "location": "/join",
+        "date": "Fri, 09 Oct 2026 19:36:55 GMT",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5",
+        "transfer-encoding": "chunked"
+      },
+      "body": "",
+      "ms": 190
+    },
+    "pass": true
+  },
+  {
+    "name": "room join.html GET -> 301 /room/join",
+    "opts": {
+      "method": "GET",
+      "path": "/room/join.html"
+    },
+    "got": {
+      "ok": true,
+      "status": 301,
+      "headers": {
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "x-robots-tag": "noindex, nofollow",
+        "strict-transport-security": "max-age=31536000",
+        "content-security-policy": "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        "cross-origin-opener-policy": "same-origin",
+        "location": "/room/join",
+        "date": "Fri, 09 Oct 2026 19:36:55 GMT",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5",
+        "transfer-encoding": "chunked"
+      },
+      "body": "",
+      "ms": 17
+    },
+    "pass": true
+  },
+  {
+    "name": "join.html with query preserved",
+    "opts": {
+      "method": "GET",
+      "path": "/join.html?room=abc"
+    },
+    "got": {
+      "ok": true,
+      "status": 301,
+      "headers": {
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "x-robots-tag": "noindex, nofollow",
+        "strict-transport-security": "max-age=31536000",
+        "content-security-policy": "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        "cross-origin-opener-policy": "same-origin",
+        "location": "/join?room=abc",
+        "date": "Fri, 09 Oct 2026 19:36:55 GMT",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5",
+        "transfer-encoding": "chunked"
+      },
+      "body": "",
+      "ms": 5
+    },
+    "pass": true
+  },
+  {
+    "name": "join.html HEAD -> 301 no body",
+    "opts": {
+      "method": "HEAD",
+      "path": "/join.html"
+    },
+    "got": {
+      "ok": true,
+      "status": 301,
+      "headers": {
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "x-robots-tag": "noindex, nofollow",
+        "strict-transport-security": "max-age=31536000",
+        "content-security-policy": "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        "cross-origin-opener-policy": "same-origin",
+        "location": "/join",
+        "date": "Fri, 09 Oct 2026 19:36:55 GMT",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5"
+      },
+      "body": "",
+      "ms": 10
+    },
+    "pass": true
+  },
+  {
+    "name": "join.html POST (non-GET) -> ???",
+    "opts": {
+      "method": "POST",
+      "path": "/join.html"
+    },
+    "got": {
+      "ok": true,
+      "status": 404,
+      "headers": {
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "x-robots-tag": "noindex, nofollow",
+        "strict-transport-security": "max-age=31536000",
+        "content-security-policy": "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        "cross-origin-opener-policy": "same-origin",
+        "content-type": "application/json; charset=utf-8",
+        "content-length": "430",
+        "date": "Fri, 09 Oct 2026 19:36:55 GMT",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5"
+      },
+      "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids\"},{\"tool\":\"room_check_access\"}],\"operationId\":\"op_GJA5cTyC\",\"category\":\"not_found\"}",
+      "ms": 22
+    },
+    "pass": true
+  },
+  {
+    "name": "join.html PUT (non-GET) -> ???",
+    "opts": {
+      "method": "PUT",
+      "path": "/join.html"
+    },
+    "got": {
+      "ok": true,
+      "status": 404,
+      "headers": {
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "x-robots-tag": "noindex, nofollow",
+        "strict-transport-security": "max-age=31536000",
+        "content-security-policy": "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        "cross-origin-opener-policy": "same-origin",
+        "content-type": "application/json; charset=utf-8",
+        "content-length": "430",
+        "date": "Fri, 09 Oct 2026 19:36:55 GMT",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5"
+      },
+      "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids\"},{\"tool\":\"room_check_access\"}],\"operationId\":\"op_8mrCAZns\",\"category\":\"not_found\"}",
+      "ms": 15
+    },
+    "pass": true
+  },
+  {
+    "name": "join.html DELETE (non-GET) -> ???",
+    "opts": {
+      "method": "DELETE",
+      "path": "/join.html"
+    },
+    "got": {
+      "ok": true,
+      "status": 404,
+      "headers": {
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "x-robots-tag": "noindex, nofollow",
+        "strict-transport-security": "max-age=31536000",
+        "content-security-policy": "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        "cross-origin-opener-policy": "same-origin",
+        "content-type": "application/json; charset=utf-8",
+        "content-length": "430",
+        "date": "Fri, 09 Oct 2026 19:36:55 GMT",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5"
+      },
+      "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids\"},{\"tool\":\"room_check_access\"}],\"operationId\":\"op_KD07LO42\",\"category\":\"not_found\"}",
+      "ms": 39
+    },
+    "pass": true
+  },
+  {
+    "name": "join.html OPTIONS -> ???",
+    "opts": {
+      "method": "OPTIONS",
+      "path": "/join.html"
+    },
+    "got": {
+      "ok": true,
+      "status": 404,
+      "headers": {
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "x-robots-tag": "noindex, nofollow",
+        "strict-transport-security": "max-age=31536000",
+        "content-security-policy": "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        "cross-origin-opener-policy": "same-origin",
+        "content-type": "application/json; charset=utf-8",
+        "content-length": "430",
+        "date": "Fri, 09 Oct 2026 19:36:55 GMT",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5"
+      },
+      "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids\"},{\"tool\":\"room_check_access\"}],\"operationId\":\"op_6397YWBH\",\"category\":\"not_found\"}",
+      "ms": 29
+    },
+    "pass": true
+  },
+  {
+    "name": "join.html trailing slash -> 301 (deliberate QA 2026-10-03 normalization)",
+    "opts": {
+      "method": "GET",
+      "path": "/join.html/"
+    },
+    "got": {
+      "ok": true,
+      "status": 301,
+      "headers": {
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "x-robots-tag": "noindex, nofollow",
+        "strict-transport-security": "max-age=31536000",
+        "content-security-policy": "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        "cross-origin-opener-policy": "same-origin",
+        "location": "/join",
+        "date": "Fri, 09 Oct 2026 19:36:55 GMT",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5",
+        "transfer-encoding": "chunked"
+      },
+      "body": "",
+      "ms": 12
+    },
+    "pass": true
+  },
+  {
+    "name": "join.html uppercase -> 404?",
+    "opts": {
+      "method": "GET",
+      "path": "/JOIN.HTML"
+    },
+    "got": {
+      "ok": true,
+      "status": 404,
+      "headers": {
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "x-robots-tag": "noindex, nofollow",
+        "strict-transport-security": "max-age=31536000",
+        "content-security-policy": "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        "cross-origin-opener-policy": "same-origin",
+        "content-type": "application/json; charset=utf-8",
+        "content-length": "430",
+        "date": "Fri, 09 Oct 2026 19:36:55 GMT",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5"
+      },
+      "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids\"},{\"tool\":\"room_check_access\"}],\"operationId\":\"op_bxy1oiFi\",\"category\":\"not_found\"}",
+      "ms": 17
+    },
+    "pass": true
+  },
+  {
+    "name": "join.html encoded -> ???",
+    "opts": {
+      "method": "GET",
+      "path": "/join%2ehtml"
+    },
+    "got": {
+      "ok": true,
+      "status": 404,
+      "headers": {
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "x-robots-tag": "noindex, nofollow",
+        "strict-transport-security": "max-age=31536000",
+        "content-security-policy": "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        "cross-origin-opener-policy": "same-origin",
+        "content-type": "application/json; charset=utf-8",
+        "content-length": "430",
+        "date": "Fri, 09 Oct 2026 19:36:55 GMT",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5"
+      },
+      "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids\"},{\"tool\":\"room_check_access\"}],\"operationId\":\"op_Eu0Rb_2w\",\"category\":\"not_found\"}",
+      "ms": 25
+    },
+    "pass": true
+  },
+  {
+    "name": "join.htm typo -> 404?",
+    "opts": {
+      "method": "GET",
+      "path": "/join.htm"
+    },
+    "got": {
+      "ok": true,
+      "status": 404,
+      "headers": {
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "x-robots-tag": "noindex, nofollow",
+        "strict-transport-security": "max-age=31536000",
+        "content-security-policy": "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        "cross-origin-opener-policy": "same-origin",
+        "content-type": "application/json; charset=utf-8",
+        "content-length": "430",
+        "date": "Fri, 09 Oct 2026 19:36:55 GMT",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5"
+      },
+      "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids\"},{\"tool\":\"room_check_access\"}],\"operationId\":\"op_y4ISl47N\",\"category\":\"not_found\"}",
+      "ms": 17
+    },
+    "pass": true
+  },
+  {
+    "name": "favicon.ico redirect",
+    "opts": {
+      "method": "GET",
+      "path": "/favicon.ico"
+    },
+    "got": {
+      "ok": true,
+      "status": 301,
+      "headers": {
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "x-robots-tag": "noindex, nofollow",
+        "strict-transport-security": "max-age=31536000",
+        "content-security-policy": "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        "cross-origin-opener-policy": "same-origin",
+        "location": "/favicon.svg",
+        "date": "Fri, 09 Oct 2026 19:36:56 GMT",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5",
+        "transfer-encoding": "chunked"
+      },
+      "body": "",
+      "ms": 22
+    },
+    "pass": true
+  },
+  {
+    "name": "room favicon.ico redirect",
+    "opts": {
+      "method": "GET",
+      "path": "/room/favicon.ico"
+    },
+    "got": {
+      "ok": true,
+      "status": 301,
+      "headers": {
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "x-robots-tag": "noindex, nofollow",
+        "strict-transport-security": "max-age=31536000",
+        "content-security-policy": "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        "cross-origin-opener-policy": "same-origin",
+        "location": "/room/favicon.svg",
+        "date": "Fri, 09 Oct 2026 19:36:56 GMT",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5",
+        "transfer-encoding": "chunked"
+      },
+      "body": "",
+      "ms": 22
+    },
+    "pass": true
+  },
+  {
+    "name": "double html suffix -> 404 (correct, exact-match only)",
+    "opts": {
+      "method": "GET",
+      "path": "/join.html.html"
+    },
+    "got": {
+      "ok": true,
+      "status": 404,
+      "headers": {
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "x-robots-tag": "noindex, nofollow",
+        "strict-transport-security": "max-age=31536000",
+        "content-security-policy": "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        "cross-origin-opener-policy": "same-origin",
+        "content-type": "application/json; charset=utf-8",
+        "content-length": "430",
+        "date": "Fri, 09 Oct 2026 19:36:56 GMT",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5"
+      },
+      "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids\"},{\"tool\":\"room_check_access\"}],\"operationId\":\"op_3d80lMdn\",\"category\":\"not_found\"}",
+      "ms": 19
+    },
+    "pass": true
+  },
+  {
+    "name": "join.html with huge query (16k) -> client parser limit (node http, not server)",
+    "opts": {
+      "method": "GET",
+      "path": "/join.html?xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    "got": {
+      "ok": false,
+      "error": "Parse Error: Header overflow",
+      "ms": 18
+    },
+    "pass": true
+  },
+  {
+    "name": "research GET -> 405",
+    "opts": {
+      "method": "GET",
+      "path": "/api/web/research"
+    },
+    "got": {
+      "ok": true,
+      "status": 405,
+      "headers": {
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "x-robots-tag": "noindex, nofollow",
+        "strict-transport-security": "max-age=31536000",
+        "content-security-policy": "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        "cross-origin-opener-policy": "same-origin",
+        "x-operation-id": "op_bfiPIsAo",
+        "content-type": "application/json; charset=utf-8",
+        "content-length": "539",
+        "date": "Fri, 09 Oct 2026 19:36:56 GMT",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5"
+      },
+      "body": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an allowed method (Allow header or route docs); do not retry the same method.\",\"next\":[{\"command\":\"Read the 405 response's Allow header when present — otherwise the route docs — for the accepted methods, then resend with an allowed method; do not retry the same method\"}],\"operationId\":\"op_bfiPIsAo\",\"category\":\"input\"}",
+      "ms": 49
+    },
+    "pass": true
+  },
+  {
+    "name": "research HEAD -> 405",
+    "opts": {
+      "method": "HEAD",
+      "path": "/api/web/research"
+    },
+    "got": {
+      "ok": true,
+      "status": 405,
+      "headers": {
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "x-robots-tag": "noindex, nofollow",
+        "strict-transport-security": "max-age=31536000",
+        "content-security-policy": "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        "cross-origin-opener-policy": "same-origin",
+        "x-operation-id": "op_HLo7jIz0",
+        "content-type": "application/json; charset=utf-8",
+        "content-length": "539",
+        "date": "Fri, 09 Oct 2026 19:36:56 GMT",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5"
+      },
+      "body": "",
+      "ms": 38
+    },
+    "pass": true
+  },
+  {
+    "name": "research PUT -> 405",
+    "opts": {
+      "method": "PUT",
+      "path": "/api/web/research"
+    },
+    "got": {
+      "ok": true,
+      "status": 405,
+      "headers": {
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "x-robots-tag": "noindex, nofollow",
+        "strict-transport-security": "max-age=31536000",
+        "content-security-policy": "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        "cross-origin-opener-policy": "same-origin",
+        "x-operation-id": "op_eNGJTUII",
+        "content-type": "application/json; charset=utf-8",
+        "content-length": "539",
+        "date": "Fri, 09 Oct 2026 19:36:56 GMT",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5"
+      },
+      "body": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an allowed method (Allow header or route docs); do not retry the same method.\",\"next\":[{\"command\":\"Read the 405 response's Allow header when present — otherwise the route docs — for the accepted methods, then resend with an allowed method; do not retry the same method\"}],\"operationId\":\"op_eNGJTUII\",\"category\":\"input\"}",
+      "ms": 71
+    },
+    "pass": true
+  },
+  {
+    "name": "research DELETE -> 405",
+    "opts": {
+      "method": "DELETE",
+      "path": "/api/web/research"
+    },
+    "got": {
+      "ok": true,
+      "status": 405,
+      "headers": {
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "x-robots-tag": "noindex, nofollow",
+        "strict-transport-security": "max-age=31536000",
+        "content-security-policy": "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        "cross-origin-opener-policy": "same-origin",
+        "x-operation-id": "op_CgkTBtG6",
+        "content-type": "application/json; charset=utf-8",
+        "content-length": "539",
+        "date": "Fri, 09 Oct 2026 19:36:56 GMT",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5"
+      },
+      "body": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an allowed method (Allow header or route docs); do not retry the same method.\",\"next\":[{\"command\":\"Read the 405 response's Allow header when present — otherwise the route docs — for the accepted methods, then resend with an allowed method; do not retry the same method\"}],\"operationId\":\"op_CgkTBtG6\",\"category\":\"input\"}",
+      "ms": 37
+    },
+    "pass": true
+  },
+  {
+    "name": "research OPTIONS -> ???",
+    "opts": {
+      "method": "OPTIONS",
+      "path": "/api/web/research"
+    },
+    "got": {
+      "ok": true,
+      "status": 405,
+      "headers": {
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "x-robots-tag": "noindex, nofollow",
+        "strict-transport-security": "max-age=31536000",
+        "content-security-policy": "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        "cross-origin-opener-policy": "same-origin",
+        "x-operation-id": "op__xm8KqzN",
+        "content-type": "application/json; charset=utf-8",
+        "content-length": "539",
+        "date": "Fri, 09 Oct 2026 19:36:56 GMT",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5"
+      },
+      "body": "{\"error\":{\"code\":\"method_not_allowed\",\"message\":\"Method not allowed\"},\"status\":\"action_required\",\"reason\":\"method_not_allowed\",\"hint\":\"This route does not accept that HTTP method — nothing was changed. Resend with an allowed method (Allow header or route docs); do not retry the same method.\",\"next\":[{\"command\":\"Read the 405 response's Allow header when present — otherwise the route docs — for the accepted methods, then resend with an allowed method; do not retry the same method\"}],\"operationId\":\"op__xm8KqzN\",\"category\":\"input\"}",
+      "ms": 23
+    },
+    "pass": true
+  },
+  {
+    "name": "research POST no auth -> 401",
+    "opts": {
+      "method": "POST",
+      "path": "/api/web/research"
+    },
+    "got": {
+      "ok": true,
+      "status": 401,
+      "headers": {
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "x-robots-tag": "noindex, nofollow",
+        "strict-transport-security": "max-age=31536000",
+        "content-security-policy": "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        "cross-origin-opener-policy": "same-origin",
+        "x-operation-id": "op_-J2_Tdx0",
+        "content-type": "application/json; charset=utf-8",
+        "content-length": "1122",
+        "date": "Fri, 09 Oct 2026 19:36:56 GMT",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5"
+      },
+      "body": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"No credential. Agents can self-mint an identity at POST /api/agent-identities.\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/session\"},{\"command\":\"Keep the saved credential and intended room. Verify the configured origin. For an identity secret, GET /api/agent-rooms with the same Bearer credential; for a room key, check the existing room connection. Never send the secret to another host.\"},{\"command\":\"A successful identity read can distinguish a missing room link; a 401 alone cannot prove why access failed. Ask the room owner to verify membership and service health. Do not erase connection.json or automatically register a replacement.\"},{\"command\":\"If you have no saved connection, read /llms.txt for initial setup. Recoverable registration is a write that may create an identity, not a read-only access check.\"}],\"operationId\":\"op_-J2_Tdx0\",\"category\":\"access\"}",
+      "ms": 41
+    },
+    "pass": true
+  },
+  {
+    "name": "research POST junk bearer -> 401",
+    "opts": {
+      "method": "POST",
+      "path": "/api/web/research"
+    },
+    "got": {
+      "ok": true,
+      "status": 401,
+      "headers": {
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "x-robots-tag": "noindex, nofollow",
+        "strict-transport-security": "max-age=31536000",
+        "content-security-policy": "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        "cross-origin-opener-policy": "same-origin",
+        "x-operation-id": "op_IExVW0rJ",
+        "content-type": "application/json; charset=utf-8",
+        "content-length": "1072",
+        "date": "Fri, 09 Oct 2026 19:36:56 GMT",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5"
+      },
+      "body": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"Invalid Authorization header\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/session\"},{\"command\":\"Keep the saved credential and intended room. Verify the configured origin. For an identity secret, GET /api/agent-rooms with the same Bearer credential; for a room key, check the existing room connection. Never send the secret to another host.\"},{\"command\":\"A successful identity read can distinguish a missing room link; a 401 alone cannot prove why access failed. Ask the room owner to verify membership and service health. Do not erase connection.json or automatically register a replacement.\"},{\"command\":\"If you have no saved connection, read /llms.txt for initial setup. Recoverable registration is a write that may create an identity, not a read-only access check.\"}],\"operationId\":\"op_IExVW0rJ\",\"category\":\"access\"}",
+      "ms": 22
+    },
+    "pass": true
+  },
+  {
+    "name": "research POST empty body no auth -> 401",
+    "opts": {
+      "method": "POST",
+      "path": "/api/web/research"
+    },
+    "got": {
+      "ok": true,
+      "status": 401,
+      "headers": {
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "x-robots-tag": "noindex, nofollow",
+        "strict-transport-security": "max-age=31536000",
+        "content-security-policy": "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        "cross-origin-opener-policy": "same-origin",
+        "x-operation-id": "op_cg3O0EcK",
+        "content-type": "application/json; charset=utf-8",
+        "content-length": "1122",
+        "date": "Fri, 09 Oct 2026 19:36:56 GMT",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5"
+      },
+      "body": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"No credential. Agents can self-mint an identity at POST /api/agent-identities.\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/session\"},{\"command\":\"Keep the saved credential and intended room. Verify the configured origin. For an identity secret, GET /api/agent-rooms with the same Bearer credential; for a room key, check the existing room connection. Never send the secret to another host.\"},{\"command\":\"A successful identity read can distinguish a missing room link; a 401 alone cannot prove why access failed. Ask the room owner to verify membership and service health. Do not erase connection.json or automatically register a replacement.\"},{\"command\":\"If you have no saved connection, read /llms.txt for initial setup. Recoverable registration is a write that may create an identity, not a read-only access check.\"}],\"operationId\":\"op_cg3O0EcK\",\"category\":\"access\"}",
+      "ms": 19
+    },
+    "pass": true
+  },
+  {
+    "name": "research POST invalid JSON no auth -> 401 (before parse)",
+    "opts": {
+      "method": "POST",
+      "path": "/api/web/research"
+    },
+    "got": {
+      "ok": true,
+      "status": 401,
+      "headers": {
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "x-robots-tag": "noindex, nofollow",
+        "strict-transport-security": "max-age=31536000",
+        "content-security-policy": "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        "cross-origin-opener-policy": "same-origin",
+        "x-operation-id": "op_YvIluT-r",
+        "content-type": "application/json; charset=utf-8",
+        "content-length": "1122",
+        "date": "Fri, 09 Oct 2026 19:36:56 GMT",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5"
+      },
+      "body": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"No credential. Agents can self-mint an identity at POST /api/agent-identities.\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/session\"},{\"command\":\"Keep the saved credential and intended room. Verify the configured origin. For an identity secret, GET /api/agent-rooms with the same Bearer credential; for a room key, check the existing room connection. Never send the secret to another host.\"},{\"command\":\"A successful identity read can distinguish a missing room link; a 401 alone cannot prove why access failed. Ask the room owner to verify membership and service health. Do not erase connection.json or automatically register a replacement.\"},{\"command\":\"If you have no saved connection, read /llms.txt for initial setup. Recoverable registration is a write that may create an identity, not a read-only access check.\"}],\"operationId\":\"op_YvIluT-r\",\"category\":\"access\"}",
+      "ms": 18
+    },
+    "pass": true
+  },
+  {
+    "name": "research POST huge body no auth -> 401 not 413?",
+    "opts": {
+      "method": "POST",
+      "path": "/api/web/research"
+    },
+    "got": {
+      "ok": true,
+      "status": 401,
+      "headers": {
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "x-robots-tag": "noindex, nofollow",
+        "strict-transport-security": "max-age=31536000",
+        "content-security-policy": "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        "cross-origin-opener-policy": "same-origin",
+        "x-operation-id": "op_J3ncJo-y",
+        "content-type": "application/json; charset=utf-8",
+        "content-length": "1122",
+        "date": "Fri, 09 Oct 2026 19:36:56 GMT",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5"
+      },
+      "body": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"No credential. Agents can self-mint an identity at POST /api/agent-identities.\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/session\"},{\"command\":\"Keep the saved credential and intended room. Verify the configured origin. For an identity secret, GET /api/agent-rooms with the same Bearer credential; for a room key, check the existing room connection. Never send the secret to another host.\"},{\"command\":\"A successful identity read can distinguish a missing room link; a 401 alone cannot prove why access failed. Ask the room owner to verify membership and service health. Do not erase connection.json or automatically register a replacement.\"},{\"command\":\"If you have no saved connection, read /llms.txt for initial setup. Recoverable registration is a write that may create an identity, not a read-only access check.\"}],\"operationId\":\"op_J3ncJo-y\",\"category\":\"access\"}",
+      "ms": 32
+    },
+    "pass": true
+  },
+  {
+    "name": "research POST garbage content-type no auth -> 401",
+    "opts": {
+      "method": "POST",
+      "path": "/api/web/research"
+    },
+    "got": {
+      "ok": true,
+      "status": 401,
+      "headers": {
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "x-robots-tag": "noindex, nofollow",
+        "strict-transport-security": "max-age=31536000",
+        "content-security-policy": "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        "cross-origin-opener-policy": "same-origin",
+        "x-operation-id": "op_0vhjKnmB",
+        "content-type": "application/json; charset=utf-8",
+        "content-length": "1122",
+        "date": "Fri, 09 Oct 2026 19:36:56 GMT",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5"
+      },
+      "body": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"No credential. Agents can self-mint an identity at POST /api/agent-identities.\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/session\"},{\"command\":\"Keep the saved credential and intended room. Verify the configured origin. For an identity secret, GET /api/agent-rooms with the same Bearer credential; for a room key, check the existing room connection. Never send the secret to another host.\"},{\"command\":\"A successful identity read can distinguish a missing room link; a 401 alone cannot prove why access failed. Ask the room owner to verify membership and service health. Do not erase connection.json or automatically register a replacement.\"},{\"command\":\"If you have no saved connection, read /llms.txt for initial setup. Recoverable registration is a write that may create an identity, not a read-only access check.\"}],\"operationId\":\"op_0vhjKnmB\",\"category\":\"access\"}",
+      "ms": 28
+    },
+    "pass": true
+  },
+  {
+    "name": "research trailing slash -> 401 (normalization routes it to the handler)",
+    "opts": {
+      "method": "POST",
+      "path": "/api/web/research/"
+    },
+    "got": {
+      "ok": true,
+      "status": 401,
+      "headers": {
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "x-robots-tag": "noindex, nofollow",
+        "strict-transport-security": "max-age=31536000",
+        "content-security-policy": "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        "cross-origin-opener-policy": "same-origin",
+        "x-operation-id": "op_bjmSPsAi",
+        "content-type": "application/json; charset=utf-8",
+        "content-length": "1122",
+        "date": "Fri, 09 Oct 2026 19:36:56 GMT",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5"
+      },
+      "body": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"No credential. Agents can self-mint an identity at POST /api/agent-identities.\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/session\"},{\"command\":\"Keep the saved credential and intended room. Verify the configured origin. For an identity secret, GET /api/agent-rooms with the same Bearer credential; for a room key, check the existing room connection. Never send the secret to another host.\"},{\"command\":\"A successful identity read can distinguish a missing room link; a 401 alone cannot prove why access failed. Ask the room owner to verify membership and service health. Do not erase connection.json or automatically register a replacement.\"},{\"command\":\"If you have no saved connection, read /llms.txt for initial setup. Recoverable registration is a write that may create an identity, not a read-only access check.\"}],\"operationId\":\"op_bjmSPsAi\",\"category\":\"access\"}",
+      "ms": 27
+    },
+    "pass": true
+  },
+  {
+    "name": "research uppercase path -> 404?",
+    "opts": {
+      "method": "POST",
+      "path": "/api/WEB/RESEARCH"
+    },
+    "got": {
+      "ok": true,
+      "status": 404,
+      "headers": {
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "x-robots-tag": "noindex, nofollow",
+        "strict-transport-security": "max-age=31536000",
+        "content-security-policy": "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        "cross-origin-opener-policy": "same-origin",
+        "x-operation-id": "op_dv9n3lIg",
+        "content-type": "application/json; charset=utf-8",
+        "content-length": "430",
+        "date": "Fri, 09 Oct 2026 19:36:56 GMT",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5"
+      },
+      "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found\"},\"status\":\"action_required\",\"reason\":\"not_found\",\"hint\":\"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.\",\"next\":[{\"command\":\"Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids\"},{\"tool\":\"room_check_access\"}],\"operationId\":\"op_dv9n3lIg\",\"category\":\"not_found\"}",
+      "ms": 42
+    },
+    "pass": true
+  },
+  {
+    "name": "research POST query-string auth -> ???",
+    "opts": {
+      "method": "POST",
+      "path": "/api/web/research?auth=room"
+    },
+    "got": {
+      "ok": true,
+      "status": 401,
+      "headers": {
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "x-robots-tag": "noindex, nofollow",
+        "strict-transport-security": "max-age=31536000",
+        "content-security-policy": "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        "cross-origin-opener-policy": "same-origin",
+        "x-operation-id": "op_J1tkq2s5",
+        "content-type": "application/json; charset=utf-8",
+        "content-length": "1122",
+        "date": "Fri, 09 Oct 2026 19:36:56 GMT",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5"
+      },
+      "body": "{\"error\":{\"code\":\"unauthenticated\",\"message\":\"No credential. Agents can self-mint an identity at POST /api/agent-identities.\"},\"status\":\"action_required\",\"reason\":\"unauthenticated\",\"hint\":\"Keep your saved connection. Check the service address and existing access before creating another identity.\",\"next\":[{\"tool\":\"room_check_access\"},{\"path\":\"/api/agent-rooms\"},{\"path\":\"/api/session\"},{\"command\":\"Keep the saved credential and intended room. Verify the configured origin. For an identity secret, GET /api/agent-rooms with the same Bearer credential; for a room key, check the existing room connection. Never send the secret to another host.\"},{\"command\":\"A successful identity read can distinguish a missing room link; a 401 alone cannot prove why access failed. Ask the room owner to verify membership and service health. Do not erase connection.json or automatically register a replacement.\"},{\"command\":\"If you have no saved connection, read /llms.txt for initial setup. Recoverable registration is a write that may create an identity, not a read-only access check.\"}],\"operationId\":\"op_J1tkq2s5\",\"category\":\"access\"}",
+      "ms": 24
+    },
+    "pass": true
+  }
+]

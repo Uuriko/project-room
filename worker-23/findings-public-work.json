@@ -1,0 +1,6 @@
+{
+ "cases": 53,
+ "genuineFindings": 0,
+ "findings": [],
+ "note": "One initial flag (q:after+limit: after=abc -> 200) was a wrong test expectation: 'abc' is a valid identifier cursor, so 200 is correct; expectation fixed in fuzz-public-work.mjs. Verified: 422 invalid_public_work for bad limit/after/unknown params, 401 for unauthenticated actions, 405 for wrong methods, 404 for unknown ids. No 500s, no hangs, no stack leaks."
+}

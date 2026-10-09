@@ -1,0 +1,15 @@
+const { RoomStore } = await import("../server/store.mjs");
+const { initialRoom } = await import("../server/bootstrap.mjs");
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+const dir = mkdtempSync(join(tmpdir(), "w16-proj-"));
+const store = new RoomStore(join(dir, "room.sqlite"));
+store.initialize(initialRoom());
+const row = store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get();
+const p = JSON.parse(row.projection);
+console.log("top keys:", Object.keys(p).join(","));
+console.log("room keys:", Object.keys(p.room || {}).join(","));
+console.log("title:", JSON.stringify(p.room?.title), "purpose-len:", p.room?.purpose?.length, "ownerId:", p.room?.ownerId);
+console.log("members type:", typeof p.members, "count:", Object.keys(p.members || {}).length);
+store.close(); rmSync(dir, { recursive: true, force: true });

@@ -1,0 +1,62 @@
+[
+  {
+    "name": "fetch loopback url blocked",
+    "got": 200,
+    "pass": true,
+    "detail": "{\"plan\":[{\"source\":\"fetch\",\"status\":\"planned\",\"reason\":\"1 explicit URL(s) via the room's SSRF-hardened fetch\",\"cost\":\"bills web-fetch quota (1 fetch(es))\"}],\"evidence\":[],\"fetch_errors\":[{\"url\":\"http://127.0.0.1:43331/api/health\",\"code\":\"invalid_url\",\"message\":\"Only ports 80 and 443 can be fetched\"}"
+  },
+  {
+    "name": "fetch closed port -> fetch_errors",
+    "got": 200,
+    "pass": true,
+    "detail": "{\"plan\":[{\"source\":\"fetch\",\"status\":\"planned\",\"reason\":\"1 explicit URL(s) via the room's SSRF-hardened fetch\",\"cost\":\"bills web-fetch quota (1 fetch(es))\"}],\"evidence\":[],\"fetch_errors\":[{\"url\":\"http://127.0.0.1:9/x\",\"code\":\"invalid_url\",\"message\":\"Only ports 80 and 443 can be fetched\"}],\"provider_e"
+  },
+  {
+    "name": "fetch metadata IP blocked",
+    "got": 200,
+    "pass": true,
+    "detail": "{\"plan\":[{\"source\":\"fetch\",\"status\":\"planned\",\"reason\":\"1 explicit URL(s) via the room's SSRF-hardened fetch\",\"cost\":\"bills web-fetch quota (1 fetch(es))\"}],\"evidence\":[],\"fetch_errors\":[{\"url\":\"http://169.254.169.254/latest/meta-data/\",\"code\":\"blocked_host\",\"message\":\"Refusing to fetch a private, l"
+  },
+  {
+    "name": "fetch garbage url",
+    "got": 200,
+    "pass": true,
+    "detail": "{\"plan\":[{\"source\":\"fetch\",\"status\":\"planned\",\"reason\":\"1 explicit URL(s) via the room's SSRF-hardened fetch\",\"cost\":\"bills web-fetch quota (1 fetch(es))\"}],\"evidence\":[],\"fetch_errors\":[{\"url\":\"not a url\",\"code\":\"invalid_url\",\"message\":\"url is not parseable\"}],\"provider_errors\":[],\"provider_status\""
+  },
+  {
+    "name": "fetch no urls given -> ?",
+    "got": 200,
+    "pass": true,
+    "detail": "{\"plan\":[{\"source\":\"fetch\",\"status\":\"skipped\",\"reason\":\"no urls[] given — the fetch leg needs explicit URLs (the room has no search backend without a provider key)\",\"cost\":\"n/a\"}],\"evidence\":[],\"fetch_errors\":[],\"provider_errors\":[],\"provider_status\":{\"name\":null,\"status\":\"unconfigured\",\"detail\":\"no"
+  },
+  {
+    "name": "provider leg unconfigured",
+    "got": 200,
+    "pass": true,
+    "detail": "{\"plan\":[{\"source\":\"provider\",\"status\":\"unconfigured\",\"reason\":\"set WEB_RESEARCH_PROVIDER=alexandria and ALEXANDRIA_API_KEY to enable the provider leg\",\"cost\":\"n/a\"}],\"evidence\":[],\"fetch_errors\":[],\"provider_errors\":[],\"provider_status\":{\"name\":null,\"status\":\"unconfigured\",\"detail\":\"set WEB_RESEARC"
+  },
+  {
+    "name": "all sources exec",
+    "got": 200,
+    "pass": true,
+    "detail": "{\"plan\":[{\"source\":\"room\",\"status\":\"skipped\",\"reason\":\"no usable keywords in question\",\"cost\":\"free (room memory)\"},{\"source\":\"docs\",\"status\":\"planned\",\"reason\":\"keyword search over the room's own docs corpus (docs/, README.md, CHANGELOG.md)\",\"cost\":\"free (local)\"},{\"source\":\"fetch\",\"status\":\"planne"
+  },
+  {
+    "name": "exec repeat 1 room+docs",
+    "got": 200,
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "exec repeat 2 room+docs",
+    "got": 200,
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "name": "exec repeat 3 room+docs",
+    "got": 200,
+    "pass": true,
+    "detail": ""
+  }
+]

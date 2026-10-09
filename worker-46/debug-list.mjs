@@ -1,0 +1,13 @@
+import { RoomStore } from "../server/store.mjs";
+import { AgentRooms } from "../server/agent-rooms.mjs";
+import { readFileSync } from "node:fs";
+const store = new RoomStore("/tmp/w2000-worker46/room.sqlite");
+const secret = readFileSync(new URL(".creds-pri.txt", import.meta.url), "utf8").trim();
+const ar = new AgentRooms(store);
+const identity = store.identities.resolveGlobalIdentitySecret(secret);
+console.log("identityId:", identity?.identityId);
+const auth = store.identities.resolveIdentityLink(identity.identityId, "w46-room-6f36");
+console.log("resolveIdentityLink:", auth ? JSON.stringify({ memberId: auth.member?.id, role: auth.member?.role }) : "NULL");
+const out = ar.list(secret, "");
+console.log("list():", JSON.stringify(out).slice(0, 500));
+process.exit(0);
