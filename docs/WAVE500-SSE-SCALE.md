@@ -1,6 +1,6 @@
 # WAVE-500 W1 — SSE stream ceiling (SIM, before F1)
 
-Date: 2026-10-08. Worker: wave500 W1 (coordinator 5/6, swarm-scale presence + streaming).
+Date: 2026-10-08/09. Worker: wave500 W1 (coordinator 5/6, swarm-scale presence + streaming).
 Branch: `wave500/presence-w1-scale`. Harness: `perf/wave500-sse-scale-bench.mjs`.
 
 **Label: SIM — PRE-F1 BASELINE.** Measurement only — F1 (shared SSE pump) is
@@ -54,7 +54,7 @@ measurement (+1 s warmup), sequential. Metrics per run:
 
 ## Environment caveat (read before the table)
 
-The fleet VM has **2 cores** and carried a **1-min load of 13–19** through the
+The fleet VM has **2 cores** and carried a **1-min load of 11–22** through the
 whole series (post-reboot fleet storm; hundreds of sibling agent processes).
 `nice -n -8` was used to reduce descheduling of the benchmark, but wall-clock
 timer metrics (`lateP50/P99`, `deliveryRatio`, `eventLoopDelay`) remain
@@ -117,19 +117,35 @@ Comparison with prior baselines (same 100-stream, full-page regime):
 |--------|-----------------|
 | perf guild w6 (SIM, 10/07) | ~25 s event-loop work/s (differently-defined metric — summed delay, not CPU) |
 | F1 bench `tests/bench-fanout-f1.mjs` before (10/08) | pump cpu burn 162.1 ms/s; event-loop delay mean 759.92 ms |
-| This series (SIM, 10/08) | cpu ~290 ms/s (clean series) / ~180 ms/s (contended, scheduler-throttled); per-tick ~0.85–1.2 ms |
+| This series (SIM, 10/08–09) | cpu 177.4 ms/s at N=100 (3-run mean, contended); per-tick 1.2 ms |
 
 ## Post-F1 comparison (informational, separate tree)
 
 <!-- POSTF1 -->
 One N=100 round was run against the F1 tree (`wave500/presence` @ 86ac6a90a,
 shared SSE pump) with the same harness, for a rough before/after signal.
-W2's own SIM before/after numbers are authoritative; this is a spot check.
+W2's own SIM before/after numbers (~6x pump-CPU reduction at 100 streams) are
+authoritative; this is a single-run spot check.
 
-| N | tree | cpu ms/s | per-tick ms | delivery ratio | late p50/p99 (ms) |
-|---|------|----------|-------------|----------------|-------------------|
-| 100 | pre-F1 (`wave500/presence-w1-scale`) | 177.4 | 1.2 | 0.37 | 390 / 1360 |
-| 100 | post-F1 (`wave500/presence` @ 86ac6a90a) | — | — | — | — |
+| N | tree | cpu ms/s | ms per stream-serve | ticks / 10 s | eventLoopDelay mean (ms) |
+|---|------|----------|---------------------|--------------|--------------------------|
+| 100 | pre-F1 (`wave500/presence-w1-scale`, 3-run mean) | 177.4 | 1.20 | ~1480 stream-ticks | 171 (45–328 across runs) |
+| 100 | post-F1 (`wave500/presence` @ 86ac6a90a, 1 run) | 142.6 | 0.42 | 34 room-ticks | 14.7 |
+
+Reading notes:
+
+- `deliveryRatio` and tick-lateness p50/p99 are NOT comparable across the
+  pump change (per-stream 250 ms timers vs one shared per-room timer), so
+  they are omitted here; the comparable unit is CPU per stream-serve
+  (one stream receiving one tick's worth of events): 1.20 ms → 0.42 ms
+  (~2.8x in this spot check).
+- The headline win is loop decongestion: eventLoopDelay mean 171 ms →
+  14.7 ms. The room timer itself was punctual (lateness p50 2.6 ms) though
+  6 of 40 room ticks were swallowed by contention (lateness p99 3.4 s).
+- SIM caveat: all 100 streams catch up the same preload from the same
+  cursor, so the shared fetch+projection is maximally effective here.
+  Production streams at divergent cursors share less; treat 2.8x as an
+  upper-bound-shaped data point, not a production promise.
 
 <!-- /POSTF1 -->
 
