@@ -75,6 +75,9 @@ function pct(samples, p) {
   return s[Math.min(s.length - 1, Math.floor((p / 100) * s.length))];
 }
 const mean = a => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
+// Loop-based max: spread (...a) blows the call stack when the lateness
+// sample array grows large (hit at N=400, ~500k+ samples).
+const lateMax = a => { let m = 0; for (let i = 0; i < a.length; i++) if (a[i] > m) m = a[i]; return m; };
 
 // Fake store shared by all instances in the run (one process = one event
 // loop). Events indexed by sequence so eventsAfter is O(limit), like the
@@ -219,7 +222,7 @@ async function runOnce(runIdx, store) {
         samples: late.length,
         p50: Number(pct(late, 50).toFixed(1)),
         p99: Number(pct(late, 99).toFixed(1)),
-        max: Number(Math.max(...late, 0).toFixed(1)),
+        max: Number(lateMax(late).toFixed(1)),
       },
       messages: {
         rowsDelivered: rows,
