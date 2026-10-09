@@ -6,6 +6,8 @@
 // The live GitHub Actions source lives in github-actions-source.mjs;
 // tests use scripted fixtures.
 
+import { SCHEMA_VERSION } from "../../scripts/telemetry-schema.mjs";
+
 export const SAMPLE_TYPE = "ci.queue_depth_sample";
 export const DEFAULT_INTERVAL_S = 900; // 15-minute cadence
 
@@ -122,6 +124,12 @@ export async function sampleOnce(
   const waits = snapshot.waits_s ?? [];
   const timestamp = now || new Date().toISOString();
   const record = {
+    // FIX-25: common v:1 envelope. All pre-existing fields are kept unchanged
+    // (backward compatible): `type` still names the gauge, `timestamp` stays
+    // as the legacy alias of `ts` for readers like FIX-55's normalizeCiQueue.
+    v: SCHEMA_VERSION,
+    ts: timestamp,
+    kind: "gauge",
     type: SAMPLE_TYPE,
     id: makeId(timestamp),
     timestamp,

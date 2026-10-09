@@ -32,7 +32,8 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { agentConnectionFromEnvironment } from "../client/agent-connection.mjs";
 
-export const SCHEMA_VERSION = 1;
+import { SCHEMA_VERSION } from "./telemetry-schema.mjs";
+export { SCHEMA_VERSION };
 export const ALARM_NAME = "metric.surface_degraded";
 
 // ---------------------------------------------------------------------------

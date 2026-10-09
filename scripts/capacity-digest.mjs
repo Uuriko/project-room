@@ -24,6 +24,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { SCHEMA_VERSION } from "./telemetry-schema.mjs";
 
 // --- constants ------------------------------------------------------------
 
@@ -163,6 +164,12 @@ export function buildDigest({ board, ciQueue, now } = {}) {
   if (alerts.length === 0) lines.push("✅ no alerts");
 
   return {
+    // FIX-25: common v:1 envelope. All pre-existing payload fields are kept
+    // unchanged (backward compatible): `generatedAt` stays as the legacy
+    // alias of `ts` for the webhook relay and --out readers.
+    v: SCHEMA_VERSION,
+    ts: generatedAt,
+    kind: "digest",
     text: lines.join("\n"),
     alerts,
     gauges: {

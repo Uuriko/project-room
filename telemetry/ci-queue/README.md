@@ -16,10 +16,15 @@ credentials, no writes to external systems.
 ## Schema
 
 Record shape, `ci.queue_depth_sample` v1 (full field list in
-[queue-depth-schema.json](queue-depth-schema.json)):
+[queue-depth-schema.json](queue-depth-schema.json)). Every record also carries
+the common v:1 telemetry envelope (`v`, `ts`, `kind: "gauge"` — see
+[docs/telemetry/schema.md](../../docs/telemetry/schema.md)):
 
 ```json
 {
+  "v": 1,
+  "ts": "2026-10-08T19:45:00.000Z",
+  "kind": "gauge",
   "type": "ci.queue_depth_sample",
   "id": "ciqd-20261008T194500Z-7f3a",
   "timestamp": "2026-10-08T19:45:00.000Z",

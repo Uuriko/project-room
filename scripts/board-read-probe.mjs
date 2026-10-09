@@ -49,6 +49,7 @@
 import http from "node:http";
 import https from "node:https";
 import { pathToFileURL } from "node:url";
+import { SCHEMA_VERSION } from "./telemetry-schema.mjs";
 
 // ---------------------------------------------------------------------------
 // Pure math / parsing (unit-testable)
@@ -221,6 +222,7 @@ export async function runProbe({
   timeoutMs = 30000,
 }) {
   const url = `${baseUrl.replace(/\/$/, "")}${path}`;
+  const runStartedAt = new Date().toISOString(); // FIX-25: envelope ts for the probe run
   // One keep-alive pool per origin for the whole probe run. Parallel ladder
   // reads open parallel sockets (up to maxSockets) so they genuinely overlap
   // server-side; without reuse, fresh-connect-per-read serializes and the
@@ -255,6 +257,11 @@ export async function runProbe({
     });
   }
   const result = {
+    // FIX-25: common v:1 envelope. All pre-existing report fields are kept
+    // unchanged (backward compatible); `ts` marks the probe run start.
+    v: SCHEMA_VERSION,
+    ts: runStartedAt,
+    kind: "probe",
     target: { baseUrl, path, url },
     slo: SLO,
     baseline: {
