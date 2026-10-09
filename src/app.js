@@ -36,7 +36,7 @@ import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendin
 import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, authPanelTitle, roomIdFromNext, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
 import { rememberLastRoom, rememberAccountHint, readLastRoom, readLastRoomTitle, readAccountHint, hasSessionHint, clearBrowserSessionHints, rememberMemberRoom, readMemberRoom, clearStoredPasswords, signInRoomTarget } from "./browser-session.js";
-import { attachmentFromBytes, composerAudienceNote, COMPOSER_FILE_BYTES, fileChipLabel } from "./composer-files.js";
+import { attachmentFromBytes, composerAudienceNote, composerAudiencePickerVisible, COMPOSER_FILE_BYTES, fileChipLabel } from "./composer-files.js";
 import { formatSessionExpiry } from "./session-expiry.js";
 import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui.js";
 import { installHumanPush } from "./human-push.js";
@@ -1420,7 +1420,15 @@ $("#guest-upgrade-link")?.addEventListener("click", () => {
 function syncComposerChrome() {
   const to = $("#message-to-select")?.value;
   const bar = $("#composer-toolbar");
-  if (bar) bar.hidden = !to && !requestMode;
+  // bu-09: the audience picker is the broadcast-vs-DM control and stays
+  // visible whenever there is someone to address. Hiding it until a
+  // recipient was already chosen made room-chat DMs undiscoverable — the
+  // hidden control was the only way to start one.
+  if (bar) bar.hidden = !composerAudiencePickerVisible({
+    members: state?.members ? Object.values(state.members) : [],
+    selfId: session?.member?.id,
+    requestMode: Boolean(requestMode),
+  });
   const note = $("#audience-note");
   if (note) {
     // RC-2026-09-19-070: a message addressed to one member is private to the
