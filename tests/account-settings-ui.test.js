@@ -263,6 +263,7 @@ test("an unverified account sees the email verification form after mount (emailV
   await ui.mount(container);
   assert.ok(container.innerHTML.includes('data-form="email-verify"'), "the verification-code form renders");
   assert.ok(container.innerHTML.includes('name="code"'));
+  assert.ok(container.innerHTML.includes('data-action="email-verify-resend"'), "a Send a new code control renders");
   const verified = stubClient({ "/api/auth/methods": { methods, emailVerification: { status: "verified", verified: true, passwordResetRequired: false }, providers: null } });
   const ui2 = createAccountSettingsUI({ accountClient: verified });
   const container2 = fakeContainer();
