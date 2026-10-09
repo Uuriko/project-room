@@ -379,3 +379,62 @@ test('deleted assistant prompt shows only content-free stop controls and preserv
   assert.equal(await panel.getByRole('button').count(),0);
   assert.equal(await page.locator('#message-input').inputValue(),'Keep my unsent conversation draft.');
 });
+
+// Real commands and stream delivery own this regression; existing journeys
+// never kept Project open across work events. No production-only test seam.
+test('open Project follows live work changes without losing keyboard position', { timeout: 60000 }, async t => {
+  const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
+  let browser;
+  t.after(async () => { await browser?.close(); server.closeStreams(); server.closeAllConnections(); if (server.listening) await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const send = (type, data) => f.store.command(f.keys.owner, 'commons', { id: crypto.randomUUID(), type, data });
+  for (let index = 0; index < 30; index++) send('work.proposed', { workItemId: `live-${index}`, title: `Project ${index}`, definitionOfDone: 'A readable result', accountableMemberId: 'owner', mode: 'read', independentVerificationRequired: false, ownerDecisionRequired: index === 25, ...(index === 25 ? { humanDecisionMakerId: 'owner' } : {}) });
+  const mutate = (id, type, extra = {}) => send(type, { workItemId: id, expectedRevision: f.store.room('commons').state.workItems[id].revision, ...extra });
+  for (const id of ['live-24', 'live-25']) { mutate(id, 'work.accepted'); mutate(id, 'work.started'); }
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 700 } });
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto(`http://127.0.0.1:${server.address().port}`); await signInFixture(page, f.keys.owner);
+  await page.locator('#main').waitFor({ state: 'visible' });
+  await page.locator('#human-project-open').click();
+  const dialog = page.locator('#human-project-dialog'), row = page.locator('[data-project-work="live-24"]');
+  await row.focus();
+  const scroll = await dialog.evaluate(node => node.scrollTop);
+  assert.ok(scroll > 0, 'the long project list really scrolls');
+  const assertPosition = async () => {
+    assert.equal(await dialog.evaluate(node => node.open), true);
+    assert.equal(await row.evaluate(node => document.activeElement === node), true);
+    assert.equal(await dialog.evaluate(node => node.scrollTop), scroll);
+  };
+  mutate('live-24', 'work.blocked', { reason: 'Question from collaborator', nextAction: 'Answer the question' });
+  await page.waitForFunction(() => document.querySelector('[data-project-work="live-24"] span')?.textContent === 'Needs input', null, { timeout: 5000 });
+  await assertPosition();
+  await row.evaluate(node => { window.projectRowBefore = node; });
+  send('message.posted', { messageId: 'project-unrelated-chat', body: 'An unrelated update' });
+  await page.locator('[data-message-record-id="project-unrelated-chat"]').waitFor({ state: 'attached' });
+  assert.equal(await row.evaluate(node => node === window.projectRowBefore), true, 'unrelated chat does not reconstruct Project');
+  await assertPosition();
+  mutate('live-24', 'work.started', { resolvedBlocker: 'Question answered' });
+  await page.waitForFunction(() => document.querySelector('[data-project-work="live-24"] span')?.textContent === 'In progress · reported');
+  const { textVersion } = await import('../server/text-results.mjs');
+  for (const [id, label] of [['live-24', 'Done'], ['live-25', 'Needs review']]) {
+    const body = `Result for ${id}`, messageId = `project-result-${id}`;
+    const posted = send('message.posted', { messageId, workItemId: id, body });
+    mutate(id, 'work.completed', { evidenceKind: 'room_text', evidenceMessageId: messageId, evidenceMessageEventId: posted.event.id, evidenceVersion: textVersion(body), previousCompletionEventId: null, producerId: 'owner', summary: 'Finished result', nextAction: 'Read the result' });
+    await page.waitForFunction(({ id, label }) => [...document.querySelectorAll('[data-project-work]')].find(node => node.dataset.projectWork === id)?.querySelector('span').textContent === label, { id, label });
+    await assertPosition();
+  }
+  await row.evaluate(node => { window.projectRowBefore = node; });
+  await page.keyboard.press('Escape'); await dialog.waitFor({ state: 'hidden' });
+  await page.locator('#human-project-open').click();
+  assert.equal(await row.locator('span').textContent(), 'Done');
+  assert.equal(await row.evaluate(node => node === window.projectRowBefore), true, 'reopening unchanged content keeps its nodes');
+  await row.focus();
+  mutate('live-24', 'work.superseded', { supersededByWorkItemId: 'live-0', reason: 'Continue in the replacement task' });
+  await row.waitFor({ state: 'detached' });
+  assert.equal(await dialog.locator('[data-close-project]').evaluate(node => document.activeElement === node), true, 'removed focused task falls back to Close');
+  await dialog.locator('[data-close-project]').click();
+  await page.locator('#human-project-open').click();
+  await page.locator('[data-project-work="live-25"]').click(); await dialog.waitFor({ state: 'hidden' });
+  assert.deepEqual(errors, []);
+});

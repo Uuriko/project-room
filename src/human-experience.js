@@ -30,13 +30,26 @@ export function installHumanExperience({ getState, getSession, client, notice, o
   const dialog = document.createElement('dialog'); dialog.id = 'human-project-dialog'; dialog.setAttribute('aria-labelledby', 'human-project-title');
   dialog.innerHTML = '<div class="dialog-head"><h2 id="human-project-title">Project</h2><button type="button" class="button ghost" data-close-project>Close</button></div><div id="human-project-content"></div>';
   document.body.append(dialog); dialog.querySelector('[data-close-project]').onclick = () => dialog.close();
-  $('#human-project-open').onclick = () => {
-    const state = getState();
-    $('#human-project-content').innerHTML = [`<p>${esc(state.room.purpose || uiText("human.copy.004"))}</p>`, Object.values(state.workItems ?? {}).filter(w => !w.supersededBy).map(w => {
+  let projectHtml = null;
+  function paintProject() {
+    const state = getState(), panel = $('#human-project-content');
+    const html = [`<p>${esc(state.room.purpose || uiText("human.copy.004"))}</p>`, Object.values(state.workItems ?? {}).filter(w => !w.supersededBy).map(w => {
       const label = w.state === 'completed' ? (currentResult(w) ? 'Done' : 'Needs review') : w.state === 'working' ? uiText("human.copy.005") : w.state === 'blocked' ? 'Needs input' : 'Planned';
       return ["<button type=\"button\" class=\"human-project-item\" data-project-work=\"", esc(w.id), "\"><strong>", esc(w.title), "</strong><span>", esc(label), "</span></button>"].join('');
     }).join('')].join('');
-    if (!Object.keys(state.workItems ?? {}).length) $('#human-project-content').insertAdjacentHTML('beforeend', uiText("human.copy.006"));
+    const nextHtml = html + (!Object.keys(state.workItems ?? {}).length ? uiText("human.copy.006") : '');
+    if (projectHtml === nextHtml) return;
+    const focused = panel.contains(document.activeElement) ? document.activeElement.closest('[data-project-work]') : null;
+    const workId = focused?.dataset.projectWork, scroll = dialog.scrollTop;
+    panel.innerHTML = nextHtml; projectHtml = nextHtml;
+    if (focused) {
+      const replacement = [...panel.querySelectorAll('[data-project-work]')].find(button => button.dataset.projectWork === workId);
+      (replacement || dialog.querySelector('[data-close-project]')).focus({ preventScroll: true });
+    }
+    dialog.scrollTop = scroll;
+  }
+  $('#human-project-open').onclick = () => {
+    paintProject();
     dialog.showModal();
   };
   dialog.addEventListener('click', event => { const button = event.target.closest('[data-project-work]'); if (button) { dialog.close(); openWork(button.dataset.projectWork); } });
@@ -188,7 +201,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
       if (!active) { projection = null; operation = null; rejectedOperation = null; configureOperation = null; boundary = ''; selected = false; section.querySelector('#assistant-runs').replaceChildren(); delete $('#assistant-runs')._html; if (setup.open) setup.close(); if (dialog.open) dialog.close(); if (resultDialog.open) resultDialog.close(); resultEntry = null; document.body.classList.remove('human-advanced'); return; }
       if (boundary !== key()) {
         for (const modal of [setup, dialog, resultDialog]) if (modal.open) modal.close();
-        resultEntry = null; resultDialog.querySelector('form').reset(); setup.querySelector('form').reset(); $('#human-project-content').replaceChildren(); $('#assistant-runs').replaceChildren(); delete $('#assistant-runs')._html;
+        resultEntry = null; resultDialog.querySelector('form').reset(); setup.querySelector('form').reset(); $('#human-project-content').replaceChildren(); projectHtml = null; $('#assistant-runs').replaceChildren(); delete $('#assistant-runs')._html;
         boundary = key(); projection = null; operation = null; rejectedOperation = null; configureOperation = null; contribution = null; error = ''; lastRead = 0; selected = false; ask.textContent = 'Ask Room'; ask.setAttribute('aria-pressed', 'false');
         try {
           const pending = JSON.parse(sessionStorage.getItem(pendingKey()) || 'null');
@@ -199,6 +212,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
         $('#human-advanced').checked = enabled; document.body.classList.toggle('human-advanced', enabled);
         $('#people-panel').open = false;
       }
+      if (dialog.open) paintProject();
       // Message tombstones must hide cached activity even if assistant reads fail.
       paint(); void refresh();
     },
