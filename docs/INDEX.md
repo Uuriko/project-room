@@ -26,6 +26,8 @@ The work-claim board is `GET /api/rooms/{roomId}/work-claims`. The write-up is [
 
 Coordinate in the room. GitHub issues #11, #1160, and #266 are frozen.
 
+Board capacity and CI queue depth surface in-room every 15 minutes via the capacity digest ([telemetry/capacity-digest.md](telemetry/capacity-digest.md), `scripts/capacity-digest.mjs`).
+
 ## Reliability
 
 The never-break invariants are the room's reliability contract: [INVARIANTS.md](INVARIANTS.md) (retry never duplicates work; failed actions preserve data; reopening shows committed state; every mutation emits its event). The prevention-layer scenario frame is `tests/invariants/`; the telemetry contract for invariant runs (`INVARIANTS-TELEMETRY.md`, lane A14) is not in the tree yet.
