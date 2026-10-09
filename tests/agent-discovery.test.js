@@ -299,6 +299,16 @@ test("uppercase /SKILL.md serves the agent skill, distinct from the llms.txt pac
   // doc must name those causes and not advise "try other interests".
   assert.ok(skill.body.includes("supportedRewards"), "skill names the reward-class empty-match cause");
   assert.ok(!skill.body.includes("Try other interests"), "skill drops the ineffective empty-match advice");
+  // Stranger dead-end recovery map (qa200-GP-05/FINDINGS): four dead ends a
+  // first-contact agent hits that the onboarding text above does not cover —
+  // Cloudflare 403 on stock library user-agents, zstd content-encoding
+  // breaking naive clients, the "Unknown error '<code>'" fallthrough hint,
+  // and a 401/rooms: [] right after a successful mint. Each must carry its
+  // exact recovery, verified live against production.
+  assert.ok(skill.body.includes("error code: 1010"), "skill names the Cloudflare 1010 user-agent dead end");
+  assert.ok(skill.body.includes("Content-Encoding: zstd"), "skill documents the zstd dead end and recovery");
+  assert.ok(skill.body.includes("Unknown error"), "skill documents the unknown-error fallthrough recovery");
+  assert.ok(skill.body.includes("rooms: []"), "skill documents the fresh-mint 401 / rooms dead end");
   assert.ok(!FORBIDDEN.test(skill.body), "skill stays secret-free");
   for (const path of ["/room/SKILL.md", "/project-room/SKILL.md"]) {
     assert.ok(DISCOVERY_PATHS.includes(path), path);
