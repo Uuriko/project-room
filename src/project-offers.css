@@ -500,4 +500,12 @@ footer a {
 .find-work li { min-width:0; overflow-wrap:anywhere; }
 .find-work textarea { min-height:180px; margin-top:12px; }
 .match-scope { font-size:.9rem; }
+/* M-11: tablets and landscape phones (761-1024px) get a two-column find-work
+   grid. The desktop 4-column form / 3-column cards squeeze each form column to
+   ~160px on an iPad portrait, truncating the selects. The <=760px phone rule
+   below still wins on narrow screens. */
+@media(max-width:1024px) {
+  .find-work form { grid-template-columns:1fr 1fr; }
+  .find-work ul { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
 @media(max-width:760px) { .find-work { padding:16px; } .find-work form,.find-work ul { grid-template-columns:minmax(0,1fr); } }
