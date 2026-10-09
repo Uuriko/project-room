@@ -389,18 +389,24 @@ export async function handleInboxMount(ctx) {
           receiptSpan.end();
         }
       }
-      if (!data || !exact(data, ["action", "sourceId", "sendId"]) || !["dispatch", "reconcile"].includes(data.action)
+      if (!data || !exact(data, ["action", "sourceId", "sendId"]) || !["dispatch", "reconcile", "flush"].includes(data.action)
         || !validId(data.sourceId) || !validId(data.sendId)) reject(422, "invalid_inbox_send", "Choose the existing channel reply.");
       const sender = channelSendFor(data.sourceId);
       if (!sender) reject(409, "channel_sending_unavailable", "Sending is not enabled for this channel.");
       // Per-connection send budget for reply dispatches (task #41): one
       // token per dispatch, honest 429 with Retry-After on exhaustion.
-      // Reconciles only read provider state, so they spend no budget.
-      if (data.action === "dispatch") {
+      // Reconciles only read provider state, so they spend no budget. A flush
+      // may resubmit, so it spends a token, but only for an attempt that is
+      // actually stuck at "unknown" (anything else is a no-op).
+      const spendsBudget = data.action === "dispatch"
+        || data.action === "flush" && sender.transport.current(token, data.sourceId, data.sendId, binding).status === "unknown";
+      if (spendsBudget) {
         const budgetChannel = sendBudgetChannelFor(sender.provider);
         if (budgetChannel) sendBudgets.check({ channel: budgetChannel, accountId: auth.account.id, connectionId: sender.connectionId });
       }
-      const send = await sender.transport[data.action](token, data.sourceId, data.sendId, binding);
+      const send = data.action === "flush"
+        ? await sender.transport.flushSend(token, data.sourceId, data.sendId, binding, { minAgeMs: 30_000 })
+        : await sender.transport[data.action](token, data.sourceId, data.sendId, binding);
       const last = telegramStatus.snapshot(auth.account.id, sender.connectionId).lastSendResult;
       return json(res, 200, { ...store.inbox.sends(token, data.sourceId, binding), simulationAvailable: Boolean(syntheticInboxTransport), channelSend: channelSendView(sender), send,
         lastSendResult: last ? { at: new Date(last.at).toISOString(), outcome: last.outcome, code: last.code } : null });
