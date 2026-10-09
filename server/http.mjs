@@ -3462,6 +3462,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const workClaimsDuplicatesMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/duplicates$/.exec(url.pathname);
       // Owner cap for open claims per member. Literal segment before {id}.
       const workClaimsConfigMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/config$/.exec(url.pathname);
+      // Claim-reputation read side (retention scoreboard). Literal segments
+      // before {id} so they are never mistaken for a claim id.
+      const workClaimsReputationMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/reputation$/.exec(url.pathname);
+      const workClaimsReputationMeMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/reputation\/me$/.exec(url.pathname);
       const workClaimItemMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})$/.exec(url.pathname);
       const workClaimClaimMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/claim$/.exec(url.pathname);
       const workClaimUpdateMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/update$/.exec(url.pathname);
@@ -3473,7 +3477,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // Provenance walk + premise-invalid rollback (orch-provenance-rollback).
       // Literal segments are matched before the {id} template so they are
       // never mistaken for a claim id.
-      const workClaimMatch = workClaimsMatch ?? workClaimsStatusMatch ?? workClaimsSweepMatch ?? workClaimsDuplicatesMatch ?? workClaimsConfigMatch ?? workClaimClaimMatch
+      const workClaimMatch = workClaimsMatch ?? workClaimsStatusMatch ?? workClaimsSweepMatch ?? workClaimsDuplicatesMatch ?? workClaimsConfigMatch ?? workClaimsReputationMatch ?? workClaimsReputationMeMatch ?? workClaimClaimMatch
         ?? workClaimUpdateMatch ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch
         ?? workClaimItemMatch
         ?? workClaimReceiptsMatch;
@@ -3756,6 +3760,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           : workClaimsStatusMatch ? "status"
           : workClaimsDuplicatesMatch ? "duplicates"
           : workClaimsConfigMatch ? "config"
+          : workClaimsReputationMeMatch ? "reputation-me"
+          : workClaimsReputationMatch ? "reputation"
           : workClaimsMatch ? (req.method === "GET" ? "list" : "create")
           : workClaimReceiptsMatch ? "receipts"
           : workClaimItemMatch ? "read"

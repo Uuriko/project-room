@@ -40,6 +40,9 @@ import {
   walkProvenance, flagPremiseInvalid, clearPremiseFlag, closeWork, isTerminalClaimState, claimHistoryLength,
 } from "./work-claims.mjs";
 import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
+import {
+  laneClaimStanding, roomClaimLeaderboard,
+} from "./claim-reputation.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { evaluateReceipt } from "./jev-receipts.mjs";
 import { findClaimCollisions } from "./claim-collisions.mjs";
@@ -114,6 +117,14 @@ const shape = (fields, { required = [], optional = [] } = {}) => {
 };
 
 const invalidInput = (reject, expected) => reject(422, "invalid_claim_input", `Expected ${expected}.`);
+
+// Bounded leaderboard page size for the reputation read side.
+const reputationLimitOf = (reject, params) => {
+  const raw = params?.get("limit");
+  if (raw === null || raw === undefined) return 25;
+  if (!/^[1-9]\d*$/.test(raw) || Number(raw) > 100) invalidInput(reject, "limit an integer 1-100");
+  return Number(raw);
+};
 
 const claimIdOf = (reject, id) => {
   if (typeof id !== "string" || !CLAIM_ID_PATTERN.test(id)) invalidInput(reject, "a work id matching [A-Za-z0-9_-]{1,128}");
@@ -841,6 +852,29 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       nextCursor: nextOffset < ranked.length ? cursorEncode(nextOffset) : null,
     }, caller));
   }
+  if (workClaimRoute === "reputation" && req.method === "GET") {
+    // Claim-bonds P1 read side: the visible scoreboard. Same member
+    // contract as receipts — authenticated non-members get 403 not_member,
+    // and reads stay open to guest agents, like every other GET on this
+    // family. Bands gate routing visibility only; nothing here bans, blocks
+    // claims, or touches money.
+    const members = store.roomAuthority(roomId).members ?? {};
+    const member = members[caller];
+    if (!member || member.active === false) {
+      reject(403, "not_member", `Member "${caller}" is not a member of room "${roomId}"`);
+    }
+    return json(res, 200, roomClaimLeaderboard(store.db, roomId, { limit: reputationLimitOf(reject, url.searchParams) }));
+  }
+  if (workClaimRoute === "reputation-me" && req.method === "GET") {
+    // A lane's own standing: decayed score, band, open claims, and the
+    // hoarding-cap flag, so the cap is legible before the lane claims.
+    const members = store.roomAuthority(roomId).members ?? {};
+    const member = members[caller];
+    if (!member || member.active === false) {
+      reject(403, "not_member", `Member "${caller}" is not a member of room "${roomId}"`);
+    }
+    return json(res, 200, laneClaimStanding(store.db, roomId, caller, {}));
+  }
   if (workClaimRoute === "sweep" && req.method === "POST") {
     if (!maySweepWorkClaims(access)) refuseSweep();
     // QA200-CH-2033: a sweep settles PR links and records CI facts, which
@@ -1379,7 +1413,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   // RFC 9110: a 405 names the resource's valid methods. The route table above
   // is the source of truth; an unknown route has no meaningful Allow value.
   const WORK_CLAIM_METHODS = {
-    list: "GET", receipts: "GET", sweep: "POST", duplicates: "GET", status: "GET", config: "GET, POST", create: "POST",
+    list: "GET", receipts: "GET", reputation: "GET", "reputation-me": "GET", sweep: "POST", duplicates: "GET", status: "GET", config: "GET, POST", create: "POST",
     read: "GET", claim: "POST", update: "POST", review: "POST", release: "POST",
     reassign: "POST", renew: "POST", provenance: "GET", "premise-invalid": "POST",
   };

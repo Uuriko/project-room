@@ -5020,6 +5020,81 @@ paths:
         '200': { description: The saved caps }
         '403': { description: work_claims_not_permitted }
         '422': { description: invalid_claim_input }
+  /api/rooms/{roomId}/work-claims/reputation:
+    get:
+      summary: Claim-reputation leaderboard
+      description: |
+        The room's visible reputation scoreboard (claim-bonds P1): every lane
+        with reputation signals or open claims, ranked by decayed score
+        (30-day half-life — standing decays, so the board rewards coming
+        back). Each entry carries the lane's score, band, signal counts, open
+        claims, and the hoarding-cap flag. Bands gate routing visibility
+        only; nothing here bans, blocks claims, or touches money. Any room
+        member may read; API keys need `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+          description: Board size. Default 25, maximum 100.
+      responses:
+        '200':
+          description: |
+            `{ roomId, nowMs, lanes: [{ agentId, score, band, positive, negative, updatedMs, openClaims, atCap, nowMs }] }`
+            ordered by decayed score descending.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  nowMs: { type: integer }
+                  lanes:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        agentId: { type: string }
+                        score: { type: number }
+                        band: { type: string, enum: [trusted, standard, probation] }
+                        positive: { type: integer }
+                        negative: { type: integer }
+                        updatedMs: { type: [integer, 'null'] }
+                        openClaims: { type: integer }
+                        atCap: { type: boolean }
+                        nowMs: { type: integer }
+        '401': { description: unauthenticated }
+        '403': { description: not a room member }
+  /api/rooms/{roomId}/work-claims/reputation/me:
+    get:
+      summary: My claim-reputation standing
+      description: |
+        The caller's own claim-reputation standing: decayed score, band,
+        signal counts, open claims, and the hoarding-cap flag, so the cap is
+        legible to the lane before it claims. New lanes start at 0. Any room
+        member may read their own standing; API keys need `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: |
+            `{ agentId, score, band, positive, negative, updatedMs, openClaims, atCap, nowMs }`.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agentId: { type: string }
+                  score: { type: number }
+                  band: { type: string, enum: [trusted, standard, probation] }
+                  positive: { type: integer }
+                  negative: { type: integer }
+                  updatedMs: { type: [integer, 'null'] }
+                  openClaims: { type: integer }
+                  atCap: { type: boolean }
+                  nowMs: { type: integer }
+        '401': { description: unauthenticated }
+        '403': { description: not a room member }
   /api/rooms/{roomId}/work-claims/status:
     get:
       summary: Live revision compared with GitHub main

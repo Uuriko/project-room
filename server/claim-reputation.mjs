@@ -323,6 +323,59 @@ function parseEventRow(row) {
   }
 }
 
+class ClaimReputationError extends Error {
+  constructor(code, message) { super(message); this.name = "ClaimReputationError"; this.code = code; }
+}
+export { ClaimReputationError };
+
+// Read-side: parsed work_claim.updated event rows for one room (or every
+// room when roomId is null) from the durable events table, in sequence
+// order. This is the same source the journal sync folds, so the visible
+// scoreboard and the journaled signals can never disagree. Malformed rows
+// are skipped, never thrown.
+export function readClaimEventRows(db, roomId = null) {
+  const rows = db.prepare(
+    `SELECT room_id, sequence, body FROM events
+     WHERE json_valid(body) AND json_extract(body,'$.type')='work_claim.updated'
+     ${roomId ? "AND room_id=?" : ""}
+     ORDER BY sequence`
+  ).all(...(roomId ? [roomId] : []));
+  const parsed = [];
+  for (const row of rows) {
+    const event = parseEventRow(row);
+    if (event) parsed.push(event);
+  }
+  return parsed;
+}
+
+// Read-side: the room's visible scoreboard. Every lane with reputation
+// signals or open claims, ranked by decayed score (30-day half-life, the
+// same decay the tracker applies) — a lane whose standing decayed below a
+// fresher lane sorts below it, so the board rewards coming back. Frozen.
+export function roomClaimLeaderboard(db, roomId, { nowMs, limit = 25 } = {}) {
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+    throw new ClaimReputationError("invalid_limit", "limit must be an integer 1-100");
+  }
+  const projected = projectClaimReputation(readClaimEventRows(db, roomId), { nowMs });
+  const now = projected.nowMs;
+  const agents = new Set(projected.openClaims.keys());
+  for (const s of projected.signals) agents.add(s.agent);
+  const lanes = [...agents].map(agentId => claimReputationSummary(projected, agentId, { nowMs: now }));
+  lanes.sort((a, b) => b.score - a.score || (a.agentId < b.agentId ? -1 : a.agentId > b.agentId ? 1 : 0));
+  return Object.freeze({ roomId, nowMs: now, lanes: Object.freeze(lanes.slice(0, limit)) });
+}
+
+// Read-side: one lane's full standing — the laneClaimBondVisibility shape
+// the P1 spec names for routing visibility, plus signal counts. Unknown
+// lanes return zeros (a new lane starts at 0, never an error). Frozen.
+export function laneClaimStanding(db, roomId, agentId, { nowMs } = {}) {
+  if (typeof agentId !== "string" || agentId.length === 0) {
+    throw new ClaimReputationError("invalid_agent_id", "agentId must be a non-empty string");
+  }
+  const projected = projectClaimReputation(readClaimEventRows(db, roomId), { nowMs });
+  return claimReputationSummary(projected, agentId, { nowMs: projected.nowMs });
+}
+
 // Read work_claim.updated events from the durable events table and fold
 // them into the claim-reputation signal journal. Idempotent: re-running
 // changes nothing. The journal is the analytics surface the P1 measurement
@@ -340,17 +393,7 @@ export function syncClaimReputationJournal(db, { roomId: requestedRoomId = null 
   const legacyRowsRemoved = db.prepare(`DELETE FROM claim_reputation_signals WHERE ${legacyWhere}`).run().changes;
   const roomId = legacyRowsRemoved > 0 ? null : requestedRoomId;
   const widenedToAllRooms = Boolean(requestedRoomId) && roomId === null;
-  const rows = db.prepare(
-    `SELECT room_id, sequence, body FROM events
-     WHERE json_extract(body,'$.type')='work_claim.updated'
-     ${roomId ? "AND room_id=?" : ""}
-     ORDER BY sequence`
-  ).all(...(roomId ? [roomId] : []));
-  const parsed = [];
-  for (const row of rows) {
-    const event = parseEventRow(row);
-    if (event) parsed.push(event);
-  }
+  const parsed = readClaimEventRows(db, roomId);
   // Fold each room on its own: claim state is keyed by (roomId, claimId),
   // so the same claimId in two rooms never shares a position or a cap count.
   const byRoom = new Map();
