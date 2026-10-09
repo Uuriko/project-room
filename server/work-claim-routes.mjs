@@ -43,6 +43,8 @@ import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { evaluateReceipt } from "./jev-receipts.mjs";
 import { findClaimCollisions } from "./claim-collisions.mjs";
+import { readRequestId } from "./request-dedupe.mjs"; // FIX-57: requestId outcome journal
+import { withOpDeadline, opTimeoutMs } from "./op-timeout.mjs"; // FIX-57: per-op server-side deadlines
 import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
 import { noteReadyWork } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { getActiveSquad } from "./squads.mjs"; // plan-squads: work offers target squads
@@ -63,6 +65,37 @@ import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { isRoomArchived } from "../src/events.js";
 
 const CLAIM_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+
+// FIX-57: the mutating work-claim routes that run under a bounded
+// server-side deadline (see server/op-timeout.mjs).
+const OP_TIMEOUT_ROUTE_KINDS = new Set(["create", "claim", "update", "renew", "release"]);
+
+// FIX-57: deterministic outcome for a timed-out op. The requestId outcome
+// journal is the source of truth: if the op recorded an outcome before this
+// response was composed, the retry contract replays it as
+// already-applied-idempotent; otherwise the op is reported not-applied and
+// safe to re-drive with the same requestId. Never "hung, unknown".
+function opTimeoutOutcome({ op, timeoutMs, elapsedMs, requestId, dedupe }) {
+  const prior = requestId && dedupe ? dedupe.check(requestId) : null;
+  if (prior?.duplicate) {
+    return { status: 200,
+      value: { ...prior.result, outcome: "already-applied-idempotent", duplicate: true } };
+  }
+  return { status: 504, value: {
+    error: { code: "op_timeout",
+      message: `work-claim ${op ?? "op"} exceeded its ${timeoutMs ?? "?"}ms server-side deadline before an outcome was recorded` },
+    outcome: "not-applied",
+    op: op ?? null,
+    timeoutMs: timeoutMs ?? null,
+    elapsedMs: elapsedMs ?? null,
+    requestId: requestId ?? null,
+    retryable: true,
+    deterministicRetry: requestId !== null && dedupe !== null,
+    hint: requestId
+      ? "Re-drive the op with the same requestId: the server returns the recorded outcome instead of double-applying."
+      : "No requestId was supplied, so a retry cannot recover the outcome — resend with a requestId for a deterministic retry.",
+  } };
+}
 
 // Per-room registry: roomId -> { items: Map(id -> work item), config: { defaultLeaseHours?, reviewPolicy? } }.
 export function createWorkClaimRegistry() {
@@ -646,10 +679,27 @@ export async function handleWorkClaims(options) {
     auth: reauthorize ? reauthorize() : options.auth,
     helpers: { ...helpers, body: () => requestData, json: (_res, status, value) => ({ status, value }) },
   });
+  // FIX-57: the mutating work-claim ops run under a bounded server-side
+  // deadline (env-tunable, 10s default). The store transaction always runs
+  // to commit-or-throw, so its outcome is knowable; the deadline bounds the
+  // awaitable segments and, on expiry, the client gets a deterministic
+  // outcome code (never "hung, unknown") via the requestId outcome journal.
+  const opKind = req.method === "POST" && OP_TIMEOUT_ROUTE_KINDS.has(options.workClaimRoute)
+    ? options.workClaimRoute : null;
+  const execOp = () => (registry.transaction ? registry.transaction(run) : run());
   try {
-    const result = registry.transaction ? registry.transaction(run) : run();
+    const result = opKind
+      ? (await withOpDeadline(opKind, execOp, { timeoutMs: opTimeoutMs(opKind) })).value
+      : execOp();
     return helpers.json(res, result.status, result.value);
   } catch (error) {
+    if (error?.code === "op_timeout") {
+      const outcome = opTimeoutOutcome({
+        op: error.op ?? opKind, timeoutMs: error.timeoutMs, elapsedMs: error.elapsedMs,
+        requestId: readRequestId(requestData), dedupe: options.store?.requestDedupe ?? null,
+      });
+      return helpers.json(res, outcome.status, outcome.value);
+    }
     if (error?.code === "file_lease_conflict" && error.body) return helpers.json(res, 409, error.body);
     if (Number.isInteger(error?.status) && error.body && error.code) return helpers.json(res, error.status, error.body);
     throw error;
@@ -693,6 +743,26 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   refuseRoomGuideOffStarter(registry, roomId, auth, workClaimId, req.method, reject);
   const nowMs = typeof store.now === "function" ? store.now() : Date.now();
   const caller = auth.member.id;
+  // FIX-57: requestId idempotency on the mutating routes. A client that
+  // retries a mutation after a timeout or a lost response carries the same
+  // requestId; replayIfDuplicate returns the recorded outcome with
+  // duplicate:true instead of double-applying. applied() records the
+  // outcome INSIDE this route's transaction (atomic with the mutation
+  // commit — a recorded outcome always means "applied") and tags the
+  // response with outcome:"applied". The store is installed on
+  // store.requestDedupe by server init; null-guarded for compatibility.
+  const dedupe = store?.requestDedupe ?? null;
+  const replayIfDuplicate = requestId => {
+    if (!requestId || !dedupe) return null;
+    const prior = dedupe.check(requestId);
+    if (!prior.duplicate) return null;
+    return json(res, 200, { ...prior.result, outcome: "already-applied-idempotent", duplicate: true });
+  };
+  const applied = (requestId, status, value) => {
+    const body = { ...value, outcome: "applied" };
+    if (requestId && dedupe) dedupe.record(requestId, body);
+    return json(res, status, body);
+  };
   // Every committed claim change appends one work_claim.updated room event
   // inside this transaction (server/work-claim-events.mjs).
   const commit = (item, action, extra = {}) => {
@@ -901,11 +971,16 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "create" && req.method === "POST") {
     const raw = body(req);
-    if (!shape(raw, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch", "kind", "revision", "assignee", "squadId"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?, kind?, revision?, assignee?, squadId?}");
+    if (!shape(raw, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch", "kind", "revision", "assignee", "squadId", "requestId"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?, kind?, revision?, assignee?, squadId?, requestId?}");
     requireWriter();
     requireEventBudget();
     const id = claimIdOf(reject, raw.id);
     const data = clientPullRequestInput(reject, boardTextFields(reject, raw, { title: {}, note: { multiline: true } }));
+    // FIX-57: a retried create whose first attempt already landed replays
+    // the recorded claim instead of 409ing or double-creating.
+    const requestId = readRequestId(data);
+    const dupCreate = replayIfDuplicate(requestId);
+    if (dupCreate) return dupCreate;
     assertDependsOnKnown(reject, data, { selfId: id, has: other => registry.has(roomId, other) });
     if (registry.has(roomId, id)) reject(409, "work_claim_exists", `Work claim "${id}" already exists in this room`);
     const open = registry.list(roomId).filter(item => !isTerminalClaimState(item.state)).length;
@@ -958,10 +1033,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
         attention: "assigned", attentionMemberId: assignee,
         wakeMemberId: assignee, wakeReason: "assigned"
       });
-      return json(res, 201, ackedAssignee);
+      return applied(requestId, 201, ackedAssignee);
     }
     commit(item, "created");
-    return json(res, 201, item);
+    return applied(requestId, 201, item);
   }
   if (workClaimRoute === "read" && req.method === "GET") {
     closeLiveClaims();
@@ -970,7 +1045,12 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "claim" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { optional: ["note", "leaseHours", "files", "advisory", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch"] })) invalidInput(reject, "{note?, leaseHours?, files?, advisory?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?}");
+    if (!shape(data, { optional: ["note", "leaseHours", "files", "advisory", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch", "requestId"] })) invalidInput(reject, "{note?, leaseHours?, files?, advisory?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?, requestId?}");
+    // FIX-57: a retried claim whose first attempt already landed replays
+    // the recorded outcome instead of 409ing on the now-held claim.
+    const requestId = readRequestId(data);
+    const dupClaim = replayIfDuplicate(requestId);
+    if (dupClaim) return dupClaim;
     if ("advisory" in data && typeof data.advisory !== "boolean") invalidInput(reject, "advisory true or false");
     const item = load(claimIdOf(reject, workClaimId));
     // H4 (QA-200 2026-10-08): a failed claim's 409 must name the real recovery.
@@ -1033,13 +1113,18 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // W012 required reading: every enrollment response presents the reading
     // list for the claim's kind. Advisory only — enrollment never gates on
     // it, so there is no bypass to learn and no existing flow can break.
-    return json(res, 200, { ...acked, fileWarnings: data.advisory === true ? fileWarningsFor(registry.list(roomId), acked) : [],
+    return applied(requestId, 200, { ...acked, fileWarnings: data.advisory === true ? fileWarningsFor(registry.list(roomId), acked) : [],
       requiredReading: requiredReadingFor(item.kind) });
   }
   if (workClaimRoute === "update" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs", "readingAck", "parentClaimId", "evidenceRefs", "expectedClaimedAt", "expectedHistoryLength"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?, readingAck?, parentClaimId?, evidenceRefs?, expectedClaimedAt?, expectedHistoryLength?}");
+    if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs", "readingAck", "parentClaimId", "evidenceRefs", "expectedClaimedAt", "expectedHistoryLength", "requestId"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?, readingAck?, parentClaimId?, evidenceRefs?, expectedClaimedAt?, expectedHistoryLength?, requestId?}");
     if (data.state === undefined && data.note === undefined && data.readingAck === undefined) invalidInput(reject, "a state transition, a note, or a reading ack");
+    // FIX-57: a retried update whose first attempt already landed replays
+    // the recorded item instead of double-applying the transition.
+    const requestId = readRequestId(data);
+    const dupUpdate = replayIfDuplicate(requestId);
+    if (dupUpdate) return dupUpdate;
     // W012 required reading: the owner confirms they read the enrollment
     // reading list. { docs: [...] } is validated by the pure machine; a
     // malformed ack is a 422, never a silent drop.
@@ -1138,7 +1223,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       : runPure(reject, () => stampReadingAck(updated, caller, { docs: data.readingAck.docs, now: nowMs }));
     // Q3-A: a note-only update coalesces with this claim's last room event.
     commit(acked, "state_changed", { coalesce: data.state === undefined || data.state === item.state });
-    return json(res, 200, acked);
+    return applied(requestId, 200, acked);
   }
   if (workClaimRoute === "review" && req.method === "POST") {
     // A verdict review is a record from someone other than the owner who
@@ -1197,13 +1282,19 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "release" && req.method === "POST") {
     const data = body(req);
+    // FIX-57: check the outcome journal before the ownership check — a
+    // retried release whose first attempt already landed replays the
+    // recorded outcome even though the claim is now released (ownerless).
+    const requestId = readRequestId(data);
+    const dupRelease = replayIfDuplicate(requestId);
+    if (dupRelease) return dupRelease;
     const item = load(claimIdOf(reject, workClaimId));
     const authority = authorityOver(item);
     // E5/D4 (QA-200 2026-10-08): ownership is checked before the body
     // shape, so a non-holder is always refused with 403 work_not_owner
     // (abuse-guards C2) regardless of what the body carries.
-    if (!shape(data, { required: ["expectedClaimedAt", "expectedHistoryLength"], optional: ["note", "reason"] }))
-      invalidInput(reject, "{expectedClaimedAt, expectedHistoryLength, reason?, note?}");
+    if (!shape(data, { required: ["expectedClaimedAt", "expectedHistoryLength"], optional: ["note", "reason", "requestId"] }))
+      invalidInput(reject, "{expectedClaimedAt, expectedHistoryLength, reason?, note?, requestId?}");
     requireEventBudget();
     const reason = text(Object.hasOwn(data, "reason") ? "reason" : "note", data.reason ?? data.note, { multiline: true });
     // E5/D4 (QA-200 2026-10-08): a release binds the claim round the client
@@ -1229,7 +1320,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       throw error;
     }
     commit(released, "released");
-    return json(res, 200, released);
+    return applied(requestId, 200, released);
   }
   if (workClaimRoute === "reassign" && req.method === "POST") {
     const data = body(req);
@@ -1278,7 +1369,12 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // the current lease window began. Renewals are discussed in the channel —
     // a stale holder can't hold work indefinitely without showing progress.
     const data = body(req);
-    if (!shape(data, { optional: ["progressMessageId", "note", "leaseHours"] })) invalidInput(reject, "{progressMessageId?, note?, leaseHours?}");
+    if (!shape(data, { optional: ["progressMessageId", "note", "leaseHours", "requestId"] })) invalidInput(reject, "{progressMessageId?, note?, leaseHours?, requestId?}");
+    // FIX-57: a retried renew whose first attempt already landed replays
+    // the recorded outcome instead of extending the lease twice.
+    const requestId = readRequestId(data);
+    const dupRenew = replayIfDuplicate(requestId);
+    if (dupRenew) return dupRenew;
     const item = load(claimIdOf(reject, workClaimId));
     // W4 (QA 2026-09-28): a lapsed lease auto-releases the claim (owner
     // cleared), so the ownership check below would misdiagnose it as an
@@ -1322,7 +1418,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const renewed = runPure(reject, () => renewWork(item, caller,
       { note: data.note, leaseHours: leaseHoursOfBody(data), room: roomLike, now: nowMs }));
     commit(renewed, "renewed", { coalesce: true });
-    return json(res, 200, renewed);
+    return applied(requestId, 200, renewed);
   }
   if (workClaimRoute === "config" && (req.method === "GET" || req.method === "POST")) {
     if (req.method === "GET") return json(res, 200, { roomId, ...config });

@@ -60,6 +60,7 @@ import { isIdentitySecret } from "./agent-identities.mjs";
 import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomAppUrl } from "../deploy/room-entry.mjs";
 import { guestAgentLinkContract, GUEST_AGENT_TOKEN_PREFIX, isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { isWebFetchGuest, WebFetchError } from "./web-fetch.mjs";
+import { ensureDedupeTable, createDedupeStore, dedupeTtlMs } from "./request-dedupe.mjs"; // FIX-57: requestId outcome journal for mutating work-claim routes
 // Board v2 is retired. Its routes answer 410 board_v2_retired. The
 // board_vtwo_* tables stay in place; nothing here drops them.
 import { validateClaimText, CLAIM_TEXT_MAX_LENGTH } from "./claim-validate.mjs"; // Synchronous pre-post claim-block validation (RC-2026-09-24-204): pure, no store.
@@ -577,6 +578,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // access_requests schema is applied in the store open path (server/store.mjs),
   // so every RoomStore — including store-only recovery fixtures — carries it.
   const accessRequests = new AccessRequests(store);
+  // FIX-57: requestId outcome journal for the mutating work-claim routes
+  // (create/claim/update/renew/release). The dedupe table lives in the room
+  // database so outcome records commit atomically with the mutation; routes
+  // null-guard store.requestDedupe for pre-wiring compatibility.
+  ensureDedupeTable(store.db);
+  store.requestDedupe = createDedupeStore(store.db, { ttlMs: dedupeTtlMs() });
   // agent_room_ownership schema is applied in the store open path
   // (server/store.mjs), so every RoomStore carries it; http.mjs only owns
   // the service instance.

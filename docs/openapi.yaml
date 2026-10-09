@@ -5006,6 +5006,19 @@ paths:
                     are woken with reason assigned. Omit it to leave the item
                     unclaimed. An unknown or inactive member is 422
                     work_assignee_unknown_member.
+                requestId:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                  description: >
+                    Idempotency key for this attempt. A retried create carrying
+                    the same requestId replays the recorded claim with
+                    `duplicate: true` and `outcome:
+                    already-applied-idempotent` instead of 409ing or
+                    double-creating. Every response also carries an explicit
+                    `outcome`; a 504 `op_timeout` means the server-side
+                    deadline fired before an outcome was recorded — re-drive
+                    with the same requestId for the definitive answer.
       responses:
         '201':
           description: The created item. Unclaimed unless assignee is set, in which case that member owns it.
@@ -5017,6 +5030,13 @@ paths:
         '403': { description: work_claims_not_permitted }
         '409': { description: work_claim_exists, work_board_full, or too_many_open_claims }
         '422': { description: invalid_claim_input or work_assignee_unknown_member }
+        '504':
+          description: |
+            op_timeout: the create exceeded its server-side deadline (default
+            10 s; WORK_CLAIM_OP_TIMEOUT_MS, WORK_CLAIM_OP_TIMEOUT_CREATE_MS)
+            before an outcome was recorded. The body carries `outcome:
+            not-applied`, `retryable: true` and the requestId. Re-drive with
+            the same requestId for the definitive recorded outcome.
   /api/rooms/{roomId}/work-claims/config:
     get:
       summary: Read the room's work-claim caps
@@ -5328,6 +5348,20 @@ paths:
                 pullRequest:
                   type: [string, 'null']
                   description: Links or clears the GitHub pull request URL.
+                requestId:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                  description: >
+                    Idempotency key for this attempt. A retried claim carrying
+                    the same requestId replays the recorded outcome with
+                    `duplicate: true` and `outcome: already-applied-idempotent`
+                    instead of 409ing or double-applying. Every response also
+                    carries an explicit `outcome` (`applied` /
+                    `already-applied-idempotent` / `not-applied`); a 504
+                    `op_timeout` means the server-side deadline fired before an
+                    outcome was recorded — re-drive with the same requestId for
+                    the definitive answer.
       responses:
         '200':
           description: |
@@ -5364,6 +5398,15 @@ paths:
             overlap a live lease. The body names holder { claimId, owner },
             files, and leaseExpiresAt.
         '422': { description: invalid_claim_input }
+        '504':
+          description: |
+            op_timeout: the mutating op exceeded its server-side deadline
+            (default 10 s; WORK_CLAIM_OP_TIMEOUT_MS,
+            WORK_CLAIM_OP_TIMEOUT_CLAIM_MS) before an outcome was recorded.
+            The body carries `outcome: not-applied`, `retryable: true` and the
+            requestId. Re-drive with the same requestId: the server returns
+            the recorded outcome (`already-applied-idempotent`,
+            `duplicate: true`) instead of double-applying.
   /api/rooms/{roomId}/work-claims/{claimId}/update:
     post:
       summary: Update claimed work or append a PR link
@@ -5469,6 +5512,21 @@ paths:
                       minimum: 0
                       description: Optional round precondition (opt-in, same names as the appendPullRequest variant) - exact history.length + (historyOmitted ?? 0) from the same read. Detects concurrent changes since the read; see expectedClaimedAt.
                       example: 203
+                    requestId:
+                      type: string
+                      minLength: 1
+                      maxLength: 128
+                      description: >
+                        Idempotency key for this attempt. A retried update
+                        carrying the same requestId replays the recorded outcome
+                        with `duplicate: true` and `outcome:
+                        already-applied-idempotent` instead of double-applying.
+                        Every response also carries an explicit `outcome`
+                        (`applied` / `already-applied-idempotent` /
+                        `not-applied`); a 504 `op_timeout` means the
+                        server-side deadline fired before an outcome was
+                        recorded — re-drive with the same requestId for the
+                        definitive answer.
                 - type: object
                   additionalProperties: false
                   required: [appendPullRequest, expectedClaimedAt, expectedHistoryLength]
@@ -5501,6 +5559,13 @@ paths:
         '409':
           description: Append or preconditioned update refused with work_claim_conflict for stale basis or inactive/superseded work, claim_lease_lapsed for an expired lease, or room_archived. Read the current item before deciding whether a fresh same-round request is appropriate
         '422': { description: invalid_claim_input, including mixed append/state bodies, non-string PR input, malformed preconditions, or a seventeenth distinct URL }
+        '504':
+          description: |
+            op_timeout: the update exceeded its server-side deadline (default
+            10 s; WORK_CLAIM_OP_TIMEOUT_MS, WORK_CLAIM_OP_TIMEOUT_UPDATE_MS)
+            before an outcome was recorded. The body carries `outcome:
+            not-applied`, `retryable: true` and the requestId. Re-drive with
+            the same requestId for the definitive recorded outcome.
   /api/rooms/{roomId}/work-claims/{claimId}/provenance:
     get:
       summary: Walk the claim provenance graph
@@ -5705,6 +5770,20 @@ paths:
                   description: Exact history.length + (historyOmitted ?? 0) from the same read; absent historyOmitted counts as zero. Detects concurrent changes and same-millisecond reclaim
                 reason: { type: string, description: Why the claim was released. Recorded on the history entry. }
                 note: { type: string, description: Older alias for reason. reason wins when both are sent. }
+                requestId:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                  description: >
+                    Idempotency key for this attempt. A retried release
+                    carrying the same requestId replays the recorded outcome
+                    with `duplicate: true` and `outcome:
+                    already-applied-idempotent` instead of failing on the
+                    already-released claim. Every response also carries an
+                    explicit `outcome`; a 504 `op_timeout` means the
+                    server-side deadline fired before an outcome was recorded
+                    — re-drive with the same requestId for the definitive
+                    answer.
       responses:
         '200':
           description: The released item
@@ -5717,6 +5796,13 @@ paths:
         '404': { description: work_claim_not_found }
         '409': { description: work_claim_conflict (stale expectedClaimedAt/expectedHistoryLength — re-read and retry) }
         '422': { description: invalid_claim_input }
+        '504':
+          description: |
+            op_timeout: the release exceeded its server-side deadline (default
+            10 s; WORK_CLAIM_OP_TIMEOUT_MS, WORK_CLAIM_OP_TIMEOUT_RELEASE_MS)
+            before an outcome was recorded. The body carries `outcome:
+            not-applied`, `retryable: true` and the requestId. Re-drive with
+            the same requestId for the definitive recorded outcome.
   /api/rooms/{roomId}/work-claims/{claimId}/close:
     post:
       x-room-permission: claim_owner|owner|manage_claims
@@ -6506,6 +6592,19 @@ paths:
                 progressMessageId: { type: string }
                 leaseHours: { type: number }
                 note: { type: string }
+                requestId:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                  description: >
+                    Idempotency key for this attempt. A retried renew carrying
+                    the same requestId replays the recorded outcome with
+                    `duplicate: true` and `outcome:
+                    already-applied-idempotent` instead of extending the lease
+                    twice. Every response also carries an explicit `outcome`;
+                    a 504 `op_timeout` means the server-side deadline fired
+                    before an outcome was recorded — re-drive with the same
+                    requestId for the definitive answer.
       responses:
         '200':
           description: The renewed item
@@ -6517,6 +6616,13 @@ paths:
         '403': { description: work_not_owner }
         '404': { description: work_claim_not_found }
         '422': { description: claim_renewal_source_required | claim_renewal_source_stale | invalid_claim_input }
+        '504':
+          description: |
+            op_timeout: the renew exceeded its server-side deadline (default
+            10 s; WORK_CLAIM_OP_TIMEOUT_MS, WORK_CLAIM_OP_TIMEOUT_RENEW_MS)
+            before an outcome was recorded. The body carries `outcome:
+            not-applied`, `retryable: true` and the requestId. Re-drive with
+            the same requestId for the definitive recorded outcome.
   /api/rooms/{roomId}/feedback:
     get:
       summary: List feedback clusters

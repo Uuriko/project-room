@@ -25,11 +25,13 @@ that write board cards: `claim.acquired`, `claim.released`, `claim.renewed`,
 `POST /api/rooms/{roomId}/work-claims`
 
 ```json
-{ "id": "lane-a", "title": "Lane A", "reviewPolicy": "self_attested", "note": "optional", "tags": ["migration"], "files": ["server/a.mjs"], "dependsOn": ["lane-b"], "pullRequest": "https://github.com/Uuriko/project-room/pull/7" }
+{ "id": "lane-a", "title": "Lane A", "reviewPolicy": "self_attested", "note": "optional", "tags": ["migration"], "files": ["server/a.mjs"], "dependsOn": ["lane-b"], "pullRequest": "https://github.com/Uuriko/project-room/pull/7", "requestId": "client-chosen-1..128-chars" }
 ```
 
 `id` matches `[A-Za-z0-9_-]{1,128}`. Only `id` is required. A duplicate id is
-**409** `work_claim_exists`. The item starts `unclaimed`.
+**409** `work_claim_exists`. The item starts `unclaimed`. `requestId` is the
+optional idempotency key (see "Operation timeouts and deterministic
+outcomes" below).
 
 `assignee` names an active member. The item is claimed for them and they are
 woken with reason `assigned`. An unknown or inactive member is **422**
@@ -47,7 +49,9 @@ woken with reason `assigned`. An unknown or inactive member is **422**
 
 `POST .../update` with `{ "state" }` moves the claim. An illegal move is
 **422** `invalid_claim_input` and names the allowed targets, for example
-`claimed -> in_progress|blocked|released`.
+`claimed -> in_progress|blocked|released`. The body also accepts
+`requestId` for idempotent retries (see "Operation timeouts and
+deterministic outcomes").
 
 `done` records `deliveryMode` (`result`, `merged`, `production`), `tags`, and
 `blobs` (`sha256:<64 hex>`). Review policies are `self_attested`,
@@ -57,7 +61,7 @@ see the manual review contract below.
 
 ## Claim, release, reassign
 
-`POST .../claim` with `{ "note"?, "leaseHours"?, "files"?, "advisory"?, "dependsOn"?, "pullRequest"?, "pullRequests"?, "repo"?, "branch"? }`.
+`POST .../claim` with `{ "note"?, "leaseHours"?, "files"?, "advisory"?, "dependsOn"?, "pullRequest"?, "pullRequests"?, "repo"?, "branch"?, "requestId"? }`.
 Only an `unclaimed` item can be claimed. A second holder is **409**
 `work_claim_conflict`. `repo` and `branch` are optional labels (1..200
 characters of letters, numbers, or `.` `_` `/` `-`).
@@ -70,8 +74,8 @@ labels on the same path do not conflict. The same label does. Overlap is
 `files`, and `leaseExpiresAt`. `advisory: true` still claims and returns
 `fileWarnings`.
 
-`POST .../release` with `{ "reason"? }` (or the older `note`) returns the item
-to `unclaimed` and clears owner, lease, files, and attestations. The holder
+`POST .../release` with `{ "expectedClaimedAt", "expectedHistoryLength", "reason"? }` (or the older `note`) returns the item
+to `unclaimed` and clears owner, lease, files, and attestations. `requestId` is accepted for idempotent retries. The holder
 can release their own claim. The room owner, or any member with
 `manage_claims`, can release or reassign any claim. The history entry is
 stamped with the caller, and `reason` is the note. `in_progress` and
@@ -82,7 +86,7 @@ current active member. The new owner is woken with reason `assigned`.
 
 ## Renew
 
-`POST .../renew` with `{ "progressMessageId"?, "note"?, "leaseHours"? }`.
+`POST .../renew` with `{ "progressMessageId"?, "note"?, "leaseHours"?, "requestId"? }`.
 
 Only the holder can renew, and only while the claim is active and the lease
 has not lapsed. A heartbeat with no message extends the lease. When
@@ -90,6 +94,34 @@ has not lapsed. A heartbeat with no message extends the lease. When
 posted after `leaseStartAt` (or `claimedAt` when there is no lease start).
 A DM, someone else's message, or an older message is refused. A lapsed lease
 is **409** `claim_lease_lapsed`: claim the item again.
+
+## Operation timeouts and deterministic outcomes
+
+The mutating ops — create, claim, update, renew, release — each run under a
+bounded **server-side deadline** (default 10 s). The deadline is env-tunable:
+`WORK_CLAIM_OP_TIMEOUT_MS` sets every op, and
+`WORK_CLAIM_OP_TIMEOUT_<OP>_MS` (for example
+`WORK_CLAIM_OP_TIMEOUT_RELEASE_MS`) overrides one op; invalid values fall
+back to the default and everything clamps to 300 s.
+
+Every response for these ops carries an explicit `outcome`:
+
+- `applied` — this call applied the mutation (the normal 200/201).
+- `already-applied-idempotent` — a retry replaying the recorded outcome;
+  the mutation was applied exactly once (`duplicate: true`).
+- `not-applied` — the deadline fired before any outcome was recorded
+  (**504** `op_timeout`, `retryable: true`). Re-drive the op with the same
+  `requestId` for the definitive answer.
+
+The client never gets "hung, unknown": the mutation and its outcome record
+commit atomically in one transaction, so a recorded outcome always means
+"applied", and a retry with the same `requestId` (a 1..128-character string
+you choose per attempt) can never double-apply — not even when the first
+attempt's response was lost or timed out. Treat `requestId` as a bearer
+secret: whoever presents it gets the recorded outcome. Outcome records
+expire after `REQUEST_DEDUPE_TTL_MS` (default 24 h); without a `requestId`
+the op still works but a timed-out retry cannot be recovered
+deterministically — always send one on retries.
 
 ## Caps
 

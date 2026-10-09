@@ -151,6 +151,8 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/room-activation-pack.mjs'); // Room activation pack (quill lane, RC-2026-09-18-040; imported by server/http.mjs)
   paths.add('server/room-context.mjs'); // Compact agent room context (imported by server/store.mjs)
   for (const path of ['server/work-claims.mjs', 'server/work-claim-routes.mjs', 'server/work-duplicates.mjs', 'server/claim-coordination.mjs', 'server/claim-pr-sync.mjs', 'server/mention-receipts.mjs']) paths.add(path); // RC-2026-09-18-041: work-claim state machine + HTTP routes (imported by server/http.mjs); work-duplicates: pure duplicate detection (imported by server/work-claim-routes.mjs)
+  paths.add('server/request-dedupe.mjs'); // FIX-57: requestId outcome journal (imported by server/http.mjs and server/work-claim-routes.mjs)
+  paths.add('server/op-timeout.mjs'); // FIX-57: per-op server-side deadlines (imported by server/work-claim-routes.mjs)
   paths.add('server/retention-response.mjs'); // room-retention: first-contribution SLA bot + zero-reply watchdog (pure, imported by server/work-claim-routes.mjs)
   paths.add('server/claim-validate.mjs'); // RC-2026-09-24-204: synchronous pre-post claim-block validation (imported by server/http.mjs; pure, no imports of its own)
   for (const path of ['server/bounty-escrow.mjs', 'server/bounty-escrow-routes.mjs', 'server/bounty-disputes.mjs', 'server/dispute-arbiters.mjs', 'server/bounty-reputation.mjs', 'server/reputation.mjs', 'server/bounty-receipts.mjs']) paths.add(path); // agent work exchange slice 1: escrowed bounties (imported by server/http.mjs) + slice #4 bounty -> reputation + receipts slice #1: Ed25519-signed movement receipts (imported by server/bounty-escrow.mjs)
