@@ -291,6 +291,10 @@ export class AgentInvites {
             : row.display_name || DEFAULT_INVITE_NAME;
           if (receipt.code_hash !== row.code_hash || receipt.display_name !== name)
             fail(409, "invite_redeem_idempotency_conflict", "This request id already redeemed a different invite.");
+          // A caller that presents an identity credential must be the identity
+          // that redeemed: the replay mints a fresh onboarding token for it.
+          if (existingIdentity && existingIdentity.identityId !== receipt.identity_id)
+            fail(403, "invite_redeem_identity_mismatch", "This request id belongs to a different identity.");
           return replayRedeemReceipt(this, receipt);
         }
       }
