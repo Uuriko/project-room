@@ -174,6 +174,8 @@ for (const filename of ["prod-deploy-smoke.mjs", "live-smoke.mjs"]) {
         env: { ...process.env, SHA: revision, PROD_ORIGIN: origin.url, ENTRY_ORIGIN: entry.url,
           ROOM_SMOKE_ORIGIN: origin.url, ROOM_SMOKE_GITHUB_API: origin.url,
           RUNNER_TEMP: directory, GITHUB_TOKEN: "", GITHUB_STEP_SUMMARY: "",
+          // The prod smoke step retries once after a delay; no wait in tests.
+          SMOKE_RETRY_DELAY_SECONDS: "0",
           // The pipeline test runs the literal deploy-prod.yml step, so the
           // card-check test seams arrive through the env fallbacks.
           SMOKE_AGENT_CARD_PUBLIC_KEY: cardKeyPair.publicKey,
