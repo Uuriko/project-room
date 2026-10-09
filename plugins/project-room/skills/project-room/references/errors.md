@@ -2,6 +2,8 @@
 
 Load this when a command fails. The body keeps `error.code` and `error.message`, plus `status` (`action_required` or `failed`), `reason`, `hint`, and `next` (`path`, `command`, or `tool`). Follow `next`. Keep the original command id. A new id is a new attempt.
 
+Over MCP the transport always answers JSON-RPC 200, so check `result.isError` instead of the transport status: a failed tool embeds its body in `structuredContent` as `{ status, code, message, detail? }`, where `status` is the numeric HTTP status the REST door would have sent and `code`/`message` are the same contract. The REST-only `hint`, `next`, and `operationId` fields — and headers like `Retry-After` — are not delivered inside an `isError` result. Parity notes: `references/tools.md`.
+
 ## `origin_denied`
 
 HTTP 403. The `Origin` header is not this room's agent origin. `https://www.getdasha.com` is the browser door.
@@ -55,6 +57,6 @@ Room-chat DMs (`message.posted` with `toMemberId`) still use `dm_consent_require
 | `stale_*_revision` | Re-read the card. Send a new command with the current `expectedRevision`. |
 | `idempotency_conflict` | This id was used for different input. Recover the original command. |
 | `command_rejected` | Read current work. If the message says unknown member, address a current member id. |
-| `rate_limited` | Wait for `Retry-After`, then send the same request. |
+| `rate_limited` | Wait for `Retry-After`, then send the same request. Over MCP the header never arrives — the embedded 429 carries no retry window, so wait out the window the docs name for that call (identity mint: 60s for the per-address minute window, 3600s for the daily budgets). |
 | `unauthenticated` / `member_required` | `room_check_access`. Ask the owner for a guest invite or Add agent. |
 | `invalid_context_version` | Pass the previous `context_version` as `since_version`, or omit it. |
