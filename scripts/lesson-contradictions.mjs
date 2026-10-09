@@ -34,14 +34,14 @@
 // The pure helpers are exported for tests/lesson-contradictions.test.js
 // (repo convention: scripts export helpers, tests import them).
 
-import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import {
-  parseWikiEntries,
-  parseQueueEntries,
-  tokenize,
-} from "./lesson-scorer.mjs";
+import { tokenize, preview, loadAllCorpus } from "./lesson-corpus.mjs";
+// Back-compat re-exports: tests/lesson-contradictions.test.js imports
+// parseLessonBullets from this script; it and the other corpus helpers
+// now live in scripts/lesson-corpus.mjs (the re-export keeps the import
+// working exactly as before).
+export { parseLessonBullets, loadAllCorpus } from "./lesson-corpus.mjs";
 
 // ------------------------------------------------------- directive extraction
 
@@ -340,62 +340,7 @@ export function findContradictions(entries) {
   return hits;
 }
 
-// ---------------------------------------------------- agent-lessons parsing
-
-// The repo AGENTS.md has no "## Lessons" section, but the operator's shared
-// AGENTS.md does (top-level "- " bullets). Parse those when the file is
-// passed via --files. Never writes back to the file.
-export function parseLessonBullets(markdown) {
-  const lines = String(markdown).split("\n");
-  let inLessons = false;
-  const entries = [];
-  let cur = null;
-  let n = 0;
-  for (const line of lines) {
-    const h = /^##\s+(.+?)\s*$/.exec(line);
-    if (h) {
-      if (cur) {
-        entries.push({ id: `agent-lessons:${n++}`, source: "agent-lessons", text: cur.join("\n").trim() });
-        cur = null;
-      }
-      inLessons = /^lessons$/i.test(h[1].trim());
-      continue;
-    }
-    if (!inLessons) continue;
-    const b = /^-\s+(.+?)\s*$/.exec(line);
-    if (b) {
-      if (cur) entries.push({ id: `agent-lessons:${n++}`, source: "agent-lessons", text: cur.join("\n").trim() });
-      cur = [b[1]];
-    } else if (cur && line.trim().length) {
-      cur.push(line.trim());
-    }
-  }
-  if (cur) entries.push({ id: `agent-lessons:${n++}`, source: "agent-lessons", text: cur.join("\n").trim() });
-  return entries;
-}
-
-export function loadAllCorpus(root, files) {
-  const defaults = ["docs/ROOM-WIKI.md", "docs/WEEKLY-LEARNINGS.md"];
-  const list = files && files.length ? files : defaults;
-  const out = [];
-  for (const rel of list) {
-    const abs = join(root, rel);
-    if (!existsSync(abs)) continue;
-    const text = readFileSync(abs, "utf8");
-    if (rel.includes("WIKI")) out.push(...parseWikiEntries(text));
-    else if (rel.includes("WEEKLY-LEARNINGS") || rel.includes("LEARNINGS"))
-      out.push(...parseQueueEntries(text));
-    else out.push(...parseLessonBullets(text));
-  }
-  return out;
-}
-
 // ------------------------------------------------------------------ reporting
-
-function preview(text, max = 140) {
-  const one = text.replace(/\s+/g, " ").trim();
-  return one.length > max ? one.slice(0, max - 1) + "…" : one;
-}
 
 const TYPE_BLURB = {
   "opposing-directive":
@@ -420,7 +365,7 @@ export function renderContradictionReport(hits, { format = "text" } = {}) {
     lines.push(`${i + 1}. [${h.type}] ${h.a}  <>  ${h.b}`);
     lines.push(`   ${TYPE_BLURB[h.type]}`);
     if (h.shared.length) lines.push(`   shared: ${h.shared.join(", ")}`);
-    for (const ev of h.evidence) lines.push(`   > ${preview(ev)}`);
+    for (const ev of h.evidence) lines.push(`   > ${preview(ev, 140)}`);
     lines.push("");
   });
   return lines.join("\n");
