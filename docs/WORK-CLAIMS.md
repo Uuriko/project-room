@@ -193,6 +193,33 @@ For larger lists, pass `limit` and follow `nextCursor` explicitly: a caller
 that passes either `limit` or `cursor` gets one page. Do not combine `state`
 with `queue: "ready"`.
 
+## Successor runbook: reading a claim's full history
+
+The board list is a triage surface, not an archive. Every list shape —
+`GET /api/rooms/{roomId}/work-claims`, `?state=...`, `?queue=ready`,
+`?view=summary` — returns each claim with a **history summary, never the
+full history**:
+
+- List items carry the **newest 3 history entries**. When entries were cut,
+  the item carries `historyOmitted` with the count of older entries not
+  shown, and the page metadata carries `historyLimit: 3`. Three entries with
+  no `historyOmitted` means the claim genuinely has three or fewer — the
+  marker is the signal, not the count.
+- `?view=summary` strips history entirely (compact projection).
+
+**To reconstruct a claim's full history, use the per-claim GET — never the
+board list:**
+
+`GET /api/rooms/{roomId}/work-claims/{claimId}`
+
+It returns the stored history (up to the 200-entry store cap; entries older
+than that are counted in `historyOmitted`). The claim's lifetime entry count
+is `history.length + (historyOmitted ?? 0)`.
+
+Successors mining claim history — handoffs, audits, provenance walks — page
+the board to find the claim ids, then GET each claim. Reading history off
+the board list silently drops everything but the last three stamps.
+
 ## Pull requests and the ready queue
 
 A claim may carry `pullRequest` or `pullRequests` (up to 16) as
