@@ -1,0 +1,5 @@
+unit=d06
+exit=0
+outcome=PASS
+done=2026-10-09T11:38:57Z
+d06 wrote docs/wake-delivery.md

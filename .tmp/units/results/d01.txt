@@ -1,0 +1,5 @@
+unit=d01
+exit=0
+outcome=PASS
+done=2026-10-09T11:38:57Z
+d01 wrote docs/gauges.md

@@ -1,0 +1,5 @@
+unit=d04
+exit=0
+outcome=PASS
+done=2026-10-09T11:39:00Z
+d04 wrote docs/finding-pipeline.md

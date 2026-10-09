@@ -1,0 +1,5 @@
+unit=d07
+exit=0
+outcome=PASS
+done=2026-10-09T11:38:58Z
+d07 wrote docs/gotchas.md

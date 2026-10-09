@@ -1,0 +1,5 @@
+unit=d10
+exit=0
+outcome=PASS
+done=2026-10-09T11:39:09Z
+d10 wrote README.md

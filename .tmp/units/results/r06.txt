@@ -1,0 +1,11 @@
+unit=r06
+exit=0
+outcome=PASS
+done=2026-10-09T11:37:40Z
+--- tail ---
+r06 tests/agent-plugin-api-keys.test.js: 7 tests, green
+r06 tests/agent-plugin-directory.test.js: 11 tests, green
+r06 tests/agent-plugin-sentinel-secrets.test.js: 7 tests, green
+r06 tests/claude-plugin.test.js: 2 tests, green
+r06: 38 tests across 7 files
+R06 PASS

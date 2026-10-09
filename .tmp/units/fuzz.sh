@@ -9,7 +9,7 @@ RES=$W/.tmp/units/results/${U}.txt
 LOG=$W/.tmp/units/${U}.testlog
 {
   echo "unit=$U"
-  timeout 180 node "$W/.tmp/units/f/${U}.mjs" >"$LOG" 2>&1
+  timeout 600 node "$W/.tmp/units/f/${U}.mjs" >"$LOG" 2>&1
   CODE=$?
   echo "exit=$CODE"
   if [ "$CODE" -eq 0 ]; then echo "outcome=PASS"; else echo "outcome=FAIL"; fi

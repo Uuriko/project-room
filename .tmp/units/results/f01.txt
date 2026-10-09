@@ -1,4 +1,6 @@
 unit=f01
-exit=124
-outcome=FAIL
-done=2026-10-09T10:58:36Z
+exit=0
+outcome=PASS
+done=2026-10-09T11:38:09Z
+f01: corpus=197 pass=152 fail=45 crash=0
+F01 PASS

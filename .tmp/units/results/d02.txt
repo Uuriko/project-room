@@ -1,0 +1,5 @@
+unit=d02
+exit=0
+outcome=PASS
+done=2026-10-09T11:38:58Z
+d02 wrote docs/thresholds.md

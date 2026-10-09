@@ -1,0 +1,5 @@
+unit=d08
+exit=0
+outcome=PASS
+done=2026-10-09T11:39:08Z
+d08 wrote dead-code.md

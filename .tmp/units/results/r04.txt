@@ -1,0 +1,7 @@
+unit=r04
+exit=0
+outcome=PASS
+done=2026-10-09T11:37:41Z
+--- tail ---
+r04: ℹ tests 5 ℹ pass 5 ℹ fail 0
+R04 PASS

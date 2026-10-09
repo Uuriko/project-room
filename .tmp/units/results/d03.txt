@@ -1,0 +1,5 @@
+unit=d03
+exit=0
+outcome=PASS
+done=2026-10-09T11:38:59Z
+d03 wrote docs/data-flow.md

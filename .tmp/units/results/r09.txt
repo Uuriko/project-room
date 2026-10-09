@@ -1,11 +1,11 @@
 unit=r09
-exit=1
-outcome=FAIL
-done=2026-10-09T10:58:47Z
+exit=0
+outcome=PASS
+done=2026-10-09T11:28:01Z
 --- tail ---
-    at ModuleJob.link (node:internal/modules/esm/module_job:381:17) {
-  code: 'ERR_MODULE_NOT_FOUND',
-  url: 'file:///home/hatch/workspace/pr-wave1000-guild-11/.tmp/pristine/deploy/public-search.mjs'
-}
-
-Node.js v24.20.0
+ok: DELETE tripwires -> 405 (want 405)
+ok: unknown health path -> 404 (want 404)
+ok: huge query -> 200 (want 200)
+ok: encoded traversal -> 200 (want 200)
+ok: GET happy path -> 200, 5 gauges
+R09 PASS

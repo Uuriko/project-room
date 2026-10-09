@@ -1,0 +1,5 @@
+unit=d05
+exit=0
+outcome=PASS
+done=2026-10-09T11:39:01Z
+d05 wrote docs/plugin-delivery.md
