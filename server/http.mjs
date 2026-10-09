@@ -2863,6 +2863,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       // Agent invite codes: redemption is unauthenticated (the code is the
       // bearer credential); issuance is owner-only per room.
+      // Self-diagnosing 422s (missing/unexpected/invalid) port the MCP
+      // structured-argument shape down to HTTP so the error names the field.
+      const describeDiagnosis = diagnosis => {
+        const parts = [];
+        if (diagnosis.missing.length) parts.push(`missing required field${diagnosis.missing.length > 1 ? "s" : ""}: ${diagnosis.missing.join(", ")}`);
+        if (diagnosis.unexpected.length) parts.push(`unexpected field${diagnosis.unexpected.length > 1 ? "s" : ""}: ${diagnosis.unexpected.join(", ")}`);
+        for (const [field, reason] of Object.entries(diagnosis.invalid)) parts.push(`${field}: ${reason}`);
+        return parts.join("; ");
+      };
       if (url.pathname === "/api/agent-invites/redeem" && req.method === "POST") {
         rate(`invite-redeem:${remoteAddress}`, 20);
         const data = await body(req);
@@ -2876,11 +2885,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           additionalProperties: false,
         }, data);
         if (diagnosis) {
-          const parts = [];
-          if (diagnosis.missing.length) parts.push(`missing required field${diagnosis.missing.length > 1 ? "s" : ""}: ${diagnosis.missing.join(", ")}`);
-          if (diagnosis.unexpected.length) parts.push(`unexpected field${diagnosis.unexpected.length > 1 ? "s" : ""}: ${diagnosis.unexpected.join(", ")}`);
-          for (const [field, reason] of Object.entries(diagnosis.invalid)) parts.push(`${field}: ${reason}`);
-          reject(422, "invalid_invite", `Invalid invite redeem (${parts.join("; ")}). Send exactly {code, displayName}.`);
+          reject(422, "invalid_invite", `Invalid invite redeem (${describeDiagnosis(diagnosis)}). Send exactly {code, displayName}.`);
         }
         const redeemedInvite = store.invites.redeem(data.code, { displayName: data.displayName, identitySecret: bearer(req) });
         // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md):
@@ -2998,12 +3003,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           additionalProperties: false,
         }, data);
         if (diagnosis) {
-          const parts = [];
-          if (diagnosis.missing.length) parts.push(`missing required field${diagnosis.missing.length > 1 ? "s" : ""}: ${diagnosis.missing.join(", ")}`);
-          if (diagnosis.unexpected.length) parts.push(`unexpected field${diagnosis.unexpected.length > 1 ? "s" : ""}: ${diagnosis.unexpected.join(", ")}`);
-          for (const [field, reason] of Object.entries(diagnosis.invalid)) parts.push(`${field}: ${reason}`);
           reject(422, "invalid_request",
-            `Invalid access request (${parts.join("; ")}). Send {roomId, identityId, displayName, requestedPermissions} with optional {note, referredBy, requestId}; requestId is your idempotency key — reuse it when retrying.`);
+            `Invalid access request (${describeDiagnosis(diagnosis)}). Send {roomId, identityId, displayName, requestedPermissions} with optional {note, referredBy, requestId}; requestId is your idempotency key — reuse it when retrying.`);
         }
         // Burs-IA steal A1: filing an access request is a cold-start step — the
         // response teaches the status-poll path and the expected decision
