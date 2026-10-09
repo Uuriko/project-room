@@ -781,10 +781,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   // the claim route. create-with-assignee and reassign are acquire paths
   // too — they must refuse overlapping leases with the same 409 body, or a
   // lease can be landed silently around the conflict check. fileLeaseConflicts
-  // already excludes the item itself by id.
-  const refuseFileLeaseConflict = item => {
-    const conflicts = fileLeaseConflicts(registry.list(roomId), item);
-    if (conflicts.length === 0) return;
+  // already excludes the item itself by id. One checker, one 409 builder —
+  // FIX-35 removed the claim route's second inline copy; every call site
+  // below shares these.
+  const throwFileLeaseConflict = (item, conflicts) => {
     const conflict = fileLeaseConflictBody(item, conflicts);
     const body = {
       ...agentErrorBody({ httpStatus: 409, code: "file_lease_conflict", message: conflict.error.message, roomId, workItemId: item.id }),
@@ -794,6 +794,23 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     error.code = "file_lease_conflict";
     error.body = body;
     throw error;
+  };
+  const refuseFileLeaseConflict = item => {
+    const conflicts = fileLeaseConflicts(registry.list(roomId), item);
+    if (conflicts.length === 0) return;
+    throwFileLeaseConflict(item, conflicts);
+  };
+  // FIX-35 (WAVE-300): update-time exclusivity check. Files are immutable via
+  // update (QA200-MUT-26 pin), so an update can only newly violate the lease
+  // invariant if a future change lets it touch lease scope — refuse only
+  // conflicts the update INTRODUCES, never pre-existing ones (an advisory
+  // holder's note update on an already-overlapping claim must keep working).
+  const refuseNewFileLeaseConflicts = (before, after) => {
+    const beforeHolders = new Set(fileLeaseConflicts(registry.list(roomId), before).map(conflict => conflict.holder.claimId));
+    const introduced = fileLeaseConflicts(registry.list(roomId), after)
+      .filter(conflict => !beforeHolders.has(conflict.holder.claimId));
+    if (introduced.length === 0) return;
+    throwFileLeaseConflict(after, introduced);
   };
 
   if (workClaimRoute === "status" && req.method === "GET") {
@@ -933,6 +950,12 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // without a non-owner APPROVE. An explicit reviewPolicy still wins.
     const reviewPolicy = data.reviewPolicy ?? (isHardWork({ tags: data.tags }) ? "distinct_member" : undefined);
     let item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy, note: data.note, tags: data.tags, files: data.files, dependsOn: data.dependsOn, parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs, pullRequest: data.pullRequest, pullRequests: data.pullRequests, repo: data.repo, branch: data.branch, kind: data.kind, revision: data.revision, squadId: data.squadId }, { now: nowMs, agentId: caller }));
+    // FIX-35 (WAVE-300): the exclusivity check ran only on create-with-assignee
+    // (QA200 ch-2037) — an unassigned create declaring files overlapping an
+    // active exclusive lease sailed through silently. Declared files that
+    // overlap a live lease are a 409 here too, before anything is committed,
+    // so the request still fails atomically and the item is never created.
+    refuseFileLeaseConflict(item);
     if (assignee) {
       const held = registry.list(roomId).filter(entry => entry.owner === assignee && ACTIVE_CLAIM_STATES.includes(entry.state)).length;
       if (held >= config.maxMemberOpenClaims) {
@@ -943,11 +966,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       item = runPure(reject, () => claimWork(item, assignee, {
         note: data.note ?? `assigned by ${caller}`, room: roomLike, now: nowMs
       }));
-      // QA200 ch-2037: create-with-assignee lands a lease without touching
-      // the claim route, so run the exclusivity check here. The whole request
-      // is one transaction — a conflict fails atomically and the item is
-      // never created.
-      refuseFileLeaseConflict(item);
+      // The create-time exclusivity check above already ran on this item's
+      // files (same item, same files — claimWork for the assignee passes no
+      // new files), so no second check is needed here.
       // Retention ack (research brief 2026-09-28, mechanic #2): every claim
       // gets the bot's immediate structured receipt, so no contribution sits
       // at zero replies from t=0. First-time contributors carry the 24h
@@ -1006,19 +1027,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     }));
     // Exclusive file lease. Overlap with another live claim is a 409 that
     // names the holder, the files, and when that lease ends. advisory: true
-    // keeps the older warn-and-proceed behavior.
-    const conflicts = fileLeaseConflicts(registry.list(roomId), claimed);
-    if (conflicts.length > 0 && data.advisory !== true) {
-      const conflict = fileLeaseConflictBody(claimed, conflicts);
-      const body = {
-        ...agentErrorBody({ httpStatus: 409, code: "file_lease_conflict", message: conflict.error.message, roomId, workItemId: claimed.id }),
-        ...conflict
-      };
-      const error = new Error(body.error.message);
-      error.code = "file_lease_conflict";
-      error.body = body;
-      throw error;
-    }
+    // keeps the older warn-and-proceed behavior. Uses the shared
+    // refuseFileLeaseConflict checker — not a second inline copy (FIX-35).
+    if (data.advisory !== true) refuseFileLeaseConflict(claimed);
     // Retention ack (research brief 2026-09-28, mechanic #2): every claim gets
     // the bot's immediate structured receipt, so no contribution sits at zero
     // replies from t=0. First-time contributors carry the 24h verdict SLA in
@@ -1136,6 +1147,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // when) after the state/note write, in the same commit.
     const acked = data.readingAck === undefined ? updated
       : runPure(reject, () => stampReadingAck(updated, caller, { docs: data.readingAck.docs, now: nowMs }));
+    // FIX-35 (WAVE-300): exclusivity check at update time — refuse only
+    // newly introduced conflicts (see refuseNewFileLeaseConflicts).
+    refuseNewFileLeaseConflicts(item, acked);
     // Q3-A: a note-only update coalesces with this claim's last room event.
     commit(acked, "state_changed", { coalesce: data.state === undefined || data.state === item.state });
     return json(res, 200, acked);

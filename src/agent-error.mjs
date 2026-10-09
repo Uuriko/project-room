@@ -193,6 +193,36 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
           : "Read the current item, identify the holder, then ask them to reassign or release the claim.")]
     };
   }
+  // FIX-35 (WAVE-300): file_lease_conflict fell through to the unmapped-code
+  // branch, so the 409 hint read "Unknown error 'file_lease_conflict'..."
+  // even though the 409 message (built by fileLeaseConflictBody) already
+  // names the holder, the overlapping files, and the lease expiry. The hint
+  // repeats the actionable parts — who holds the lease, which files overlap,
+  // the recovery (release/reassign or different files) — and points at the
+  // duplicates endpoint for nearby work. Never "retry the same files".
+  if (reasonCode === "file_lease_conflict") {
+    const text = String(message || "");
+    const holder = /overlaps files leased to (.+?) \((.+?)\) until/.exec(text);
+    const files = /until .+: (.+)$/.exec(text)?.[1]?.split(",").map(part => part.trim()).filter(Boolean) ?? [];
+    const who = holder ? `${holder[1]} (${holder[2]})` : "another claim";
+    const what = files.length > 0
+      ? files.slice(0, 2).join(", ") + (files.length > 2 ? ` (+${files.length - 2} more)` : "")
+      : "the contested files";
+    const dupPath = roomId ? `/api/rooms/${roomId}/work-claims/duplicates` : null;
+    const hint = publicHint(
+      `${who} holds ${what} — ask them to release/reassign or use other files.`
+        + (dupPath ? ` Related: GET ${dupPath}?q=<overlapping file>.` : ""),
+      "Overlapping file lease — ask the holder to release or reassign, or claim different files.");
+    return {
+      status: "action_required", reason: "file_lease_conflict",
+      hint,
+      next: [
+        command("Ask the holder to release or reassign the overlapping files, or retry with different files — do not retry the same files unchanged."),
+        ...(dupPath ? [path(`${dupPath}?q=<overlapping file>`)] : []),
+        readWork,
+      ]
+    };
+  }
   // Recovery requires an actual current review, never an implied approval
   // from a note or a suggested automatic verdict.
   if (reasonCode === "work_review_rejected") {

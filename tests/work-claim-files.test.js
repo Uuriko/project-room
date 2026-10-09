@@ -81,11 +81,14 @@ test("create with assignee and disjoint files still claims (201)", async () => {
 // QA200 ch-2037 challenge: reassign is an acquire path too — a fresh
 // unclaimed item with declared files lands claimed, and an active claim
 // changes hands, both without touching the claim route. Overlap must 409.
+// (FIX-35: "b" is created before "a" lands its lease — the create-time
+// exclusivity check would refuse it the other way round; unclaimed files
+// never block, only live leases do.)
 test("reassign of an unclaimed file-declared item refuses on overlap (409)", async () => {
   const registry = createWorkClaimRegistry();
+  await call(registry, "claude", "create", null, { id: "b", files: ["server/a.mjs"] });
   await call(registry, "jill", "create", null, { id: "a", files: ["server/a.mjs"] });
   await call(registry, "jill", "claim", "a", {});
-  await call(registry, "claude", "create", null, { id: "b", files: ["server/a.mjs"] });
   const out = await call(registry, "claude", "reassign", "b", { newOwner: "ada" });
 
   assert.equal(out.status, 409);
@@ -136,9 +139,12 @@ test("advisory true still claims and names the other holder in fileWarnings", as
 
 test("a lapsed lease frees the files, and a lease that never expires still blocks", async () => {
   const registry = createWorkClaimRegistry();
+  // FIX-35: "b" is created before "a" lands its lease — the create-time
+  // exclusivity check would refuse it the other way round; unclaimed files
+  // never block, only live leases do.
+  await call(registry, "claude", "create", null, { id: "b", files: ["scripts/room"] });
   await call(registry, "jill", "create", null, { id: "a", files: ["scripts/room"] });
   await call(registry, "jill", "claim", "a", { leaseHours: null });
-  await call(registry, "claude", "create", null, { id: "b", files: ["scripts/room"] });
   const blocked = await call(registry, "claude", "claim", "b", {});
   assert.equal(blocked.status, 409);
   assert.equal(blocked.value.leaseExpiresAt, null);
@@ -217,4 +223,68 @@ test("paths are normalized and paths that escape the repo are refused", async ()
   for (const bad of ["../etc/passwd", "/abs/path", "server/../../x"]) {
     await assert.rejects(call(registry, "claude", "create", null, { id: `bad${bad.length}`, files: [bad] }), error => error.status === 422);
   }
+});
+
+// FIX-35 (WAVE-300): the exclusivity check fired only at claim time (and on
+// create-with-assignee via QA200 ch-2037). An unassigned create declaring
+// files overlapping an active exclusive lease sailed through silently (201);
+// it must 409 with the same holder/files/expiry body as claim time, and the
+// item must never be created (atomic, like the assignee path).
+test("FIX-35: create with files overlapping an active lease is refused (409), not just at claim time", async () => {
+  const registry = createWorkClaimRegistry();
+  await call(registry, "jill", "create", null, { id: "a", files: ["server/a.mjs"] });
+  await call(registry, "jill", "claim", "a", {});
+  const out = await call(registry, "claude", "create", null, { id: "b", files: ["server/a.mjs"] });
+
+  assert.equal(out.status, 409);
+  assert.equal(out.value.error.code, "file_lease_conflict");
+  assert.deepEqual(out.value.holder, { claimId: "a", owner: "jill" });
+  assert.deepEqual(out.value.files, ["server/a.mjs"]);
+  assert.equal(registry.has("room1", "b"), false);
+});
+
+// FIX-35: the 409 hint must be actionable — holder identity, overlapping
+// file list, duplicates-endpoint pointer — not the generic "Unknown error".
+test("FIX-35: file_lease_conflict 409 hint names holder/files and points at the duplicates endpoint", async () => {
+  const registry = createWorkClaimRegistry();
+  await call(registry, "jill", "create", null, { id: "a", files: ["server/a.mjs"] });
+  await call(registry, "jill", "claim", "a", {});
+  await call(registry, "claude", "create", null, { id: "b" });
+  const out = await call(registry, "claude", "claim", "b", { files: ["server/a.mjs"] });
+
+  assert.equal(out.status, 409);
+  assert.equal(out.value.error.code, "file_lease_conflict");
+  assert.doesNotMatch(out.value.hint, /Unknown error/);
+  assert.match(out.value.hint, /jill/);
+  assert.match(out.value.hint, /server\/a\.mjs/);
+  assert.match(out.value.hint, /work-claims\/duplicates/);
+});
+
+// FIX-35: non-overlapping creates are unaffected by the create-time check.
+test("FIX-35: create with disjoint files still succeeds (201)", async () => {
+  const registry = createWorkClaimRegistry();
+  await call(registry, "jill", "create", null, { id: "a", files: ["server/a.mjs"] });
+  await call(registry, "jill", "claim", "a", {});
+  const out = await call(registry, "claude", "create", null, { id: "b", files: ["server/b.mjs"] });
+
+  assert.equal(out.status, 201);
+  assert.equal(registry.get("room1", "b").state, "unclaimed");
+  assert.deepEqual(registry.get("room1", "b").files, ["server/b.mjs"]);
+});
+
+// FIX-35: the update route runs the lease check too. Files are immutable via
+// update (QA200-MUT-26 pin above), so the check must only refuse an update
+// that NEWLY introduces a conflict — an advisory holder's note update on an
+// already-overlapping claim must still 200, never false-positive 409.
+test("FIX-35: update runs the file-lease check without false-positiving pre-existing overlaps", async () => {
+  const registry = createWorkClaimRegistry();
+  await call(registry, "jill", "create", null, { id: "a", files: ["server/a.mjs"] });
+  await call(registry, "jill", "claim", "a", {});
+  // ada deliberately holds the overlap via advisory warn-and-proceed
+  await call(registry, "claude", "create", null, { id: "b" });
+  await call(registry, "ada", "claim", "b", { files: ["server/a.mjs"], advisory: true });
+  const out = await call(registry, "ada", "update", "b", { note: "still working" });
+
+  assert.equal(out.status, 200);
+  assert.equal(out.value.state, "claimed");
 });

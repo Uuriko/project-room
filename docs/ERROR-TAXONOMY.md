@@ -40,6 +40,16 @@ wait for the heartbeat to go stale (10 minutes), or supersede the work
 item. The same claim command renews a claim you already hold. Do not
 hammer the endpoint.
 
+**`file_lease_conflict`** (409) — the files you declared overlap an active
+exclusive file lease held by another live claim. The 409 names the holder
+(`holder`: claim id + owner), the overlapping files (`files`), and the lease
+expiry (`leaseExpiresAt`); the hint repeats the recovery — ask the holder to
+release or reassign, or claim different files — and points at
+`GET /api/rooms/:roomId/work-claims/duplicates?q=<file>` for nearby work.
+The check runs at create, claim, update, and reassign time, not just at claim
+time; `advisory: true` on the claim route keeps the older warn-and-proceed
+behavior. Do not retry the same files unchanged.
+
 **`spend_allowance_exceeded`** (409) — the room owner set a spend allowance
 and this start (or this spend report) would commit more than is left. Read
 `GET /api/rooms/:id/spend-allowance` for spent, reserved, held and headroom,

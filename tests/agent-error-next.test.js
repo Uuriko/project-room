@@ -368,3 +368,21 @@ test("unsigned work.completed names room_text fields, then a room_text completio
   assert.equal(completed.work.receipt.nativeText.messageId, messageId);
   assert.equal(Object.hasOwn(completed.work.receipt, "signedEvidence"), false);
 });
+
+test("FIX-35: file_lease_conflict 409 hint names the holder, the files, and the duplicates endpoint", () => {
+  // WAVE-300 FIX-35: the 409 fired with the generic unmapped-code hint
+  // "Unknown error 'file_lease_conflict'..." even though the 409 message
+  // already names the holder, the overlapping files, and the lease expiry.
+  // The hint must be actionable instead: holder identity, overlapping file
+  // list, duplicates-endpoint pointer.
+  const ax = agentErrorAx({ httpStatus: 409, code: "file_lease_conflict",
+    message: 'Work "b" overlaps files leased to ada (a) until 2026-10-09T12:00:00.000Z: server/a.mjs',
+    roomId: "room1", workItemId: "b" });
+  assertAx(ax, { reason: "file_lease_conflict" });
+  assert.doesNotMatch(ax.hint, /Unknown error/);
+  assert.match(ax.hint, /ada/);
+  assert.match(ax.hint, /server\/a\.mjs/);
+  assert.match(ax.hint, /work-claims\/duplicates/);
+  assert.ok(ax.next.some(step => step.path?.includes("/api/rooms/room1/work-claims/duplicates")),
+    "next points at the duplicates endpoint");
+});
