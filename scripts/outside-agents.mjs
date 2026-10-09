@@ -2,6 +2,7 @@
 // The message grants no access and mints no identity. Other members read the
 // same messages through server/outside-agents.mjs.
 import { outsideAgentBody } from "../server/outside-agents.mjs";
+import { connectionDiagnostic } from "../client/agent-connection.mjs";
 
 const arg = name => {
   const index = process.argv.indexOf(name);
@@ -10,7 +11,7 @@ const arg = name => {
 const externalRef = arg("--ref"), displayName = arg("--name"), origin = arg("--origin") ?? "other";
 if (!externalRef || !displayName || process.argv.includes("--help")) {
   console.error("node scripts/outside-agents.mjs --ref bus:cursor --name Cursor --origin bus --reach bus:cursor [--note text] [--post]");
-  process.exit(process.argv.includes("--help") ? 0 : 1);
+  process.exit(process.argv.includes("--help") ? 0 : 2);
 }
 const body = outsideAgentBody({
   v: 1, kind: "introduce", externalRef, displayName, origin, reach: arg("--reach"), note: arg("--note")
@@ -20,8 +21,15 @@ if (!process.argv.includes("--post")) {
 } else {
   const { RoomAgentClient } = await import("../client/room-agent.mjs");
   const { agentConnectionFromEnvironment } = await import("../client/agent-connection.mjs");
-  const result = await new RoomAgentClient(agentConnectionFromEnvironment()).recordOutsideAgent({
-    externalRef, displayName, origin, reach: arg("--reach"), note: arg("--note")
-  });
-  process.stdout.write(JSON.stringify(result));
+  try {
+    const result = await new RoomAgentClient(agentConnectionFromEnvironment()).recordOutsideAgent({
+      externalRef, displayName, origin, reach: arg("--reach"), note: arg("--note")
+    });
+    process.stdout.write(JSON.stringify(result));
+  } catch (error) {
+    // Fixed diagnostic text: never dump transport internals, file paths, or
+    // environment-derived detail on a connection/config failure.
+    console.error(JSON.stringify(connectionDiagnostic(error)));
+    process.exit(1);
+  }
 }

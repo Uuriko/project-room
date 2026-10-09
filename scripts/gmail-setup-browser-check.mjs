@@ -10,8 +10,12 @@ for (const width of [390, 1440]) test(`new account setup without Gmail is two st
   f.store.db.prepare('UPDATE accounts SET onboarded=0 WHERE id=?').run(account.id);
   const key = f.store.issueAccountAccessKey(account.id), server = createRoomServer({ store: f.store });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const origin = 'http://127.0.0.1:' + server.address().port, browser = await chromium.launch({ headless: true });
-  t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const origin = 'http://127.0.0.1:' + server.address().port;
+  // Cleanup before the browser launch: a launch failure must fail the test,
+  // not hang the runner on the still-listening server.
+  let browser;
+  t.after(async () => { await browser?.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
   const page = await browser.newPage({ viewport: { width, height: 900 } }), errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(origin + '/?account=1'); await signInFixture(page, key);
@@ -62,8 +66,11 @@ test('Connect Gmail returns from Google into saved setup with real imported fixt
   const server = createRoomServer({ store: f.store, gmailAuth: config });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = 'http://127.0.0.1:' + server.address().port; config.redirectUri = origin + '/api/auth/gmail/callback';
-  const browser = await chromium.launch({ headless: true });
-  t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  // Cleanup before the browser launch: a launch failure must fail the test,
+  // not hang the runner on the still-listening server.
+  let browser;
+  t.after(async () => { await browser?.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
   const page = await browser.newPage(), errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.route('https://accounts.google.com/**', route => {
     const url = new URL(route.request().url()); assert.equal(url.searchParams.get('scope'), 'https://www.googleapis.com/auth/gmail.modify');

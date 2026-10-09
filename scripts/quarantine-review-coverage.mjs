@@ -42,6 +42,13 @@ const get = name => {
 };
 if (args.includes("--help")) { console.log(usage); process.exit(0); }
 
+// Unknown flags are a silent-misparse trap (e.g. --fomat json degrading to
+// text output with exit 0). Reject them like the rest of the guild-06
+// usage-error pass instead of ignoring them.
+const KNOWN_FLAGS = new Set(["--store", "--since", "--until", "--now", "--format", "--help"]);
+const unknown = args.find(a => a.startsWith("--") && !KNOWN_FLAGS.has(a));
+if (unknown) { console.error(`error: unknown option "${unknown}"\n\n` + usage); process.exit(2); }
+
 const storePath = get("--store");
 if (!storePath) { console.error("error: --store <path> is required\n\n" + usage); process.exit(2); }
 const format = get("--format") ?? "text";

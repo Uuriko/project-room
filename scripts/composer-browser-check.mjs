@@ -1,7 +1,7 @@
 // Synthetic browser fixtures. These checks do not stand in for physical-device or human AT runs.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright";
@@ -27,6 +27,9 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     send(T.MESSAGE_POSTED, { messageId: "topic", body: "Which book should we read?" });
     send(T.MESSAGE_POSTED, { messageId: "reply", body: "A short story collection?", replyToId: "topic" });
     send(T.MESSAGE_POSTED, { messageId: "ping", body: "Ping @Room owner" });
+    // Screenshots below assume the directory exists; test-results/ is
+    // gitignored, so a fresh checkout would otherwise fail on the first one.
+    mkdirSync("test-results", { recursive: true });
     const server = createRoomServer({ store, streamInterval: 50 });
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     const origin = `http://127.0.0.1:${server.address().port}`;

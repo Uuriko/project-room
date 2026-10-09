@@ -7,7 +7,10 @@ import { RoomAgentClient } from "../client/room-agent.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 
 const [ownerPath, stage, targetId, output] = process.argv.slice(2);
-if (process.argv.length !== 6 || !["select", "adopt"].includes(stage)) throw new Error("Supply fixture owner path, select/adopt, exact offer/message ID, and a new evidence directory.");
+if (process.argv.length !== 6 || !["select", "adopt"].includes(stage) || !ownerPath || ownerPath.startsWith("-") || !output || output.startsWith("-")) {
+  process.stderr.write("Usage: node scripts/helper-owner-exercise.mjs <fixture-owner-path> select|adopt <offer-or-message-id> <new-evidence-dir>\n");
+  process.exit(2);
+}
 const config = JSON.parse(readFileSync(ownerPath)), origin = new URL(config.origin);
 assert.equal(config.fixture, "room-helper-exercise-v1"); assert.equal(origin.origin, config.origin);
 assert.equal(origin.protocol, "http:"); assert.equal(origin.hostname, "127.0.0.1");

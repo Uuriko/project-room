@@ -70,6 +70,10 @@ export function brokenDocLinks() {
 
 const isMain = process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url;
 if (isMain) {
+  if (process.argv.slice(2).length) {
+    console.error("Usage: node scripts/docs-link-check.mjs");
+    process.exit(2);
+  }
   const { failures, pending, checked } = brokenDocLinks();
   for (const path of pending) console.log(`docs-link-check: pending (other batch): ${path}`);
   if (failures.length) {

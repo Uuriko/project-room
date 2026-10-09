@@ -78,6 +78,9 @@ export function parseTap(tapText) {
     };
     if (/#\s*SKIP\b/i.test(name)) rec.status = "skip";
     // Consume the YAML-ish detail block that follows an indented test line.
+    // The outer cursor jumps past the whole block: re-scanning its lines as
+    // test points manufactured phantom records whenever an error/diff quoted
+    // TAP-looking text (e.g. "not ok 2 - ..." inside `error: |-`).
     let j = i + 1;
     let inBlock = false;
     let errorCapture = false;
@@ -104,7 +107,7 @@ export function parseTap(tapText) {
       j++;
     }
     records.push(rec);
-    i++;
+    i = j; // skip the consumed detail block (see above); i++ would re-scan it
   }
   return { records, bailOut };
 }

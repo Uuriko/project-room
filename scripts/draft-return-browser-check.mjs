@@ -19,11 +19,14 @@ async function setup(t, { humanWork = false, mobile = false } = {}) {
   } });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+  // Register cleanup before launch: if chromium.launch throws, the t.after
+  // must still close the server and remove the fixture directory.
+  let browser;
   t.after(async () => {
-    await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
+    await browser?.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
     f.store.close(); rmSync(f.directory, { recursive: true, force: true });
   });
+  browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
   const page = await browser.newPage({ viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 }, isMobile: mobile, hasTouch: mobile, reducedMotion: "reduce" }), errors = [], outside = [];
   page.setDefaultTimeout(8000); page.on("pageerror", error => errors.push(error.message));
   await page.route("**/*", route => {

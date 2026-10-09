@@ -27,7 +27,7 @@
 // flag on the later entry, so reviewers can consolidate.
 //
 // Usage:
-//   node scripts/lesson-scorer.mjs [--format text|json] [--threshold N]
+//   node scripts/lesson-scorer.mjs [--json] [--threshold N]
 //       [--fail-under N] [--top N] [--files f1 f2 ...]
 //   Default: score docs/ROOM-WIKI.md + docs/WEEKLY-LEARNINGS.md and print a
 //   text report. Exit 0 on ok; 1 on error, or when --fail-under is set and
@@ -46,7 +46,11 @@ export const DUP_THRESHOLD = 0.55; // Jaccard at/above this: near-duplicate
 
 // ---------------------------------------------------------------- scoring
 
-const FILE_LINE_RE = /[\w\-./~]+\.(mjs|js|cjs|ts|tsx|jsx|md|markdown|yaml|yml|json|jsonl|sh|bash|css|html|py|go|rs)\s*:\s*\d+/g;
+// Bound the filename run to 260 chars (classic MAX_PATH): the unbounded
+// [\w\-./~]+ re-tried every start position with a full greedy run on dot-less
+// input, which is O(n^2) (~59s for 100k chars). A real file:line ref never
+// needs a longer prefix, and a longer run still matches from its tail.
+const FILE_LINE_RE = /[\w\-./~]{1,260}\.(mjs|js|cjs|ts|tsx|jsx|md|markdown|yaml|yml|json|jsonl|sh|bash|css|html|py|go|rs)\s*:\s*\d+/g;
 const PR_REF_RE = /(?:^|[\s(])#\d{2,}\b/g;
 const SHA_RE = /\b[0-9a-f]{7,40}\b/g;
 const DATE_RE = /\b20\d{2}-\d{2}-\d{2}\b/g;
@@ -351,14 +355,28 @@ export function renderReport(scored, { threshold = REVIEW_THRESHOLD, top = Infin
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
+// A numeric-valued option: the value must be present, must not be another
+// flag, and must parse to a finite number. Without this, `--threshold` with
+// a missing value silently scored with threshold NaN, and `--fail-under
+// --json` swallowed the --json flag as its value (exit 0, wrong format).
+function numOpt(argv, i, name) {
+  const raw = argv[i + 1];
+  if (raw === undefined || raw.startsWith("--") || !Number.isFinite(Number(raw))) {
+    console.error(`error: ${name} needs a numeric value (got ${raw === undefined ? "nothing" : JSON.stringify(raw)})`);
+    console.error("Usage: node scripts/lesson-scorer.mjs [--json] [--threshold N] [--fail-under N] [--top N] [--files f ...]");
+    process.exit(2);
+  }
+  return Number(raw);
+}
+
 function parseArgs(argv) {
   const opts = { format: "text", threshold: REVIEW_THRESHOLD, failUnder: null, top: Infinity, files: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--json") opts.format = "json";
-    else if (a === "--threshold") opts.threshold = Number(argv[++i]);
-    else if (a === "--fail-under") opts.failUnder = Number(argv[++i]);
-    else if (a === "--top") opts.top = Number(argv[++i]);
+    else if (a === "--threshold") { opts.threshold = numOpt(argv, i, "--threshold"); i++; }
+    else if (a === "--fail-under") { opts.failUnder = numOpt(argv, i, "--fail-under"); i++; }
+    else if (a === "--top") { opts.top = numOpt(argv, i, "--top"); i++; }
     else if (a === "--files") {
       while (i + 1 < argv.length && !argv[i + 1].startsWith("--")) opts.files.push(argv[++i]);
     } else if (a === "--help" || a === "-h") {
@@ -379,7 +397,7 @@ function main(argv) {
   const entries = loadCorpus(root, opts.files);
   const scored = scoreCorpus(entries);
   if (opts.format === "json") {
-    console.log(JSON.stringify({ threshold: opts.threshold, entries: scored }, null, 2));
+    console.log(JSON.stringify({ threshold: opts.threshold, entries: scored.slice(0, opts.top) }, null, 2));
   } else {
     console.log(renderReport(scored, { threshold: opts.threshold, top: opts.top }));
   }

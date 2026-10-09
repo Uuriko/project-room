@@ -5,7 +5,10 @@ import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-if (process.argv.length !== 2) throw new Error('worker-ci-build accepts no deployment arguments');
+if (process.argv.length !== 2) {
+  process.stderr.write("Usage: node scripts/worker-ci-build.mjs (accepts no deployment arguments)\n");
+  process.exit(2);
+}
 const directory = fileURLToPath(new URL('../cloudflare/', import.meta.url));
 const config = JSON.parse(readFileSync(join(directory, 'wrangler.jsonc'), 'utf8'));
 const signer = 'node ../scripts/sign-agent-card.mjs';
@@ -25,4 +28,8 @@ try {
     if (probe.error) throw probe.error;
     process.exitCode = probe.status ?? 1;
   }
-} finally { unlinkSync(path); }
+} finally {
+  // W46: best-effort cleanup — a failed unlink (e.g. the path is a squatted
+  // directory) must not mask the original write failure with ENOENT/EISDIR.
+  try { unlinkSync(path); } catch { /* temp config is pid-unique; nothing to recover */ }
+}

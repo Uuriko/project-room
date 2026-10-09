@@ -61,3 +61,17 @@ test("browser suite membership is exact, not substring: check.mjs is not other-c
   const closed = checkCoverage(map, { exists: () => true, browserSuite: "node --test scripts/check.mjs" });
   assert.ok(closed.some(p => /not wired into npm run test:browser/.test(p)));
 });
+
+test("browser suite extraction keeps scripts/ subdirectory paths", () => {
+  assert.deepEqual(
+    parseBrowserSuite("node --test scripts/onboarding-probe/gate.mjs scripts/check.mjs"),
+    ["scripts/onboarding-probe/gate.mjs", "scripts/check.mjs"]
+  );
+  const map = { version: 1, claims: [{ id: "x", claim: "c",
+    evidence: { unit: [], browser: ["scripts/onboarding-probe/gate.mjs"] } }] };
+  const problems = checkCoverage(map, {
+    exists: () => true,
+    browserSuite: parseBrowserSuite("node --test scripts/onboarding-probe/gate.mjs"),
+  });
+  assert.deepEqual(problems, [], "a wired subdir browser check must not be flagged unwired");
+});

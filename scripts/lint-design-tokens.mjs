@@ -27,7 +27,31 @@ const BASELINE_PATH = join(root, "scripts", "design-tokens-baseline.json");
 // QA D-1: quotes added 2026-10-04 — `fill="#ff0000"` (quote between `=` and
 // `#`) slipped the `=` fix; URL-encoded `%23ff0000` is normalized to `#`
 // before scanning (see hexHits) since it decodes to `#ff0000` at render.
-const HEX_RE = /(^|[:\s,(="'])#[0-9a-fA-F]{3,8}\b/g;
+// CSS escape sequences decode before the browser matches anything, so
+// `font-\73ize: 16px` sets a raw font-size while looking like an unknown
+// property to a naive pattern — and `#\66 f0000` is #ff0000 to the renderer
+// while a plain hex pattern sees only `#\`. Decode escapes before scanning so
+// the ratchet sees what the browser sees (fail closed). CSS Syntax §4.3.7.
+const decodeCssEscapes = (s) =>
+  s.replace(/\\([0-9a-fA-F]{1,6}\s?|[\s\S])/g, (m, esc) => {
+    if (/^[\r\n\f]/.test(esc)) return ""; // \<newline> is a line continuation
+    if (/^[0-9a-fA-F]/.test(esc)) {
+      let cp = parseInt(esc, 16);
+      if (cp === 0 || (cp >= 0xd800 && cp <= 0xdfff) || cp > 0x10ffff) cp = 0xfffd;
+      return String.fromCodePoint(cp);
+    }
+    return esc; // \<char> is the character itself
+  });
+// A hex run may spell its digits with escapes (`#\66 f0000`). The run below
+// accepts hex escapes and the decoded value is validated, so the evasion is
+// flagged. An escaped `#` itself (`\#`) is NOT matched: it is an identifier
+// escape, not a color — matching it would false-positive on `url(\#id)`
+// fragment references. The trailing `(?!\w)` preserves the plain pattern's
+// `\b` behavior: the run must not continue into an identifier character
+// (so `#account-settings` still matches nothing).
+const HEX_ESCAPE = String.raw`\\[0-9a-fA-F]{1,6}\s?`;
+const HEX_UNIT = String.raw`(?:[0-9a-fA-F]|${HEX_ESCAPE})`;
+const HEX_RE = new RegExp(`(^|[:\\s,(="'])#(${HEX_UNIT}{3,8})(?!\\w)`, "g");
 // A raw `font-size:` declaration: the value is a literal (16px, .875rem)
 // rather than a design token. `font-size: var(--text-sm)` is the sanctioned
 // token path and is NOT a violation. Custom property definitions
@@ -70,8 +94,9 @@ export function hexHits(line) {
   HEX_RE.lastIndex = 0;
   let m;
   while ((m = HEX_RE.exec(normalized)) !== null) {
-    const hash = m[0].slice(m[1].length);
-    hits.push(hash);
+    // Report the decoded spelling so `#\66 f0000` and `#ff0000` deduplicate
+    // against the same baseline key.
+    hits.push("#" + decodeCssEscapes(m[2]));
   }
   return hits;
 }
@@ -82,7 +107,8 @@ export function hexHits(line) {
 const stripComments = s => s.replace(/\/\*.*?\*\//g, "");
 
 export function rawFontSizeValue(line) {
-  const m = FONT_SIZE_RE.exec(line);
+  // Decode escapes first: `font-\73ize` is `font-size` to the browser.
+  const m = FONT_SIZE_RE.exec(decodeCssEscapes(line));
   if (!m) return null;
   const value = stripComments(m[2]).trim();
   // A colon with no value on the line means the value continues on the next
@@ -97,7 +123,8 @@ export function rawFontSizeValue(line) {
 // system-font keywords (caption, icon, menu, ...) carry no size and are not
 // violations; `var(--...)` is the token path.
 export function rawFontShorthandValue(line) {
-  const m = FONT_SHORTHAND_RE.exec(line);
+  // Decode escapes first: `fo\6E t` is `font` to the browser.
+  const m = FONT_SHORTHAND_RE.exec(decodeCssEscapes(line));
   if (!m) return null;
   const value = stripComments(m[2]).trim();
   // Dangling colon: value continues on the next line — fail closed. QA D-1.

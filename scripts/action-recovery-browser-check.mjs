@@ -36,13 +36,16 @@ async function setup(t, { action = "complete", mobile = false, live = true, adva
   if (action === "decide") mutate(T.VERIFICATION_RECORDED, { ...evidence(), result: "pass", summary: "Checked v1" }, "human-reviewer");
   if (action === "decide") send(T.MESSAGE_POSTED, { messageId: "rationale-browser", body: "Rationale: accept this exact result." });
   const server = createRoomServer({ store: f.store, streamInterval: 40 });
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  const origin = `http://127.0.0.1:${server.address().port}`;
-  const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+  // Cleanup before the browser launch: a launch failure must fail the test,
+  // not hang the runner on the still-listening server (nor leak the fixture dir).
+  let browser;
   t.after(async () => {
-    await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
+    await browser?.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
     f.store.close(); rmSync(f.directory, { recursive: true, force: true });
   });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
   const page = await browser.newPage({ viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 }, isMobile: mobile, hasTouch: mobile, reducedMotion: "reduce" }), errors = [], outside = [];
   page.setDefaultTimeout(8000); page.on("pageerror", error => errors.push(error.message));
   await page.route("**/*", route => {

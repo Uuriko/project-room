@@ -4,6 +4,7 @@
 // after one retry is inconclusive and does not fail the path.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { classifyReady, evaluateGate } from "../scripts/onboarding-probe/gate.mjs";
 
@@ -61,4 +62,14 @@ test("ready latency past three times the baseline is inconclusive after one retr
   assert.equal(verdict.pass, true);
   assert.deepEqual(verdict.inconclusive, ["ready"]);
   assert.deepEqual(verdict.failures, []);
+});
+
+test("CLI gate requires --result and --baseline values: clean usage error, no stack trace (guild-06 fuzz)", () => {
+  const script = new URL("../scripts/onboarding-probe/gate.mjs", import.meta.url);
+  for (const args of [[], ["--help"], ["--result"], ["--result", "a.json"], ["--baseline", "b.json"]]) {
+    const r = spawnSync(process.execPath, [script.pathname, ...args], { encoding: "utf8", timeout: 15000 });
+    assert.notEqual(r.status, 0, `expected nonzero exit for [${args.join(" ")}]`);
+    assert.doesNotMatch(r.stderr, /^\s*at\s/m, `no stack trace for [${args.join(" ")}]: ${r.stderr.slice(0, 200)}`);
+    assert.match(r.stderr, /Usage:/i, `usage on stderr for [${args.join(" ")}]`);
+  }
 });

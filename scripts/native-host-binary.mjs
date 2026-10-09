@@ -57,6 +57,9 @@ export const onPath = (name, pathValue) => {
 //   { binary }          resolved, with `source` naming which rule matched
 //   { binary: null, reason } unresolved, with operator-readable guidance
 export function resolveHostBinary(host, environment = process.env) {
+  // A nullish environment is reportable, not fatal: keep the documented
+  // never-throws contract for callers that probe with an absent environment.
+  if (environment == null) environment = process.env;
   if (!Object.hasOwn(HOST_BINARY_ENV, host)) {
     return { binary: null, reason: `Unknown native host "${host}"` };
   }

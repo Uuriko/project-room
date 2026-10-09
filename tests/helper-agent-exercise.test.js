@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { startHelperAgentExercise } from "../scripts/helper-agent-exercise.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { readAgentConnection } from "../client/agent-connection.mjs";
@@ -26,4 +30,17 @@ test("helper acceptance fixture seeds only context, separates credentials and le
   const owner = JSON.parse(readFileSync(f.manifest.ownerPath));
   assert.equal(JSON.stringify(e).includes(config.token), false); assert.equal(JSON.stringify(e).includes(owner.token), false);
   await f.close(); assert.equal(existsSync(f.directory), false); await f.close();
+});
+
+test("CLI rejects flag-like args instead of treating them as the evidence path (guild-06 fuzz)", t => {
+  const script = fileURLToPath(new URL("../scripts/helper-agent-exercise.mjs", import.meta.url));
+  const dir = mkdtempSync(join(tmpdir(), "helper-exercise-cli-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  for (const arg of ["--help", "--bogus-flag-xyz"]) {
+    const r = spawnSync(process.execPath, [script, arg], { encoding: "utf8", timeout: 20000, cwd: dir });
+    assert.equal(r.status, 2, `expected exit 2 for ${arg}, got ${r.status}: ${r.stderr}`);
+    assert.match(r.stderr, /Usage:/i, "usage goes to stderr");
+    assert.doesNotMatch(r.stderr, /^\s*at\s/m, "no stack trace on usage error");
+    assert.equal(existsSync(join(dir, arg)), false, `must not create a file named ${arg}`);
+  }
 });

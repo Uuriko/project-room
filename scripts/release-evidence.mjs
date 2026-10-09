@@ -65,7 +65,15 @@ function main(argv) {
     process.exit(2);
   }
   const tapText = readFileSync(tapPath, "utf8");
-  const probes = probesPath ? JSON.parse(readFileSync(probesPath, "utf8")) : undefined;
+  let probes;
+  if (probesPath) {
+    try {
+      probes = JSON.parse(readFileSync(probesPath, "utf8"));
+    } catch (err) {
+      console.error(`release-evidence: --probes file is not valid JSON: ${err.message}`);
+      process.exit(2);
+    }
+  }
   const git = args => execFileSync("git", args, { encoding: "utf8" });
   const commit = git(["rev-parse", "HEAD"]).trim();
   const porcelain = git(["status", "--porcelain"]);

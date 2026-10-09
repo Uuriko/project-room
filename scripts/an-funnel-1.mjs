@@ -9,6 +9,7 @@
 //
 // Exit 0 with a JSON report on stdout. Exit 2 on bad arguments, exit 1 when
 // the database cannot answer (missing tables), with the reason on stderr.
+import { pathToFileURL } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { ACTIVATION_FUNNEL_DEFINITIONS, activationFunnel } from "../server/analytics/activation-funnel.mjs";
 
@@ -34,6 +35,16 @@ function tableExists(db, name) {
   return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));
 }
 
+// Message timestamps arrive as ISO strings in the server's event envelopes,
+// but other writers (fixtures, migrations) may store epoch-ms numbers.
+// Date.parse() turns a number into NaN, silently dropping the message from
+// the funnel — so accept finite numbers as epoch ms. Anything else counts
+// as unparseable downstream.
+export function normalizeMessageAt(atRaw) {
+  const at = typeof atRaw === "number" ? atRaw : Date.parse(atRaw);
+  return Number.isFinite(at) ? at : NaN;
+}
+
 function loadRows(db, path) {
   const missing = [];
   for (const name of ["analytics_events", "member_accounts", "events"]) {
@@ -57,7 +68,7 @@ function loadRows(db, path) {
   const messages = [];
   let droppedUnparseable = 0;
   for (const row of messageRows) {
-    const at = Date.parse(row.atRaw);
+    const at = normalizeMessageAt(row.atRaw);
     if (!Number.isFinite(at)) {
       droppedUnparseable += 1;
       continue;
@@ -134,4 +145,5 @@ function main() {
   }
 }
 
-main();
+const invokedAsCli = pathToFileURL(process.argv[1] ?? "").href === import.meta.url;
+if (invokedAsCli) main();

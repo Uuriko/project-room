@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
-import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
+import { createAcceptanceFixture, applyFixtureFix } from "../scripts/acceptance-fixture.mjs";
 
 test("acceptance setup is isolated, repeatable, scoped and includes invitation states", () => {
   const a = createAcceptanceFixture(), b = createAcceptanceFixture();
@@ -19,5 +19,19 @@ test("acceptance setup is isolated, repeatable, scoped and includes invitation s
     assert.equal(a.store.verifyInvitationAudit().consistent, true);
   } finally {
     for (const f of [a, b]) { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); }
+  }
+});
+
+test("applyFixtureFix applies positional substitutions", () => {
+  assert.equal(applyFixtureFix("abcdef", "1:X\n"), "aXcdef");
+  assert.equal(applyFixtureFix("abcdef", "\n  \n3:YZ\n"), "abcYZef");
+  assert.equal(applyFixtureFix("abcdef", "0:a\n5:f"), "abcdef");
+});
+
+test("applyFixtureFix fails loud on malformed fix lines", () => {
+  // The old loop silently corrupted the payload here: "5" parsed as pos 0,
+  // "99:x" padded the payload with empty strings, "2:" deleted a char.
+  for (const bad of ["5", "99:x", "-1:x", "2:", "2.5:x", "abc:x"]) {
+    assert.throws(() => applyFixtureFix("abcdef", bad), /malformed fix line/);
   }
 });

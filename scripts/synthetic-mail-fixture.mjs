@@ -28,7 +28,9 @@ export class SyntheticMailFixture {
     return JSON.parse(this.db.prepare("SELECT receipt FROM messages WHERE id=?").get(operationId)?.receipt ?? "null");
   }
   outcome(operationId, outcome) {
-    const receipt = JSON.parse(this.db.prepare("SELECT receipt FROM messages WHERE id=?").get(operationId).receipt);
+    const row = this.db.prepare("SELECT receipt FROM messages WHERE id=?").get(operationId);
+    if (!row) throw new Error(`SyntheticMailFixture: unknown operationId ${JSON.stringify(operationId)}`);
+    const receipt = JSON.parse(row.receipt);
     this.db.prepare("UPDATE messages SET receipt=? WHERE id=?").run(JSON.stringify({ ...receipt, outcome }), operationId);
   }
   count() { return this.db.prepare("SELECT count(*) n FROM messages").get().n; }

@@ -4,7 +4,16 @@ import { RoomStore } from "../server/store.mjs";
 
 // Trusted local operator tool; no account identities, invitation contents, or secrets
 // are printed. Opening read-only never runs a migration or repairs a projection.
-const { values } = parseArgs({ options: { db: { type: "string" }, help: { type: "boolean" } } });
+const USAGE = "Usage: node scripts/audit-invitations.mjs [--db <path>] [--help]";
+let values;
+try {
+  ({ values } = parseArgs({ options: { db: { type: "string" }, help: { type: "boolean" } } }));
+} catch (e) {
+  // Arg errors (unknown option, unexpected positional, missing --db value)
+  // must not surface as an uncaught parseArgs stack trace.
+  process.stderr.write(`audit-invitations: ${e.message}\n${USAGE}\n`);
+  process.exit(2);
+}
 if (values.help) {
   console.log(`node scripts/audit-invitations.mjs [--db <path>] [--help]
 

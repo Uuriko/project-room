@@ -160,7 +160,13 @@ function report(result, manifest) {
 const isMain = process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url;
 if (isMain) {
   const manifestPath = resolve(dirname(fileURLToPath(import.meta.url)), "../server.json");
-  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  } catch (error) {
+    console.error(`server.json: cannot load ${manifestPath}: ${error.message}`);
+    process.exit(2);
+  }
   const result = process.argv.includes("--against-registry")
     ? await checkAgainstRegistry(manifest)
     : checkServerJson(manifest);

@@ -58,12 +58,21 @@ export async function backfillFile(dbPath, { now = Date.now() } = {}) {
 function parseArgs(argv) {
   let db = null;
   for (let i = 0; i < argv.length; i += 1) {
-    if (argv[i] === "--db") db = argv[i + 1] ?? null;
+    if (argv[i] === "--db") {
+      const value = argv[i + 1];
+      if (value === undefined || value.startsWith("--")) {
+        throw new Error("usage: --db requires a database path");
+      }
+      db = value;
+      i += 1; // skip the consumed value
+    }
     else if (argv[i] === "--report") continue;
     else if (argv[i].startsWith("-")) throw new Error(`unknown argument ${argv[i]}`);
   }
   return db;
 }
+
+const USAGE = "usage: node scripts/analytics-backfill.mjs --db <sqlite> [--report]";
 
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
@@ -71,11 +80,12 @@ if (isMain) {
   try { db = parseArgs(process.argv.slice(2)); }
   catch (error) {
     console.error(error.message);
-    process.exit(1);
+    console.error(USAGE);
+    process.exit(2);
   }
   if (!db) {
-    console.error("usage: node scripts/analytics-backfill.mjs --db <sqlite> [--report]");
-    process.exit(1);
+    console.error(USAGE);
+    process.exit(2);
   }
   backfillFile(db).then(({ report }) => {
     console.log(JSON.stringify(report, null, 2));

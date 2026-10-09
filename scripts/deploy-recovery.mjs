@@ -110,6 +110,9 @@ async function main() {
     console.log(recoveryDescription(report));
     if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `\n${recoveryDescription(report)}\n\n${report.compatibilityLimit}\n`);
     process.exitCode = ['ROLL FORWARD REQUIRED', 'ROLLBACK NOT VERIFIED'].includes(report.status) ? 1 : 0;
-  } else throw new Error('Usage: deploy-recovery.mjs snapshot <output> | recover <pre-deploy> <output>');
+  } else {
+    process.stderr.write("Usage: deploy-recovery.mjs snapshot <output> | recover <pre-deploy> <output>\n");
+    process.exit(2);
+  }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) await main();

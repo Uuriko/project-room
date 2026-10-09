@@ -410,8 +410,11 @@ for (const outcome of ["success", "failure"]) {
     const server = createRoomServer({ store, streamInterval: 30 });
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     const origin = `http://127.0.0.1:${server.address().port}`;
-    const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
-    t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); rmSync(directory, { recursive: true, force: true }); });
+    // Register cleanup before launch: if chromium.launch throws, the t.after
+    // must still close the server and remove the fixture directory.
+    let browser;
+    t.after(async () => { await browser?.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); rmSync(directory, { recursive: true, force: true }); });
+    browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
     const page = await browser.newPage(); const errors = [];
     page.setDefaultTimeout(5000);
     await page.addInitScript(() => {

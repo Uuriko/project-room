@@ -7,7 +7,10 @@ import { createRoomServer } from "../server/http.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 
-if (process.argv.length !== 3 || !process.stdin.isTTY) throw new Error("Choose a new evidence file and interactive control handle");
+if (process.argv.length !== 3 || !process.stdin.isTTY) {
+  process.stderr.write("Usage: node scripts/request-host-fixture.mjs <new-evidence-file> (interactive terminal required)\n");
+  process.exit(2);
+}
 const output = resolve(process.argv[2]), f = createAcceptanceFixture(), traffic = [];
 const send = (id, type, data) => f.store.command(f.keys.owner, "commons", { id, type, data });
 send("host-charter", "room.charter_updated", { expectedRevision: 0,
@@ -45,11 +48,18 @@ const status = () => {
 const stop = async () => {
   if (stopped) return; stopped = true; input.close();
   try { writeFileSync(output, JSON.stringify(evidence(), null, 2), { flag: "wx", mode: 0o600 }); }
+  catch (error) {
+    // The evidence file may already exist (flag "wx" refuses to clobber it).
+    // Report one clean line and exit 1 instead of an unhandled-rejection
+    // stack trace; the disposable fixture is still torn down below.
+    process.exitCode = 1;
+    process.stderr.write(`request-host-fixture: cannot write evidence file ${output}: ${error.message}\n`);
+  }
   finally {
     server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
     f.store.close(); rmSync(f.directory, { recursive: true, force: true });
   }
-  console.log(JSON.stringify({ stage: "stopped", evidence: output, removed: "Only this disposable fixture and its credentials" }));
+  if (!process.exitCode) console.log(JSON.stringify({ stage: "stopped", evidence: output, removed: "Only this disposable fixture and its credentials" }));
 };
 input.on("line", line => {
   const action = line.trim();

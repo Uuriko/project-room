@@ -207,3 +207,22 @@ for (const failedDoor of ["origin", "entry"]) {
     });
   }
 }
+
+test("CLI: a non-numeric or negative --wait-ms fails fast with exit 2, before any network", async () => {
+  // A non-numeric wait parses to NaN, which used to make the --sha revision
+  // wait loop's deadline NaN (Date.now() > NaN is always false), so the loop
+  // could never time out: the CLI hung forever on a typo. It must now reject
+  // the flag value up front, before the first HTTP request.
+  for (const bad of ["abc", "-5", "NaN", "Infinity"]) {
+    const started = Date.now();
+    const result = await new Promise((resolve, reject) => {
+      execFile(process.execPath, [script, "--wait-ms", bad], { timeout: 8000 }, (error, stdout, stderr) => {
+        if (error && typeof error.code !== "number") return reject(error);
+        resolve({ code: error?.code ?? 0, stderr });
+      });
+    });
+    assert.equal(result.code, 2, `--wait-ms ${bad}`);
+    assert.match(result.stderr, /--wait-ms must be a non-negative number/);
+    assert.ok(Date.now() - started < 8000, `--wait-ms ${bad} finished without touching the network`);
+  }
+});

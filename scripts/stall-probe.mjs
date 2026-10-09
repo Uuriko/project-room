@@ -33,7 +33,7 @@ export function parseProbeArgs(argv) {
     else if (arg === "--seconds") opts.seconds = Number(next);
     else if (arg === "--path") opts.path = next ?? "";
     else if (arg === "--max-ms") opts.maxP99Ms = Number(next);
-    else continue;
+    else throw new Error(`unknown option: ${arg}`);
     i += 1;
   }
   return opts;
@@ -68,7 +68,13 @@ export async function runStallProbe({ url, seconds, path, maxP99Ms, fetchImpl, s
 }
 
 async function main() {
-  const opts = parseProbeArgs(process.argv.slice(2));
+  let opts;
+  try { opts = parseProbeArgs(process.argv.slice(2)); }
+  catch (error) {
+    console.error("Usage: node scripts/stall-probe.mjs --url https://host [--seconds 20] [--path /api/ready] [--max-ms 3000]");
+    console.error(String(error?.message ?? error));
+    process.exit(2);
+  }
   if (!opts.url) {
     console.error("Usage: node scripts/stall-probe.mjs --url https://host [--seconds 20] [--path /api/ready] [--max-ms 3000]");
     process.exit(2);

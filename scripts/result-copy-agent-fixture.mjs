@@ -6,9 +6,21 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { setTier } from "../server/autonomy-tiers.mjs";
+import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 
 const f = createAcceptanceFixture();
-const send = (actor, type, data) => f.store.command(f.keys[actor], "commons", { id: crypto.randomUUID(), type, data });
+// External evidence must be a canonical signed evidence object
+// (room-signed-evidence/1); the unsigned evidenceUrl this fixture used to
+// carry is rejected by work.completed (missing_signed_evidence), which
+// crashed the fixture at startup. Same shape as the result-copy browser
+// check's mutate wrapper.
+const signEvidence = makeTestSigner(f.store);
+const send = (actor, type, data) => {
+  if (type === T.WORK_COMPLETED && data.evidenceUrl && !data.signedEvidence) {
+    data = { ...data, signedEvidence: signEvidence() };
+  }
+  return f.store.command(f.keys[actor], "commons", { id: crypto.randomUUID(), type, data });
+};
 send("owner", T.MEMBER_ADDED, { memberId: "copy-editor", displayName: "Synthetic summary editor", kind: "agent", accountableHumanId: "owner", permissions: [] });
 f.keys.editor = f.store.issueAccessKey("commons", "copy-editor");
 // Graduated autonomy tiers: the fixture agent is operator-promoted so the

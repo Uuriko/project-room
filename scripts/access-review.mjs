@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { existsSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { pathToFileURL } from "node:url";
 
@@ -8,6 +9,8 @@ import { pathToFileURL } from "node:url";
 //                      environment variable NAMED by --key-env (default ROOM_OWNER_KEY).
 // --revoke-identity records one owner revoke in the store file, then prints
 // the review. It clears both membership-administration stores for that identity.
+// A revoke never creates the store file: the path must already exist, so a
+// typo cannot silently record the revoke into a fresh empty store.
 // Credentials are never accepted on the command line and never printed. The
 // report itself contains no tokens, secrets or hashes (server/access-review.mjs).
 const USAGE = `node scripts/access-review.mjs [--db PATH | --origin URL --key-env NAME] [--room ID ...] [--json]
@@ -50,7 +53,9 @@ async function revokeInStore(values, env) {
   const { RoomStore } = await import("../server/store.mjs");
   const { assembleAccessReview } = await import("../server/access-review.mjs");
   const key = ownerKey(values, env);
-  const store = new RoomStore(resolve(values.db || env.ROOM_DB || ".data/room.sqlite"));
+  const dbPath = resolve(values.db || env.ROOM_DB || ".data/room.sqlite");
+  if (!existsSync(dbPath)) throw new Error(`Store file does not exist: ${dbPath} (a revoke never creates one)`);
+  const store = new RoomStore(dbPath);
   try {
     store.delegation.revokeEffective(key, values.room[0], { identityId: values["revoke-identity"] });
     return store.readTransaction(() => assembleAccessReview(store, values.room[0]));

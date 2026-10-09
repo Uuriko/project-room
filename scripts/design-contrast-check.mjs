@@ -2,6 +2,12 @@
 // from scripts/check.mjs, including in CI where the unit suite is skipped.
 import { CONTRAST_PAIRS, contrastRatio } from "../src/design-tokens.js";
 
+const args = process.argv.slice(2);
+if (args.length) {
+  process.stderr.write("Usage: node scripts/design-contrast-check.mjs (no options)\n");
+  process.exit(2);
+}
+
 const failures = [];
 for (const [name, foreground, background, min] of CONTRAST_PAIRS) {
   const ratio = contrastRatio(foreground, background);

@@ -6,7 +6,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
@@ -334,4 +334,17 @@ test("a review of one identity shows both administration stores, and one revoke 
     "commons"
   ), false);
   assert.throws(() => f.store.delegation.revokeEffective(f.ownerKey, "commons", { identityId }), /No membership-administration authority/);
+});
+
+test("--revoke-identity refuses a store file that does not exist and never creates one", async t => {
+  const directory = mkdtempSync(join(tmpdir(), "room-access-review-missing-db-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const missing = join(directory, "nope.sqlite");
+  const run = (args, env = {}) => execFileAsync(process.execPath, [script, ...args], { encoding: "utf8", timeout: 30000, cwd: checkout,
+    env: { ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("ROOM_"))), ...env } })
+    .then(({ stdout, stderr }) => ({ status: 0, stdout, stderr }), error => ({ status: error.code ?? 1, stdout: error.stdout ?? "", stderr: error.stderr ?? String(error) }));
+  const result = await run(["--db", missing, "--room", "commons", "--revoke-identity", "someone"], { ROOM_OWNER_KEY: "A".repeat(43) });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /does not exist/);
+  assert.equal(existsSync(missing), false, "a revoke must not conjure a fresh store into existence");
 });

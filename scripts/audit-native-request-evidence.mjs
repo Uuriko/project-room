@@ -3,8 +3,19 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 const paths = process.argv.slice(2);
-if (paths.length !== 4) throw new Error("Provide Room, Codex clarification, Codex production and Claude review evidence files");
-const [room, clarify, produce, review] = paths.map(path => JSON.parse(readFileSync(path, "utf8")));
+if (paths.length !== 4) {
+  process.stderr.write("Usage: node scripts/audit-native-request-evidence.mjs <room.json> <codex-clarify.json> <codex-produce.json> <claude-review.json>\n");
+  process.exit(2);
+}
+const readJson = path => {
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch (error) {
+    process.stderr.write(`Cannot read ${path}: ${error instanceof Error ? error.message.split("\n")[0] : error}\n`);
+    process.exit(2);
+  }
+};
+const [room, clarify, produce, review] = paths.map(readJson);
 const hash = value => createHash("sha256").update(value).digest("hex");
 const events = host => host.stdout.split("\n").filter(Boolean).map(line => JSON.parse(line));
 const calls = host => events(host).filter(e => e.type === "item.completed" && e.item?.type === "mcp_tool_call").map(e => e.item);

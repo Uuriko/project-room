@@ -31,12 +31,16 @@ async function setup(t) {
   const server = createRoomServer({ store: f.store, streamInterval: 40 });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+  // Register cleanup before the browser launch: if chromium.launch() throws
+  // (missing binary, bad ROOM_TEST_CHROMIUM_PATH), the still-listening server
+  // and the fixture directory must be torn down, or the runner hangs forever.
+  let browser;
   t.after(async () => {
-    await browser.close(); server.closeStreams(); server.closeAllConnections();
+    await browser?.close(); server.closeStreams(); server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
     f.store.close(); rmSync(f.directory, { recursive: true, force: true });
   });
+  browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
   return { f, origin, browser, workItemId, body };
 }
 

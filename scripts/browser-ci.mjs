@@ -14,7 +14,7 @@
 import { mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
 import { spawnSync } from "node:child_process";
-import { browserPlan, parseShard } from "./browser-shards.mjs";
+import { browserPlan, parseShard, SHARD_COUNT } from "./browser-shards.mjs";
 
 // Under test-results/ so the existing upload-artifact step keeps it too.
 export const RESULTS_FILE = "test-results/browser-junit.xml";
@@ -34,8 +34,22 @@ export function ciArgs(script, destination = RESULTS_FILE, shard = null) {
 
 function main() {
   const argv = process.argv.slice(2);
-  if (argv.length > 1 || (argv.length && !argv[0].startsWith("--shard="))) throw new Error("Usage: browser-ci.mjs [--shard=1/4]");
-  const shard = argv.length ? parseShard(argv[0].slice(8)) : null;
+  const usage = `Usage: browser-ci.mjs [--shard=1/${SHARD_COUNT}]\n`;
+  if (argv.length > 1 || (argv.length && !argv[0].startsWith("--shard="))) {
+    process.stderr.write(usage);
+    process.exit(2);
+  }
+  let shard = null;
+  if (argv.length) {
+    try {
+      shard = parseShard(argv[0].slice("--shard=".length));
+    } catch (error) {
+      // A malformed --shard value is a usage error, not a crash: report it
+      // cleanly (worker-46 fail-first: tests/browser-ci-shard.test.js).
+      process.stderr.write(`browser-ci: ${error.message}\n${usage}`);
+      process.exit(2);
+    }
+  }
   const pkg = JSON.parse(readFileSync("package.json", "utf8"));
   const script = pkg.scripts?.["test:browser"];
   const plan = browserPlan(script);

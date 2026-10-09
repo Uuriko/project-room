@@ -243,8 +243,15 @@ async function main() {
   }
   const markdown = renderMarkdown(result.summary);
   const jsonSummary = renderJsonSummary(result.summary, { threshold: result.threshold, breached: result.breached });
-  if (options.out) writeFileSync(options.out, markdown);
-  if (options.jsonOut) writeFileSync(options.jsonOut, `${jsonSummary}\n`);
+  try {
+    if (options.out) writeFileSync(options.out, markdown);
+    if (options.jsonOut) writeFileSync(options.jsonOut, `${jsonSummary}\n`);
+  } catch (err) {
+    // A bad --out/--json-out path is a config error (exit 2), never an
+    // uncaught stack trace.
+    console.error(`dependency-audit: cannot write output file: ${err.message}`);
+    process.exit(2);
+  }
   process.stdout.write(markdown);
   if (result.breached) {
     console.error(`dependency-audit: FAIL — vulnerabilities at/above "${result.threshold}" found`);

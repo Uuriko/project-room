@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, readFileSync, statSync, writeFileSync, chmodSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, statSync, writeFileSync, chmodSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -146,6 +146,48 @@ test("M-27: an unwritable --key-file refuses to revoke the old account key", asy
   const bad = run(["--account-key", "--account", "u1", "--key-file", join(dir, "no-such-dir", "k.txt")]);
   assert.notEqual(bad.status, 0);
   assert.match(bad.stdout + bad.stderr, /ENOENT|no such file/i, "the write failure surfaces instead of a silent strand");
+  const store = new RoomStore(db);
+  t.after(() => store.close());
+  assert.ok(store.authenticateAccountAccessKey(key1), "key1 still authenticates — nothing was revoked");
+});
+
+// H-2x: --key-file followed symlinks — openSync(path, "w") resolves the
+// final component, so a bearer key was written THROUGH a symlink into an
+// attacker-chosen path while the script reported success ("Key written to
+// <link> (mode 0600)"). The symlink target also had its mode flipped to
+// 0600 by fchmodSync on the followed fd. --key-file must fail closed on a
+// symlink instead of diverting key material.
+// Contract: a symlinked --key-file refuses the run; the target file is
+// untouched; the previously delivered key keeps working (M-27: the minted
+// but undelivered key is revoked, old keys are not).
+// Credible regression: pre-fix openSync follows the link, writes the key
+// into the victim file, exits 0 -> the status and content assertions fail.
+// Real CLI boundary via spawnSync; no new production seams.
+test("H-2x: --key-file refuses to write through a symlink", t => {
+  const dir = mkdtempSync(join(tmpdir(), "project-room-provision-symlink-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const db = join(dir, "room.sqlite");
+  const script = fileURLToPath(new URL("../scripts/provision.mjs", import.meta.url));
+  const run = args => spawnSync(process.execPath, [script, ...args], {
+    env: { ...process.env, ROOM_DB: db }, encoding: "utf8",
+  });
+  const first = run(["--account-key", "--account", "u1", "--print-key"]);
+  assert.equal(first.status, 0, first.stderr);
+  const key1 = first.stdout.trim().split("\n").at(-1);
+  assert.ok(/^[A-Za-z0-9_-]{43}$/.test(key1), "first run delivered a usable key");
+  // Plant a symlink where the operator asked the key file to go, pointing at
+  // a victim file the "operator" did not intend to touch.
+  const victim = join(dir, "victim.txt");
+  writeFileSync(victim, "MARKER-VICTIM-CONTENT\n");
+  const link = join(dir, "owner.key");
+  symlinkSync(victim, link);
+  const bad = run(["--account-key", "--account", "u1", "--key-file", link]);
+  assert.notEqual(bad.status, 0, "writing through a symlink must fail closed");
+  assert.match(bad.stdout + bad.stderr, /symlink/i, "the refusal names the symlink");
+  assert.equal(readFileSync(victim, "utf8"), "MARKER-VICTIM-CONTENT\n",
+    "no key material was written through the link into the victim file");
+  assert.equal(/^[A-Za-z0-9_-]{43}$/m.test(readFileSync(victim, "utf8")), false,
+    "the victim file holds no bearer key");
   const store = new RoomStore(db);
   t.after(() => store.close());
   assert.ok(store.authenticateAccountAccessKey(key1), "key1 still authenticates — nothing was revoked");

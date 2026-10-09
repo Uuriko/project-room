@@ -128,9 +128,20 @@ export async function runManualOwnerExercise({ ownerPath, stage, answerPath, out
   } finally { await browser.close(); }
 }
 
+const ownerCliUsage = `Usage: node scripts/manual-owner-exercise.mjs <owner.json> <export|return> <answer|-for-export> <new-evidence-dir>
+
+Simulated owner browser stages. The caller supplies the AI answer separately.
+<owner.json>         fixture from room-helper-exercise-v1 (origin, token, workItemId)
+<export|return>      export: copy the work packet; return: paste an AI draft back
+<answer|-for-export> the AI draft file for the return stage (- for export)
+<new-evidence-dir>  NEW directory the evidence (packet.png/answer.md/evidence.json) is written to`;
+
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const [ownerPath, stage, answerPath, output] = process.argv.slice(2);
-  if (process.argv.length !== 6) throw new Error("Supply fixture owner path, export/return, answer file (or - for export), and NEW evidence directory.");
+  if (process.argv.length !== 6 || !["export", "return"].includes(stage)) {
+    console.error(ownerCliUsage);
+    process.exit(2);
+  }
   const evidence = await runManualOwnerExercise({ ownerPath, stage, answerPath, output });
   console.log(JSON.stringify({ stage, beforeSequence: evidence.beforeSequence, afterSequence: evidence.afterSequence, output,
     messageId: evidence.message?.id, completionEventId: evidence.work.receipt?.eventId }));

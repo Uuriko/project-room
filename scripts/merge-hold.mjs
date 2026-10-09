@@ -124,7 +124,9 @@ function option(args, name) {
 async function main() {
   const [verb, ...args] = process.argv.slice(2);
   if (verb === "block") {
-    const exempt = (option(args, "--exempt-pr") ?? "").split(",").map(Number).filter(Number.isInteger).filter(n => n > 0);
+    // Same splitter as parseHolds(): comma- or space-separated, `#` optional.
+    const exempt = (option(args, "--exempt-pr") ?? "").split(/[\s,]+/)
+      .map(v => Number(String(v).replace(/^#/, ""))).filter(Number.isInteger).filter(n => n > 0);
     process.stdout.write(holdBlock({ until: option(args, "--until"), by: option(args, "--by"), reason: option(args, "--reason"), exemptPrs: exempt }) + "\n");
     return;
   }

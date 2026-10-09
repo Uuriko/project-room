@@ -50,7 +50,10 @@ export async function createInboxSandbox({ includeEmailReview = false } = {}) {
     } };
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  if (process.argv.length !== 3 || process.argv[2] !== "--start") throw new Error("Explicit opt-in: node scripts/inbox-sandbox.mjs --start");
+  if (process.argv.length !== 3 || process.argv[2] !== "--start") {
+    process.stderr.write("Usage: node scripts/inbox-sandbox.mjs --start (explicit opt-in; local sample only)\n");
+    process.exit(2);
+  }
   const sample = await createInboxSandbox({ includeEmailReview: true });
   console.log("Local sample only — no real messages or agents.");
   console.log(sample.accountUrl);

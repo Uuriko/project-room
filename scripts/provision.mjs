@@ -1,13 +1,22 @@
 import { parseArgs } from "node:util";
-import { mkdirSync, writeFileSync, openSync, fchmodSync, closeSync } from "node:fs";
+import { mkdirSync, writeFileSync, openSync, fchmodSync, closeSync, constants as fsConstants } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
-const { values } = parseArgs({ allowPositionals: true, options: { help: { type: "boolean" }, init: { type: "boolean" }, "account-key": { type: "boolean" }, room: { type: "string", default: "commons" }, member: { type: "string", default: "owner" }, account: { type: "string" }, name: { type: "string" }, kind: { type: "string", default: "human" }, permissions: { type: "string", default: "accept_work,complete_work,verify" }, "print-key": { type: "boolean" }, "key-file": { type: "string" } } });
+const usageLine = `Usage: node scripts/provision.mjs [--init] [--account-key] [--room <id>] [--member <id>] [--account <id>] [--name <n>] [--kind <human|agent>] [--permissions <csv>] [--print-key] [--key-file <path>]\n`;
+// W46: an unknown flag is a usage error (exit 2), not an uncaught
+// ERR_PARSE_ARGS_UNKNOWN_OPTION stack trace.
+let values;
+try {
+  ({ values } = parseArgs({ allowPositionals: true, options: { help: { type: "boolean" }, init: { type: "boolean" }, "account-key": { type: "boolean" }, room: { type: "string", default: "commons" }, member: { type: "string", default: "owner" }, account: { type: "string" }, name: { type: "string" }, kind: { type: "string", default: "human" }, permissions: { type: "string", default: "accept_work,complete_work,verify" }, "print-key": { type: "boolean" }, "key-file": { type: "string" } } }));
+} catch {
+  process.stderr.write(usageLine);
+  process.exit(2);
+}
 if (values.help) {
-  process.stdout.write(`Usage: node scripts/provision.mjs [--init] [--account-key] [--room <id>] [--member <id>] [--account <id>] [--name <n>] [--kind <human|agent>] [--permissions <csv>] [--print-key] [--key-file <path>]\n`);
+  process.stdout.write(usageLine);
   process.exit(0);
 }
 
@@ -21,7 +30,21 @@ function emitKey(meta, accessKey) {
     // leak the bearer key. Force owner-only mode on the fd before writing;
     // fail closed (the exception propagates, no key is written) when the
     // chmod cannot be applied.
-    const fd = openSync(values["key-file"], "w", 0o600);
+    // H-2x: the final path component must not be a symlink. openSync(path,
+    // "w") follows symlinks, which would write the bearer key through the
+    // link into an attacker-chosen file while reporting success. O_NOFOLLOW
+    // fails closed with ELOOP before any byte is written, and the
+    // deliver-then-commit wrapper revokes the minted-but-undelivered key.
+    let fd;
+    try {
+      fd = openSync(values["key-file"],
+        fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | fsConstants.O_NOFOLLOW, 0o600);
+    } catch (error) {
+      if (error.code === "ELOOP") {
+        throw new Error(`provision: --key-file must not be a symlink (refusing to write the key through ${values["key-file"]})`, { cause: error });
+      }
+      throw error;
+    }
     try {
       fchmodSync(fd, 0o600);
       writeFileSync(fd, accessKey + "\n");
@@ -45,7 +68,19 @@ process.umask(0o077);
 mkdirSync(dirname(filename), { recursive: true, mode: 0o700 });
 const store = new RoomStore(filename);
 try {
-  if (values.init) store.initialize(initialRoom(values.room, values.member));
+  // W46: re-initializing an existing room is a clean error (exit 2), not an
+  // uncaught UNIQUE constraint stack trace.
+  if (values.init) {
+    try {
+      store.initialize(initialRoom(values.room, values.member));
+    } catch (error) {
+      if (String(error?.message).includes("UNIQUE constraint failed: rooms.id")) {
+        console.error(`provision: room "${values.room}" is already initialized; refusing to re-initialize`);
+        process.exit(2);
+      }
+      throw error;
+    }
+  }
   // M-27: deliver-then-commit. The new key is minted WITHOUT revoking its
   // predecessors, delivered, and only then do the old keys get revoked. A
   // delivery failure (unwritable --key-file, no deliverable channel) leaves
@@ -67,7 +102,11 @@ try {
     revokeStale(accessKey);
   };
   if (values["account-key"]) {
-    if (!values.account) throw new Error("Account-key provisioning requires --account");
+    // W46: missing --account is a usage error (exit 2), not an uncaught stack.
+    if (!values.account) {
+      console.error("provision: --account-key requires --account <id>");
+      process.exit(2);
+    }
     let account;
     try { account = store.account(values.account); }
     catch (error) {
@@ -83,9 +122,25 @@ try {
       },
     );
   } else {
-    const { state } = store.room(values.room);
+    // W46: a missing room is a clean error (exit 2), not an uncaught
+    // ServiceError stack trace.
+    let state;
+    try {
+      ({ state } = store.room(values.room));
+    } catch (error) {
+      if (error?.code === "room_not_found") {
+        console.error(`provision: room "${values.room}" not found; run with --init first to create it`);
+        process.exit(2);
+      }
+      throw error;
+    }
     if (!Object.hasOwn(state.members, values.member)) {
-      if (!values.name) throw new Error("New members require --name");
+      // W46: missing --name is a usage error (exit 2), not an uncaught stack.
+      // Runs before any key is minted, so no revocation is needed.
+      if (!values.name) {
+        console.error(`provision: new member "${values.member}" requires --name <display name>`);
+        process.exit(2);
+      }
       // Local database administration is intentionally separate from the public HTTP API.
       const admin = store.insertCredential(values.room, state.room.ownerId, "access", null, Date.now() + 60000);
       try { store.command(admin, values.room, { id: crypto.randomUUID(), type: T.MEMBER_ADDED, data: { memberId: values.member, displayName: values.name, kind: values.kind, permissions: values.permissions ? values.permissions.split(",") : [] } }); }

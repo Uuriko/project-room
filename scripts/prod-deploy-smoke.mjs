@@ -81,6 +81,14 @@ if (sha && !/^[0-9a-f]{40}$/.test(sha)) {
   console.error("prod-deploy-smoke: --sha must be a full 40-character lowercase hex commit");
   process.exit(2);
 }
+// A non-numeric --wait-ms parses to NaN, which makes the --sha revision
+// wait's deadline NaN (Date.now() > NaN is always false), so the loop can
+// never time out and the CLI hangs forever on a typo. Reject up front,
+// before any network, like the other flag validations.
+if (!Number.isFinite(waitMs) || waitMs < 0) {
+  console.error("prod-deploy-smoke: --wait-ms must be a non-negative number of milliseconds");
+  process.exit(2);
+}
 
 // Cloudflare's bot rules treat a bare client differently from a browser.
 const UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36 project-room-deploy-smoke";
@@ -182,7 +190,11 @@ export async function checkAgentCardDoor({
   stats = null,
 }) {
   const started = now();
-  const deadline = started + Math.max(0, waitMs);
+  // A non-finite waitMs (e.g. NaN) makes the deadline NaN, and `now() >= NaN`
+  // is always false, so the door loop can never time out and the CLI hangs
+  // forever. Fail closed on the default window instead of hanging.
+  const effectiveWaitMs = Number.isFinite(waitMs) ? Math.max(0, waitMs) : 90000;
+  const deadline = started + effectiveWaitMs;
   let streak = 0;
   let attempt = 0;
   let staleFetches = 0;
@@ -209,7 +221,7 @@ export async function checkAgentCardDoor({
         // converges after the deadline must fail, not go green.
         if (now() >= deadline) {
           return done(
-            [...pending.slice(-8), `not converged: ${fetches} consecutive passing fetches completed after the ${waitMs}ms window closed (${attempt} fetches, ${staleFetches} stale)`],
+            [...pending.slice(-8), `not converged: ${fetches} consecutive passing fetches completed after the ${effectiveWaitMs}ms window closed (${attempt} fetches, ${staleFetches} stale)`],
             false,
           );
         }
@@ -223,7 +235,7 @@ export async function checkAgentCardDoor({
       staleFetches += 1;
       pending.push(...labelled);
       if (now() >= deadline) {
-        return done([...pending.slice(-8), `not converged: ${fetches} consecutive passing fetches not reached within ${waitMs}ms (${staleFetches} failing of ${attempt} fetches)`], false);
+        return done([...pending.slice(-8), `not converged: ${fetches} consecutive passing fetches not reached within ${effectiveWaitMs}ms (${staleFetches} failing of ${attempt} fetches)`], false);
       }
     }
     await sleepFn(gapMs);

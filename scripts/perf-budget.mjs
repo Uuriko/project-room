@@ -32,10 +32,11 @@ export const networkProfileFor = (width, mode = "auto") => mode === "none" ? nul
 
 export function parseArgs(argv) {
   const out = { origin: null, pages: [...DEFAULT_PAGES], viewports: [...DEFAULT_VIEWPORTS], cpu: 4, network: "auto", out: null };
+  const usage = message => { throw new UsageError(message); };
   for (let i = 0; i < argv.length; i += 1) {
     const key = argv[i];
     const value = argv[i + 1];
-    const need = () => { if (value === undefined || value.startsWith("--")) throw new Error(`${key} needs a value`); i += 1; return value; };
+    const need = () => { if (value === undefined || value.startsWith("--")) usage(`${key} needs a value`); i += 1; return value; };
     if (key === "--origin") out.origin = need().replace(/\/$/, "");
     else if (key === "--pages") out.pages = need().split(",").map(page => page.trim()).filter(Boolean);
     else if (key === "--viewport" || key === "--viewports") out.viewports = need().split(",").map(Number);
@@ -43,15 +44,19 @@ export function parseArgs(argv) {
     else if (key === "--network") out.network = need();
     else if (key === "--out") out.out = need();
     else if (key === "--help" || key === "-h") out.help = true;
-    else throw new Error(`unknown argument ${key}`);
+    else usage(`unknown argument ${key}`);
   }
-  if (out.origin && !/^https?:\/\//.test(out.origin)) throw new Error("--origin must be an http(s) origin");
-  if (!out.pages.length || out.pages.some(page => !page.startsWith("/"))) throw new Error("--pages takes paths that start with /");
-  if (!out.viewports.length || out.viewports.some(width => !Number.isInteger(width) || width < 200 || width > 3000)) throw new Error("--viewport takes widths in px, for example 390,1280");
-  if (!["auto", "none", "mobile", "desktop"].includes(out.network)) throw new Error("--network takes auto, none, mobile or desktop");
-  if (!Number.isFinite(out.cpu) || out.cpu < 1 || out.cpu > 20) throw new Error("--cpu takes a throttling rate from 1 to 20");
+  if (out.origin && !/^https?:\/\//.test(out.origin)) usage("--origin must be an http(s) origin");
+  if (!out.pages.length || out.pages.some(page => !page.startsWith("/"))) usage("--pages takes paths that start with /");
+  if (!out.viewports.length || out.viewports.some(width => !Number.isInteger(width) || width < 200 || width > 3000)) usage("--viewport takes widths in px, for example 390,1280");
+  if (!["auto", "none", "mobile", "desktop"].includes(out.network)) usage("--network takes auto, none, mobile or desktop");
+  if (!Number.isFinite(out.cpu) || out.cpu < 1 || out.cpu > 20) usage("--cpu takes a throttling rate from 1 to 20");
   return out;
 }
+
+// CLI usage errors (distinct from runtime failures): the entrypoint below
+// prints a usage line to stderr and exits 2, per the guild-06 convention.
+export class UsageError extends Error {}
 
 export async function startLocalServer() {
   const [{ RoomStore }, { createRoomServer }] = await Promise.all([import("../server/store.mjs"), import("../server/http.mjs")]);
@@ -133,7 +138,7 @@ async function sourceRevision(origin) {
 export async function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
   if (args.help) {
-    console.log("usage: node scripts/perf-budget.mjs [--origin URL] [--pages /,/about] [--viewport 390,1280] [--cpu 4] [--network auto|none|mobile|desktop] [--out file.json]");
+    console.log(USAGE);
     return 0;
   }
   const local = args.origin ? null : await startLocalServer();
@@ -158,6 +163,15 @@ export function chromiumAvailable(chromium) {
   return Boolean(path) && existsSync(path);
 }
 
+const USAGE = "usage: node scripts/perf-budget.mjs [--origin URL] [--pages /,/about] [--viewport 390,1280] [--cpu 4] [--network auto|none|mobile|desktop] [--out file.json]";
+
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  main().then(code => process.exit(code), error => { console.error(`perf-budget: ${error.message}`); process.exit(1); });
+  main().then(code => process.exit(code), error => {
+    if (error instanceof UsageError) {
+      process.stderr.write(`perf-budget: ${error.message}\n${USAGE}\n`);
+      process.exit(2);
+    }
+    console.error(`perf-budget: ${error.message}`);
+    process.exit(1);
+  });
 }

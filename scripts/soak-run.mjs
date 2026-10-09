@@ -13,6 +13,7 @@
 //            2 = harness error (could not boot the server, etc).
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { Agent, get } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,6 +38,7 @@ function bool(name, dflt) { const v = process.env[name]; return v === undefined 
 if (!Number.isFinite(cfg.durationS) || cfg.durationS < 5) fail(2, `SOAK_DURATION_S must be >= 5 (got ${cfg.durationS})`);
 if (!Number.isFinite(cfg.loadRps) || cfg.loadRps < 1 || cfg.loadRps > 500) fail(2, `SOAK_LOAD_RPS must be 1..500 (got ${cfg.loadRps})`);
 
+async function main() {
 const workdir = mkdirSync(join(tmpdir(), `soak-${process.pid}-${Date.now()}`), { recursive: true });
 const dbPath = join(workdir, "room.sqlite");
 const metricsPath = join(workdir, "metrics.ndjson");
@@ -84,7 +86,7 @@ child.stderr.on("data", (d) => process.stderr.write(`[server] ${d}`));
 let ready = false;
 const bootT0 = Date.now();
 try {
-  ready = await waitFor(() => unexpectedExit === null && probeReady(), 30_000, "server ready");
+  ready = await waitFor(() => unexpectedExit === null && probeReady(origin), 30_000, "server ready");
 } catch (e) {
   unexpectedExit = unexpectedExit || { code: null, signal: "boot-timeout" };
 }
@@ -110,7 +112,6 @@ let runCrashed = unexpectedExit !== null;
 
 if (ready) {
   const paths = ["/api/health", "/.well-known/agent-card.json", "/growth/health", "/"];
-  const { Agent, get } = await import("node:http");
   const agent = new Agent({ keepAlive: true, maxSockets: 32 });
   const endAt = Date.now() + cfg.durationS * 1000;
   let pathIdx = 0;
@@ -124,15 +125,7 @@ if (ready) {
     void hit(path);
   }
   function hit(path) {
-    return new Promise((resolve) => {
-      const req = get(origin + path, { agent }, (res) => {
-        stats.byStatus[res.statusCode] = (stats.byStatus[res.statusCode] || 0) + 1;
-        if (res.statusCode >= 200 && res.statusCode < 300) stats.ok2xx += 1;
-        res.resume(); res.on("end", resolve);
-      });
-      req.on("error", () => { stats.errors += 1; resolve(); });
-      req.setTimeout(10_000, () => { req.destroy(); stats.errors += 1; resolve(); });
-    });
+    return requestOnce(origin, path, agent, stats);
   }
 
   // Crash-recovery leg: kill -9 mid-run (not counted as a failure), restart the
@@ -152,7 +145,7 @@ if (ready) {
       child.kill("SIGKILL");
       await new Promise((r) => child.once("exit", r));
       child = respawn();
-      const ok = await waitFor(() => probeReady(), 30_000, "server re-ready").catch(() => false);
+      const ok = await waitFor(() => probeReady(origin), 30_000, "server re-ready").catch(() => false);
       const downtimeMs = Date.now() - killStartedAt;
       crashRecoveredAt = { ok, downtimeMs };
       if (ok) excludeWindows.push({ from: killStartedAt, to: Date.now() + WARMUP_MS, reason: "crash-recovery restart" });
@@ -183,10 +176,7 @@ if (ready) {
     const shutdownAt = Date.now();
     report.shutdownAt = shutdownAt;
     child.kill("SIGTERM");
-    const shutdownExit = await new Promise((r) => {
-      const to = setTimeout(() => { child.kill("SIGKILL"); }, 15_000);
-      child.once("exit", (code, signal) => { clearTimeout(to); r({ code, signal }); });
-    });
+    const shutdownExit = await waitForExit(child, 15_000);
     // Graceful SIGTERM shutdown ends with process.exit(0); anything else is a crash.
     if (shutdownExit.code !== 0 || shutdownExit.signal !== null) {
       runCrashed = true;
@@ -264,6 +254,16 @@ function respawn() {
   return c;
 }
 
+function finish() {
+  report.finishedAt = new Date().toISOString();
+  report.verdict = report.failures.length === 0 ? "pass" : "fail";
+  try { writeFileSync(reportPath, JSON.stringify(report, null, 2)); } catch { /* best effort */ }
+  console.log(`[soak] verdict=${report.verdict} report=${reportPath}`);
+  for (const f of report.failures) console.log(`[soak] FAIL: ${f}`);
+  process.exit(report.failures.length === 0 ? 0 : 1);
+}
+}
+
 async function waitFor(fn, timeoutMs, what) {
   const t0 = Date.now();
   for (;;) {
@@ -273,7 +273,7 @@ async function waitFor(fn, timeoutMs, what) {
   }
 }
 
-async function probeReady() {
+async function probeReady(origin) {
   try {
     const res = await fetch(`${origin}/api/health`, { signal: AbortSignal.timeout(2000) });
     return res.status < 500;
@@ -301,11 +301,74 @@ function fail(code, message) {
   process.exit(code);
 }
 
-function finish() {
-  report.finishedAt = new Date().toISOString();
-  report.verdict = report.failures.length === 0 ? "pass" : "fail";
-  try { writeFileSync(reportPath, JSON.stringify(report, null, 2)); } catch { /* best effort */ }
-  console.log(`[soak] verdict=${report.verdict} report=${reportPath}`);
-  for (const f of report.failures) console.log(`[soak] FAIL: ${f}`);
-  process.exit(report.failures.length === 0 ? 0 : 1);
+
+// ---- exported for unit tests ------------------------------------------------
+// One load-driver request. Records status/error counts into `stats`.
+// (Exported so the harness's own accounting is unit-testable; the CLI path
+// is unchanged.)
+export async function requestOnce(origin, path, agent, stats, timeoutMs = 10000) {
+  return new Promise((resolve) => {
+    // One request, one outcome: a late 'error' after 'end' (or after the
+    // timeout already fired) must not inflate the error count.
+    let settled = false;
+    const done = (isError) => {
+      if (settled) return;
+      settled = true;
+      if (isError) stats.errors += 1;
+      resolve();
+    };
+    const req = get(origin + path, { agent }, (res) => {
+      stats.byStatus[res.statusCode] = (stats.byStatus[res.statusCode] || 0) + 1;
+      if (res.statusCode >= 200 && res.statusCode < 300) stats.ok2xx += 1;
+      res.resume(); res.on("end", () => done(false));
+    });
+    req.on("error", () => done(true));
+    req.setTimeout(timeoutMs, () => { req.destroy(); done(true); });
+  });
+}
+
+// Wait for a child process to exit, SIGKILLing after `ms`. Resolves with the
+// { code, signal } pair. A child that already exited resolves immediately:
+// waiting on its "exit" event would hang forever (the event already fired).
+// (Exported for unit tests.)
+export function waitForExit(child, ms) {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return Promise.resolve({ code: child.exitCode, signal: child.signalCode });
+  }
+  return new Promise((resolve) => {
+    const to = setTimeout(() => { child.kill("SIGKILL"); }, ms);
+    child.once("exit", (code, signal) => { clearTimeout(to); resolve({ code, signal }); });
+  });
+}
+
+// ---- CLI entry ----------------------------------------------------------------
+// This harness takes no positional arguments: every knob is an env var (see
+// --help). Rejecting unknown flags here is load-bearing — without it, a typo
+// like `node scripts/soak-run.mjs --duratoin 5` would silently run the full
+// default 15-minute soak instead of failing fast.
+// (Kept behind the main-module guard so importing the module for unit tests
+// never parses argv or exits the process.)
+const SOAK_USAGE = "Usage: node scripts/soak-run.mjs [--help]";
+const SOAK_HELP =
+  `${SOAK_USAGE}\n\nQ007 soak harness — orchestrator. Boots the real server in a child\n` +
+  `process, applies sustained HTTP load, then evaluates memory growth,\n` +
+  `event-loop lag, file-descriptor growth, unhandled rejections, and crashes.\n` +
+  `Exit code: 0 = PASS, 1 = FAIL, 2 = harness error.\n\n` +
+  `All configuration is via environment:\n` +
+  `  SOAK_DURATION_S=900       soak length in seconds (>= 5)\n` +
+  `  SOAK_LOAD_RPS=10          request rate (1..500)\n` +
+  `  SOAK_MAX_HEAP_GROWTH_MB=25\n` +
+  `  SOAK_MAX_LAG_P99_MS=250\n` +
+  `  SOAK_MAX_FD_GROWTH=25\n` +
+  `  SOAK_CRASH_RECOVERY=0     SIGKILL mid-run and verify the server recovers\n` +
+  `  SOAK_CRASH_AT_S=300       when to SIGKILL (with SOAK_CRASH_RECOVERY=1)\n` +
+  `  SOAK_INJECT_LEAK=0        fault injection: growing memory leak\n` +
+  `  SOAK_INJECT_REJECTION=0   fault injection: unhandled rejection\n` +
+  `  SOAK_REPORT_PATH          report path (default: <workdir>/soak-report.json)\n`;
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  const argv = process.argv.slice(2);
+  if (argv.includes("--help") || argv.includes("-h")) { process.stdout.write(SOAK_HELP); process.exit(0); }
+  if (argv.length > 0) { process.stderr.write(`soak-run: unknown option "${argv[0]}"\n${SOAK_USAGE}\n`); process.exit(2); }
+  main().catch((e) => fail(2, e && e.message ? e.message : String(e)));
 }

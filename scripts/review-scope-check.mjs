@@ -25,7 +25,8 @@
 //   node scripts/review-scope-check.mjs --declared a.mjs,b.mjs --files-file <...>
 //   CI_CHANGED_FILES (newline-separated) overrides git when set outside CI.
 // Exit: 0 on success (verdict in the JSON report); 2 on drift with --strict;
-// 1 on usage errors.
+// 1 on usage errors, including unreadable input files and a failing git diff
+// (reported as one clean stderr line, never an uncaught stack trace).
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -76,8 +77,29 @@ export function matchScope(changedFiles, declaredFiles) {
 }
 
 function changedFilesFromGit(base, head) {
-  const out = execFileSync("git", ["diff", "--name-only", `${base}...${head}`], { cwd: root }).toString("utf8");
-  return out.split("\n").map(s => s.trim()).filter(Boolean);
+  try {
+    const out = execFileSync("git", ["diff", "--name-only", `${base}...${head}`], { cwd: root }).toString("utf8");
+    return out.split("\n").map(s => s.trim()).filter(Boolean);
+  } catch (error) {
+    const detail = String(error.stderr ?? error.message ?? error).trim().split("\n")[0];
+    failUsage(`git diff ${base}...${head} failed: ${detail}`);
+  }
+}
+
+// A bad input (missing file, a directory, a non-string flag value) is a
+// usage error, not a crash: report one line on stderr and exit 1, the
+// documented usage-error code, instead of an uncaught stack trace.
+function failUsage(message) {
+  console.error(`review-scope-check: ${message}`);
+  process.exit(1);
+}
+
+function readInputFile(flag, file) {
+  try {
+    return readFileSync(resolve(root, file), "utf8");
+  } catch (error) {
+    failUsage(`--${flag} ${file}: ${error.code ? `${error.code}: ` : ""}${error.message.split("\n")[0]}`);
+  }
 }
 
 function parseArgs(argv) {
@@ -93,7 +115,7 @@ function main() {
   const args = parseArgs(process.argv.slice(2));
   let changed;
   if (args["files-file"]) {
-    changed = readFileSync(resolve(root, args["files-file"]), "utf8").split("\n").map(s => s.trim()).filter(Boolean);
+    changed = readInputFile("files-file", args["files-file"]).split("\n").map(s => s.trim()).filter(Boolean);
   } else if (process.env.CI_CHANGED_FILES != null && !process.env.GITHUB_ACTIONS) {
     changed = process.env.CI_CHANGED_FILES.split("\n").map(s => s.trim()).filter(Boolean);
   } else if (args.base && args.head) {
@@ -103,7 +125,7 @@ function main() {
     process.exit(1);
   }
   let declared = [];
-  if (args["body-file"]) declared = parseDeclaredFiles(readFileSync(resolve(root, args["body-file"]), "utf8"));
+  if (args["body-file"]) declared = parseDeclaredFiles(readInputFile("body-file", args["body-file"]));
   if (args.declared) declared = declared.concat(String(args.declared).split(",").map(normalizePath).filter(Boolean));
   declared = [...new Set(declared)];
   const report = {

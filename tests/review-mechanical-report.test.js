@@ -165,3 +165,13 @@ test("actual completed-run report binds conclusions to the tested head and suppr
   const stale=executeReportJob(t,workflow.jobs.full,{CURRENT_FIXTURE_HEAD:"newer-sha"});
   assert.equal(stale.env.HEAD_MISMATCH,"true"); assert.deepEqual(stale.reports,[]);
 });
+
+test("CLI requires --scope-json: clean usage error, no stack trace (guild-06 fuzz)", () => {
+  const script = new URL("../scripts/review-mechanical-report.mjs", import.meta.url);
+  for (const args of [[], ["--help"], ["--bogus-flag-xyz"], ["--annotations"]]) {
+    const r = spawnSync(process.execPath, [script.pathname, ...args], { encoding: "utf8", timeout: 15000 });
+    assert.notEqual(r.status, 0, `expected nonzero exit for [${args.join(" ")}]`);
+    assert.doesNotMatch(r.stderr, /^\s*at\s/m, `no stack trace for [${args.join(" ")}]: ${r.stderr.slice(0, 200)}`);
+    assert.match(r.stderr, /Usage:/i, `usage on stderr for [${args.join(" ")}]`);
+  }
+});

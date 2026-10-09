@@ -283,6 +283,13 @@ describe("mergeEventLists", () => {
       { sequence: 5, body: "x" },
     ]);
   });
+
+  it("skips corrupt non-object entries instead of crashing", () => {
+    assert.deepEqual(
+      mergeEventLists([null, "nope", 42, { sequence: 2, body: "b" }], [undefined]),
+      [{ sequence: 2, body: "b" }]
+    );
+  });
 });
 
 describe("spill round-trip", () => {

@@ -92,7 +92,10 @@ export async function startAssistedAgentExercise() {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  if (process.argv.length > 2) throw new Error('Run this fixture without arguments. Stop it to remove its temporary room and credentials.');
+  if (process.argv.length > 2) {
+    process.stderr.write("Usage: node scripts/assisted-agent-exercise.mjs (no arguments). Stop it to remove its temporary room and credentials.\n");
+    process.exit(2);
+  }
   const fixture = await startAssistedAgentExercise();
   const stop = () => { void fixture.close().catch(() => { console.error('Local fixture cleanup failed.'); process.exitCode = 1; }); };
   process.once('SIGINT', stop);

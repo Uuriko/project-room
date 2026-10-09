@@ -14,6 +14,14 @@ import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
 import { createMagicLinkMailer } from "../server/magic-links.mjs";
 
+// Browser journey: takes no CLI arguments (CI runs it as `node --test` with
+// none). An unexpected flag is a typo — fail closed before launching chromium.
+const cliArgs = process.argv.slice(2);
+if (cliArgs.length > 0) {
+  process.stderr.write("Usage: node --test scripts/invitation-check.mjs\n");
+  process.exit(2);
+}
+
 const fixtureLogins = new Map();
 const fixtureDelivery = new Map();
 

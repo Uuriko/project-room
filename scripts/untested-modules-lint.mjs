@@ -81,6 +81,11 @@ export function findUntested(serverDir, testDir) {
 
 const isMain = !!process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
 if (isMain) {
+  const extra = process.argv.slice(2);
+  if (extra.length > 0) {
+    process.stderr.write(`Usage: node scripts/untested-modules-lint.mjs (takes no options; got: ${extra.join(" ")})\n`);
+    process.exit(2);
+  }
   const { modules, untested } = findUntested(join(root, "server"), join(root, "tests"));
   const fresh = untested.filter(name => !GRANDFATHERED.includes(name));
   const stale = GRANDFATHERED.filter(name => !untested.includes(name));

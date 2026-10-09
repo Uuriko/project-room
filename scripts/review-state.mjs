@@ -194,15 +194,31 @@ function asMarkdown(states, routing) {
   ].join("\n");
 }
 
+function readJsonArg(path, flag) {
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch (e) {
+    console.error(`review-state: cannot parse ${flag} ${path}: ${String(e.message).split("\n")[0]}`);
+    process.exit(2);
+  }
+}
+
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) {
+  const cliArgs = process.argv.slice(2);
+  const knownFlags = new Set(["--repo", "--lanes", "--assign-file", "--input", "--format", "--author-lanes", "--help"]);
+  const unknownFlags = cliArgs.filter((a) => a.startsWith("--") && !knownFlags.has(a));
+  if (cliArgs.includes("--help") || unknownFlags.length) {
+    console.error("Usage: node scripts/review-state.mjs [--repo Uuriko/project-room] [--lanes fo,instinct] [--assign-file assignments.json] [--input fixture.json] [--format json|md] [--author-lanes lanes.json]");
+    process.exit(2);
+  }
   const input = argValue("--input");
-  const fixture = input ? JSON.parse(readFileSync(input, "utf8")) : fetchLive();
+  const fixture = input ? readJsonArg(input, "--input") : fetchLive();
   const lanes = (argValue("--lanes") || "").split(",").map((s) => s.trim()).filter(Boolean).map((name) => ({ name }));
   const assignFile = argValue("--assign-file");
-  const prior = assignFile && existsSync(assignFile) ? JSON.parse(readFileSync(assignFile, "utf8")) : {};
+  const prior = assignFile && existsSync(assignFile) ? readJsonArg(assignFile, "--assign-file") : {};
 
   const authorLanesFile = argValue("--author-lanes");
-  const authorLanes = authorLanesFile ? JSON.parse(readFileSync(authorLanesFile, "utf8")) : {};
+  const authorLanes = authorLanesFile ? readJsonArg(authorLanesFile, "--author-lanes") : {};
   const attributed = { ...fixture, prs: fixture.prs.map(pr => ({ ...pr, authorLane: authorLanes[pr.number] ?? pr.authorLane ?? null })) };
   const states = analyzeReviewState(attributed);
   const routing = routeReviews(states, lanes, prior);

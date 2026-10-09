@@ -16,19 +16,38 @@ const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const listen = (server, protocol = 'http') => new Promise((resolve, reject) => {
   server.once('error', reject); server.listen(0, '127.0.0.1', () => resolve(`${protocol}://127.0.0.1:${server.address().port}`));
 });
-const mode = process.argv[2];
-if (mode === 'publish') {
-  const config = JSON.parse(readFileSync(process.argv[3], 'utf8'));
-  if (config.fixture !== 'project-room-real-agent-v1' || config.memberId !== 'producer') throw new Error('Producer fixture configuration required');
-  const url = new URL(config.artifactOrigin);
+// Publishes an artifact file for the real-agent fixture. Throws plain Errors
+// (no stacks) for every input/config problem; the CLI maps them to exit 2.
+function publishArtifact(configPath, artifactPath) {
+  if (!configPath || !artifactPath) throw new Error('publish needs a producer config path and an artifact path');
+  let config;
+  try { config = JSON.parse(readFileSync(configPath, 'utf8')); }
+  catch { throw new Error(`cannot read producer config: ${configPath}`); }
+  if (config?.fixture !== 'project-room-real-agent-v1' || config?.memberId !== 'producer') throw new Error('Producer fixture configuration required');
+  if (typeof config.artifactOrigin !== 'string' || !config.artifactOrigin) throw new Error('config.artifactOrigin must be a nonempty string');
+  let url;
+  try { url = new URL(config.artifactOrigin); } catch { throw new Error(`config.artifactOrigin is not a valid URL: ${config.artifactOrigin}`); }
   if (url.origin !== config.artifactOrigin || url.hostname !== '127.0.0.1' || url.protocol !== 'https:') throw new Error('HTTPS loopback artifact origin required');
-  const bytes = readFileSync(resolve(process.argv[4]));
+  if (typeof config.artifactDirectory !== 'string' || !config.artifactDirectory) throw new Error('config.artifactDirectory must be a nonempty string');
+  let bytes;
+  try { bytes = readFileSync(resolve(artifactPath)); } catch { throw new Error(`cannot read artifact: ${artifactPath}`); }
   if (!bytes.length || bytes.length > 64000) throw new Error('Use a nonempty Markdown artifact under 64 KB');
   const hash = digest(bytes), path = join(config.artifactDirectory, `${hash}.md`);
   if (existsSync(path)) {
     if (digest(readFileSync(path)) !== hash) throw new Error('Existing artifact bytes disagree');
   } else writeFileSync(path, bytes, { flag: 'wx', mode: 0o600 }); // Publish the exact bytes that were hashed.
   console.log(JSON.stringify({ evidenceUrl: `${url.origin}/${hash}.md`, evidenceVersion: `sha256:${hash}`, bytes: bytes.length }));
+}
+
+const mode = process.argv[2];
+if (mode === 'publish') {
+  try {
+    publishArtifact(process.argv[3], process.argv[4]);
+  } catch (e) {
+    // Input/config errors are usage errors: clean message, no stack trace.
+    process.stderr.write(`real-agent-fixture: ${e.message}\nUsage: node scripts/real-agent-fixture.mjs publish PRODUCER-CONFIG ARTIFACT.md\n`);
+    process.exit(2);
+  }
 } else if (mode === 'serve' || mode === 'serve-context') {
   const contextExercise = mode === 'serve-context';
   process.umask(0o077);
@@ -83,4 +102,7 @@ if (mode === 'publish') {
     if (existsSync(artifactKeyFile)) unlinkSync(artifactKeyFile);
   };
   process.on('SIGINT', stop); process.on('SIGTERM', stop);
-} else throw new Error('Use serve, serve-context, or publish PRODUCER-CONFIG ARTIFACT.md');
+} else {
+  process.stderr.write("Usage: node scripts/real-agent-fixture.mjs <serve|serve-context|publish> PRODUCER-CONFIG ARTIFACT.md\n");
+  process.exit(2);
+}

@@ -84,6 +84,10 @@ function parseArgs(argv) {
 
 function main() {
   const args = parseArgs(process.argv.slice(2));
+  if (!args["scope-json"]) {
+    process.stderr.write("Usage: node scripts/review-mechanical-report.mjs --scope-json <scope.json> [--annotations] [--stage <stage> --pr <n> --head <sha> --lint <file> --tests <file> --additions <n> --deletions <n>]\n");
+    process.exit(2);
+  }
   const scope = JSON.parse(readFileSync(resolve(root, args["scope-json"]), "utf8"));
   if (args.annotations) {
     for (const line of driftAnnotations(scope)) process.stdout.write(line + "\n");

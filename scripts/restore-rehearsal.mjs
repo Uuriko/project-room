@@ -13,6 +13,14 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { backupRoom, reconcileRestoredAuthority } from "../server/backup.mjs";
 
+// The rehearsal takes no arguments: an unexpected flag is a typo, not an
+// option. Fail closed with a usage line instead of silently running the drill.
+const cliArgs = process.argv.slice(2);
+if (cliArgs.length > 0) {
+  process.stderr.write("Usage: node scripts/restore-rehearsal.mjs\n");
+  process.exit(2);
+}
+
 const directory = mkdtempSync(join(tmpdir(), "room-restore-rehearsal-"));
 const backupDest = mkdtempSync(join(tmpdir(), "room-backup-dest-"));
 try {

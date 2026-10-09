@@ -14,6 +14,14 @@ import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
 
+// Browser journey: takes no CLI arguments (CI runs it as `node --test` with
+// none). An unexpected flag is a typo — fail closed before launching chromium.
+const cliArgs = process.argv.slice(2);
+if (cliArgs.length > 0) {
+  process.stderr.write("Usage: node --test scripts/pinned-messages-browser-check.mjs\n");
+  process.exit(2);
+}
+
 // UI calming #2 moved Pin/Unpin into the per-message "⋯" overflow menu;
 // open it first, exactly as a member does.
 async function openPinMenu(row) {

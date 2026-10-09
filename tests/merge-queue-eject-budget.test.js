@@ -18,8 +18,8 @@
 //    enforces on tests/quarantine.json.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -264,6 +264,32 @@ test("pruneAged: drops ejects far outside the window, keeps proposals", () => {
 
 test("BUDGET_DEFAULTS: 3 ejects in a 24h rolling window", () => {
   assert.deepEqual(BUDGET_DEFAULTS, { max_ejects: 3, window_hours: 24 });
+});
+
+test("CLI --merge-ledgers with missing file args exits 2 with usage, no stack trace (guild-06 fuzz)", () => {
+  const script = path.join(here, "..", "scripts", "merge-queue-eject-budget.mjs");
+  for (const args of [["--merge-ledgers"], ["--merge-ledgers", "a.json"]]) {
+    const r = spawnSync("node", [script, ...args], { encoding: "utf8", timeout: 15000 });
+    assert.equal(r.status, 2, `expected exit 2 for ${args.join(" ")}, got ${r.status}: ${r.stderr}`);
+    assert.match(r.stderr, /Usage:/i, "usage goes to stderr");
+    assert.doesNotMatch(r.stderr, /^\s*at\s/m, "no stack trace on usage error");
+  }
+});
+
+test("CLI --merge-ledgers merges two ledgers end to end", () => {
+  const script = path.join(here, "..", "scripts", "merge-queue-eject-budget.mjs");
+  const dir = mkdtempSync(path.join(tmpdir(), "eject-budget-cli-"));
+  const a = emptyLedger();
+  recordEject(a, { pr: "123", ...eject(NOW - 2 * HOUR, "sha-a") });
+  const b = emptyLedger();
+  recordEject(b, { pr: "123", ...eject(NOW - HOUR, "sha-b") });
+  const fa = path.join(dir, "a.json"), fb = path.join(dir, "b.json"), out = path.join(dir, "out.json");
+  writeFileSync(fa, JSON.stringify(a));
+  writeFileSync(fb, JSON.stringify(b));
+  const r = spawnSync("node", [script, "--merge-ledgers", fa, fb, out], { encoding: "utf8", timeout: 15000 });
+  assert.equal(r.status, 0, `expected exit 0, got ${r.status}: ${r.stderr}`);
+  const merged = JSON.parse(readFileSync(out, "utf8"));
+  assert.deepEqual(merged.ejects["123"].map((e) => e.sha).sort(), ["sha-a", "sha-b"]);
 });
 
 test("mergeLedgers: unions concurrent ledger updates without double-counting", () => {

@@ -18,13 +18,24 @@ if (!base || !Number.isFinite(maxMs) || maxMs <= 0) {
   process.exit(1);
 }
 
-const url = new URL(path, base).href;
+let url;
+try {
+  url = new URL(path, base).href;
+} catch {
+  process.stderr.write(`Error: --base is not a valid base URL: ${JSON.stringify(base)}\n`);
+  process.stderr.write("Usage: node scripts/cold-start-probe.mjs --base URL [--path /api/version] [--max-ms 2000]\n");
+  process.exit(2);
+}
 const started = performance.now();
 let status = 0;
 let body = "";
 let error = null;
 try {
-  const response = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(15000), headers: { "cache-control": "no-store" } });
+  // W24: the hang-guard abort used to be hardcoded at 15s, so a raised
+  // --max-ms budget (e.g. 20000) could never pass — the fetch aborted at 15s
+  // and the probe failed inside its own stated budget. Scale the guard with
+  // the budget instead; default behavior (2000ms budget) is unchanged.
+  const response = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(Math.max(15000, maxMs + 1000)), headers: { "cache-control": "no-store" } });
   status = response.status;
   body = await response.text();
 } catch (caught) {

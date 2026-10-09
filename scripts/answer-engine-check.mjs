@@ -393,15 +393,36 @@ export async function runAnswerCheck({
   return { exitCode: failed ? 1 : 0, lines, report, summaryPath, rawPath };
 }
 
+function usage() {
+  return [
+    "Usage: node scripts/answer-engine-check.mjs [--out-dir <dir>] [--date YYYY-MM-DD] [--help]",
+    "",
+    "Weekly check: the same prompts go to ChatGPT, Claude, Perplexity, and Grok.",
+    "A missing key skips that engine; exits 0 when nothing was called.",
+    "Exit codes: 0 = ok, 1 = an engine call failed, 2 = usage/config error.",
+  ].join("\n");
+}
+
+function usageError(message) {
+  process.stderr.write(`answer-engine-check: ${message}\n${usage()}\n`);
+  process.exit(2);
+}
+
 function parseArgs(argv) {
   const opts = { outDir: "." };
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--out-dir") opts.outDir = argv[++i] ?? ".";
-    else if (argv[i] === "--date") {
+    const arg = argv[i];
+    if (arg === "--help" || arg === "-h") {
+      process.stdout.write(`${usage()}\n`);
+      process.exit(0);
+    } else if (arg === "--out-dir") opts.outDir = argv[++i] ?? ".";
+    else if (arg === "--date") {
       const day = argv[++i] ?? "";
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error("--date must be YYYY-MM-DD");
-      opts.now = new Date(`${day}T00:00:00Z`);
-    }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) usageError("--date must be YYYY-MM-DD");
+      const when = new Date(`${day}T00:00:00Z`);
+      if (Number.isNaN(when.getTime())) usageError(`--date is not a real calendar date: ${day}`);
+      opts.now = when;
+    } else usageError(`unknown option: ${arg}`);
   }
   return opts;
 }
@@ -412,11 +433,21 @@ async function main() {
   process.exit(result.exitCode);
 }
 
+// W3-F4 follow-up: the crash path must never throw. loadPromptConfig() can
+// fail on its own (missing/corrupt prompts JSON); letting it throw inside the
+// catch handler masks the original error as an unhandled rejection.
+export function loadCrashSecrets(loadConfig = loadPromptConfig) {
+  try {
+    return Object.values(loadConfig().engines ?? {}).map(engine => process.env[engine.secret]);
+  } catch {
+    return [];
+  }
+}
+
 const isMain = !!process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
 if (isMain) main().catch(error => {
   // W3-F4: build the redaction list from the same config the check uses, so
   // a new engine's secret can never drift out of the crash-path redaction.
-  const secrets = Object.values(loadPromptConfig().engines ?? {}).map(engine => process.env[engine.secret]);
-  console.error(redact(error?.message ?? error, secrets));
+  console.error(redact(error?.message ?? error, loadCrashSecrets()));
   process.exit(1);
 });

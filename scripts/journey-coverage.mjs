@@ -20,7 +20,7 @@ export function parseCoverageMap(markdown) {
 // array and tests exact membership: the old string form allowed substring
 // false-negatives ("scripts/check.mjs" matching "scripts/other-check.mjs").
 export function parseBrowserSuite(script) {
-  return [...new Set(String(script || "").match(/scripts\/[A-Za-z0-9_.-]+\.mjs/g) ?? [])];
+  return [...new Set(String(script || "").match(/scripts\/[A-Za-z0-9_.\/-]+\.mjs/g) ?? [])];
 }
 
 export function checkCoverage(map, { exists = existsSync, browserSuite = [] } = {}) {

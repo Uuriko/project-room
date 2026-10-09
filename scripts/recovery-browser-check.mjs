@@ -45,7 +45,13 @@ test('actual Node entrypoint pauses without touching populated data, then resume
   await page.locator('#main').waitFor({ state: 'visible' });
   assert.equal(fixture.store.room('commons').sequence, fixture.cursor);
   const after = auditRecovery(fixture.store);
-  assert.deepEqual(after.tables.filter(row => row.table !== 'credentials'), before.tables.filter(row => row.table !== 'credentials'));
+  // Boot housekeeping, not room data: a resumed boot runs eager cold-start
+  // integrity and initializes the public read-model backfill cursor, so these
+  // tables gain rows the paused boot never wrote. The paused assertion above
+  // already pins "no writes while paused"; here only room data must be stable.
+  const housekeeping = new Set(["integrity_snapshot", "integrity_job_cursor", "integrity_room_state", "public_read_model_backfill"]);
+  const roomData = row => row.table !== 'credentials' && !housekeeping.has(row.table);
+  assert.deepEqual(after.tables.filter(roomData), before.tables.filter(roomData));
   await page.screenshot({ path: 'test-results/recovery-resumed-desktop.png' });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });

@@ -81,8 +81,12 @@ export async function startHelperAgentExercise({ humanReviewer = false } = {}) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  if (process.argv.length !== 3) throw new Error("Supply one new evidence file; this fixture never opens an existing room.");
-  const evidenceFile = resolve(process.argv[2]), fd = openSync(evidenceFile, "wx", 0o600);
+  const outArg = process.argv[2];
+  if (process.argv.length !== 3 || !outArg || outArg.startsWith("-")) {
+    process.stderr.write("Usage: node scripts/helper-agent-exercise.mjs <new-evidence-file>\n");
+    process.exit(2);
+  }
+  const evidenceFile = resolve(outArg), fd = openSync(evidenceFile, "wx", 0o600);
   let fixture, closing = false;
   try {
     fixture = await startHelperAgentExercise();

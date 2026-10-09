@@ -1,5 +1,5 @@
 // Synthetic same-room participation, never a hosted runner or external workspace.
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -64,12 +64,32 @@ export async function startWorkLifecycleFixture() {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  if (process.argv.length !== 3) throw new Error("Provide one NEW evidence JSON path. This fixture never reads an existing room.");
-  const evidenceFile = resolve(process.argv[2]), fixture = await startWorkLifecycleFixture(); let closing = false;
+  const outArg = process.argv[2];
+  if (process.argv.length !== 3 || !outArg || outArg.startsWith("-")) {
+    process.stderr.write("Usage: node scripts/work-lifecycle-agent-fixture.mjs <new-evidence-file>\n");
+    process.exit(2);
+  }
+  const evidenceFile = resolve(outArg);
+  if (existsSync(evidenceFile)) {
+    // Fail fast: the evidence write below uses flag "wx" and refuses to
+    // overwrite, so an existing path could never succeed — don't start the
+    // fixture just to crash on SIGTERM with an EEXIST stack trace.
+    process.stderr.write(`work-lifecycle-agent-fixture: evidence file already exists, refusing to overwrite: ${evidenceFile}\n`);
+    process.exit(2);
+  }
+  const fixture = await startWorkLifecycleFixture(); let closing = false;
   const stop = async () => {
     if (closing) return; closing = true;
-    try { writeFileSync(evidenceFile, JSON.stringify(fixture.evidence(), null, 2), { flag: "wx", mode: 0o600 }); console.log(JSON.stringify({ evidenceFile })); }
-    finally { await fixture.close(); }
+    try {
+      writeFileSync(evidenceFile, JSON.stringify(fixture.evidence(), null, 2), { flag: "wx", mode: 0o600 });
+      console.log(JSON.stringify({ evidenceFile }));
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      // Racy twin of the pre-flight check above: the file appeared after
+      // startup. Report it cleanly instead of an unhandled rejection stack.
+      process.stderr.write(`work-lifecycle-agent-fixture: evidence file already exists, refusing to overwrite: ${evidenceFile}\n`);
+      process.exitCode = 2;
+    } finally { await fixture.close(); }
   };
   process.once("SIGINT", () => { void stop(); }); process.once("SIGTERM", () => { void stop(); });
   console.log(JSON.stringify({ manifestFile: fixture.manifestFile, ownerFile: fixture.ownerFile, origin: fixture.origin }));

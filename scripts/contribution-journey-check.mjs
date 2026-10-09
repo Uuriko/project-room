@@ -18,7 +18,7 @@ for (const touch of [false, true]) test(`contribution journey ${touch ? "touch" 
     f.store.close(); rmSync(f.directory, { recursive: true, force: true });
   });
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
   const context = await browser.newContext({ viewport: touch ? { width: 390, height: 844 } : { width: 1280, height: 900 }, isMobile: touch, hasTouch: touch, reducedMotion: "reduce" });
   const origin = `http://127.0.0.1:${server.address().port}`, errors = [];
   context.on("page", page => { page.setDefaultTimeout(8000); page.on("pageerror", error => errors.push(error.message)); });

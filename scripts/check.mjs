@@ -1,6 +1,12 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+// Every path below is relative to the repository root: anchor there no
+// matter which directory the script was invoked from, instead of crashing
+// with a raw ENOENT stack trace at module load.
+process.chdir(fileURLToPath(new URL("..", import.meta.url)));
 
 // Fail fast with a clear message on old Node (task #42): package.json
 // declares engines >=24.19.0, and npm only warns without engine-strict.

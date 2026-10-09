@@ -141,8 +141,13 @@ export function checkEligibility(ctx, roomId, claim) {
     return { ...base, eligible: false, reason: "not_opted_in" };
   }
   // backfill_done is forever-terminal: the claim has exactly one herdr pane.
-  // backfill_aborted is retryable on a later run (resumability); a dangling
-  // backfill_start without a terminal row is crash-recovered in executeOne.
+  // backfill_aborted is retryable on a later run (resumability). An open
+  // herdr_sessions row without a backfill_done row (e.g. a dangling
+  // backfill_start from a crashed run) is treated as already-migrated: the
+  // pane exists, so the claim is skipped and never double-spawned. (W24:
+  // executeOne() used to carry a pane-liveness crash-recovery block for this
+  // case, but it was unreachable — this predicate short-circuits first — so
+  // it was removed as dead code.)
   if (journalDone(db, roomId, claim.id) || openSession(db, roomId, claim.id)) {
     return { ...base, eligible: false, reason: "already_migrated" };
   }
@@ -257,55 +262,50 @@ export function createBackfillExecutor(opts) {
       journal(db, now, { kind: "backfill_skipped", roomId, claimId, detail: { reason: elig.reason } });
       return { claimId, outcome: "skipped", reason: elig.reason };
     }
-    // Crash recovery: an intent row without a terminal row means the last run
-    // died mid-claim. If the pane is alive and linked, complete the linkage;
-    // otherwise clean up the half-spawn and respawn below.
-    let sessionId = null;
+    // W24: the pane-liveness crash-recovery block that used to sit here
+    // (existing open session -> probe paneAlive -> complete linkage or close
+    // + respawn, plus the concurrent-attach winner guard) was unreachable:
+    // checkEligibility() above already returns already_migrated for any claim
+    // with an open herdr_sessions row, so `existing` was always null and
+    // ctx.bridge.paneAlive was never consulted. Removed as dead code; the
+    // open-session-means-migrated contract is pinned by
+    // tests/herdr-backfill.test.js ("already-herdr claim (open session row)
+    // is skipped, never re-spawned").
     const started = db.prepare(`SELECT seq FROM herdr_session_journal
       WHERE idempotency_key = ? AND kind = 'backfill_start' ORDER BY seq DESC LIMIT 1`)
       .get(idempotencyKey(roomId, claimId));
-    const existing = openSession(db, roomId, claimId);
-    if (existing && ctx.bridge.paneAlive(existing.session_id)) {
-      sessionId = existing.session_id; // complete the linkage, no new pane
-    } else if (existing) {
-      db.prepare(`UPDATE herdr_sessions SET status = 'closed' WHERE session_id = ?`)
-        .run(existing.session_id);
-      journal(db, now, { kind: "backfill_start", roomId, claimId, sessionId: existing.session_id,
-        detail: { note: "half-spawned pane dead; respawning" } });
+    if (!started) {
+      journal(db, now, { kind: "backfill_start", roomId, claimId,
+        detail: { memberId: claim.owner, claimState: claim.state } });
     }
-    if (!sessionId) {
-      if (!started || existing) {
-        journal(db, now, { kind: "backfill_start", roomId, claimId,
-          detail: { memberId: claim.owner, claimState: claim.state } });
-      }
-      // Adapter-constructed spawn: the bridge owns argv construction from the
-      // allowlisted agent kind (risk-review fencing). Never caller argv.
-      let spawn;
-      try {
-        spawn = ctx.bridge.spawnAgent({
-          agentKind: ctx.agentKindFor(claim.owner),
-          resumeSessionRef: planItem.resumeSessionRef ?? null,
-          metadata: { room_id: roomId, claim_id: claimId, member_id: claim.owner, backfill: "true" },
-        });
-      } catch (err) {
-        journal(db, now, { kind: "backfill_aborted", roomId, claimId,
-          detail: { reason: "spawn_failed", error: String(err && err.message || err) } });
-        return { claimId, outcome: "aborted", reason: "spawn_failed" };
-      }
-      sessionId = spawn.sessionId;
-      // Guard against a concurrent attach winning the race: one open session
-      // per claim, enforced here (code-level; journal is the authority).
-      const winner = openSession(db, roomId, claimId);
-      if (winner && winner.session_id !== sessionId) {
-        journal(db, now, { kind: "backfill_aborted", roomId, claimId, sessionId,
-          detail: { reason: "concurrent_attach_won", winner: winner.session_id } });
-        return { claimId, outcome: "aborted", reason: "concurrent_attach_won" };
-      }
-      db.prepare(`INSERT OR IGNORE INTO herdr_sessions
-        (session_id, room_id, member_id, claim_id, backend, attached_at, status)
-        VALUES (?, ?, ?, ?, 'herdr', ?, 'open')`)
-        .run(sessionId, roomId, claim.owner, claimId, nowIso(now));
+    // Adapter-constructed spawn: the bridge owns argv construction from the
+    // allowlisted agent kind (risk-review fencing). Never caller argv.
+    let spawn;
+    try {
+      spawn = ctx.bridge.spawnAgent({
+        agentKind: ctx.agentKindFor(claim.owner),
+        resumeSessionRef: planItem.resumeSessionRef ?? null,
+        metadata: { room_id: roomId, claim_id: claimId, member_id: claim.owner, backfill: "true" },
+      });
+    } catch (err) {
+      journal(db, now, { kind: "backfill_aborted", roomId, claimId,
+        detail: { reason: "spawn_failed", error: String(err && err.message || err) } });
+      return { claimId, outcome: "aborted", reason: "spawn_failed" };
     }
+    // W24: a bridge that returns no usable sessionId must journal
+    // backfill_aborted, never backfill_done — the done row is
+    // forever-terminal, and an uncaught bind throw here used to kill the run
+    // with no journal row at all (per-claim contract: abort + exit 1).
+    if (!spawn || typeof spawn.sessionId !== "string" || spawn.sessionId === "") {
+      journal(db, now, { kind: "backfill_aborted", roomId, claimId,
+        detail: { reason: "spawn_invalid", note: "bridge returned no usable sessionId" } });
+      return { claimId, outcome: "aborted", reason: "spawn_invalid" };
+    }
+    const sessionId = spawn.sessionId;
+    db.prepare(`INSERT OR IGNORE INTO herdr_sessions
+      (session_id, room_id, member_id, claim_id, backend, attached_at, status)
+      VALUES (?, ?, ?, ?, 'herdr', ?, 'open')`)
+      .run(sessionId, roomId, claim.owner, claimId, nowIso(now));
     // History-append, with the compat-plan invariant enforced: the claim's
     // public state (state / owner / claimedAt) must be byte-identical after.
     const fenced = { state: claim.state, owner: claim.owner, claimedAt: claim.claimedAt };

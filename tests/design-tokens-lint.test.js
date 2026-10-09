@@ -148,3 +148,28 @@ test("current tree has no new violations against the baseline", () => {
   assert.deepEqual(added, []);
   assert.deepEqual(removed, []);
 });
+
+test("rawFontSizeValue flags CSS-escaped property names", () => {
+  // `\73 ` is the CSS escape for `s` — the browser reads this as font-size,
+  // so the ratchet must too (fail closed).
+  assert.equal(rawFontSizeValue("  font-\\73ize: 16px;"), "16px");
+  assert.equal(rawFontSizeValue("  \\46 ont-size: var(--text-sm);"), null);
+  assert.equal(rawFontSizeValue("  FONT-\\53 IZE: 1rem;"), "1rem");
+});
+
+test("rawFontShorthandValue flags CSS-escaped shorthand names", () => {
+  assert.equal(rawFontShorthandValue("  fo\\6E t: 16px/1.5 serif;"), "16px");
+  assert.equal(rawFontShorthandValue("  \\66 ont: inherit;"), null);
+});
+
+test("hexHits flags hex colors spelled with CSS escapes", () => {
+  // `#\66 f0000` is #ff0000 to the renderer (CSS Syntax §4.3.7).
+  assert.deepEqual(hexHits("  color: #\\66 f0000;"), ["#ff0000"]);
+  assert.deepEqual(hexHits("  color: #f\\30 0;"), ["#f00"]);
+});
+
+test("hexHits does not treat an escaped hash as a color", () => {
+  // `\#` is an identifier escape, not a color token — matching it would
+  // false-positive on `url(\#id)` fragment references.
+  assert.deepEqual(hexHits("  background: url(\\#section);"), []);
+});

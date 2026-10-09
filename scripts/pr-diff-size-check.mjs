@@ -70,17 +70,22 @@ function countedLines(numstat) {
 
 function findJustification(prBody) {
   const lines = String(prBody || "").split("\n");
-  const headingRe = /^\s*#{0,6}\s*large\s+diff\s+justification\b\s*:?\s*$/i;
-  let start = -1;
+  // Justification text may sit on the heading line itself ("## Large diff
+  // justification: <reason>") or on the lines after it; both count.
+  const headingRe = /^\s*#{0,6}\s*large\s+diff\s+justification\b\s*:?\s*(.*)$/i;
+  let start = -1, first = "";
   for (let i = 0; i < lines.length; i++) {
-    if (headingRe.test(lines[i])) {
+    const m = lines[i].match(headingRe);
+    if (m) {
       start = i + 1;
+      first = m[1];
       break;
     }
   }
   if (start === -1) return null;
   // Justification runs to the next markdown heading or the end of the body.
   const content = [];
+  if (first.trim()) content.push(first);
   for (let i = start; i < lines.length; i++) {
     if (/^\s*#{1,6}\s+\S/.test(lines[i])) break;
     content.push(lines[i]);
@@ -125,15 +130,40 @@ export function checkDiffSize({ numstat, prBody, threshold } = {}) {
   };
 }
 
+const USAGE = `usage: node pr-diff-size-check.mjs --base <sha> --head <sha> [--body <text>|--body-b64 <b64>|--body-file <path>]
+       or set BASE_SHA, HEAD_SHA, PR_BODY / PR_BODY_B64 env vars.`;
+
+function usageError(message) {
+  process.stderr.write(`${message}\n${USAGE}\n`);
+  process.exit(2);
+}
+
+const VALUE_FLAGS = new Set(["--base", "--head", "--body", "--body-b64", "--body-file"]);
+
 function parseArgs(argv) {
   const out = {};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    if (arg === "--base") out.base = argv[++i];
-    else if (arg === "--head") out.head = argv[++i];
-    else if (arg === "--body") out.body = argv[++i];
-    else if (arg === "--body-b64") out.body = Buffer.from(argv[++i], "base64").toString("utf8");
-    else if (arg === "--body-file") out.body = readFileSync(argv[++i], "utf8");
+    if (arg === "--help" || arg === "-h") {
+      console.log(USAGE);
+      process.exit(0);
+    }
+    if (!VALUE_FLAGS.has(arg)) usageError(`unknown option: ${arg}`);
+    const value = argv[i + 1];
+    if (value === undefined) usageError(`option ${arg} requires a value`);
+    i++;
+    if (arg === "--body-b64") {
+      out.body = Buffer.from(value, "base64").toString("utf8");
+    } else if (arg === "--body-file") {
+      // An unreadable body file is a usage error, not an uncaught ENOENT/EISDIR crash.
+      try {
+        out.body = readFileSync(value, "utf8");
+      } catch (e) {
+        usageError(`cannot read --body-file ${value}: ${e.message}`);
+      }
+    } else {
+      out[arg.slice(2)] = value;
+    }
   }
   return out;
 }
@@ -144,8 +174,7 @@ if (isCli) {
   const base = args.base ?? process.env.BASE_SHA;
   const head = args.head ?? process.env.HEAD_SHA;
   if (!base || !head) {
-    console.error("usage: node pr-diff-size-check.mjs --base <sha> --head <sha> [--body <text>|--body-b64 <b64>|--body-file <path>]");
-    console.error("       or set BASE_SHA, HEAD_SHA, PR_BODY / PR_BODY_B64 env vars.");
+    console.error(USAGE);
     process.exit(2);
   }
   const prBody = args.body ?? (process.env.PR_BODY_B64

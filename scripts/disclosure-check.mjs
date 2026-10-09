@@ -15,6 +15,14 @@ import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
 import { ensurePeopleOpen } from "./room-chrome.mjs";
 
+// Browser journey: takes no CLI arguments (CI runs it as `node --test` with
+// none). An unexpected flag is a typo — fail closed before launching chromium.
+const cliArgs = process.argv.slice(2);
+if (cliArgs.length > 0) {
+  process.stderr.write("Usage: node --test scripts/disclosure-check.mjs\n");
+  process.exit(2);
+}
+
 test("background updates preserve open disclosures, focus, draft and recipient", { timeout: 90000 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), "room-disclosure-"));
   const store = new RoomStore(join(directory, "room.sqlite"));

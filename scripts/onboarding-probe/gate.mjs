@@ -92,8 +92,14 @@ if (isMain) {
   const args = process.argv.slice(2);
   const resultFlag = args.indexOf("--result");
   const baselineFlag = args.indexOf("--baseline");
-  const result = readJson(args[resultFlag + 1]);
-  const baseline = readJson(args[baselineFlag + 1]);
+  const resultPath = resultFlag === -1 ? undefined : args[resultFlag + 1];
+  const baselinePath = baselineFlag === -1 ? undefined : args[baselineFlag + 1];
+  if (!resultPath || !baselinePath) {
+    process.stderr.write("Usage: node scripts/onboarding-probe/gate.mjs --result <result.json> --baseline <baseline.json>\n");
+    process.exit(2);
+  }
+  const result = readJson(resultPath);
+  const baseline = readJson(baselinePath);
   const runs = Array.isArray(result.runs) && result.runs.length ? result.runs : [result];
   const verdict = evaluateGate(runs, baseline, { inconclusive: result.ready?.inconclusive === true });
   const line = verdict.pass ? "onboarding probe gate: pass" : "onboarding probe gate: fail";

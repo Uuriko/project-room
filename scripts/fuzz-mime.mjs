@@ -28,7 +28,7 @@
 // the corpus runs on every PR while this script runs the longer scheduled
 // sweep. Both import the same helpers below, so there is one owner for the
 // invariant.
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, realpathSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseMimeMessage, MimeError } from "../server/mime-message.mjs";
@@ -249,15 +249,36 @@ const NUMERIC_SPECS = {
   budgetMs: { flag: "--budget-ms", integer: false, min: 0, exclusive: true },
   maxMs: { flag: "--max-ms", integer: false, min: 0, exclusive: true },
 };
+const USAGE = `Usage: node scripts/fuzz-mime.mjs [options]
+  --seed N        PRNG seed (default ${DEFAULT_SEED}; same seed => same inputs)
+  --iterations N  random cases after the corpus (default 20000)
+  --budget-ms N   wall-clock budget for the random phase in ms (default 480000)
+  --max-ms N      per-case time limit in ms; a slower case is a "slow" failure (default 5000)
+  --corpus DIR    seed corpus directory (default tests/fuzz/mime-corpus)
+  --report DIR    failing inputs land here (default ./mime-fuzz-out, created only on failure)
+  --skip-corpus   random phase only
+  --quiet         summary line only
+`;
+function usageError(msg) {
+  if (msg) console.error(`fuzz-mime: ${msg}`);
+  console.error(USAGE);
+  process.exit(2);
+}
+// Every long option the driver understands. A misspelled option (e.g.
+// --iteration) must fail loudly: silently ignoring it would run the default
+// config and exit 0, a false green for a scheduled fuzz gate.
+const KNOWN_OPTIONS = new Set(["seed", "iterations", "budgetMs", "maxMs", "corpus", "report", "skipCorpus", "quiet"]);
 function parseArgs(argv) {
   const out = {};
   for (let i = 0; i < argv.length; i++) {
     const m = /^--([a-z-]+)(?:=(.*))?$/.exec(argv[i]);
-    if (!m) { console.error(`fuzz-mime: unknown arg: ${argv[i]}`); process.exit(2); }
+    if (!m) usageError(`unknown arg: ${argv[i]}`);
+    if (m[1] === "help") usageError();
     const key = m[1].replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+    if (!KNOWN_OPTIONS.has(key)) usageError(`unknown option: --${m[1]}`);
     if (BOOLEAN_FLAGS.has(key)) { out[key] = m[2] === undefined ? true : m[2] !== "false"; continue; }
     if (m[2] !== undefined) { out[key] = m[2]; continue; }
-    if (i + 1 >= argv.length || argv[i + 1].startsWith("--")) { console.error(`fuzz-mime: missing value for --${m[1]}`); process.exit(2); }
+    if (i + 1 >= argv.length || argv[i + 1].startsWith("--")) usageError(`missing value for --${m[1]}`);
     out[key] = argv[++i];
   }
   for (const [key, spec] of Object.entries(NUMERIC_SPECS)) {
@@ -266,23 +287,43 @@ function parseArgs(argv) {
     const inRange = spec.exclusive ? v > spec.min : v >= spec.min;
     if (!Number.isFinite(v) || (spec.integer && !Number.isInteger(v)) || !inRange) {
       const what = spec.integer ? `a non-negative integer` : `a number greater than ${spec.min}`;
-      console.error(`fuzz-mime: ${spec.flag} must be ${what}, got ${JSON.stringify(raw)}`);
-      process.exit(2);
+      usageError(`${spec.flag} must be ${what}, got ${JSON.stringify(raw)}`);
     }
     out[key] = v;
   }
   return out;
 }
 
-const isMain = process.argv[1] === fileURLToPath(import.meta.url);
-if (isMain) {
+// argv[1] is the resolved path in the common case, but a symlinked or
+// otherwise aliased launch changes its spelling. An exact-only comparison
+// silently no-ops (exit 0, zero cases, no output) — a false green for a
+// scheduled fuzz gate — so compare through the real path too, with a
+// basename fallback like the secret-scan gate (scripts/secret-scan-check.mjs).
+const invokedAsCli = (() => {
+  const arg1 = process.argv[1];
+  if (!arg1) return false;
+  const self = fileURLToPath(import.meta.url);
+  if (arg1 === self || arg1.endsWith("/fuzz-mime.mjs") || arg1.endsWith("\\fuzz-mime.mjs")) return true;
+  try { return realpathSync(arg1) === self; } catch { return false; }
+})();
+if (invokedAsCli) {
   const args = parseArgs(process.argv.slice(2));
+  const corpusDir = args.corpus ?? DEFAULT_CORPUS_DIR;
+  if (!args.skipCorpus) {
+    // Fail clean (usage error) on an unreadable --corpus instead of an
+    // uncaught ENOENT stack trace from deep inside the run.
+    try {
+      loadCorpus(corpusDir);
+    } catch (e) {
+      usageError(`--corpus ${JSON.stringify(corpusDir)} is unreadable (${e.code ?? e.message})`);
+    }
+  }
   const { failures } = runFuzz({
     seed: args.seed ?? DEFAULT_SEED,
     iterations: args.iterations ?? 20000,
     budgetMs: args.budgetMs ?? 480000,
     maxMs: args.maxMs ?? 5000,
-    corpusDir: args.corpus ?? DEFAULT_CORPUS_DIR,
+    corpusDir,
     reportDir: args.report ?? resolve("mime-fuzz-out"),
     skipCorpus: args.skipCorpus ?? false,
     quiet: args.quiet ?? false,

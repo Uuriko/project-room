@@ -44,6 +44,34 @@ export function isUnmounted(status, bodyText) {
   } catch { return /^not found\.?\s*$/i.test(bodyText.trim()) || bodyText.trim() === ""; }
 }
 
+// Probe one route against a live origin and judge mounted vs unmounted.
+// Exported for tests: the full room-server path is exercised through
+// checkRoutes, while unit tests can point this at a stub origin.
+export async function probeRoute(origin, route) {
+  const hasBody = !["GET", "HEAD", "OPTIONS"].includes(route.method);
+  const response = await fetch(origin + route.url, {
+    method: route.method, redirect: "manual",
+    headers: { Origin: origin, ...(hasBody ? { "Content-Type": "application/json" } : {}) },
+    ...(hasBody ? { body: "{}" } : {})
+  });
+  let status = response.status;
+  let text = route.method === "HEAD" ? "" : await response.text();
+  if (route.method === "HEAD" && status === 404) {
+    // HEAD responses never carry a body (RFC 9110 9.3.2), so the 404
+    // mounted-vs-unmounted heuristic cannot read one: without a re-probe,
+    // every HEAD route answering 404 — including a mounted route answering
+    // a resource-specific 404, which the docstring says proves the route is
+    // wired — reports MISSING. Re-probe with GET, which carries the same
+    // status code as HEAD by spec, and judge mount on the GET body.
+    const getResponse = await fetch(origin + route.url, {
+      method: "GET", redirect: "manual", headers: { Origin: origin },
+    });
+    status = getResponse.status;
+    text = await getResponse.text();
+  }
+  return { route: `${route.method} ${route.path}`, status, mounted: !isUnmounted(status, text) };
+}
+
 export async function checkRoutes(routes) {
   const { RoomStore } = await import("../server/store.mjs");
   const { createRoomServer } = await import("../server/http.mjs");
@@ -56,16 +84,7 @@ export async function checkRoutes(routes) {
   const origin = `http://127.0.0.1:${server.address().port}`;
   try {
     const results = [];
-    for (const route of routes) {
-      const hasBody = !["GET", "HEAD", "OPTIONS"].includes(route.method);
-      const response = await fetch(origin + route.url, {
-        method: route.method, redirect: "manual",
-        headers: { Origin: origin, ...(hasBody ? { "Content-Type": "application/json" } : {}) },
-        ...(hasBody ? { body: "{}" } : {})
-      });
-      const text = route.method === "HEAD" ? "" : await response.text();
-      results.push({ route: `${route.method} ${route.path}`, status: response.status, mounted: !isUnmounted(response.status, text) });
-    }
+    for (const route of routes) results.push(await probeRoute(origin, route));
     return results;
   } finally {
     server.closeStreams?.(); server.closeAllConnections?.();

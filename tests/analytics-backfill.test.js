@@ -67,6 +67,7 @@ test("an excluded room is counted beside productive rooms, including an env id a
 
 test("the backfill command requires a database path", () => {
   const result = spawnSync(process.execPath, ["scripts/analytics-backfill.mjs"], { encoding: "utf8" });
-  assert.equal(result.status, 1);
+  // Guild-06 usage-error convention: usage line on stderr + exit 2.
+  assert.equal(result.status, 2);
   assert.match(result.stderr, /--db/);
 });

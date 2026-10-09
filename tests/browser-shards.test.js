@@ -112,3 +112,14 @@ test("browser shard plan is balanced on measured runtimes: full timing coverage,
     assert.ok(share <= 0.30, `browser shard ${shard.index} holds ${(100 * share).toFixed(1)}% of measured runtime (cap 30%)`);
   }
 });
+
+test("browser-shards-check rejects flag-like and unreadable receipt dirs without a stack trace (guild-06 fuzz)", () => {
+  const root = join(new URL(".", import.meta.url).pathname, "..");
+  const invoke = (args) => spawnSync(process.execPath, ["scripts/browser-shards-check.mjs", ...args], { cwd: root, encoding: "utf8", timeout: 15000 });
+  for (const bad of ["--help", "--bogus-flag-xyz", "/nonexistent-guild06-receipts-xyz"]) {
+    const r = invoke([bad]);
+    assert.notEqual(r.status, 0, `expected nonzero exit for ${bad}`);
+    assert.doesNotMatch(r.stderr, /^\s*at\s/m, `no stack trace for ${bad}: ${r.stderr.slice(0, 200)}`);
+    assert.match(r.stderr, /Usage:|cannot read receipt directory/i, `clean error for ${bad}`);
+  }
+});

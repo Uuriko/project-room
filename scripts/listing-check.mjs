@@ -273,13 +273,28 @@ export function listingExitCode(post) {
   return post?.attempted && !post.posted ? 1 : 0;
 }
 
+export function resolveOutPath(argv, root) {
+  const outFlag = argv.indexOf("--out");
+  if (outFlag === -1) return resolve(root, "listing-check.json");
+  const value = argv[outFlag + 1];
+  if (!value || value.startsWith("-")) {
+    throw new Error("listing-check: --out requires a file path");
+  }
+  return resolve(value);
+}
+
 const isMain = process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url;
 if (isMain) {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
   const server = JSON.parse(readFileSync(resolve(root, "server.json"), "utf8"));
   const catalog = JSON.parse(readFileSync(resolve(root, "docs/listings.json"), "utf8"));
-  const outFlag = process.argv.indexOf("--out");
-  const outPath = outFlag === -1 ? resolve(root, "listing-check.json") : resolve(process.argv[outFlag + 1] ?? "");
+  let outPath;
+  try {
+    outPath = resolveOutPath(process.argv, root);
+  } catch (error) {
+    process.stderr.write(`${error.message}\nUsage: listing-check.mjs [--out REPORT_PATH]\n`);
+    process.exit(2);
+  }
   const rows = await checkListings(catalog.rows, {
     server,
     token: process.env.GITHUB_TOKEN ?? ""

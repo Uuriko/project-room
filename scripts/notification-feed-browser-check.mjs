@@ -145,7 +145,7 @@ test("older notification paging finds a buried mention without acknowledging uns
   send("buried-mention", "@Room owner please review the plan");
   for (let i = 0; i < 600; i++) send(`noise-${i}`, "Routine progress");
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
   const p = await browser.newPage({ viewport: { width: 390, height: 844 } });
   p.setDefaultTimeout(10000);
   await p.goto(`http://127.0.0.1:${server.address().port}`);

@@ -28,7 +28,7 @@ async function setup(t, { mobile = false, review = false, viewport = null, body 
   if (review) complete();
   const server = createRoomServer({ store: f.store, streamInterval: 40 }); await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`, browser = await chromium.launch({ headless: true });
-  t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  t.after(async () => { await browser?.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   const page = await browser.newPage({ viewport: viewport ?? (mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 }), isMobile: mobile, hasTouch: mobile, reducedMotion: "reduce" });
   const errors = [], outside = []; page.on("pageerror", e => errors.push(e.message)); page.setDefaultTimeout(8000);
   await page.route("**/*", route => { if (new URL(route.request().url()).origin !== origin) { outside.push(route.request().url()); return route.abort(); } return route.continue(); });

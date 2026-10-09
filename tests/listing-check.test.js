@@ -6,7 +6,8 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  checkListings, checkRow, commandIdFor, listingExitCode, postListingSummary, renderSummary
+  checkListings, checkRow, commandIdFor, listingExitCode, postListingSummary, renderSummary,
+  resolveOutPath
 } from "../scripts/listing-check.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -207,4 +208,14 @@ test("every catalog row classifies, including at least 16 directories", async ()
   });
   assert.equal(results.length, catalog.rows.length);
   assert.ok(results.every(row => row.status === "unknown"));
+});
+
+test("--out resolves to a report path, and a bare --out is a usage error", () => {
+  assert.equal(resolveOutPath(["node", "listing-check.mjs"], root), join(root, "listing-check.json"));
+  assert.equal(resolveOutPath(["node", "listing-check.mjs", "--out", "reports/out.json"], root),
+    join(process.cwd(), "reports/out.json"));
+  assert.throws(() => resolveOutPath(["node", "listing-check.mjs", "--out"], root),
+    /--out requires a file path/);
+  assert.throws(() => resolveOutPath(["node", "listing-check.mjs", "--out", "--other"], root),
+    /--out requires a file path/);
 });

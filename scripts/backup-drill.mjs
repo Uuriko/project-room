@@ -12,7 +12,17 @@ import { EVENT_TYPES as T } from "../src/events.js";
 import { backupRoom, backupDigests } from "../server/backup.mjs";
 import { verifyRestoredBackup } from "./backup-verify.mjs";
 
+// The drill takes no arguments: an unexpected flag is a typo, not an option.
+// Fail closed with a usage line instead of silently running the full drill.
+const cliArgs = process.argv.slice(2);
+if (cliArgs.length > 0) {
+  process.stderr.write("Usage: node scripts/backup-drill.mjs\n");
+  process.exit(2);
+}
+
 const directory = mkdtempSync(join(tmpdir(), "room-backup-drill-"));
+let backupDir = null; // assigned mid-drill; finally must tolerate early failure
+try {
 const filename = join(directory, "room.sqlite");
 const store = new RoomStore(filename);
 store.initialize(initialRoom());
@@ -37,7 +47,7 @@ const before = {
 };
 store.close();
 
-const backupDir = mkdtempSync(join(tmpdir(), "room-backup-dest-"));
+backupDir = mkdtempSync(join(tmpdir(), "room-backup-dest-"));
 const result = await backupRoom(filename, backupDir);
 assert.equal(result.verified, true, "backup must verify on restore");
 assert.ok(result.filename.endsWith("room.sqlite"), "backup must produce a sqlite file");
@@ -60,5 +70,8 @@ restored.close();
 const verification = await verifyRestoredBackup({ backupFilename: result.filename, watermarkPath: result.watermark });
 assert.equal(verification.ok, true, `restore verification failed: ${JSON.stringify(verification.checks.filter(c => !c.ok))}`);
 console.log(JSON.stringify({ ok: true, before, after, digests: { events: liveDigests.events.sha256.slice(0, 12), files: liveDigests.attachments.sha256.slice(0, 12) }, audit: result.recovery ? "recovery-audit-passed" : "no-recovery-audit" }));
-rmSync(directory, { recursive: true, force: true });
-rmSync(backupDir, { recursive: true, force: true });
+} finally {
+  // The drill must not litter os.tmpdir() when an assertion fails mid-run.
+  rmSync(directory, { recursive: true, force: true });
+  if (backupDir) rmSync(backupDir, { recursive: true, force: true });
+}

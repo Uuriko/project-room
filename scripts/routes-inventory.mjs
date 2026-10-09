@@ -23,6 +23,19 @@ import { PUBLIC_DOOR_PATHS } from "../deploy/room-entry.mjs";
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 const ALLOWLIST = "scripts/routes-legacy-allowlist.json";
 
+const USAGE = `node scripts/routes-inventory.mjs [--check | --write [--baseline] | --help]
+
+Walks the routes the server still serves outside the route table and compares
+them against scripts/routes-legacy-allowlist.json (the parity baseline, which
+only shrinks as extraction PRs move a group into server/routes/table.mjs).
+
+Modes:
+  (no args)   Print the extracted legacy route list to stdout.
+  --check     Fail (exit 1) on allowlist drift; print problems to stderr.
+  --write     Rewrite the allowlist from the current extraction (fails on drift).
+  --baseline  With --write: start a new baseline instead of reusing the file's.
+  --help      Show this help.`;
+
 export const templateKey = path => path.replace(/\{[^}]+\}/g, "{}");
 
 const routeKey = (method, path) => `${method} ${templateKey(path)}`;
@@ -472,6 +485,20 @@ function readAllowlist(root) {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  const args = process.argv.slice(2);
+  if (args.includes("--help")) {
+    console.log(USAGE);
+    process.exit(0);
+  }
+  // Unknown flags must not silently fall through to the default inventory dump:
+  // a typo'd --write (e.g. --writ) would otherwise no-op while the operator
+  // believes the allowlist was rewritten.
+  const KNOWN = new Set(["--check", "--write", "--baseline"]);
+  const unknown = args.filter(arg => !KNOWN.has(arg));
+  if (unknown.length) {
+    process.stderr.write(`${USAGE}\n\nError: unknown option(s): ${unknown.join(" ")}\n`);
+    process.exit(2);
+  }
   const root = repoRoot();
   const extracted = extractLegacyRoutes(loadRouteSources(root));
   if (process.argv.includes("--write")) {

@@ -14,6 +14,14 @@ import { clickChrome, openSearch } from "./room-chrome.mjs";
 import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 import { hashPassword } from "../src/password-auth.mjs";
 
+// Browser journey: takes no CLI arguments (CI runs it as `node --test` with
+// none). An unexpected flag is a typo — fail closed before launching chromium.
+const cliArgs = process.argv.slice(2);
+if (cliArgs.length > 0) {
+  process.stderr.write("Usage: node --test scripts/updates-browser-check.mjs\n");
+  process.exit(2);
+}
+
 const command = (type, data, id = crypto.randomUUID()) => ({ id, type, data });
 
 function seedWithFloodWait(store, token, event, advanceClock) {

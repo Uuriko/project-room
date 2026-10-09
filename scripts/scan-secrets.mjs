@@ -52,9 +52,20 @@ const PATTERNS = [
 
 function getDiff(base, diffFile) {
   if (diffFile) {
-    return readFileSync(diffFile, "utf8");
+    try {
+      return readFileSync(diffFile, "utf8");
+    } catch (error) {
+      console.error(`scan-secrets: cannot read diff file ${diffFile}: ${error.message}`);
+      process.exit(2);
+    }
   }
-  const root = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
+  let root;
+  try {
+    root = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  } catch (error) {
+    console.error(`scan-secrets: cannot find the git repository top level: ${error.message}`);
+    process.exit(2);
+  }
   const r = spawnSync("git", ["--no-pager", "diff", "--no-color", "--no-ext-diff", "-U0", `${base}...HEAD`, "--"], { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   if (r.status !== 0) {
     console.error(`scan-secrets: git diff ${base}...HEAD failed:\n${r.stderr}`);

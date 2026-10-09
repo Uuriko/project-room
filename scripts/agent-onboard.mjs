@@ -63,6 +63,24 @@ export function loadState(path = statePath()) {
   if (!raw.onboardings || typeof raw.onboardings !== "object" || Array.isArray(raw.onboardings)) {
     throw new Error(`onboarding state file is corrupt: ${path} (missing "onboardings" object). Move it aside or delete it to start fresh.`);
   }
+  // W24: validate the per-onboarding checklist shape here, not at first
+  // access — a hand-edited or truncated file with missing items used to
+  // crash checklist/intro with a bare TypeError ("Cannot read properties of
+  // undefined"). Fail with the standard corrupt-state error instead.
+  const incomplete = [];
+  for (const [id, ob] of Object.entries(raw.onboardings)) {
+    const items = ob && typeof ob === "object" ? ob.items : null;
+    const missing = CHECKLIST
+      .filter(item => !items || typeof items[item.id] !== "object" || items[item.id] === null)
+      .map(item => item.id);
+    if (missing.length) incomplete.push(`${id} (missing: ${missing.join(", ")})`);
+  }
+  if (incomplete.length) {
+    throw new Error(
+      `onboarding state file is corrupt: ${path} (incomplete checklist items: ${incomplete.join("; ")}). ` +
+      `Move it aside or delete it to start fresh.`
+    );
+  }
   return raw;
 }
 
@@ -216,6 +234,11 @@ export async function onboardMain(argv) {
     case "start": {
       const [identityId] = rest;
       if (!identityId) throw new Error("usage: start <identityId> [--name <display>]");
+      // W24: a flag in the identityId position (e.g. `start --name Foo`)
+      // used to silently create an onboarding literally named "--name".
+      if (identityId.startsWith("--")) {
+        throw new Error(`usage: start <identityId> [--name <display>] ("${identityId}" looks like a flag, not an identity id)`);
+      }
       out = { started: startOnboarding(state, identityId, flagValue(rest, "name")).identityId };
       break;
     }

@@ -19,12 +19,44 @@ import { join, dirname, relative, resolve } from "node:path";
 import { builtinModules } from "node:module";
 import https from "node:https";
 
-const args = process.argv.slice(2);
-function flag(name) {
-  const i = args.indexOf(name);
-  return i === -1 ? null : args[i + 1];
+// ---- CLI -----------------------------------------------------------------
+const USAGE = "Usage: node scripts/check-deps-exist.mjs [--root <dir>]";
+
+function usageError(message) {
+  process.stderr.write(`${message}\n${USAGE}\n`);
+  process.exit(2);
 }
-const ROOT = resolve(flag("--root") || process.env.ZERO_BUG_ROOT || process.cwd());
+
+const argv = process.argv.slice(2);
+let rootFlag = null;
+for (let i = 0; i < argv.length; i += 1) {
+  const a = argv[i];
+  if (a === "--help" || a === "-h") {
+    process.stdout.write(
+      `${USAGE}\n\nZero-bug gate: dependency-existence ("slopsquatting" defense).\n` +
+      `Every dependency declared in package.json must exist on the npm registry,\n` +
+      `and every bare import in scanned sources must be a declared dependency.\n` +
+      `  --root <dir>   scan this tree instead of the current directory\n` +
+      `                 (also honors the ZERO_BUG_ROOT env var)\n`,
+    );
+    process.exit(0);
+  }
+  if (a === "--root") {
+    const v = argv[i + 1];
+    if (v === undefined || v === "") usageError("check-deps-exist: --root requires a directory");
+    rootFlag = v;
+    i += 1;
+    continue;
+  }
+  if (a.startsWith("--root=")) {
+    const v = a.slice("--root=".length);
+    if (v === "") usageError("check-deps-exist: --root requires a directory");
+    rootFlag = v;
+    continue;
+  }
+  usageError(`check-deps-exist: unknown option "${a}"`);
+}
+const ROOT = resolve(rootFlag ?? process.env.ZERO_BUG_ROOT ?? process.cwd());
 
 const REGISTRY = "https://registry.npmjs.org";
 const TIMEOUT_MS = 10_000;

@@ -61,6 +61,48 @@ export function isPathAllowlisted(relPath, entries) {
 // Diff parsing — added lines only, never removed/context lines
 // ---------------------------------------------------------------------------
 
+// Git C-style-quotes a diff path when core.quotePath is on (the default) and
+// the name holds a `"`, `\`, control char, or non-ASCII byte — the `+++ `
+// header then reads `+++ "b/scripts/caf\303\251.mjs"`. An un-unquoted path
+// never matches the scan scope, so secrets added to such files bypassed the
+// gate entirely. Unquoting restores the real repo-relative name.
+export function unquoteDiffPath(p) {
+  if (p.length < 2 || !p.startsWith('"') || !p.endsWith('"')) return p;
+  const inner = p.slice(1, -1);
+  const simple = {
+    a: 0x07, b: 0x08, f: 0x0c, n: 0x0a, r: 0x0d, t: 0x09, v: 0x0b,
+    '"': 0x22, "\\": 0x5c,
+  };
+  const bytes = [];
+  const pushUtf8 = (s) => {
+    for (const b of Buffer.from(s, "utf8")) bytes.push(b);
+  };
+  for (let i = 0; i < inner.length; i++) {
+    const c = inner[i];
+    if (c !== "\\" || i + 1 >= inner.length) {
+      pushUtf8(c);
+      continue;
+    }
+    const next = inner[++i];
+    if (next in simple) {
+      bytes.push(simple[next]);
+      continue;
+    }
+    if (next >= "0" && next <= "7") {
+      let oct = next;
+      while (oct.length < 3 && i + 1 < inner.length && inner[i + 1] >= "0" && inner[i + 1] <= "7") {
+        oct += inner[++i];
+      }
+      bytes.push(parseInt(oct, 8));
+      continue;
+    }
+    // Unknown escape: keep it literally so a weird path degrades to a
+    // non-matching name instead of throwing mid-scan.
+    pushUtf8(`\\${next}`);
+  }
+  return new TextDecoder("utf-8", { fatal: false }).decode(new Uint8Array(bytes));
+}
+
 export function parseDiff(diffText) {
   const added = [];
   let file = null;
@@ -78,7 +120,7 @@ export function parseDiff(diffText) {
     // starts, `+++...` is an added source line whose text already starts
     // with `++`, not a new file.
     if (line.startsWith("+++ ") && !inHunk) {
-      const p = line.slice(4).trim();
+      const p = unquoteDiffPath(line.slice(4).trim());
       skipFile = p === "/dev/null";
       file = p.startsWith("b/") ? p.slice(2) : p;
       continue;

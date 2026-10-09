@@ -5,6 +5,11 @@
 // A regression here silently drops the scope-drift signal reviewers rely on.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   normalizePath,
   parseDeclaredFiles,
@@ -105,4 +110,49 @@ test("matchScope ignores undeclared-listed files that were never touched", () =>
   const r = matchScope(["server/a.mjs"], ["server/a.mjs", "server/b.mjs"]);
   assert.equal(r.verdict, "clean");
   assert.deepEqual(r.drift, []);
+});
+
+// CLI input hardening: unreadable inputs fail with a one-line usage error
+// (exit 1, the documented usage-error code), never an uncaught stack trace.
+
+const script = fileURLToPath(new URL("../scripts/review-scope-check.mjs", import.meta.url));
+function runCli(args) {
+  return new Promise((resolve, reject) => {
+    execFile(process.execPath, [script, ...args], { timeout: 10000 }, (error, stdout, stderr) => {
+      if (error && typeof error.code !== "number") return reject(error);
+      resolve({ code: error?.code ?? 0, stdout, stderr });
+    });
+  });
+}
+
+test("CLI: missing --files-file fails with a clean usage error, not a stack trace", async () => {
+  const { code, stderr } = await runCli(["--files-file", "/nonexistent-worker48-files"]);
+  assert.equal(code, 1);
+  assert.match(stderr, /review-scope-check: --files-file \/nonexistent-worker48-files/);
+  assert.doesNotMatch(stderr, /^\s+at /m);
+});
+
+test("CLI: --files-file naming a directory fails with a clean usage error", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "scope-check-dir-"));
+  const { code, stderr } = await runCli(["--files-file", dir]);
+  assert.equal(code, 1);
+  assert.match(stderr, /review-scope-check: --files-file /);
+  assert.doesNotMatch(stderr, /^\s+at /m);
+});
+
+test("CLI: missing --body-file fails with a clean usage error", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "scope-check-body-"));
+  const files = join(dir, "files.txt");
+  writeFileSync(files, "server/a.mjs\n");
+  const { code, stderr } = await runCli(["--files-file", files, "--body-file", join(dir, "nope.md")]);
+  assert.equal(code, 1);
+  assert.match(stderr, /review-scope-check: --body-file /);
+  assert.doesNotMatch(stderr, /^\s+at /m);
+});
+
+test("CLI: a failing git diff fails with a clean usage error", async () => {
+  const { code, stderr } = await runCli(["--base", "deadbeef", "--head", "deadbeef"]);
+  assert.equal(code, 1);
+  assert.match(stderr, /review-scope-check: git diff deadbeef\.\.\.deadbeef failed/);
+  assert.doesNotMatch(stderr, /^\s+at /m);
 });

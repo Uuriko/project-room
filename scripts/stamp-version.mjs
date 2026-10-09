@@ -15,17 +15,21 @@ const args = process.argv.slice(2);
 // came after a flag.
 const KNOWN_FLAGS = new Set(["--revision", "--build-id"]);
 const positionals = [];
+function usageError(message) {
+  process.stderr.write(`stamp-version: ${message}\nUsage: node scripts/stamp-version.mjs [--revision <sha>] [--build-id <id>] [target]\n`);
+  process.exit(2);
+}
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
   if (a === "--") { positionals.push(...args.slice(i + 1)); break; }
   if (a.startsWith("--")) {
-    if (!KNOWN_FLAGS.has(a)) throw new Error(`unknown option: ${a}`);
+    if (!KNOWN_FLAGS.has(a)) usageError(`unknown option: ${a}`);
     i++; // consume the flag's value
     continue;
   }
   positionals.push(a);
 }
-if (positionals.length > 1) throw new Error("expected at most one positional target");
+if (positionals.length > 1) usageError("expected at most one positional target");
 const targetArg = positionals[0] ?? null;
 const target = targetArg ? (isAbsolute(targetArg) ? targetArg : join(process.cwd(), targetArg)) : join(root, "server", "version.mjs");
 const opt = name => { const i = args.indexOf(name); return i === -1 ? null : args[i + 1]; };

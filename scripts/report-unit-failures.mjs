@@ -43,10 +43,28 @@ function latestReceipt(dir, index, total) {
   return best ? JSON.parse(readFileSync(best, "utf8")) : null;
 }
 
+const USAGE = "Usage: report-unit-failures.mjs --shard=1/3 [--body-file=path]\n";
+
+function usage(note) {
+  if (note) process.stderr.write(note + "\n");
+  process.stderr.write(USAGE);
+  process.exit(2);
+}
+
 function main() {
+  for (const a of process.argv.slice(2)) {
+    if (!a.startsWith("--shard=") && !a.startsWith("--body-file=")) {
+      usage(`Unknown option: ${a}`);
+    }
+  }
   const shardArg = arg("--shard");
-  if (!shardArg) throw new Error("Usage: report-unit-failures.mjs --shard=1/3 [--body-file=path]");
-  const { index, total } = parseShard(shardArg);
+  if (!shardArg) usage();
+  let index, total;
+  try {
+    ({ index, total } = parseShard(shardArg));
+  } catch (error) {
+    usage(error instanceof Error ? error.message : String(error));
+  }
   if (total !== SHARD_COUNT) throw new Error(`expected ${SHARD_COUNT} shards`);
   const receipt = latestReceipt("test-results", index, total);
   const failures = Array.isArray(receipt?.failures) ? receipt.failures : [];

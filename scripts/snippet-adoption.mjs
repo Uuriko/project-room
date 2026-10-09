@@ -15,6 +15,7 @@ export const SEARCH_INTERVAL_MS = 6_500;
 export const SEARCH_PAGE_SIZE = 100;
 export const SEARCH_RESULT_CAP = 1_000;
 export const GITHUB_API = "https://api.github.com";
+export const DEFAULT_OPS_ORIGIN = "https://room.trydemigod.com";
 
 export const ADOPTION_QUERIES = Object.freeze([
   Object.freeze({ id: "agents_md", q: '"project-room:coordination" filename:AGENTS.md' }),
@@ -403,8 +404,11 @@ export async function postOpsSummary({ origin, roomId, credential, text, fetchIm
   if (!credential) return { posted: false, reason: "ROOM_OPS_POST_TOKEN not set" };
   if (!roomId) return { posted: false, reason: "ROOM_OPS_ROOM_ID not set" };
   const id = randomUUID();
+  // An explicitly-empty origin must not produce a relative URL, which
+  // fetch() rejects; fall back to the default room origin.
+  const base = String(origin ?? "").trim().replace(/\/$/, "") || DEFAULT_OPS_ORIGIN;
   const status = await postJson({
-    url: `${origin.replace(/\/$/, "")}/api/rooms/${encodeURIComponent(roomId)}/commands`,
+    url: `${base}/api/rooms/${encodeURIComponent(roomId)}/commands`,
     credential,
     fetchImpl,
     body: { id, type: "message.posted", data: { messageId: id, body: text } },
@@ -505,7 +509,7 @@ export async function runAdoption({
   const markdown = adoptionSummaryMarkdown(report);
   say(adoptionOpsText(report));
   if (env.GITHUB_STEP_SUMMARY) appendFileSync(env.GITHUB_STEP_SUMMARY, markdown);
-  const origin = String(env.ROOM_OPS_ORIGIN ?? "https://room.trydemigod.com").trim();
+  const origin = String(env.ROOM_OPS_ORIGIN ?? DEFAULT_OPS_ORIGIN).trim() || DEFAULT_OPS_ORIGIN;
   const ops = await postOpsSummary({
     origin,
     roomId: String(env.ROOM_OPS_ROOM_ID ?? "").trim(),

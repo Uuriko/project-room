@@ -18,7 +18,7 @@ for (const mobile of [false, true]) test(`refine draft ${mobile ? "mobile" : "de
   for (const [messageId, body] of [["source-a", original], ["source-b", "A different draft.\nChecks: none."]]) send("message.posted", {
     messageId, body, workItemId: workId, packetId: messageId, basisRevision: 1
   });
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
   const page = await browser.newPage({ viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 }, isMobile: mobile, hasTouch: mobile, reducedMotion: "reduce" });
   page.setDefaultTimeout(10000);
   const errors = [], external = [], commands = [];

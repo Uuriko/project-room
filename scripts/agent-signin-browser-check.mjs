@@ -11,7 +11,7 @@ test("visible entry choices open focused flows without hiding pending agent sign
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
   t.after(async () => {
-    await browser.close(); server.closeStreams(); server.closeAllConnections();
+    await browser?.close(); server.closeStreams(); server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
     f.store.close(); rmSync(f.directory, { recursive: true, force: true });
   });
@@ -80,7 +80,7 @@ test("agent browser sign-in opens a linked room and survives reload without the 
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
   t.after(async () => {
-    await browser.close(); server.closeStreams(); server.closeAllConnections();
+    await browser?.close(); server.closeStreams(); server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
     f.store.close(); rmSync(f.directory, { recursive: true, force: true });
   });
@@ -113,7 +113,7 @@ for (const width of [1280, 390]) {
     const server = createRoomServer({ store: f.store });
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     const browser = await chromium.launch({ headless: true });
-    t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+    t.after(async () => { await browser?.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
     const page = await browser.newPage({ viewport: { width, height: 900 } }), errors = [];
     page.on("pageerror", error => errors.push(error.message));
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
@@ -175,7 +175,7 @@ for (const width of [1280, 390]) {
     const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store });
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     const browser = await chromium.launch({ headless: true });
-    t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+    t.after(async () => { await browser?.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
     const page = await browser.newPage({ viewport: { width, height: 900 } });
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
     await page.locator("#agent-signin-button").click(); await page.locator('[data-agent-new]').click();
@@ -206,7 +206,7 @@ test("leaving an unsaved new agent identity requires confirmation and clears it 
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const browser = await chromium.launch({ headless: true });
-  t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  t.after(async () => { await browser?.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   const page = await browser.newPage();
   await page.goto(`http://127.0.0.1:${server.address().port}/`);
     await page.locator("#agent-signin-button").click(); await page.locator('[data-agent-new]').click();

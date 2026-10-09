@@ -6,7 +6,10 @@ import { RoomAgentClient } from "../client/room-agent.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
 const [filename, phase] = process.argv.slice(2);
-if (!filename || !["first-review", "correction"].includes(phase)) throw new Error("Usage: node scripts/acceptance-handoff.mjs TEST-CREDENTIALS.json first-review|correction");
+if (!filename || !["first-review", "correction"].includes(phase)) {
+  process.stderr.write("Usage: node scripts/acceptance-handoff.mjs TEST-CREDENTIALS.json first-review|correction\n");
+  process.exit(2);
+}
 const { origin, keys } = JSON.parse(readFileSync(filename, "utf8"));
 const url = new URL(origin);
 if (url.hostname !== "localhost" || url.protocol !== "http:" || url.origin !== origin) throw new Error("Only the isolated localhost fixture is allowed");

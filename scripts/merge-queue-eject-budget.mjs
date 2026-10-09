@@ -374,11 +374,18 @@ if (isMain) {
   // Ledger union tool for the workflow's rebase-conflict path:
   //   node scripts/merge-queue-eject-budget.mjs --merge-ledgers <a.json> <b.json> <out.json>
   if (process.argv[2] === "--merge-ledgers") {
+    const [aPath, bPath, outPath] = process.argv.slice(3, 6);
+    if (!aPath || !bPath || !outPath) {
+      process.stderr.write(
+        "Usage: node scripts/merge-queue-eject-budget.mjs --merge-ledgers <a.json> <b.json> <out.json>\n",
+      );
+      process.exit(2);
+    }
     const merged = mergeLedgers(
-      JSON.parse(readFileSync(process.argv[3], "utf8")),
-      JSON.parse(readFileSync(process.argv[4], "utf8")),
+      JSON.parse(readFileSync(aPath, "utf8")),
+      JSON.parse(readFileSync(bPath, "utf8")),
     );
-    writeFileSync(process.argv[5], JSON.stringify(merged, null, 2) + "\n");
+    writeFileSync(outPath, JSON.stringify(merged, null, 2) + "\n");
     console.log(JSON.stringify({ ok: true, merged: true }));
   } else {
     main().catch((error) => { console.error(error.message); process.exitCode = 1; });

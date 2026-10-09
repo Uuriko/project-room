@@ -159,7 +159,10 @@ export async function profileDiscovery({ workCount, messageCount, samples = 3, m
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  if (process.argv.length !== 2) throw new Error('No arguments: this profiler creates disposable local fixtures only');
+  if (process.argv.length !== 2) {
+    process.stderr.write("Usage: node scripts/discovery-profile.mjs (no arguments; this profiler creates disposable local fixtures only)\n");
+    process.exit(2);
+  }
   const scenarios = [];
   for (const managedProducer of [false, true]) for (const [workCount, messageCount] of [[10, 20], [100, 250], [400, 1200]]) {
     const result = await profileDiscovery({ workCount, messageCount, managedProducer }); scenarios.push(result);

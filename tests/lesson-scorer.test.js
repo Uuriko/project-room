@@ -235,4 +235,21 @@ describe("lesson-scorer (W014)", () => {
     assert.ok(typeof r.score === "number");
     assert.ok(r.dims && r.flags);
   });
+
+  it("scores a long dot-less entry fast (FILE_LINE_RE must not backtrack quadratically)", () => {
+    // Repro: FILE_LINE_RE's leading [\w\-./~]+ tried every start position with
+    // a full greedy run on dot-less input — O(n^2), ~59s for 100k chars.
+    const text = "x".repeat(30000);
+    const started = Date.now();
+    const r = scoreLesson(text);
+    const elapsed = Date.now() - started;
+    assert.ok(Number.isFinite(r.score), "score must be a finite number");
+    assert.ok(elapsed < 4000, `scoreLesson took ${elapsed}ms on 30k dot-less chars`);
+  });
+
+  it("still detects file:line evidence after the backtracking fix", () => {
+    const r = scoreLesson("See scripts/lesson-scorer.mjs:42 for the evidence regex; never bypass it.");
+    assert.ok(r.dims.evidence >= 10, `evidence was ${r.dims.evidence}`);
+    assert.ok(!r.flags.includes("no-evidence"), `flags were ${r.flags}`);
+  });
 });

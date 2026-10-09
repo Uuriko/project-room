@@ -341,8 +341,8 @@ export function runDeployChecks({
   return result;
 }
 
-function printUsage() {
-  process.stdout.write(`deploy-checks: reproducible deploy checks — lockfile + asset hash verification (F007)
+function printUsage(stream = process.stdout) {
+  stream.write(`deploy-checks: reproducible deploy checks — lockfile + asset hash verification (F007)
 
 Usage:
   node scripts/deploy-checks.mjs [--root <dir>] [--assets <csv>] [--manifest <path>]
@@ -383,27 +383,36 @@ function failLines(result) {
 }
 
 async function main() {
-  const { values } = parseArgs({
-    strict: true,
-    options: {
-      root: { type: "string" },
-      assets: { type: "string" },
-      manifest: { type: "string" },
-      check: { type: "boolean", default: false },
-      write: { type: "boolean", default: false },
-      "lockfile-only": { type: "boolean", default: false },
-      "assets-only": { type: "boolean", default: false },
-      help: { type: "boolean", default: false },
-    },
-  });
+  let values;
+  try {
+    ({ values } = parseArgs({
+      strict: true,
+      options: {
+        root: { type: "string" },
+        assets: { type: "string" },
+        manifest: { type: "string" },
+        check: { type: "boolean", default: false },
+        write: { type: "boolean", default: false },
+        "lockfile-only": { type: "boolean", default: false },
+        "assets-only": { type: "boolean", default: false },
+        help: { type: "boolean", default: false },
+      },
+    }));
+  } catch (err) {
+    process.stderr.write(`deploy-checks: ${err.message}\n`);
+    printUsage(process.stderr);
+    process.exit(2);
+  }
   if (values.help) { printUsage(); return; }
   if (values.check && values.write) {
     process.stderr.write("deploy-checks: --check and --write are mutually exclusive\n");
+    printUsage(process.stderr);
     process.exitCode = 2;
     return;
   }
   if (values["lockfile-only"] && values["assets-only"]) {
     process.stderr.write("deploy-checks: --lockfile-only and --assets-only are mutually exclusive\n");
+    printUsage(process.stderr);
     process.exitCode = 2;
     return;
   }
@@ -420,11 +429,13 @@ async function main() {
   if (values.write) {
     if (values["lockfile-only"]) {
       process.stderr.write("deploy-checks: --write has nothing to write with --lockfile-only\n");
+      printUsage(process.stderr);
       process.exitCode = 2;
       return;
     }
     if (assets.length === 0) {
       process.stderr.write("deploy-checks: --write needs at least one asset (--assets <csv> or a deploy/ directory)\n");
+      printUsage(process.stderr);
       process.exitCode = 2;
       return;
     }
@@ -434,7 +445,14 @@ async function main() {
       process.exitCode = 1;
       return;
     }
-    const manifest = writeManifest(manifestPath, buildManifest(hashes), { fs: nodeFs });
+    let manifest;
+    try {
+      manifest = writeManifest(manifestPath, buildManifest(hashes), { fs: nodeFs });
+    } catch (err) {
+      process.stderr.write(`deploy-checks: cannot write manifest at ${manifestPath}: ${err.message}\n`);
+      process.exitCode = 1;
+      return;
+    }
     process.stdout.write(`${JSON.stringify({ ok: true, mode: "write", manifestPath, assetCount: manifest.assetCount, skipped })}\n`);
     return;
   }

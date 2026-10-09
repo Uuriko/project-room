@@ -2,7 +2,13 @@ import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { replayNdjson } from "../server/room-export.mjs";
 
-const { values } = parseArgs({ options: { from: { type: "string" }, to: { type: "string" } } });
+let values;
+try {
+  ({ values } = parseArgs({ options: { from: { type: "string" }, to: { type: "string" } } }));
+} catch {
+  process.stderr.write("Usage: node scripts/replay-room-export.mjs --from <export.ndjson> --to <destination>\n");
+  process.exit(2);
+}
 process.umask(0o077);
 try {
   if (!values.from || !values.to) throw new Error("Missing replay paths");

@@ -48,12 +48,19 @@ export async function readDoors(origin, fetchImpl = fetch) {
 
 // Poll until both doors report `sha` or the window closes; returns the last read.
 export async function waitDoors({ origin, sha, waitMs = 0, pollMs = 10000, fetchImpl = fetch, sleep = ms => new Promise(r => setTimeout(r, ms)) }) {
+  assertSaneWindows(waitMs, pollMs); // a NaN/negative window would poll forever on a NaN deadline
   const deadline = Date.now() + waitMs;
   for (;;) {
     const seen = await readDoors(origin, fetchImpl);
     const state = classifyDoors({ sha, ...seen });
     if (state === "converged" || Date.now() >= deadline) return { state, ...seen };
     await sleep(Math.min(pollMs, Math.max(0, deadline - Date.now())));
+  }
+}
+
+function assertSaneWindows(waitMs, pollMs) {
+  if (!Number.isFinite(waitMs) || waitMs < 0 || !Number.isFinite(pollMs) || pollMs <= 0) {
+    throw new Error(`waitDoors: waitMs must be finite and >= 0, pollMs finite and > 0 (got waitMs=${waitMs} pollMs=${pollMs})`);
   }
 }
 
@@ -64,11 +71,13 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const opt = (name, fallback) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : fallback; };
   const origin = opt("--origin");
   const sha = opt("--sha");
-  if (!origin || !/^[0-9a-f]{40}$/.test(sha ?? "")) {
+  const waitMs = Number(opt("--wait-ms", 0));
+  const pollMs = Number(opt("--poll-ms", 10000));
+  if (!origin || !/^[0-9a-f]{40}$/.test(sha ?? "") || !Number.isFinite(waitMs) || waitMs < 0 || !Number.isFinite(pollMs) || pollMs <= 0) {
     console.error("usage: check-version-doors.mjs --origin URL --sha <40-hex> [--wait-ms N] [--poll-ms N]");
     process.exit(2);
   }
-  const result = await waitDoors({ origin: origin.replace(/\/$/, ""), sha, waitMs: Number(opt("--wait-ms", 0)), pollMs: Number(opt("--poll-ms", 10000)) });
+  const result = await waitDoors({ origin: origin.replace(/\/$/, ""), sha, waitMs, pollMs });
   console.log(JSON.stringify({ sha, origin, ...result, label: result.state === "do-stale" ? "DO still on old revision" : result.state }));
   if (result.state === "do-stale") console.error(`DO still on old revision: worker reports ${sha}, ${DOORS.do} reports ${result.doRev ?? "nothing"}`);
   process.exit(EXIT[result.state]);

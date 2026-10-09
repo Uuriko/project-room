@@ -206,6 +206,7 @@ function spillPath(stateDir) {
 export function mergeEventLists(a, b) {
   const seen = new Map();
   for (const e of [...(a ?? []), ...(b ?? [])]) {
+    if (!e || typeof e !== "object") continue; // corrupt spill entries never crash the walk
     const seq = Number(e.sequence) || 0;
     if (!seen.has(seq)) seen.set(seq, e);
   }

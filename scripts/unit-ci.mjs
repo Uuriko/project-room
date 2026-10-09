@@ -50,9 +50,16 @@ export function runTestFiles(files) {
 function main() {
   const argv = process.argv.slice(2);
   if (argv.length !== 1 || !argv[0].startsWith("--shard=")) {
-    throw new Error("Usage: node scripts/unit-ci.mjs --shard=1/3");
+    process.stderr.write("Usage: node scripts/unit-ci.mjs --shard=1/3\n");
+    process.exit(2);
   }
-  const shard = parseShard(argv[0].slice("--shard=".length));
+  let shard;
+  try {
+    shard = parseShard(argv[0].slice("--shard=".length));
+  } catch (err) {
+    process.stderr.write(`unit-ci: ${err.message}\nUsage: node scripts/unit-ci.mjs --shard=1/3\n`);
+    process.exit(2);
+  }
   // Fresh checkouts do not contain ignored .tmp/. Initialize before both
   // dependency preflight and test children, matching scripts/test-env.sh.
   const worktreeScratch = resolve(".tmp");

@@ -317,7 +317,17 @@ function loadJson(path, label) {
 }
 
 const args = process.argv.slice(2);
-const mode = args.find((a) => ["--extract", "--check", "--baseline", "--report"].includes(a)) ?? "--check";
+const MODES = ["--extract", "--check", "--baseline", "--report"];
+const KNOWN_ARGS = new Set(MODES);
+function usageError(message) {
+  process.stderr.write(`i18n-harness: ${message}\nUsage: node scripts/i18n-harness.mjs [--extract|--check|--baseline|--report]\n`);
+  process.exit(2);
+}
+const unknown = args.find((a) => !KNOWN_ARGS.has(a));
+if (unknown !== undefined) usageError(`unknown argument ${unknown}`);
+const modes = args.filter((a) => MODES.includes(a));
+if (modes.length > 1) usageError(`conflicting modes: ${modes.join(" ")}`);
+const mode = modes[0] ?? "--check";
 
 if (mode === "--extract") {
   console.log(JSON.stringify(runExtraction(), null, 2));

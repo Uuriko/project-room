@@ -15,11 +15,14 @@ for (const [name, viewport] of [["desktop", { width: 1360, height: 900 }], ["mob
   test(`chat suggestions ${name}: tap a reply, or turn a request into a task`, { timeout: 60000 }, async t => {
     const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-    const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+    // Cleanup before the browser launch: a launch failure must fail the test,
+    // not hang the runner on the still-listening server.
+    let browser;
     t.after(async () => {
-      await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
+      await browser?.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
       f.store.close(); rmSync(f.directory, { recursive: true, force: true });
     });
+    browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
     const say = (key, body) => f.store.command(f.keys[key], "commons", { id: crypto.randomUUID(), type: T.MESSAGE_POSTED, data: { messageId: crypto.randomUUID(), body } });
     const page = await browser.newPage({ viewport, reducedMotion: "reduce" }), errors = [];
     page.setDefaultTimeout(8000); page.on("pageerror", error => errors.push(error.message));
@@ -57,11 +60,14 @@ test("an unanswered question offers Ask @Agent, which only prefills the mention"
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
   f.store.command(f.keys.owner, "commons", { id: "quiet-channel", type: T.CHANNEL_CREATED, data: { channelId: "quiet", name: "quiet" } });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+  // Cleanup before the browser launch: a launch failure must fail the test,
+  // not hang the runner on the still-listening server.
+  let browser;
   t.after(async () => {
-    await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
+    await browser?.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
     f.store.close(); rmSync(f.directory, { recursive: true, force: true });
   });
+  browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
   const page = await browser.newPage({ viewport: { width: 1360, height: 900 }, reducedMotion: "reduce" }), errors = [];
   page.setDefaultTimeout(8000); page.on("pageerror", error => errors.push(error.message));
   await page.clock.install();

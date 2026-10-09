@@ -7,10 +7,51 @@ import { spawn } from "node:child_process";
 import { roomTools, attentionTools } from "../client/mcp-stdio.mjs";
 import { resolveHostBinary } from "./native-host-binary.mjs";
 const [host, metadataPath, phase, outputPath] = process.argv.slice(2);
-if (process.argv.length !== 6 || !["codex", "claude"].includes(host) || !["clarify", "produce", "review"].includes(phase)) throw new Error("Choose host, fixture metadata, phase and a new evidence file");
-const fixture = JSON.parse(readFileSync(metadataPath, "utf8"));
-const memberId = phase === "review" ? "reviewer" : "producer", participant = fixture.participants.find(p => p.memberId === memberId);
-if (!participant || new URL(fixture.origin).hostname !== "127.0.0.1") throw new Error("Synthetic loopback fixture required");
+if (process.argv.length !== 6 || !["codex", "claude"].includes(host) || !["clarify", "produce", "review"].includes(phase)) {
+  process.stderr.write("Usage: node scripts/native-host-request-run.mjs <codex|claude> <fixture-metadata.json> <clarify|produce|review> <new-evidence-file>\n");
+  process.exit(2);
+}
+const memberId = phase === "review" ? "reviewer" : "producer";
+// Reserve evidence before any model calls. Existing evidence must never trigger
+// a duplicate exercise followed by a late file-exists failure. Reservation
+// stays first, so every could-not-start path still records its outcome.
+let output;
+try {
+  output = openSync(resolve(outputPath), "wx", 0o600);
+} catch (error) {
+  writeSync(2, `Cannot reserve evidence ${resolve(outputPath)}: ${error.message}\n`);
+  process.exit(1);
+}
+// A run that cannot start is still a result the operator needs recorded:
+// fixture problems are written to the reserved evidence instead of thrown,
+// so the operator always gets a structured record and never a bare stack.
+function recordNotStarted(extra) {
+  const at = new Date().toISOString();
+  writeFileSync(output, JSON.stringify({ host, phase, memberId, startedAt: at, finishedAt: at,
+    code: null, signal: null, timedOut: false, outputLimited: false, ...extra,
+    boundary: "No native host was started. Nothing was sent to a model and no room operation was attempted." }, null, 2), { flag: "wx", mode: 0o600 });
+  closeSync(output);
+  writeSync(2, (extra.fixtureError ?? extra.hostUnresolved) + "\n");
+  process.exit(1);
+}
+let fixture = null;
+try {
+  fixture = JSON.parse(readFileSync(metadataPath, "utf8"));
+} catch (error) {
+  recordNotStarted({ fixtureError: `Cannot read fixture metadata ${metadataPath}: ${error.code === "ENOENT" ? "no such file" : error.message}` });
+}
+let participant = null;
+try {
+  if (!fixture || typeof fixture !== "object") throw new Error(`fixture metadata ${metadataPath} is not a JSON object`);
+  if (!Array.isArray(fixture.participants)) throw new Error(`fixture metadata ${metadataPath} has no participants array`);
+  participant = fixture.participants.find(p => p.memberId === memberId);
+  if (!participant) throw new Error(`fixture metadata ${metadataPath} has no ${memberId} participant`);
+  let originHostname = null;
+  try { originHostname = new URL(fixture.origin).hostname; } catch { /* stays null: treated as non-loopback below */ }
+  if (originHostname !== "127.0.0.1") throw new Error("Synthetic loopback fixture required");
+} catch (error) {
+  recordNotStarted({ fixtureError: error.message });
+}
 const readTools = ["room_check_access", "room_read_attention", "room_acknowledge_attention", "room_list_work", "room_read_work", "room_read_work_discussion", "room_read_request", "room_read_result"];
 const names = [...readTools, ...(phase === "clarify" ? ["room_reply"] : phase === "review" ? ["room_record_verification"]
   : ["room_accept_work", "room_start_work", "room_post_draft", "room_submit_text_result", "room_respond_to_request"])];
@@ -43,21 +84,10 @@ if (host === "codex") {
     "--disallowedTools", [...roomTools, ...attentionTools].filter(t => !names.includes(t.name)).map(t => "mcp__room__" + t.name).join(","),
     "--max-turns", "25", "--output-format", "stream-json", "--verbose", prompt];
 }
-// Reserve evidence before any model calls. Existing evidence must never trigger
-// a duplicate exercise followed by a late file-exists failure.
-const output = openSync(resolve(outputPath), "wx", 0o600);
-// Evidence reservation stays first, so an already-used evidence path still
-// refuses ahead of everything else. Only then does an unresolved host matter,
-// and it is written down rather than thrown: a run that could not start is
-// still a result the operator needs recorded.
+// Only now that fixture and evidence are settled does an unresolved host
+// matter; it is written down rather than thrown.
 if (!resolvedHost.binary) {
-  const at = new Date().toISOString();
-  writeFileSync(output, JSON.stringify({ host, phase, memberId, startedAt: at, finishedAt: at,
-    code: null, signal: null, timedOut: false, outputLimited: false, hostUnresolved: resolvedHost.reason,
-    boundary: "No native host was started. Nothing was sent to a model and no room operation was attempted." }, null, 2), { flag: "wx", mode: 0o600 });
-  closeSync(output);
-  writeSync(2, resolvedHost.reason + "\n");
-  process.exit(1);
+  recordNotStarted({ hostUnresolved: resolvedHost.reason });
 }
 const child = spawn(resolvedHost.binary, args, { cwd: fixture.directory, env, stdio: ["pipe", "pipe", "pipe"] });
 let stdout = "", stderr = "", buffer = "", timedOut = false, outputLimited = false, killTimer;

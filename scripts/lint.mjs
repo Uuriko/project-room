@@ -19,5 +19,5 @@ if (!existsSync(eslint)) {
   console.error("Lint gate: eslint is not installed. Run `npm ci` first.");
   process.exit(1);
 }
-const result = spawnSync(process.execPath, [eslint, ".", ...args.filter(a => a !== "--skip-if-missing")], { cwd: root, stdio: "inherit" });
+const result = spawnSync(process.execPath, [eslint, ".", ...args.filter(a => a !== "--skip-if-missing" && a !== "")], { cwd: root, stdio: "inherit" });
 process.exit(result.status ?? 1);

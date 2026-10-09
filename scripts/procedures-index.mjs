@@ -15,7 +15,7 @@
 // The library is read-only by design in v1: there is no write API and the
 // served doc advertises none. New versions land through pull requests that
 // edit the markdown and regenerate this index.
-import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -109,10 +109,25 @@ const proceduresDir = join(repoRoot, "docs", "procedures");
 const outPath = join(repoRoot, "deploy", "procedures-index.mjs");
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const check = process.argv.includes("--check");
+  const cliArgs = process.argv.slice(2);
+  const knownFlags = new Set(["--check", "--help"]);
+  const unknownFlags = cliArgs.filter((a) => a.startsWith("--") && !knownFlags.has(a));
+  if (cliArgs.includes("--help") || unknownFlags.length) {
+    console.error("Usage: node scripts/procedures-index.mjs [--check]");
+    process.exit(2);
+  }
+  const check = cliArgs.includes("--check");
+  if (!existsSync(proceduresDir)) {
+    console.error(`procedures-index: procedures directory not found: ${proceduresDir}`);
+    process.exit(1);
+  }
   const index = buildProceduresIndex(proceduresDir);
   const rendered = renderModule(index);
   if (check) {
+    if (!existsSync(outPath)) {
+      console.error(`procedures-index: ${outPath} is missing: run "node scripts/procedures-index.mjs" to generate it`);
+      process.exit(1);
+    }
     const current = readFileSync(outPath, "utf8");
     if (current !== rendered) {
       console.error("deploy/procedures-index.mjs is stale: run node scripts/procedures-index.mjs");

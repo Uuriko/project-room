@@ -95,8 +95,23 @@ export function renderMarkdown(markdown, { labelPrefix = "" } = {}) {
 
 function sections(markdown) {
   const found = [];
-  const chunks = markdown.split(/^## /m).slice(1);
-  for (const chunk of chunks) {
+  // Split on ## headings that are NOT inside fenced code blocks: a "## "
+  // line inside a sample config would otherwise become a phantom HowTo step
+  // in the page's JSON-LD (and split the enclosing section in two).
+  const chunks = [];
+  let current = [];
+  let inFence = false;
+  for (const line of markdown.replace(/\r\n/g, "\n").split("\n")) {
+    if (line.startsWith("```")) inFence = !inFence;
+    if (!inFence && line.startsWith("## ")) {
+      chunks.push(current.join("\n"));
+      current = [line.slice("## ".length)];
+      continue;
+    }
+    current.push(line);
+  }
+  chunks.push(current.join("\n"));
+  for (const chunk of chunks.slice(1)) {
     const [title, ...rest] = chunk.split("\n");
     const body = rest.join("\n");
     const prose = body.replace(/```[\s\S]*?```/g, " ").replace(/\s+/g, " ").trim();

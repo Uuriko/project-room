@@ -244,7 +244,15 @@ function preferenceOf(text) {
   // Drop tokens present on both sides (sentence bleed); they carry no order signal.
   const x = side(m[1]);
   const y = side(m[2]);
-  for (const t of [...x]) if (y.has(t)) { x.delete(t); y.delete(t); }
+  const shared = [...x].filter((t) => y.has(t));
+  // ...but only when neither side would be emptied: a preference whose whole
+  // vocabulary repeats inside a justification clause ("prefer pnpm over npm
+  // ... because the lockfile is pnpm") is still a preference, and dropping
+  // the shared tokens would null the whole statement and hide a real
+  // inversion.
+  if (shared.length > 0 && shared.length < x.size && shared.length < y.size) {
+    for (const t of shared) { x.delete(t); y.delete(t); }
+  }
   if (x.size === 0 || y.size === 0) return null;
   return { x, y, raw: m[0].trim() };
 }

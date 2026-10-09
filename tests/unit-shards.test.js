@@ -145,3 +145,14 @@ test("canonical discovery matches real default Node across extensions, nested an
   const seen=readFileSync(join(dir,"seen.jsonl"),"utf8").trim().split("\n").map(JSON.parse).sort();
   assert.deepEqual(seen,actual,"planner has exactly default Node membership");
 });
+
+test("unit-shards-check rejects flag-like and unreadable receipt dirs without a stack trace (guild-06 fuzz)", () => {
+  const root = join(new URL(".", import.meta.url).pathname, "..");
+  const invoke = (args) => spawnSync(process.execPath, ["scripts/unit-shards-check.mjs", ...args], { cwd: root, encoding: "utf8", timeout: 15000 });
+  for (const bad of ["--help", "--bogus-flag-xyz", "/nonexistent-guild06-receipts-xyz"]) {
+    const r = invoke([bad]);
+    assert.notEqual(r.status, 0, `expected nonzero exit for ${bad}`);
+    assert.doesNotMatch(r.stderr, /^\s*at\s/m, `no stack trace for ${bad}: ${r.stderr.slice(0, 200)}`);
+    assert.match(r.stderr, /Usage:|cannot read receipt directory/i, `clean error for ${bad}`);
+  }
+});

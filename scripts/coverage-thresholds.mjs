@@ -387,15 +387,21 @@ export function evaluateModules(root, config, grouped) {
   return results;
 }
 
+/** Compare a measured module percentage against its threshold.
+ * Thresholds are specified to 0.1 precision: flooring absorbs
+ * floating-point epsilon so 95.64% vs a 95.6 threshold passes. The report's
+ * per-module verdict tag must use this same compare, or the tag can disagree
+ * with the gate's verdict at the float-floor boundary. */
+export function meetsThreshold(pct, threshold) {
+  return Math.floor(pct * 10) / 10 >= threshold;
+}
+
 /** Compare module percentages against thresholds. */
 export function checkThresholds(config, results) {
   const failures = [];
   for (const [name, mod] of Object.entries(config.modules)) {
     const r = results[name];
-    // Compare at 0.1 precision (thresholds are specified to 0.1): flooring
-    // absorbs floating-point epsilon so 95.64% vs a 95.6 threshold passes.
-    const pctFloor = Math.floor(r.pct * 10) / 10;
-    if (pctFloor < mod.threshold) {
+    if (!meetsThreshold(r.pct, mod.threshold)) {
       failures.push({
         module: name,
         dir: mod.dir,
@@ -414,10 +420,10 @@ const fmtPct = n => `${n.toFixed(1)}%`;
 export function formatReport(results, check) {
   const lines = ["", "Per-module coverage thresholds:"];
   for (const [name, r] of Object.entries(results)) {
-    const verdict = r.pct < r.threshold ? "FAIL" : "ok";
+    const verdict = meetsThreshold(r.pct, r.threshold) ? "ok" : "FAIL";
     lines.push(
       `  [${verdict}] ${name}/ (${r.files} files): ${fmtPct(r.pct)} covered vs ${fmtPct(r.threshold)} threshold` +
-        (r.zeroCoverageFiles ? ` — ${r.zeroCoverageFiles} files with zero coverage data` : "")
+        (r.zeroCoverageFiles.length ? ` — ${r.zeroCoverageFiles.length} files with zero coverage data` : "")
     );
   }
   if (!check.ok) {
