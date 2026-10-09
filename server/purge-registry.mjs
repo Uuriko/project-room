@@ -279,6 +279,19 @@ const ROWS = [
     }
   },
   {
+    "table": "agent_invite_redeem_receipts",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ],
+      "identity": [
+        "identity_id"
+      ]
+    }
+  },
+  {
     "table": "agent_invite_codes",
     "key": "room_id",
     "action": "delete",
