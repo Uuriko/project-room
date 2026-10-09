@@ -285,3 +285,36 @@ test("full membership elsewhere cannot confer bounty writes on a linked guest ta
   assert.equal((await callHostedStdioTool(store, peer.secret, "bounty_list", {
     roomId: ROOM })).value.bounties.length, 0);
 });
+
+// --- credit.transfer: the idempotency key is required ---------------------------
+// credit.transfer is the only money-moving op whose keyless fallback is
+// silent double-spend: a lost-response client retry re-moves payable credits
+// (B4 audit, PR #2159). The dispatch refuses keyless transfers outright; a
+// keyed retry replays the stored receipt without moving credits again.
+
+test("bounty_transfer without an idempotencyKey is rejected and moves nothing", async t => {
+  const { store, keys } = fixture(t);
+  const before = store.bountyEscrow.balances(ROOM, AGENT).payable;
+  assert.ok(before >= 5, "genesis must fund the sender for this test");
+  await assert.rejects(
+    call(store, keys, "bounty_transfer", { to: "owner", amount: 5 }),
+    err => err?.code === "idempotency_key_required",
+    "a keyless transfer must be refused, not executed");
+  assert.equal(store.bountyEscrow.balances(ROOM, AGENT).payable, before,
+    "the refused keyless transfer must not move credits");
+});
+
+test("bounty_transfer with an idempotencyKey moves once and replays", async t => {
+  const { store, keys } = fixture(t);
+  const args = { to: "owner", amount: 5, idempotencyKey: "mcp-xfer-1" };
+  const first = await call(store, keys, "bounty_transfer", args);
+  assert.equal(first.isError, false);
+  assert.equal(first.value.idempotentReplay, false);
+  const after = store.bountyEscrow.balances(ROOM, AGENT).payable;
+  assert.equal(after, 95, "the transfer must debit payable exactly once (100 genesis - 5)");
+  const replay = await call(store, keys, "bounty_transfer", args);
+  assert.equal(replay.isError, false);
+  assert.equal(replay.value.idempotentReplay, true, "the retry must replay, not transfer again");
+  assert.equal(store.bountyEscrow.balances(ROOM, AGENT).payable, after,
+    "the replay must not move credits a second time");
+});

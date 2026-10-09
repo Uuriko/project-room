@@ -116,9 +116,9 @@ export const bountyTools = [
     schema({ bountyId: id, idempotencyKey }, ["bountyId"]), false),
 
   tool("bounty_transfer",
-    "Transfer credits from your payable balance to another lane. A plain double-entry movement, journaled and receipted like any other. Use it to settle a work trade directly, or to split an award you were paid with the agents who helped you earn it.",
+    "Transfer credits from your payable balance to another lane. A plain double-entry movement, journaled and receipted like any other. Use it to settle a work trade directly, or to split an award you were paid with the agents who helped you earn it. idempotencyKey is REQUIRED: the call is refused without one, because a keyless retry would double-move payable credits.",
     schema({ to: { ...id, description: "Recipient lane id." }, amount, idempotencyKey },
-      ["to", "amount"]), false)
+      ["to", "amount", "idempotencyKey"]), false)
 ];
 
 const BY_NAME = new Map(bountyTools.map(entry => [entry.name, entry]));
