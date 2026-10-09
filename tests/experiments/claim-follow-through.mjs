@@ -54,7 +54,7 @@ export function claimFollowThrough(claim, { dependencies = [], now, candidateHea
 
 // Reconstructable offline helper: node tests/experiments/claim-follow-through.mjs < input.json
 // Input: {claim, options:{now, candidateHead?, dependencies?}}. No network access.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (!process.env.NODE_TEST_CONTEXT && process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   if (process.argv.length !== 2) throw new TypeError('Use stdin JSON; no command arguments supported');
   const input = JSON.parse(readFileSync(0, 'utf8'));
   process.stdout.write(`${JSON.stringify(claimFollowThrough(input.claim, input.options), null, 2)}\n`);

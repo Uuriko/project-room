@@ -64,11 +64,13 @@ test('helper is read-only and requires explicit observation and valid inputs', (
 });
 test('offline CLI reconstructs the same result and rejects unused arguments', () => {
   const args = ['tests/experiments/claim-follow-through.mjs'];
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
   const input = JSON.stringify({ claim: claim(), options });
-  const run = spawnSync(process.execPath, args, { input, encoding: 'utf8' });
+  const run = spawnSync(process.execPath, args, { input, encoding: 'utf8', env });
   assert.equal(run.status, 0, run.stderr);
   assert.deepEqual(JSON.parse(run.stdout), claimFollowThrough(claim(), options));
-  assert.notEqual(spawnSync(process.execPath, [...args, '--dispatch'], { input }).status, 0);
+  assert.notEqual(spawnSync(process.execPath, [...args, '--dispatch'], { input, env }).status, 0);
 });
 
 test('current review findings prompt assessment without inventing a merge hold', () => {
@@ -77,4 +79,11 @@ test('current review findings prompt assessment without inventing a merge hold',
   } }] });
   assert.equal(code(item), 'inspect_review_findings');
   assert.equal(code({ ...item, reviews: [{ ...item.reviews[0], basis: { ...item.reviews[0].basis, headSha: 'b'.repeat(40) } }] }), 'inspect_acceptance');
+});
+
+test('test discovery never starts the stdin CLI', () => {
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  const run = spawnSync(process.execPath, ['--test', 'tests/experiments/claim-follow-through.mjs'], { encoding: 'utf8', timeout: 5000, env });
+  assert.equal(run.status, 0, run.stderr);
 });
