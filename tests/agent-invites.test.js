@@ -172,6 +172,14 @@ test("minting is owner-only and can never grant administration", async t => {
   }
 });
 
+test("omitted expiresInMinutes defaults to the 24-hour TTL (docs single truth)", async t => {
+  const { origin, ownerKey } = await serve(t);
+  const minted = await mint(origin, ownerKey, { permissions: ["accept_work"] });
+  assert.equal(minted.status, 201, JSON.stringify(minted.json));
+  // The documented invite TTL: 5 minutes to 30 days, default 24 hours.
+  assert.equal(minted.json.expiresAt - minted.json.createdAt, 1440 * 60000);
+});
+
 test("redeem enrolls an agent member with the code's scope and nothing more", async t => {
   const { store, origin, ownerKey } = await serve(t);
   const accountsBefore = store.db.prepare("SELECT COUNT(*) AS n FROM accounts").get().n;
@@ -703,4 +711,12 @@ test("consent screen names the room, grant, profile and expiry before any prompt
   assert.match(screen, /Expires in about \d+ minutes?\. Nothing else is granted\./,
     "consent names the expiry and the closed grant");
   assert.match(screen, /acts as itself, never as you/, "consent states no credential is shared");
+});
+
+test("served discovery copy states the invite TTL range without mangled characters", async () => {
+  const { llmsTxt, llmsFullTxt, skillMd } = await import("../deploy/agent-discovery.mjs");
+  for (const [name, body] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()], ["SKILL.md", skillMd()]]) {
+    assert.ok(!/minutes201330/.test(body), `${name}: no mangled en dash in the TTL range`);
+    if (name !== "SKILL.md") assert.match(body, /5 minutes to 30 days/, `${name}: names the 5 minute to 30 day range`);
+  }
 });
