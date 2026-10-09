@@ -64,6 +64,14 @@ test("canReviewClaim allows review while the work is in progress, blocked, or ha
     canReviewClaim(item("a", { pullRequest: { url: "https://github.com/o/r/pull/1" } }), v, m),
     true
   );
+  // An open PR does not make a finished claim reviewable: the server's
+  // recordReview only accepts active claims, so the form would always 4xx.
+  for (const state of ["done", "cancelled", "closed", "unclaimed"]) {
+    assert.equal(
+      canReviewClaim(item("a", { state, pullRequest: { url: "https://github.com/o/r/pull/1" } }), v, m),
+      false, state
+    );
+  }
 });
 
 // --- claimReviewForm: the review controls on the claim card ---
