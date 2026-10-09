@@ -6,7 +6,7 @@ import { EVENT_TYPES as T, MAX_MESSAGE_BODY_CHARS, WORK_STATES as S, roomPolicy,
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
-import { conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
+import { TIMELINE_WINDOW, windowTimeline, windowToInclude, conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
 import { canonicalReaction, clipGraphemes, emojiCatalog, emojiMatches, emojiName, emojiQuery, foldedReactionMap, frequentEmoji, insertEmoji, renderEmojiShortcodes } from "./emoji.js";
 import { nextWorkStep, workStatus, workActions, renderWorkActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, diffResultLines, diffResultSummary, workRecipeOptions } from "./workflow.js";
 import { coordinationLoops } from "./work-loops.js";
@@ -300,6 +300,13 @@ let requestRuns = {}, requestRunsReading = false, requestRunsReadKey = "";
 let requestMode = null, requestReading = false, requestEpoch = 0;
 const composerKey = () => requestMode ? replyDraftKey(requestMode, currentThreadId) : currentThreadId ?? channelDraftKey(activeChannelId);
 const conversationViewKey = () => currentThreadId ? `thread:${currentThreadId}` : `room:${activeChannelId}`;
+// The room timeline renders only its newest TIMELINE_WINDOW root messages; the
+// "Show earlier messages" control adds another page. A room with thousands of
+// messages otherwise builds thousands of rows (and layout reads over them) on
+// open. timelineWindow maps a view key to how many roots that view shows.
+const TIMELINE_PAGER_KEY = "pager:earlier";
+const timelineWindow = new Map();
+let timelineRevealing = false;
 const viewPositions = new Map(), pendingReactions = new Map(), pendingPins = new Set(), locallyOwnedMessageIds = new Set();
 let newVisibleMessages = 0, unreadAnchorId = null, mentionIndex = 0, emojiIndex = 0;
 let mutedThreads = new Set(), threadMuteBusy = false;
@@ -488,7 +495,7 @@ const client = new RoomClient({
     }
     requestRuns = {}; requestMode = null; requestReading = false; requestEpoch++; syncRequestComposer();
     renderComposerError();
-    viewPositions.clear(); pendingReactions.clear(); locallyOwnedMessageIds.clear(); newVisibleMessages = 0; briefView.reset();
+    viewPositions.clear(); timelineWindow.clear(); pendingReactions.clear(); locallyOwnedMessageIds.clear(); newVisibleMessages = 0; briefView.reset();
     if (!pendingSignout) signoutOperationId += 1;
     refreshOperationId += 1;
     $("#signout-button").disabled = pendingSignout;
@@ -2259,14 +2266,17 @@ function renderMessages() {
     if (horizonCache.has(threadKey)) horizonAnchorId = horizonAnchorFor(messages, horizonCache.get(threadKey));
     else { horizonAnchorId = null; void applyHorizonAnchor(); }
   }
-  const messages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
+  const allMessages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
+  const shownLimit = currentThreadId ? Infinity : timelineWindow.get(view) ?? TIMELINE_WINDOW;
+  const { messages, hidden: hiddenCount } = windowTimeline(allMessages, shownLimit);
+  const revealing = timelineRevealing; timelineRevealing = false;
   const previous = new Map([...list.children].map(e => [e.dataset.key, e]));
   const pageScroll = list.scrollHeight <= list.clientHeight;
   const listTop = Math.max(0, list.getBoundingClientRect().top);
   const nearBottom = pageScroll ? list.getBoundingClientRect().bottom <= innerHeight + 80
     : list.scrollHeight - list.scrollTop - list.clientHeight < 80;
   const anchor = [...list.children].find(e => {
-    if (e.hasAttribute("data-claim-update")) return false; // removed and repainted below
+    if (e.hasAttribute("data-claim-update") || e.dataset.key === TIMELINE_PAGER_KEY) return false; // removed and repainted below
     const bounds = e.getBoundingClientRect();
     return bounds.bottom > listTop && (!pageScroll || bounds.top < innerHeight);
   });
@@ -2281,7 +2291,7 @@ function renderMessages() {
   // node is in its final place.
   const focusedKey = focused?.dataset.focusKey ?? null;
   const focusedMessage = focused?.matches(".message");
-  const newMessages = sameView ? messages.filter(m => !previous.has(`message:${m.id}`)) : [];
+  const newMessages = sameView && !revealing ? messages.filter(m => !previous.has(`message:${m.id}`)) : [];
   const newCount = newMessages.length;
   if (!sameView || nearBottom) unreadAnchorId = null;
   else if (!unreadAnchorId && newMessages[0]) unreadAnchorId = newMessages[0].id;
@@ -2306,12 +2316,14 @@ function renderMessages() {
   const savedSelection = captureTimelineSelection(list);
   // Message IDs are caller-controlled and may themselves begin with "work:".
   const keep = new Set(messages.map(m => `message:${m.id}`));
+  if (hiddenCount) keep.add(TIMELINE_PAGER_KEY);
   // Board claim lines carry no data-key, so the map above holds only the last
   // one; any left in the list made the reorder below move every message row
   // after them on every arrival. They are repainted after each render.
   list.querySelectorAll(":scope > [data-claim-update]").forEach(node => node.remove());
   for (const [id, node] of previous) if (!keep.has(id) && !node.hasAttribute("data-work-timeline")) node.remove();
-  const workEntries = currentThreadId || !state ? [] : timelineWorkEntries().filter(e => e.channelId === activeChannelId);
+  const firstShownAt = hiddenCount ? Date.parse(messages[0].createdAt) || 0 : 0;
+  const workEntries = currentThreadId || !state ? [] : timelineWorkEntries().filter(e => e.channelId === activeChannelId && (!hiddenCount || e.ts >= firstShownAt));
   const ordered = [];
   // One members array per pass keeps the body HTML cache keyed (see createBodyHtmlCache).
   const mentionable = state ? Object.values(state.members) : [];
@@ -2392,6 +2404,18 @@ function renderMessages() {
   for (const [key, node] of previous) if (key?.startsWith("work:") && !workById.has(key.slice(5))) node.remove();
   let wi = 0;
   const merged = [];
+  if (hiddenCount) {
+    let pager = previous.get(TIMELINE_PAGER_KEY);
+    if (!pager) {
+      pager = document.createElement("li");
+      pager.className = "timeline-pager"; pager.dataset.key = TIMELINE_PAGER_KEY;
+      const more = document.createElement("button");
+      more.type = "button"; more.className = "text-button"; more.dataset.timelineEarlier = "";
+      more.textContent = uiText("timeline.earlier");
+      pager.append(more);
+    }
+    merged.push(pager);
+  }
   messages.forEach((message, index) => {
     while (wi < workEntries.length && workEntries[wi].ts <= msgTs(message)) merged.push(workById.get(workEntries[wi++].item.id));
     merged.push(ordered[index]);
@@ -2897,6 +2921,7 @@ function revealMessage(id) {
   const message = conversation.byId.get(id);
   if (messageChannelId(message) !== activeChannelId) setActiveChannel(messageChannelId(message));
   switchThread(message.replyToId ? conversation.rootById.get(id) : null);
+  expandTimelineTo(id);
   const row = [...$("#message-list").querySelectorAll("[data-message-record-id]")]
     .find(node => node.dataset.messageRecordId === id);
   // Scroll first: content-visibility: auto skips off-screen rows, and focusing
@@ -4109,7 +4134,26 @@ function submitRequest(form) {
 }
 // The menu lifting click listener is no longer needed (content-visibility
 // removed from .message). The menu positions correctly without it.
+// Widen the root-timeline window so the message with this id is rendered.
+function expandTimelineTo(id) {
+  if (currentThreadId) return;
+  const view = `room:${activeChannelId}`;
+  const roots = conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
+  const current = timelineWindow.get(view) ?? TIMELINE_WINDOW, next = windowToInclude(roots, id, current);
+  if (next > current) {
+    timelineWindow.set(view, next);
+    timelineRevealing = true;
+    renderMessages();
+  }
+}
 $("#message-list").addEventListener("click", e => {
+  if (e.target.closest("[data-timeline-earlier]")) {
+    const view = `room:${activeChannelId}`;
+    timelineWindow.set(view, (timelineWindow.get(view) ?? TIMELINE_WINDOW) + TIMELINE_WINDOW);
+    timelineRevealing = true;
+    renderMessages();
+    return;
+  }
   const file = e.target.closest("[data-download-file]");
   if (file) { void downloadMessageFile(file.dataset.downloadFile, file.dataset.fileMessage); return; }
   if (e.target.closest("[data-empty-write]")) { $("#message-input").focus(); return; }
