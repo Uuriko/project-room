@@ -449,7 +449,10 @@ export class RoomClient {
       && payload.viewerSessionBinding === session.sessionBinding
       && (!Number.isSafeInteger(session.sessionRevision) || payload.viewerSessionRevision === session.sessionRevision);
   }
-  refresh(receipt = null) {
+  // `revalidate`: a stream (re)open or error. It must re-read (access and the
+  // newest messages), but the stream replays every event after the held
+  // sequence, so older history is corrected by those events' own reads.
+  refresh(receipt = null, { revalidate = false } = {}) {
     if (this.session?.authMode === "account" && !this.ownsAccountSession()) { this.endAccess(); return Promise.resolve(); }
     // Only sequenced room events can prove a snapshot already contains a change.
     // Reconnects, explicit refreshes and non-event receipts always revalidate access.
@@ -458,19 +461,19 @@ export class RoomClient {
     // A new message or claim receipt cannot change older messages, so it may
     // re-read only the newest ones. Anything else needs a full read at or past
     // its own sequence, even when a newer windowed read already landed.
-    const windowed = sequence !== null && RECENT_REFRESH_EVENTS.has(receipt.event.type);
+    const windowed = sequence === null ? revalidate : RECENT_REFRESH_EVENTS.has(receipt.event.type);
     const held = this.heldMessages(), fullSequence = held?.fullSequence ?? this.sequence;
     if (sequence !== null && sequence <= (windowed ? this.sequence : fullSequence)) return Promise.resolve();
     const generation = this.generation;
     if (this.flight?.generation === generation) {
-      if (sequence === null) this.flight.again = true;
+      if (sequence === null) { if (revalidate) this.flight.revisit = true; else this.flight.again = true; }
       else {
         this.flight.sequence = Math.max(this.flight.sequence, sequence);
         if (!windowed) this.flight.fullSequence = Math.max(this.flight.fullSequence, sequence);
       }
       return this.flight.promise;
     }
-    const flight = { generation, again: false, sequence: 0, fullSequence: 0, fullNow: !windowed };
+    const flight = { generation, again: false, revisit: false, sequence: 0, fullSequence: 0, fullNow: !windowed };
     this.flight = flight;
     flight.promise = (async () => {
       try {
@@ -478,7 +481,7 @@ export class RoomClient {
         do {
           const session = this.session, holding = this.heldMessages();
           const full = flight.again || flight.fullNow || flight.fullSequence > covered || !holding;
-          flight.again = false; flight.fullNow = false; flight.sequence = 0;
+          flight.again = false; flight.revisit = false; flight.fullNow = false; flight.sequence = 0;
           const read = await this.request(this.path(full ? "" : "?messages=recent"), { offerContext: true });
           if (generation !== this.generation || !this.session) return;
           if (!this.ownsResponse(read)) { this.endAccess(); return; }
@@ -493,9 +496,12 @@ export class RoomClient {
               fullSequence: whole ? snapshot.sequence : holding.fullSequence };
             this.onSnapshot(snapshot, this.session);
           }
-        } while (flight.again || flight.fullNow || flight.sequence > this.sequence || flight.fullSequence > covered);
+        } while (flight.again || flight.revisit || flight.fullNow || flight.sequence > this.sequence || flight.fullSequence > covered);
       } catch (error) {
         if (generation !== this.generation) return;
+        // A failed read may have owed a full one; the stream will not replay
+        // its event, so the next read of any kind is full.
+        this.held = null;
         if (this.session?.authMode === "account" && !this.ownsAccountSession()) { this.endAccess(); return; }
         throw error;
       }
@@ -899,15 +905,19 @@ export class RoomClient {
     if (!this.events || !this.session) { this.onStatus("Manual refresh available; live updates unavailable"); return; }
     if (this.session.authMode === "account" && !this.ownsAccountSession()) { this.endAccess(); return; }
     const generation = this.generation, session = this.session;
-    const stream = new this.events(`${this.path("/stream")}?after=${this.sequence}${this.session.authMode === "account" ? `&auth=account&binding=${encodeURIComponent(this.session.sessionBinding)}` : ""}`);
+    // Resume from the last FULL read, not the newest windowed one: a windowed read
+    // can pass an event (an edit of an older message) that it did not carry, and
+    // the stream must replay that event so it triggers its own full read.
+    const resumeAfter = this.heldMessages()?.fullSequence ?? this.sequence;
+    const stream = new this.events(`${this.path("/stream")}?after=${resumeAfter}${this.session.authMode === "account" ? `&auth=account&binding=${encodeURIComponent(this.session.sessionBinding)}` : ""}`);
     this.stream = stream;
     const ownsStream = () => this.stream === stream && this.generation === generation && this.session === session;
-    const refreshStream = receipt => this.refresh(receipt).catch(error => { if (ownsStream()) this.handleFailure(error); });
+    const refreshStream = (receipt, options) => this.refresh(receipt, options).catch(error => { if (ownsStream()) this.handleFailure(error); });
     stream.addEventListener("open", () => {
       if (!ownsStream()) return;
       this.streamRetryDelay = 1000;
       this.onStatus("Connected to room service · no peer read or processing receipt");
-      refreshStream();
+      refreshStream(null, { revalidate: true });
     });
     stream.addEventListener("room-event", message => {
       if (!ownsStream()) return;
@@ -926,7 +936,7 @@ export class RoomClient {
     stream.addEventListener("error", () => {
       if (!ownsStream()) return;
       this.onStatus("Reconnecting · displayed history may be stale");
-      refreshStream();
+      refreshStream(null, { revalidate: true });
       // Native retry handles CONNECTING, but HTTP refusals leave EventSource CLOSED.
       // Replace only that stream, with backoff and the same session ownership.
       if (ownsStream() && stream.readyState === 2 && !this.streamRetry) {
