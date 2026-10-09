@@ -1,0 +1,68 @@
+=== R4: upstream/wave400/elegant-http-a ===
+Preparing worktree (detached HEAD 89f042538)
+Updating files:  23% (672/2826)Updating files:  24% (679/2826)Updating files:  25% (707/2826)Updating files:  26% (735/2826)Updating files:  27% (764/2826)Updating files:  28% (792/2826)Updating files:  29% (820/2826)Updating files:  30% (848/2826)Updating files:  31% (877/2826)Updating files:  32% (905/2826)Updating files:  33% (933/2826)Updating files:  34% (961/2826)Updating files:  35% (990/2826)Updating files:  36% (1018/2826)Updating files:  37% (1046/2826)Updating files:  38% (1074/2826)Updating files:  39% (1103/2826)Updating files:  40% (1131/2826)Updating files:  40% (1138/2826)Updating files:  41% (1159/2826)Updating files:  42% (1187/2826)Updating files:  43% (1216/2826)Updating files:  44% (1244/2826)Updating files:  45% (1272/2826)Updating files:  46% (1300/2826)Updating files:  47% (1329/2826)Updating files:  48% (1357/2826)Updating files:  49% (1385/2826)Updating files:  50% (1413/2826)Updating files:  51% (1442/2826)Updating files:  52% (1470/2826)Updating files:  53% (1498/2826)Updating files:  53% (1522/2826)Updating files:  54% (1527/2826)Updating files:  55% (1555/2826)Updating files:  56% (1583/2826)Updating files:  57% (1611/2826)Updating files:  58% (1640/2826)Updating files:  59% (1668/2826)Updating files:  60% (1696/2826)Updating files:  61% (1724/2826)Updating files:  61% (1728/2826)Updating files:  62% (1753/2826)Updating files:  63% (1781/2826)Updating files:  64% (1809/2826)Updating files:  65% (1837/2826)Updating files:  66% (1866/2826)Updating files:  66% (1872/2826)Updating files:  67% (1894/2826)Updating files:  68% (1922/2826)Updating files:  69% (1950/2826)Updating files:  70% (1979/2826)Updating files:  71% (2007/2826)Updating files:  72% (2035/2826)Updating files:  73% (2063/2826)Updating files:  74% (2092/2826)Updating files:  75% (2120/2826)Updating files:  75% (2129/2826)Updating files:  76% (2148/2826)Updating files:  77% (2177/2826)Updating files:  78% (2205/2826)Updating files:  79% (2233/2826)Updating files:  80% (2261/2826)Updating files:  81% (2290/2826)Updating files:  82% (2318/2826)Updating files:  83% (2346/2826)Updating files:  84% (2374/2826)Updating files:  85% (2403/2826)Updating files:  86% (2431/2826)Updating files:  87% (2459/2826)Updating files:  88% (2487/2826)Updating files:  88% (2510/2826)Updating files:  89% (2516/2826)Updating files:  90% (2544/2826)Updating files:  91% (2572/2826)Updating files:  92% (2600/2826)Updating files:  93% (2629/2826)Updating files:  94% (2657/2826)Updating files:  95% (2685/2826)Updating files:  96% (2713/2826)Updating files:  97% (2742/2826)Updating files:  98% (2770/2826)Updating files:  99% (2798/2826)Updating files: 100% (2826/2826)Updating files: 100% (2826/2826), done.
+HEAD is now at 89f042538 elegant-http-a: share MCP card header writer between OPTIONS and GET/HEAD
+Rebasing (1/2)Rebasing (2/2)                                                                                Successfully rebased and updated detached HEAD.
+REBASE: ok
+520 /home/hatch/workspace/pr-wave1000-guild-19/findings/guild-19/reverify-4.diff
+TESTS: tests/http-public-dm.test.js tests/id-sec-http.test.js
+{"event":"room.cold_start","durationMs":994,"integrity":"eager","phases":{"schema":{"ms":381,"rowsRead":0},"plugin":{"ms":228,"rowsRead":0},"fence":{"ms":69,"rowsRead":0},"verifies":{"ms":23,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":159,"heapBytes":37067872,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":1384,"integrity":"eager","phases":{"schema":{"ms":130,"rowsRead":0},"plugin":{"ms":610,"rowsRead":0},"fence":{"ms":429,"rowsRead":0},"verifies":{"ms":28,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":171,"heapBytes":35611840,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ POST /join mints an identity and a personal first room (3703.242686ms)
+{"event":"room.cold_start","durationMs":783,"integrity":"eager","phases":{"schema":{"ms":143,"rowsRead":0},"plugin":{"ms":373,"rowsRead":0},"fence":{"ms":79,"rowsRead":0},"verifies":{"ms":9,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":135,"heapBytes":41708920,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ POST /join with an inviteCode redeems the invite (3090.196845ms)
+{"event":"room.cold_start","durationMs":766,"integrity":"eager","phases":{"schema":{"ms":67,"rowsRead":0},"plugin":{"ms":468,"rowsRead":0},"fence":{"ms":114,"rowsRead":0},"verifies":{"ms":7,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":143,"heapBytes":47313928,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ POST /join validates its body (1507.135156ms)
+{"event":"room.cold_start","durationMs":999,"integrity":"eager","phases":{"schema":{"ms":70,"rowsRead":0},"plugin":{"ms":320,"rowsRead":0},"fence":{"ms":482,"rowsRead":0},"verifies":{"ms":21,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":138,"heapBytes":37311816,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ GET /skills serves the machine-readable catalog (+ aliases) (1287.897275ms)
+room diagnostic op_5x1WTVk4 403 dm_consent_required access /api/rooms/:roomId/commands
+room diagnostic op_6Oynafq6 403 dm_blocked access /api/rooms/:roomId/commands
+{"event":"room.cold_start","durationMs":2072,"integrity":"eager","phases":{"schema":{"ms":68,"rowsRead":0},"plugin":{"ms":950,"rowsRead":0},"fence":{"ms":801,"rowsRead":0},"verifies":{"ms":22,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":173,"heapBytes":44757408,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ DMs are open by default; request/block flows still work over HTTP (2295.705718ms)
+room diagnostic op_qHd7Inkj 403 owner_only access /api/rooms/:roomId/public-face
+{"event":"room.cold_start","durationMs":1951,"integrity":"eager","phases":{"schema":{"ms":471,"rowsRead":0},"plugin":{"ms":748,"rowsRead":0},"fence":{"ms":542,"rowsRead":0},"verifies":{"ms":38,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":165,"heapBytes":39968784,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ public face: owner opt-in, sanitized reads, DMs never leak, disable 404s (4434.59465ms)
+{"event":"room.cold_start","durationMs":673,"integrity":"eager","phases":{"schema":{"ms":237,"rowsRead":0},"plugin":{"ms":151,"rowsRead":0},"fence":{"ms":48,"rowsRead":0},"verifies":{"ms":77,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":138,"heapBytes":44665584,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ discovery surfaces carry Link headers (2696.781545ms)
+room diagnostic op_v_34AwF6 403 dm_blocked access /api/rooms/:roomId/commands
+{"event":"room.cold_start","durationMs":1010,"integrity":"eager","phases":{"schema":{"ms":336,"rowsRead":0},"plugin":{"ms":507,"rowsRead":0},"fence":{"ms":44,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":141,"heapBytes":49554216,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ refused DM persists no event and no message (1277.71947ms)
+room diagnostic op_eD0S7QWw 403 dm_consent_required access /api/rooms/:roomId/commands
+room diagnostic op_2kmwqzpD 403 dm_blocked access /api/rooms/:roomId/dm-consents
+room diagnostic op_Mt-9YDZ6 403 dm_blocked access /api/rooms/:roomId/commands
+room diagnostic op_dP260drQ 409 dm_no_pending_request conflict /api/rooms/:roomId/dm-consents/bob/decide
+{"event":"room.cold_start","durationMs":2094,"integrity":"eager","phases":{"schema":{"ms":286,"rowsRead":0},"plugin":{"ms":956,"rowsRead":0},"fence":{"ms":513,"rowsRead":0},"verifies":{"ms":84,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":173,"heapBytes":43370528,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ DM consent reject / block / unblock over HTTP (2347.747768ms)
+{"event":"room.cold_start","durationMs":1286,"integrity":"eager","phases":{"schema":{"ms":147,"rowsRead":0},"plugin":{"ms":703,"rowsRead":0},"fence":{"ms":181,"rowsRead":0},"verifies":{"ms":98,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":158,"heapBytes":47992448,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ DM consent reason is trimmed and capped at 500 characters (2954.505532ms)
+{"event":"room.cold_start","durationMs":1735,"integrity":"eager","phases":{"schema":{"ms":245,"rowsRead":0},"plugin":{"ms":741,"rowsRead":0},"fence":{"ms":439,"rowsRead":0},"verifies":{"ms":85,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":163,"heapBytes":53999944,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ public feed edges: limits clamp, unknown cursor restarts, HEAD is 405 (2518.093386ms)
+{"event":"room.cold_start","durationMs":797,"integrity":"eager","phases":{"schema":{"ms":328,"rowsRead":0},"plugin":{"ms":187,"rowsRead":0},"fence":{"ms":37,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":145,"heapBytes":42505648,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ join identity + first-room creation is atomic (no orphan identity) (2396.343145ms)
+room diagnostic op_xmaCeoJB 403 dm_blocked access /api/rooms/:roomId/dm-consents
+room diagnostic op_zAhFFtMw 403 dm_blocked access /api/rooms/:roomId/commands
+room diagnostic op_dopbdir5 422 invalid_dm_block input /api/rooms/:roomId/dm-consents/block
+room diagnostic op_WbwgBwiO 404 blocked_not_found not_found /api/rooms/:roomId/dm-consents/block
+room diagnostic op_dbAV9ThO 401 unauthenticated access /api/rooms/:roomId/dm-consents/block
+✔ DM consent proactive block over HTTP (1938.165386ms)
+{"event":"room.cold_start","durationMs":2476,"integrity":"eager","phases":{"schema":{"ms":375,"rowsRead":0},"plugin":{"ms":905,"rowsRead":0},"fence":{"ms":726,"rowsRead":0},"verifies":{"ms":148,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":197,"heapBytes":38149696,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":2507,"integrity":"eager","phases":{"schema":{"ms":386,"rowsRead":0},"plugin":{"ms":733,"rowsRead":0},"fence":{"ms":452,"rowsRead":0},"verifies":{"ms":56,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":169,"heapBytes":34947016,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a later verified sign-in removes an unverified password and records it (10462.578438ms)
+room diagnostic op__262iko1 403 email_unverified access /api/rooms/:roomId/agent-invites
+{"event":"room.cold_start","durationMs":2174,"integrity":"eager","phases":{"schema":{"ms":80,"rowsRead":0},"plugin":{"ms":1096,"rowsRead":0},"fence":{"ms":569,"rowsRead":0},"verifies":{"ms":48,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":170,"heapBytes":43474608,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ an unverified account is refused invites and identity mint (5203.302214ms)
+✔ a room token works on /mcp for its room, expires, and records last use (3503.374753ms)
+✔ findAccountByVerifiedEmail callers stay on the verified-email contract (705.217423ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 17
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 63300.075306
+TEST_EXIT: 0
+HEAD: 627f83f2b
+DONE R4 rebase=ok
