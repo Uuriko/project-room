@@ -111,6 +111,23 @@ test('single-worktree repo + --local identity -> guard PASSES (no collision risk
   assert.equal(r.status, 0, `guard must pass for a lone worktree: ${r.stdout}${r.stderr}`);
 });
 
+test('missing identity -> guard FAILS with guidance', (t) => {
+  const root = tmpRoot(t);
+  const repo = path.join(root, 'noid');
+  fs.mkdirSync(repo);
+  git(repo, ['init', '-q', '-b', 'main']);
+  const r = runGuard(repo, ['check'], {
+    HOME: repo, // hide the operator's real ~/.gitconfig identity
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_AUTHOR_NAME: '', // make sure env identity cannot rescue this case
+    GIT_AUTHOR_EMAIL: '',
+  });
+  assert.notEqual(r.status, 0, 'guard must fail when no identity is configured');
+  const out = r.stdout + r.stderr;
+  assert.match(out, /missing/, 'failure must say identity is missing');
+  assert.match(out, /GIT_AUTHOR_NAME/, 'guidance must mention GIT_AUTHOR_NAME');
+});
+
 test('set subcommand writes identity at worktree scope', (t) => {
   const { linked } = sharedCheckout(t);
   const r = runGuard(linked, ['set', 'Worktree Worker', 'worker@example.com']);
