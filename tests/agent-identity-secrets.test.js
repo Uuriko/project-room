@@ -263,3 +263,34 @@ test("mcp join file-body cap honors any casing of the bearer scheme (bughunt 202
     await res.text();
   }
 });
+
+test("rotate/revoke refuse to act without confirm (422 confirm_required)", async t => {
+  // The documented gate: an empty, unconfirmed, or misshapen body must
+  // 422 with confirm_required and leave the secret untouched — an
+  // accidental probe or replay can never burn the credential. The
+  // route-level exact() shape check has no other coverage.
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const agent = f.store.identities.create("Confirm-gated agent");
+  const badBodies = [{}, { confirm: false }, { confirm: "yes" }, { confirm: true, extra: 1 }];
+  for (const action of ["rotate", "revoke"]) {
+    const path = `/api/agent-identities/${agent.identityId}/${action}`;
+    for (const body of badBodies) {
+      const res = await post(origin, path, body, agent.secret);
+      assert.equal(res.status, 422, `${action} ${JSON.stringify(body)}`);
+      assert.equal(await errorCode(res), "confirm_required");
+    }
+    // An empty requestId is its own 422 — still nothing rotated or revoked.
+    const emptyId = await post(origin, path, { confirm: true, requestId: "" }, agent.secret);
+    assert.equal(emptyId.status, 422);
+    assert.equal(await errorCode(emptyId), "invalid_request_id");
+  }
+  // Nothing rotated and nothing revoked: the secret still authenticates.
+  assert.ok(f.store.identities.resolveGlobalIdentitySecret(agent.secret));
+  assert.equal(f.store.identities.secretRevoked(agent.identityId), false);
+  // The confirmed path proceeds, and requestId is echoed for retry correlation.
+  const ok = await post(origin, `/api/agent-identities/${agent.identityId}/rotate`,
+    { confirm: true, requestId: "e3-probe-1" }, agent.secret);
+  assert.equal(ok.status, 200);
+  assert.equal((await ok.json()).requestId, "e3-probe-1");
+});
