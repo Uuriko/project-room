@@ -207,17 +207,17 @@ export async function beginSelectedWork({ connected, read, execute, scope = null
   const confirmed = [];
   const seen = new Set();
   let pending = invocation?.requestId ? invocation : null;
+  // An unknown read keeps the in-flight invocation, or points at a fresh read.
+  const unknownResume = () => pending ?? { tool: "room_read_work", workItemId: scope?.workItemId ?? null };
   for (let step = 0; step < 4; step += 1) {
     let context;
     try {
       context = await read();
     } catch {
-      return stoppedResult(null, { confirmed, stopped: "unknown",
-        resume: pending ?? { tool: "room_read_work", workItemId: scope?.workItemId ?? null } });
+      return stoppedResult(null, { confirmed, stopped: "unknown", resume: unknownResume() });
     }
     if (!context?.work || !context.viewer) {
-      return stoppedResult(context, { confirmed, stopped: "unknown",
-        resume: pending ?? { tool: "room_read_work", workItemId: scope?.workItemId ?? null } });
+      return stoppedResult(context, { confirmed, stopped: "unknown", resume: unknownResume() });
     }
     const plan = planBegin(context.work, context.viewer, { scope, now });
     if (!plan.stage) return readResult(context, plan, confirmed);

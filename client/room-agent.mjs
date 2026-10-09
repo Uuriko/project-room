@@ -20,6 +20,16 @@ import { assembleOutsideAgents, planOutsideAgentRecord } from "../src/outside-ag
 import { CONTENT_TRUST, markIfOther, stampBoard, stampWorkListing, withContentTrust } from "../server/content-trust.mjs";
 
 export { AGENT_ERRORS };
+
+// Drops undefined-valued fields when building optional request payloads:
+// ...(x === undefined ? {} : {x}) becomes ...defined({x}). Every other value
+// (null, "", 0, false) is kept exactly as before.
+const defined = entries => Object.fromEntries(Object.entries(entries).filter(([, value]) => value !== undefined));
+// Shared response-shape predicates (were per-validator local copies).
+const isObject = value => value !== null && typeof value === "object" && !Array.isArray(value);
+const isNonNegativeInt = value => Number.isSafeInteger(value) && value >= 0;
+const isText = value => typeof value === "string" && value.trim().length > 0 && value.length <= 4096;
+const exactKeys = (value, keys) => isObject(value) && Object.keys(value).sort().join(" ") === keys.split(" ").sort().join(" ");
 export class RoomClientError extends Error {
   constructor(status, code, message, retryAfterMs = null, extras = null) {
     super(message);
@@ -134,18 +144,16 @@ function checkedCharter(value, horizon) {
 }
 
 function checkedOffers(result) {
-  const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
-  const count = value => Number.isSafeInteger(value) && value >= 0;
   try {
     const read = result.offers, entries = read?.offers, a = read?.availability;
-    if (result.offerContextVersion !== 1 || !object(read) || read.version !== 1
+    if (result.offerContextVersion !== 1 || !isObject(read) || read.version !== 1
       || Object.keys(read).sort().join() !== "availability,offers,retainedOfferCount,version"
       || !Array.isArray(entries) || entries.length > MAX_HELP_OFFERS
-      || !count(read.retainedOfferCount) || read.retainedOfferCount < entries.length || read.retainedOfferCount > MAX_HELP_OFFERS
-      || !count(a?.pendingForViewer) || a.pendingForViewer > MAX_PENDING_HELP_OFFERS || a.pendingForViewer > read.retainedOfferCount) throw new Error();
+      || !isNonNegativeInt(read.retainedOfferCount) || read.retainedOfferCount < entries.length || read.retainedOfferCount > MAX_HELP_OFFERS
+      || !isNonNegativeInt(a?.pendingForViewer) || a.pendingForViewer > MAX_PENDING_HELP_OFFERS || a.pendingForViewer > read.retainedOfferCount) throw new Error();
     const members = Object.fromEntries(result.context.participants.filter(p => p.unavailable !== true).map(p => [p.id, p]));
     const rows = Object.fromEntries(entries.map(entry => {
-      if (!object(entry?.offer) || entry.offer.workItemId !== result.work.id
+      if (!isObject(entry?.offer) || entry.offer.workItemId !== result.work.id
         || entry.offer.revision > result.evaluatedThrough || entry.offer.invitation?.revision > result.evaluatedThrough
         || Date.parse(entry.offer.updatedAt) > Date.parse(result.evaluatedAt)) throw new Error();
       return [entry.offer.id, entry.offer];
@@ -166,51 +174,47 @@ function checkedOffers(result) {
 }
 
 function checkedWorkSnapshot(value, roomId) {
-  const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
-  const integer = value => Number.isSafeInteger(value) && value >= 0;
-  const text = value => typeof value === "string" && value.trim().length > 0 && value.length <= 4096;
-  const exact = (value, keys) => object(value) && Object.keys(value).sort().join(" ") === keys.split(" ").sort().join(" ");
   try {
     const state = value?.state, projected = Object.hasOwn(value, "snapshotView") || Object.hasOwn(value, "snapshotVersion");
-    if (!object(value) || value.roomId !== roomId || !integer(value.sequence) || !object(state)
-      || state.room?.id !== roomId || !validId(value.viewerId) || !object(state.members) || !object(state.workItems)
+    if (!isObject(value) || value.roomId !== roomId || !isNonNegativeInt(value.sequence) || !isObject(state)
+      || state.room?.id !== roomId || !validId(value.viewerId) || !isObject(state.members) || !isObject(state.workItems)
       || !Object.hasOwn(state.members, value.viewerId) || Object.keys(state.members).length > 100 || Object.keys(state.workItems).length > 500) throw new Error();
     if (projected) {
       const help = Object.hasOwn(value, "helpContextVersion") || Object.hasOwn(value, "evaluatedAt");
       if (value.snapshotView !== "work" || value.snapshotVersion !== 1
-        || !exact(value, "snapshotView snapshotVersion roomId sequence state charter viewerId viewerAccountId viewerAuthEpoch viewerSessionBinding viewerSessionRevision" + (help ? " helpContextVersion evaluatedAt" : ""))
+        || !exactKeys(value, "snapshotView snapshotVersion roomId sequence state charter viewerId viewerAccountId viewerAuthEpoch viewerSessionBinding viewerSessionRevision" + (help ? " helpContextVersion evaluatedAt" : ""))
         || help && (value.helpContextVersion !== 1 || typeof value.evaluatedAt !== "string" || !Number.isFinite(Date.parse(value.evaluatedAt)) || new Date(value.evaluatedAt).toISOString() !== value.evaluatedAt)
-        || !exact(state, "room members workItems")) throw new Error();
+        || !exactKeys(state, "room members workItems")) throw new Error();
     } else if (value.replyRequestContractVersion !== undefined && value.replyRequestContractVersion !== 1
-      || !integer(value.cursor) || value.cursor > value.sequence
+      || !isNonNegativeInt(value.cursor) || value.cursor > value.sequence
       || !Array.isArray(state.messages) || !Array.isArray(state.eventLog)) throw new Error();
     // Legacy compatibility validates the consumed envelope/current records, not
     // unused history integrity. It never issues a second, weaker fallback request.
     for (const [id, member] of Object.entries(state.members)) {
-      if (!validId(id) || member?.id !== id || !text(member.displayName) || !["agent", "human"].includes(member.kind)
-        || typeof member.active !== "boolean" || !integer(member.revision) || member.revision > value.sequence
+      if (!validId(id) || member?.id !== id || !isText(member.displayName) || !["agent", "human"].includes(member.kind)
+        || typeof member.active !== "boolean" || !isNonNegativeInt(member.revision) || member.revision > value.sequence
         || !Array.isArray(member.permissions) || member.permissions.some(p => !PERMISSIONS.includes(p))
         || new Set(member.permissions).size !== member.permissions.length) throw new Error();
     }
     for (const [id, item] of Object.entries(state.workItems)) {
-      if (!validId(id) || item?.id !== id || !text(item.title) || !text(item.definitionOfDone)
-        || !Object.values(WORK_STATES).includes(item.state) || !integer(item.revision) || item.revision > value.sequence
+      if (!validId(id) || item?.id !== id || !isText(item.title) || !isText(item.definitionOfDone)
+        || !Object.values(WORK_STATES).includes(item.state) || !isNonNegativeInt(item.revision) || item.revision > value.sequence
         || !["read", "write"].includes(item.mode) || !Number.isFinite(Date.parse(item.updatedAt))
         || !validId(item.accountableMemberId) || !Object.hasOwn(state.members, item.accountableMemberId)
         || ["independentVerificationRequired", "ownerDecisionRequired"].some(key => typeof item[key] !== "boolean")
         || ["verifierMemberId", "humanDecisionMakerId", "supersededBy"].some(key => item[key] !== null && !validId(item[key]))
-        || ["claim", "receipt", "verification", "decision", "blocker"].some(key => item[key] !== null && !object(item[key]))) throw new Error();
+        || ["claim", "receipt", "verification", "decision", "blocker"].some(key => item[key] !== null && !isObject(item[key]))) throw new Error();
       if (projected && ["receiptHistory", "verificationHistory", "decisionHistory"].some(key => Object.hasOwn(item, key))) throw new Error();
-      if (item.receipt && (!validId(item.receipt.eventId) || !text(item.receipt.evidenceVersion)
-        || !text(item.receipt.summary) || !text(item.receipt.nextAction)
+      if (item.receipt && (!validId(item.receipt.eventId) || !isText(item.receipt.evidenceVersion)
+        || !isText(item.receipt.summary) || !isText(item.receipt.nextAction)
         || item.receipt.producerId !== null && !validId(item.receipt.producerId))) throw new Error();
-      if (item.verification && (!validId(item.verification.completionEventId) || !text(item.verification.evidenceVersion)
+      if (item.verification && (!validId(item.verification.completionEventId) || !isText(item.verification.evidenceVersion)
         || !["pass", "fail"].includes(item.verification.result) || typeof item.verification.independenceConfirmed !== "boolean")) throw new Error();
-      if (item.decision && (!validId(item.decision.completionEventId) || !text(item.decision.evidenceVersion)
+      if (item.decision && (!validId(item.decision.completionEventId) || !isText(item.decision.evidenceVersion)
         || !["approved", "changes_requested", "rejected"].includes(item.decision.decision))) throw new Error();
       if (item.claim && (!validId(item.claim.holderId) || !Number.isFinite(Date.parse(item.claim.expiresAt))
         || !["active", "released", "superseded"].includes(item.claim.status))) throw new Error();
-      if (item.blocker && (!text(item.blocker.reason) || !text(item.blocker.nextAction))) throw new Error();
+      if (item.blocker && (!isText(item.blocker.reason) || !isText(item.blocker.nextAction))) throw new Error();
       if (value.helpContextVersion === 1) {
         const help = workHelpContext(state, id, value.viewerId, value.evaluatedAt);
         if (help.revision > value.sequence) throw new Error();
@@ -368,7 +372,7 @@ export class RoomAgentClient {
     return this.#fetch(`${this.#origin}${edgeDoorApiPath(this.#origin, path)}`, {
       method, redirect: "error", credentials: "omit", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
       headers: { Authorization: `Bearer ${this.#token}`, ...headers },
-      ...(body === undefined ? {} : { body })
+      ...defined({ body })
     });
   }
   // Maps a non-2xx service response to a RoomClientError, keeping the
@@ -453,9 +457,13 @@ export class RoomAgentClient {
     }
     const now = Date.now();
     if (!identityAuth && value.expiresAt <= now) throw new RoomClientError(200, "expiry_unconfirmed", "Check the local clock and agent key expiry");
+    return this.#connectionCheckResult(member.permissions, value.expiresAt, now);
+  }
+  // One shape for both connection-check paths: the accepted-credential report.
+  #connectionCheckResult(permissions, expiresAt, checkedAt) {
     return { contractVersion: 1, type: "agent_connection_check", status: "credential_accepted", origin: this.#origin,
-      roomId: this.#roomId, memberId: this.#memberId, kind: "agent", permissions: [...member.permissions],
-      checkedAt: new Date(now).toISOString(), expiresAt: value.expiresAt, scope: "room", externalExecution: false };
+      roomId: this.#roomId, memberId: this.#memberId, kind: "agent", permissions: [...permissions],
+      checkedAt: new Date(checkedAt).toISOString(), expiresAt, scope: "room", externalExecution: false };
   }
   async #checkIdentityConnection({ signal } = {}) {
     const snapshot = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}`, undefined, signal);
@@ -471,9 +479,7 @@ export class RoomAgentClient {
       || (!ownerAgent && member.delegatedAdmin !== true && member.permissions.some(permission => ["manage_members", "decide"].includes(permission)))) {
       throw new RoomClientError(200, "identity_mismatch", "Identity is not linked to this room as the configured agent");
     }
-    return { contractVersion: 1, type: "agent_connection_check", status: "credential_accepted", origin: this.#origin,
-      roomId: this.#roomId, memberId: this.#memberId, kind: "agent", permissions: [...member.permissions],
-      checkedAt: new Date(Date.now()).toISOString(), expiresAt: null, scope: "room", externalExecution: false };
+    return this.#connectionCheckResult(member.permissions, null, Date.now());
   }
   // A wake-up hint only. Consumers re-read their authorized queue before acting;
   // no streamed message body is used as executable input or saved as history.
@@ -691,8 +697,8 @@ export class RoomAgentClient {
   }
   async workDiscussion(workItemId, options = {}) {
     if (!options || typeof options !== "object" || Array.isArray(options) || Object.keys(options).some(key => !["since", "cursor", "limit", "signal"].includes(key))) throw new Error("Use discussion checkpoint, cursor, limit and signal only");
-    const { since, cursor = null, limit = 20, signal } = options, integer = n => Number.isSafeInteger(n) && n >= 0;
-    if (!validId(workItemId) || !integer(limit) || limit < 1 || limit > 50 || (since !== undefined && !integer(since))
+    const { since, cursor = null, limit = 20, signal } = options;
+    if (!validId(workItemId) || !isNonNegativeInt(limit) || limit < 1 || limit > 50 || (since !== undefined && !isNonNegativeInt(since))
       || (cursor !== null && (typeof cursor !== "string" || cursor.length > 2048 || !/^[A-Za-z0-9_-]+$/.test(cursor) || since !== undefined))) throw new Error("Choose one task and either a checkpoint or its continuation");
     const query = new URLSearchParams({ workItemId, limit });
     if (cursor !== null) query.set("cursor", cursor);
@@ -706,16 +712,16 @@ export class RoomAgentClient {
       if (!value || Array.isArray(value) || Object.keys(value).length !== keys.length || !keys.every(key => Object.hasOwn(value, key))
         || Buffer.from(JSON.stringify(value)).toString("base64url") !== token || value.version !== 1
         || value.roomId !== this.#roomId || value.workItemId !== workItemId || value.viewerId !== result.viewerId || !validId(value.anchorId)
-        || !integer(value.horizon) || !integer(value.since) || !integer(value.after) || value.since > value.after || value.after >= value.horizon) invalid();
+        || !isNonNegativeInt(value.horizon) || !isNonNegativeInt(value.since) || !isNonNegativeInt(value.after) || value.since > value.after || value.after >= value.horizon) invalid();
       return value;
     };
     if (result?.contentTrust !== CONTENT_TRUST || result?.contractVersion !== 1 || result.roomId !== this.#roomId || result.workItemId !== workItemId || !validId(result.viewerId)
       || result.selection?.rule !== "source-linked-descendants-v1" || result.scope?.membership !== "room" || result.scope.targetedMessages !== "room-visible" || result.scope.externalExecution !== false
-      || !page || !integer(page.horizon) || !integer(page.since) || !integer(page.after) || page.since > page.after || page.after > page.horizon
+      || !page || !isNonNegativeInt(page.horizon) || !isNonNegativeInt(page.since) || !isNonNegativeInt(page.after) || page.since > page.after || page.after > page.horizon
       || page.cursor !== cursor || (cursor === null && (page.since !== (since ?? 0) || page.after !== (since ?? 0)))
       || page.limit !== limit || !Array.isArray(page.items) || page.items.length > limit || typeof page.hasMore !== "boolean"
-      || !integer(current?.evaluatedThrough) || current.evaluatedThrough < page.horizon || !Number.isFinite(Date.parse(current.evaluatedAt))
-      || !integer(current.workRevision) || current.next?.workItemId !== workItemId || current.next.workRevision !== current.workRevision
+      || !isNonNegativeInt(current?.evaluatedThrough) || current.evaluatedThrough < page.horizon || !Number.isFinite(Date.parse(current.evaluatedAt))
+      || !isNonNegativeInt(current.workRevision) || current.next?.workItemId !== workItemId || current.next.workRevision !== current.workRevision
       || (page.hasMore ? !page.items.length || page.checkpoint !== null || typeof page.nextCursor !== "string" || page.nextCursor.length > 2048
         || !/^[A-Za-z0-9_-]+$/.test(page.nextCursor) || page.nextCursor === cursor : page.nextCursor !== null || page.checkpoint !== page.horizon)) invalid();
     const requested = cursor === null ? null : continuation(cursor);
@@ -724,14 +730,14 @@ export class RoomAgentClient {
     for (const row of page.items) {
       if (!row || typeof row !== "object" || Array.isArray(row)) invalid();
       const message = row.message, proposal = message?.proposal;
-      if (!integer(row.sequence) || row.sequence <= after || row.sequence > page.horizon || !validId(row.eventId) || events.has(row.eventId)
+      if (!isNonNegativeInt(row.sequence) || row.sequence <= after || row.sequence > page.horizon || !validId(row.eventId) || events.has(row.eventId)
         || !["source", "linked", "reply"].includes(row.relation) || !validId(message?.id) || ids.has(message.id) || !validId(message.authorId)
         || typeof message.body !== "string" || !Number.isFinite(Date.parse(message.createdAt))
         || ["replyToId", "toMemberId", "workItemId"].some(key => message[key] !== null && !validId(message[key]))
         || (row.relation === "source" && message.id !== result.selection.sourceMessageId)
         || (row.relation === "linked" && message.workItemId !== workItemId)
         || (row.relation === "reply" && (!message.replyToId || message.workItemId !== null))
-        || (proposal && (!validId(proposal.packetId) || !integer(proposal.basisRevision) || !integer(proposal.submittedAtRevision)
+        || (proposal && (!validId(proposal.packetId) || !isNonNegativeInt(proposal.basisRevision) || !isNonNegativeInt(proposal.submittedAtRevision)
           || proposal.basisRevision > proposal.submittedAtRevision || proposal.attribution !== "manual-unverified"))) invalid();
       if (message.authorId !== result.viewerId) {
         if (message.untrusted !== true) invalid();
@@ -785,17 +791,8 @@ export class RoomAgentClient {
   }
   workClaimCreate({ id, title, reviewPolicy, note, tags, files, dependsOn, parentClaimId, evidenceRefs, pullRequest, assignee } = {}, { signal } = {}) {
     if (typeof id !== "string" || !id) throw new Error("Choose a work claim id");
-    return this.#request("/work-claims", { id,
-      ...(title === undefined ? {} : { title }),
-      ...(reviewPolicy === undefined ? {} : { reviewPolicy }),
-      ...(tags === undefined ? {} : { tags }),
-      ...(files === undefined ? {} : { files }),
-      ...(dependsOn === undefined ? {} : { dependsOn }),
-      ...(parentClaimId === undefined ? {} : { parentClaimId }),
-      ...(evidenceRefs === undefined ? {} : { evidenceRefs }),
-      ...(pullRequest === undefined ? {} : { pullRequest }),
-      ...(assignee === undefined ? {} : { assignee }),
-      ...(note === undefined ? {} : { note }) }, signal);
+    return this.#request("/work-claims", { id, ...defined({ title, reviewPolicy, tags, files,
+      dependsOn, parentClaimId, evidenceRefs, pullRequest, assignee, note }) }, signal);
   }
   workClaimGet(id, { signal } = {}) { return this.#request(`/work-claims/${encodeURIComponent(id)}`, undefined, signal); }
   // Provenance walk (orch-provenance-rollback): the downstream graph of
@@ -807,31 +804,20 @@ export class RoomAgentClient {
   // notify), or clear one claim's flag after re-review.
   workClaimPremiseInvalid(id, { reason, clear, note, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/premise-invalid`,
-      { ...(reason === undefined ? {} : { reason }), ...(clear === undefined ? {} : { clear }),
-        ...(note === undefined ? {} : { note }) }, signal);
+      { ...defined({ reason, clear, note }) }, signal);
   }
   // Claim lifecycle: retire open work without delivering it (verb close or cancel).
   closeWorkClaim(id, { verb = "close", reason, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/${verb === "cancel" ? "cancel" : "close"}`,
-      reason === undefined ? {} : { reason }, signal);
+      defined({ reason }), signal);
   }
   claimWorkItem(id, { note, leaseHours, files, advisory, dependsOn, parentClaimId, evidenceRefs, pullRequest, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/claim`,
-      { ...(note === undefined ? {} : { note }), ...(leaseHours === undefined ? {} : { leaseHours }),
-        ...(files === undefined ? {} : { files }), ...(advisory === undefined ? {} : { advisory }),
-        ...(dependsOn === undefined ? {} : { dependsOn }),
-        ...(parentClaimId === undefined ? {} : { parentClaimId }),
-        ...(evidenceRefs === undefined ? {} : { evidenceRefs }),
-        ...(pullRequest === undefined ? {} : { pullRequest }) }, signal);
+      defined({ note, leaseHours, files, advisory, dependsOn, parentClaimId, evidenceRefs, pullRequest }), signal);
   }
   updateWorkItem(id, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/update`,
-      { ...(state === undefined ? {} : { state }), ...(note === undefined ? {} : { note }),
-        ...(deliveryMode === undefined ? {} : { deliveryMode }),
-        ...(reviewedBy === undefined ? {} : { reviewedBy }),
-        ...(tags === undefined ? {} : { tags }), ...(blobs === undefined ? {} : { blobs }),
-        ...(parentClaimId === undefined ? {} : { parentClaimId }),
-        ...(evidenceRefs === undefined ? {} : { evidenceRefs }) }, signal);
+      defined({ state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs }), signal);
   }
   linkWorkItemPullRequest(id, { pullRequest, expectedClaimedAt, expectedHistoryLength, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/update`,
@@ -839,13 +825,11 @@ export class RoomAgentClient {
   }
   reviewWorkItem(id, { note, verdict, summary, url, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/review`,
-      { ...(note === undefined ? {} : { note }), ...(verdict === undefined ? {} : { verdict }),
-        ...(summary === undefined ? {} : { summary }), ...(url === undefined ? {} : { url }) }, signal);
+      defined({ note, verdict, summary, url }), signal);
   }
   renewWorkItem(id, { progressMessageId, note, leaseHours, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/renew`,
-      { ...(progressMessageId === undefined ? {} : { progressMessageId }), ...(note === undefined ? {} : { note }),
-        ...(leaseHours === undefined ? {} : { leaseHours }) }, signal);
+      defined({ progressMessageId, note, leaseHours }), signal);
   }
   workClaimConfig({ maxMemberOpenClaims, signal } = {}) {
     if (maxMemberOpenClaims === undefined) return this.#request("/work-claims/config", undefined, signal);
@@ -853,12 +837,12 @@ export class RoomAgentClient {
   }
   releaseWorkItem(id, { note, reason, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/release`,
-      { ...(note === undefined ? {} : { note }), ...(reason === undefined ? {} : { reason }) }, signal);
+      defined({ note, reason }), signal);
   }
   reassignWorkItem(id, { newOwner, note, signal } = {}) {
     if (typeof newOwner !== "string" || !newOwner) throw new Error("Choose the new owner");
     return this.#request(`/work-claims/${encodeURIComponent(id)}/reassign`,
-      { newOwner, ...(note === undefined ? {} : { note }) }, signal);
+      { newOwner, ...defined({ note }) }, signal);
   }
   sweepWorkClaims({ signal } = {}) { return this.#request("/work-claims/sweep", {}, signal); }
   // Convenience: claim, creating the item first when it does not exist yet.
@@ -970,8 +954,7 @@ export class RoomAgentClient {
     return value;
   }
   linkIdentity({ identityId, memberId, displayName, permissions }, { signal } = {}) {
-    return this.#identityAdmin("/identity-links", { identityId, ...(memberId === undefined ? {} : { memberId }),
-      ...(displayName === undefined ? {} : { displayName }), permissions }, { signal });
+    return this.#identityAdmin("/identity-links", { identityId, ...defined({ memberId, displayName }), permissions }, { signal });
   }
   identityLinks({ signal } = {}) {
     return this.#identityAdmin("/identity-links", undefined, { signal });
@@ -986,11 +969,10 @@ export class RoomAgentClient {
     if (!this.#memberId) throw new Error("A pinned memberId is required to deactivate your own membership");
     return this.#deletePath(`/api/rooms/${encodeURIComponent(this.#roomId)}/members/${encodeURIComponent(this.#memberId)}`, undefined, signal);
   }
-  // One-time agent invite codes. Issuance is owner, manage_members, or
-  // invite_member (agents may hold invite_member without manage_members).
-  // The raw code is shown once at creation and only its hash is stored.
-  // Redemption is unauthenticated (the code is the bearer credential).
-  async #inviteAdmin(suffix, body, { signal } = {}) {
+  // Room-scoped admin verbs (invite codes, access requests): they skip
+  // #request's agent-pinning preflight because the caller is an owner, not an
+  // agent member. Responses are still checked against the configured room.
+  async #roomAdmin(suffix, body, { signal } = {}) {
     const value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}${suffix}`, body, signal);
     if (value?.roomId !== this.#roomId) {
       throw new RoomClientError(200, "invalid_response", "Room response does not match the configured room");
@@ -998,11 +980,8 @@ export class RoomAgentClient {
     return value;
   }
   async createAgentInvite({ permissions, profile, expiresInMinutes, displayName } = {}, { signal } = {}) {
-    const attempt = body => this.#inviteAdmin("/agent-invites", body, { signal });
-    const options = {
-      ...(expiresInMinutes === undefined ? {} : { expiresInMinutes }),
-      ...(displayName === undefined ? {} : { displayName }),
-    };
+    const attempt = body => this.#roomAdmin("/agent-invites", body, { signal });
+    const options = defined({ expiresInMinutes, displayName });
     let value;
     if (profile === "collaborate") {
       try {
@@ -1016,11 +995,7 @@ export class RoomAgentClient {
         value = await attempt({ permissions: [...AGENT_AUTONOMY_PERMISSIONS], ...options });
       }
     } else {
-      value = await attempt({
-        ...(profile === undefined ? {} : { profile }),
-        ...(permissions === undefined ? {} : { permissions }),
-        ...options,
-      });
+      value = await attempt({ ...defined({ profile, permissions }), ...options });
     }
     if (typeof value?.code !== "string" || typeof value?.inviteId !== "string") {
       throw new RoomClientError(200, "invalid_response", "Room returned an invalid invite code");
@@ -1028,7 +1003,7 @@ export class RoomAgentClient {
     return value;
   }
   async agentInvites({ signal } = {}) {
-    const value = await this.#inviteAdmin("/agent-invites", undefined, { signal });
+    const value = await this.#roomAdmin("/agent-invites", undefined, { signal });
     if (!Array.isArray(value?.invites)) throw new RoomClientError(200, "invalid_response", "Room returned an invalid invite list");
     return value;
   }
@@ -1041,11 +1016,7 @@ export class RoomAgentClient {
   // create/rotate return the secret exactly once; the caller must store it
   // now. list never returns secrets.
   async createAgentKey({ scopes, label, expiresAt } = {}, { signal } = {}) {
-    const value = await this.#fetchPath("/api/agent-keys", {
-      scopes,
-      ...(label === undefined ? {} : { label }),
-      ...(expiresAt === undefined ? {} : { expiresAt }),
-    }, signal);
+    const value = await this.#fetchPath("/api/agent-keys", { scopes, ...defined({ label, expiresAt }) }, signal);
     if (typeof value?.keyId !== "string" || typeof value?.secret !== "string"
       || typeof value?.credential !== "string" || !Array.isArray(value?.scopes)) {
       throw new RoomClientError(200, "invalid_response", "Room returned an invalid API key");
@@ -1077,20 +1048,13 @@ export class RoomAgentClient {
   // Self-serve access requests. Listing and deciding are owner-only (the
   // server enforces manage_members); the request itself is unauthenticated
   // via the standalone requestAccess() below.
-  async #accessAdmin(suffix, body, { signal } = {}) {
-    const value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}${suffix}`, body, signal);
-    if (value?.roomId !== this.#roomId) {
-      throw new RoomClientError(200, "invalid_response", "Room response does not match the configured room");
-    }
-    return value;
-  }
   accessRequests({ status } = {}, { signal } = {}) {
     const query = status === undefined ? "" : `?status=${encodeURIComponent(status)}`;
-    return this.#accessAdmin(`/access-requests${query}`, undefined, { signal });
+    return this.#roomAdmin(`/access-requests${query}`, undefined, { signal });
   }
   decideAccessRequest(requestId, { decision, permissions, note } = {}, { signal } = {}) {
-    return this.#accessAdmin(`/access-requests/${encodeURIComponent(requestId)}/decide`,
-      { decision, ...(permissions === undefined ? {} : { permissions }), ...(note === undefined ? {} : { note }) }, { signal });
+    return this.#roomAdmin(`/access-requests/${encodeURIComponent(requestId)}/decide`,
+      { decision, ...defined({ permissions, note }) }, { signal });
   }
   // Owner-granted membership administration (RC-2026-09-18-038): the owner
   // grants/revokes/lists the delegation; a grant lets the holder's agent
@@ -1113,7 +1077,7 @@ export class RoomAgentClient {
   transferOwnership(toMemberId, { reason, signal } = {}) {
     if (typeof toMemberId !== "string" || !toMemberId) throw new RoomClientError(0, "invalid_config", "Choose the member to appoint as owner");
     return this.#request("/ownership/transfer",
-      { toMemberId, ...(reason === undefined ? {} : { reason }) }, signal);
+      { toMemberId, ...defined({ reason }) }, signal);
   }
   // W4-57 M6: sanitized support-export bundle (owner-only). Whitelisted
   // scalar fields only — safe to hand to support without redaction.
@@ -1192,11 +1156,7 @@ export class RoomAgentClient {
     if (rounds !== undefined && (!Number.isSafeInteger(rounds) || rounds < 0)) throw new Error("rounds must be a non-negative integer");
     if (toolCalls !== undefined && (!Number.isSafeInteger(toolCalls) || toolCalls < 0)) throw new Error("toolCalls must be a non-negative integer");
     return this.#request("/work-sessions", { requestId, workItemId, expectedRevision, action,
-      ...(status === undefined ? {} : { status }),
-      ...(budget === undefined ? {} : { budget }),
-      ...(spendCents === undefined ? {} : { spendCents }),
-      ...(rounds === undefined ? {} : { rounds }),
-      ...(toolCalls === undefined ? {} : { toolCalls }) }, signal);
+      ...defined({ status, budget, spendCents, rounds, toolCalls }) }, signal);
   }
   // Claim one queued session atomically: reads the card, then drives it to
   // processing with the card's revision. Throws session_claimed when held.
@@ -1208,7 +1168,7 @@ export class RoomAgentClient {
     if (!card) throw new Error("No queued session card for that work item");
     return this.workSessionAction({ requestId: randomUUID(), workItemId,
       expectedRevision: card.revision, action: "set_status", status: "processing",
-      ...(budget === undefined ? {} : { budget }) }, { signal });
+      ...defined({ budget }) }, { signal });
   }
   workAction(name, args, options = {}) {
     return submitWorkAction(this, { roomId: this.#roomId, memberId: this.#memberId }, name, args, options);
@@ -1265,7 +1225,7 @@ export class RoomAgentClient {
       const listed = matches?.work ?? candidates.map(item => ({ item }));
       let work = listed.map(({ item, excerpt }) => {
         return { id: item.id, title: item.title, state: item.state, revision: item.revision, mode: item.mode, next: nextWorkStep(item, now),
-          ...(excerpt === undefined ? {} : { excerpt }),
+          ...defined({ excerpt }),
           ...(focus === "help_wanted" ? { help: helpFor(item) } : {}),
           ...(focus === "results" ? { result: currentResult(item),
             nextResultRead: item.receipt.nativeText ? { tool: "room_read_result", arguments: { workItemId: item.id, completionEventId: item.receipt.eventId } } : null } : {}),
