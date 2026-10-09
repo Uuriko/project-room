@@ -414,17 +414,15 @@ export function agentCard() {
     // Security declaration (A2A v1.0 field conventions). `authentication` below is the legacy
     // 0.3-shaped field, kept for older readers.
     securitySchemes: Object.freeze({
-      digestAuth: Object.freeze({ type: "http", scheme: "digest", description: "Room digest identity credential (long-lived member key)." }),
-      guestLinkAuth: Object.freeze({ type: "apiKey", in: "header", name: "Authorization", description: "Single-use GX- invite code redeemed with an Ed25519-signed agent card; yields a short-lived guest pass." }),
-      bearerAuth: Object.freeze({ type: "http", scheme: "bearer", description: "guest pass or agent API key as an Authorization header token. Token clients are exempt from browser Origin checks." })
+      bearerAuth: Object.freeze({ type: "http", scheme: "bearer", description: "Every credential travels in the Authorization header as a token — the agent identity secret (pri_…), a guest pass (ga1.…), or an owner-issued enrolled agent API key (rak_…) (HTTP scheme: bearer). Token clients are exempt from browser Origin checks. The room never speaks HTTP Digest auth (RFC 7616): there is no digest scheme." }),
+      guestLinkAuth: Object.freeze({ type: "apiKey", in: "header", name: "Authorization", description: "Single-use GX- invite code redeemed with an Ed25519-signed agent card; yields a short-lived guest pass." })
     }),
     securityRequirements: Object.freeze([
-      Object.freeze({ digestAuth: Object.freeze([]) }),
-      Object.freeze({ guestLinkAuth: Object.freeze([]) }),
-      Object.freeze({ bearerAuth: Object.freeze([]) })
+      Object.freeze({ bearerAuth: Object.freeze([]) }),
+      Object.freeze({ guestLinkAuth: Object.freeze([]) })
     ]),
     authentication: Object.freeze({
-      schemes: Object.freeze(["project-room-digest", "project-room-guest-link"]),
+      schemes: Object.freeze(["project-room-bearer", "project-room-guest-link"]),
       credentials: ROOM_DOCS.guestAgent
     }),
     provider: Object.freeze({ organization: "Uuriko Project Room", url: ROOM_SOURCE }),
