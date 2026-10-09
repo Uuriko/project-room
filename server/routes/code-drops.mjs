@@ -19,12 +19,8 @@ function access(ctx, { writing }) {
       scope === required || (scope.endsWith(":*") && required.startsWith(scope.slice(0, -1))));
     if (!granted) ctx.reject(403, "insufficient_scope", `API key lacks the ${required} scope`);
   }
-  if (writing) {
-    ctx.protectWrite(ctx.req, auth, selected.bearer);
-    ctx.rate(`write:${auth.credentialHash}`, 60);
-  } else {
-    ctx.rate(`read:${auth.credentialHash}`, 600);
-  }
+  if (writing) ctx.protectWrite(ctx.req, auth, selected.bearer);
+  ctx.rate(`${writing ? "write" : "read"}:${auth.credentialHash}`, writing ? 60 : 600);
   return { roomId, token: selected.token, fence };
 }
 
@@ -92,20 +88,19 @@ const checkBody = Object.freeze({ type: "object", required: ["verdict"], additio
     note: { type: "string" }, announce: { type: "boolean" } } });
 const response = Object.freeze({ type: "object" });
 
+function codeDropRoute(row) {
+  return Object.freeze({ auth: "room", capability: null, scope: "room", events: [], ...row });
+}
+
 export const CODE_DROP_ROUTES = Object.freeze([
-  Object.freeze({ id: "code-drop-share", method: "POST", path: "/api/rooms/{roomId}/code",
-    auth: "room", capability: null, scope: "room", handler: shareCodeDrop, bodyLimit: mcpAttachmentBodyBytes,
-    schema: { params: roomParams, body: shareBody, response }, events: ["message.posted"] }),
-  Object.freeze({ id: "code-drop-list", method: "GET", path: "/api/rooms/{roomId}/code",
-    auth: "room", capability: null, scope: "room", handler: listCodeDrops,
-    schema: { params: roomParams, response }, events: [] }),
-  Object.freeze({ id: "code-drop-read", method: "GET", path: "/api/rooms/{roomId}/code/{dropId}",
-    auth: "room", capability: null, scope: "room", handler: readCodeDrop,
-    schema: { params: dropParams, response }, events: [] }),
-  Object.freeze({ id: "code-drop-raw", method: "GET", path: "/api/rooms/{roomId}/code/{dropId}/raw",
-    auth: "room", capability: null, scope: "room", handler: rawCodeDrop,
-    schema: { params: dropParams, response: { type: "string" } }, events: [] }),
-  Object.freeze({ id: "code-drop-check", method: "POST", path: "/api/rooms/{roomId}/code/{dropId}/checks",
-    auth: "room", capability: null, scope: "room", handler: checkCodeDrop,
+  codeDropRoute({ id: "code-drop-share", method: "POST", path: "/api/rooms/{roomId}/code", handler: shareCodeDrop,
+    bodyLimit: mcpAttachmentBodyBytes, schema: { params: roomParams, body: shareBody, response }, events: ["message.posted"] }),
+  codeDropRoute({ id: "code-drop-list", method: "GET", path: "/api/rooms/{roomId}/code", handler: listCodeDrops,
+    schema: { params: roomParams, response } }),
+  codeDropRoute({ id: "code-drop-read", method: "GET", path: "/api/rooms/{roomId}/code/{dropId}", handler: readCodeDrop,
+    schema: { params: dropParams, response } }),
+  codeDropRoute({ id: "code-drop-raw", method: "GET", path: "/api/rooms/{roomId}/code/{dropId}/raw", handler: rawCodeDrop,
+    schema: { params: dropParams, response: { type: "string" } } }),
+  codeDropRoute({ id: "code-drop-check", method: "POST", path: "/api/rooms/{roomId}/code/{dropId}/checks", handler: checkCodeDrop,
     schema: { params: dropParams, body: checkBody, response }, events: ["message.posted"] }),
 ]);
