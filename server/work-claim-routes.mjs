@@ -1038,7 +1038,11 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "update" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs", "readingAck", "parentClaimId", "evidenceRefs", "expectedClaimedAt", "expectedHistoryLength"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?, readingAck?, parentClaimId?, evidenceRefs?, expectedClaimedAt?, expectedHistoryLength?}");
+    if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs", "readingAck", "parentClaimId", "evidenceRefs", "requestId", "expectedClaimedAt", "expectedHistoryLength"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?, readingAck?, parentClaimId?, evidenceRefs?, requestId?, expectedClaimedAt?, expectedHistoryLength?}");
+    if (data.requestId !== undefined
+      && (typeof data.requestId !== "string" || !CLAIM_ID_PATTERN.test(data.requestId))) {
+      invalidInput(reject, "requestId must be 1..128 characters [A-Za-z0-9_-]");
+    }
     if (data.state === undefined && data.note === undefined && data.readingAck === undefined) invalidInput(reject, "a state transition, a note, or a reading ack");
     // W012 required reading: the owner confirms they read the enrollment
     // reading list. { docs: [...] } is validated by the pure machine; a
@@ -1046,6 +1050,15 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (data.readingAck !== undefined && !shape(data.readingAck, { required: ["docs"] })) invalidInput(reject, "readingAck: {docs: [...]}");
     const item = load(claimIdOf(reject, workClaimId));
     if (item.owner !== caller) reject(403, "work_not_owner", `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
+    // PRODUCT-200 A4 (QA-200 AQ-HI-06): opt-in idempotency. A requestId
+    // that already landed on this claim replays the stored outcome (200,
+    // the current item) with no new write, no history entry and no room
+    // event — a timed-out retry cannot duplicate the update. It runs before
+    // the stale-basis precondition: the client already got its 200 for this
+    // request, so a retry carrying a now-stale basis is still a replay.
+    if (data.requestId !== undefined && Object.hasOwn(item.requestOutcomes ?? {}, data.requestId)) {
+      return json(res, 200, item);
+    }
     requireWriter();
     requireEventBudget();
     // QA-200 worker-13 (C3/E4): opt-in round precondition on plain note/state
@@ -1106,7 +1119,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     }
     const updated = runPure(reject, () => updateWork(item, caller,
       { state: data.state, note: data.note, deliveryMode: data.deliveryMode, reviewedBy: data.reviewedBy,
-        tags: data.tags, blobs: data.blobs, parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs, now: nowMs }));
+        tags: data.tags, blobs: data.blobs, parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs,
+        requestId: data.requestId, now: nowMs }));
     if (data.state === "done") {
       // Jev-harness receipt-acceptance gate, shadow mode (docs/JEV-GATES.md):
       // score the receipt, journal the would-be verdict (flagging

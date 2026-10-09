@@ -21,14 +21,15 @@ const WORK_CLAIM_FIELDS = ["id", "title", "state", "owner", "history", "claimedA
   "attestations", "tags", "files", "fileBlocks", "blobs", "dependsOn", "parentClaimId", "evidenceRefs",
   "premiseFlag", "pullRequest", "pullRequests", "updatedAt",
   "repo", "branch", "chain", "supersededBy", "workItemId", "squadId",
-  "kind", "revision", "ci", "reviews", "historyOmitted", "readingAcks", "deploy"];
+  "kind", "revision", "ci", "reviews", "historyOmitted", "readingAcks", "deploy",
+  "requestOutcomes"];
 const WORK_CLAIM_DEFAULTS = { title: null, state: "unclaimed", owner: null, history: [],
   claimedAt: null, leaseStartAt: null, leaseExpiresAt: null, deliveryMode: null,
   reviewPolicy: null, reviewedBy: null, attestations: [], tags: [], files: [], fileBlocks: {}, blobs: [],
   dependsOn: [], parentClaimId: null, evidenceRefs: [], premiseFlag: null,
   pullRequest: null, pullRequests: [], updatedAt: null,
   repo: null, branch: null, chain: [], supersededBy: null, workItemId: null, squadId: null,
-  kind: "work", revision: null, ci: null, reviews: [], readingAcks: {}, deploy: null };
+  kind: "work", revision: null, ci: null, reviews: [], readingAcks: {}, deploy: null, requestOutcomes: {} };
 const decodeItem = text => {
   const item = decodeRow(text, { kind: WORK_CLAIM_ROW_KIND, fields: WORK_CLAIM_FIELDS, defaults: WORK_CLAIM_DEFAULTS });
   if (item.title == null) item.title = item.id; // workOf: title ?? id
@@ -36,6 +37,8 @@ const decodeItem = text => {
   if (item.historyOmitted == null) delete item.historyOmitted;
   // plan-pr-autolink: deploy links are sparse; absent means never deployed.
   if (item.deploy == null) delete item.deploy;
+  // PRODUCT-200 A4: idempotency records are sparse; absent means none seen.
+  if (item.requestOutcomes == null || Object.keys(item.requestOutcomes).length === 0) delete item.requestOutcomes;
   return item;
 };
 
