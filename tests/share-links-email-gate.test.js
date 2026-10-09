@@ -71,6 +71,30 @@ test("accountless owner bearer still mints (no account to verify)", t => {
   assert.equal(created.link.status, "active");
 });
 
+// Same gate class on the personal (attributed) invite link that the Invite
+// dialog mints on open through GET /referrals -> Referrals.board ->
+// shareLinks.personalInvite: it never called assertEmailVerified, so an
+// unverified owner who is refused by shareLinks.create still walks out of
+// the dialog with a working guest link.
+test("EXPLOIT: unverified account owner gets a personal invite link — email gate missing", t => {
+  const store = fixture(t);
+  const { token, binding } = ownerAccountSession(store, { verified: false });
+  const auth = store.authenticateAccountSession(token, "commons", binding);
+  assert.equal(store.accountLogins.emailStatus("owner-acct"), "unverified");
+  assert.equal(store.shareLinks.personalInvite(auth, "commons", 25), null,
+    "personalInvite must hand an unverified account no link, like create");
+  assert.equal(store.db.prepare("SELECT count(*) n FROM share_links").get().n, 0, "nothing minted");
+});
+
+test("verified account owner still gets a personal invite link (no regression)", t => {
+  const store = fixture(t);
+  const { token, binding } = ownerAccountSession(store, { verified: true });
+  const auth = store.authenticateAccountSession(token, "commons", binding);
+  const personal = store.shareLinks.personalInvite(auth, "commons", 25);
+  assert.equal(typeof personal?.token, "string");
+  assert.equal(personal.link.status, "active");
+});
+
 // Same gate class on the GX guest-invite mint: ownerGate requires an
 // account session but never checked verification, so an unverified owner
 // could mint single-use guest codes while agent-invites 403 them.
