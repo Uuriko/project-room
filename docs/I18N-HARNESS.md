@@ -31,6 +31,8 @@ node scripts/i18n-harness.mjs --baseline  # regenerate strings/i18n-baseline.jso
 
 `--check` runs inside `npm run lint`, so it gates CI.
 
+Duplicate keys are a separate silent hole `JSON.parse` cannot catch (it keeps the last value): `node scripts/json-dupkey-check.mjs` scans `strings/*.json` and the other authoritative JSON configs and fails CI naming every duplicated key. It runs inside `npm run check`.
+
 ## Baseline ratchet
 
 `strings/i18n-baseline.json` records violation counts; `strings/i18n-scope.json`

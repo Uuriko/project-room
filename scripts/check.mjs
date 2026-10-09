@@ -47,6 +47,12 @@ if (spawnSync(process.execPath, ["scripts/server-json-check.mjs"], { stdio: "inh
   const lint = spawnSync(process.execPath, ["scripts/lint.mjs", "--skip-if-missing"], { stdio: "inherit" });
   if (lint.status !== 0) process.exit(lint.status || 1);
 }
+// FIX-36: duplicate JSON keys are a silent hole — JSON.parse keeps the last
+// value, so a clean merge repeating an i18n key drops a string with all
+// tests green. This gate scans the authoritative JSON configs and fails
+// loudly, naming every duplicated key.
+const dupKeys = spawnSync(process.execPath, ["scripts/json-dupkey-check.mjs"], { stdio: "inherit" });
+if (dupKeys.status !== 0) process.exit(dupKeys.status || 1);
 // Secret-scan gate (H005 wiring, 2026-09-16): scans the repo tree for
 // accidentally committed secrets. Fails the build on any finding.
 const secretScan = spawnSync(process.execPath, ["scripts/secret-scan-check.mjs"], { stdio: "inherit" });
