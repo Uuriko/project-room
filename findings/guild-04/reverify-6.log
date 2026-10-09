@@ -1,0 +1,28 @@
+=== RV-6 branch=wave400/elegant-rooms-a at 2026-10-09T12:49:39Z
+HEAD is now at 61e335e20 wave400: simplify room-export-html walk (note/evidence push helpers)
+--- rebase onto origin/main
+rebase attempt 1 failed:
+Rebasing (1/4)Rebasing (2/4)Rebasing (3/4)Rebasing (4/4)error: Your local changes to the following files would be overwritten by merge:
+REBASE_OK (attempt 2)
+--- rebased onto 4ac993882; head 6e6131659
+--- tests: tests/room-export.test.js tests/room-directory.test.js tests/room-mcp-inbox-attachments.test.js
+✔ an enrolled identity puts, lists, downloads, and discards its own inbox attachment bytes (2903.086658ms)
+{"event":"room.cold_start","durationMs":873,"integrity":"eager","phases":{"schema":{"ms":189,"rowsRead":0},"plugin":{"ms":414,"rowsRead":0},"fence":{"ms":136,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":144,"heapBytes":47669168,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a pri_ bearer can stage an inbox attachment larger than the join body cap (1649.172602ms)
+✔ staged inbox attachments expire and an identity cannot exceed the staged cap (2421.719427ms)
+ℹ tests 29
+ℹ suites 0
+ℹ pass 29
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 262655.267363
+TESTS_DONE
+--- slice diff vs origin/main:
+ server/room-attachment-bytes.mjs | 32 +++++++++-------------
+ server/room-directory.mjs        | 57 +++++++++++++++++++---------------------
+ server/room-export-html.mjs      | 50 ++++++++++++++---------------------
+ server/room-export.mjs           | 30 +++++++--------------
+ 4 files changed, 69 insertions(+), 100 deletions(-)
+DONE_RV_6

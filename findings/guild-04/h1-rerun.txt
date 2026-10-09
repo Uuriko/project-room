@@ -1,0 +1,6 @@
+H1: KILLED in 221.4s
+table</dt><dd>Room owner</dd>\n<dt>Proposed by</dt><dd>Room owner <time datetime="2026-10-09T12:43:40.717Z">2026-10-09 12:43:40 UTC</time></dd>\n</dl>\n<ul class="evidence">\n<li><span class="head"><span class="author">Completion</span> <span>Room owner</span> <time datetime="2026-10-09T12:43:40.860Z">2026-10-09 12:43:40 UTC</time></span><div class="body">Merged the &lt;fix&gt;</div><div><a href="https://example.com/pr/1?q=%3Ca%3E&amp;r=%22b%22" rel="noopener noreferrer nofollow">https://example.com/pr/1?q=%3Ca%3E&amp;r=%22b%22</a> <span class="flag">version abc123</span></div></li>\n</ul>\n</section>\n</section>\n<footer>\nEnd of export: 13 events rendered, through sequence 13.\n</footer>\n</body>\n</html>\n`,
+    expected: /<script/i,
+    operator: 'doesNotMatch',
+    diff: 'simple'
+  }

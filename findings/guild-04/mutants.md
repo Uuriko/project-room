@@ -68,7 +68,10 @@ Finding: `verifyRoomLifecycle` inversion is well-covered; the trailing hang
 after store-open failures is a test-robustness note (a store that throws at
 open can wedge a later test's event loop).
 
-**H1–H5, E2–E5 → harness timeouts, not escapes (re-running to confirm).**
-Baseline `tests/room-export.test.js` takes ~298s unmutated vs the 300s mutant
-timeout — any load pushes mutant runs over. Re-running H1 with a 600s timeout;
-expect KILLED or SURVIVED on the merits.
+**H1 → KILLED (verified).** Re-ran with a 600s timeout: KILLED in 221.4s —
+the stored-XSS mutant is caught by the suite; the 300s timeout was purely a
+harness limit against a ~298s baseline suite.
+
+**H2–H5, E2–E5 → re-running with 600s timeouts** (findings/guild-04/rerun-timeouthang.py,
+log: findings/guild-04/timeouthang-rerun.log). Expected: KILLED or SURVIVED on the
+merits; the H1 result proves the timeout class was a harness artifact.

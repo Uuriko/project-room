@@ -1,12 +1,23 @@
-=== RV-1 branch=wave300/fix4-eventlog-read-scale at 2026-10-09T12:38:00Z
+=== RV-1 branch=wave300/fix4-eventlog-read-scale at 2026-10-09T12:46:15Z
 HEAD is now at 4eceef376 FIX-4: event-log read scalability
 --- rebase onto origin/main
-REBASE_FAILED
-hint: It has been rescheduled; To edit the command before continuing, please
-hint: edit the todo list first:
-hint: 
-hint:     git rebase --edit-todo
-hint:     git rebase --continue
---- NOT rebased; RESULT: REBASE_FAILED — no tests run
+REBASE_OK (attempt 1)
+--- rebased onto 4ac993882; head 22ded70d8
+--- tests: tests/event-log-read-scale.test.js tests/events-after-sequence.test.js tests/events-cursor-paging.test.js
+✔ unfiltered paging still returns the whole log exactly once (1999.97277ms)
+✔ a full page still reports more, so nothing is skipped at the boundary (1423.719213ms)
+✔ an until filter terminates rather than waiting for events it excludes (1463.738791ms)
+✔ actor, since and until combine across pages without loss or duplication (1936.694888ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 23261.276473
+TESTS_DONE
+--- slice diff vs origin/main:
+ server/store.mjs | 54 ++++++++++++++++++++++++++++++++++++++++--------------
+ 1 file changed, 40 insertions(+), 14 deletions(-)
 DONE_RV_1
-Deleted branch g04-rv-1-scratch (was 4eceef376).

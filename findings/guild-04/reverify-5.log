@@ -1,0 +1,25 @@
+=== RV-5 branch=wave400/docs-core at 2026-10-09T12:48:54Z
+HEAD is now at 66687643c wave400/docs-core: fold late http-a findings into SUSPECTED-BUGS-CORE.md
+--- rebase onto origin/main
+REBASE_OK (attempt 1)
+--- rebased onto 4ac993882; head 6542ff1b3
+--- tests: tests/room-assistant.test.js tests/room-key-heartbeat.test.js
+✔ room key revocation during upload refuses /api/agent-heartbeats/ack (1942.070315ms)
+{"event":"room.cold_start","durationMs":639,"integrity":"eager","phases":{"schema":{"ms":91,"rowsRead":0},"plugin":{"ms":272,"rowsRead":0},"fence":{"ms":166,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":128,"heapBytes":46654488,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ room key host names cannot modify identity-owned pull-only host configuration (3701.700942ms)
+✔ room key refuses multi-room identity and an unlinked member (2689.828179ms)
+ℹ tests 29
+ℹ suites 0
+ℹ pass 29
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 132315.561861
+TESTS_DONE
+--- slice diff vs origin/main:
+ server/room-assistant.mjs    | 5 +++++
+ server/room-key-presence.mjs | 3 +++
+ server/store.mjs             | 5 +++++
+ 3 files changed, 13 insertions(+)
+DONE_RV_5

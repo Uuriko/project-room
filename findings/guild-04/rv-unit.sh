@@ -20,9 +20,10 @@ git -C $REPO worktree add $WT -b $SB origin/$BRANCH 2>&1 | tail -1
 cd $WT || { echo "WORKTREE_FAIL"; exit 1; }
 echo "--- rebase onto origin/main"
 REBASED=no
-for attempt in 1 2 3; do
+for attempt in 1 2 3 4 5 6 7 8; do
   # Disposable worktree: discard any transient external modification before each attempt.
   git checkout -- . 2>/dev/null
+  git rebase --abort 2>/dev/null
   if git rebase origin/main > .rebase-out.txt 2>&1; then
     echo "REBASE_OK (attempt $attempt)"
     REBASED=yes
@@ -31,10 +32,10 @@ for attempt in 1 2 3; do
   echo "rebase attempt $attempt failed:"
   grep -E "error:|CONFLICT" .rebase-out.txt | head -3
   git rebase --abort 2>/dev/null
-  sleep 5
+  sleep 3
 done
 if [ "$REBASED" != yes ]; then
-  echo "REBASE_FAILED after 3 attempts"
+  echo "REBASE_FAILED after 8 attempts"
   echo "--- conflicting files:"
   git diff --name-only --diff-filter=U | head -20
 fi

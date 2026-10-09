@@ -1,0 +1,8 @@
+=== RV-7 branch=wave400/elegant-server at 2026-10-09T12:53:51Z
+HEAD is now at 3ccb02576 wave400: merge elegant-wclaims (dedupe validators/helpers in work-claims.mjs, -7 lines)
+--- rebase onto origin/main
+rebase attempt 1 failed:
+Rebasing (1/8)error: Your local changes to the following files would be overwritten by merge:
+REBASE_OK (attempt 2)
+--- rebased onto 4ac993882; head 5fce963ff
+--- tests: tests/room-export.test.js tests/room-directory.test.js tests/room-mcp-inbox-attachments.test.js
