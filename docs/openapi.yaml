@@ -3818,7 +3818,7 @@ paths:
         - accountSession: []
       parameters:
         - $ref: '#/components/parameters/RoomId'
-        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: id, in: path, required: true, schema: { type: string }, description: 'The access-request id (requestId in code).' }
       requestBody:
         required: true
         content:
@@ -9477,6 +9477,7 @@ paths:
           application/json:
             schema:
               type: object
+              required: [roomId]
               properties:
                 roomId: { type: string }
                 maxDepth: { type: integer, minimum: 1, maximum: 12, description: Optional chain cap (default 6) }
@@ -9581,6 +9582,10 @@ paths:
               properties:
                 token: { type: string }
                 displayName: { type: string, maxLength: 80, description: Optional display name for the new member }
+                proof:
+                  type: string
+                  pattern: '^[A-Za-z0-9_-]{1,43}$'
+                  description: Optional base64url proof (1-43 chars) for the anonymous mint limiter. Malformed proof is 422 invalid_invite.
       responses:
         '201':
           description: >-
