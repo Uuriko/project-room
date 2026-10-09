@@ -73,7 +73,17 @@ very old `after`/`Last-Event-ID` on a huge log stalls its room's peers until
 it catches up. Accepted for F1; revisit if measured room stalls appear.
 
 Benchmark: event-loop ms/sec at 100 streams, before vs after (SIM harness
-with a fake store; label SIM).
+with a fake store; label SIM). Measured 2026-10-08 (`tests/bench-fanout-f1.mjs`,
+100 streams x 10s @ 250ms, 5000 preloaded events, 2000-message projection):
+
+- Full 100-row pages (after=0): eventsAfter calls 1028 -> 30 (~34x fewer fetches);
+  pump cpu burn 162.1 -> 141.5 ms/sec; event-loop delay mean 759.92 -> 13.26 ms.
+- atHead (streams open at the log head, empty pages — isolates the shared
+  fetch+redact+projection work F1 targets): pump cpu burn 202.9 -> 39.0 ms/sec (~5.2x).
+
+The full-page delta is smaller because the per-stream costs F1 deliberately
+keeps (per-event JSON.stringify + socket writes) dominate there; both are
+unchanged by F1 and identical before/after.
 
 ## F2 — Bounded-parallel wake dispatch + coalescing (server/agent-plugin-store.mjs)
 
