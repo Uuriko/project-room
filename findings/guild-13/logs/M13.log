@@ -1,0 +1,36 @@
+unit=M13 file=agent-invites.mjs test=tests/agent-invites.test.js
+desc: redeemed check inverted: double-redeem allowed
+=== MUTANT DIFF ===
+diff --git a/server/agent-invites.mjs b/server/agent-invites.mjs
+index 8cde0e19d..ca55fe8fe 100644
+--- a/server/agent-invites.mjs
++++ b/server/agent-invites.mjs
+@@ -247,7 +247,7 @@ export class AgentInvites {
+       if (row.revoked_at != null) fail(410, "invite_revoked", "Invite code was revoked");
+       const now = this.store.now();
+       if (now >= row.expires_at) fail(410, "invite_expired", "Invite code expired");
+-      if (row.redeemed_at != null) fail(409, "invite_already_used", "Invite code was already used");
++      if (row.redeemed_at == null) fail(409, "invite_already_used", "Invite code was already used");
+       const room = this.store.room(row.room_id);
+       // The inviter's authority is re-checked at redemption, like invitation
+       // acceptance: a demoted issuer's outstanding codes stop working.
+=== TEST RUN ===
+test_exit=1
+  AssertionError [ERR_ASSERTION]: {"error":{"code":"invite_already_used","message":"Invite code was already used"},"status":"action_required","reason":"invite_already_used","hint":"Unknown error 'invite_already_used'. Re-check access and current work; if it repeats, report the code and full message to the room owner.","next":[{"tool":"room_check_access"},{"tool":"room_list_work"},{"command":"If it repeats, report error.code 'invite_already_used' with the full message to the room owner — this code has no known recovery."}],"operationId":"op_8exOCSC7","category":"conflict"}
+  
+  409 !== 201
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-13/tests/agent-invites.test.js:679:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 409,
+    expected: 201,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+VERDICT=KILLED (tests failed with mutant applied)
+=== RESTORING ===
+restored clean

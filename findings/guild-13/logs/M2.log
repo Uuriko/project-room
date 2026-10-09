@@ -1,0 +1,36 @@
+unit=M2 file=identity-secret-hash.mjs test=tests/agent-identity-secrets.test.js
+desc: boundary: 16-char identity hash key ignored
+=== MUTANT DIFF ===
+diff --git a/server/identity-secret-hash.mjs b/server/identity-secret-hash.mjs
+index b8346776f..57eea8f02 100644
+--- a/server/identity-secret-hash.mjs
++++ b/server/identity-secret-hash.mjs
+@@ -38,7 +38,7 @@ export function configuredIdentityHashKey(source) {
+   const value = typeof source === "string" ? source : source?.[IDENTITY_HASH_KEY_ENV];
+   if (typeof value !== "string") return null;
+   const trimmed = value.trim();
+-  if (trimmed.length < 16) return null;
++  if (trimmed.length <= 16) return null;
+   return trimmed;
+ }
+ 
+=== TEST RUN ===
+test_exit=0
+{"event":"room.cold_start","durationMs":891,"integrity":"eager","phases":{"schema":{"ms":243,"rowsRead":0},"plugin":{"ms":353,"rowsRead":0},"fence":{"ms":73,"rowsRead":0},"verifies":{"ms":28,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":138,"heapBytes":51416752,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ rotate/revoke require authentication (5320.014835ms)
+{"event":"room.cold_start","durationMs":1199,"integrity":"eager","phases":{"schema":{"ms":510,"rowsRead":0},"plugin":{"ms":171,"rowsRead":0},"fence":{"ms":219,"rowsRead":0},"verifies":{"ms":10,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":139,"heapBytes":42137392,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2151,"integrity":"eager","phases":{"schema":{"ms":297,"rowsRead":0},"plugin":{"ms":482,"rowsRead":0},"fence":{"ms":1079,"rowsRead":0},"verifies":{"ms":79,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":153,"heapBytes":47681568,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ authorization scheme is case-insensitive per RFC 7235 (QA 2026-10-03 P1-3) (2924.899583ms)
+✔ revoked_at column is backfilled on pre-existing identity tables (2535.042532ms)
+✔ mcp join file-body cap honors any casing of the bearer scheme (bughunt 2026-10-03) (4773.600108ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 46226.577676
+VERDICT=SURVIVED (tests passed with mutant applied)
+=== RESTORING ===
+restored clean

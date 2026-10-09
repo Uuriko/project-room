@@ -1,0 +1,36 @@
+unit=M4 file=identity-verification.mjs test=tests/identity-verification.test.js
+desc: invert isVerified
+=== MUTANT DIFF ===
+diff --git a/server/identity-verification.mjs b/server/identity-verification.mjs
+index 4f96aca84..0703b60db 100644
+--- a/server/identity-verification.mjs
++++ b/server/identity-verification.mjs
+@@ -62,7 +62,7 @@ export function createIdentityVerification({ store, clock } = {}) {
+ 
+   const level = identityId => (recordOf(identityId) ? VERIFIED : UNVERIFIED);
+ 
+-  const isVerified = identityId => recordOf(identityId) !== null;
++  const isVerified = identityId => recordOf(identityId) === null;
+ 
+   const attestation = identityId => recordOf(identityId);
+ 
+=== TEST RUN ===
+test_exit=1
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-13/tests/identity-verification.test.js:32:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+VERDICT=KILLED (tests failed with mutant applied)
+=== RESTORING ===
+restored clean

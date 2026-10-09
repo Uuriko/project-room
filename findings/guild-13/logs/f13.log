@@ -1,0 +1,1 @@
+{"unit":"F13","name":"operator-oracle","pass":true,"detail":"no-auth=404 wrong-token=404 bearer-scheme=404 empty=404"}

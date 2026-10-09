@@ -1,0 +1,36 @@
+unit=M1 file=operator-auth.mjs test=tests/operator-purge.test.js
+desc: invert operator token timing-safe comparison
+=== MUTANT DIFF ===
+diff --git a/server/operator-auth.mjs b/server/operator-auth.mjs
+index 1a2bcb2c7..2864ab8bd 100644
+--- a/server/operator-auth.mjs
++++ b/server/operator-auth.mjs
+@@ -43,7 +43,7 @@ export function operatorTokenMatches(token, env = operatorEnv()) {
+   if (!expectedHex || typeof token !== "string") return false;
+   const actual = createHash("sha256").update(token).digest();
+   const expected = Buffer.from(expectedHex, "hex");
+-  return actual.length === expected.length && timingSafeEqual(actual, expected);
++  return actual.length === expected.length && !timingSafeEqual(actual, expected);
+ }
+ 
+ // Room and account cookies are not an operator credential. A request that
+=== TEST RUN ===
+test_exit=1
+  AssertionError [ERR_ASSERTION]: {"error":{"code":"not_found","message":"Not found"},"status":"action_required","reason":"not_found","hint":"That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.","next":[{"command":"Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids"},{"tool":"room_check_access"}],"operationId":"op_D73poPoc","category":"not_found"}
+  
+  404 !== 200
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-13/tests/operator-purge.test.js:469:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Suite.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 404,
+    expected: 200,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+VERDICT=KILLED (tests failed with mutant applied)
+=== RESTORING ===
+restored clean

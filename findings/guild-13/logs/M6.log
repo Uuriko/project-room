@@ -1,0 +1,36 @@
+unit=M6 file=invitation-evidence.mjs test=tests/invitation-evidence.test.js
+desc: invert member kind check in evidence assert
+=== MUTANT DIFF ===
+diff --git a/server/invitation-evidence.mjs b/server/invitation-evidence.mjs
+index 923f2ab15..f09966002 100644
+--- a/server/invitation-evidence.mjs
++++ b/server/invitation-evidence.mjs
+@@ -40,7 +40,7 @@ export function assertInvitationMembershipEvidence(record, linked, binding, room
+     || !Number.isSafeInteger(linked.sequence) || linked.sequence < 1 || linked.sequence > room.sequence
+     || canonicalInvitationData(joined) !== canonicalInvitationData(expected)
+     || binding?.account_id !== record.intended_account_id || binding.origin !== `invitation:${record.id}`
+-    || member?.id !== record.intended_member_id || member.kind !== "human"
++    || member?.id !== record.intended_member_id || member.kind === "human"
+     || member.displayName !== record.intended_display_name || member.role !== record.intended_role
+     || member.accountableHumanId !== record.intended_member_id
+     || canonicalInvitationData(member.membershipOrigin) !== canonicalInvitationData(origin)) {
+=== TEST RUN ===
+test_exit=1
+    actual: Error: Membership evidence differs from journal
+        at assertInvitationMembershipEvidence (file:///home/hatch/workspace/pr-wave1000-guild-13/server/invitation-evidence.mjs:47:11)
+        at file:///home/hatch/workspace/pr-wave1000-guild-13/tests/invitation-evidence.test.js:58:29
+        at getActual (node:assert:611:5)
+        at strict.doesNotThrow (node:assert:779:32)
+        at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-13/tests/invitation-evidence.test.js:58:10)
+        at Test.runInAsyncScope (node:async_hooks:227:14)
+        at Test.run (node:internal/test_runner/test:1397:25)
+        at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+        at Test.postRun (node:internal/test_runner/test:1537:19)
+        at Test.run (node:internal/test_runner/test:1462:12),
+    expected: undefined,
+    operator: 'doesNotThrow',
+    diff: 'simple'
+  }
+VERDICT=KILLED (tests failed with mutant applied)
+=== RESTORING ===
+restored clean

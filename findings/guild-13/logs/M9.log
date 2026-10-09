@@ -1,0 +1,36 @@
+unit=M9 file=oauth-provider.mjs test=tests/oauth-provider.test.js
+desc: invert PKCE S256 comparison
+=== MUTANT DIFF ===
+diff --git a/server/oauth-provider.mjs b/server/oauth-provider.mjs
+index a0ae2e427..d503cb9fc 100644
+--- a/server/oauth-provider.mjs
++++ b/server/oauth-provider.mjs
+@@ -206,7 +206,7 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
+     const expected = base64url(createHash("sha256").update(codeVerifier).digest());
+     const a = Buffer.from(expected);
+     const b = Buffer.from(record.codeChallenge);
+-    check(a.length === b.length && timingSafeEqual(a, b), "PKCE verification failed");
++    check(a.length === b.length && !timingSafeEqual(a, b), "PKCE verification failed");
+     // Bind the minted family to the code record BEFORE issuing, so the
+     // linkage survives even if the issuer throws after this point.
+     const familyId = `oarf_${newSecret(16)}`;
+=== TEST RUN ===
+test_exit=1
+test at tests/oauth-provider.test.js:320:1
+✖ F-02: revokeSession kills one family, ownership-checked (0.375073ms)
+  Error [OAuthProviderError]: PKCE verification failed
+      at fail (file:///home/hatch/workspace/pr-wave1000-guild-13/server/oauth-provider.mjs:30:41)
+      at check (file:///home/hatch/workspace/pr-wave1000-guild-13/server/oauth-provider.mjs:31:57)
+      at Object.exchangeCode (file:///home/hatch/workspace/pr-wave1000-guild-13/server/oauth-provider.mjs:209:5)
+      at mkPair (file:///home/hatch/workspace/pr-wave1000-guild-13/tests/oauth-provider.test.js:244:19)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-13/tests/oauth-provider.test.js:322:13)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12) {
+    code: 'invalid_request'
+  }
+VERDICT=KILLED (tests failed with mutant applied)
+=== RESTORING ===
+restored clean

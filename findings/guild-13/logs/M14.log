@@ -1,0 +1,36 @@
+unit=M14 file=referral-invites.mjs test=tests/referral-invites.test.js
+desc: accept expired referral invites
+=== MUTANT DIFF ===
+diff --git a/server/referral-invites.mjs b/server/referral-invites.mjs
+index b6e42a181..9f7d4c6c8 100644
+--- a/server/referral-invites.mjs
++++ b/server/referral-invites.mjs
+@@ -377,7 +377,7 @@ export class ReferralInvites {
+       });
+       fail(status, code, message);
+     };
+-    if (this.now() >= expiresAt) rejectAndFail(410, "invite_expired", "That invite has expired", "expired");
++    if (this.now() < expiresAt) rejectAndFail(410, "invite_expired", "That invite has expired", "expired");
+     if (depth > maxDepth) rejectAndFail(409, "referral_depth_exceeded", "That invite is past the chain depth limit", "depth_exceeded");
+     const preRoom = this.store.room(roomId);
+     // A truthy map lookup treats toString as an active inviter, so redeem
+=== TEST RUN ===
+test_exit=1
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  410 !== 201
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-13/tests/referral-invites.test.js:507:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 410,
+    expected: 201,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+VERDICT=KILLED (tests failed with mutant applied)
+=== RESTORING ===
+restored clean

@@ -1,0 +1,4 @@
+{"event":"room.cold_start","durationMs":2588,"integrity":"eager","phases":{"schema":{"ms":334,"rowsRead":0},"plugin":{"ms":924,"rowsRead":0},"fence":{"ms":503,"rowsRead":0},"verifies":{"ms":375,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":181,"heapBytes":36030840,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+room diagnostic op_G9r4H-Cw 422 invalid_invite input /api/rooms/:roomId/agent-invites
+room diagnostic op_h5jT1WP- 422 invalid_request input /api/rooms/:roomId/access-requests

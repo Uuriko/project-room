@@ -1,0 +1,36 @@
+unit=M7 file=invitation-journal.mjs test=tests/invitation-journal.test.js
+desc: invert journal checksum check in replay
+=== MUTANT DIFF ===
+diff --git a/server/invitation-journal.mjs b/server/invitation-journal.mjs
+index f3ee157e8..18e60284e 100644
+--- a/server/invitation-journal.mjs
++++ b/server/invitation-journal.mjs
+@@ -117,7 +117,7 @@ export function replayInvitationJournal(rows) {
+     const entry = JSON.parse(row.body);
+     assert(exact(entry, entryKeys) && entry.version === 1 && integer(entry.recordedAt));
+     assert(row.invitation_id === entry.invitationId && row.sequence === index + 1 && entry.sequence === row.sequence);
+-    assert(entry.record.id === entry.invitationId && entry.previousHash === checksum && row.checksum === digest(entry));
++    assert(entry.record.id === entry.invitationId && entry.previousHash === checksum && row.checksum !== digest(entry));
+     validateInvitationSnapshot(entry.record, entry.audits);
+     if (!previous) {
+       assert(entry.kind === "legacy-v4-baseline" || (entry.kind === "issued" && entry.record.status === "pending"));
+=== TEST RUN ===
+test_exit=1
+  Error: Invitation record requires operator reconciliation
+      at fail (file:///home/hatch/workspace/pr-wave1000-guild-13/server/store.mjs:418:49)
+      at RoomStore.appendInvitationJournal (file:///home/hatch/workspace/pr-wave1000-guild-13/server/store.mjs:2342:13)
+      at file:///home/hatch/workspace/pr-wave1000-guild-13/server/store.mjs:3281:12
+      at run (file:///home/hatch/workspace/pr-wave1000-guild-13/server/store.mjs:647:22)
+      at Object.transaction (file:///home/hatch/workspace/pr-wave1000-guild-13/server/store.mjs:674:22)
+      at RoomStore.transaction (file:///home/hatch/workspace/pr-wave1000-guild-13/server/store.mjs:2621:41)
+      at RoomStore.issueInvitation (file:///home/hatch/workspace/pr-wave1000-guild-13/server/store.mjs:3231:17)
+      at fixture (file:///home/hatch/workspace/pr-wave1000-guild-13/tests/invitation-journal.test.js:28:24)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-13/tests/invitation-journal.test.js:182:13)
+      at Test.runInAsyncScope (node:async_hooks:227:14) {
+    status: 503,
+    code: 'invitation_integrity_error',
+    headers: null
+  }
+VERDICT=KILLED (tests failed with mutant applied)
+=== RESTORING ===
+restored clean

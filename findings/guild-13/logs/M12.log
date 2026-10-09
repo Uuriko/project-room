@@ -1,0 +1,36 @@
+unit=M12 file=google-oauth.mjs test=tests/google-oauth-email.test.js
+desc: trust unverified email claim
+=== MUTANT DIFF ===
+diff --git a/server/google-oauth.mjs b/server/google-oauth.mjs
+index 5f45694e1..2632d8b95 100644
+--- a/server/google-oauth.mjs
++++ b/server/google-oauth.mjs
+@@ -180,7 +180,7 @@ export class GoogleSignIn {
+     // anything else yields null and the account is keyed on the subject.
+     // The HTTP layer's normalizeEmail is the final shape gate.
+     const emailClaim = claims.email;
+-    const email = claims.email_verified === true && typeof emailClaim === 'string'
++    const email = claims.email_verified !== true && typeof emailClaim === 'string'
+       && emailClaim.length > 0 && emailClaim.length <= 254 ? emailClaim : null;
+     return { iss: GOOGLE_ISSUER, sub: claims.sub, exp: claims.exp, iat: claims.iat, email };
+   }
+=== TEST RUN ===
+test_exit=1
+  
+  + null
+  - 'human@example.com'
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-13/tests/google-oauth-email.test.js:171:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: 'human@example.com',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+VERDICT=KILLED (tests failed with mutant applied)
+=== RESTORING ===
+restored clean

@@ -1,0 +1,36 @@
+unit=M10 file=mcp-identity-mint.mjs test=tests/mcp-identity-mint.test.js
+desc: accept wrong MCP method
+=== MUTANT DIFF ===
+diff --git a/server/mcp-identity-mint.mjs b/server/mcp-identity-mint.mjs
+index c150b3cbc..7752b8d6b 100644
+--- a/server/mcp-identity-mint.mjs
++++ b/server/mcp-identity-mint.mjs
+@@ -61,7 +61,7 @@ export const isIdentityMintMcpTool = name => IDENTITY_MINT_MCP_TOOLS.includes(na
+ export function handleIdentityMintMcp(store, message, { remoteAddress } = {}) {
+   const hasId = object(message) && Object.hasOwn(message, 'id');
+   const requestId = message?.id;
+-  if (!object(message) || message.jsonrpc !== '2.0' || message.method !== 'tools/call'
++  if (!object(message) || message.jsonrpc !== '2.0' || message.method === 'tools/call'
+     || (hasId && !(typeof requestId === 'string' && requestId.length <= 128 || Number.isSafeInteger(requestId)))) {
+     return mcpInvalidRequest();
+   }
+=== TEST RUN ===
+test_exit=1
+  + }
+  - undefined
+  
+      at unwrapCall (file:///home/hatch/workspace/pr-wave1000-guild-13/tests/mcp-identity-mint.test.js:53:10)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-13/tests/mcp-identity-mint.test.js:132:24)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: { code: -32600, message: 'Invalid request', data: { reason: 'invalid_request', hint: 'Send one JSON-RPC 2.0 object: {"jsonrpc":"2.0","id":<string up to 128 chars or integer>,"method":"<name>","params":{...}}. Omit id for a notification; notifications receive no JSON-RPC response. Batches are not accepted.', next: [Array], status: 'action_required', operationId: 'op_0dbJTFxY', category: 'input' } },
+    expected: undefined,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+VERDICT=KILLED (tests failed with mutant applied)
+=== RESTORING ===
+restored clean

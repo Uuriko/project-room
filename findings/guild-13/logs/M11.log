@@ -1,0 +1,36 @@
+unit=M11 file=github-oauth.mjs test=tests/github-oauth.test.js
+desc: invert pending-state expiry check
+=== MUTANT DIFF ===
+diff --git a/server/github-oauth.mjs b/server/github-oauth.mjs
+index 595e46995..6959c1904 100644
+--- a/server/github-oauth.mjs
++++ b/server/github-oauth.mjs
+@@ -166,7 +166,7 @@ export function createPendingStore({ now = Date.now, ttlMs = GITHUB_PENDING_TTL_
+       }
+       if (!entry) fail("github_state_invalid");
+       pending.delete(foundKey); // single-use: any replay of the state fails
+-      if (entry.createdAt + ttlMs <= now()) fail("github_state_expired");
++      if (entry.createdAt + ttlMs > now()) fail("github_state_expired");
+       return { codeVerifier: entry.codeVerifier, sessionToken: entry.sessionToken, sessionRevision: entry.sessionRevision,
+         link: entry.link === true };
+     }
+=== TEST RUN ===
+test_exit=1
+
+test at tests/github-oauth.test.js:86:1
+✖ pending store: expired states are rejected and dropped (3.484399ms)
+  AssertionError [ERR_ASSERTION]: expected GitHubOAuthError(github_state_expired)
+      at throwsCode (file:///home/hatch/workspace/pr-wave1000-guild-13/tests/github-oauth.test.js:27:10)
+      at async TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-13/tests/github-oauth.test.js:92:3)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: undefined,
+    operator: 'fail',
+    diff: 'simple'
+  }
+VERDICT=KILLED (tests failed with mutant applied)
+=== RESTORING ===
+restored clean

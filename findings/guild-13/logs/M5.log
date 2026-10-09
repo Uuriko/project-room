@@ -1,0 +1,36 @@
+unit=M5 file=gmail-import-authority.mjs test=tests/gmail-sync.test.js
+desc: invert gmail import connection binding
+=== MUTANT DIFF ===
+diff --git a/server/gmail-import-authority.mjs b/server/gmail-import-authority.mjs
+index b1a3ed63b..e1c2ab9c9 100644
+--- a/server/gmail-import-authority.mjs
++++ b/server/gmail-import-authority.mjs
+@@ -15,7 +15,7 @@ export function gmailImportAuth(store, token, request) {
+   grant.check();
+   const account = store.account(grant.accountId), connection = store.connections.connection(account.id, grant.connectionId);
+   if (!account.active || account.authEpoch !== grant.epoch || connection?.state !== 'active' || connection.authEpoch !== grant.epoch || connection.profile.provider !== 'gmail-api') reject();
+-  if (request.action === 'page.apply') { if (request.connectionId !== grant.connectionId) reject(); }
++  if (request.action === 'page.apply') { if (request.connectionId === grant.connectionId) reject(); }
+   else if (request.action === 'source.import') {
+     if (request.data?.envelope?.connection?.id !== grant.connectionId || request.data.envelope.connection.accountId !== account.id) reject();
+   } else reject();
+=== TEST RUN ===
+test_exit=1
+  Error: Gmail import authority expired.
+      at reject (file:///home/hatch/workspace/pr-wave1000-guild-13/server/gmail-import-authority.mjs:13:32)
+      at gmailImportAuth (file:///home/hatch/workspace/pr-wave1000-guild-13/server/gmail-import-authority.mjs:18:91)
+      at file:///home/hatch/workspace/pr-wave1000-guild-13/server/email-import.mjs:205:20
+      at run (file:///home/hatch/workspace/pr-wave1000-guild-13/server/store.mjs:647:22)
+      at Object.transaction (file:///home/hatch/workspace/pr-wave1000-guild-13/server/store.mjs:653:29)
+      at RoomStore.transaction (file:///home/hatch/workspace/pr-wave1000-guild-13/server/store.mjs:2621:41)
+      at EmailImport.apply (file:///home/hatch/workspace/pr-wave1000-guild-13/server/email-import.mjs:204:23)
+      at file:///home/hatch/workspace/pr-wave1000-guild-13/server/gmail-sync.mjs:76:34
+      at run (file:///home/hatch/workspace/pr-wave1000-guild-13/server/store.mjs:647:22)
+      at Object.transaction (file:///home/hatch/workspace/pr-wave1000-guild-13/server/store.mjs:674:22) {
+    status: 403,
+    code: 'gmail_import_authority',
+    headers: null
+  }
+VERDICT=KILLED (tests failed with mutant applied)
+=== RESTORING ===
+restored clean

@@ -1,0 +1,2 @@
+{"event":"room.cold_start","durationMs":2573,"integrity":"eager","phases":{"schema":{"ms":181,"rowsRead":0},"plugin":{"ms":910,"rowsRead":0},"fence":{"ms":706,"rowsRead":0},"verifies":{"ms":269,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":189,"heapBytes":36148048,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404

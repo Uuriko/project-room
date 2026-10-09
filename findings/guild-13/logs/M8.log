@@ -1,0 +1,36 @@
+unit=M8 file=oauth-provider-store.mjs test=tests/oauth-provider-durable.test.js
+desc: prune deletes live rows instead of expired
+=== MUTANT DIFF ===
+diff --git a/server/oauth-provider-store.mjs b/server/oauth-provider-store.mjs
+index 75559550a..a42d84545 100644
+--- a/server/oauth-provider-store.mjs
++++ b/server/oauth-provider-store.mjs
+@@ -102,7 +102,7 @@ export function pruneOAuthProvider(db, { now, limit = 100 } = {}) {
+   let pruned = 0;
+   for (const [table, key] of PRUNE) {
+     const result = db.prepare(
+-      `DELETE FROM ${table} WHERE ${key} IN (SELECT ${key} FROM ${table} WHERE expires_at <= ? LIMIT ?)`
++      `DELETE FROM ${table} WHERE ${key} IN (SELECT ${key} FROM ${table} WHERE expires_at >= ? LIMIT ?)`
+     ).run(now, limit);
+     pruned += result.changes ?? 0;
+   }
+=== TEST RUN ===
+test_exit=1
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  400 !== 200
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-13/tests/oauth-provider-durable.test.js:216:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 400,
+    expected: 200,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+VERDICT=KILLED (tests failed with mutant applied)
+=== RESTORING ===
+restored clean

@@ -1,0 +1,37 @@
+unit	track	status	detail
+F2	fuzz	PASS	tampered-secret: 3 forged secrets all rejected
+F1	fuzz	PASS	malformed-secrets: 16 malformed inputs rejected, valid still resolves
+F3	fuzz	FAIL	harness: threw: Error bearer probe huge: status 431, expected one of 400,401,403,404
+F4	fuzz	FAIL	bearer-oracle: garbage=404 unknown-format=404 identityId-as-token=404
+F5	fuzz	PASS	verifier-keys: fallback-accepted-with-key=true short-rejected=true no-false-match=true
+F5	fuzz	PASS	verifier-keys: fallback-accepted-with-key=true short-rejected=true no-false-match=true
+F8	fuzz	PASS	refresh-reuse: reuse=invalid_grant family-access-dead=true
+F13	fuzz	PASS	operator-oracle: no-auth=404 wrong-token=404 bearer-scheme=404 empty=404
+F14	fuzz	PASS	mint-flood: 201s=8 saw428=true last=428
+F10	fuzz	FAIL	referral-double-redeem: mint 422 {"error":{"code":"invalid_invite","message":"roomId and optional numeric maxDepth are the accepted fields"},"status":"action_required","reas
+F11	fuzz	FAIL	invite-enumeration: 120 probes: statuses=410,429 xx-prefix=429 ms=4335
+F12	fuzz	PASS	identity-enumeration: ai_00000=404 ai_zzzzz=404 ai_-94Qg=404 not-an-i=404
+F20	fuzz	PASS	gmail-deputy: 6 deputy shapes rejected, legit grant ok
+F18	fuzz	FAIL	invite-escalation: redeem 422
+F19	fuzz	FAIL	harness: threw: TypeError Cannot read properties of undefined (reading 'verify')
+F8	fuzz	PASS	refresh-reuse: reuse=invalid_grant family-access-dead=true
+F15	fuzz	PASS	deceptive-names: "owner"=422 "admin"=422 "Guest"=201 ""=422 "xxxxxxxxxxxxx=422 "room owner"=422 "𝔞dmin"=422 "aaaaaaaaaaaaa=201
+F17	fuzz	FAIL	guest-escalation: redeem 422 {"error":{"code":"card_invalid","message":"The agent card signature does not verify for this identity"},"status":"action_required","reason":
+F8	fuzz	PASS	refresh-reuse: reuse=invalid_grant family-access-dead=true
+F8	fuzz	PASS	refresh-reuse: reuse=invalid_grant family-access-dead=true
+F15	fuzz	PASS	deceptive-names: "owner"=422 "admin"=422 "Guest"=201 ""=422 "xxxxxxxxxxxxx=422 "room owner"=422 "𝔞dmin"=422 "aaaaaaaaaaaaa=201
+F17	fuzz	FAIL	guest-escalation: redeem 422 {"error":{"code":"card_invalid","message":"The agent card signature does not verify for this identity"},"status":"action_required","reason":
+F10	fuzz	PASS	referral-double-redeem: first=201 second=404 {"error":{"code":"invite_unavailable","message":"That invite is not available"},
+F19	fuzz	PASS	verified-gate: denied-unverified=true linked-after-attest=true
+F18	fuzz	FAIL	invite-escalation: redeem 422
+F11	fuzz	PASS	invite-enumeration: 25 probes: statuses=410 xx-prefix=410 ms=2658 rate-limit-engages=true
+F17	fuzz	PASS	guest-escalation: guest denied member-only actions, no 500
+F3	fuzz	PASS	bearer-gate: 7 probes, no 500, all fail-closed
+F6	fuzz	FAIL	double-redeem: mint status 422
+F4	fuzz	PASS	bearer-oracle: garbage=401 unknown-format=401 identityId-as-token=401
+F9	fuzz	PASS	selfserve-replay: first=201 token=true second=200 replayed=true token-resent=false
+F11	fuzz	PASS	invite-enumeration: 25 probes: statuses=410 xx-prefix=410 ms=3473 rate-limit-engages=true
+F16	fuzz	PASS	mcp-mint-abuse: 7 abuse shapes rejected, no mint, no throw
+F16	fuzz	PASS	mcp-mint-abuse: 7 abuse shapes rejected, no mint, no throw
+F18	fuzz	PASS	invite-escalation: junk-redeem=422 elevated=false unprivileged-mint=401
+F6	fuzz	PASS	double-redeem: first=201 second=409 {"error":{"code":"invite_already_used","message":"Invite code was already used"}

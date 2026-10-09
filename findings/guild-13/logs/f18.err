@@ -1,0 +1,3 @@
+{"event":"room.cold_start","durationMs":2505,"integrity":"eager","phases":{"schema":{"ms":85,"rowsRead":0},"plugin":{"ms":1616,"rowsRead":0},"fence":{"ms":292,"rowsRead":0},"verifies":{"ms":44,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":200,"heapBytes":36021392,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+room diagnostic op_EeKbDdVB 401 unauthenticated access /api/rooms/:roomId/agent-invites

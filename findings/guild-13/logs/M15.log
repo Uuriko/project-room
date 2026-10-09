@@ -1,0 +1,36 @@
+unit=M15 file=guest-invites.mjs test=tests/guest-invite-flow.test.js
+desc: invert live-invite expiry window
+=== MUTANT DIFF ===
+diff --git a/server/guest-invites.mjs b/server/guest-invites.mjs
+index 43d3298f0..d365e91d2 100644
+--- a/server/guest-invites.mjs
++++ b/server/guest-invites.mjs
+@@ -260,7 +260,7 @@ export class GuestInvites {
+   }
+ 
+   liveInvite(row) {
+-    return row && row.status === "active" && row.redeem_by > this.store.now();
++    return row && row.status === "active" && row.redeem_by < this.store.now();
+   }
+ 
+   // One active seat per identity per room: faces are cheap, seats are not.
+=== TEST RUN ===
+test_exit=1
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  410 !== 409
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-13/tests/guest-invite-flow.test.js:652:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 410,
+    expected: 409,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+VERDICT=KILLED (tests failed with mutant applied)
+=== RESTORING ===
+restored clean
