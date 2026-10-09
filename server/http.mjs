@@ -53,6 +53,7 @@ const MCP_SERVER_CARD_DOC = discoveryDoc(MCP_SERVER_CARD_PATH);
 import { isRoomMcpPath, writeRoomMcpNode } from "./mcp-http.mjs";
 import { isA2aPath, writeA2aNode } from "./a2a-jsonrpc.mjs";
 import { mcpAttachmentBodyBytes } from "./room-attachment-bytes.mjs";
+import { runWithSpend } from "./spend-grants.mjs";
 import { createHostedRoomMcp } from "./mcp-room-profile.mjs";
 import { diagnoseArguments } from "./mcp-arg-errors.mjs";
 import { collectNeedsMe } from "./needs-me.mjs";
@@ -3278,9 +3279,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             if (!exact(data, allowed) || typeof data.repo !== "string" || !Number.isSafeInteger(data.prNumber)) {
               reject(422, "invalid_land_item", "repo and prNumber are required");
             }
-            const result = await store.landQueue.add(roomId, auth.member.id, {
+            const result = await runWithSpend(store, selected.token, "add_land_item", roomId, () => store.landQueue.add(roomId, auth.member.id, {
               repo: data.repo, prNumber: data.prNumber, claimantMemberId: claimant
-            });
+            }));
             return json(res, result.duplicate ? 200 : 201, result);
           }
           if (action === "remove_land_item") {
@@ -3346,7 +3347,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           || !exact(data, ["id", "filename", "mediaType", "data"])) {
           reject(422, "invalid_attachment", "id, filename, mediaType, and data are required");
         }
-        const staged = store.roomAttachments.stage(selected.token, roomId, data);
+        const staged = await runWithSpend(store, selected.token, "room_put_file", roomId, () => store.roomAttachments.stage(selected.token, roomId, data));
         return json(res, staged.duplicate ? 200 : 201, staged);
       }
       // onboarding-funnel was removed on main (replaced by activation-pack);
@@ -3884,7 +3885,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           ?? bountyDisputeDecideMatch ?? bountyDisputeMatch ?? bountyFinalizeMatch ?? bountyRubricMatch;
         const identityMatch = creditsBalancesMatch ?? creditsHistoryMatch;
         const sybilFlagIdMatch = bountySybilDismissMatch ?? bountySybilConfirmMatch;
-        return await handleBountyEscrow({ req, res, url, store, roomId, auth, escrowRoute,
+        return await handleBountyEscrow({ req, res, url, store, roomId, auth, escrowRoute, token: selected.token,
           bountyId: bountyIdMatch ? pathId(bountyIdMatch[2]) : null,
           sybilFlagId: sybilFlagIdMatch ? pathId(sybilFlagIdMatch[2]) : null,
           identity: identityMatch ? identityMatch[2] : null,

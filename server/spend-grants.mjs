@@ -60,6 +60,7 @@ import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { getTier, DEFAULT_AUTONOMY_TIER } from "./autonomy-tiers.mjs";
 import { spendAllowanceReport } from "./spend-allowance.mjs";
 import { spendPricingEnabled } from "../src/events.js";
+import { ServiceError } from "./service-error.mjs";
 
 export const SPEND_CAPABILITY = "spend";
 export const SPEND_DENOMINATION = "credits";
@@ -607,6 +608,25 @@ export function chargeSpendBeforeCall(store, secret, name, args) {
     roomCommittedCents: report.committedCents,
     nowMs,
   }));
+}
+
+// REST twins of priced MCP tools must charge exactly like the MCP route
+// (REST POST /files, POST /add_land_item). Same trust-boundary check, same
+// settle/void handling: a duplicate replay is voided, a throw is voided.
+export async function runWithSpend(store, secret, name, roomId, run) {
+  let spend;
+  try { spend = chargeSpendBeforeCall(store, secret, name, { roomId }); }
+  catch (error) {
+    // REST callers get the same typed refusal the MCP route returns (402 payment_required).
+    if (error instanceof SpendGrantError) throw new ServiceError(error.status, error.code, error.message);
+    throw error;
+  }
+  if (!spend) return run();
+  let value;
+  try { value = await run(); } catch (error) { spend.void(); throw error; }
+  if (value && typeof value === "object" && value.duplicate === true) spend.void();
+  else spend.settle();
+  return value;
 }
 
 // --- HTTP management routes (mirroring server/grants.mjs) ---

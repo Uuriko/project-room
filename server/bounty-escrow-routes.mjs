@@ -29,7 +29,9 @@
 // Idempotency-Key header or the `idempotencyKey` body field. A replayed key
 // returns the original status and body without re-executing.
 import { BountyEscrow, EscrowError, canonicalLane, BOUNTY_GROUPS, normalizeActor } from "./bounty-escrow.mjs";
-import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
+import { enforceAutonomyTierForAction, getTier, DEFAULT_AUTONOMY_TIER } from "./autonomy-tiers.mjs";
+import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
+import { chargeSpendBeforeCall, SpendGrantError } from "./spend-grants.mjs";
 
 const IDEM_HEADER = "idempotency-key";
 
@@ -116,7 +118,7 @@ export function publishBountyEvent(store, roomId, event) {
   } catch (error) { console.error("bounty webhook fan-out failed:", error?.message ?? error); }
 }
 
-export async function handleBountyEscrow({ req, res, url, store, roomId, auth, escrowRoute, bountyId, identity, sybilFlagId, reauthorize, helpers }) {
+export async function handleBountyEscrow({ req, res, url, store, roomId, auth, escrowRoute, bountyId, identity, sybilFlagId, reauthorize, token = null, helpers }) {
   const { json, reject, body } = helpers;
   if (req.method !== "GET" && req.method !== "HEAD") enforceAutonomyTierForAction({
     db: store.db, roomId, state: { room: { ownerId: store.roomAuthority?.(roomId)?.ownerId } },
@@ -125,6 +127,7 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
   const caller = canonicalLane(auth.member.id);
   const actor = normalizeActor(null, caller);
   const key = payload => idemKeyOf(req, payload);
+  let spendHandle = null;
   const idem = (payload, route, status, thunk) =>
     runPure(reject, () => {
       const result = store.transaction(() => {
@@ -142,6 +145,9 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
           { callerLane: caller, bountyId: bountyId ?? sybilFlagId ?? null, payload: Object.fromEntries(Object.entries(payload).filter(([name]) => name !== "idempotencyKey")) });
       });
       if (!result.replayed) publishBountyEvent(store, roomId, result.body?.receipt?.event);
+      // Priced route (bounty_post, same price as MCP): settle a fresh write,
+      // void an idempotent replay that already paid.
+      if (spendHandle) { const handle = spendHandle; spendHandle = null; if (result.replayed) handle.void(); else handle.settle(); }
       return json(res, result.status, result.body);
     });
 
@@ -207,13 +213,29 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
     const payload = await readPayload(reject, body, req);
     if (!shape(payload, { required: ["title", "criteria", "amount", "deadline"], optional: ["verifierId", "approvalMode", "rubric", "idempotencyKey"] }))
       invalidInput(reject, "{title, criteria, amount, deadline, verifierId?, approvalMode?, rubric?, idempotencyKey?}");
-    return idem(payload, "bounty.post", 201, () => {
-      const { bounty, receipt } = escrow.postBounty(roomId,
-        { poster: caller, title: payload.title, criteria: payload.criteria, amount: payload.amount,
-          deadline: payload.deadline, verifierId: payload.verifierId ?? null,
-          approvalMode: payload.approvalMode ?? "human", rubric: payload.rubric ?? null, actor });
-      return { roomId, bounty, receipt };
-    });
+    // Charge parity with MCP bounty_post: the REST twin must not post for free.
+    // Reserve before the write; any failure after this point voids it.
+    // Denial hierarchy (same as MCP): autonomy outranks spend. A t1_readonly
+    // or guest agent keeps its agent_readonly/guest_scope_denied refusal.
+    const tier = getTier(store.db, roomId, auth.member.id)?.autonomyTier ?? DEFAULT_AUTONOMY_TIER;
+    const exemptFromCharge = tier === "t1_readonly" || isGuestAgentMemberId(auth.member.id);
+    try { spendHandle = exemptFromCharge ? null : chargeSpendBeforeCall(store, token, "bounty_post", { roomId }); }
+    catch (error) {
+      if (error instanceof SpendGrantError) reject(error.status, error.code, error.message);
+      throw error;
+    }
+    try {
+      return await idem(payload, "bounty.post", 201, () => {
+        const { bounty, receipt } = escrow.postBounty(roomId,
+          { poster: caller, title: payload.title, criteria: payload.criteria, amount: payload.amount,
+            deadline: payload.deadline, verifierId: payload.verifierId ?? null,
+            approvalMode: payload.approvalMode ?? "human", rubric: payload.rubric ?? null, actor });
+        return { roomId, bounty, receipt };
+      });
+    } catch (error) {
+      if (spendHandle) { spendHandle.void(); spendHandle = null; }
+      throw error;
+    }
   }
   // Slice 6: re-pin the rubric (v+1). Poster-only; only while PROPOSED —
   // funding pins the rubric for the rest of the lifecycle.
