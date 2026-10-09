@@ -3571,15 +3571,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // NOTE: matchmakingMatch must stay in the roomId chain above — it was
       // added to the 404 guard but forgotten here, so every matchmaking
       // route 500'd on `undefined[1]` instead of reaching roomAuth's 401.
-      const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
-      const threadMessageId = threadMatch ? pathId(threadMatch[2]) : null;
-      const accessRequestId = accessDecideMatch ? pathId(accessDecideMatch[2]) : null;
-      const dmRequesterId = dmConsentDecideMatch ? pathId(dmConsentDecideMatch[2]) : null;
-      const peerDmThreadId = peerDmThreadMatch ? pathId(peerDmThreadMatch[2]) : null;
-      const mentionEventId = mentionAckMatch ? pathId(mentionAckMatch[2]) : null;
-      const savedDeleteMessageId = savedDeleteMatch ? pathId(savedDeleteMatch[2]) : null;
-      const deactivateMemberId = memberDeactivateMatch ? pathId(memberDeactivateMatch[2]) : null;
-      const cardMemberId = memberCardMatch ? pathId(memberCardMatch[2]) : null;
+      // Path id captured by a route regex, or null when that regex did not match.
+      const matchId = match => match ? pathId(match[2]) : null;
+      const invitationId = matchId(revokeMatch);
+      const threadMessageId = matchId(threadMatch);
+      const accessRequestId = matchId(accessDecideMatch);
+      const dmRequesterId = matchId(dmConsentDecideMatch);
+      const peerDmThreadId = matchId(peerDmThreadMatch);
+      const mentionEventId = matchId(mentionAckMatch);
+      const savedDeleteMessageId = matchId(savedDeleteMatch);
+      const deactivateMemberId = matchId(memberDeactivateMatch);
+      const cardMemberId = matchId(memberCardMatch);
       const route = publicWorkRoomReviewMatch ? "public-work-review" : projectOfferActionMatch ? "project-offers" : match ? (match[2] ?? "") : revokeMatch ? "invitation-revoke" : threadMatch ? "thread" : accessDecideMatch ? "access-decide" : delegationGrantMatch ? "delegation-grant" : delegationRevokeMatch ? "delegation-revoke" : delegationListMatch ? "delegation-list" : ownerDelegateGrantMatch ? "owner-delegate-grant" : ownerDelegateRevokeMatch ? "owner-delegate-revoke" : ownerDelegateListMatch ? "owner-delegate-list"
         : dmConsentDecideMatch ? "dm-consent-decide" : dmConsentBlockMatch ? "dm-consent-block" : dmConsentRevokeMatch ? "dm-consent-revoke"
         : dmConsentUnblockMatch ? "dm-consent-unblock" : publicFaceRotateMatch ? "public-face-rotate"
@@ -3766,7 +3768,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const collabIdMatch = collabAssignmentReleaseMatch ?? collabApprovalDecideMatch ?? collabApprovalResubmitMatch
           ?? collabRoutingResolveMatch ?? collabHandoffTransitionMatch ?? collabEnvelopeTransitionMatch;
         return await handleInboxCollab({ req, res, url, store, roomId, auth, collabRoute,
-          collabId: collabIdMatch ? pathId(collabIdMatch[2]) : null,
+          collabId: matchId(collabIdMatch),
           reauthorize: () => reauthorizeFunnel({ credentialChecks: true, writeScope: true, writeProtection: true, guestReadBan: true }),
           helpers: { json, reject, body } });
       }
@@ -3791,7 +3793,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch
          ;
         return await handleWorkClaims({ req, res, url, store, roomId, auth, workClaimRoute,
-          workClaimId: workClaimIdMatch ? pathId(workClaimIdMatch[2]) : null, registry: store.workClaims,
+          workClaimId: matchId(workClaimIdMatch), registry: store.workClaims,
           ...(fetchPullRequest ? { fetchPullRequest } : {}),
           ...(githubToken !== undefined ? { githubToken } : {}),
           reauthorize: () => reauthorizeFunnel(), helpers: { json, reject, body } });
@@ -3819,7 +3821,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           // Fall through to the dispatch below.
         }
         return await handleMatchmaking({ req, res, url, store, roomId, auth, matchmakingRoute,
-          matchmakingId: matchmakingIdMatch ? pathId(matchmakingIdMatch[2]) : null,
+          matchmakingId: matchId(matchmakingIdMatch),
           registry: store.matchmaking,
           reauthorize: () => reauthorizeFunnel(), helpers: { json, reject, body } });
       }
@@ -3844,7 +3846,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           : "read";
         const feedbackIdMatch = feedbackTriageMatch ?? feedbackAppealMatch ?? feedbackOutcomeMatch ?? feedbackItemMatch;
         return await handleFeedback({ req, res, url, store, roomId, auth, feedbackRoute,
-          feedbackId: feedbackIdMatch ? pathId(feedbackIdMatch[2]) : null,
+          feedbackId: matchId(feedbackIdMatch),
           reauthorize: () => reauthorizeFunnel(), helpers: { json, reject, body } });
       }
       // Board v2 is retired. Authenticated callers get 410 and a pointer at
@@ -3880,8 +3882,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const identityMatch = creditsBalancesMatch ?? creditsHistoryMatch;
         const sybilFlagIdMatch = bountySybilDismissMatch ?? bountySybilConfirmMatch;
         return await handleBountyEscrow({ req, res, url, store, roomId, auth, escrowRoute,
-          bountyId: bountyIdMatch ? pathId(bountyIdMatch[2]) : null,
-          sybilFlagId: sybilFlagIdMatch ? pathId(sybilFlagIdMatch[2]) : null,
+          bountyId: matchId(bountyIdMatch),
+          sybilFlagId: matchId(sybilFlagIdMatch),
           identity: identityMatch ? identityMatch[2] : null,
           reauthorize: () => reauthorizeFunnel({ credentialChecks: true, writeScope: true, guestReadBan: true }),
           helpers: { json, reject, body } });
