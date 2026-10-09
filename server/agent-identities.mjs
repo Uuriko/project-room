@@ -107,6 +107,7 @@ export function ensureIdentityLinkCodeSchema(db) {
 }
 
 export const IDENTITY_SECRET_PREFIX = "pri_";
+const MIN_RECOVERABLE_SECRET_DISTINCT = 16;
 const IDENTITY_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const MEMBER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
@@ -330,6 +331,14 @@ export class AgentIdentities {
     if (/[\u0000-\u001f\u007f]/.test(name)) fail(422, "invalid_identity", "displayName must not contain control characters");
     assertNotReservedRoleName(name); // Q3-D: role-like names are refused at mint
     if (suppliedSecret !== undefined && !/^pri_[A-Za-z0-9_-]{43}$/.test(suppliedSecret))
+      fail(422, "invalid_identity", "Recoverable registration requires a generated identity credential");
+    // The credential is client-chosen here, so the server cannot know it came
+    // from 32 random bytes. A well-formed but repetitive value such as
+    // pri_AAAA... is guessable, and the identity id derives from its hash, so
+    // anyone who guesses it can replay the registration and read the identity.
+    // A random 43-char base64url string has ~31 distinct characters on average
+    // (fewer than 16 is about a 7-sigma event), so this never rejects a real one.
+    if (suppliedSecret !== undefined && new Set(suppliedSecret.slice(IDENTITY_SECRET_PREFIX.length)).size < MIN_RECOVERABLE_SECRET_DISTINCT)
       fail(422, "invalid_identity", "Recoverable registration requires a generated identity credential");
     return this.store.transaction(() => {
       ensureIdentitySecretSchema(this.db);
