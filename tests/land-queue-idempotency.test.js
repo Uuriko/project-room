@@ -137,10 +137,12 @@ test("reportTip retry with the same requestId replays changed:['tip'] and emits 
   store.landQueue.configure({ fetchImpl: mockGitHub().fetchImpl });
   const added = await store.landQueue.add("commons", "owner", { repo: "acme/demo", prNumber: 8 });
   const itemId = added.item.itemId;
+  // add() commits its own land.updated receipt (A9), so count from there.
+  const eventsAfterAdd = landEvents(store).length;
   const first = store.landQueue.reportTip("commons", "owner", { itemId, sourceRevision: "src-1", requestId: "tip-1" });
   assert.deepEqual(first.changed, ["tip"]);
   const eventsAfterFirst = landEvents(store).length;
-  assert.equal(eventsAfterFirst, 1);
+  assert.equal(eventsAfterFirst, eventsAfterAdd + 1, "the first reportTip emits exactly one event");
   const replay = store.landQueue.reportTip("commons", "owner", { itemId, sourceRevision: "src-1", requestId: "tip-1" });
   assert.deepEqual(replay.changed, ["tip"], "replay returns the original changed payload");
   assert.deepEqual(replay.item, first.item, "replay returns the original item view");
