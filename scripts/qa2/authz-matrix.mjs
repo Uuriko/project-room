@@ -104,7 +104,14 @@ const A = [
   ["steal claim held by collaborator", [], t => req("POST", `${R}/work-claims/qa2-held/claim`, { token: t, body: { note: "steal" } }), { okStatuses: [409] }],
   ["update claim held by collaborator", ["collaborator"], t => req("POST", `${R}/work-claims/qa2-held/update`, { token: t, body: { note: "touch" } })],
   ["reassign claim held by collaborator", ["owner", "collaborator"], t => req("POST", `${R}/work-claims/qa2-held/reassign`, { token: t, body: { newOwner: ids.collaborator, note: "keep" } })],
-  ["release claim held by collaborator", ["owner", "collaborator"], t => req("POST", `${R}/work-claims/${t === T.owner ? "qa2-release" : "qa2-held"}/release`, { token: t, body: { note: "drop" } })],
+  ["release claim held by collaborator", ["owner", "collaborator"], async t => {
+    // E5/D4 (QA-200 2026-10-08): /release binds the claim round the client read.
+    const id = t === T.owner ? "qa2-release" : "qa2-held";
+    const held = must(await req("GET", `${R}/work-claims/${id}`, { token: t }), "read claim round");
+    return req("POST", `${R}/work-claims/${id}/release`, { token: t, body: { note: "drop",
+      expectedClaimedAt: held.claimedAt,
+      expectedHistoryLength: held.history.length + (held.historyOmitted ?? 0) } });
+  }],
   ["mint agent invite", ["owner"], t => req("POST", `${R}/agent-invites`, { token: t, body: { profile: "chat" } })],
   ["list agent invites", ["owner"], t => req("GET", `${R}/agent-invites`, { token: t })],
   ["edit owner's message", ["owner"], t => req("POST", `${R}/commands`, { token: t, body: cmd("message.edited", { messageId: ownerMsg, body: "qa2 edited", expectedMessageRevision: 0 }) }), { denyAs422: "command_rejected", once: true }],
