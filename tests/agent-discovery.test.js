@@ -7,7 +7,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { roomEntry } from "../deploy/room-entry.mjs";
 import {
-  agentCard, llmsTxt, llmsFullTxt, kitsTxt, agentCardJson, agentsJson, discoveryDoc, DISCOVERY_PATHS,
+  agentCard, llmsTxt, llmsFullTxt, skillMd, kitsTxt, agentCardJson, agentsJson, discoveryDoc, DISCOVERY_PATHS,
   AFTER_PASTE_SECTION, joinPrompt, JOIN_HOSTS, JOIN_PROMPT_PATH, SHORT_PACKET_FILES, SHORT_PACKET_SYNONYMS, AGENT_CARD_SYNONYMS, HEALTH_ALIAS_PATHS,
   KITS_CATALOG_PATH, KITS_CATALOG_SYNONYMS, KITS_CATALOG_FILES, AGENTS_JSON_PATH,
   isHealthAliasPath, rewriteRoomApiPrefix, edgeDoorApiPath, DISCOVERY_PROTOCOL_VERSION, AGENT_CARD_A2A_PATH,
@@ -631,4 +631,18 @@ test("llms.txt documents the work-claims REST contract (issue #1529)", () => {
   assert.match(section, /\/work-claims\/{claimId}\/update/);
   assert.match(section, /\/work-claims\/{claimId}\/release/);
   assert.match(section, /first claim wins/i);
+});
+
+// PRODUCT-200 B1: the served /openapi.json is the curated in-scope machine
+// surface (generated from DISCOVERABILITY_ROUTES), not every route. Its own
+// info.description says "treat it as documentation, not a live route table",
+// and scripts/openapi-served-exclusions.json inventories the out-of-scope
+// routes with reasons. The packets must state that coverage rule honestly;
+// an "every route" sentence is docs/live drift the moment it ships.
+test("llms packets describe /openapi.json as the curated machine surface, not every route", () => {
+  for (const [name, text] of [["llms.txt", llmsTxt()], ["skill.md", skillMd()]]) {
+    assert.ok(!text.includes("Every route is in"), `${name}: no 'Every route is in' overclaim`);
+    assert.ok(!text.includes("(every route)"), `${name}: no '(every route)' overclaim`);
+    assert.match(text, /curated machine[ -]surface/, `${name}: states the actual coverage rule`);
+  }
 });
