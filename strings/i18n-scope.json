@@ -80,6 +80,7 @@
   "src/project-offers-ui.js",
   "src/push-ask.js",
   "src/pwa-install.js",
+  "src/pwa-register.js",
   "src/referral-board.js",
   "src/reminder-time.js",
   "src/reminders.js",
