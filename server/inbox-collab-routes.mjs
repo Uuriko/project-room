@@ -80,6 +80,16 @@ export async function handleInboxCollab(options) {
 
 function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute, collabId, helpers }) {
   const { json, reject, body } = helpers;
+  // Read the request body and enforce a strict shape; rejects 422 on mismatch.
+  const readFields = (spec, expected) => {
+    const fields = body(req);
+    if (!shape(fields, spec)) invalidInput(reject, expected);
+    return fields;
+  };
+  // Resolve a room member id to the linked agent identity (null when unlinked).
+  const linkedIdentityId = memberId => store.db.prepare(
+    "SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?")
+    .get(roomId, memberId)?.identityId ?? null;
   if (req.method !== "GET" && req.method !== "HEAD") enforceAutonomyTierForAction({
     db: store.db, roomId, state: { room: { ownerId: store.roomAuthority?.(roomId)?.ownerId } },
     actor: auth.member, action: `${req.method} inbox-collab ${collabRoute}`, fail: reject });
@@ -103,10 +113,8 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
     switch (collabRoute) {
       case "assignments": {
         if (req.method === "POST") {
-          const fields = body(req);
-          if (!shape(fields, { required: ["threadId", "assignee"], optional: ["force"] })) {
-            invalidInput(reject, "{threadId, assignee, force?}");
-          }
+          const fields = readFields({ required: ["threadId", "assignee"], optional: ["force"] },
+            "{threadId, assignee, force?}");
           const { assignmentId, record } = collab.assignThread(roomId, fields.threadId,
             fields.assignee, { by: caller, force: fields.force === true });
           // RC-2026-09-24-203: push doorbell when a thread is assigned to an
@@ -116,14 +124,10 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
           try {
             const assigneeId = record?.assignee?.kind === "agent" && typeof record.assignee.id === "string"
               ? record.assignee.id : null;
-            if (assigneeId) {
-              const link = store.db.prepare(
-                "SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?")
-                .get(roomId, assigneeId);
-              if (link?.identityId) {
-                store.agentHeartbeats.pushNotify({ identityId: link.identityId,
-                  eventType: "assignment.created", roomId, id: assignmentId, ts: store.now() });
-              }
+            const identityId = assigneeId ? linkedIdentityId(assigneeId) : null;
+            if (identityId) {
+              store.agentHeartbeats.pushNotify({ identityId,
+                eventType: "assignment.created", roomId, id: assignmentId, ts: store.now() });
             }
           } catch { /* the push path never fails the assignment */ }
           return json(res, 201, { assignmentId, assignment: record });
@@ -135,18 +139,14 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
       }
       case "assignment-release": {
         if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
-        const fields = body(req);
-        if (!shape(fields, { required: [], optional: ["reason"] })) invalidInput(reject, "{reason?}");
+        const fields = readFields({ required: [], optional: ["reason"] }, "{reason?}");
         const { assignmentId, record } = collab.releaseAssignment(roomId, collabId,
           { by: caller, reason: fields.reason ?? null });
         return json(res, 200, { assignmentId, assignment: record });
       }
       case "notes": {
         if (req.method === "POST") {
-          const fields = body(req);
-          if (!shape(fields, { required: ["threadId", "body"], optional: ["tag"] })) {
-            invalidInput(reject, "{threadId, body, tag?}");
-          }
+          const fields = readFields({ required: ["threadId", "body"], optional: ["tag"] }, "{threadId, body, tag?}");
           const note = collab.addThreadNote(roomId, fields.threadId,
             { author: caller, body: fields.body, tag: fields.tag ?? null });
           return json(res, 201, { note });
@@ -161,18 +161,14 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
       case "lock-acquire": {
         if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
         const holder = asAgent();
-        const fields = body(req);
-        if (!shape(fields, { required: ["threadId"], optional: ["ttlMs"] })) {
-          invalidInput(reject, "{threadId, ttlMs?}");
-        }
+        const fields = readFields({ required: ["threadId"], optional: ["ttlMs"] }, "{threadId, ttlMs?}");
         const { lock, duplicate } = collab.acquireDraftLock(roomId, fields.threadId, holder,
           { ttlMs: fields.ttlMs ?? null });
         return json(res, duplicate ? 200 : 201, { lock, duplicate });
       }
       case "lock-release": {
         if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
-        const fields = body(req);
-        if (!shape(fields, { required: ["lockId"] })) invalidInput(reject, "{lockId}");
+        const fields = readFields({ required: ["lockId"] }, "{lockId}");
         const released = collab.releaseDraftLock(roomId, fields.lockId, { by: caller });
         return json(res, 200, released);
       }
@@ -184,10 +180,7 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
       }
       case "approvals": {
         if (req.method === "POST") {
-          const fields = body(req);
-          if (!shape(fields, { required: ["threadId", "draft", "channel"] })) {
-            invalidInput(reject, "{threadId, draft: {subject?, body}, channel}");
-          }
+          const fields = readFields({ required: ["threadId", "draft", "channel"] }, "{threadId, draft: {subject?, body}, channel}");
           const agent = asAgent();
           const proposal = collab.proposeDraft(roomId, fields.threadId,
             { draft: fields.draft, byAgent: agent, channel: fields.channel });
@@ -202,15 +195,15 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
       case "approval-decide": {
         if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
         const human = asHuman();
-        const fields = body(req);
-        if (!shape(fields, { required: ["decision"], optional: ["note", "editedBody"] })
-          || !["approve", "edit", "reject"].includes(fields.decision)) {
+        const fields = readFields({ required: ["decision"], optional: ["note", "editedBody"] },
+          '{decision: "approve"|"edit"|"reject", note?, editedBody?}');
+        if (!["approve", "edit", "reject"].includes(fields.decision)) {
           invalidInput(reject, '{decision: "approve"|"edit"|"reject", note?, editedBody?}');
         }
-        if (fields.decision === "edit" && (fields.editedBody === null || fields.editedBody === undefined)) {
+        if (fields.decision === "edit" && fields.editedBody == null) {
           return reject(422, "invalid_input", 'decision "edit" requires editedBody with the requested changes.');
         }
-        if (fields.decision === "reject" && (fields.note === null || fields.note === undefined)) {
+        if (fields.decision === "reject" && fields.note == null) {
           return reject(422, "invalid_input", 'decision "reject" requires note as the rejection reason.');
         }
         const proposal = collab.decideApproval(roomId, collabId, {
@@ -225,17 +218,14 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
       case "approval-resubmit": {
         if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
         const agent = asAgent();
-        const fields = body(req);
-        if (!shape(fields, { required: ["draft"] })) invalidInput(reject, "{draft: {subject?, body}}");
+        const fields = readFields({ required: ["draft"] }, "{draft: {subject?, body}}");
         const proposal = collab.resubmitApproval(roomId, collabId, { draft: fields.draft, byAgent: agent });
         return json(res, 200, { proposal });
       }
       case "routing-mentions": {
         if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
-        const fields = body(req);
-        if (!shape(fields, { required: ["mentionedAgentId"], optional: ["threadId", "context"] })) {
-          invalidInput(reject, "{mentionedAgentId, threadId?, context?}");
-        }
+        const fields = readFields({ required: ["mentionedAgentId"], optional: ["threadId", "context"] },
+          "{mentionedAgentId, threadId?, context?}");
         if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/.test(fields.mentionedAgentId)) {
           return reject(422, "invalid_input", "mentionedAgentId must be a 1..64 character agent name.");
         }
@@ -253,7 +243,7 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
       }
       case "routing-resolve": {
         if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
-        const fields = body(req);
+        const fields = readFields({ required: ["outcome"] }, "{outcome}");
         // The resolver is whoever authenticated, like every other actor on
         // these routes. This one used to accept a resolvedBy from the body and
         // only shape-check it, so any member could record the owner, or anyone
@@ -261,7 +251,6 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
         // collab_routing_events row and its history, not just the response. An
         // attribution nobody can vouch for is worse than none, so the field is
         // refused rather than quietly ignored.
-        if (!shape(fields, { required: ["outcome"] })) invalidInput(reject, "{outcome}");
         const record = collab.resolveRouting(roomId, collabId, {
           by: caller,
           outcome: fields.outcome,
@@ -270,20 +259,13 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
       }
       case "routing-policy": {
         if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
-        const fields = body(req);
-        if (!shape(fields, { required: ["agentId", "policy"] })) {
-          invalidInput(reject, "{agentId, policy: {mode: direct|escalate, scopes?, escalateTo?, note?}}");
-        }
+        const fields = readFields({ required: ["agentId", "policy"] },
+          "{agentId, policy: {mode: direct|escalate, scopes?, escalateTo?, note?}}");
         // M-7(a): a routing policy names who handles an agent's mentions —
         // only the room owner or that agent itself may set it. An agent's
         // member id resolves to its agent identity via identity_links.
         const ownerId = store.roomAuthority?.(roomId)?.ownerId ?? null;
-        let callerAgentId = caller.id;
-        if (caller.kind === "agent") {
-          callerAgentId = store.db.prepare(
-            "SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?")
-            .get(roomId, caller.id)?.identityId ?? caller.id;
-        }
+        const callerAgentId = caller.kind === "agent" ? linkedIdentityId(caller.id) ?? caller.id : caller.id;
         if (caller.id !== ownerId && callerAgentId !== fields.agentId) {
           return reject(403, "routing_forbidden",
             "Only the room owner or the agent the policy is for can set a routing policy.");
@@ -293,11 +275,9 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
       }
       case "handoffs": {
         if (req.method === "POST") {
-          const fields = body(req);
-          if (!shape(fields, { required: ["threadId", "to"],
-            optional: ["summary", "openQuestions", "pendingActions", "excerpt", "subject"] })) {
-            invalidInput(reject, "{threadId, to: {kind: agent|human, id}, summary?, openQuestions?, pendingActions?, excerpt?, subject?}");
-          }
+          const fields = readFields({ required: ["threadId", "to"],
+            optional: ["summary", "openQuestions", "pendingActions", "excerpt", "subject"] },
+            "{threadId, to: {kind: agent|human, id}, summary?, openQuestions?, pendingActions?, excerpt?, subject?}");
           if (fields.to === null || typeof fields.to !== "object" || Array.isArray(fields.to)
             || !["agent", "human"].includes(fields.to.kind) || typeof fields.to.id !== "string" || !fields.to.id) {
             return reject(422, "invalid_input", "to must be { kind: agent|human, id }.");
@@ -327,10 +307,8 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
       }
       case "handoff-transition": {
         if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
-        const fields = body(req);
-        if (!shape(fields, { required: ["status"], optional: ["note"] })) {
-          invalidInput(reject, '{status: "accepted"|"completed"|"released", note?}');
-        }
+        const fields = readFields({ required: ["status"], optional: ["note"] },
+          '{status: "accepted"|"completed"|"released", note?}');
         const scope = collab.resolveHandoffAccount(roomId, caller.id, auth.account?.id ?? null);
         const handoff = collab.transitionHandoff(scope, collabId, fields.status,
           { note: fields.note ?? null, by: caller.id, roomId });
@@ -342,11 +320,9 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
       // (store.handoffEnvelopes); these routes are thin room-scoped adapters.
       case "envelopes": {
         if (req.method === "POST") {
-          const fields = body(req);
-          if (!shape(fields, { required: ["to", "objective", "inputs", "authority", "expectedOutput", "acceptanceTest", "termination"],
-            optional: ["provenance", "requestId"] })) {
-            invalidInput(reject, "{to, objective, inputs, authority, expectedOutput, acceptanceTest, termination, provenance?, requestId?}");
-          }
+          const fields = readFields({ required: ["to", "objective", "inputs", "authority", "expectedOutput", "acceptanceTest", "termination"],
+            optional: ["provenance", "requestId"] },
+            "{to, objective, inputs, authority, expectedOutput, acceptanceTest, termination, provenance?, requestId?}");
           const { requestId, ...envelopeFields } = fields;
           const receipt = store.handoffEnvelopes.create(roomId, envelopeFields, { from: caller.id, requestId });
           return json(res, receipt.duplicate ? 200 : 201, receipt);
@@ -362,10 +338,8 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
       }
       case "envelope-transition": {
         if (req.method !== "POST") return reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
-        const fields = body(req);
-        if (!shape(fields, { required: ["status"], optional: ["note", "checksPassed"] })) {
-          invalidInput(reject, '{status: "accepted"|"completed"|"rejected"|"escalated"|"cancelled", note?, checksPassed?}');
-        }
+        const fields = readFields({ required: ["status"], optional: ["note", "checksPassed"] },
+          '{status: "accepted"|"completed"|"rejected"|"escalated"|"cancelled", note?, checksPassed?}');
         const envelope = store.handoffEnvelopes.transition(roomId, collabId, fields.status,
           { by: caller.id, note: fields.note ?? null, checksPassed: fields.checksPassed ?? null });
         return json(res, 200, { envelope });

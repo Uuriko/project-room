@@ -103,17 +103,15 @@ function feedbackAuthorityOptions(roomId, store) {
     try { return store.roomAuthority(roomId); }
     catch { return null; } // unknown/corrupt room: fail closed below
   };
+  // Gate a lane predicate on a fresh authority read; fail closed when the
+  // room is unknown or the lane is not a string.
+  const withAuthority = (lane, test) => {
+    const a = authority();
+    return a && typeof lane === "string" ? test(a, lane) : false;
+  };
   return {
-    isReviewer: lane => {
-      const a = authority();
-      if (!a || typeof lane !== "string") return false;
-      return lane === a.ownerId || a.members?.[lane]?.role === "moderator";
-    },
-    isReleaseAuthority: lane => {
-      const a = authority();
-      if (!a || typeof lane !== "string") return false;
-      return lane === a.ownerId;
-    },
+    isReviewer: lane => withAuthority(lane, (a, l) => l === a.ownerId || a.members?.[l]?.role === "moderator"),
+    isReleaseAuthority: lane => withAuthority(lane, (a, l) => l === a.ownerId),
   };
 }
 
