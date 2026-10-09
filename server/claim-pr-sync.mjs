@@ -15,7 +15,7 @@
 //     the in-flight request at the sooner of 5s and the time remaining
 // The token (GITHUB_TOKEN or GH_TOKEN) is never logged or stored. Public
 // repositories still answer when it is absent.
-import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
+import { emitWorkClaimEvent, emitOrphanClaimWake, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
 import { ACTIVE_CLAIM_STATES, closeWhenLive, notePullMerged, recordCi, releaseExpired } from "./work-claims.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
 import {
@@ -536,6 +536,10 @@ function sweepExpiredClaimLeases(store, nowMs) {
         enqueueClaimWake(store, roomId, before.owner,
           `work-claim:${item.id}:lease_expired:${before.leaseExpiresAt ?? receipt?.sequence ?? nowMs}`,
           { reason: "lease_expired", actorId: before.owner });
+        // FIX-15 (WAVE-300): same orphan routing as the per-request sweep —
+        // the orphan signal goes to the successor or the claim reaper, never
+        // to the dead owner alone.
+        emitOrphanClaimWake(store, roomId, { item, previousOwnerId: before.owner, actorId: before.owner, atMs: nowMs });
         released += 1;
       }
     });

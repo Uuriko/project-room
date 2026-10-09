@@ -43,7 +43,7 @@ import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { evaluateReceipt } from "./jev-receipts.mjs";
 import { findClaimCollisions } from "./claim-collisions.mjs";
-import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
+import { emitWorkClaimEvent, emitOrphanClaimWake, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
 import { noteReadyWork } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { getActiveSquad } from "./squads.mjs"; // plan-squads: work offers target squads
 import { isFirstContribution, retentionAck } from "./retention-response.mjs";
@@ -750,6 +750,11 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     enqueueClaimWake(store, roomId, before.owner,
       `work-claim:${item.id}:lease_expired:${before.leaseExpiresAt ?? receipt?.sequence ?? nowMs}`,
       { reason: "lease_expired", actorId: before.owner });
+    // FIX-15 (WAVE-300): the claim is orphaned now — the lease lapsed and
+    // nobody holds it. The dead owner keeps their lease_expired notice
+    // above, but the orphan signal routes to the elected successor (none on
+    // this path yet) or the claim reaper, never to the dead owner alone.
+    emitOrphanClaimWake(store, roomId, { item, previousOwnerId: before.owner, actorId: before.owner, atMs: nowMs });
   });
   const config = registry.configFor(roomId);
   const roomLike = { workClaims: registry.rawConfig(roomId) };

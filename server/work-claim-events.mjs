@@ -25,7 +25,7 @@ const eventTitle = item => {
   return title.trim() ? title : item.id;
 };
 
-export function workClaimEventData(item, action, { previousOwnerId = null, paths = undefined, pullRequest = undefined, reason = undefined, ciState = undefined, verdict = undefined, attention = undefined, attentionMemberId = undefined } = {}) {
+export function workClaimEventData(item, action, { previousOwnerId = null, paths = undefined, pullRequest = undefined, reason = undefined, ciState = undefined, verdict = undefined, attention = undefined, attentionMemberId = undefined, successorId = undefined } = {}) {
   if (!WORK_CLAIM_ACTIONS.includes(action)) throw new Error(`Unknown work claim action: ${action}`);
   // Release and lease expiry clear files on the item. Callers pass the paths
   // that were held so the receipt still says which lane opened up.
@@ -55,6 +55,9 @@ export function workClaimEventData(item, action, { previousOwnerId = null, paths
   // still gets the item; the wake below is what pause and autonomy skip.
   if (attention) data.attention = attention;
   if (attentionMemberId) data.attentionMemberId = attentionMemberId;
+  // FIX-15 (WAVE-300): orphan/successor receipts name the elected successor
+  // when one exists, so readers can tell who the orphan wake reached.
+  if (successorId !== undefined) data.successorId = successorId;
   return data;
 }
 
@@ -163,7 +166,7 @@ export function claimEventCoalesced(store, roomId, claimId, action, atMs) {
 
 // Handler unit tests drive the routes with a registry-only store; events need
 // the real event log, so a store without one records nothing here.
-export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previousOwnerId = null, atMs = null, paths = undefined, pullRequest = undefined, reason = undefined, ciState = undefined, verdict = undefined, attention = undefined, attentionMemberId = undefined, coalesce = false }) {
+export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previousOwnerId = null, atMs = null, paths = undefined, pullRequest = undefined, reason = undefined, ciState = undefined, verdict = undefined, attention = undefined, attentionMemberId = undefined, successorId = undefined, coalesce = false }) {
   if (!store?.db || typeof store.room !== "function") return null;
   const stamp = Number.isFinite(atMs) ? atMs : (typeof store.now === "function" ? store.now() : Date.now());
   if (coalesce && claimEventCoalesced(store, roomId, item.id, action, stamp)) return null;
@@ -180,7 +183,7 @@ export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previ
     actorId: actor && actor.active !== false ? actorId : room.state.room.ownerId,
     roomId,
     at: new Date(stamp).toISOString(),
-    data: workClaimEventData(item, action, { previousOwnerId, paths, pullRequest, reason, ciState, verdict, attention, attentionMemberId })
+    data: workClaimEventData(item, action, { previousOwnerId, paths, pullRequest, reason, ciState, verdict, attention, attentionMemberId, successorId })
   });
   if (actor?.system === true) incoming.data.actorKind = "system";
   const state = applyEvent(room.state, incoming);
@@ -202,4 +205,81 @@ export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previ
     catch (error) { console.error("work claim receipt card failed:", error?.message ?? error); }
   }
   return { sequence, event: incoming };
+}
+
+// FIX-15 (WAVE-300): the claim reaper. An orphaned claim — lease lapsed, no
+// living holder — is nobody's round anymore, so its wake cannot die with the
+// dead owner: the room owner is the room's standing claim-management
+// authority and the member that can re-claim, reassign or retire the orphan.
+export function claimReaperId(store, roomId) {
+  try {
+    return store.roomAuthority?.(roomId)?.ownerId
+      ?? store.room(roomId)?.state?.room?.ownerId
+      ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// FIX-15 (WAVE-300): orphan routing. Call this when a claim is detected as
+// orphaned (the lease-expiry sweep, the stale-claim sweep, the reaper path)
+// AFTER the claim itself was released: it appends one `claim.orphaned`
+// receipt naming the dead owner (previousOwnerId) and the elected successor
+// when one exists (successorId), and routes the wake to the successor when
+// FIX-17's election picked one, otherwise to the claim reaper — never to
+// the dead owner alone. The wake id carries the event sequence, so a later
+// orphaning of the same claim wakes again. A wake or event failure here
+// must not roll back the release that already committed.
+export function emitOrphanClaimWake(store, roomId, { item, previousOwnerId = null, successorId = null, actorId = null, atMs = null }) {
+  if (!item || typeof item.id !== "string") return null;
+  const receipt = emitWorkClaimEvent(store, roomId, {
+    actorId: actorId ?? previousOwnerId,
+    item,
+    action: "orphaned",
+    previousOwnerId,
+    successorId: successorId ?? undefined,
+    atMs
+  });
+  const targetId = successorId ?? claimReaperId(store, roomId);
+  if (typeof targetId === "string" && targetId) {
+    const stamp = receipt?.sequence
+      ?? (Number.isFinite(atMs) ? atMs : (typeof store.now === "function" ? store.now() : Date.now()));
+    try {
+      enqueueClaimWake(store, roomId, targetId,
+        `work-claim:${item.id}:orphaned:${stamp}`,
+        { reason: "orphaned", actorId: actorId ?? previousOwnerId });
+    } catch (error) {
+      console.error("orphan claim wake failed:", error?.message ?? error);
+    }
+  }
+  return receipt;
+}
+
+// FIX-15 (WAVE-300): the successor-assignment receipt. The successor
+// election (FIX-17's electSuccessor, consumed by FIX-12's POST .../succeed)
+// moves ownership itself; the election consumer calls this right after the
+// winning ballot commits. It appends one `claim.successor_assigned` receipt
+// naming the previous owner and the successor, and wakes the successor with
+// reason `successor_assigned`. Election semantics live in FIX-17 — this is
+// notification only.
+export function emitSuccessorAssigned(store, roomId, { item, successorId, previousOwnerId = null, actorId = null, atMs = null }) {
+  if (!item || typeof item.id !== "string" || typeof successorId !== "string" || !successorId) return null;
+  const receipt = emitWorkClaimEvent(store, roomId, {
+    actorId: actorId ?? successorId,
+    item,
+    action: "successor_assigned",
+    previousOwnerId,
+    successorId,
+    atMs
+  });
+  const stamp = receipt?.sequence
+    ?? (Number.isFinite(atMs) ? atMs : (typeof store.now === "function" ? store.now() : Date.now()));
+  try {
+    enqueueClaimWake(store, roomId, successorId,
+      `work-claim:${item.id}:successor_assigned:${stamp}`,
+      { reason: "successor_assigned", actorId: actorId ?? successorId });
+  } catch (error) {
+    console.error("successor assigned wake failed:", error?.message ?? error);
+  }
+  return receipt;
 }
