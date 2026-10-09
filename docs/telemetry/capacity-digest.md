@@ -60,6 +60,11 @@ Posting is **opt-in and never default-on** (tests assert this). Two steps:
 
 The posted payload is JSON: `{ text, alerts, gauges, generatedAt }` — `text`
 is the room-ready rendering above; `alerts`/`gauges` are machine-readable.
+The `--out` file (and the payload object `buildDigest` returns) additionally
+carries the common v:1 telemetry envelope (`v`, `ts`, `kind: "digest"` — see
+[schema.md](schema.md)); `generatedAt` stays as the legacy alias of `ts`.
+Note the alerts' inner `kind` field (`board_full`, `board_high`, `ci_knee`)
+is the *alert* kind, a different namespace from the envelope `kind`.
 
 Without `--post` the script just prints the digest to stdout (and optionally
 `--out <path>` writes the payload JSON to a file). Nothing is sent anywhere.

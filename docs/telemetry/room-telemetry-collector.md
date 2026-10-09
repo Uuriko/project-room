@@ -61,10 +61,12 @@ probe is rejected before any request escapes.
 
 ## Output: JSONL records
 
-`<out>/telemetry.jsonl`, one JSON object per line, `v: 1`. Every record
-carries `ts` (ISO), `kind`, the current `window` stats, and `self`
-(self-instrumentation: probe/error/timeout counts, checkpoint write p50,
-uptime, restart count, alarm state).
+`<out>/telemetry.jsonl`, one JSON object per line, `v: 1`. This is the
+canonical shape of the common telemetry schema — see
+[schema.md](schema.md) for the envelope contract every emitter adopts.
+Every record carries `ts` (ISO), `kind`, the current `window` stats, and
+`self` (self-instrumentation: probe/error/timeout counts, checkpoint write
+p50, uptime, restart count, alarm state).
 
 - `{"kind":"sample", ...}` — periodic window snapshot: `window.reads`,
   `window.timeouts`, `window.timeoutRate`, `window.latency` (`count`, `min`,

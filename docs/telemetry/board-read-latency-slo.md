@@ -38,9 +38,11 @@ node scripts/board-read-probe.mjs --base-url http://127.0.0.1:PORT --path /board
 node scripts/board-read-probe.mjs --bearer <token> --header "x-custom: yes"
 ```
 
-Output is JSON on stdout: `target`, `slo`, `baseline` (concurrency-1 reads),
-`ladder` (per-rung summaries + attribution), `method` (which attribution path
-was actually available), and `verdict`.
+Output is JSON on stdout: the common v:1 telemetry envelope (`v`, `ts`,
+`kind: "probe"` — see [schema.md](schema.md)) plus `target`, `slo`,
+`baseline` (concurrency-1 reads), `ladder` (per-rung summaries +
+attribution), `method` (which attribution path was actually available), and
+`verdict`.
 
 The probe tags every request with `x-probe: board-read-probe` and
 `x-probe-concurrency: <n>` — operators can filter probe traffic out of real
