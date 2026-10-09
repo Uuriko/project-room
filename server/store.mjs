@@ -3650,6 +3650,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   currentIdentitySecretHash(identityId) {
     return this.db.prepare("SELECT secret_hash AS secretHash FROM agent_identities WHERE identity_id=?").get(identityId)?.secretHash ?? null;
   }
+  // Linked agent identity for a room member, or undefined when unlinked.
+  identityLinkOf(roomId, memberId) {
+    return this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?").get(roomId, memberId);
+  }
   // Join-flow browser session. After a successful self-serve join the new
   // agent member's browser needs a working session — the join page's "open
   // the room" link would otherwise strand them with a secret but no session.
@@ -3670,7 +3674,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // invalidates the session — the same binding createAgentSession uses
       // (RC-2026-09-23-106). Members with no identity link keep the legacy
       // null binding.
-      const linkRow = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?").get(roomId, memberId);
+      const linkRow = this.identityLinkOf(roomId, memberId);
       const token = this.insertCredential(roomId, memberId, "session", null, expiresAt, linkRow ? this.currentIdentitySecretHash(linkRow.identityId) : null);
       return { token, expiresAt };
     });
@@ -3939,7 +3943,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   agentHostPresence(roomId, members, memberId) {
     const member = members[memberId];
     if (!member || member.kind !== "agent" || member.active === false) return null;
-    const link = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?").get(roomId, memberId);
+    const link = this.identityLinkOf(roomId, memberId);
     if (!link) return null;
     const status = this.agentHeartbeats.statusOf(link.identityId);
     return { identityId: link.identityId, status: status.status, lastSeenAt: status.lastSeenAt };
@@ -5020,12 +5024,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   maybeWakeOnMention(roomId, state, senderMemberId, data, eventId) {
     const targets = agentWakeTargets(state, senderMemberId, data, this.db, roomId);
     if (targets.size === 0) return;
-    const linkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
     for (const [memberId, kind] of targets) {
       // Trust off skips the wake. The post already landed; the command result
       // names the skip.
       if (firstBlockedWakeTarget(state, senderMemberId, [memberId])) continue;
-      const link = linkOf.get(roomId, memberId);
+      const link = this.identityLinkOf(roomId, memberId);
       if (!link) continue;
       const { woken, signal } = this.agentHeartbeats.wakeIfOffline({
         agentId: link.identityId, kind, roomId, messageId: data.messageId ?? eventId });
@@ -5210,18 +5213,23 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const members = this.room(roomId).state.members ?? {};
       return {
         roomId, memberId: target,
-        mentions: rows.map(r => ({
-          messageEventId: r.messageEventId, memberId: r.memberId, state: r.state,
-          displayName: members[r.memberId]?.displayName ?? r.memberId,
-          createdAt: new Date(r.createdAt).toISOString(),
-          timeoutAt: new Date(r.timeoutAt).toISOString(),
-          decidedAt: r.decidedAt === null ? null : new Date(r.decidedAt).toISOString(),
-        })),
+        mentions: rows.map(r => this.serializeMentionRow(r, members, r.messageEventId, r.memberId)),
       };
     });
   }
 
   // #658: single mention row view for the ack response.
+  // One serializer for mention rows — the list and the ack view share the
+  // same shape (the view additionally carries roomId).
+  serializeMentionRow(row, members, messageEventId, memberId) {
+    return {
+      messageEventId, memberId, state: row.state,
+      displayName: members[memberId]?.displayName ?? memberId,
+      createdAt: new Date(row.createdAt).toISOString(),
+      timeoutAt: new Date(row.timeoutAt).toISOString(),
+      decidedAt: row.decidedAt === null ? null : new Date(row.decidedAt).toISOString(),
+    };
+  }
   mentionView(roomId, messageEventId, memberId) {
     const row = this.db.prepare(
       `SELECT state, created_at AS createdAt, timeout_at AS timeoutAt, decided_at AS decidedAt
@@ -5229,13 +5237,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     ).get(roomId, messageEventId, memberId);
     if (!row) return null;
     const members = this.room(roomId).state.members ?? {};
-    return {
-      roomId, messageEventId, memberId, state: row.state,
-      displayName: members[memberId]?.displayName ?? memberId,
-      createdAt: new Date(row.createdAt).toISOString(),
-      timeoutAt: new Date(row.timeoutAt).toISOString(),
-      decidedAt: row.decidedAt === null ? null : new Date(row.decidedAt).toISOString(),
-    };
+    return { roomId, ...this.serializeMentionRow(row, members, messageEventId, memberId) };
   }
 
   // #658: batch-load mention chip data for a page of message events. One
