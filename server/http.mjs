@@ -2658,10 +2658,21 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const data = await body(req);
         const hasProof = Boolean(data) && Object.hasOwn(data, "proof");
         const hasInvite = Boolean(data) && Object.hasOwn(data, "inviteCode");
-        const joinFields = ["displayName", ...(hasInvite ? ["inviteCode"] : []), ...(hasProof ? ["proof"] : [])];
+        const hasRecoverable = Boolean(data) && Object.hasOwn(data, "recoverable");
+        const joinFields = ["displayName", ...(hasInvite ? ["inviteCode"] : []), ...(hasProof ? ["proof"] : []), ...(hasRecoverable ? ["recoverable"] : [])];
         if (!data || !exact(data, joinFields)) {
-          reject(422, "invalid_join", "displayName, an optional inviteCode, and an optional proof are the accepted fields");
+          reject(422, "invalid_join", "displayName, an optional inviteCode, an optional proof, and an optional recoverable flag are the accepted fields");
         }
+        // Retry-safe first-room join: `recoverable: true` with the caller's own
+        // generated pri_ secret as the bearer. The identity id derives from that
+        // secret, so a retry after a lost response returns the same identity and
+        // the same personal room (duplicate: true) instead of minting a second
+        // identity and room. The anonymous (no invite) branch only.
+        if (hasRecoverable && (data.recoverable !== true || hasInvite)) {
+          reject(422, "invalid_join", "recoverable must be true and applies only to a join without an inviteCode");
+        }
+        const recoverableSecret = hasRecoverable ? bearer(req) : undefined;
+        if (hasRecoverable && !recoverableSecret) reject(401, "unauthenticated", "Saved registration credential required");
         const name = typeof data.displayName === "string" ? data.displayName.trim() : "";
         if (!name || name.length > 80) reject(422, "invalid_join", "displayName must be 1-80 characters");
         if (hasProof && (typeof data.proof !== "string" || !/^[A-Za-z0-9_-]{1,43}$/.test(data.proof))) {
@@ -2708,9 +2719,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           // Atomic: a failed room creation rolls the identity insert back
           // with it, so no orphan identity can survive a half-done join.
           const createdIdentity = store.identities.create(name, {
+            secret: recoverableSecret,
             anonymous: { address: String(remoteAddress ?? ""), proof: data.proof },
           });
-          const createdRoom = agentRooms.create(createdIdentity.secret, {
+          const createdRoom = agentRooms.create(recoverableSecret ?? createdIdentity.secret, {
             roomId: `personal-${createdIdentity.identityId}`,
             title: `${name}'s room`,
             purpose: "A personal room for getting oriented and starting work.",
@@ -2739,8 +2751,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           sessionExpiresAt: firstJoined.expiresAt,
           next: [
             "You are signed in — open the room below",
-            "Save identitySecret too — it is shown once and never again, for agent tooling",
-            `Authenticate: Authorization: Bearer <identitySecret> on /api/rooms/${room.roomId}/…`,
+            recoverableSecret
+              ? "Your own pri_ secret is your credential; retry this call with the same secret and you get this identity and room back"
+              : "Save identitySecret too — it is shown once and never again, for agent tooling",
+            `Authenticate: Authorization: Bearer <${recoverableSecret ? "your pri_ secret" : "identitySecret"}> on /api/rooms/${room.roomId}/…`,
             `Orient: GET /api/rooms/${room.roomId}/activation-pack`,
             `Read the room: GET /api/rooms/${room.roomId}?view=work`
           ]
