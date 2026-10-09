@@ -66,9 +66,18 @@ export function parseDiff(diffText) {
   let file = null;
   let newLine = 0;
   let skipFile = false;
-  for (const rawLine of diffText.split("\n")) {
-    const line = rawLine;
-    if (line.startsWith("+++ ")) {
+  let inHunk = false;
+  for (const line of diffText.split("\n")) {
+    if (line.startsWith("diff --git ")) {
+      file = null;
+      skipFile = false;
+      inHunk = false;
+      continue;
+    }
+    // A file header is `+++ b/path` before the first hunk. After a hunk
+    // starts, `+++...` is an added source line whose text already starts
+    // with `++`, not a new file.
+    if (line.startsWith("+++ ") && !inHunk) {
       const p = line.slice(4).trim();
       skipFile = p === "/dev/null";
       file = p.startsWith("b/") ? p.slice(2) : p;
@@ -81,10 +90,11 @@ export function parseDiff(diffText) {
     const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
     if (hunk) {
       newLine = parseInt(hunk[1], 10);
+      inHunk = true;
       continue;
     }
     if (file === null || skipFile) continue;
-    if (line.startsWith("+") && !line.startsWith("+++")) {
+    if (line.startsWith("+")) {
       added.push({ path: file, line: newLine, text: line.slice(1) });
       newLine++;
     } else if (line.startsWith("-") && !line.startsWith("---")) {
