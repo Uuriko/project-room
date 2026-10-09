@@ -71,8 +71,16 @@ import { messageVisibleToViewer, summaryHistoryFloor } from "./history-visibilit
  *     requireOwnerDecision: boolean,
  *     trust: boolean           // Room Trust. true (open) until the owner flips it off
  *   },
- *   coordinationNorms: {       // room-wide defaults; an agent honours these
- *     maxClaimsPerAgentPerCycle: number, // 1: one write claim per agent at a time
+ *   coordinationNorms: {       // room-wide behavioral defaults an agent
+ *                             // honours voluntarily; NOT server-enforced.
+ *                             // (FIX-65 2026-10-09: maxClaimsPerAgentPerCycle
+ *                             // was removed from this list because it read as
+ *                             // an enforced cap while no server path enforced
+ *                             // it. The enforced per-agent open-claim cap is
+ *                             // maxMemberOpenClaims — default 20, owner-set
+ *                             // 1..10000 via the work-claims config endpoint —
+ *                             // refused server-side with 409
+ *                             // too_many_open_claims.)
  *     releaseOnInactivityHours: number,  // 24: release claims idle this long
  *     stopAfterRepeatedNoopWakes: boolean // true: stand down after repeated
  *                                        // wakes that produce no action
@@ -88,10 +96,11 @@ const OPEN_WORK_STATES = new Set([
   WORK_STATES.PROPOSED, WORK_STATES.ACCEPTED, WORK_STATES.WORKING, WORK_STATES.BLOCKED
 ]);
 
-// Coordination norms: the room's standing defaults. Frozen so callers cannot
-// mutate the shared reference; buildActivationPack copies them per pack.
+// Coordination norms: the room's standing behavioral defaults. Frozen so
+// callers cannot mutate the shared reference; buildActivationPack copies them
+// per pack. These are voluntary norms, not enforced caps — the enforced
+// per-agent open-claim cap is maxMemberOpenClaims (see work-claims.mjs).
 export const COORDINATION_NORMS = Object.freeze({
-  maxClaimsPerAgentPerCycle: 1,
   releaseOnInactivityHours: 24,
   stopAfterRepeatedNoopWakes: true
 });

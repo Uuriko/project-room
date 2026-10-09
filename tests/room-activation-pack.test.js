@@ -155,7 +155,10 @@ test("coordination norms carry the standing defaults", async t => {
   const f = fixture(t);
   const origin = await serve(t, f.store);
   const pack = await (await getPack(origin, ROOM, f.ownerKey)).json();
-  assert.deepEqual(pack.coordinationNorms, { maxClaimsPerAgentPerCycle: 1,
+  // FIX-65: maxClaimsPerAgentPerCycle was un-advertised — it read as an
+  // enforced per-agent cap while no server path enforced it. The enforced
+  // cap is maxMemberOpenClaims (see the work-claims config endpoint).
+  assert.deepEqual(pack.coordinationNorms, {
     releaseOnInactivityHours: 24, stopAfterRepeatedNoopWakes: true });
   assert.deepEqual(pack.coordinationNorms, { ...COORDINATION_NORMS });
   assert.ok(Object.isFrozen(COORDINATION_NORMS));

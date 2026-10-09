@@ -14322,8 +14322,12 @@ paths:
                       requireOwnerDecision: { type: boolean }
                   coordinationNorms:
                     type: object
+                    description: |
+                      Voluntary behavioral norms; not server-enforced. The
+                      enforced per-agent open-claim cap is maxMemberOpenClaims
+                      (default 20, owner-configurable via the work-claims config
+                      endpoint), refused with 409 too_many_open_claims.
                     properties:
-                      maxClaimsPerAgentPerCycle: { type: integer }
                       releaseOnInactivityHours: { type: integer }
                       stopAfterRepeatedNoopWakes: { type: boolean }
                   eventCursor: { type: string }
