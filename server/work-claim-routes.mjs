@@ -973,8 +973,12 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     assertDependsOnKnown(reject, data, { selfId: id, has: other => registry.has(roomId, other) });
     if (registry.has(roomId, id)) {
       const existing = registry.get(roomId, id);
-      throw attachConflictSignal(new ServiceError(409, "work_claim_exists", `Work claim "${id}" already exists in this room`),
+      let refusal = null;
+      try { reject(409, "work_claim_exists", `Work claim "${id}" already exists in this room`); }
+      catch (error) { refusal = error; }
+      if (refusal) throw attachConflictSignal(refusal,
         { item: existing ?? { id }, conflictCode: "work_claim_exists", holderId: existing?.owner ?? null, requestId: createRequestId });
+      throw new ServiceError(409, "work_claim_exists", `Work claim "${id}" already exists in this room`);
     }
     const open = registry.list(roomId).filter(item => !isTerminalClaimState(item.state)).length;
     if (open >= config.maxOpenClaims) {
@@ -1045,10 +1049,17 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const claimRequestId = requestIdOf(reject, data.requestId);
     // FIX-34: every conflict below lands a cheap conflict_attempted receipt
     // naming the would-be claimer and the current holder (post-rollback, via
-    // the outer catch), so contention is observable in the event tail.
+    // the outer catch), so contention is observable in the event tail. The
+    // refusal still goes through the injected reject, so the route-layer
+    // contract (thrown refusal carries error.body) is unchanged; the signal
+    // rides on the same error object.
     const rejectConflict = (conflictItem, conflictCode, message, extra = {}) => {
-      throw attachConflictSignal(new ServiceError(409, conflictCode, message),
+      let refusal = null;
+      try { reject(409, conflictCode, message); } catch (error) { refusal = error; }
+      if (refusal) throw attachConflictSignal(refusal,
         { item: conflictItem, conflictCode, holderId: conflictItem.owner ?? null, requestId: claimRequestId, ...extra });
+      // A non-throwing reject is a harness bug; fail closed with the same status.
+      throw new ServiceError(409, conflictCode, message);
     };
     const item = load(claimIdOf(reject, workClaimId));
     // H4 (QA-200 2026-10-08): a failed claim's 409 must name the real recovery.

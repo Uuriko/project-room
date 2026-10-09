@@ -50,9 +50,9 @@ test('a 409 claim conflict emits one conflict_attempted event naming task, claim
   const { store, call, conflicts } = await fixture(t);
   assert.equal((await call({ route: 'create', body: { id: 'contended', title: 'Contended' } })).status, 201);
   assert.equal((await call({ route: 'claim', claimId: 'contended', body: { leaseHours: 1 } })).status, 200);
-  const attempt = await call({ route: 'claim', claimId: 'contended', member: 'peer', body: { leaseHours: 1 } }).catch(e => e);
+  const attempt = await call({ route: 'claim', claimId: 'contended', member: 'peer', body: { leaseHours: 1 } });
   assert.equal(attempt.status, 409);
-  assert.equal(attempt.code, 'work_claim_conflict');
+  assert.equal(attempt.value.error.code, 'work_claim_conflict');
   const events = conflicts();
   assert.equal(events.length, 1);
   const data = events[0].data;
@@ -74,9 +74,9 @@ test('a self re-claim 409 also emits, with holder equal to the requester', async
   const { call, conflicts } = await fixture(t);
   await call({ route: 'create', body: { id: 'mine' } });
   await call({ route: 'claim', claimId: 'mine', body: { leaseHours: 1 } });
-  const attempt = await call({ route: 'claim', claimId: 'mine', body: { leaseHours: 1 } }).catch(e => e);
+  const attempt = await call({ route: 'claim', claimId: 'mine', body: { leaseHours: 1 } });
   assert.equal(attempt.status, 409);
-  assert.equal(attempt.code, 'work_claim_conflict');
+  assert.equal(attempt.value.error.code, 'work_claim_conflict');
   const events = conflicts();
   assert.equal(events.length, 1);
   assert.equal(events[0].data.conflictCode, 'work_claim_conflict');
@@ -135,19 +135,34 @@ test('no double emission: same requestId retries emit once; distinct requesters 
   const { call, conflicts } = await fixture(t);
   await call({ route: 'create', body: { id: 'hot' } });
   await call({ route: 'claim', claimId: 'hot', body: { leaseHours: 1 } });
-  const attempt = member => call({ route: 'claim', claimId: 'hot', member, body: { leaseHours: 1, requestId: 'retry-1' } }).catch(e => e);
+  const attempt = member => call({ route: 'claim', claimId: 'hot', member, body: { leaseHours: 1, requestId: 'retry-1' } });
   assert.equal((await attempt('peer')).status, 409);
   assert.equal((await attempt('peer')).status, 409, 'same requestId retried');
   assert.equal(conflicts().length, 1, 'one event for the repeated requestId');
-  const other = await call({ route: 'claim', claimId: 'hot', member: 'peer', body: { leaseHours: 1, requestId: 'retry-2' } }).catch(e => e);
+  const other = await call({ route: 'claim', claimId: 'hot', member: 'peer', body: { leaseHours: 1, requestId: 'retry-2' } });
   assert.equal(other.status, 409);
   assert.equal(conflicts().length, 1, 'a different requestId inside the window still coalesces');
-  const rival = await call({ route: 'claim', claimId: 'hot', member: 'peer2', body: { leaseHours: 1 } }).catch(e => e);
+  const rival = await call({ route: 'claim', claimId: 'hot', member: 'peer2', body: { leaseHours: 1 } });
   assert.equal(rival.status, 409);
   const events = conflicts();
   assert.equal(events.length, 2, 'a second would-be claimer gets their own signal');
   assert.deepEqual(events.map(e => e.data.requesterId), ['peer', 'peer2']);
   assert.equal(events[0].data.requestId, 'retry-1', 'the requestId rides the payload for traceability');
+});
+
+test('a duplicate create 409 emits a conflict event naming the existing holder', async t => {
+  const { call, conflicts } = await fixture(t);
+  assert.equal((await call({ route: 'create', body: { id: 'dup' } })).status, 201);
+  assert.equal((await call({ route: 'claim', claimId: 'dup', member: 'peer', body: { leaseHours: 1 } })).status, 200);
+  const attempt = await call({ route: 'create', member: 'peer2', body: { id: 'dup' } });
+  assert.equal(attempt.status, 409);
+  assert.equal(attempt.value.error.code, 'work_claim_exists');
+  const events = conflicts();
+  assert.equal(events.length, 1);
+  assert.equal(events[0].data.workClaim, 'dup');
+  assert.equal(events[0].data.conflictCode, 'work_claim_exists');
+  assert.equal(events[0].data.requesterId, 'peer2');
+  assert.equal(events[0].data.ownerId, 'peer');
 });
 
 test('a registry-only store still refuses cleanly without emitting', async t => {
@@ -175,7 +190,7 @@ test('a registry-only store still refuses cleanly without emitting', async t => 
   });
   await runRoute({ route: 'create', body: { id: 'h4' } });
   await runRoute({ route: 'claim', id: 'h4' });
-  const error = await runRoute({ route: 'claim', id: 'h4', memberId: 'grok' }).catch(e => e);
-  assert.equal(error.status, 409);
-  assert.equal(error.code, 'work_claim_conflict');
+  const refused = await runRoute({ route: 'claim', id: 'h4', memberId: 'grok' });
+  assert.equal(refused.status, 409);
+  assert.equal(refused.value.error.code, 'work_claim_conflict');
 });
