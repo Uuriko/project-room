@@ -369,9 +369,12 @@ export function runOpList({ claims, store, clock, ops, rng, afterEach = true }) 
 // ---------------------------------------------------------------------------
 const WEAKENINGS = {
   // P1: disable claimWork's anti-collision check (concurrent claims both win).
+  // The anchor is the guard's condition only — not the message text — so
+  // message refactors don't silently disarm the weakening (the
+  // exactly-once check below still fails loudly on real drift).
   p1: [
-    [`check(item.state === "unclaimed", item.owner === agent`,
-     `void(item.state === "unclaimed", item.owner === agent`],
+    [`check(item.state === "unclaimed",`,
+     `void(item.state === "unclaimed",`],
   ],
   // P2: release stops clearing the owner (unclaimed item keeps an owner: torn).
   p2: [
