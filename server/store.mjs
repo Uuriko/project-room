@@ -459,11 +459,23 @@ const columnNames = (db, table) => new Set(db.prepare(`PRAGMA table_info(${table
 const addColumnIfMissing = (db, table, name, definition) => {
   if (!columnNames(db, table).has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`);
 };
+const addColumnsIfMissing = (db, table, columns) => { for (const [name, definition] of columns) addColumnIfMissing(db, table, name, definition); };
+// The constructor's schema pass is a long run of idempotent DDL statements;
+// one call per block instead of one this.db.exec per schema.
+const execSchemas = (db, schemas) => { for (const schema of schemas) db.exec(schema); };
+// Journal convergence: verify absent-ok, apply the additive DDL, verify again.
+const convergeJournalSchema = (db, journal, schema) => {
+  journal.verifySchema({ allowAbsent: true });
+  db.exec(schema);
+  journal.verifySchema();
+};
 function ensureAccountProfileSchema(db) {
   if (!db.prepare("SELECT 1 FROM sqlite_master WHERE name='accounts'").get()) return;
-  addColumnIfMissing(db, "accounts", "display_name", "TEXT");
-  addColumnIfMissing(db, "accounts", "avatar_url", "TEXT");
-  addColumnIfMissing(db, "accounts", "onboarded", "INTEGER NOT NULL DEFAULT 1");
+  addColumnsIfMissing(db, "accounts", [
+    ["display_name", "TEXT"],
+    ["avatar_url", "TEXT"],
+    ["onboarded", "INTEGER NOT NULL DEFAULT 1"],
+  ]);
   // RC-2026-09-19-088: ever_had_room tracks whether the account has ever held
   // a room membership, so the default-room endpoint never resurrects a room
   // for someone who deliberately left (or was removed from) all of theirs.
@@ -943,60 +955,48 @@ const inboxNext = (roomId, directMessages, assignments, mentions, directMentions
   return steps.sort((a, b) => Number(b.required === true) - Number(a.required === true));
 };
 
+// Single-item-or-empty guidance: a populated list yields one action step
+// built from the first item, an empty list the empty-state note. presence,
+// capabilities and work-sessions guidance all share the shape.
+const singleOrEmptyStep = (items, step, empty) => items.length > 0 ? [Object.freeze(step(items[0]))] : [Object.freeze(empty)];
+
 // RC-2026-09-18-054: presence guidance — who is around and how to reach
 // them (DM via the message.posted command with toMemberId).
-const presenceNext = (roomId, memberIds) => {
-  if (memberIds.length > 0) {
-    return [Object.freeze({
-      action: "dm-member",
-      method: "POST",
-      path: `/api/rooms/${roomId}/commands`,
-      description: `DM a member directly: send { id: <uuid>, type: "message.posted", data: { messageId: <uuid>, body: "hello", toMemberId: "${memberIds[0]}" } }. Send your identity secret as the Bearer token.`,
-    })];
-  }
-  return [Object.freeze({
-    action: "watch-presence",
-    description: "Nobody is online right now. Presence lists online members and who is holding work sessions.",
-  })];
-};
+const presenceNext = (roomId, memberIds) => singleOrEmptyStep(memberIds, first => ({
+  action: "dm-member",
+  method: "POST",
+  path: `/api/rooms/${roomId}/commands`,
+  description: `DM a member directly: send { id: <uuid>, type: "message.posted", data: { messageId: <uuid>, body: "hello", toMemberId: "${first}" } }. Send your identity secret as the Bearer token.`,
+}), {
+  action: "watch-presence",
+  description: "Nobody is online right now. Presence lists online members and who is holding work sessions.",
+});
 
 // RC-2026-09-18-055: capabilities guidance — who can do the work and how
 // to hand it over (thread assignment to a member).
-const capabilitiesNext = (roomId, assignees) => {
-  if (assignees.length > 0) {
-    const first = assignees[0];
-    return [Object.freeze({
-      action: "delegate-work",
-      method: "POST",
-      path: `/api/rooms/${roomId}/collab/assignments`,
-      description: `Assign a thread to ${first.id}: send { threadId: "<thread>", assignee: { kind: "${first.kind}", id: "${first.id}" } }. Send your identity secret as the Bearer token.`,
-    })];
-  }
-  return [Object.freeze({
-    action: "advertise-capabilities",
-    description: "No members advertise capabilities yet. Members publish theirs with the capabilities.advertised command.",
-  })];
-};
+const capabilitiesNext = (roomId, assignees) => singleOrEmptyStep(assignees, first => ({
+  action: "delegate-work",
+  method: "POST",
+  path: `/api/rooms/${roomId}/collab/assignments`,
+  description: `Assign a thread to ${first.id}: send { threadId: "<thread>", assignee: { kind: "${first.kind}", id: "${first.id}" } }. Send your identity secret as the Bearer token.`,
+}), {
+  action: "advertise-capabilities",
+  description: "No members advertise capabilities yet. Members publish theirs with the capabilities.advertised command.",
+});
 
 // RC-2026-09-18-057: work-sessions guidance — seeing open work is half
 // the loop; the other half is the atomic claim (set_status -> processing).
-const workSessionsNext = (roomId, sessions) => {
-  if (sessions.length > 0) {
-    const first = sessions[0];
-    return [Object.freeze({
-      action: "claim-session",
-      method: "POST",
-      path: `/api/rooms/${roomId}/work-sessions`,
-      description: `Claim "${first.workItemId}": send { requestId: "<uuid>", workItemId: "${first.workItemId}", expectedRevision: ${first.revision ?? 0}, action: "set_status", status: "processing" }. Send your identity secret as the Bearer token.`,
-    })];
-  }
-  return [Object.freeze({
-    action: "register-work-item",
-    method: "POST",
-    path: `/api/rooms/${roomId}/work-claims`,
-    description: "No work sessions are open. Register a work item first: POST { id: \"<slug>\", title: \"<task>\", note: \"<context>\" } to this path, then claim it with the claim-session action above.",
-  })];
-};
+const workSessionsNext = (roomId, sessions) => singleOrEmptyStep(sessions, first => ({
+  action: "claim-session",
+  method: "POST",
+  path: `/api/rooms/${roomId}/work-sessions`,
+  description: `Claim "${first.workItemId}": send { requestId: "<uuid>", workItemId: "${first.workItemId}", expectedRevision: ${first.revision ?? 0}, action: "set_status", status: "processing" }. Send your identity secret as the Bearer token.`,
+}), {
+  action: "register-work-item",
+  method: "POST",
+  path: `/api/rooms/${roomId}/work-claims`,
+  description: "No work sessions are open. Register a work item first: POST { id: \"<slug>\", title: \"<task>\", note: \"<context>\" } to this path, then claim it with the claim-session action above.",
+});
 
 // Agent members a message.posted would wake: @mentions resolved the same way
 // as mention tracking (member id, display name, and linked identity names)
@@ -1405,52 +1405,35 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (!deferIntegrity) this.repairProjectionProvenance({ upgradeV1: version === 1 });
     if (version === 1 || version === 2) this.migrateIdentityV3(version);
     if (version === 1 || version === 2 || version === 3) this.migrateInvitationsV4();
-      if (version < 5) this.migrateInvitationJournalV5();
-      if (version < 7) this.db.exec(shareLinkSchema);
-      if (version < 8) this.db.exec(reminderSchema);
-      if (version < 9) this.db.exec(agentConnectionSchema);
-      if (version < 15) this.db.exec(inboxSchema);
-      if (version < 18) this.db.exec(emailImportSchema);
-      if (version < 21 && this.db.prepare("SELECT 1 FROM private_inbox_commands WHERE json_extract(request_json,'$.action') LIKE 'reply.%' OR json_type(receipt_json,'$.attempt') IS NOT NULL LIMIT 1").get())
-        throw new Error("Pre-v21 reply history requires operator reconciliation");
-      if (version < 22 && this.db.prepare("SELECT 1 FROM private_inbox_commands WHERE json_extract(request_json,'$.action') IN ('reply.observed','reply.review') OR json_type(receipt_json,'$.attempt.observation') IS NOT NULL OR json_type(receipt_json,'$.attempt.review') IS NOT NULL LIMIT 1").get())
-        throw new Error("Pre-v22 reply review history requires operator reconciliation");
-      if (version < 23 && this.db.prepare("SELECT 1 FROM private_inbox_commands WHERE json_extract(request_json,'$.action') LIKE 'reply.update.%' OR json_type(receipt_json,'$.update') IS NOT NULL LIMIT 1").get())
-        throw new Error("Pre-v23 reply update history requires operator reconciliation");
-      if (version < 24 && this.db.prepare("SELECT 1 FROM private_inbox_commands WHERE json_extract(request_json,'$.action')='reply.update.acknowledged' OR json_type(receipt_json,'$.update.acknowledgment') IS NOT NULL OR json_extract(receipt_json,'$.update.status')='update_acknowledged' LIMIT 1").get())
-        throw new Error("Pre-v24 reply acknowledgment history requires operator reconciliation");
-      if (version < 25 && this.db.prepare("SELECT 1 FROM private_inbox_commands WHERE json_extract(request_json,'$.action') IN ('reply.update.inspected','reply.update.review') OR json_type(receipt_json,'$.update.inspection') IS NOT NULL OR json_type(receipt_json,'$.update.review') IS NOT NULL OR json_type(receipt_json,'$.update.resolvedAt') IS NOT NULL OR json_extract(receipt_json,'$.update.status')='resolved' LIMIT 1").get())
-        throw new Error("Pre-v25 reply resolution history requires operator reconciliation");
+    if (version < 5) this.migrateInvitationJournalV5();
+    // Additive schemas that predate the no-bump convergence convention: a
+    // database older than the schema's introduction still needs the DDL.
+    for (const [minVersion, schema] of [[7, shareLinkSchema], [8, reminderSchema], [9, agentConnectionSchema], [15, inboxSchema], [18, emailImportSchema]])
+      if (version < minVersion) this.db.exec(schema);
+    // Pre-v21..v25 reply shapes: an older writer left rows the current schema
+    // cannot interpret, so refuse to open rather than reinterpret them.
+    for (const [minVersion, kind, probe] of [
+      [21, "reply", "SELECT 1 FROM private_inbox_commands WHERE json_extract(request_json,'$.action') LIKE 'reply.%' OR json_type(receipt_json,'$.attempt') IS NOT NULL LIMIT 1"],
+      [22, "reply review", "SELECT 1 FROM private_inbox_commands WHERE json_extract(request_json,'$.action') IN ('reply.observed','reply.review') OR json_type(receipt_json,'$.attempt.observation') IS NOT NULL OR json_type(receipt_json,'$.attempt.review') IS NOT NULL LIMIT 1"],
+      [23, "reply update", "SELECT 1 FROM private_inbox_commands WHERE json_extract(request_json,'$.action') LIKE 'reply.update.%' OR json_type(receipt_json,'$.update') IS NOT NULL LIMIT 1"],
+      [24, "reply acknowledgment", "SELECT 1 FROM private_inbox_commands WHERE json_extract(request_json,'$.action')='reply.update.acknowledged' OR json_type(receipt_json,'$.update.acknowledgment') IS NOT NULL OR json_extract(receipt_json,'$.update.status')='update_acknowledged' LIMIT 1"],
+      [25, "reply resolution", "SELECT 1 FROM private_inbox_commands WHERE json_extract(request_json,'$.action') IN ('reply.update.inspected','reply.update.review') OR json_type(receipt_json,'$.update.inspection') IS NOT NULL OR json_type(receipt_json,'$.update.review') IS NOT NULL OR json_type(receipt_json,'$.update.resolvedAt') IS NOT NULL OR json_extract(receipt_json,'$.update.status')='resolved' LIMIT 1"],
+    ])
+      if (version < minVersion && this.db.prepare(probe).get()) throw new Error(`Pre-v${minVersion} ${kind} history requires operator reconciliation`);
       if (version < 27) this.migrateAgentIdentitiesV27();
-      // RC-2026-09-19-055: identity-secret revoked_at converges on existing
-      // databases via ALTER TABLE; old rows backfill NULL and keep reading
-      // as "not revoked". Follows the spam-quarantine column pattern (PR #562).
-      ensureIdentitySecretSchema(this.db);
-      ensureIdentityCapacitySchema(this.db);
-      // RC-2026-09-24-210: identity link codes (proof-of-possession for
-      // identityId enrollment) converge the same additive way — IF NOT
-      // EXISTS is idempotent, no schema version bump, intentionally
-      // outside the writer fence (see unfencedAdditiveTables).
-      ensureIdentityLinkCodeSchema(this.db);
-      // Graduated autonomy tiers (#928 rescope): purely additive table —
-      // IF NOT EXISTS is idempotent, no schema version bump. Replaces the
-      // slice 1/3 agent_operator_controls table (module removed).
-      ensureAutonomyTiersSchema(this.db);
-      // CP-ADMIN-0: operator audit log. IF NOT EXISTS is idempotent, no schema
-      // version bump, intentionally outside the writer fence (see
-      // unfencedAdditiveTables). Append-only triggers reject UPDATE and DELETE.
-      ensureOperatorActionsSchema(this.db);
-      // UFO-steal slice 1 (RC-2026-09-27-2728): per-agent capability grant
-      // edges — purely additive table, IF NOT EXISTS is idempotent, no
-      // schema version bump.
-      ensureGrantsSchema(this.db);
-      // Spend-primitive MVP (qa4-spend-mvp-jill): per-agent spend grant
-      // terms + the charge ledger — purely additive tables, IF NOT EXISTS
-      // is idempotent, no schema version bump.
-      ensureSpendGrantsSchema(this.db);
-      // RC-2026-09-19-078: account profile (display_name/avatar_url) and
-      // onboarding flag converge the same additive way; no version bump.
-      ensureAccountProfileSchema(this.db);
+    // Additive ALTER-based convergence (see ADDITIVE_SCHEMA_ENSURES): IF NOT
+    // EXISTS is idempotent, no schema version bump, intentionally outside
+    // the writer fence (see unfencedAdditiveTables).
+    for (const ensureSchema of [
+      ensureIdentitySecretSchema, // RC-2026-09-19-055: revoked_at backfills NULL, reads as "not revoked" (PR #562 pattern)
+      ensureIdentityCapacitySchema,
+      ensureIdentityLinkCodeSchema, // RC-2026-09-24-210: proof-of-possession codes for identityId enrollment
+      ensureAutonomyTiersSchema, // #928 rescope: replaces the slice 1/3 agent_operator_controls table
+      ensureOperatorActionsSchema, // CP-ADMIN-0: append-only audit log (triggers reject UPDATE/DELETE)
+      ensureGrantsSchema, // RC-2026-09-27-2728: per-agent capability grant edges
+      ensureSpendGrantsSchema, // spend-primitive MVP: grant terms + charge ledger
+      ensureAccountProfileSchema, // RC-2026-09-19-078: display_name/avatar_url + onboarding flag
+    ]) ensureSchema(this.db);
       // Integration map slice 9: the agent public-key registry is purely
       // additive — IF NOT EXISTS is idempotent, no schema version bump,
       // and the table is intentionally outside the writer fence (see
@@ -1483,9 +1466,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (version > 0 && version < 36) this.migrateInvitationAgentRevokeV36();
       // Short human invite codes alias share_links. After the v35 rebuild so
       // the FK targets the live table. Purely additive, no version bump,
-      // intentionally outside the writer fence.
-      this.db.exec(shareLinkCodeSchema);
-      this.db.exec(shareLinkAccessSchema); // link access options, additive
+      // intentionally outside the writer fence (shareLinkAccessSchema holds
+      // the link access options).
+      execSchemas(this.db, [shareLinkCodeSchema, shareLinkAccessSchema]);
       // Agent invite codes are purely additive (no data migration, no fence
       // impact), so no schema version bump: IF NOT EXISTS is idempotent here
       // and the v0 block above covers fresh databases.
@@ -1507,31 +1490,23 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           AND ri.redeemed_member_id = referral_chain_members.member_id
           AND ri.status = 'redeemed' LIMIT 1
       ) WHERE max_depth IS NULL`);
-      // Referral attribution (invite/access-request joins): purely additive —
-      // no migration, no fence impact; referrals are only written by the join
-      // paths, and the table holds no credential data.
-      this.db.exec(referralSchema);
-      // Wake queue rows are purely additive (no data migration, no fence
-      // impact), so no schema version bump: IF NOT EXISTS is idempotent here.
-      this.db.exec(wakeQueueSchema);
-      // The pause surface (W4-48) is purely additive as well.
-      this.db.exec(wakeQueuePauseSchema);
-      // Attention preferences are purely additive as well (W4-46).
-      this.db.exec(attentionSchema);
-      // RC-2026-09-25-911: next-action dismissals/suppressions are purely
-      // additive as well: IF NOT EXISTS is idempotent, no schema version bump.
-      this.db.exec(nextActionsSchema);
-      // Updates marks are purely additive: IF NOT EXISTS, no schema version bump.
-      this.db.exec(updatesSchema);
-      this.workClaims.verifySchema({ allowAbsent: true });
-      this.db.exec(workClaimSchema);
-      this.workClaims.verifySchema();
-      // RC-2026-09-18-051: wakeable agent presence — host heartbeats and the
-      // wake-signal queue are purely additive as well: IF NOT EXISTS is
-      // idempotent, no schema version bump.
-      this.db.exec(agentHeartbeatSchema);
-      // Opt-in work delivery: host preferences + pointer journal, purely additive, no schema version bump.
-      this.db.exec(workWakeSchema);
+      // Purely additive, IF NOT EXISTS is idempotent, no schema version bump:
+      // referral attribution (join-written, no credential data), wake queue
+      // rows, the W4-48 pause surface, W4-46 attention prefs, RC-2026-09-25-911
+      // next-action dismissals/suppressions, and updates marks.
+      execSchemas(this.db, [
+        referralSchema,
+        wakeQueueSchema,
+        wakeQueuePauseSchema,
+        attentionSchema,
+        nextActionsSchema,
+        updatesSchema,
+      ]);
+      convergeJournalSchema(this.db, this.workClaims, workClaimSchema);
+      // Purely additive, IF NOT EXISTS is idempotent, no schema version bump:
+      // RC-2026-09-18-051 wakeable-agent heartbeats + wake-signal queue, and
+      // opt-in work delivery (host preferences + pointer journal).
+      execSchemas(this.db, [agentHeartbeatSchema, workWakeSchema]);
       this.workWakes.verifySchema();
       // Land queue: purely additive, no schema version bump, outside the
       // writer fence. The table is the source of truth; land.updated events
@@ -1543,47 +1518,36 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // routes are unchanged and still do not retain provider bytes.
       this.db.exec(inboxAttachmentBytesSchema);
       this.inboxAttachments.verifySchema();
-      // RC-2026-09-24-202: members directory skill cards are purely additive
-      // as well: IF NOT EXISTS is idempotent, no schema version bump.
-      this.db.exec(membersDirectorySchema);
-      // The channel webhook update journal (B20) follows the same additive pattern.
-      this.db.exec(channelJournalSchema);
-      // The durable Telegram live status (task 10) is purely additive as well.
-      this.db.exec(telegramLiveStatusSchema);
-      // The spam-guard quarantine journal is purely additive as well:
-      // IF NOT EXISTS is idempotent, no schema version bump, and the table is
-      // intentionally outside the writer fence (see unfencedAdditiveTables).
-      this.db.exec(spamQuarantineSchema);
-      // Jev-harness shadow-decision journal: purely additive like the
-      // quarantine journal above — IF NOT EXISTS is idempotent, no schema
-      // version bump, outside the writer fence (append-only measurement).
-      this.db.exec(jevShadowSchema);
-      // Consent-bound DMs and the public read-only face: purely additive
-      // side tables (no events, no projection impact), same pattern.
-      this.db.exec(dmConsentSchema);
-      // Agent bonds and peer DMs: additive identity-pair tables. Receipts
-      // also land on the room ledger as participant-visible events.
-      this.db.exec(bondSchema);
-      this.db.exec(roomPublicFaceSchema);
-      // #605: opt-in public room directory (owner toggles discoverability;
-      // purely additive side table, no events, no projection impact).
-      this.db.exec(roomDirectorySchema);
-      // Empty public read-model tables. Filling them is the public-read-model
-      // cron (or the opt-in write). The constructor does not scan rooms.
-      this.db.exec(PUBLIC_READ_MODEL_SCHEMA);
+      // Purely additive side tables (no events, no projection impact): IF NOT
+      // EXISTS is idempotent, no schema version bump, intentionally outside
+      // the writer fence — members-directory skill cards (RC-2026-09-24-202),
+      // the B20 channel webhook journal, durable Telegram live status (task
+      // 10), the spam-guard quarantine journal, the jev-harness shadow-decision
+      // journal (append-only measurement), consent-bound DMs, agent bonds and
+      // peer DMs (receipts also land on the room ledger), the #605 opt-in
+      // public room directory, and the empty public read-model tables (filled
+      // by the public-read-model cron; the constructor does not scan rooms).
+      execSchemas(this.db, [
+        membersDirectorySchema,
+        channelJournalSchema,
+        telegramLiveStatusSchema,
+        spamQuarantineSchema,
+        jevShadowSchema,
+        dmConsentSchema,
+        bondSchema,
+        roomPublicFaceSchema,
+        roomDirectorySchema,
+        PUBLIC_READ_MODEL_SCHEMA,
+      ]);
       // Existing directory rows predate the independent feed visibility bit.
       // Default them on so upgrading does not silently hide public work.
       addColumnIfMissing(this.db, "room_directory_settings", "opportunities_enabled", "INTEGER NOT NULL DEFAULT 1");
-      // RC-2026-09-23-100: guest invites (GX-… public handoff) — purely
-      // additive side tables (no events, no projection impact), same pattern.
-      this.db.exec(guestInviteSchema);
-      // GA-2 (issue #941): single-use link redemption records — purely
-      // additive side table (no events, no projection impact), same pattern.
-      this.db.exec(guestLinkExchangeSchema);
-      // RC-2026-09-25-912: self-serve guest seats + request-ID idempotency
-      // records — purely additive side tables (no events, no projection
-      // impact), same pattern.
-      this.db.exec(guestSelfServeSchema);
+      // Purely additive side tables (no events, no projection impact): IF NOT
+      // EXISTS is idempotent, no schema version bump — RC-2026-09-23-100
+      // guest invites (GX-… public handoff), GA-2 single-use link redemption
+      // records (#941), RC-2026-09-25-912 self-serve guest seats + request-ID
+      // idempotency records.
+      execSchemas(this.db, [guestInviteSchema, guestLinkExchangeSchema, guestSelfServeSchema]);
       // RC-2026-09-23-102: web-fetch page cache + per-request journal — purely
       // additive side tables (no events, no projection impact), same pattern.
       this.db.exec(webFetchSchema);
@@ -1616,16 +1580,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // projection impact): IF NOT EXISTS is idempotent, no schema version
       // bump, registered in writer-fence unfencedAdditiveTables.
       this.db.exec(squadSchema);
-      // Human browser push subscriptions. Purely additive side table (no
+      // Human browser push subscriptions. Purely additive side tables (no
       // events, no projection impact): IF NOT EXISTS is idempotent, no
       // schema version bump, intentionally outside the writer fence.
-      this.db.exec(humanPushSchema);
-      this.db.exec(humanPushPrefsSchema);
+      execSchemas(this.db, [humanPushSchema, humanPushPrefsSchema]);
       // Rich push (sender/preview/deep link): converge existing databases.
       // Old rows read preview as on and quiet hours as unset, preserving
       // today's delivery exactly until the member touches the switches.
-      addColumnIfMissing(this.db, "human_push_preferences", "preview_enabled", "INTEGER NOT NULL DEFAULT 0");
-      addColumnIfMissing(this.db, "human_push_preferences", "quiet_hours", "TEXT");
+      addColumnsIfMissing(this.db, "human_push_preferences", [
+        ["preview_enabled", "INTEGER NOT NULL DEFAULT 0"],
+        ["quiet_hours", "TEXT"],
+      ]);
       // Gap #2 (PR #562): explicit account_id/source_id columns converge on
       // existing databases via ALTER TABLE; old rows backfill NULL and keep
       // reading as { accountId: null, sourceId: null }.
@@ -1639,8 +1604,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // The agent handoff journal (task 23) follows the same additive pattern:
       // IF NOT EXISTS is idempotent, no schema version bump, and the table is
       // intentionally outside the writer fence (see unfencedAdditiveTables).
-      this.db.exec(inboxHandoffSchema);
-      this.db.exec(inboxHandoffRoomSchema); // Which room a collab-route handoff was made in; see server/inbox-handoff.mjs.
+      // inboxHandoffRoomSchema records which room a collab-route handoff was
+      // made in; see server/inbox-handoff.mjs.
+      execSchemas(this.db, [inboxHandoffSchema, inboxHandoffRoomSchema]);
       // The typed handoff envelope journal (RC-2026-09-19-062) follows the
       // same additive pattern: IF NOT EXISTS is idempotent, no schema version
       // bump, and the table is intentionally outside the writer fence
@@ -1658,16 +1624,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // bump, and the tables are intentionally outside the writer fence (see
       // unfencedAdditiveTables in server/writer-fence.mjs).
       this.db.exec(inboxCollabSchema);
-      // Per-source read markers are purely additive (no data migration): IF NOT
-      // EXISTS is idempotent here. The table is intentionally outside the writer
-      // fence (see unfencedAdditiveTables in server/writer-fence.mjs) so
-      // same-schema packaged fallbacks that predate it still verify.
-      this.db.exec(inboxReadSchema);
-      this.db.exec(moderationSchema); // Message reports (issue #6 E4): purely additive, same pattern.
+      // Per-source read markers and E4 message reports (issue #6) are purely
+      // additive (no data migration): IF NOT EXISTS is idempotent here. The
+      // tables are intentionally outside the writer fence (see
+      // unfencedAdditiveTables in server/writer-fence.mjs) so same-schema
+      // packaged fallbacks that predate them still verify.
+      execSchemas(this.db, [inboxReadSchema, moderationSchema]);
       // LEGAL: terms acceptance, public abuse reports, operator unpublish. Additive, unfenced.
-      this.db.exec(accountTermsSchema);
-      this.db.exec(publicAbuseSchema);
-      this.db.exec(publicUnpublishSchema);
+      execSchemas(this.db, [accountTermsSchema, publicAbuseSchema, publicUnpublishSchema]);
       // Escrowed bounties (agent work exchange, slice 1): purely additive,
       // intentionally outside the writer fence (see unfencedAdditiveTables in
       // server/writer-fence.mjs) so same-schema packaged fallbacks that
@@ -1676,24 +1640,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // converge deployed databases first: ALTER TABLE cannot rewrite the
       // stored CREATE TABLE text that verifySchema compares.
       convergeBountyDeployedSchema(this.db);
-      this.db.exec(bountyEscrowSchema);
-      this.db.exec(projectOffersSchema);
-      this.db.exec(demigodOffersSchema);
-      this.db.exec(demigodContractsSchema);
-      this.db.exec(buyerSignoffSchema);
-      this.db.exec(trialTaskSchema);
+      execSchemas(this.db, [bountyEscrowSchema, projectOffersSchema, demigodOffersSchema, demigodContractsSchema, buyerSignoffSchema, trialTaskSchema]);
       this.publicWorkClaims.verifySchema({ allowAbsent: true });
       verifyPublicWorkClaimFence(this.db, { allowAbsent: true });
-      this.db.exec(publicWorkClaimsSchema);
-      this.db.exec(publicWorkClaimFenceSchema);
+      execSchemas(this.db, [publicWorkClaimsSchema, publicWorkClaimFenceSchema]);
       this.publicWorkClaims.verifySchema();
       verifyPublicWorkClaimFence(this.db);
-      this.publicWorkReviews.verifySchema({ allowAbsent: true });
-      this.db.exec(publicWorkReviewsSchema);
-      this.publicWorkReviews.verifySchema();
-      this.publicWorkSuccessors.verifySchema({ allowAbsent: true });
-      this.db.exec(publicWorkSuccessorsSchema);
-      this.publicWorkSuccessors.verifySchema();
+      convergeJournalSchema(this.db, this.publicWorkReviews, publicWorkReviewsSchema);
+      convergeJournalSchema(this.db, this.publicWorkSuccessors, publicWorkSuccessorsSchema);
       // Self-serve agent access requests: purely additive, intentionally outside
       // the writer fence (see unfencedAdditiveTables). Applied here (not only in
       // createRoomServer) so store-only fixtures and the recovery audit see it.
@@ -1730,17 +1684,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // migration may not have created them yet); the helper skips absent
       // columns but not absent tables.
       if (columnNames(this.db, "agent_api_keys").size > 0) addColumnIfMissing(this.db, "agent_api_keys", "last_used_ua", "TEXT");
-      if (columnNames(this.db, "agent_identities").size > 0) {
-        addColumnIfMissing(this.db, "agent_identities", "last_used_at", "INTEGER");
-        addColumnIfMissing(this.db, "agent_identities", "last_used_ua", "TEXT");
-        addColumnIfMissing(this.db, "agent_identities", "mcp_legacy_uses", "INTEGER NOT NULL DEFAULT 0");
-      }
-      // Existing v35 databases predate persistent OAuth state. Converge this
-      // unfenced additive table on every open, not only invitation migration.
-      this.db.exec(oauthPendingSchema);
-      this.db.exec(gmailSchema);
-      this.db.exec(requestRunSchema);
-      this.db.exec(roomAssistantSchema);
+      if (columnNames(this.db, "agent_identities").size > 0) addColumnsIfMissing(this.db, "agent_identities", [
+        ["last_used_at", "INTEGER"],
+        ["last_used_ua", "TEXT"],
+        ["mcp_legacy_uses", "INTEGER NOT NULL DEFAULT 0"],
+      ]);
+      // Existing v35 databases predate persistent OAuth state. Converge these
+      // unfenced additive tables on every open, not only invitation migration.
+      execSchemas(this.db, [oauthPendingSchema, gmailSchema, requestRunSchema, roomAssistantSchema]);
       // Fresh recovery stores must include the same additive growth columns
       // as HTTP registration; otherwise NDJSON replay rejects existing rows.
       ensurePayoutColumns(this.db);
