@@ -68,7 +68,9 @@ file and conflicts with every other live claim on that path. Two different
 labels on the same path do not conflict. The same label does. Overlap is
 **409** `file_lease_conflict`. The body names `holder` (`claimId`, `owner`),
 `files`, and `leaseExpiresAt`. `advisory: true` still claims and returns
-`fileWarnings`.
+`fileWarnings`. A *directory* scope overlapping a live claim's file scope
+(or the reverse) is subtler: the claim lands and the overlap is returned as
+`scopeOverlapWarnings` — see "Scope dedup at claim time" below.
 
 `POST .../release` with `{ "reason"? }` (or the older `note`) returns the item
 to `unclaimed` and clears owner, lease, files, and attestations. The holder
@@ -111,6 +113,48 @@ with `POST /api/rooms/{roomId}/work-claims/config` and
 fields. The board's owner form sets both. `GET` on that path reads
 the caps. Anyone else who posts is **403** `work_claims_not_permitted`.
 Missing or invalid stored values use the defaults.
+
+## Scope dedup at claim time
+
+File scopes are deduplicated on the scope spine — directory prefixes, not
+claim bodies. Two checks run when a claim lands on `POST .../claim`:
+
+- **Exact-path overlap → 409 `file_lease_conflict`** (established). The body
+  names the holder (`claimId`, `owner`), the files, and `leaseExpiresAt`.
+  `advisory: true` keeps the older warn-and-proceed behavior and returns the
+  overlap as `fileWarnings`.
+- **Prefix overlap → advisory warning** (FIX-48). When a live claim's
+  directory scope covers — or is covered by — one of the new claim's scopes,
+  the exact-path check cannot see it, so the claim still lands and the
+  overlap is returned as `scopeOverlapWarnings` on the 200 response
+  (`[{ holder: { claimId, owner }, scopes: [...] }]`). The warning is also
+  stamped on the claim's history (`scope_overlap_warning`), so the claim's
+  room event carries it.
+
+Why advisory instead of a refusal: directory scopes are legitimately used
+for hierarchical partitioning — a lead holds `server/` while sub-lanes hold
+`server/x.mjs` — so refusing would break flows that succeed today. The
+warning plus the room event gives the coordinator the signal to repartition
+without breaking the claim. Scope semantics follow the FIX-24 checker: a
+directory scope covers everything under it; the same path with two
+*different* block labels does not conflict; the same path with the same
+label (or no label) does.
+
+Examples:
+
+- `server/` held by claim A, claim B lands on `server/http.mjs` → B lands
+  with a `scopeOverlapWarnings` entry naming A and `server/http.mjs ~ server`.
+- `server/http.mjs` held by A, B lands on `server/` → same warning, the
+  direction reversed.
+- `server/a.mjs` vs `server/b.mjs` → disjoint, no warning.
+- `server2/x.mjs` vs `server/` → disjoint; prefix matching is on path
+  segments, not string prefixes.
+- `server/a.mjs` vs `server/a.mjs` → **409**, not a warning (exact-path
+  spine).
+
+The advisory check runs on the claim route today. Create-with-assignee and
+reassign still enforce only the exact-path 409; extending the advisory
+warning to those acquire paths is follow-up work.
 
 ## Leases
 

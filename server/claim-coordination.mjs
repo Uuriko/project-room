@@ -304,6 +304,56 @@ export function fileLeaseConflictBody(claimed, conflicts) {
   };
 }
 
+// FIX-48: thin-spine prefix overlap at claim time — FIX-24's scope-partition
+// semantics, enforced when the claim lands instead of at pre-PR check time.
+// fileLeaseConflicts owns the exact-path spine (409 file_lease_conflict);
+// this returns only STRICT prefix overlaps: a directory scope in a live
+// claim covering (or covered by) a scope of the incoming claim. Same-path
+// pairs are excluded — the 409 spine and the block-label exemption already
+// decide those. The route warns on these (advisory-first) instead of
+// refusing: directory scopes are also used for legitimate hierarchical
+// partitioning (a lead holds `server/` while sub-lanes hold `server/x.mjs`),
+// so a refusal would break flows that succeed today. No I/O; frozen outputs.
+export function scopePrefixOverlaps(items, claimed) {
+  const wanted = fileSlots(claimed);
+  if (wanted.length === 0) return [];
+  const overlaps = [];
+  for (const item of items ?? []) {
+    if (!item || item.id === claimed.id || !LIVE_CLAIM_STATES.has(item.state)) continue;
+    const held = fileSlots(item);
+    const hits = [];
+    for (const w of wanted) {
+      for (const h of held) {
+        if (w.path === h.path) continue; // exact spine: fileLeaseConflicts' territory
+        if (h.path.startsWith(w.path + "/") || w.path.startsWith(h.path + "/")) {
+          hits.push(`${slotLabel(w)} ~ ${slotLabel(h)}`);
+        }
+      }
+    }
+    const unique = [...new Set(hits)].sort();
+    if (unique.length === 0) continue;
+    overlaps.push(Object.freeze({
+      holder: Object.freeze({ claimId: item.id, owner: item.owner ?? null }),
+      scopes: Object.freeze(unique)
+    }));
+  }
+  overlaps.sort((a, b) => (a.holder.claimId < b.holder.claimId ? -1 : a.holder.claimId > b.holder.claimId ? 1 : 0));
+  return Object.freeze(overlaps);
+}
+
+// FIX-48: stamp the advisory prefix-overlap warning on the claim's history so
+// the record is durable and the commit's single work_claim.updated room event
+// carries it. Machine-readable key=value note, plain ASCII (retentionAck
+// convention); hard-capped far under the 4000-char note bound.
+export function stampScopeOverlapWarning(item, overlaps, { nowMs = Date.now(), agentId = "system" } = {}) {
+  const holders = overlaps.map(o => o.holder.claimId);
+  const pairs = [...new Set(overlaps.flatMap(o => o.scopes))].sort();
+  let note = `scope-overlap-warning holders=${holders.length} first=${holders[0] ?? "-"} scopes=${pairs.join(" | ")}`;
+  if (note.length > 1000) note = note.slice(0, 997) + "...";
+  const entry = stamp(nowMs, agentId, "scope_overlap_warning", note);
+  return Object.freeze({ ...item, history: Object.freeze([...(item.history ?? []), entry]) });
+}
+
 // Unheld claims whose dependencies are all done. A missing dependency is not
 // done. An empty dependency list is ready: nobody is waiting on it.
 export function readyClaims(items) {

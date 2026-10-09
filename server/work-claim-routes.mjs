@@ -49,7 +49,7 @@ import { getActiveSquad } from "./squads.mjs"; // plan-squads: work offers targe
 import { isFirstContribution, retentionAck } from "./retention-response.mjs";
 import { requiredReadingFor, stampReadingAck } from "./required-reading.mjs"; // W012: per-lane required reading
 import { ROOM_GUIDE_ID } from "./room-guide.mjs";
-import { fileLeaseConflictBody, fileLeaseConflicts, holdForRateLimit, readyClaims } from "./claim-coordination.mjs";
+import { fileLeaseConflictBody, fileLeaseConflicts, holdForRateLimit, readyClaims, scopePrefixOverlaps, stampScopeOverlapWarning } from "./claim-coordination.mjs";
 import { collectPullRequestLookups, commitPullRequestLookup, readClaimPullBudget, writeClaimPullBudget } from "./claim-pr-sync.mjs";
 import {
   assertBoardEventBudget, assertBoardLeaseHours, assertDependsOnKnown, boardText, boardTextFields, clientPullRequestInput,
@@ -1019,6 +1019,17 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       error.body = body;
       throw error;
     }
+    // FIX-48: thin-spine dedup at claim time, advisory-first. Exact-path
+    // overlaps were refused with 409 above; a *prefix* overlap — a directory
+    // scope in a live claim covering (or covered by) one of this claim's
+    // scopes, invisible to the exact-path spine — warns instead of refusing,
+    // so nothing that previously succeeded can now fail. The warning is
+    // stamped on the history (the commit's single work_claim.updated event
+    // carries it) and returned as scopeOverlapWarnings.
+    const prefixOverlaps = scopePrefixOverlaps(registry.list(roomId), claimed);
+    const warned = prefixOverlaps.length > 0
+      ? stampScopeOverlapWarning(claimed, prefixOverlaps, { nowMs, agentId: caller })
+      : claimed;
     // Retention ack (research brief 2026-09-28, mechanic #2): every claim gets
     // the bot's immediate structured receipt, so no contribution sits at zero
     // replies from t=0. First-time contributors carry the 24h verdict SLA in
@@ -1028,12 +1039,13 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // created stamp is not a prior contribution. The ack rides the same
     // commit, so this stays one room event.
     const first = isFirstContribution(registry.list(roomId).filter(entry => entry.id !== item.id), caller);
-    const acked = retentionAck(claimed, { now: nowMs, first, agentId: caller });
+    const acked = retentionAck(warned, { now: nowMs, first, agentId: caller });
     commit(acked, "claimed");
     // W012 required reading: every enrollment response presents the reading
     // list for the claim's kind. Advisory only — enrollment never gates on
     // it, so there is no bypass to learn and no existing flow can break.
     return json(res, 200, { ...acked, fileWarnings: data.advisory === true ? fileWarningsFor(registry.list(roomId), acked) : [],
+      scopeOverlapWarnings: prefixOverlaps,
       requiredReading: requiredReadingFor(item.kind) });
   }
   if (workClaimRoute === "update" && req.method === "POST") {

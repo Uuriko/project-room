@@ -5446,7 +5446,9 @@ paths:
         Declared files are an exclusive lease: overlap with another live
         claim is 409 `file_lease_conflict`, naming the holder, the files,
         and `leaseExpiresAt`. `advisory: true` records the claim anyway and
-        returns `fileWarnings`. API keys need `rooms:write`.
+        returns `fileWarnings`. A directory scope that covers (or is covered
+        by) another live claim's scope is advisory-only: the claim lands and
+        the overlap is returned as `scopeOverlapWarnings`. API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: claimId
@@ -5502,8 +5504,11 @@ paths:
           description: |
             The claimed item. `fileWarnings` names other live claims on the
             same files when `advisory` is true; otherwise it is empty.
-            `requiredReading` lists the repo-relative docs the claim's kind
-            asks the holder to read (advisory; acks go to /update).
+            `scopeOverlapWarnings` names live claims whose directory scope
+            covers (or is covered by) this claim's scopes — advisory-only,
+            the claim always lands. `requiredReading` lists the repo-relative
+            docs the claim's kind asks the holder to read (advisory; acks go
+            to /update).
           content:
             application/json:
               schema:
@@ -5524,6 +5529,20 @@ paths:
                                 properties:
                                   id: { type: string }
                                   owner: { type: [string, 'null'] }
+                      scopeOverlapWarnings:
+                        type: array
+                        description: Prefix-overlap warnings (FIX-48). Each entry names the holding claim and the overlapping scope pairs.
+                        items:
+                          type: object
+                          properties:
+                            holder:
+                              type: object
+                              properties:
+                                claimId: { type: string }
+                                owner: { type: [string, 'null'] }
+                            scopes:
+                              type: array
+                              items: { type: string }
                       requiredReading:
                         type: array
                         items: { type: string }
