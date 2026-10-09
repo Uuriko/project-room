@@ -5,6 +5,7 @@
 
 import { DurableObject } from "cloudflare:workers";
 import { authorize } from "./auth.mjs";
+import { controlFrameOnLink } from "./protocol.mjs";
 import { bytesToB64url, sha256Hex, timingEqual } from "./bytes.mjs";
 import { RelayError, relayError } from "./errors.mjs";
 import { verifyLinkSignature } from "./hmac.mjs";
@@ -165,11 +166,13 @@ export class MachineLink extends DurableObject {
     }
     if (msg.type !== "hello" && msg.type !== "heartbeat") return;
     let accepted = false;
+    let control = null;
     await this.exclusive(() => {
       if (!this.state) return;
       if (msg.type === "hello") {
         if (msg.protocol !== PROTOCOL_VERSION || msg.machineId !== this.state.machineId) return;
         if (typeof msg.label !== "string" || typeof msg.version !== "string") return;
+        control = controlFrameOnLink(this.state, Date.now());
       }
       this.state.lastHeartbeat = new Date().toISOString();
       this.dirty = true;
@@ -178,6 +181,8 @@ export class MachineLink extends DurableObject {
     if (msg.type === "hello" && !accepted) {
       try { ws.close(1002, "protocol"); } catch { /* already closed */ }
     }
+    // A halt or pause issued while the daemon was offline reaches it now.
+    if (accepted && control) this.send(ws, control);
   }
 
   async webSocketClose(ws) {

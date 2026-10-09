@@ -30,7 +30,7 @@ The daemon connects to `relayUrl` and sends `Authorization: Bearer <machineToken
 
 `call` is sent only after the relay's own Phase 0 check succeeds. `caller.verified` is `true` on that frame and is not set when the check fails. Slots on that frame are `desk` and `scratch`. `args` is the tool argument object.
 
-`halt` is `{ "type": "halt", "epoch": <number> }`. `pause` is `{ "type": "pause", "minutes": <number> }`. `resume` is `{ "type": "resume" }`. `bye` is `{ "type": "bye" }`.
+`halt` is `{ "type": "halt", "epoch": <number> }`. `pause` is `{ "type": "pause", "minutes": <number> }`. `resume` is `{ "type": "resume" }`. `bye` is `{ "type": "bye" }`. When a daemon says `hello`, the relay sends the current `halt`, or a `pause` with the remaining minutes rounded up, so a control issued while the machine was offline still reaches it. A `resume` issued while it was offline is not replayed.
 
 The daemon answers `{ "type": "result", "id", "ok", "result" | "error" }`. A result may be up to 4 MiB. The relay returns that outcome on both MCP and `POST /call`. A tool failure is a normal result with `isError: true`, not an HTTP error.
 
