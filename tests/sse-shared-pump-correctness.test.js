@@ -426,24 +426,42 @@ test("F1: one eventsAfter fetch per room per tick regardless of stream count", a
 });
 
 test("F1: the shared fetch rides the minimum stream cursor and skips the per-viewer filter", async t => {
-  const f = await fixture(t, { streamInterval: 50 });
+  // Contract: each tick's single fetch uses after = min(live stream cursors)
+  // so a far-behind stream's rows are never skipped, and it carries
+  // { includeInvisible: true } so the page is the union of every stream's
+  // visible rows. Regression: fetching from the max cursor (or any single
+  // stream's view) would starve the laggard / break the union.
+  //
+  // Deterministic without timing assumptions: while the laggard is behind,
+  // every shared fetch must advance `after` by exactly one 100-row page from
+  // a start-aligned base and must stay below the ahead stream's cursor; once
+  // the laggard catches up the fetch parks at the room head. We assert on
+  // the below-head prefix of the observed ticks, however long setup took.
+  const interval = 200;
+  const f = await fixture(t, { streamInterval: interval });
   const calls = wrapEventsAfter(f.store);
   const start = f.store.room("commons").sequence;
-  for (let i = 0; i < 150; i++) f.bulkPost("commons", `backlog-${i}`);
-  const head = f.store.room("commons").sequence;
+  f.store.transaction(() => { for (let i = 0; i < 600; i++) f.bulkPost("commons", `backlog-${i}`); });
+  const highKey = f.addAgent("commons").key; // member.added lands after the backlog
+  const top = f.store.room("commons").sequence;
   const low = await f.openReading("commons", f.keys.commons, start);
-  const high = await f.openReading("commons", f.addAgent("commons").key, head);
+  const high = await f.openReading("commons", highKey, top);
   const measureFrom = Date.now();
-  await sleep(400);
+  await sleep(interval * 3 + 150);
   const tickCalls = calls.filter(c => c.at >= measureFrom);
-  assert.ok(tickCalls.length >= 1, "at least one shared tick ran");
-  // The first shared tick happens before any fan-out delivery, so the
-  // minimum cursor is still exactly `start`.
-  assert.equal(tickCalls[0].args[2], start,
-    `the shared fetch rides the minimum stream cursor (first tick fetched after=${tickCalls[0].args[2]}, want ${start})`);
+  assert.ok(tickCalls.length >= 2, `enough shared ticks ran to measure (saw ${tickCalls.length})`);
+  const afters = tickCalls.map(c => c.args[2]);
+  const belowHead = afters.filter(after => after < top);
+  assert.ok(belowHead.length >= 1, `at least one shared tick rode the laggard's cursor (afters=${afters.join(",")}, top=${top})`);
+  for (let i = 1; i < afters.length; i++)
+    assert.ok(afters[i] >= afters[i - 1], `shared fetch cursors never go backwards (${afters.join(",")})`);
+  for (const after of belowHead)
+    assert.equal((after - start) % 100, 0, `laggard-phase fetch tracks a page-aligned cursor (after=${after}, start=${start})`);
+  for (let i = 1; i < belowHead.length; i++)
+    assert.equal(belowHead[i] - belowHead[i - 1], 100, `laggard advances exactly one page per shared tick (${belowHead.join(",")})`);
   // W1 refined design: the shared page is the UNION of every stream's
   // visible rows, so the fetch carries { includeInvisible: true } (6th arg).
-  const flagged = tickCalls.some(c => c.args[4]?.includeInvisible === true || c.args[5]?.includeInvisible === true);
-  assert.ok(flagged, "the shared fetch carries { includeInvisible: true }");
-  await f.waitFor(() => low.ids().length >= 100, 10000, "far-behind stream to receive from the shared page");
+  assert.ok(tickCalls.every(c => c.args[4]?.includeInvisible === true || c.args[5]?.includeInvisible === true),
+    "every shared fetch carries { includeInvisible: true }");
+  await f.waitFor(() => low.ids().length >= 300, 20000, "far-behind stream to receive from the shared page");
 });
