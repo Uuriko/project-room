@@ -139,6 +139,15 @@ CHAOS FAILURE — property "escrow-transitions"
 The `chaos ok:` line on success tells you what ran:
 `25 seed(s) x 60 ops, 848 applied, 652 expected rejections, 0 failures [mode=smoke]`.
 
+## Related
+
+- `tests/chaos/work-claim-chaos-scaffold.mjs` (PRODUCT-200 C3): fault-injection
+  at the storage layer for the **work-claim** state machine (kill the isolate
+  mid-write, assert no torn rows). Different layer, different machine — the
+  two harnesses coexist: that one injects storage faults, this one drives
+  random op sequences against invite and escrow logic.
+- WAVE-400's fuzzing front: one-off bug-finding runs, nothing committed.
+
 ## Fail-first
 
 These properties guard already-correct code, so "red" was demonstrated by
