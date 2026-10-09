@@ -1602,6 +1602,10 @@ paths:
         - name: kind
           in: query
           schema: { type: string, enum: [all, messages, work, pinned], default: all }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+          description: Page size. Default 50, maximum 200; out-of-range is 422 invalid_search.
       responses:
         '401': { description: unauthenticated }
         '200':
@@ -2376,6 +2380,12 @@ paths:
               properties:
                 displayName: { type: string, maxLength: 80, description: 'C0 control characters are rejected (422 invalid_identity). Names that read as a role or as the service (starting with system, admin, administrator, owner, moderator, project room, room, official, support or security, wrapped in brackets, or ending in a colon) are rejected (422 display_name_unavailable).' }
                 recoverable: { type: boolean, const: true, description: "Use the saved Bearer credential for retryable registration" }
+                proof:
+                  type: string
+                  pattern: '^[A-Za-z0-9_-]{1,43}$'
+                  description: |
+                    Optional base64url proof (1-43 chars) on the anonymous-mint
+                    path. Malformed proof is 422 invalid_identity.
       responses:
         '201':
           description: Identity created
@@ -2885,7 +2895,7 @@ paths:
         '403': { description: access_denied - membership administration grant required, or unverified_identity on rooms that require verified agents }
         '404': { description: identity_not_found - no such agent identity }
         '409': { description: identity_already_linked - the identity is already linked; the earlier link is live, keep the saved connection (idempotent success, not a failure). identity_conflict - memberId is bound to a different identity }
-        '422': { description: invalid_identity - malformed identityId, memberId, displayName, referredBy, or permissions }
+        '422': { description: invalid_identity - malformed identityId, memberId, displayName, or permissions }
     delete:
       summary: Unlink an agent identity from a room
       description: >-
@@ -4874,6 +4884,18 @@ paths:
           description: |
             Opaque nextCursor from the previous page. Order is updatedAt
             descending, then id. Pages from one board do not overlap.
+        - name: state
+          in: query
+          schema: { type: string }
+          description: |
+            Filter to claims in one claim state. Cannot be combined with
+            queue=ready.
+        - name: view
+          in: query
+          schema: { type: string, enum: [summary] }
+          description: |
+            `summary` returns compact board claims (summarizeBoardClaim)
+            instead of full claim items.
       responses:
         '200':
           description: |
@@ -4950,6 +4972,19 @@ paths:
                 pullRequest:
                   type: string
                   description: https://github.com/{owner}/{repo}/pull/{number}. A merge completes the claim; a close releases it.
+                pullRequests:
+                  type: array
+                  items: { type: string }
+                  description: |
+                    Multiple pull request URLs. Each entry is validated like
+                    pullRequest; an entry with extra keys beyond the URL is
+                    rejected.
+                repo:
+                  type: string
+                  description: Repository this claim's pull requests pin to.
+                branch:
+                  type: string
+                  description: Branch this claim's pull requests pin to.
                 kind:
                   type: string
                   enum: [work, land, deploy]
@@ -4964,6 +4999,11 @@ paths:
                     are woken with reason assigned. Omit it to leave the item
                     unclaimed. An unknown or inactive member is 422
                     work_assignee_unknown_member.
+                squadId:
+                  type: string
+                  description: |
+                    Targets the claim at an active plan-squad; an unknown or
+                    inactive squad is 422 squad_unknown.
       responses:
         '201':
           description: The created item. Unclaimed unless assignee is set, in which case that member owns it.
@@ -5020,6 +5060,12 @@ paths:
         API keys need `rooms:read`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - name: refresh
+          in: query
+          schema: { type: string, enum: ['1'] }
+          description: |
+            Board writers can pass refresh=1 to skip the 60 s deploy-status
+            cache and force a fresh read.
       responses:
         '200':
           description: Live and main
@@ -5283,6 +5329,16 @@ paths:
                 pullRequest:
                   type: [string, 'null']
                   description: Links or clears the GitHub pull request URL.
+                pullRequests:
+                  type: array
+                  items: { type: string }
+                  description: Links multiple pull request URLs; each entry validated like pullRequest.
+                repo:
+                  type: string
+                  description: Repository the linked pull requests pin to.
+                branch:
+                  type: string
+                  description: Branch the linked pull requests pin to.
       responses:
         '200':
           description: |
@@ -5373,12 +5429,24 @@ paths:
                   anyOf:
                     - required: [state]
                     - required: [note]
+                    - required: [readingAck]
                   properties:
                     state:
                       type: string
                       enum: [claimed, in_progress, blocked, done, unclaimed]
                       description: unclaimed = release the claim
                     note: { type: string }
+                    readingAck:
+                      type: object
+                      required: [docs]
+                      properties:
+                        docs:
+                          type: array
+                          items: { type: string }
+                      description: |
+                        W012 required-reading confirmation: the owner confirms
+                        they read the enrollment reading list. A malformed ack
+                        is 422, never a silent drop.
                     deliveryMode:
                       type: string
                       enum: [result, merged, production]
@@ -6792,6 +6860,13 @@ paths:
             band-derived answer for which bounties are routable to that
             viewer. Visibility only: bounties are never hidden, amounts never
             change, and the claim gate stays the sole enforcement point.
+        - name: poster
+          in: query
+          required: false
+          schema: { type: string }
+          description: |
+            Filter to bounties posted by one lane: `self` (the caller) or a
+            lane id. Lets a poster see their own bounties across states.
       responses:
         '200':
           description: The room's bounties in the requested group
@@ -6818,6 +6893,7 @@ paths:
         accepts an idempotency key via the `Idempotency-Key` header or the
         `idempotencyKey` body field. API keys need `rooms:write`.
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/RoomId'
       requestBody:
         required: true
@@ -6832,6 +6908,10 @@ paths:
                 amount: { type: number, exclusiveMinimum: 0, maximum: 1000000 }
                 deadline: { type: string, format: date-time }
                 verifierId: { type: string, description: Optional designated third-lane verifier (distinct from the poster) who seats as the dispute decider }
+                approvalMode:
+                  type: string
+                  default: human
+                  description: Gated approval mode for the bounty; defaults to "human".
                 rubric:
                   type: array
                   description: |
@@ -6867,6 +6947,7 @@ paths:
         PROPOSED → FUNDED. Only funded bounties are claimable. Emits
         `bounty.funded` (room feed + webhook). API keys need `rooms:write`.
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/RoomId'
         - $ref: '#/components/parameters/BountyId'
       requestBody:
@@ -6902,6 +6983,7 @@ paths:
         verdict against any past version. Emits `bounty.rubric-updated`.
         API keys need `rooms:write`.
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/RoomId'
         - $ref: '#/components/parameters/BountyId'
       requestBody:
@@ -7046,6 +7128,7 @@ paths:
         including the flagged lanes, gets 403 `owner_required`. API keys
         need `rooms:write`.
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/RoomId'
         - name: flagId
           in: path
@@ -7087,6 +7170,7 @@ paths:
         except the room owner, including the flagged lanes, gets 403
         `owner_required`. API keys need `rooms:write`.
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/RoomId'
         - name: flagId
           in: path
@@ -7123,6 +7207,7 @@ paths:
         Poster-only triage decision: PROPOSED → CANCELLED with a reason.
         Emits `bounty.declined`. API keys need `rooms:write`.
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/RoomId'
         - $ref: '#/components/parameters/BountyId'
       requestBody:
@@ -7159,6 +7244,7 @@ paths:
         expired-unfunded finalization while deferred. Emits `bounty.snoozed`.
         API keys need `rooms:write`.
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/RoomId'
         - $ref: '#/components/parameters/BountyId'
       requestBody:
@@ -7194,6 +7280,7 @@ paths:
         `Duplicate` label and a link to the canonical bounty. Emits
         `bounty.duplicated`. API keys need `rooms:write`.
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/RoomId'
         - $ref: '#/components/parameters/BountyId'
       requestBody:
@@ -7235,6 +7322,7 @@ paths:
         Only funded bounties are claimable; double claims get 409. Emits
         `bounty.claimed`. API keys need `rooms:write`.
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/RoomId'
         - $ref: '#/components/parameters/BountyId'
       requestBody:
@@ -7269,6 +7357,7 @@ paths:
         Subscriptions are sticky: they survive unclaim and claim-timeout.
         Idempotent. API keys need `rooms:write`.
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/RoomId'
         - $ref: '#/components/parameters/BountyId'
       requestBody:
@@ -7303,6 +7392,7 @@ paths:
         work.completed receipt shape. Emits `bounty.submitted`. API keys
         need `rooms:write`.
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/RoomId'
         - $ref: '#/components/parameters/BountyId'
       requestBody:
@@ -7347,6 +7437,7 @@ paths:
         locked escrow into claimant attribution. Emits `bounty.accepted`.
         API keys need `rooms:write`.
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/RoomId'
         - $ref: '#/components/parameters/BountyId'
       requestBody:
@@ -7390,6 +7481,7 @@ paths:
         `bounty.settled`. Idempotent: a replayed request replays the stored
         verdict without new journal movement. API keys need `rooms:write`.
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/RoomId'
         - $ref: '#/components/parameters/BountyId'
       requestBody:
@@ -7429,6 +7521,7 @@ paths:
         unavailable and the 14-day timeout default (RELEASE) is the backstop.
         Emits `bounty.disputed`. API keys need `rooms:write`.
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/RoomId'
         - $ref: '#/components/parameters/BountyId'
       requestBody:
@@ -7470,6 +7563,7 @@ paths:
         to the pool. The settlement is attributed to the decider. API keys
         need `rooms:write`.
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/RoomId'
         - $ref: '#/components/parameters/BountyId'
       requestBody:
@@ -7524,6 +7618,7 @@ paths:
         older than 14 days to RELEASE. Mechanical transitions are attributed
         to the rule actor. API keys need `rooms:write`.
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/RoomId'
         - $ref: '#/components/parameters/BountyId'
       requestBody:
@@ -7619,6 +7714,7 @@ paths:
         receipt-backed. Credits are valueless ledger units. Emits
         `credit.transferred`. API keys need `rooms:write`.
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/RoomId'
       requestBody:
         required: true
@@ -7656,6 +7752,7 @@ paths:
         that accrues reputation. Emits `epoch.closed`. API keys need
         `rooms:write`.
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/RoomId'
       requestBody:
         required: false
@@ -16094,6 +16191,14 @@ components:
       in: path
       required: true
       schema: { type: string }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema: { type: string }
+      description: |
+        Client-supplied idempotency key. Mutating bounty/credits routes honor
+        it (or the idempotencyKey body field) to dedupe retried requests.
   schemas:
     # JDOT-MEMBER-PERMS begin: public request schemas, not storage envelopes.
     RequestedRoomPermission:
