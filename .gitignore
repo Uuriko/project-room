@@ -8,6 +8,9 @@ node_modules
 coverage/
 test-results/
 
+# Invariant-harness telemetry output (docs/INVARIANTS-TELEMETRY.md) — never commit
+results/
+
 # Local run logs (may contain tokens) — never commit
 runlogs-tmp/
 
