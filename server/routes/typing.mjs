@@ -17,11 +17,9 @@ export async function postTypingBeat(ctx) {
   const fence = selected.mode === "account" ? ctx.accountBinding(ctx.req) : ctx.expectedBinding(ctx.req);
   const auth = ctx.roomAuth(selected, roomId, fence);
   if (!auth?.member?.id) ctx.reject(401, "unauthenticated", "Room membership required");
-  // Instinct-3 review of #1545 (muse-room 3509): a typing beat is a room
-  // write, so it takes the same write chain as roomContext(ctx, true) in
-  // member-permissions.mjs: no bearer account sessions,
-  // CSRF/Origin on cookie writes, the shared write bucket, and rooms:write
-  // for API keys. A read-only key or a cross-site cookie POST is refused.
+  // A typing beat is a room write, so it takes the same write chain as
+  // roomContext(ctx, true): no bearer account sessions, CSRF/Origin on cookie
+  // writes, the shared write bucket, and rooms:write for API keys.
   if (selected.bearer && auth.credentialScope !== "room") ctx.reject(403, "access_denied", "Bearer account sessions are not accepted");
   ctx.protectWrite(ctx.req, auth, selected.bearer);
   if (auth.kind === "api-key" && !(auth.apiKeyScopes ?? []).some(scope => scope === "rooms:write" || scope === "rooms:*")) {
@@ -33,8 +31,7 @@ export async function postTypingBeat(ctx) {
   return ctx.json(ctx.res, 200, { ok: true, ttlMs: TYPING_TTL_MS });
 }
 
-const parameters = Object.freeze({ type: "object", required: ["roomId"],
-  properties: { roomId: { type: "string" } } });
+const parameters = Object.freeze({ type: "object", required: ["roomId"], properties: { roomId: { type: "string" } } });
 
 export const TYPING_ROUTES = Object.freeze([
   Object.freeze({ id: "typing", method: "POST", path: "/api/rooms/{roomId}/typing",
