@@ -36,9 +36,12 @@
 // The pure helpers are exported for tests/lesson-scorer.test.js (repo
 // convention: scripts export helpers, tests import them).
 
-import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { loadCorpus, preview, tokenize } from "./lesson-corpus.mjs";
+// Back-compat re-exports: docs/lesson-scorer.md lists these as the script's
+// API and lesson-contradictions.mjs used to import them from here.
+export { parseWikiEntries, parseQueueEntries, tokenize, loadCorpus } from "./lesson-corpus.mjs";
 
 export const REVIEW_THRESHOLD = 40; // below this: flagged for review
 export const HIGH_SIGNAL_BAR = 60; // at/above this: solid signal
@@ -191,19 +194,6 @@ export function scoreEntry(entry) {
 
 // ------------------------------------------------------- duplicate detection
 
-const STOPWORDS = new Set(
-  "a,an,the,and,or,but,if,then,else,for,to,of,in,on,at,by,with,from,as,is,are,was,were,be,been,being,it,its,this,that,these,those,while,do,does,did,not,no,yes,so,such,than,too,very,can,will,just,into,over,under,after,before,when,where,which,who,whom,whose,my,our,your,his,her,their,per,via,vs".split(
-    ","
-  )
-);
-
-export function tokenize(text) {
-  return String(text)
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((t) => t.length >= 3 && !STOPWORDS.has(t));
-}
-
 function jaccard(a, b) {
   const A = new Set(a);
   const B = new Set(b);
@@ -247,76 +237,11 @@ export function scoreCorpus(entries) {
     .map(({ e }) => e);
 }
 
-// ------------------------------------------------------------- corpus parsing
-
-function stripFences(markdown) {
-  return String(markdown).replace(/```[\s\S]*?```/g, "");
-}
-
-export function parseWikiEntries(markdown) {
-  const text = stripFences(markdown);
-  const headerRe = /^## (\d{4}-\d{2}-\d{2}) · (.+?) · (.+?)$/gm;
-  const headers = [...text.matchAll(headerRe)];
-  const entries = [];
-  for (let k = 0; k < headers.length; k++) {
-    const [full, date, slice, agent] = headers[k];
-    const start = headers[k].index + full.length;
-    const end = k + 1 < headers.length ? headers[k + 1].index : text.length;
-    const body = text.slice(start, end).trim();
-    if (!body) continue;
-    const id = `wiki:${date}:${slice}`;
-    entries.push({
-      id,
-      source: "wiki",
-      date,
-      slice,
-      agent,
-      text: `${date} · ${slice} · ${agent}\n${body}`,
-    });
-  }
-  return entries;
-}
-
-export function parseQueueEntries(markdown) {
-  const text = stripFences(markdown);
-  const entries = [];
-  let week = null;
-  let n = 0;
-  for (const line of text.split("\n")) {
-    const h = /^##\s+(.+?)\s*$/.exec(line);
-    if (h) {
-      week = h[1].trim();
-      continue;
-    }
-    const b = /^\s*-\s+(.+?)\s*$/.exec(line);
-    if (b && week) {
-      const body = b[1].trim();
-      if (body.startsWith("<!--")) continue;
-      entries.push({ id: `queue:${week}:${n++}`, source: "queue", week, text: body });
-    }
-  }
-  return entries;
-}
-
-export function loadCorpus(root, files) {
-  const defaults = ["docs/ROOM-WIKI.md", "docs/WEEKLY-LEARNINGS.md"];
-  const out = [];
-  for (const rel of files && files.length ? files : defaults) {
-    const abs = join(root, rel);
-    if (!existsSync(abs)) continue;
-    const text = readFileSync(abs, "utf8");
-    if (rel.includes("WIKI")) out.push(...parseWikiEntries(text));
-    else out.push(...parseQueueEntries(text));
-  }
-  return out;
-}
+// Corpus loading/parsing now lives in scripts/lesson-corpus.mjs
+// (parseWikiEntries, parseQueueEntries, loadCorpus, tokenize, preview);
+// the re-exports above keep this script's documented API intact.
 
 // ------------------------------------------------------------------- reporting
-
-function preview(text, max = 90) {
-  const one = text.replace(/\s+/g, " ").trim();
-  return one.length > max ? one.slice(0, max - 1) + "…" : one;
-}
 
 export function renderReport(scored, { threshold = REVIEW_THRESHOLD, top = Infinity } = {}) {
   const lines = [];
