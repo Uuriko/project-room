@@ -102,6 +102,13 @@ export function createHeartbeatActor({ store, bearer, reject }) {
     : agentAuth(req, scope);
 }
 
+// Body shapes: required keys present, no keys outside required+optional.
+// The compact form of `exact(data, combo)` over every subset of the
+// optional fields (exact = same key count and all fields present).
+const hasShape = (data, required, optional = []) => !!data
+  && required.every(key => Object.hasOwn(data, key))
+  && Object.keys(data).every(key => required.includes(key) || optional.includes(key));
+
 const KEY_ACTION_ROUTE = /^\/api\/agent-keys\/(rak_[A-Za-z0-9_-]{1,64})\/(rotate|revoke)$/;
 const SUBSCRIPTION_ROUTE = /^\/api\/agent-webhooks\/([A-Za-z0-9_-]{1,64})$/;
 const SUBSCRIPTION_DELIVERIES_ROUTE = /^\/api\/agent-webhooks\/([A-Za-z0-9_-]{1,64})\/deliveries$/;
@@ -111,7 +118,7 @@ const PUBLIC_CARD_ROUTE = /^\/api\/agents\/directory\/([a-z][a-z0-9-]{0,119})$/;
 // RC-2026-09-24-202: public skill card per identity (opt-in via publish:true).
 const SKILL_CARD_ROUTE = /^\/api\/agents\/([A-Za-z0-9_-]{1,64})\/card$/;
 
-export function createAgentPluginRoutes({ store, json, reject, body, rate, bearer, exact, pathId, origin }) {
+export function createAgentPluginRoutes({ store, json, reject, body, rate, bearer, pathId, origin }) {
   // Coded pure-module errors -> HTTP: unknown/not-found reads as 404,
   // validation as 422. Ownership errors come from the sub-store as
   // AgentPluginError with their own status.
@@ -128,6 +135,25 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     return auth;
   };
 
+  // Destructive actions (key rotate/revoke, secret rotate/revoke) require an
+  // explicit { confirm: true } body; requestId is optional and echoed back.
+  const readConfirmedBody = async (req, message) => {
+    const data = await body(req);
+    if (!hasShape(data, ["confirm"], ["requestId"]) || data.confirm !== true)
+      reject(422, "confirm_required", message);
+    if (data.requestId !== undefined && (typeof data.requestId !== "string" || !data.requestId))
+      reject(422, "invalid_request_id", "requestId must be a non-empty string when present");
+    return data;
+  };
+  const withRequestId = (data, result) =>
+    data.requestId === undefined ? result : { ...result, requestId: data.requestId };
+
+  // The path identity must equal the authenticated identity: one identity
+  // can never rotate/revoke/mint for another.
+  const assertOwnIdentity = (auth, identityId, action) => {
+    if (auth.identityId !== identityId) reject(403, "cross_identity", `An identity can only ${action}`);
+  };
+
   // Optional member credential for the directory read surface. Null when no
   // Authorization header is sent (the public view). A valid room-member
   // credential upgrades the view to public + room-visibility cards:
@@ -137,22 +163,10 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
   // scope) fall back to the public view — never an error, never a leak.
   const memberAuth = req => {
     if (!req.headers.authorization) return null;
-    const secret = bearer(req);
-    let identityId;
-    if (secret.startsWith("pri_")) {
-      const resolved = store.identities.resolveGlobalIdentitySecret(secret);
-      if (!resolved) reject(401, "unauthenticated", "Unknown agent identity");
-      identityId = resolved.identityId;
-    } else if (secret.startsWith("rak_")) {
-      const record = store.agentPlugin.verifyPresentedApiKey(secret);
-      if (!record) reject(401, "unauthenticated", "Unknown, revoked, or expired API key");
-      if (!grantsScope(record.scopes, "directory:read")) return null;
-      identityId = record.identityId;
-    } else {
-      reject(401, "unauthenticated", "Agent credential required");
-    }
-    if (!store.agentPlugin.identityIsRoomMember(identityId)) return null;
-    return { identityId };
+    const auth = agentAuth(req); // 401 on invalid credentials, as before
+    if (auth.scopes !== null && !grantsScope(auth.scopes, "directory:read")) return null;
+    if (!store.agentPlugin.identityIsRoomMember(auth.identityId)) return null;
+    return { identityId: auth.identityId };
   };
 
   // The https origin the derived documents (manifest, directory) are built
@@ -195,11 +209,10 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     Object.freeze({ action: "read-manifest", method: "GET", path: "/api/agent-manifest", requiredScope: null,
       description: "The agent plug-in manifest: auth schemes, enrollment flows, API-key scopes, and the agent surface. Unauthenticated." }),
   ]);
-  // A granted scope covers its required scope exactly, or any scope under a
-  // prefix:* wildcard (the scope vocabulary's own rule).
-  const scopeGrants = (granted, required) => required === null ||
-    granted.some(g => g === required || (g.endsWith(":*") && required.startsWith(g.slice(0, -1))));
-  const keyNextFor = scopes => KEY_NEXT.filter(n => scopeGrants(scopes, n.requiredScope))
+  // requiredScope null = readable with any granted scope (the exact/wildcard
+  // rule is the scope vocabulary's own, in grantsScope above).
+  const keyNextFor = scopes => KEY_NEXT
+    .filter(n => n.requiredScope === null || grantsScope(scopes, n.requiredScope))
     .map(({ requiredScope, ...rest }) => rest);
   const withCredential = doc => ({ ...doc, credential: API_KEY_PREFIX + doc.secret, next: keyNextFor(doc.scopes) });
 
@@ -207,9 +220,8 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     rate(`agent-key-issue:${remoteAddress}`, 20);
     const auth = ownerAuth(req);
     const data = await body(req);
-    const shape = data && (exact(data, ["scopes"]) || exact(data, ["scopes", "label"])
-      || exact(data, ["scopes", "expiresAt"]) || exact(data, ["scopes", "label", "expiresAt"]));
-    if (!shape) reject(422, "invalid_api_key_request", "scopes, with optional label and expiresAt, are the accepted fields");
+    if (!hasShape(data, ["scopes"], ["label", "expiresAt"]))
+      reject(422, "invalid_api_key_request", "scopes, with optional label and expiresAt, are the accepted fields");
     if (!Array.isArray(data.scopes) || data.scopes.length === 0 || !data.scopes.every(s => typeof s === "string"))
       reject(422, "invalid_api_key_request", "scopes must be a non-empty string array");
     if (data.label !== undefined && typeof data.label !== "string")
@@ -268,14 +280,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
   const keyAction = translate(async (req, res, { remoteAddress, keyId, action }) => {
     rate(`agent-key-${action}:${remoteAddress}`, 20);
     ownerAuth(req);
-    const data = await body(req);
-    const shape = data && (exact(data, ["confirm"]) || exact(data, ["confirm", "requestId"]));
-    if (!shape || data.confirm !== true) {
-      reject(422, "confirm_required", KEY_ACTION_CONFIRM[action]);
-    }
-    if (data.requestId !== undefined && (typeof data.requestId !== "string" || !data.requestId)) {
-      reject(422, "invalid_request_id", "requestId must be a non-empty string when present");
-    }
+    const data = await readConfirmedBody(req, KEY_ACTION_CONFIRM[action]);
     const result = store.transaction(() => {
       // The request body can wait while the identity credential is retired.
       // Check current authority under the same writer fence as the mutation.
@@ -284,7 +289,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
         ? withCredential(store.agentPlugin.rotateApiKey({ identityId: auth.identityId, keyId }))
         : store.agentPlugin.revokeApiKey({ identityId: auth.identityId, keyId });
     });
-    return json(res, 200, data.requestId === undefined ? result : { ...result, requestId: data.requestId });
+    return json(res, 200, withRequestId(data, result));
   });
 
   // ---- Agent directory ----
@@ -301,18 +306,9 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     // RC-2026-09-18-027: every publish-path 422 points at the signing guide
     // so failures teach instead of dead-ending.
     const signingDocs = "See docs/SIGNED-AGENT-CARDS.md for the signing guide.";
-    const shape = data && [
-      ["agentId", "card", "publicKey", "signature"],
-      ["agentId", "card", "visibility", "publicKey", "signature"],
-      ["agentId", "card", "publicKey", "signature", "rotationSignature"],
-      ["agentId", "card", "visibility", "publicKey", "signature", "rotationSignature"],
-      ["agentId", "card", "publicKey", "signature", "recovery"],
-      ["agentId", "card", "visibility", "publicKey", "signature", "recovery"],
-      ["agentId", "card", "publicKey", "signature", "rotationSignature", "recovery"],
-      ["agentId", "card", "visibility", "publicKey", "signature", "rotationSignature", "recovery"],
-    ].some(fields => exact(data, fields));
-    if (!shape) reject(422, "invalid_card",
-      "agentId, card, publicKey, signature, and optional visibility, rotationSignature, recovery are the accepted fields. " + signingDocs);
+    if (!hasShape(data, ["agentId", "card", "publicKey", "signature"], ["visibility", "rotationSignature", "recovery"]))
+      reject(422, "invalid_card",
+        "agentId, card, publicKey, signature, and optional visibility, rotationSignature, recovery are the accepted fields. " + signingDocs);
     if (data.recovery !== undefined && data.recovery !== true) {
       reject(422, "invalid_card", "recovery must be true when given. " + signingDocs);
     }
@@ -372,7 +368,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     rate(`agent-skills-publish:${remoteAddress}`, 20);
     const auth = agentAuth(req, requiredScope("skills:publish"));
     const data = await body(req);
-    if (!data || !exact(data, ["publish", "skills"])) {
+    if (!hasShape(data, ["publish", "skills"])) {
       reject(422, "invalid_skills", "publish (boolean) and skills (array) are the accepted fields");
     }
     const result = store.membersDirectory.setSkills(auth.identityId, { publish: data.publish, skills: data.skills });
@@ -449,7 +445,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     rate(`agent-webhook-subscribe:${remoteAddress}`, 20);
     const auth = agentAuth(req, requiredScope("webhooks:manage"));
     const data = await body(req);
-    if (!data || !(exact(data, ["url", "events"]) || exact(data, ["url", "events", "secret"])))
+    if (!hasShape(data, ["url", "events"], ["secret"]))
       reject(422, "invalid_subscription_request", "url, events, and optional secret are the accepted fields");
     if (!Array.isArray(data.events) || data.events.length === 0 || !data.events.every(e => typeof e === "string"))
       reject(422, "invalid_subscription_request", "events must be a non-empty string array");
@@ -521,7 +517,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     rate(`agent-webhook-verify:${remoteAddress}`, 120);
     const auth = agentAuth(req, requiredScope("webhooks:manage"));
     const data = await body(req);
-    if (!(data && exact(data, ["eventType", "data", "signature"])))
+    if (!hasShape(data, ["eventType", "data", "signature"]))
       reject(422, "invalid_verify_request", "eventType, data, and signature are the accepted fields");
     if (typeof data.eventType !== "string" || data.eventType.length === 0)
       reject(422, "invalid_verify_request", "eventType must be a non-empty string");
@@ -659,18 +655,11 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
   const rotateIdentitySecret = translate(async (req, res, { remoteAddress, identityId }) => {
     rate(`agent-identity-rotate:${remoteAddress}`, 20);
     const auth = ownerAuth(req);
-    if (auth.identityId !== identityId) reject(403, "cross_identity", "An identity can only rotate its own secret");
-    const data = await body(req);
-    const shape = data && (exact(data, ["confirm"]) || exact(data, ["confirm", "requestId"]));
-    if (!shape || data.confirm !== true) {
-      reject(422, "confirm_required",
-        "Rotation retires the current secret immediately and shows the replacement once. Send {\"confirm\":true} to proceed; requestId is optional.");
-    }
-    if (data.requestId !== undefined && (typeof data.requestId !== "string" || !data.requestId)) {
-      reject(422, "invalid_request_id", "requestId must be a non-empty string when present");
-    }
+    assertOwnIdentity(auth, identityId, "rotate its own secret");
+    const data = await readConfirmedBody(req,
+      "Rotation retires the current secret immediately and shows the replacement once. Send {\"confirm\":true} to proceed; requestId is optional.");
     const result = store.identities.rotate(identityId, bearer(req));
-    return json(res, 200, data.requestId === undefined ? result : { ...result, requestId: data.requestId });
+    return json(res, 200, withRequestId(data, result));
   });
 
   // Revocation is the end of the line for this credential: unlike rotation it
@@ -680,18 +669,11 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
   const revokeIdentitySecret = translate(async (req, res, { remoteAddress, identityId }) => {
     rate(`agent-identity-revoke:${remoteAddress}`, 20);
     const auth = ownerAuth(req);
-    if (auth.identityId !== identityId) reject(403, "cross_identity", "An identity can only revoke its own secret");
-    const data = await body(req);
-    const shape = data && (exact(data, ["confirm"]) || exact(data, ["confirm", "requestId"]));
-    if (!shape || data.confirm !== true) {
-      reject(422, "confirm_required",
-        "Revocation retires this secret immediately and issues nothing in its place; it cannot be undone. Rotate instead when you need continuity. Send {\"confirm\":true} to proceed; requestId is optional.");
-    }
-    if (data.requestId !== undefined && (typeof data.requestId !== "string" || !data.requestId)) {
-      reject(422, "invalid_request_id", "requestId must be a non-empty string when present");
-    }
+    assertOwnIdentity(auth, identityId, "revoke its own secret");
+    const data = await readConfirmedBody(req,
+      "Revocation retires this secret immediately and issues nothing in its place; it cannot be undone. Rotate instead when you need continuity. Send {\"confirm\":true} to proceed; requestId is optional.");
     const result = store.identities.revoke(identityId, bearer(req));
-    return json(res, 200, data.requestId === undefined ? result : { ...result, requestId: data.requestId });
+    return json(res, 200, withRequestId(data, result));
   });
 
   // ---- Identity link codes (RC-2026-09-24-210) ----
@@ -711,7 +693,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
   const mintIdentityLinkCode = translate(async (req, res, { remoteAddress, identityId }) => {
     rate(`identity-link-code:${remoteAddress}`, 20);
     const auth = ownerAuth(req);
-    if (auth.identityId !== identityId) reject(403, "cross_identity", "An identity can only mint link codes for itself");
+    assertOwnIdentity(auth, identityId, "mint link codes for itself");
     return json(res, 201, store.identities.mintLinkCode(identityId, bearer(req)));
   });
 
@@ -737,10 +719,10 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
   const rotateIdentityKey = translate(async (req, res, { remoteAddress, identityId }) => {
     rate(`agent-key-rotate:${remoteAddress}`, 20);
     const auth = ownerAuth(req);
-    if (auth.identityId !== identityId) reject(403, "cross_identity", "An identity can only rotate its own keys");
+    assertOwnIdentity(auth, identityId, "rotate its own keys");
     const data = await body(req);
-    const shape = data && (exact(data, ["newPublicKey"]) || exact(data, ["newPublicKey", "overlapMs"]));
-    if (!shape) reject(422, "invalid_key", "newPublicKey is required; overlapMs is optional");
+    if (!hasShape(data, ["newPublicKey"], ["overlapMs"]))
+      reject(422, "invalid_key", "newPublicKey is required; overlapMs is optional");
     return json(res, 200, store.keyRegistry.rotateKey(identityId, {
       identitySecret: bearer(req), newPublicKey: data.newPublicKey, overlapMs: data.overlapMs }));
   });
@@ -748,9 +730,9 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
   const revokeIdentityKey = translate(async (req, res, { remoteAddress, identityId }) => {
     rate(`agent-key-revoke:${remoteAddress}`, 20);
     const auth = ownerAuth(req);
-    if (auth.identityId !== identityId) reject(403, "cross_identity", "An identity can only revoke its own keys");
+    assertOwnIdentity(auth, identityId, "revoke its own keys");
     const data = await body(req);
-    if (!(data && exact(data, ["publicKey"]) && typeof data.publicKey === "string")) {
+    if (!hasShape(data, ["publicKey"]) || typeof data.publicKey !== "string") {
       reject(422, "invalid_key", "publicKey is required");
     }
     return json(res, 200, store.keyRegistry.revokeKey(identityId, {
@@ -784,9 +766,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     // RC-2026-09-24-203: the body stays backward-compatible — hostId is
     // required; mode is optional and defaults to wakeable (RC-2026-09-28-3602).
     // wakeUrl / cadenceSeconds / pushNotification / workWakes are optional.
-    const heartbeatFields = ["hostId", "mode", "wakeUrl", "cadenceSeconds", "pushNotification", "workWakes"];
-    if (!data || !Object.keys(data).every(field => heartbeatFields.includes(field))
-        || !Object.hasOwn(data, "hostId"))
+    if (!hasShape(data, ["hostId"], ["mode", "wakeUrl", "cadenceSeconds", "pushNotification", "workWakes"]))
       reject(422, "invalid_heartbeat", "hostId is required; mode defaults to wakeable; wakeUrl, cadenceSeconds, pushNotification and workWakes are optional");
     if (roomKey) assertRoomKeyPullOnly(store, auth.identityId, data);
     // Subscribe-time SSRF guard: the push url's hostname must resolve to a
@@ -827,7 +807,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     let auth = heartbeatActor(req, requiredScope("heartbeats:report"));
     const initialIdentity = auth.identityId;
     const data = await body(req);
-    if (!data || !exact(data, ["signalIds"]) || !Array.isArray(data.signalIds))
+    if (!hasShape(data, ["signalIds"]) || !Array.isArray(data.signalIds))
       reject(422, "invalid_heartbeat_ack", "signalIds (a string array) is the accepted field");
     return json(res, 200, store.transaction(() => {
       auth = heartbeatActor(req, requiredScope("heartbeats:report"));
@@ -922,65 +902,71 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     }
   });
 
-  return async function handleAgentPluginRoutes(req, res, { url, remoteAddress }) {
-    const pathname = url.pathname, method = req.method;
-    if (pathname === "/api/agent-keys" && method === "POST") { await issueKey(req, res, { remoteAddress }); return true; }
-    if (pathname === "/api/agent-keys" && method === "GET") { await listKeys(req, res); return true; }
-    const keyActionMatch = method === "POST" ? KEY_ACTION_ROUTE.exec(pathname) : null;
-    if (keyActionMatch) { await keyAction(req, res, { remoteAddress, keyId: keyActionMatch[1], action: keyActionMatch[2] }); return true; }
-    if (pathname === "/api/agent-directory/cards" && method === "POST") { await publishCard(req, res, { remoteAddress }); return true; }
-    if (pathname === "/api/agent-skills" && method === "POST") { await publishSkills(req, res, { remoteAddress }); return true; }
-    const skillCardMatch = method === "GET" ? SKILL_CARD_ROUTE.exec(pathname) : null;
-    if (skillCardMatch) { await skillCardDocument(req, res, { remoteAddress, identityId: skillCardMatch[1] }); return true; }
-    if (pathname === "/api/agent-directory" && method === "GET") { await directoryDocument(req, res, { url }); return true; }
-    if (pathname === "/api/agents/directory" && method === "GET") { await directoryDocument(req, res, { url }); return true; }
-    const cardMatch = method === "DELETE" ? CARD_ROUTE.exec(pathname) : null;
-    if (cardMatch) { await withdrawCard(req, res, { remoteAddress, agentId: cardMatch[1] }); return true; }
-    const publicCardMatch = method === "GET" ? PUBLIC_CARD_ROUTE.exec(pathname) : null;
-    if (publicCardMatch) { await cardDocument(req, res, { agentId: publicCardMatch[1] }); return true; }
-    if ((pathname === "/api/agent-manifest" || pathname === WELL_KNOWN_PATH) && method === "GET") { await manifest(req, res); return true; }
-    if (pathname === "/api/agent-webhooks" && method === "GET") { await listWebhooks(req, res); return true; }
-    if (pathname === "/api/agent-webhooks" && method === "POST") { await subscribeWebhook(req, res, { remoteAddress }); return true; }
-    const subMatch = method === "DELETE" ? SUBSCRIPTION_ROUTE.exec(pathname) : null;
-    if (subMatch) { await unsubscribeWebhook(req, res, { remoteAddress, subscriptionId: subMatch[1] }); return true; }
-    const deliveriesMatch = method === "GET" ? SUBSCRIPTION_DELIVERIES_ROUTE.exec(pathname) : null;
-    if (deliveriesMatch) { await webhookDeliveries(req, res, { remoteAddress, subscriptionId: deliveriesMatch[1] }); return true; }
-    const verifyDeliveryMatch = method === "POST" ? VERIFY_DELIVERY_ROUTE.exec(pathname) : null;
-    if (verifyDeliveryMatch) { await verifyDelivery(req, res, { remoteAddress, subscriptionId: verifyDeliveryMatch[1] }); return true; }
+  // ---- Route table ----
+  // Rows are tried in order; the first (method, path) match wins, exactly
+  // like the if-chain this replaces. Fixed paths stay as "/api/…" string
+  // literals and regexes stay as anchored constants above — the route-docs
+  // gate extracts the served surface from those source literals, and
+  // tests/open-routes.test.js reads KEY_ACTION_ROUTE from its declaration.
+  const fixed = path => pathname => (pathname === path ? {} : null);
+  const either = (...paths) => pathname => (paths.includes(pathname) ? {} : null);
+  const captured = (regex, map) => pathname => {
+    const m = regex.exec(pathname);
+    return m ? map(m) : null;
+  };
+  const identityCaptured = regex => captured(regex, m => ({ identityId: pathId(m[1]) }));
+  const ROUTES = [
+    ["POST", fixed("/api/agent-keys"), issueKey],
+    ["GET", fixed("/api/agent-keys"), listKeys],
+    ["POST", captured(KEY_ACTION_ROUTE, m => ({ keyId: m[1], action: m[2] })), keyAction],
+    ["POST", fixed("/api/agent-directory/cards"), publishCard],
+    ["POST", fixed("/api/agent-skills"), publishSkills],
+    ["GET", captured(SKILL_CARD_ROUTE, m => ({ identityId: m[1] })), skillCardDocument],
+    ["GET", fixed("/api/agent-directory"), directoryDocument],
+    ["GET", fixed("/api/agents/directory"), directoryDocument],
+    ["DELETE", captured(CARD_ROUTE, m => ({ agentId: m[1] })), withdrawCard],
+    ["GET", captured(PUBLIC_CARD_ROUTE, m => ({ agentId: m[1] })), cardDocument],
+    ["GET", either("/api/agent-manifest", WELL_KNOWN_PATH), manifest],
+    ["GET", fixed("/api/agent-webhooks"), listWebhooks],
+    ["POST", fixed("/api/agent-webhooks"), subscribeWebhook],
+    ["DELETE", captured(SUBSCRIPTION_ROUTE, m => ({ subscriptionId: m[1] })), unsubscribeWebhook],
+    ["GET", captured(SUBSCRIPTION_DELIVERIES_ROUTE, m => ({ subscriptionId: m[1] })), webhookDeliveries],
+    ["POST", captured(VERIFY_DELIVERY_ROUTE, m => ({ subscriptionId: m[1] })), verifyDelivery],
     // RC-2026-09-19-064: signed dispatch surface (fixed paths before the
     // subscription-id regexes so they cannot shadow each other).
-    if (pathname === "/api/agent-webhooks/deliveries" && method === "GET") { await deliveryLog(req, res, { url }); return true; }
-    if (pathname === "/api/agent-webhooks/dead-letter" && method === "GET") { await deadLetterQueue(req, res, { url }); return true; }
-    if (pathname === "/api/agent-webhooks/metrics" && method === "GET") { await deliveryMetrics(req, res); return true; }
-    if (pathname === "/api/agent-webhooks/process" && method === "POST") { await processWebhooks(req, res); return true; }
-    const redriveMatch = method === "POST" ? DELIVERY_REDRIVE_ROUTE.exec(pathname) : null;
-    if (redriveMatch) { await redriveDelivery(req, res, { deliveryId: redriveMatch[1] }); return true; }
-    const verifyMatch = method === "POST" ? VERIFY_ROUTE.exec(pathname) : null;
-    if (verifyMatch) { await verifyIdentity(req, res, { remoteAddress, identityId: pathId(verifyMatch[1]) }); return true; }
-    const unverifyMatch = method === "DELETE" ? VERIFY_ROUTE.exec(pathname) : null;
-    if (unverifyMatch) { await unverifyIdentity(req, res, { identityId: pathId(unverifyMatch[1]) }); return true; }
-    const verificationMatch = method === "GET" ? VERIFICATION_ROUTE.exec(pathname) : null;
-    if (verificationMatch) { await identityVerification(req, res, { identityId: pathId(verificationMatch[1]) }); return true; }
-    const secretRotateMatch = method === "POST" ? SECRET_ROTATE_ROUTE.exec(pathname) : null;
-    if (secretRotateMatch) { await rotateIdentitySecret(req, res, { remoteAddress, identityId: pathId(secretRotateMatch[1]) }); return true; }
-    const secretRevokeMatch = method === "POST" ? SECRET_REVOKE_ROUTE.exec(pathname) : null;
-    if (secretRevokeMatch) { await revokeIdentitySecret(req, res, { remoteAddress, identityId: pathId(secretRevokeMatch[1]) }); return true; }
+    ["GET", fixed("/api/agent-webhooks/deliveries"), deliveryLog],
+    ["GET", fixed("/api/agent-webhooks/dead-letter"), deadLetterQueue],
+    ["GET", fixed("/api/agent-webhooks/metrics"), deliveryMetrics],
+    ["POST", fixed("/api/agent-webhooks/process"), processWebhooks],
+    ["POST", captured(DELIVERY_REDRIVE_ROUTE, m => ({ deliveryId: m[1] })), redriveDelivery],
+    ["POST", identityCaptured(VERIFY_ROUTE), verifyIdentity],
+    ["DELETE", identityCaptured(VERIFY_ROUTE), unverifyIdentity],
+    ["GET", identityCaptured(VERIFICATION_ROUTE), identityVerification],
+    ["POST", identityCaptured(SECRET_ROTATE_ROUTE), rotateIdentitySecret],
+    ["POST", identityCaptured(SECRET_REVOKE_ROUTE), revokeIdentitySecret],
     // RC-2026-09-24-210: identity-holder proof-of-possession mint.
-    const linkCodeMatch = method === "POST" ? LINK_CODE_ROUTE.exec(pathname) : null;
-    if (linkCodeMatch) { await mintIdentityLinkCode(req, res, { remoteAddress, identityId: pathId(linkCodeMatch[1]) }); return true; }
-    const keyListMatch = method === "GET" ? KEY_LIST_ROUTE.exec(pathname) : null;
-    if (keyListMatch) { await listIdentityKeys(req, res, { identityId: pathId(keyListMatch[1]) }); return true; }
-    const keyRotateMatch = method === "POST" ? KEY_ROTATE_ROUTE.exec(pathname) : null;
-    if (keyRotateMatch) { await rotateIdentityKey(req, res, { remoteAddress, identityId: pathId(keyRotateMatch[1]) }); return true; }
-    const keyRevokeMatch = method === "POST" ? KEY_REVOKE_ROUTE.exec(pathname) : null;
-    if (keyRevokeMatch) { await revokeIdentityKey(req, res, { remoteAddress, identityId: pathId(keyRevokeMatch[1]) }); return true; }
-
+    ["POST", identityCaptured(LINK_CODE_ROUTE), mintIdentityLinkCode],
+    ["GET", identityCaptured(KEY_LIST_ROUTE), listIdentityKeys],
+    ["POST", identityCaptured(KEY_ROTATE_ROUTE), rotateIdentityKey],
+    ["POST", identityCaptured(KEY_REVOKE_ROUTE), revokeIdentityKey],
     // RC-2026-09-18-051: wakeable agent presence.
-    if (pathname === "/api/agent-heartbeats" && method === "POST") { await reportHeartbeat(req, res, { remoteAddress }); return true; }
-    if (pathname === "/api/agent-heartbeats" && method === "GET") { await readHeartbeats(req, res); return true; }
-    if (pathname === "/api/agent-heartbeats/ack" && method === "POST") { await ackHeartbeats(req, res, { remoteAddress }); return true; }
-    // RC-2026-09-28-3602: room-hosted wake poll (before any regex routes).
-    if (pathname === "/api/agent-wakes/poll" && method === "GET") { await pollWakes(req, res, { url }); return true; }
+    ["POST", fixed("/api/agent-heartbeats"), reportHeartbeat],
+    ["GET", fixed("/api/agent-heartbeats"), readHeartbeats],
+    ["POST", fixed("/api/agent-heartbeats/ack"), ackHeartbeats],
+    // RC-2026-09-28-3602: room-hosted wake poll.
+    ["GET", fixed("/api/agent-wakes/poll"), pollWakes],
+  ];
+
+  return async function handleAgentPluginRoutes(req, res, { url, remoteAddress }) {
+    const pathname = url.pathname, method = req.method;
+    for (const [routeMethod, match, handler] of ROUTES) {
+      if (routeMethod !== method) continue;
+      const params = match(pathname);
+      if (params === null) continue;
+      // Handlers destructure what they need from the shared context.
+      await handler(req, res, { url, remoteAddress, ...params });
+      return true;
+    }
     return false;
   };
 }
