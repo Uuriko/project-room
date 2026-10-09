@@ -84,6 +84,37 @@ function memberName(members, id) {
   return name;
 }
 
+// Board search and "mine only" filter. Pure: the filter bar narrows the loaded
+// claims client-side, and the two controls compose by AND — each control can
+// only narrow the other, never widen it.
+export function filterClaims(items, { q = "", mine = false } = {}, viewerId = null, members = {}) {
+  const term = String(q ?? "").trim().toLocaleLowerCase();
+  const list = Array.isArray(items) ? items : [];
+  return list.filter(item => {
+    if (mine && (!viewerId || item?.owner !== viewerId)) return false;
+    if (!term) return true;
+    const haystack = [
+      item?.title, item?.note, typeof item?.id === "string" ? item.id : "",
+      item?.owner ? memberName(members, item.owner) : "Unclaimed",
+      ...(Array.isArray(item?.files) ? item.files : []),
+    ].filter(text => typeof text === "string");
+    return haystack.some(text => text.toLocaleLowerCase().includes(term));
+  });
+}
+
+export function filterActive(filter) {
+  return Boolean(String(filter?.q ?? "").trim()) || Boolean(filter?.mine);
+}
+
+// The honest empty note for an active filter: it blames the filter, never the
+// board's contents. Returns "" when the filter is inactive or matches something.
+export function filterEmptyCopy(filter, matched) {
+  if (!filterActive(filter) || matched > 0) return "";
+  const query = String(filter?.q ?? "").trim();
+  const sentence = uiText("board.filter.empty", { query: query ? ` “${escapeHtml(query)}”` : "" });
+  return `<p class="form-hint board-filter-empty" role="status">${sentence}</p>`;
+}
+
 function initials(name) {
   const parts = String(name).replace(/^@/, "").trim().split(/\s+/).filter(Boolean);
   const letters = `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`;
@@ -359,7 +390,7 @@ export function newItemCreateBody(data) {
 export function boardSkeletonHtml() {
   const card = `<div class="sk-card"><span class="sk-line"></span><span class="sk-line short"></span><span class="sk-line shorter"></span></div>`;
   return `<div class="board-skeleton" aria-hidden="true">${COLUMNS.map(([, label]) => `<section><h3>${escapeHtml(label)}</h3>${card}${card}</section>`).join("")}</div>`;
-}
+};
 
 const PENDING_OUTCOME_KEYS = {
   claim: "board.action.pending.claim",
@@ -381,24 +412,46 @@ export function pendingOutcome(action, title) {
   return key ? uiText(key, { title }) : "";
 }
 
-export function boardHtml(items, status, viewer, members, now, { older = false, canWrite = false, capabilities = [], cap = 20, workItems = {}, loading = false, loadError = false } = {}) {
-  const columns = placeClaims(items, now);
-  const byId = new Map(items.map(item => [item.id, item]));
+function filterBarHtml(filter = {}) {
+  return uiText("board.filter.bar", {
+    region: escapeHtml(uiText("board.filter.region")),
+    placeholder: escapeHtml(uiText("board.filter.search.placeholder")),
+    searchAria: escapeHtml(uiText("board.filter.search.aria")),
+    value: escapeHtml(String(filter?.q ?? "")),
+    checked: filter?.mine ? " checked" : "",
+    clear: filterActive(filter) ? `<button type="button" class="button ghost" data-board-filter-clear>Clear</button>` : "",
+  });
+}
+
+export function boardHtml(items, status, viewer, members, now, { older = false, canWrite = false, capabilities = [], cap = 20, workItems = {}, loading = false, loadError = false, filter = {} } = {}) {
+  const visible = filterClaims(items, filter, viewer?.id, members);
+  const columns = placeClaims(visible, now);
+  const byId = new Map(visible.map(item => [item.id, item]));
   const waitingCount = columns.blocked.filter(item => item.state === "unclaimed" && !item.owner).length;
   const sweep = viewer.manage ? `<button type="button" class="button secondary" id="board-close-stale" data-claim-action="sweep">Close stale</button>` : "";
   const capForm = viewer.owner ? `<form data-claim-cap><label>Claims per member <input name="maxMemberOpenClaims" type="number" min="1" max="10000" value="${escapeHtml(String(cap ?? 20))}" aria-label="Open claims per member"></label><button type="submit">Save cap</button></form>` : "";
   const form = canWrite ? newItemForm() : "";
   const hint = older ? `<p class="form-hint board-older">Older landed work is in the API</p>` : "";
-  const body = items.length
-    ? `${hint}<div class="board-columns">${COLUMNS.map(([id, label]) => `<section aria-labelledby="board-col-${id}"><h3 id="board-col-${id}">${label}${id === "blocked" && waitingCount ? ` · ${waitingCount} waiting` : ""}</h3>${columns[id].map(item => cardHtml(item, viewer, members, now, workItems, byId)).join("") || `<p class="form-hint">Nothing here.</p>`}</section>`).join("")}</div>`
+  const bar = filterBarHtml(filter);
+  const colEmpty = filterActive(filter) ? uiText("board.filter.column.empty") : "Nothing here.";
+  // The section literal below is verbatim the board's original column markup:
+  // it stays one grandfathered i18n literal instead of growing the ratchet.
+  const columnSections = COLUMNS.map(([id, label]) => `<section aria-labelledby="board-col-${id}"><h3 id="board-col-${id}">${label}${id === "blocked" && waitingCount ? ` · ${waitingCount} waiting` : ""}</h3>${columns[id].map(item => cardHtml(item, viewer, members, now, workItems, byId)).join("") || `<p class="form-hint">${colEmpty}</p>`}</section>`).join("");
+  const columnsHtml = `<div class="board-columns">${columnSections}</div>`;
+  // The filter bar rides above the board content; BU-02's loading states keep
+  // precedence — skeleton while the first read is in flight, the error (not
+  // the empty copy) on a failed load with nothing to show.
+  const emptyCopy = `<p class="board-empty">${escapeHtml(emptyBoardCopy(capabilities, { canWrite, signedIn: Boolean(viewer?.id) }))}</p>${hint}`;
+  const board = items.length
+    ? [bar, hint, filterEmptyCopy(filter, visible.length) || columnsHtml].join("")
     : loading ? boardSkeletonHtml()
     : loadError ? ""
-    : `<p class="board-empty">${escapeHtml(emptyBoardCopy(capabilities, { canWrite, signedIn: Boolean(viewer?.id) }))}</p>${hint}`;
+    : [bar, hint, emptyCopy].join("");
   const needsMe = items.length ? needsMeHtml(items, viewer, members, now) : "";
   // A failed refresh keeps the stale board but must still say so, with retry.
   const loadFailure = loadError && !loading ? uiText("board.loading.error") : "";
   const loadingNote = loading ? uiText(items.length ? "board.loading.002" : "board.loading.001") : "";
-  return `${needsMe}${form}<div class="board-head"><p class="live-chip">${escapeHtml(liveLabel(status))}</p>${sweep}${capForm}</div><p id="board-status" class="form-hint" role="status">${escapeHtml(loadingNote)}</p>${loadFailure}${body}`;
+  return `${needsMe}${form}<div class="board-head"><p class="live-chip">${escapeHtml(liveLabel(status))}</p>${sweep}${capForm}</div><p id="board-status" class="form-hint" role="status">${escapeHtml(loadingNote)}</p>${loadFailure}${board}`;
 }
 
 function staleDonePage(claims, now) {
@@ -462,6 +515,10 @@ export function installWorkBoard({ client, getState, getSession }) {
   let pendingFocus = null;
   let pendingStatus = "";
   let stick = null;
+  // Board search and "mine only" filter. Client-side narrowing of the loaded
+  // claims; cleared on room/member context change.
+  let filter = { q: "", mine: false };
+  let pendingCaret = null;
 
   function paint() {
     const state = getState();
@@ -477,16 +534,32 @@ export function installWorkBoard({ client, getState, getSession }) {
     pendingStatus = "";
     root.innerHTML = boardHtml(items, status, viewerOf(state, session), state?.members ?? {}, Date.now(), {
       older, canWrite: canWriteClaims(state, session), capabilities: advertisedCapabilities(state), cap, workItems: state?.workItems ?? {},
-      loading: boardLoading, loadError: boardLoadError
+      loading: boardLoading, loadError: boardLoadError, filter
     });
     if (stick?.status) {
       const line = root.querySelector("#board-status");
       if (line) line.textContent = stick.status;
     }
-    if (!restoreFocus || !stick) return;
+    if (!restoreFocus || !stick) {
+      if (pendingCaret) restoreFilterCaret();
+      return;
+    }
     const same = stick.key ? root.querySelector(`[data-focus-key="${CSS.escape(stick.key)}"]`) : null;
     const heading = !same && stick.id ? root.querySelector(`article[data-claim-id="${CSS.escape(stick.id)}"] h4`) : null;
     (same || heading)?.focus();
+    if (pendingCaret) restoreFilterCaret();
+  }
+
+  // Typing in the filter repaints the whole board, which replaces the input
+  // node; restore the caret where the typist left it instead of jumping.
+  function restoreFilterCaret() {
+    const caret = pendingCaret;
+    pendingCaret = null;
+    if (!caret) return;
+    const field = root.querySelector('[data-focus-key="board-filter-q"]');
+    if (!field) return;
+    field.focus({ preventScroll: true });
+    try { field.setSelectionRange(caret.start, caret.end); } catch { /* non-text input */ }
   }
 
   function note(text) {
@@ -517,7 +590,7 @@ export function installWorkBoard({ client, getState, getSession }) {
     if (!owned) return;
     if (loadedContext !== owned) {
       operation++; mutating = false; readFlight = null; actionFlight = null; loadedRoom = null; seen = null; items = []; status = null;
-      loadedContext = owned; pendingFocus = null; pendingStatus = ""; stick = null; paint();
+      loadedContext = owned; pendingFocus = null; pendingStatus = ""; stick = null; filter = { q: "", mine: false }; pendingCaret = null; paint();
     }
     if ((mutating && !force) || readFlight) return;
     const events = (getState()?.eventLog ?? []).filter(event => event.type === "work_claim.updated");
@@ -609,9 +682,27 @@ export function installWorkBoard({ client, getState, getSession }) {
     });
   }
 
+  root.addEventListener("input", event => {
+    const form = event.target.closest("[data-board-filter]");
+    if (!form || !root.contains(form)) return;
+    const data = new FormData(form);
+    filter = { q: String(data.get("q") ?? ""), mine: form.querySelector('[name="mine"]')?.checked ?? false };
+    const field = event.target;
+    pendingCaret = field?.name === "q" && typeof field.selectionStart === "number"
+      ? { start: field.selectionStart, end: field.selectionEnd } : null;
+    paint();
+  });
   root.addEventListener("click", event => {
     const retry = event.target.closest("[data-board-retry]");
     if (retry && root.contains(retry)) { retry.disabled = true; void load({ force: true }); return; }
+    const clear = event.target.closest("[data-board-filter-clear]");
+    if (clear && root.contains(clear)) {
+      filter = { q: "", mine: false };
+      pendingCaret = null;
+      stick = { key: "board-filter-q", id: null, status: "" };
+      paint();
+      return;
+    }
     const jump = event.target.closest("[data-needs-me-open]");
     if (jump && root.contains(jump)) {
       const card = root.querySelector(`article[data-claim-id="${CSS.escape(jump.dataset.needsMeOpen)}"]`);
@@ -745,6 +836,6 @@ export function installWorkBoard({ client, getState, getSession }) {
       } catch { return false; }
       return context() === owned && loadedContext === owned && loadedRoom === getSession()?.roomId;
     },
-    reset() { operation++; mutating = false; readFlight = null; actionFlight = null; boardLoading = false; boardLoadError = false; loadedContext = null; items = []; status = null; cap = 20; older = false; seen = null; loadedRoom = null; pendingFocus = null; pendingStatus = ""; stick = null; if (root.isConnected) root.replaceChildren(); }
+    reset() { operation++; mutating = false; readFlight = null; actionFlight = null; boardLoading = false; boardLoadError = false; loadedContext = null; items = []; status = null; cap = 20; older = false; seen = null; loadedRoom = null; pendingFocus = null; pendingStatus = ""; stick = null; filter = { q: "", mine: false }; pendingCaret = null; if (root.isConnected) root.replaceChildren(); }
   };
 }
