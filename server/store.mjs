@@ -84,6 +84,8 @@ import { agentRoomSchema } from "./agent-rooms.mjs";
 import { directSendSchema } from "./inbox-outbox.mjs";
 import { inboxStitchSchema } from "./inbox-stitch-store.mjs";
 import { ensureAttachmentSchema, verifyAttachmentSchema } from "./attachment-schema.mjs";
+import { ensurePayloadSchema } from "./payload-schema.mjs";
+import { PayloadStore } from "./payload-store.mjs";
 import { RoomAttachmentBytes } from "./room-attachment-bytes.mjs";
 import { InboxAttachmentBytes, inboxAttachmentBytesSchema } from "./inbox-attachment-bytes.mjs";
 import { BountyEscrow, bountyEscrowSchema, convergeBountyDeployedSchema } from "./bounty-escrow.mjs"; // Escrowed bounties, agent work exchange slice 1.
@@ -1031,7 +1033,8 @@ export const ADDITIVE_SCHEMA_ENSURES = [
   [ensureSpendGrantsSchema, "ensureSpendGrantsSchema@1"],
   [ensureAccountProfileSchema, "ensureAccountProfileSchema@1"],
   [ensureVerifiedEmailSchema, "ensureVerifiedEmailSchema@1"],
-  [ensureAttachmentSchema, "ensureAttachmentSchema@1"]
+  [ensureAttachmentSchema, "ensureAttachmentSchema@1"],
+  [ensurePayloadSchema, "ensurePayloadSchema@1"]
 ];
 
 // Hash of the DDL this process knows how to apply. A stored match means
@@ -1253,6 +1256,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.close();
       throw new Error(version > STORE_SCHEMA_VERSION ? "Database schema is newer than this service" : "Database schema version is unsupported");
     }
+    // WAVE-300: content-addressed payload blobs. Constructed after the version
+    // check because PayloadStore runs DDL (ensurePayloadSchema), which would
+    // trip the fresh-DB hasSchema detection above. Guarded: read-only opens
+    // (backup.mjs) must not run DDL — http.mjs falls back to lazy ??= attach.
+    if (!readOnly) this.payloads = new PayloadStore(this.db, { now: () => this.now() });
     if (readOnly) {
       try {
         if (version !== STORE_SCHEMA_VERSION) throw new Error(`Read-only invitation audit requires schema v${STORE_SCHEMA_VERSION}; migrate a backed-up database through the service first`);
@@ -1748,6 +1756,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // journals above — older writers have no code path to these tables.
       this.db.exec(inboxStitchSchema);
       ensureAttachmentSchema(this.db); // Converge the deployed v28-v33 attachment lineage before installing v34 fences.
+      ensurePayloadSchema(this.db); // WAVE-300: content-addressed payload blobs (additive, unfenced).
       // MSG-1: fenced messages table (schema v37). The table has to exist
       // before installWriterFence attaches the v37 triggers. IF NOT EXISTS
       // is idempotent. A warm wake whose stamp matches skips this block.
