@@ -243,16 +243,17 @@ function viewerOf(state, session) {
 // VERIFY step: who may record a verdict review from the board. Mirrors the
 // server's mayReviewWorkClaims (an active member with write rights or the
 // verify permission); the owner can never review their own claim, and only
-// owned, still-open claims — or ones with an open PR — are reviewable. The
+// owned, active claims are reviewable. The
 // review route re-checks on POST; this only decides whether the form renders.
 export function canReviewClaim(item, viewer, members) {
   if (!item || !viewer?.id) return false;
   const member = members?.[viewer.id];
   if (!member || member.active === false) return false;
   if (!item.owner || item.owner === viewer.id) return false;
-  const open = ["claimed", "in_progress", "blocked"].includes(item.state);
-  const openPr = Boolean(item.pullRequest?.url) && !item.pullRequest.outcome;
-  if (!open && !openPr) return false;
+  // recordReview refuses anything but an active claim ("only active claims can
+  // be reviewed"), so a done/closed claim with a still-open PR must not render
+  // a form the server will always reject.
+  if (!["claimed", "in_progress", "blocked"].includes(item.state)) return false;
   const permissions = new Set(member.permissions ?? []);
   return viewer.write || permissions.has("verify");
 }
