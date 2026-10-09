@@ -374,6 +374,10 @@ export async function handleInboxMount(ctx) {
             // dispatch claim is atomic: if a racing caller won it, replay
             // their journaled send instead of driving a second delivery.
             if (prior.status === "pending" && prior.dispatch_started_at == null) {
+              // The resume is a real provider send: it spends the same budget
+              // as a fresh one.
+              if (data.channel === "telegram")
+                sendBudgets.check({ channel: "telegram", accountId: auth.account.id, connectionId: null });
               if (markDirectSendDispatch(store.db, prior.id, store.now()) === 1)
                 return driveDirectSend(prior.id);
               const raced = getDirectSend(store.db, prior.id);
