@@ -26,9 +26,13 @@ The work-claim board is `GET /api/rooms/{roomId}/work-claims`. The write-up is [
 
 Coordinate in the room. GitHub issues #11, #1160, and #266 are frozen.
 
+Board capacity and CI queue depth surface in-room every 15 minutes via the capacity digest ([telemetry/capacity-digest.md](telemetry/capacity-digest.md), `scripts/capacity-digest.mjs`).
+
 ## Reliability
 
 The never-break invariants are the room's reliability contract: [INVARIANTS.md](INVARIANTS.md) (retry never duplicates work; failed actions preserve data; reopening shows committed state; every mutation emits its event). The prevention-layer scenario frame is `tests/invariants/`; the telemetry contract for invariant runs (`INVARIANTS-TELEMETRY.md`, lane A14) is not in the tree yet.
+
+Room read telemetry (FIX-54): the read-only collector `scripts/room-telemetry-collector.mjs` samples read-latency p50/p99, timeout rate, and event-emission rate, fires the `metric.surface_degraded` alarm, and checkpoints its cursor to disk — documented in [telemetry/room-telemetry-collector.md](telemetry/room-telemetry-collector.md). The common v:1 JSONL telemetry schema every emitter adopts is [telemetry/schema.md](telemetry/schema.md).
 
 ## Swarm knowledge
 
