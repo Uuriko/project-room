@@ -58,15 +58,27 @@ export async function handleInboxMount(ctx) {
     sendBudgets, sendBudgetChannelFor, syntheticInboxTransport,
     resolveChannelTransport, directSendFetch,
   } = ctx;
+  // The shared write gate for account-session inbox mutations: CSRF plus the
+  // per-account inbox write rate limit.
+  const inboxWrite = () => { protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60); };
+  // { quarantineId, note? } payload shared by the three quarantine mutations.
+  const quarantineNote = data => data && typeof data === "object" && !Array.isArray(data)
+    && (exact(data, ["quarantineId"]) || exact(data, ["quarantineId", "note"]))
+    && typeof data.quarantineId === "string"
+    && (data.note === undefined || data.note === null || typeof data.note === "string");
+  // { action: dispatch|reconcile, sourceId, sendId } for channel sends and sample sending.
+  const sendRequest = (data, hint) => {
+    if (!data || !exact(data, ["action", "sourceId", "sendId"]) || !["dispatch", "reconcile"].includes(data.action)
+      || !validId(data.sourceId) || !validId(data.sendId)) reject(422, "invalid_inbox_send", hint);
+  };
   const webhook = routePattern(connectionRoutes.webhook).exec(url.pathname);
   if (webhook) {
     // Provider callbacks carry a per-connection secret, never an account session.
     // Verified updates only wait for the owner's import; nothing is stored here.
     if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
-    // Telegram delivers every bot's updates from a few shared egress addresses,
-    // so the per-address key is only a high guard against unverified floods;
-    // the budget that matters is counted per verified connection, after the
-    // secret matched and before anything is journaled (channelSyncLimits).
+    // Telegram's shared egress addresses make the per-address key only a
+    // coarse flood guard; the budget that matters is per verified
+    // connection, counted after the secret matched (channelSyncLimits).
     rate(`inbox-webhook:${remoteAddress}`, channelSyncLimits.webhookPerAddress);
     if (!channelWebhooks) reject(409, "channel_webhook_unavailable", "Webhook delivery is not configured here.");
     const connectionId = pathId(webhook[1]), secret = req.headers[webhookSecretHeader];
@@ -133,7 +145,7 @@ export async function handleInboxMount(ctx) {
       return json(res, 200, store.inbox.replyReviewContext(token, pathId(replySource[1]), binding, { view }));
     }
     if (url.pathname === "/api/inbox/review" && req.method === "POST") {
-      protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60);
+      inboxWrite();
       const result = store.inbox.reviewReply(token, await body(req), binding);
       return json(res, result.duplicate ? 200 : 201, result);
     }
@@ -141,44 +153,35 @@ export async function handleInboxMount(ctx) {
       reject(422, "unsupported_inbox_view", "This inbox view is not supported.");
     if (url.pathname === "/api/inbox/threads" && req.method === "GET") return json(res, 200, store.inbox.threads(token, binding,
       { sourceId: url.searchParams.get("sourceId"), limit: url.searchParams.get("limit"), includeChannels: view !== null }));
-    // Held-message quarantine review (owner review surface): the four
-    // routes ride the existing account-session auth, and the three
-    // mutations reuse account session + CSRF + the same inbox rate
-    // limit as every other inbox write.
+    // Held-message quarantine review (owner surface): the four routes ride
+    // the existing account-session auth, and the three mutations reuse
+    // account session + CSRF + the same inbox rate limit as every other write.
     if (url.pathname === "/api/inbox/quarantine" && req.method === "GET")
       return json(res, 200, store.inbox.quarantineReview(token, binding,
         { status: url.searchParams.get("status") ?? undefined, limit: url.searchParams.get("limit") }));
     // Review-coverage dashboard for the quarantine review UI: per-signal
-    // held/reviewed coverage (reviewed/total), the Confirm (released) vs
-    // Dismiss (confirmed spam) precision inputs, and the coverage gap
-    // list. Read-only, same account-session auth as the review listing.
+    // held/reviewed coverage and the Confirm vs Dismiss precision inputs.
+    // Read-only, same account-session auth as the review listing.
     if (url.pathname === "/api/inbox/quarantine/coverage" && req.method === "GET")
       return json(res, 200, store.inbox.quarantineCoverage(token, binding));
-    if (url.pathname === "/api/inbox/quarantine/release" && req.method === "POST") {
-      protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60);
+    // The three quarantine mutations share auth, rate limit, body shape, and
+    // payload; only the store call, error code, and hint differ.
+    const quarantineWrites = Object.freeze({
+      release: { call: "quarantineRelease", code: "invalid_quarantine_release", hint: "Choose the held message to confirm." },
+      dismiss: { call: "quarantineDismiss", code: "invalid_quarantine_dismiss", hint: "Choose the held message to dismiss." },
+      split: { call: "quarantineSplit", code: "invalid_quarantine_split", hint: "Choose the held message to split." },
+    });
+    const quarantineWrite = /^\/api\/inbox\/quarantine\/(release|dismiss|split)$/.exec(url.pathname);
+    if (quarantineWrite && req.method === "POST") {
+      inboxWrite();
+      const { call, code, hint } = quarantineWrites[quarantineWrite[1]];
       const data = await body(req);
-      if (!data || !(exact(data, ["quarantineId"]) || exact(data, ["quarantineId", "note"])) || typeof data.quarantineId !== "string" || (data.note !== undefined && data.note !== null && typeof data.note !== "string"))
-        reject(422, "invalid_quarantine_release", "Choose the held message to confirm.");
-      return json(res, 200, store.inbox.quarantineRelease(token, binding, { quarantineId: data.quarantineId, note: data.note }));
+      if (!quarantineNote(data)) reject(422, code, hint);
+      return json(res, 200, store.inbox[call](token, binding, { quarantineId: data.quarantineId, note: data.note }));
     }
-    if (url.pathname === "/api/inbox/quarantine/dismiss" && req.method === "POST") {
-      protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60);
-      const data = await body(req);
-      if (!data || !(exact(data, ["quarantineId"]) || exact(data, ["quarantineId", "note"])) || typeof data.quarantineId !== "string" || (data.note !== undefined && data.note !== null && typeof data.note !== "string"))
-        reject(422, "invalid_quarantine_dismiss", "Choose the held message to dismiss.");
-      return json(res, 200, store.inbox.quarantineDismiss(token, binding, { quarantineId: data.quarantineId, note: data.note }));
-    }
-    if (url.pathname === "/api/inbox/quarantine/split" && req.method === "POST") {
-      protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60);
-      const data = await body(req);
-      if (!data || !(exact(data, ["quarantineId"]) || exact(data, ["quarantineId", "note"])) || typeof data.quarantineId !== "string" || (data.note !== undefined && data.note !== null && typeof data.note !== "string"))
-        reject(422, "invalid_quarantine_split", "Choose the held message to split.");
-      return json(res, 200, store.inbox.quarantineSplit(token, binding, { quarantineId: data.quarantineId, note: data.note }));
-    }
-    // SLA dashboard (task 26): response-time percentiles, breach counts
-    // by channel and severity, and the end-of-day open-conversation
-    // sweep ("nothing closes unowned") across Telegram and email.
-    // Read-only, same account-session auth as the other inbox reads.
+    // SLA dashboard (task 26): response-time percentiles, breach counts by
+    // channel and severity, and the end-of-day open-conversation sweep
+    // ("nothing closes unowned"). Read-only, same account-session auth.
     if (url.pathname === "/api/inbox/sla/dashboard" && req.method === "GET")
       return json(res, 200, store.inbox.slaDashboard(token, binding));
     if (url.pathname === "/api/inbox/search" && req.method === "GET") return json(res, 200, store.inbox.search(token, binding,
@@ -295,7 +298,7 @@ export async function handleInboxMount(ctx) {
       return json(res, 200, store.inbox.read(token, id, binding, { emailView: view !== null, excerptView: view === "email-excerpt-v1" }));
     }
     if (url.pathname === "/api/inbox/commands" && req.method === "POST") {
-      protectWrite(req, auth, false); rate(`inbox:${auth.account.id}`, 60);
+      inboxWrite();
       const result = store.inbox.apply(token, await body(req), binding);
       return json(res, result.duplicate ? 200 : 201, result);
     }
@@ -313,10 +316,9 @@ export async function handleInboxMount(ctx) {
         validateDirectSend(data);
         // Per-connection send budget (task #41): a Telegram send costs one
         // token; exhaustion is an honest 429 with Retry-After before
-        // anything is journaled, instead of hammering the provider into a
-        // ban. Gmail is NOT budgeted: live Gmail send budgets are
-        // [JOHN]-gated (task 17, Gmail send-slice design) and wait on that
-        // approval (see server/channel-send-budgets.mjs).
+        // anything is journaled. Gmail is NOT budgeted: live Gmail send
+        // budgets are [JOHN]-gated (task 17) and wait on that approval
+        // (see server/channel-send-budgets.mjs).
         if (data.channel === "telegram")
           sendBudgets.check({ channel: "telegram", accountId: auth.account.id, connectionId: null });
         const fetchImpl = directSendFetch ?? fetch;
@@ -325,9 +327,9 @@ export async function handleInboxMount(ctx) {
         recordDirectSend(store.db, { id: sendId, accountId: auth.account.id, channel: data.channel,
           to: data.to, subject: data.subject, bodyHash, threadId: data.threadId ?? null, at: store.now() });
         // R1 delivery-path tracing (RC-2026-09-26-966): delivery.bridge_send
-        // spans the provider send; delivery.receipt spans the journal settle
-        // that records the delivery confirmation. Only the channel, the send
-        // id, and outcomes are recorded — never bodies or recipients.
+        // spans the provider send; delivery.receipt spans the journal
+        // settle. Only the channel, the send id, and outcomes are recorded
+        // — never bodies or recipients.
         const tracer = getTracer();
         const bridgeSpan = tracer.startSpan(SPAN_NAMES.BRIDGE_SEND, { attributes: {
           [ATTR.CHANNEL]: data.channel, [ATTR.MESSAGE_ID]: sendId } });
@@ -360,8 +362,7 @@ export async function handleInboxMount(ctx) {
           receiptSpan.end();
         }
       }
-      if (!data || !exact(data, ["action", "sourceId", "sendId"]) || !["dispatch", "reconcile"].includes(data.action)
-        || !validId(data.sourceId) || !validId(data.sendId)) reject(422, "invalid_inbox_send", "Choose the existing channel reply.");
+      sendRequest(data, "Choose the existing channel reply.");
       const sender = channelSendFor(data.sourceId);
       if (!sender) reject(409, "channel_sending_unavailable", "Sending is not enabled for this channel.");
       // Per-connection send budget for reply dispatches (task #41): one
@@ -381,8 +382,7 @@ export async function handleInboxMount(ctx) {
       if (!loopback) reject(403, "inbox_simulation_local_only", "Sample sending is local only.");
       if (!syntheticInboxTransport) reject(409, "inbox_simulation_unavailable", "Sample sending is unavailable here.");
       const data = await body(req);
-      if (!data || !exact(data, ["action", "sourceId", "sendId"]) || !["dispatch", "reconcile"].includes(data.action)
-        || !validId(data.sourceId) || !validId(data.sendId)) reject(422, "invalid_inbox_send", "Choose the existing sample reply.");
+      sendRequest(data, "Choose the existing sample reply.");
       const send = await syntheticInboxTransport[data.action](token, data.sourceId, data.sendId, binding);
       return json(res, 200, { ...store.inbox.sends(token, data.sourceId, binding), simulationAvailable: true, send });
     }
