@@ -1,0 +1,43 @@
+{
+  "unit": "m11",
+  "file": "server/http.mjs",
+  "mutants": 3,
+  "killed": 3,
+  "survived": 0,
+  "skipped": 0,
+  "results": [
+    {
+      "unit": "m11",
+      "file": "server/http.mjs",
+      "mutant": "ct-415",
+      "status": "KILLED",
+      "tests": [
+        "/tmp/guild19-body-mutation.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    },
+    {
+      "unit": "m11",
+      "file": "server/http.mjs",
+      "mutant": "array-body",
+      "status": "KILLED",
+      "tests": [
+        "/tmp/guild19-body-mutation.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    },
+    {
+      "unit": "m11",
+      "file": "server/http.mjs",
+      "mutant": "declared-limit",
+      "status": "KILLED",
+      "tests": [
+        "/tmp/guild19-body-mutation.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    }
+  ]
+}
