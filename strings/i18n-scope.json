@@ -35,6 +35,7 @@
   "src/dm-consents.js",
   "src/emoji-catalog.js",
   "src/emoji.js",
+  "src/error-copy.js",
   "src/events.js",
   "src/first-room-copy.js",
   "src/friend-bond.js",
