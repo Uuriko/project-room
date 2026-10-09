@@ -23,7 +23,6 @@
  */
 import { createServer } from 'node:http';
 import { randomBytes, createHash } from 'node:crypto';
-import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 
 import { BridgeError, bridgeError } from './errors.mjs';
@@ -34,7 +33,7 @@ import {
   PINNED_PROTOCOL,
   assertSocketMethodAllowed,
   buildSpawnArgv,
-  validateReportBinding,
+  validateReportMetadata,
   validateResumeArgv,
 } from './fence.mjs';
 import { HerdrSocketClient } from './socket-client.mjs';
@@ -102,8 +101,10 @@ export function createBridge(opts = {}) {
     sseHeartbeatMs: opts.sseHeartbeatMs ?? 25_000,
     timeouts: { ...DEFAULT_TIMEOUTS, ...(opts.timeouts ?? {}) },
     circuitOpenMs: opts.circuitOpenMs ?? 60_000,
-    allowSystemctl: opts.allowSystemctl ?? false,
     idempotencyTtlMs: opts.idempotencyTtlMs ?? 15 * 60 * 1000,
+    handleTtlMs: opts.handleTtlMs ?? 60 * 60 * 1000,
+    maxHandlesPerTenant: opts.maxHandlesPerTenant ?? 4096,
+    maxEventStreams: opts.maxEventStreams ?? 8,
   };
 
   const socket = new HerdrSocketClient();
@@ -126,9 +127,23 @@ export function createBridge(opts = {}) {
     for (const p of paneIds) if (p) set.add(p);
   }
 
+  /** Handles expire (handleTtlMs) and are capped per tenant. An existing live
+   *  handle for the same (tenant, pane, occupant) is reused, so polling
+   *  snapshot/list does not grow the map. */
   function issueHandle(tenantId, paneId, occupant) {
+    const now = Date.now();
+    let count = 0;
+    let oldest = null;
+    for (const [h, rec] of handles) {
+      if (now - rec.issuedAt > cfg.handleTtlMs) { handles.delete(h); continue; }
+      if (rec.tenantId !== tenantId) continue;
+      if (rec.paneId === paneId && rec.occupant === occupant) return h;
+      count += 1;
+      if (!oldest) oldest = h; // Map keeps insertion order: first seen is oldest
+    }
+    if (count >= cfg.maxHandlesPerTenant && oldest) handles.delete(oldest);
     const handle = randomBytes(24).toString('base64url');
-    handles.set(handle, { tenantId, paneId, occupant, issuedAt: Date.now() });
+    handles.set(handle, { tenantId, paneId, occupant, issuedAt: now });
     return handle;
   }
 
@@ -140,13 +155,14 @@ export function createBridge(opts = {}) {
 
   function resolveHandle(tenantId, handle) {
     const rec = handles.get(handle);
+    if (rec && Date.now() - rec.issuedAt > cfg.handleTtlMs) { handles.delete(handle); throw bridgeError('handle_not_found'); }
     if (!rec || rec.tenantId !== tenantId) throw bridgeError('handle_not_found');
     return rec;
   }
 
   // ------------------------------------------------------------------
-  // Tenant supervision glue (systemd template units; bridge never execs
-  // server binaries with caller-influenced argv).
+  // Tenant lookup. Supervision is systemd's job (herdr@<tenant> template
+  // units); the bridge executes nothing.
   // ------------------------------------------------------------------
   async function ensureTenant(tenantId) {
     const tenant = tenants.get(tenantId);
@@ -159,22 +175,9 @@ export function createBridge(opts = {}) {
     }
     // Liveness is established by real calls + the circuit breaker, not a
     // per-call ping (which would double socket traffic and distort retry
-    // budgets). The systemctl bounce below happens on transport failure.
+    // budgets). The bridge never starts or restarts tenant servers: systemd
+    // owns them (Restart=on-failure in herdr@.service).
     return tenant;
-  }
-
-  function systemctl(action, tenantId) {
-    validateTenantId(tenantId); // argv is constructed, never shell-interpolated
-    return new Promise((resolve, reject) => {
-      const child = spawn('/usr/bin/systemctl', [action, `herdr@${tenantId}`], { stdio: 'ignore' });
-      const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('systemctl timed out')); }, 15_000);
-      child.on('error', (e) => { clearTimeout(timer); reject(e); });
-      child.on('exit', (code) => {
-        clearTimeout(timer);
-        if (code === 0) resolve();
-        else reject(new Error(`systemctl ${action} exited ${code}`));
-      });
-    });
   }
 
   // ------------------------------------------------------------------
@@ -212,15 +215,7 @@ export function createBridge(opts = {}) {
         return { result, log };
       } catch (err) {
         const transportFailure = err.code === 'timeout' || err.code === 'transport_error';
-        if (transportFailure) {
-          sawTransportFailure = true;
-          // Supervision glue: one systemctl bounce per incident, then the
-          // retry budget decides. Never with caller-influenced argv.
-          if (cfg.allowSystemctl && !tenant._bounced) {
-            tenant._bounced = true;
-            await systemctl('start', tenantId).catch(() => {});
-          }
-        }
+        if (transportFailure) sawTransportFailure = true;
         const noResponse = err.gotResponse === false;
         const mayRetry = attempt < maxAttempts
           && !NEVER_RETRY.has(err.code)
@@ -406,7 +401,7 @@ export function createBridge(opts = {}) {
         const rec = resolveHandle(tenantId, body.handle);
         await verifyOccupant(tenantId, rec);
         const kind = body.kind ?? 'state';
-        const timeoutMs = Math.min(Number(body.timeoutMs) || 30_000, timeouts.wait);
+        const timeoutMs = Math.min(Math.max(Number(body.timeoutMs) || 30_000, 1), timeouts.wait);
         if (kind === 'state') {
           const { result } = await invoke(tenantId, route, 'agent.wait', { paneId: rec.paneId, timeoutMs }, { timeoutMs: timeoutMs + 5_000, write: true, idempotent: false, target: rec.paneId });
           return { state: result.state ?? result };
@@ -429,11 +424,13 @@ export function createBridge(opts = {}) {
           : kind === 'metadata' ? 'pane.report_metadata'
           : null;
         if (!method) throw bridgeError('input', `bad report kind: ${kind}`);
-        validateReportBinding({ herdrPaneId: body.herdrPaneId, targetPaneId: body.targetPaneId });
-        await checkPaneOwnership(tenantId, body.targetPaneId);
-        const params = { paneId: body.targetPaneId };
+        // Same model as send/keys/wait: the target is an issued, occupant-pinned
+        // handle for this tenant. Caller-asserted pane ids are not accepted.
+        const rec = resolveHandle(tenantId, body.handle);
+        await verifyOccupant(tenantId, rec);
+        const params = { paneId: rec.paneId };
         if (kind === 'state' && body.state !== undefined) params.state = String(body.state).slice(0, 64);
-        if (kind === 'metadata' && body.metadata !== undefined) params.metadata = body.metadata;
+        if (kind === 'metadata' && body.metadata !== undefined) params.metadata = validateReportMetadata(body.metadata);
         if (kind === 'resume') {
           if (body.resumeSessionId !== undefined) {
             // Rebuild from the template — never forward caller argv.
@@ -448,7 +445,7 @@ export function createBridge(opts = {}) {
             params.argv = body.resumeArgv.map(String);
           }
         }
-        await invoke(tenantId, route, method, params, { timeoutMs: timeouts.report, write: true, idempotent: false, target: body.targetPaneId });
+        await invoke(tenantId, route, method, params, { timeoutMs: timeouts.report, write: true, idempotent: false, target: rec.paneId });
         return { ok: true };
       }
       case 'close': {
@@ -519,11 +516,30 @@ export function createBridge(opts = {}) {
     }
   }
 
+  const eventStreams = new Map(); // tenantId -> open SSE stream count
+
   async function handleEvents(req, res) {
     let tenantId = null;
+    let heartbeat = null;
+    let sub = null;
+    let closed = false;
+    let counted = false;
+    // Idempotent teardown, wired to the response BEFORE the subscribe await so a
+    // client that leaves mid-handshake (or a failed subscribe) leaks nothing.
+    const cleanup = () => {
+      if (closed) return;
+      closed = true;
+      if (heartbeat) clearInterval(heartbeat);
+      try { sub?.close(); } catch { /* already closed */ }
+      if (counted) eventStreams.set(tenantId, Math.max(0, (eventStreams.get(tenantId) ?? 1) - 1));
+    };
     try {
       if (!cfg.masterSecret) throw bridgeError('server_misconfigured');
       tenantId = authenticate(req);
+      if ((eventStreams.get(tenantId) ?? 0) >= cfg.maxEventStreams) throw bridgeError('too_many_streams');
+      eventStreams.set(tenantId, (eventStreams.get(tenantId) ?? 0) + 1);
+      counted = true;
+      res.on('close', cleanup);
       const url = new URL(req.url, 'http://localhost');
       const since = url.searchParams.get('since') ?? undefined;
       const tenant = await ensureTenant(tenantId);
@@ -534,24 +550,26 @@ export function createBridge(opts = {}) {
         'X-Accel-Buffering': 'no',
       });
       res.write(': connected\n\n');
-      const heartbeat = setInterval(() => {
+      heartbeat = setInterval(() => {
         try { res.write(': ping\n\n'); } catch { /* closed */ }
       }, cfg.sseHeartbeatMs);
-      let closed = false;
-      const sub = await socket.subscribe(
+      const opened = await socket.subscribe(
         tenant.socketPath,
         { filter: { tenant: tenantId }, ...(since !== undefined ? { since } : {}) },
         (event) => {
+          if (closed) return;
           // Tenant scoping is structural (per-tenant server), but belt-and-
           // braces: drop frames naming another tenant.
           if (event && typeof event === 'object' && event.tenant && event.tenant !== tenantId) return;
           try { res.write(`data: ${JSON.stringify(event)}\n\n`); } catch { /* closed */ }
         },
-        () => { if (!closed) { closed = true; clearInterval(heartbeat); try { res.end(); } catch {} } },
+        () => { cleanup(); try { res.end(); } catch { /* closed */ } },
       );
+      if (closed) { opened.close(); return; }
+      sub = opened;
       await audit.write({ tenant: tenantId, route: 'events', socketMethod: 'events.subscribe', result: 'ok', status: 200, latencyMs: 0 });
-      req.on('close', () => { closed = true; clearInterval(heartbeat); sub.close(); });
     } catch (err) {
+      cleanup();
       const status = err instanceof BridgeError ? err.httpStatus : 500;
       const code = err instanceof BridgeError ? err.code : 'internal';
       await audit.write({
@@ -559,7 +577,7 @@ export function createBridge(opts = {}) {
         denyReason: code, status, latencyMs: 0,
       });
       if (!res.headersSent) sendErr(res, err);
-      else try { res.end(); } catch {}
+      else try { res.end(); } catch { /* closed */ }
     }
   }
 
@@ -611,6 +629,6 @@ export function createBridge(opts = {}) {
       await new Promise((resolve) => server.close(resolve));
     },
     /** Test/ops introspection (not exposed over HTTP). */
-    _internals: { deriveToken, breaker, idempotency, get tenants() { return tenants; } },
+    _internals: { deriveToken, breaker, idempotency, handles, eventStreams, get tenants() { return tenants; } },
   };
 }
