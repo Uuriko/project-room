@@ -48,7 +48,7 @@ test('each claim change appends one event naming the member, the action, the own
   await new Promise(resolve => setTimeout(resolve, 2));
   const progress = (await owner.say('Lane A is moving')).event.data.messageId;
   await owner.renewWorkItem('lane-a', { progressMessageId: progress, leaseHours: 3 });
-  await owner.reassignWorkItem('lane-a', { newOwner: 'reviewer', note: 'handoff' });
+  await owner.reassignWorkItem('lane-a', { newOwner: 'reviewer', note: 'handoff', ...roundOf(await owner.workClaimGet('lane-a')) });
   await peer.releaseWorkItem('lane-a', { note: 'parked', ...roundOf(await peer.workClaimGet('lane-a')) });
 
   const events = await claimEvents(owner);
@@ -77,7 +77,7 @@ test('a refused claim change appends no event', async t => {
   const before = (await claimEvents(owner)).length;
   await assert.rejects(peer.claimWorkItem('held'), error => error.status === 409);
   await assert.rejects(peer.releaseWorkItem('held'), error => error.status === 403);
-  await assert.rejects(owner.reassignWorkItem('held', { newOwner: 'nobody-here' }), error => error.status === 422);
+  await assert.rejects(owner.reassignWorkItem('held', { newOwner: 'nobody-here', ...roundOf(await owner.workClaimGet('held')) }), error => error.status === 422);
   assert.equal((await claimEvents(owner)).length, before);
 });
 

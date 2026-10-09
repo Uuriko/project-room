@@ -294,8 +294,8 @@ export async function handoff(client, id, { to, toHandle, summary, next, now, si
   const receiver = assertId(to, "Receiver member id");
   const done = assertId(summary, "Handoff summary");
   const at = nowFrom({ now });
-  verifyClaim(await callRoom(() => client.workClaimGet(claimId, { signal })), { now: at });
-  await callRoom(() => client.reassignWorkItem(claimId, { newOwner: receiver, note: done, signal }));
+  const before = verifyClaim(await callRoom(() => client.workClaimGet(claimId, { signal })), { now: at });
+  await callRoom(() => client.reassignWorkItem(claimId, { newOwner: receiver, note: done, ...claimRound(before), signal }));
   const claim = verifyClaim(await callRoom(() => client.workClaimGet(claimId, { signal })), { memberId: receiver, now: at });
   const lines = [
     `Handoff ${claimId} to ${toHandle ? `@${toHandle.replace(/^@/, "")}` : receiver}`,

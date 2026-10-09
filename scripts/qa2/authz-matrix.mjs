@@ -103,7 +103,12 @@ const A = [
   ["create work claim", ["owner", "collaborator"], t => req("POST", `${R}/work-claims`, { token: t, body: { id: `qa2-c-${randomUUID().slice(0, 8)}`, title: "x" } })],
   ["steal claim held by collaborator", [], t => req("POST", `${R}/work-claims/qa2-held/claim`, { token: t, body: { note: "steal" } }), { okStatuses: [409] }],
   ["update claim held by collaborator", ["collaborator"], t => req("POST", `${R}/work-claims/qa2-held/update`, { token: t, body: { note: "touch" } })],
-  ["reassign claim held by collaborator", ["owner", "collaborator"], t => req("POST", `${R}/work-claims/qa2-held/reassign`, { token: t, body: { newOwner: ids.collaborator, note: "keep" } })],
+  ["reassign claim held by collaborator", ["owner", "collaborator"], async t => {
+    // /reassign binds the claim round the client read, like /release.
+    const held = must(await req("GET", `${R}/work-claims/qa2-held`, { token: T.owner }), "read claim round");
+    return req("POST", `${R}/work-claims/qa2-held/reassign`, { token: t, body: { newOwner: ids.collaborator, note: "keep",
+      expectedClaimedAt: held.claimedAt ?? null, expectedHistoryLength: held.history.length + (held.historyOmitted ?? 0) } });
+  }],
   ["release claim held by collaborator", ["owner", "collaborator"], async t => {
     // E5/D4 (QA-200 2026-10-08): /release binds the claim round the client read.
     const id = t === T.owner ? "qa2-release" : "qa2-held";

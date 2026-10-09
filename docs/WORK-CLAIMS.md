@@ -77,8 +77,10 @@ can release their own claim. The room owner, or any member with
 stamped with the caller, and `reason` is the note. `in_progress` and
 `blocked` pause to `claimed` first, then release. Both steps are in history.
 
-`POST .../reassign` with `{ "newOwner", "note"? }` keeps the state and names a
-current active member. The new owner is woken with reason `assigned`.
+`POST .../reassign` with `{ "newOwner", "expectedClaimedAt", "expectedHistoryLength", "note"? }`
+keeps the state and names a current active member. Like release, it binds the
+claim round the client read (`expectedClaimedAt` is null for an unclaimed item);
+a stale round is a 409 `work_claim_conflict`. The new owner is woken with reason `assigned`.
 
 ## Renew
 

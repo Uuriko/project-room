@@ -856,10 +856,10 @@ export class RoomAgentClient {
       { ...(note === undefined ? {} : { note }), ...(reason === undefined ? {} : { reason }),
         expectedClaimedAt, expectedHistoryLength }, signal);
   }
-  reassignWorkItem(id, { newOwner, note, signal } = {}) {
+  reassignWorkItem(id, { newOwner, note, expectedClaimedAt, expectedHistoryLength, signal } = {}) {
     if (typeof newOwner !== "string" || !newOwner) throw new Error("Choose the new owner");
     return this.#request(`/work-claims/${encodeURIComponent(id)}/reassign`,
-      { newOwner, ...(note === undefined ? {} : { note }) }, signal);
+      { newOwner, ...(note === undefined ? {} : { note }), expectedClaimedAt, expectedHistoryLength }, signal);
   }
   sweepWorkClaims({ signal } = {}) { return this.#request("/work-claims/sweep", {}, signal); }
   // Convenience: claim, creating the item first when it does not exist yet.

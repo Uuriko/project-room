@@ -938,10 +938,21 @@ export function notePullMerged(work, mergedSha, now) {
 }
 // Reassign: the owner hands work to another agent (stays in the same state).
 // Attestations are cleared — reviews belong to the previous owner's round.
-export function reassignWork(work, agentId, newOwner, { note, now, authority = false, room } = {}) {
+export function reassignWork(work, agentId, newOwner, { expectedClaimedAt, expectedHistoryLength, note, now, authority = false, room } = {}) {
   const item = workOf(work), agent = agentOf(agentId), target = agentOf(newOwner), atMs = nowMsOf(now);
   check(authority === true || item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can reassign it`);
   check(!isTerminalClaimState(item.state), `work "${item.id}" is ${item.state} and immutable`);
+  // E5/D4 follow-up: the HTTP route requires the claim round the client read
+  // (claimedAt + history length), like release. In-process callers may omit
+  // both; when either is given both are validated and compared. An unclaimed
+  // item has claimedAt null, so null is its valid round token.
+  if (expectedClaimedAt !== undefined || expectedHistoryLength !== undefined) {
+    check(expectedClaimedAt === null || typeof expectedClaimedAt === "string" && expectedClaimedAt.length <= 100 && Number.isFinite(Date.parse(expectedClaimedAt)), "expectedClaimedAt must be the current claim time (ISO string) or null for an unclaimed item");
+    check(Number.isSafeInteger(expectedHistoryLength) && expectedHistoryLength >= 0, "expectedHistoryLength must be a non-negative integer");
+    if (item.claimedAt !== expectedClaimedAt || claimHistoryLength(item) !== expectedHistoryLength) {
+      fail("work_claim_conflict", "The claim changed since it was read");
+    }
+  }
   // Assigning an unclaimed item hands it over as a claim: state claimed with
   // a fresh lease (room default), the same shape create-with-assignee gives.
   // Before this, the owner was set but the state stayed "unclaimed" with no

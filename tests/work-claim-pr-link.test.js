@@ -438,12 +438,13 @@ test("re-linking resets a settled PR even when syncedAt equals claimedAt", async
 // "reassigned:<target>", never "claimed" — the old count saw only one round
 // and a same-millisecond settle+reclaim tie was misread as current-round
 // truth, so the stale "closed" outcome survived and vetoed every future poll.
+const roundOfItem = item => ({ expectedClaimedAt: item?.claimedAt ?? null, expectedHistoryLength: (item?.history?.length ?? 0) + (Number(item?.historyOmitted) || 0) });
 test("re-linking resets a same-ms tie when the first round began via reassign", async t => {
   const { store, call } = await room(t);
   const now = Date.parse("2026-10-03T13:00:00Z");
   store.now = () => now;
   await call("create", null, { id: "relink-reassign-ms", title: "relink" });
-  const assigned = (await call("reassign", "relink-reassign-ms", { newOwner: "owner" })).value;
+  const assigned = (await call("reassign", "relink-reassign-ms", { newOwner: "owner", ...roundOfItem(store.workClaims.get("commons", "relink-reassign-ms")) })).value;
   assert.equal(assigned.state, "claimed");
   assert.equal(assigned.history.at(-1).action, "reassigned:owner");
   assert.ok(!assigned.history.some(entry => entry.action === "claimed"), "reassign starts the round without a claimed stamp");
