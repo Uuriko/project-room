@@ -1,0 +1,15 @@
+=== RV-9 branch=wave400/elegant-wcroutes-b at 2026-10-09T13:25:03Z (v2 quiescence)
+WORKTREE_OK (attempt 1)
+--- rebase onto origin/main
+QUIESCENT after 80s
+rebase attempt 1 failed:
+CONFLICT (content): Merge conflict in server/work-claim-routes.mjs
+error: could not apply 86b39533e... wave400: simplify work-claim-routes tail (helpers for shape/lease/member/typed-throw checks)
+QUIESCE_TIMEOUT
+rebase attempt 2 failed:
+CONFLICT (content): Merge conflict in server/work-claim-routes.mjs
+error: could not apply 86b39533e... wave400: simplify work-claim-routes tail (helpers for shape/lease/member/typed-throw checks)
+QUIESCE_TIMEOUT
+rebase attempt 3 failed:
+CONFLICT (content): Merge conflict in server/work-claim-routes.mjs
+error: could not apply 86b39533e... wave400: simplify work-claim-routes tail (helpers for shape/lease/member/typed-throw checks)

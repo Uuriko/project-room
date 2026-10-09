@@ -1,0 +1,23 @@
+=== RV-11 branch=wave400/perf-index-audit-r2 at 2026-10-09T13:05:16Z
+HEAD is now at cd0ebe39c perf(db): add events_workitem_id expression index for work-item history reads
+--- rebase onto origin/main
+rebase attempt 1 failed:
+Rebasing (1/1)error: Your local changes to the following files would be overwritten by merge:
+REBASE_OK (attempt 2)
+--- rebased onto ee250e1e6; head cb6a70291
+--- tests: tests/events-workitem-index.test.js
+{"event":"room.cold_start","durationMs":1783,"integrity":"eager","phases":{"schema":{"ms":238,"rowsRead":0},"plugin":{"ms":588,"rowsRead":0},"fence":{"ms":535,"rowsRead":0},"verifies":{"ms":96,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":183,"heapBytes":26005160,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ work-item history reads use an ordered index, not a room-wide scan (2131.422678ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6104.35602
+TESTS_DONE
+--- slice diff vs origin/main:
+ server/store.mjs | 5 +++++
+ 1 file changed, 5 insertions(+)
+DONE_RV_11

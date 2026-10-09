@@ -1,0 +1,14 @@
+=== RV-13 branch=wave500/presence at 2026-10-09T13:22:19Z (v2 quiescence)
+WORKTREE_OK (attempt 1)
+--- rebase onto origin/main
+QUIESCENT after 90s
+REBASE_OK (attempt 1)
+--- rebased onto 525fd8343; head 293bbc736
+--- tests: tests/presence-scale.test.js tests/stream-shared-pump.test.js
+TESTS rc=1
+ℹ pass 12
+ℹ fail 3
+--- slice diff vs origin/main:
+ server/store.mjs | 27 +++++++++++++++++----------
+ 1 file changed, 17 insertions(+), 10 deletions(-)
+DONE_RV_13

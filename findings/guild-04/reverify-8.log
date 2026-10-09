@@ -1,0 +1,27 @@
+=== RV-8 branch=wave400/elegant-wcmisc at 2026-10-09T12:57:06Z
+HEAD is now at ef4fe6a2b WAVE-400 elegance: simplify work-claim misc modules (no behavior change)
+--- rebase onto origin/main
+REBASE_OK (attempt 1)
+--- rebased onto ee250e1e6; head caa2cf2bc
+--- tests: tests/room-export.test.js tests/room-directory.test.js tests/room-mcp-inbox-attachments.test.js tests/work-claim-sqlite.test.js
+✔ a pri_ bearer can stage an inbox attachment larger than the join body cap (2241.793031ms)
+✔ staged inbox attachments expire and an identity cannot exceed the staged cap (2241.049174ms)
+✔ a claim survives a restart on the durable registry and is lost on the in-memory one (776.382091ms)
+✔ room work-claim config persists across restarts (581.686419ms)
+ℹ tests 31
+ℹ suites 0
+ℹ pass 31
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 269049.219352
+TESTS_DONE
+--- slice diff vs origin/main:
+ server/room-attachment-bytes.mjs | 32 +++++++++-------------
+ server/room-directory.mjs        | 57 +++++++++++++++++++---------------------
+ server/room-export-html.mjs      | 50 ++++++++++++++---------------------
+ server/room-export.mjs           | 30 +++++++--------------
+ server/work-claim-sqlite.mjs     | 11 ++++----
+ 5 files changed, 75 insertions(+), 105 deletions(-)
+DONE_RV_8

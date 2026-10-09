@@ -1,0 +1,14 @@
+=== RV-15 branch=wave500/presence-w3-pump-tests at 2026-10-09T13:23:38Z (v2 quiescence)
+WORKTREE_OK (attempt 1)
+--- rebase onto origin/main
+QUIESCENT after 80s
+REBASE_OK (attempt 1)
+--- rebased onto 525fd8343; head db3a78128
+--- tests: tests/sse-shared-pump-correctness.test.js tests/stream-shared-pump.test.js
+TESTS_EXIT_0
+ℹ pass 15
+ℹ fail 0
+--- slice diff vs origin/main:
+ server/store.mjs | 27 +++++++++++++++++----------
+ 1 file changed, 17 insertions(+), 10 deletions(-)
+DONE_RV_15

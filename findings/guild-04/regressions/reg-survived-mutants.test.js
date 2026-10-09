@@ -138,4 +138,25 @@ test("P3: activation pack pins are filtered by messageVisibleToViewer", async t 
     "pinned DM leaked to an unauthorized viewer");
 });
 
+// H3: a deleted message's tombstone must scrub the body text — retaining it
+// keeps sensitive text in the exported message model (room-export-html.mjs).
+test("H3: deleted message tombstone scrubs the body", async t => {
+  const { walkExport } = await import("../../../server/room-export-html.mjs");
+  const { EVENT_TYPES: T, event } = await import("../../../src/events.js");
+  const rows = [
+    { sequence: 1, event: event({ type: T.MESSAGE_POSTED, actorId: "a", roomId: "r",
+      data: { messageId: "m1", body: "secret text" } }) },
+    { sequence: 2, event: event({ type: T.MESSAGE_DELETED, actorId: "a", roomId: "r",
+      data: { messageId: "m1" } }) },
+  ];
+  const { messages } = walkExport(rows);
+  const m = messages.get("m1");
+  assert.ok(m.deleted, "message must be marked deleted");
+  assert.equal(m.body, null, "tombstoned message must not retain body text");
+});
+
+// E2 (room-export.mjs cellOf canonical-base64 check): covered by
+// tests/rel14-backup-bytes.test.js ("junk" case asserts /not canonical base64/);
+// verified KILLED by that file 2026-10-09. No duplicate regression test needed.
+
 console.log(`regression module loaded (WT=${WT})`);

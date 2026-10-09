@@ -4,7 +4,8 @@ Slice: `server/store.mjs`, `server/*sqlite*.mjs`, `server/event*.mjs`, `server/r
 Driver: `findings/guild-04/bin/mutate.py`; specs in `findings/guild-04/specs/*.json`;
 raw results in `findings/guild-04/specs/*.results.jsonl`.
 
-**63 mutants: 18 KILLED · 35 SURVIVED · 10 TIMEOUT-HANG.**
+**63 mutants: 25 KILLED · 38 SURVIVED · 0 TIMEOUT-HANG** (all 10 timeout-hang
+resolved 2026-10-09 — see below).
 
 ## Killed (18) — coverage is real, no action
 
@@ -14,7 +15,7 @@ F4 (capacity 10x), G1/G2 (guide activation), G4 (welcome idempotency),
 K1 (auth check), K3 (pull-only), L1 (room limit), L2 (409 room_exists),
 L4 (roomId cap), E1 (torn-export inverted).
 
-## Survived → fail-first regression tests written (8)
+## Survived → fail-first regression tests written (9)
 
 In `findings/guild-04/regressions/reg-survived-mutants.test.js`. Each test PASSES on
 the original code and was verified to FAIL with its mutant applied (mutant applied
@@ -30,6 +31,7 @@ via the spec regex, test run, original restored — see /tmp/g04-ff.py).
 | D1 | server/room-directory.mjs:211 | nextCursor emitted on exact page boundary (>= vs >): phantom cursor | fail-first verified (test only) |
 | D5 | server/room-directory.mjs (schema DEFAULT) | public_receipts default flipped to 0: no test pins the schema default | fail-first verified (test only) |
 | P3 | server/room-activation-pack.mjs:172 | pin visibility filter dropped: 8/8 pass; pinned DMs leak to unauthorized viewers | ✅ posted |
+| H3 | server/room-export-html.mjs:136 | deleted-message tombstone keeps body text (walkExport): renderer masks it in HTML, but the exported message model retains sensitive text | fail-first verified; BUG CONFIRMED post queued (guild 3/day cap reached) |
 
 ## Survived → test-gap notes (27, queued for regression tests)
 
@@ -72,6 +74,29 @@ open can wedge a later test's event loop).
 the stored-XSS mutant is caught by the suite; the 300s timeout was purely a
 harness limit against a ~298s baseline suite.
 
-**H2–H5, E2–E5 → re-running with 600s timeouts** (findings/guild-04/rerun-timeouthang.py,
-log: findings/guild-04/timeouthang-rerun.log). Expected: KILLED or SURVIVED on the
-merits; the H1 result proves the timeout class was a harness artifact.
+**H2–H5, E2–E5 → resolved 2026-10-09 (third coordinator).** The prior run died
+mid-E3, leaving the E3 mutant applied in `server/room-export.mjs` with a stale
+`.thbak` backup (no finally-restore). Cleaned up: `git checkout --` the file,
+deleted the stale backup. Final classification from clean-state reruns:
+
+- **H2 → KILLED** (221.2s), **H4 → KILLED** (254.1s), **H5 → KILLED** (203.2s) —
+  spec test file catches them; the 300s timeout was a harness artifact.
+- **H3 → SURVIVED** (226.3s) — real gap: deleted-message tombstone retains body
+  text in `walkExport`'s message model. Fail-first regression test written and
+  verified (`reg-survived-mutants.test.js` "H3"); BUG CONFIRMED post queued —
+  guild already posted its 3/day on 2026-10-09.
+- **E2 → KILLED** — not by the spec's mapped `tests/room-export.test.js`, but by
+  `tests/rel14-backup-bytes.test.js` ("junk" case asserts /not canonical base64/;
+  2 failures with mutant applied, verified 2026-10-09). Spec→test mapping gap,
+  not a coverage gap. No duplicate regression test written.
+- **E3 → KILLED** — by `tests/rel14-backup-bytes.test.js` (2 failures: valid
+  replay throws, tampered-BLOB refusal lost). Spec mapping gap, same as E2.
+- **E4 → SURVIVED** (310.8s) — dropping `quoteIdent` validation in replayNdjson.
+  No test anywhere pins the "will not write" error, but analysis shows it is
+  defense-in-depth only: table names are allowlisted against the store's real
+  tables and column names against the real schema *before* the interpolated
+  SQL, so no hostile export can reach the unquoted interpolation. Equivalent-ish
+  under the current schema; recorded as a test-gap note.
+- **E5 → SURVIVED** (274.8s) — `timingSafeEqual` → `===` on operator export auth.
+  Real side-channel class, but functionally untestable (no timing assertion can
+  be reliable). Recorded as a test-gap note, not a BUG CONFIRMED.

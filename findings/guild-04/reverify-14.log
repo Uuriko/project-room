@@ -1,0 +1,28 @@
+=== RV-14 branch=wave500/presence-w2-pump at 2026-10-09T13:11:27Z
+HEAD is now at a0f9ab3d1 wave500 W2: F1 shared SSE pump per room (ported from wave300-fanout-perf d6e1daf72+store option)
+--- rebase onto origin/main
+rebase attempt 1 failed:
+error: Your local changes to the following files would be overwritten by checkout:
+error: could not detach HEAD
+rebase attempt 2 failed:
+Rebasing (1/1)error: Your local changes to the following files would be overwritten by merge:
+REBASE_OK (attempt 3)
+--- rebased onto 525fd8343; head 882fcfb68
+--- tests: tests/stream-shared-pump.test.js
+✔ each stream receives exactly its visible events in order (146.492101ms)
+✔ Last-Event-ID resume continues from the shared cursor (135.025684ms)
+✔ a revoked credential ends only its stream with access-ended (231.632462ms)
+✔ rooms pump independently on their own intervals (288.765132ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 9146.548555
+TESTS_DONE
+--- slice diff vs origin/main:
+ server/store.mjs | 27 +++++++++++++++++----------
+ 1 file changed, 17 insertions(+), 10 deletions(-)
+DONE_RV_14

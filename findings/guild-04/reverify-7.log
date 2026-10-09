@@ -6,3 +6,23 @@ Rebasing (1/8)error: Your local changes to the following files would be overwri
 REBASE_OK (attempt 2)
 --- rebased onto 4ac993882; head 5fce963ff
 --- tests: tests/room-export.test.js tests/room-directory.test.js tests/room-mcp-inbox-attachments.test.js
+✔ an enrolled identity puts, lists, downloads, and discards its own inbox attachment bytes (3544.384467ms)
+{"event":"room.cold_start","durationMs":2039,"integrity":"eager","phases":{"schema":{"ms":252,"rowsRead":0},"plugin":{"ms":1060,"rowsRead":0},"fence":{"ms":445,"rowsRead":0},"verifies":{"ms":51,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":160,"heapBytes":47665952,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a pri_ bearer can stage an inbox attachment larger than the join body cap (2227.731699ms)
+✔ staged inbox attachments expire and an identity cannot exceed the staged cap (4011.775072ms)
+ℹ tests 29
+ℹ suites 0
+ℹ pass 29
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 271655.38632
+TESTS_DONE
+--- slice diff vs origin/main:
+ server/room-attachment-bytes.mjs | 32 +++++++++-------------
+ server/room-directory.mjs        | 57 +++++++++++++++++++---------------------
+ server/room-export-html.mjs      | 50 ++++++++++++++---------------------
+ server/room-export.mjs           | 30 +++++++--------------
+ 4 files changed, 69 insertions(+), 100 deletions(-)
+DONE_RV_7

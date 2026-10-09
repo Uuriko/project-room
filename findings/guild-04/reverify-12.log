@@ -1,0 +1,23 @@
+=== RV-12 branch=wave400/perf-stmt-cache-r2 at 2026-10-09T13:07:47Z
+HEAD is now at 0a4c538e6 wave400/perf: cache prepared statements in work-claim registry
+--- rebase onto origin/main
+rebase attempt 1 failed:
+Rebasing (1/2)Rebasing (2/2)error: Your local changes to the following files would be overwritten by merge:
+REBASE_OK (attempt 2)
+--- rebased onto ee250e1e6; head dfeb1a262
+--- tests: tests/work-claim-sqlite.test.js
+✔ a claim survives a restart on the durable registry and is lost on the in-memory one (522.763875ms)
+✔ room work-claim config persists across restarts (570.476327ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3764.080596
+TESTS_DONE
+--- slice diff vs origin/main:
+ server/work-claim-sqlite.mjs | 18 +++++++++++++++---
+ 1 file changed, 15 insertions(+), 3 deletions(-)
+DONE_RV_12

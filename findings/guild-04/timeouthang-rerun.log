@@ -1,0 +1,5 @@
+H2: KILLED in 221.2s (rc=1)
+H3: SURVIVED in 226.3s (rc=0)
+H4: KILLED in 254.1s (rc=1)
+H5: KILLED in 203.2s (rc=1)
+E2: SURVIVED in 254.9s (rc=0)

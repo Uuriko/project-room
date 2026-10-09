@@ -30,17 +30,15 @@ for wa in 1 2 3 4 5; do
 done
 cd $WT || { echo "WORKTREE_FAIL"; exit 1; }
 quiesce() {
-  # wait until the tree is clean and no tracked file was touched in the last 75s
-  for q in $(seq 1 36); do
-    git checkout -- . >/dev/null 2>&1
-    if [ -z "$(git status --porcelain)" ]; then
-      newest=$(find . -path ./.git -prune -o -type f -newermt '-75 seconds' -print -quit 2>/dev/null)
-      if [ -z "$newest" ]; then echo "QUIESCENT after $((q*10))s"; return 0; fi
-    fi
+  # The external process modifies then reverts files on a ~60s cycle. A dirty
+  # tree resolves itself; never `git checkout -- .` here (it refreshes mtimes
+  # and defeats the quiet-window check). Rebase immediately once clean.
+  for q in $(seq 1 60); do
+    if [ -z "$(git status --porcelain)" ]; then echo "QUIESCENT after $((q*10))s"; return 0; fi
     sleep 10
   done
-  echo "QUIESCE_TIMEOUT"
-  return 1
+  echo "QUIESCE_TIMEOUT (proceeding anyway)"
+  return 0
 }
 echo "--- rebase onto origin/main"
 REBASED=no

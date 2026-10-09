@@ -1,0 +1,24 @@
+=== RV-10 branch=wave400/perf at 2026-10-09T13:04:18Z
+HEAD is now at 88200b0a9 wave400/perf: merge index-audit — events_workitem_id index (400x work-item history reads)
+--- rebase onto origin/main
+REBASE_OK (attempt 1)
+--- rebased onto ee250e1e6; head 3d75b57d9
+--- tests: tests/events-workitem-index.test.js tests/work-claim-sqlite.test.js
+{"event":"room.cold_start","durationMs":937,"integrity":"eager","phases":{"schema":{"ms":117,"rowsRead":0},"plugin":{"ms":326,"rowsRead":0},"fence":{"ms":322,"rowsRead":0},"verifies":{"ms":21,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":171,"heapBytes":25868496,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ work-item history reads use an ordered index, not a room-wide scan (1055.157501ms)
+✔ a claim survives a restart on the durable registry and is lost on the in-memory one (463.170703ms)
+✔ room work-claim config persists across restarts (249.443361ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6287.900707
+TESTS_DONE
+--- slice diff vs origin/main:
+ server/store.mjs             |  5 +++++
+ server/work-claim-sqlite.mjs | 18 +++++++++++++++---
+ 2 files changed, 20 insertions(+), 3 deletions(-)
+DONE_RV_10
