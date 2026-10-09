@@ -1136,6 +1136,13 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // when) after the state/note write, in the same commit.
     const acked = data.readingAck === undefined ? updated
       : runPure(reject, () => stampReadingAck(updated, caller, { docs: data.readingAck.docs, now: nowMs }));
+    // PRODUCT-200 D5 (2026-10-09): updateWork returns the item unchanged
+    // (same history reference) for a byte-identical retry — skip the commit
+    // so the retry appends no duplicate history entry and no room event.
+    // Mirrors the review route's `reviewed.history === item.history`
+    // duplicate handling. A reading ack is its own intentional write and
+    // still commits.
+    if (acked === updated && updated.history === item.history) return json(res, 200, acked);
     // Q3-A: a note-only update coalesces with this claim's last room event.
     commit(acked, "state_changed", { coalesce: data.state === undefined || data.state === item.state });
     return json(res, 200, acked);

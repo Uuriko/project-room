@@ -757,7 +757,40 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     tags: state === "done" && tags != null ? tagsOf(tags) : item.tags,
     blobs: state === "done" && blobs != null ? blobsOf(blobs) : item.blobs,
     ...withProvenance };
-  return withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note);
+  // PRODUCT-200 D5 (2026-10-09): retry idempotency — a byte-identical retry
+  // (same agent, same transition, same note, same provenance) must not
+  // append a duplicate history entry. When the update changes nothing
+  // observable and the latest history stamp already records this exact
+  // write, return the item unchanged (same history reference); the route
+  // skips the commit when `updated.history === item.history`. Mirrors the
+  // attestWork / recordReview duplicate handling (pure no-op + route
+  // duplicate check). A different agent, a different note, or a real field
+  // change still applies.
+  const actionLabel = state === undefined ? "noted" : `state:${state}`;
+  const lastEntry = Array.isArray(item.history) && item.history.length > 0
+    ? item.history[item.history.length - 1] : null;
+  const sameStamp = lastEntry !== null
+    && lastEntry.action === actionLabel
+    && lastEntry.agentId === agent
+    && (lastEntry.note ?? null) === (note ?? null);
+  const noChange =
+    next.state === item.state &&
+    next.owner === item.owner &&
+    next.leaseStartAt === item.leaseStartAt &&
+    next.leaseExpiresAt === item.leaseExpiresAt &&
+    next.attestations === item.attestations &&
+    next.reviews === item.reviews &&
+    next.files === item.files &&
+    next.fileBlocks === item.fileBlocks &&
+    next.deliveryMode === item.deliveryMode &&
+    next.reviewedBy === item.reviewedBy &&
+    next.tags === item.tags &&
+    next.blobs === item.blobs &&
+    next.parentClaimId === item.parentClaimId &&
+    next.evidenceRefs === item.evidenceRefs &&
+    sameStamp;
+  if (noChange) return Object.freeze(item);
+  return withHistory(next, atMs, agent, actionLabel, note);
 }
 // Release a claim, bound to the claim round the caller read (E5/D4, QA-200
 // 2026-10-08): expectedClaimedAt + expectedHistoryLength must match the
