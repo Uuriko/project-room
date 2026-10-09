@@ -30,3 +30,12 @@ test("empty title returns null so nothing is submitted", () => {
   assert.equal(newItemCreateBody(form({ title: "  ", note: "orphan" })), null);
   assert.equal(newItemCreateBody(form({})), null);
 });
+
+// FIX-45: files is required on creation — the form always sends it, with a
+// blank field as an explicit [] ("touches no files"), never omitted.
+test("files is always sent: blank field becomes an explicit empty declaration", () => {
+  const blank = newItemCreateBody(form({ title: "Call John" }));
+  assert.deepEqual(blank.files, []);
+  const filled = newItemCreateBody(form({ title: "Fix", files: "a.md" }));
+  assert.deepEqual(filled.files, ["a.md"]);
+});

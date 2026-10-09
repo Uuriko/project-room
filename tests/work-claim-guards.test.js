@@ -26,8 +26,13 @@ const helpers = {
   body: async req => req.body,
 };
 
-const call = (registry, memberId, route, id, body, query = "") => handleWorkClaims({
-  req: { method: route === "list" || route === "read" ? "GET" : "POST", body },
+const call = (registry, memberId, route, id, body, query = "") => {
+  // FIX-45: files is required on claim creation — tests that do not exercise
+  // file declarations declare [] explicitly ("touches no files").
+  const declared = (route === "create" || route === "claim") && body && !("files" in Object(body))
+    ? { files: [], ...body } : body;
+  return handleWorkClaims({
+  req: { method: route === "list" || route === "read" ? "GET" : "POST", body: declared },
   res: {},
   url: new URL(`https://room.example/api/rooms/room1/work-claims${query}`),
   store: { roomAuthority: () => ({ ownerId: "owner", members: MEMBERS }), room: () => ({ state: { messages: [] } }) },
@@ -38,6 +43,7 @@ const call = (registry, memberId, route, id, body, query = "") => handleWorkClai
   helpers,
   registry,
 });
+};
 
 const denied = result => {
   assert.equal(result.status, 403);
@@ -288,7 +294,7 @@ test("a durable claim keeps the updatedAt used for board order", async t => {
   store.initialize(initialRoom("commons"));
   t.after(() => store.close());
   const out = await handleWorkClaims({
-    req: { method: "POST", body: { id: "kept" } },
+    req: { method: "POST", body: { id: "kept", files: [] } }, // FIX-45: files required on creation
     res: {},
     url: new URL("https://room.example/api/rooms/commons/work-claims"),
     store, roomId: "commons",

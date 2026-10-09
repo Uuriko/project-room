@@ -28,7 +28,12 @@ const fakeHelpers = () => {
 // Route-level harness (same shape as tests/lease-renewal.test.js): the stub
 // store carries a live member list so W3's membership validation has real
 // data to check against.
-const runRoute = async ({ route, id, body = {}, memberId = "quill", registry, storeMessages = [] }) => {
+const runRoute = async ({ route, id, body: reqBody = {}, memberId = "quill", registry, storeMessages = [] }) => {
+  // FIX-45: files is required on claim creation. Tests that do not
+  // exercise file declarations declare [] explicitly ("touches no files");
+  // a files key the test passed is preserved untouched.
+  const body = (route === "create" || route === "claim") && !("files" in Object(reqBody))
+    ? { files: [], ...reqBody } : reqBody;
   const helpers = fakeHelpers();
   const store = {
     roomAuthority: () => ({ ownerId: "quill", members: {

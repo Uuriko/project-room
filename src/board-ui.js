@@ -336,7 +336,7 @@ function cardHtml(item, viewer, members, now, workItems, byId) {
 }
 
 function newItemForm() {
-  return `<form id="board-new-item" class="board-new"><h3>New item</h3><label>Title <input name="title" maxlength="200" required autocomplete="off"></label><label>Note <input name="note" maxlength="4000" autocomplete="off" placeholder="Optional, context for whoever picks this up"></label><label>Files <input name="files" maxlength="4000" autocomplete="off" placeholder="Optional, comma-separated"></label><button type="submit" class="button primary">Add item</button></form>`;
+  return `<form id="board-new-item" class="board-new"><h3>New item</h3><label>Title <input name="title" maxlength="200" required autocomplete="off"></label><label>Note <input name="note" maxlength="4000" autocomplete="off" placeholder="Optional, context for whoever picks this up"></label><label>Files <input name="files" maxlength="4000" autocomplete="off" placeholder="Comma-separated paths; blank if the work touches no files"></label><button type="submit" class="button primary">Add item</button></form>`;
 }
 
 // S3: the create API accepts a note, but the form never sent one (F-parity-1).
@@ -348,7 +348,9 @@ export function newItemCreateBody(data) {
   const note = String(data?.get("note") ?? "").trim();
   if (note) body.note = note;
   const files = filesFromField(data?.get("files"));
-  if (files.length) body.files = files;
+  // FIX-45: files is required on creation — an empty field is sent as an
+  // explicit [] ("touches no files"): a deliberate declaration, not silence.
+  body.files = files;
   return body;
 }
 
@@ -629,7 +631,13 @@ export function installWorkBoard({ client, getState, getSession }) {
       return;
     }
     const path = client.path(`/work-claims/${encodeURIComponent(id)}`);
-    if (action === "claim") flyButton(button, () => client.request(`${path}/claim`, { method: "POST", data: {} }), focus);
+    if (action === "claim") {
+      // FIX-45: the claim route requires declared files when the item has
+      // none — carry the card's declared list (possibly []) so the claim
+      // inherits it instead of arriving undeclared.
+      const claimed = items.find(entry => entry.id === id);
+      flyButton(button, () => client.request(`${path}/claim`, { method: "POST", data: { files: claimed?.files ?? [] } }), focus);
+    }
     else if (action === "release") {
       // E5/D4 (QA-200 2026-10-08): the release binds the claim round the
       // board read (claimedAt + lifetime history length), so a stale card

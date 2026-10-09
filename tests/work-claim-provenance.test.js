@@ -164,10 +164,14 @@ async function httpFixture(t) {
   });
   const origin = `http://127.0.0.1:${server.address().port}`;
   const call = async (token, path, body, method) => {
+  // FIX-45: files is required on claim creation — tests that do not
+  // exercise file declarations declare [] explicitly ("touches no files").
+    const sent = body !== undefined && (path === "/work-claims" || path.endsWith("/claim"))
+      && !("files" in Object(body)) ? { files: [], ...body } : body;
     const response = await fetch(`${origin}/api/rooms/commons${path}`, {
       method: method ?? (body === undefined ? "GET" : "POST"),
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body)
+      body: body === undefined ? undefined : JSON.stringify(sent)
     });
     return { status: response.status, value: await response.json() };
   };

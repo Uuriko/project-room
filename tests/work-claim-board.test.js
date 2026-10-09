@@ -84,10 +84,14 @@ async function fixture(t, { phase = { failure: false }, databasePath = ":memory:
   const origin = `http://127.0.0.1:${server.address().port}`;
   const client = token => new RoomAgentClient({ origin, roomId: "commons", token });
   const call = async (token, path, body) => {
+    // FIX-45: files is required on claim creation — claim-creation paths get
+    // an explicit [] ("touches no files") when the test body omits files.
+    const sent = body !== undefined && (path === "/work-claims" || path.endsWith("/claim"))
+      && !("files" in Object(body)) ? { files: [], ...body } : body;
     const response = await fetch(`${origin}/api/rooms/commons${path}`, {
       method: body === undefined ? "GET" : "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body)
+      body: body === undefined ? undefined : JSON.stringify(sent)
     });
     return { status: response.status, value: await response.json() };
   };
@@ -96,7 +100,7 @@ async function fixture(t, { phase = { failure: false }, databasePath = ":memory:
 
 async function startReviewedClaim(f, id, reviewPolicy, extra = {}) {
   assert.equal((await f.call(f.ownerKey, "/work-claims", { id, reviewPolicy, ...extra })).status, 201);
-  assert.equal((await f.call(f.ownerKey, `/work-claims/${id}/claim`, {})).status, 200);
+  assert.equal((await f.call(f.ownerKey, `/work-claims/${id}/claim`, { files: [] })).status, 200); // FIX-45
   const started = await f.call(f.ownerKey, `/work-claims/${id}/update`, { state: "in_progress" });
   assert.equal(started.status, 200);
   return started.value;
@@ -114,10 +118,10 @@ async function refusedCompletion(f, id, reviewedBy) {
 
 test("a contribute-profile agent creates, renews, and releases a claim without write_external", async t => {
   const { coord, call, coordKey } = await fixture(t);
-  const created = await coord.workClaimCreate({ id: "coord-1", title: "Coord lane" });
+  const created = await coord.workClaimCreate({ id: "coord-1", title: "Coord lane", files: [] }); // FIX-45: files required
   assert.equal(created.state, "unclaimed");
   assert.equal(created.owner, null);
-  const claimed = await coord.claimWorkItem("coord-1", { leaseHours: 2 });
+  const claimed = await coord.claimWorkItem("coord-1", { leaseHours: 2, files: [] }); // FIX-45: files required
   assert.equal(claimed.state, "claimed");
   assert.equal(claimed.owner, "coord");
   await new Promise(resolve => setTimeout(resolve, 5));
@@ -150,9 +154,9 @@ test("the room owner sets the per-member claim cap and a second claim is refused
   const denied = await call(coordKey, "/work-claims/config", { maxMemberOpenClaims: 4 });
   assert.equal(denied.status, 403);
   assert.equal(denied.value.error.code, "work_claims_not_permitted");
-  await coord.workClaimCreate({ id: "cap-1", title: "First" });
-  await coord.claimWorkItem("cap-1", {});
-  await coord.workClaimCreate({ id: "cap-2", title: "Second" });
+  await coord.workClaimCreate({ id: "cap-1", title: "First", files: [] }); // FIX-45
+  await coord.claimWorkItem("cap-1", { files: [] }); // FIX-45
+  await coord.workClaimCreate({ id: "cap-2", title: "Second", files: [] }); // FIX-45
   const second = await call(coordKey, "/work-claims/cap-2/claim", {});
   assert.equal(second.status, 409);
   assert.equal(second.value.error.code, "too_many_open_claims");

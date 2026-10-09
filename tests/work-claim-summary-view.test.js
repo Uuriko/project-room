@@ -59,7 +59,7 @@ const COMPACT_KEYS = ["id", "leaseExpiresAt", "owner", "state", "title"];
 test("?view=summary returns compact per-claim projections without heavy fields", async t => {
   const { owner, ownerKey, call } = await fixture(t);
   await owner.workClaimCreate({ id: "sum-1", title: "Heavy claim", note: "a long note", tags: ["x", "y"], files: ["server/a.mjs"] });
-  await owner.workClaimCreate({ id: "sum-2", title: "Light claim" });
+  await owner.workClaimCreate({ id: "sum-2", title: "Light claim", files: [] }); // FIX-45
   await owner.claimWorkItem("sum-1", { leaseHours: 2 });
 
   const { status, value } = await call(ownerKey, "/work-claims?view=summary");
@@ -84,7 +84,7 @@ test("?view=summary returns compact per-claim projections without heavy fields",
 
 test("the default list view still returns full claims with history", async t => {
   const { owner, ownerKey, call } = await fixture(t);
-  await owner.workClaimCreate({ id: "full-1", title: "Full claim", note: "keep me" });
+  await owner.workClaimCreate({ id: "full-1", title: "Full claim", note: "keep me", files: [] }); // FIX-45
   const { status, value } = await call(ownerKey, "/work-claims");
   assert.equal(status, 200);
   const claim = value.claims.find(c => c.id === "full-1");
@@ -100,9 +100,9 @@ test("an unknown view value is rejected", async t => {
 
 test("?view=summary composes with the state filter", async t => {
   const { owner, ownerKey, call } = await fixture(t);
-  await owner.workClaimCreate({ id: "st-1", title: "Claimed one" });
-  await owner.workClaimCreate({ id: "st-2", title: "Open one" });
-  await owner.claimWorkItem("st-1", { leaseHours: 2 });
+  await owner.workClaimCreate({ id: "st-1", title: "Claimed one", files: [] }); // FIX-45
+  await owner.workClaimCreate({ id: "st-2", title: "Open one", files: [] }); // FIX-45
+  await owner.claimWorkItem("st-1", { leaseHours: 2, files: [] }); // FIX-45
   const { status, value } = await call(ownerKey, "/work-claims?state=claimed&view=summary");
   assert.equal(status, 200);
   assert.equal(value.claims.length, 1);
@@ -112,7 +112,7 @@ test("?view=summary composes with the state filter", async t => {
 
 test("?view=summary composes with the ready queue", async t => {
   const { owner, ownerKey, call } = await fixture(t);
-  await owner.workClaimCreate({ id: "rd-1", title: "Ready one" });
+  await owner.workClaimCreate({ id: "rd-1", title: "Ready one", files: [] }); // FIX-45
   const { status, value } = await call(ownerKey, "/work-claims?queue=ready&view=summary");
   assert.equal(status, 200);
   assert.equal(value.queue, "ready");
@@ -123,7 +123,7 @@ test("?view=summary composes with the ready queue", async t => {
 
 test("?view=summary preserves the untrusted marker on member-authored titles", async t => {
   const { coord, ownerKey, call } = await fixture(t);
-  await coord.workClaimCreate({ id: "un-1", title: "Coord's claim" });
+  await coord.workClaimCreate({ id: "un-1", title: "Coord's claim", files: [] }); // FIX-45
   const { status, value } = await call(ownerKey, "/work-claims?view=summary");
   assert.equal(status, 200);
   const claim = value.claims.find(c => c.id === "un-1");

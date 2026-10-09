@@ -224,7 +224,12 @@ const fakeHelpers = () => {
   const json = (res, status, value) => { calls.push({ status, value }); return { status, value }; };
   return { calls, json, reject, body: async req => req.body };
 };
-const runRoute = async ({ route, id, body = {}, memberId = "quill", registry, storeMessages = [] }) => {
+const runRoute = async ({ route, id, body: reqBody = {}, memberId = "quill", registry, storeMessages = [] }) => {
+  // FIX-45: files is required on claim creation. Tests that do not
+  // exercise file declarations declare [] explicitly ("touches no files");
+  // a files key the test passed is preserved untouched.
+  const body = (route === "create" || route === "claim") && !("files" in Object(reqBody))
+    ? { files: [], ...reqBody } : reqBody;
   const helpers = fakeHelpers();
   const store = {
     roomAuthority: () => ({ members: {

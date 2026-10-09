@@ -18,7 +18,12 @@ const fakeHelpers = () => {
   return { calls, json: (res, status, value) => ({ status, value }), reject, body: async req => req.body };
 };
 const fakeAuth = memberId => ({ member: { id: memberId, kind: "agent", permissions: [] } });
-const runRoute = ({ route, id, body = {}, memberId = "quill", registry }) => handleWorkClaims({
+const runRoute = ({ route, id, body: reqBody = {}, memberId = "quill", registry }) => {
+  // FIX-45: files is required on claim creation — tests that do not exercise
+  // file declarations declare [] explicitly ("touches no files").
+  const body = (route === "create" || route === "claim") && !("files" in Object(reqBody))
+    ? { files: [], ...reqBody } : reqBody;
+  return handleWorkClaims({
   req: { method: "POST", body }, res: {}, url: {}, roomId: "room1",
   store: { roomAuthority: () => ({ members: {
     quill: { id: "quill", kind: "agent", active: true, permissions: ["verify"] },
@@ -26,7 +31,8 @@ const runRoute = ({ route, id, body = {}, memberId = "quill", registry }) => han
   } }) },
   auth: fakeAuth(memberId), workClaimRoute: route, workClaimId: id,
   helpers: fakeHelpers(), registry,
-});
+  });
+};
 
 test("H4: self re-claim 409 is machine-readable and never says 'release it first'", async () => {
   const registry = createWorkClaimRegistry();

@@ -226,6 +226,11 @@ const fakeHelpers = () => {
 };
 const fakeAuth = (memberId, permissions = []) => ({ member: { id: memberId, kind: "agent", permissions } });
 const runRoute = async ({ route, id = null, body: reqBody = {}, memberId = "quill", permissions = [], registry, storeMembers = {} }) => {
+  // FIX-45: files is required on claim creation. Tests that do not
+  // exercise file declarations declare [] explicitly ("touches no files");
+  // a files key the test passed is preserved untouched.
+  const body = (route === "create" || route === "claim") && !("files" in Object(reqBody))
+    ? { files: [], ...reqBody } : reqBody;
   const helpers = fakeHelpers();
   const store = {
     roomAuthority: roomId => ({ members: {
@@ -235,7 +240,7 @@ const runRoute = async ({ route, id = null, body: reqBody = {}, memberId = "quil
       ...storeMembers,
     } }),
   };
-  const out = await handleWorkClaims({ req: { method: route === "list" || route === "read" ? "GET" : "POST", body: reqBody },
+  const out = await handleWorkClaims({ req: { method: route === "list" || route === "read" ? "GET" : "POST", body },
     res: {}, url: {}, store, roomId: "room1", auth: fakeAuth(memberId, permissions),
     workClaimRoute: route, workClaimId: id, helpers, registry });
   return { out, calls: helpers.calls };

@@ -15,8 +15,13 @@ const helpers = {
   body: async req => req.body,
 };
 
-const call = (registry, route, id, body, queue = null) => handleWorkClaims({
-  req: { method: route === "list" || route === "read" ? "GET" : "POST", body },
+const call = (registry, route, id, body, queue = null) => {
+  // FIX-45: files is required on claim creation — tests that do not exercise
+  // file declarations declare [] explicitly ("touches no files").
+  const declared = (route === "create" || route === "claim") && body && !("files" in Object(body))
+    ? { files: [], ...body } : body;
+  return handleWorkClaims({
+  req: { method: route === "list" || route === "read" ? "GET" : "POST", body: declared },
   res: {},
   url: new URL(`https://room.example/api/rooms/room1/work-claims${queue ? `?queue=${queue}` : ""}`),
   store: { roomAuthority: () => ({ members: {
@@ -25,6 +30,7 @@ const call = (registry, route, id, body, queue = null) => handleWorkClaims({
   auth: { member: { id: "ada", kind: "agent", permissions: [] } },
   workClaimRoute: route, workClaimId: id, helpers, registry,
 });
+};
 
 test("the ready queue lists unheld claims whose dependencies are done", async () => {
   const registry = createWorkClaimRegistry();
@@ -61,8 +67,9 @@ test("dependencies survive the durable claim registry", async t => {
   const store = new RoomStore(":memory:");
   store.initialize(initialRoom("commons"));
   t.after(() => store.close());
+  // FIX-45: files is required on creation — declare [] explicitly.
   const create = body => handleWorkClaims({
-    req: { method: "POST", body },
+    req: { method: "POST", body: { files: [], ...body } },
     res: {},
     url: new URL("https://room.example/api/rooms/commons/work-claims"),
     store, roomId: "commons",
@@ -71,7 +78,7 @@ test("dependencies survive the durable claim registry", async t => {
   });
   assert.equal((await create({ id: "parent" })).status, 201);
   const out = await handleWorkClaims({
-    req: { method: "POST", body: { id: "child", dependsOn: ["parent"] } },
+    req: { method: "POST", body: { id: "child", dependsOn: ["parent"], files: [] } },
     res: {},
     url: new URL("https://room.example/api/rooms/commons/work-claims"),
     store, roomId: "commons",
@@ -86,8 +93,9 @@ test("#1527: deleting a claim waives it from dependents' dependsOn so they can r
   const store = new RoomStore(":memory:");
   store.initialize(initialRoom("commons"));
   t.after(() => store.close());
+  // FIX-45: files is required on creation — declare [] explicitly.
   const create = body => handleWorkClaims({
-    req: { method: "POST", body },
+    req: { method: "POST", body: { files: [], ...body } },
     res: {},
     url: new URL("https://room.example/api/rooms/commons/work-claims"),
     store, roomId: "commons",

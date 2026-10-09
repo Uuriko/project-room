@@ -39,9 +39,13 @@ function roomFixture(t) {
   const events = () => store.db.prepare("SELECT COUNT(*) AS n FROM events WHERE room_id='commons' AND json_extract(body,'$.type')='work_claim.updated'").get().n;
   const call = async (memberId, route, { id = null, body = undefined, query = "", fetchPullRequest = null } = {}) => {
     const method = body === undefined ? "GET" : "POST";
+  // FIX-45: files is required on claim creation — tests that do not
+  // exercise file declarations declare [] explicitly ("touches no files").
+    const declared = (route === "create" || route === "claim") && body !== undefined && !("files" in Object(body))
+      ? { files: [], ...body } : body;
     try {
       const out = await handleWorkClaims({
-        req: { method, body },
+        req: { method, body: declared },
         res: {},
         url: new URL(`https://room.example/api/rooms/commons/work-claims${query}`),
         store, roomId: "commons",
@@ -427,10 +431,14 @@ test("over real HTTP a guest's review note and sweep are refused and the list is
   });
   const origin = `http://127.0.0.1:${server.address().port}`;
   const call = async (token, path, body) => {
+  // FIX-45: files is required on claim creation — tests that do not
+  // exercise file declarations declare [] explicitly ("touches no files").
+    const sent = body !== undefined && (path === "/work-claims" || path.endsWith("/claim"))
+      && !("files" in Object(body)) ? { files: [], ...body } : body;
     const response = await fetch(`${origin}/api/rooms/commons${path}`, {
       method: body === undefined ? "GET" : "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body)
+      body: body === undefined ? undefined : JSON.stringify(sent)
     });
     return { status: response.status, value: await response.json() };
   };
@@ -440,7 +448,8 @@ test("over real HTTP a guest's review note and sweep are refused and the list is
   assert.equal(note.status, 403);
   assert.equal(note.value.error.code, "work_claims_not_permitted");
   assert.equal((await call(guestKey, "/work-claims/sweep", {})).status, 403);
-  const forged = await call(ownerKey, "/work-claims", { id: "forged", pullRequest: { url: "https://github.com/example/repo/pull/1", outcome: "merged" } });
+  // FIX-45: files declared so this exercises pullRequest validation, not the files requirement.
+  const forged = await call(ownerKey, "/work-claims", { id: "forged", files: [], pullRequest: { url: "https://github.com/example/repo/pull/1", outcome: "merged" } });
   assert.equal(forged.status, 422);
   assert.equal(forged.value.error.code, "invalid_claim_input");
   const list = await call(guestKey, "/work-claims");
