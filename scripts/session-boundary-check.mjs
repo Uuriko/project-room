@@ -1,4 +1,4 @@
-import { clickChrome } from "./room-chrome.mjs";
+import { clickChrome, openSearch, openSettings, closeSettings } from "./room-chrome.mjs";
 // Browser regressions for session ownership, stale writes, live announcements,
 // and user-controlled record identities. All state and credentials are disposable.
 import test from "node:test";
@@ -11,7 +11,6 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { event, EVENT_TYPES as T } from "../src/events.js";
-import { openSearch, openSettings, closeSettings } from "./room-chrome.mjs";
 
 const chromiumOptions = process.env.ROOM_TEST_CHROMIUM_PATH
   ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH }
@@ -108,6 +107,16 @@ async function revealSearch(page) {
   }
 }
 
+async function signOut(page) {
+  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click();
+  await clickChrome(page, "#signout-button");
+}
+
+// Seed one event into a fixture event list (roomId is always "commons").
+function seedEvent(seed, id, idempotencyKey, type, data, actorId = "owner") {
+  seed.push(event({ id, idempotencyKey, roomId: "commons", actorId, type, data }));
+}
+
 test("late caught-up success and access error cannot cross an account switch", { timeout: 90000 }, async t => {
   const fixture = await startRoom(t, {
     prepare({ store, owner, send }) {
@@ -168,7 +177,7 @@ test("late caught-up success and access error cannot cross an account switch", {
   await successCaptured.promise;
   assert.equal(store.snapshot(owner, "commons").cursor, ownerHorizon, "the old account's committed marker remains its own");
   await closeCatchup(page);
-  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await clickChrome(page, "#signout-button");
+  await signOut(page);
   await enterRoom(page, maya, "Maya");
   await page.waitForFunction(() => document.querySelector("#rb-attention-list")?.textContent.includes("Maya return item"));
   releaseSuccess.resolve();
@@ -188,7 +197,7 @@ test("late caught-up success and access error cannot cross an account switch", {
   await page.locator("#rb-ack-button").click();
   await errorCaptured.promise;
   await closeCatchup(page);
-  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await clickChrome(page, "#signout-button");
+  await signOut(page);
   await enterRoom(page, owner, "Room owner");
   releaseError.resolve();
   await errorDelivered.promise;
@@ -712,56 +721,37 @@ test("a committed brief acknowledgement invalidates its old horizon when the bri
 
 test("record identities and fragments remain collision-safe and legacy work links still resolve", { timeout: 90000 }, async t => {
   const seed = initialRoom();
-  seed.push(event({
-    id: "status", idempotencyKey: "seed-member-stack", roomId: "commons", actorId: "owner", type: T.MEMBER_ADDED,
-    data: { memberId: "stack", displayName: "Stack", kind: "human", permissions: [] }
-  }));
+  seedEvent(seed, "status", "seed-member-stack", T.MEMBER_ADDED,
+    { memberId: "stack", displayName: "Stack", kind: "human", permissions: [] });
   for (const memberId of ["duplicate-a", "duplicate-b"]) {
-    seed.push(event({
-      id: `member-${memberId}`, idempotencyKey: `seed-member-${memberId}`, roomId: "commons", actorId: "owner", type: T.MEMBER_ADDED,
-      data: { memberId, displayName: "Alex", kind: "human", permissions: ["accept_work", "complete_work", "verify"] }
-    }));
+    seedEvent(seed, `member-${memberId}`, `seed-member-${memberId}`, T.MEMBER_ADDED,
+      { memberId, displayName: "Alex", kind: "human", permissions: ["accept_work", "complete_work", "verify"] });
   }
-  seed.push(event({
-    id: "list", idempotencyKey: "seed-message-list", roomId: "commons", actorId: "owner", type: T.MESSAGE_POSTED,
-    data: { messageId: "list", body: "Message whose id collides with the static list id" }
-  }));
+  seedEvent(seed, "list", "seed-message-list", T.MESSAGE_POSTED,
+    { messageId: "list", body: "Message whose id collides with the static list id" });
   for (const [memberId, messageId, body] of [
     ["duplicate-a", "duplicate-a-message", "First Alex identity message"],
     ["duplicate-b", "duplicate-b-message", "Second Alex identity message"]
   ]) {
-    seed.push(event({
-      id: `event-${messageId}`, idempotencyKey: `seed-${messageId}`, roomId: "commons", actorId: memberId, type: T.MESSAGE_POSTED,
-      data: { messageId, body }
-    }));
-    seed.push(event({
-      id: `reaction-${memberId}`, idempotencyKey: `seed-reaction-${memberId}`, roomId: "commons", actorId: memberId, type: T.MESSAGE_REACTION_SET,
-      data: { messageId: "list", reaction: "heart", active: true }
-    }));
+    seedEvent(seed, `event-${messageId}`, `seed-${messageId}`, T.MESSAGE_POSTED, { messageId, body }, memberId);
+    seedEvent(seed, `reaction-${memberId}`, `seed-reaction-${memberId}`, T.MESSAGE_REACTION_SET,
+      { messageId: "list", reaction: "heart", active: true }, memberId);
   }
-  seed.push(event({
-    id: "message-colon", idempotencyKey: "seed-message-colon", roomId: "commons", actorId: "owner", type: T.MESSAGE_POSTED,
-    data: { messageId: "msg:colon", body: "Message with a colon id" }
-  }));
+  seedEvent(seed, "message-colon", "seed-message-colon", T.MESSAGE_POSTED,
+    { messageId: "msg:colon", body: "Message with a colon id" });
   for (const [workItemId, sourceMessageId] of [["title", "msg:colon"], ["list", null], ["work-legacy", null], ["room-title", null]]) {
-    seed.push(event({
-      id: `work-event-${workItemId}`, idempotencyKey: `seed-work-${workItemId}`, roomId: "commons", actorId: "owner", type: T.WORK_PROPOSED,
-      data: {
-        workItemId,
-        title: `Collision work ${workItemId}`,
-        definitionOfDone: "The exact record remains addressable",
-        accountableMemberId: "owner",
-        ...(sourceMessageId ? { sourceMessageId } : {})
-      }
-    }));
+    seedEvent(seed, `work-event-${workItemId}`, `seed-work-${workItemId}`, T.WORK_PROPOSED, {
+      workItemId,
+      title: `Collision work ${workItemId}`,
+      definitionOfDone: "The exact record remains addressable",
+      accountableMemberId: "owner",
+      ...(sourceMessageId ? { sourceMessageId } : {})
+    });
   }
-  seed.push(event({
-    id: "work-event-duplicate-members", idempotencyKey: "seed-work-duplicate-members", roomId: "commons", actorId: "owner", type: T.WORK_PROPOSED,
-    data: {
-      workItemId: "duplicate-members", title: "Duplicate-name assignment", definitionOfDone: "Both stable identities stay visible",
-      accountableMemberId: "duplicate-a", verifierMemberId: "duplicate-b", independentVerificationRequired: true
-    }
-  }));
+  seedEvent(seed, "work-event-duplicate-members", "seed-work-duplicate-members", T.WORK_PROPOSED, {
+    workItemId: "duplicate-members", title: "Duplicate-name assignment", definitionOfDone: "Both stable identities stay visible",
+    accountableMemberId: "duplicate-a", verifierMemberId: "duplicate-b", independentVerificationRequired: true
+  });
   const { browser, origin, owner, duplicateA, send } = await startRoom(t, {
     events: seed,
     prepare({ store }) { return { duplicateA: store.issueAccessKey("commons", "duplicate-a") }; }
@@ -867,7 +857,7 @@ test("record identities and fragments remain collision-safe and legacy work link
   // Reply addressing (#57) leaves an @-mention draft; accept the draft-guard confirm so sign-out proceeds.
   page.once("dialog", dialog => dialog.accept());
   await closeCatchup(page);
-  if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await clickChrome(page, "#signout-button");
+  await signOut(page);
   await enterRoom(page, duplicateA, "Alex (duplicate-a)");
   assert.equal(await page.locator("#identity-label").textContent(), "Alex (duplicate-a)");
   assert.equal(await page.locator("#identity-label").getAttribute("title"), "Alex (duplicate-a) · Person");

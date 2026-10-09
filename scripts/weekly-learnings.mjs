@@ -162,11 +162,8 @@ export function weekAlreadySent(sentLog, id) {
  *   Dry runs are strictly read-only.
  */
 export function watermarkDecision({ head, truncated, posted, windowStartMs, nowMs }) {
-  if (truncated) {
-    return { write: true, after: head, windowStartMs };
-  }
-  if (posted) {
-    return { write: true, after: head, windowStartMs: nowMs };
+  if (truncated || posted) {
+    return { write: true, after: head, windowStartMs: truncated ? windowStartMs : nowMs };
   }
   return { write: false };
 }
@@ -278,18 +275,12 @@ export function renderDigest({ weekLabel, prs, totalPrs, done, bugs, lessons }) 
      ...bulletList(shipped, MAX_SHIPPED, shippedTotal)].join("\n")
   );
 
-  if (bugs.length) {
-    sections.push(["BROKE & FIXED", ...bulletList(bugs, MAX_BUGS)].join("\n"));
-  }
-
-  if (lessons.length) {
-    sections.push(["LEARNED", ...bulletList(lessons, MAX_LEARNED)].join("\n"));
-  }
-
-  if (done.length) {
-    sections.push(
-      [`DONE THIS WEEK — ${done.length}`, ...bulletList(done, MAX_DONE)].join("\n")
-    );
+  for (const [title, items, max] of [
+    ["BROKE & FIXED", bugs, MAX_BUGS],
+    ["LEARNED", lessons, MAX_LEARNED],
+    [`DONE THIS WEEK — ${done.length}`, done, MAX_DONE],
+  ]) {
+    if (items.length) sections.push([title, ...bulletList(items, max)].join("\n"));
   }
 
   sections.push("📝 Lanes: append next week's lessons to docs/WEEKLY-LEARNINGS.md");
@@ -310,14 +301,16 @@ function readJson(path) {
   return JSON.parse(readFileSync(path, "utf8"));
 }
 
+function jillRoomCfg(file, key) {
+  return readJson(join(homedir(), ".config", "jill-room", file))[key];
+}
+
 function roomToken() {
-  const cfg = join(homedir(), ".config", "jill-room", "conn", "connection.json");
-  return readJson(cfg).token;
+  return jillRoomCfg(join("conn", "connection.json"), "token");
 }
 
 function roomIdentitySecret() {
-  const cfg = join(homedir(), ".config", "jill-room", "identity.json");
-  return readJson(cfg).secret;
+  return jillRoomCfg("identity.json", "secret");
 }
 
 function httpsJson({ method = "GET", path, body, token }) {
@@ -455,16 +448,19 @@ function parseArgs(argv) {
     dryRun: false,
     post: false,
   };
+  const VALUE_FLAGS = {
+    "--since": "since",
+    "--week": "week",
+    "--queue": "queue",
+    "--repo": "repo",
+    "--room": "room",
+    "--state-dir": "stateDir",
+  };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    const next = () => argv[++i] ?? die(`missing value for ${a}`);
-    if (a === "--since") args.since = next();
-    else if (a === "--week") args.week = next();
-    else if (a === "--queue") args.queue = next();
-    else if (a === "--repo") args.repo = next();
-    else if (a === "--room") args.room = next();
-    else if (a === "--state-dir") args.stateDir = next();
-    else if (a === "--dry-run") args.dryRun = true;
+    if (VALUE_FLAGS[a]) {
+      args[VALUE_FLAGS[a]] = argv[++i] ?? die(`missing value for ${a}`);
+    } else if (a === "--dry-run") args.dryRun = true;
     else if (a === "--post") args.post = true;
     else if (a === "--help" || a === "-h") {
       console.log(
@@ -528,8 +524,7 @@ async function main() {
     roomHead = walk.head;
     events = mergeEventLists(spilled, walk.events);
     if (walk.truncated) {
-      const plan = truncationPlan({ truncated: true, dryRun: isDryRun });
-      if (plan === "fail-clean") {
+      if (truncationPlan({ truncated: true, dryRun: isDryRun }) === "fail-clean") {
         // Dry run: strictly read-only — persist nothing, not even the spill.
         die(
           `room event walk hit the ${EVENT_PAGE_LIMIT}-page cap with more events pending; ` +
