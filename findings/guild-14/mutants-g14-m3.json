@@ -1,0 +1,46 @@
+{
+  "unit": "g14-m3",
+  "file": "server/bounty-escrow.mjs",
+  "mutants": 3,
+  "killed": 1,
+  "survived": 2,
+  "skipped": 0,
+  "results": [
+    {
+      "unit": "g14-m3",
+      "file": "server/bounty-escrow.mjs",
+      "mutant": "m3-dispute-claimant-invert",
+      "status": "KILLED",
+      "tests": [
+        "tests/bounty-escrow.test.js",
+        "tests/bounty-disputes.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    },
+    {
+      "unit": "g14-m3",
+      "file": "server/bounty-escrow.mjs",
+      "mutant": "m3-dispute-state-widen",
+      "status": "SURVIVED",
+      "tests": [
+        "tests/bounty-escrow.test.js",
+        "tests/bounty-disputes.test.js"
+      ],
+      "exitCode": 0,
+      "failedTests": 0
+    },
+    {
+      "unit": "g14-m3",
+      "file": "server/bounty-escrow.mjs",
+      "mutant": "m3-transition-widen",
+      "status": "SURVIVED",
+      "tests": [
+        "tests/bounty-escrow.test.js",
+        "tests/bounty-disputes.test.js"
+      ],
+      "exitCode": 0,
+      "failedTests": 0
+    }
+  ]
+}

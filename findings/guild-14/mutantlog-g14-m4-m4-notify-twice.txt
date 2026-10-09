@@ -1,0 +1,34 @@
+✔ full ladder: opened → challenged → evidence → adjudicating → decided → resolved (12.717695ms)
+✔ economic open requires a bond (bond-missing) (0.902625ms)
+✔ appeal doubles the bond per tier and returns to adjudicating (2.62539ms)
+✔ frivolous ruling forfeits the bond and has no appeal as of right (2.134223ms)
+✔ withdraw forfeits the bond from any non-terminal state (3.853723ms)
+✔ illegal transitions are rejected with invalid_transition (0.821022ms)
+✔ dispute cost is capped at 25% of the bounty across the whole escalation (0.443245ms)
+✔ unavailable is an overlay, not a state (9.949311ms)
+✔ reason codes come from the fixed vocabulary (0.475313ms)
+✔ malformed inputs are refused (0.416605ms)
+✔ finalize fires the single onDisputeFinalized callback once (18.928686ms)
+✔ withdraw notifies the escrow with a withdrawn terminal (0.365288ms)
+✔ appealed ladder fires exactly once with the final tier outcome (14.152319ms)
+✔ a throwing escrow handler still leaves the dispute terminal (8.834397ms)
+✔ no handler configured is fine; non-function handler is refused (4.978311ms)
+✔ independent verifier seats cleanly (10.147628ms)
+✔ executor cannot verify its own claim (0.431057ms)
+✔ shared runtime / credential / delegated chain is ineligible (2.109596ms)
+✔ unknown verifier falls through to unavailable, not a silent drop (0.871708ms)
+✔ tier-1 decision records an outcome-independent pay hook (3.694334ms)
+✔ malformed tier-1 decisions are refused (0.422534ms)
+✔ sortition: deterministic 3-seat draw seeded by dispute-id (4.134815ms)
+✔ sortition excludes parties and the executor (5.082127ms)
+✔ panel decision: majority wins with the majority's reason codes (14.646119ms)
+✔ panel decision rejects bad votes and deadlocks (10.291565ms)
+✔ registry read path parses agent-card frontmatter (1.669145ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3086.300698

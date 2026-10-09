@@ -1,0 +1,34 @@
+{
+  "unit": "g14-m6",
+  "file": "server/bounty-receipts.mjs",
+  "mutants": 2,
+  "killed": 2,
+  "survived": 0,
+  "skipped": 0,
+  "results": [
+    {
+      "unit": "g14-m6",
+      "file": "server/bounty-receipts.mjs",
+      "mutant": "m6-verify-skip",
+      "status": "KILLED",
+      "tests": [
+        "tests/bounty-receipts.test.js",
+        "tests/audit-receipts.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    },
+    {
+      "unit": "g14-m6",
+      "file": "server/bounty-receipts.mjs",
+      "mutant": "m6-issue-unsign",
+      "status": "KILLED",
+      "tests": [
+        "tests/bounty-receipts.test.js",
+        "tests/audit-receipts.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    }
+  ]
+}

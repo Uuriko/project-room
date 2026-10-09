@@ -1,0 +1,35 @@
+✖ track vocabulary: journal kinds and state transitions classify by track (43.121703ms)
+✔ accept -> settle: finality flows on the acceptance verdict, all journaled with track (352.050685ms)
+✔ accept -> dispute: finality freezes while acceptance is re-decided (283.090786ms)
+✔ fund -> timeout -> refund: finality-only path needs no acceptance verdict (93.06295ms)
+✔ illegal transitions are rejected on both tracks (98.361481ms)
+✔ duplicate dispute-finalized packets settle exactly once (498.997288ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 5
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3366.676099
+
+✖ failing tests:
+
+test at tests/bounty-tracks.test.js:78:1
+✖ track vocabulary: journal kinds and state transitions classify by track (43.121703ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  true !== false
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-tracks.test.js:96:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.start (node:internal/test_runner/test:1257:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

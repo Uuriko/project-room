@@ -1,0 +1,90 @@
+✔ rung 1: timeout flakes forfeit the bond and journal the strike (135.750352ms)
+✔ rung 2: the next claim requires a double bond, settled in full (186.133262ms)
+✔ rung 2 flake forfeits the doubled bond (205.484982ms)
+✔ rung 3: cooldown gates new claims and is visible on the identity card (107.460186ms)
+✔ cooldown expiry re-opens claims and journals the end; decay resets the rung and journals once (123.797464ms)
+✔ decay journal is idempotent: later claims do not re-journal (405.871394ms)
+✔ dispute-upheld records a flake strike: forfeit plus ladder journal (197.274191ms)
+✔ flakes are lane-scoped and room-scoped: other lanes are unaffected (101.084307ms)
+✔ the ladder never bans and never touches payouts: strikes are not reputation (202.048895ms)
+✔ band boundaries: trusted >= 40, standard >= -20, probation below (11.759187ms)
+✔ honest earner climbs: accepted + paid signals stack toward trusted (698.957629ms)
+✔ projection is deterministic: replaying the event stream changes nothing (21.065072ms)
+✔ failed retries never double-count: rejected transitions emit no events (5.992293ms)
+✔ claim flake penalizes, then decays back toward neutral (22.920036ms)
+✖ dispute upheld: claimant drops to probation and is gated off large claims (252.657895ms)
+✔ dispute rejected: challenger penalized, claimant vindicated (104.605743ms)
+✔ dispute split: both sides share a small loss (128.835354ms)
+✔ listEvents returns the stream in seq order with parsed data (226.536174ms)
+✔ unknown event types and malformed payloads never crash the projector (4.316448ms)
+✔ claimEligibility reports the band and the probation cap (60.939833ms)
+✔ verifier acceptance overturned: upheld dispute penalizes the verifier (overturn-rate feed) (75.740364ms)
+✔ rejected dispute overturns nothing: no acceptance_overturned for the verifier (69.727871ms)
+✔ sybil flag confirmed: member lanes take sybil_confirmed; dismissed stays neutral (163.963001ms)
+✖ probation gate denial produces a review packet for arbiters (never a suspension) (194.260888ms)
+✔ sybil.flag-resolved without member lanes never crashes the projector (3.427304ms)
+✔ routing visibility: per-viewer claimable annotation mirrors the claim gate; never hides, never touches money (193.80881ms)
+✖ routingVisibility mirrors claimEligibility across bands and amounts (no drift) (40.664255ms)
+✔ rejected submission: bond forfeited flows a penalty signal for the claimant (64.553977ms)
+✔ non-verdict lifecycle events flow no reputation signals (94.257002ms)
+ℹ tests 29
+ℹ suites 0
+ℹ pass 26
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 7404.492052
+
+✖ failing tests:
+
+test at tests/bounty-reputation.test.js:144:1
+✖ dispute upheld: claimant drops to probation and is gated off large claims (252.657895ms)
+  Error [EscrowError]: probation reputation band: may only claim bounties up to 5 credits
+      at fail (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:545:41)
+      at BountyEscrow.claimBounty (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:1671:7)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-reputation.test.js:180:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    code: 'reputation_probation'
+  }
+
+test at tests/bounty-reputation.test.js:336:1
+✖ probation gate denial produces a review packet for arbiters (never a suspension) (194.260888ms)
+  Error [EscrowError]: probation reputation band: may only claim bounties up to 5 credits
+      at fail (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:545:41)
+      at BountyEscrow.claimBounty (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:1671:7)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-reputation.test.js:374:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    code: 'reputation_probation'
+  }
+
+test at tests/bounty-reputation.test.js:437:1
+✖ routingVisibility mirrors claimEligibility across bands and amounts (no drift) (40.664255ms)
+  AssertionError [ERR_ASSERTION]: routing claimable must mirror the gate for id:agent/grokbot at 5000 millis
+  
+  true !== false
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-reputation.test.js:457:14)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

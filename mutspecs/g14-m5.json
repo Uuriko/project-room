@@ -1,0 +1,1 @@
+{"file":"server/settlement-router.mjs","mutants":[{"find":"if (!CUSTODY_ENABLED) {","name":"m5-custody-flip","replace":"if (CUSTODY_ENABLED) { /* mutant: custody branch reachable without approval */"}],"tests":["tests/demigod-jobs-money.test.js"],"unit":"g14-m5"}

@@ -1,0 +1,77 @@
+✔ clean fixture: exit 0, ok report covering the room (5824.964005ms)
+✔ corrupt chain: exit 1 with a machine-readable violation report (6657.726145ms)
+✔ read-only guarantee: the check mutates neither the file nor its directory (6917.469244ms)
+✔ missing database file: exit 2 (1007.01264ms)
+✔ no --db and no ROOM_DB: exit 2 (1178.668995ms)
+✔ database without escrow schema: exit 2, not a violation (792.324545ms)
+✔ database without rooms table: exit 2 (4025.961232ms)
+✔ ROOM_DB env fallback is honored (7870.753943ms)
+✔ genesis issues 100 credits per lane and conservation holds on empty room (128.421673ms)
+✔ canonicalLane maps room member ids to ledger lanes (3.167784ms)
+✔ normalizeActor derives agent/human kinds and honors explicit actors (9.290292ms)
+✔ post creates PROPOSED: locks nothing, sequential id, poster auto-watches (110.616593ms)
+✔ proposed bounties are not claimable and are excluded from metrics (190.15725ms)
+✔ post rejects negative, zero, oversized and over-precise amounts (27.128062ms)
+✔ fund locks the budget: poster-only, single transition, needs funds (207.039395ms)
+✔ decline cancels with a reason; duplicate cancels with Duplicate label (321.994849ms)
+✔ snooze defers a proposal: stays open, keeps time-in-state (380.526608ms)
+✔ proposed bounties past deadline expire unfunded via the keeper (61.253894ms)
+✔ claim locks the 1-credit bond; double claim is rejected; only funded is claimable (119.634226ms)
+✔ watch is sticky: claim expiry does not unfollow (132.122086ms)
+✔ submit stores the evidence receipt; only the claimant may submit (228.442996ms)
+✔ accept is a gated approval event: attribution is its explicit consequence (149.817351ms)
+✔ time-in-state is computed on reads and resets on transition (96.497254ms)
+✔ challenge window auto-approves, then the epoch sweep pays 99% + 1% pool fee and returns the bond (165.769201ms)
+✔ dispute bond must be exactly 25% of the bounty (96.901831ms)
+✔ dispute RELEASE path: rejected challenge vests the award, bond compensates the worker (126.070214ms)
+✔ dispute CANCEL path: upheld challenge refunds the poster in full, no fee (109.110373ms)
+✔ timeout refunds the award in full with no fee and forfeits the claim bond (anti-flake ladder rung 1) (142.753281ms)
+✔ the claimant cannot dispute their own submission; double disputes rejected (208.590393ms)
+✔ no designated verifier means no authorized decider: dispute is honestly unavailable (77.351162ms)
+✔ getDispute is room-scoped: another room's dispute reads as absent (L-P2-10) (185.078097ms)
+✔ unresolved disputes default to RELEASE after 14 days via permissionless finalize (96.777385ms)
+✔ idempotency keys replay the original response without re-executing (57.05339ms)
+✖ a deployed idempotency table converges and does not return another member's body (70.303985ms)
+✔ reputation counts only paid completions (27.257676ms)
+✔ transfers move payable credits; history receipts are actor-attributed with before/after (75.223328ms)
+✔ bracketed and bare bounty references are inert: no side effects, no text scanning (23.54937ms)
+✔ sequential ids are per-room and gapless within a room (13.735513ms)
+✔ metrics exclude proposed items from every count and total (128.889756ms)
+✔ persistence across restart: journal, bounties, watchers and sequences rehydrate (1332.364737ms)
+✔ dispute SPLIT from accepted: exact halves, challenger bond returned (never forfeited) (368.097917ms)
+✔ dispute SPLIT from submitted: award is attributed first, then split — no lost move (95.619136ms)
+✔ dispute SPLIT leaves no duplicate or dust: halves sum to the award exactly (160.635837ms)
+ℹ tests 43
+ℹ suites 0
+ℹ pass 42
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 44496.418727
+
+✖ failing tests:
+
+test at tests/bounty-escrow.test.js:452:1
+✖ a deployed idempotency table converges and does not return another member's body (70.303985ms)
+  AssertionError [ERR_ASSERTION]: expected idempotency_actor_mismatch, got undefined: must not re-execute
+  + actual - expected
+  
+  + undefined
+  - 'idempotency_actor_mismatch'
+  
+      at expectCode (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-escrow.test.js:39:40)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-escrow.test.js:467:3)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: 'idempotency_actor_mismatch',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

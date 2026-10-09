@@ -1,0 +1,82 @@
+✖ clean fixture: exit 0, ok report covering the room (7554.427971ms)
+✔ corrupt chain: exit 1 with a machine-readable violation report (9349.197672ms)
+✔ read-only guarantee: the check mutates neither the file nor its directory (6275.077844ms)
+✔ missing database file: exit 2 (1219.171127ms)
+✔ no --db and no ROOM_DB: exit 2 (1417.024266ms)
+✔ database without escrow schema: exit 2, not a violation (2040.705267ms)
+✔ database without rooms table: exit 2 (5316.564337ms)
+✔ ROOM_DB env fallback is honored (8056.57775ms)
+✔ genesis issues 100 credits per lane and conservation holds on empty room (400.095085ms)
+✔ canonicalLane maps room member ids to ledger lanes (14.980842ms)
+✔ normalizeActor derives agent/human kinds and honors explicit actors (59.333872ms)
+✔ post creates PROPOSED: locks nothing, sequential id, poster auto-watches (232.743139ms)
+✔ proposed bounties are not claimable and are excluded from metrics (141.932689ms)
+✔ post rejects negative, zero, oversized and over-precise amounts (88.570618ms)
+✔ fund locks the budget: poster-only, single transition, needs funds (104.199462ms)
+✔ decline cancels with a reason; duplicate cancels with Duplicate label (275.75654ms)
+✔ snooze defers a proposal: stays open, keeps time-in-state (58.93232ms)
+✔ proposed bounties past deadline expire unfunded via the keeper (61.342537ms)
+✔ claim locks the 1-credit bond; double claim is rejected; only funded is claimable (135.194687ms)
+✔ watch is sticky: claim expiry does not unfollow (123.796332ms)
+✔ submit stores the evidence receipt; only the claimant may submit (130.549517ms)
+✔ accept is a gated approval event: attribution is its explicit consequence (210.286258ms)
+✔ time-in-state is computed on reads and resets on transition (45.934514ms)
+✔ challenge window auto-approves, then the epoch sweep pays 99% + 1% pool fee and returns the bond (51.578123ms)
+✔ dispute bond must be exactly 25% of the bounty (40.928071ms)
+✔ dispute RELEASE path: rejected challenge vests the award, bond compensates the worker (31.387013ms)
+✔ dispute CANCEL path: upheld challenge refunds the poster in full, no fee (13.002804ms)
+✔ timeout refunds the award in full with no fee and forfeits the claim bond (anti-flake ladder rung 1) (15.805129ms)
+✔ the claimant cannot dispute their own submission; double disputes rejected (39.368751ms)
+✔ no designated verifier means no authorized decider: dispute is honestly unavailable (25.810264ms)
+✔ getDispute is room-scoped: another room's dispute reads as absent (L-P2-10) (285.395465ms)
+✔ unresolved disputes default to RELEASE after 14 days via permissionless finalize (93.134678ms)
+✔ idempotency keys replay the original response without re-executing (31.573433ms)
+✔ a deployed idempotency table converges and does not return another member's body (29.344768ms)
+✔ reputation counts only paid completions (8.707217ms)
+✔ transfers move payable credits; history receipts are actor-attributed with before/after (5.973244ms)
+✔ bracketed and bare bounty references are inert: no side effects, no text scanning (4.059662ms)
+✔ sequential ids are per-room and gapless within a room (12.562182ms)
+✔ metrics exclude proposed items from every count and total (7.295298ms)
+✔ persistence across restart: journal, bounties, watchers and sequences rehydrate (1327.233046ms)
+✔ dispute SPLIT from accepted: exact halves, challenger bond returned (never forfeited) (31.226652ms)
+✔ dispute SPLIT from submitted: award is attributed first, then split — no lost move (85.06015ms)
+✔ dispute SPLIT leaves no duplicate or dust: halves sum to the award exactly (10.723733ms)
+ℹ tests 43
+ℹ suites 0
+ℹ pass 42
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 50309.697435
+
+✖ failing tests:
+
+test at tests/bounty-conservation-check.test.js:78:1
+✖ clean fixture: exit 0, ok report covering the room (7554.427971ms)
+  AssertionError [ERR_ASSERTION]: stderr: file:///home/hatch/workspace/pr-wave1000-guild-14/scripts/bounty-conservation-check.mjs:34
+  import { BountyEscrow } from "../server/bounty-escrow.mjs";
+           ^^^^^^^^^^^^
+  SyntaxError: The requested module '../server/bounty-escrow.mjs' does not provide an export named 'BountyEscrow'
+      at #asyncInstantiate (node:internal/modules/esm/module_job:455:21)
+      at async ModuleJob.run (node:internal/modules/esm/module_job:553:5)
+      at async node:internal/modules/esm/loader:647:26
+      at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+  
+  Node.js v24.20.0
+  
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-conservation-check.test.js:82:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.start (node:internal/test_runner/test:1257:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

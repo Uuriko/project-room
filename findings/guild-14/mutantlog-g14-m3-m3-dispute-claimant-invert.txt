@@ -1,0 +1,231 @@
+✔ full ladder: opened → challenged → evidence → adjudicating → decided → resolved (68.825146ms)
+✔ economic open requires a bond (bond-missing) (42.003164ms)
+✔ appeal doubles the bond per tier and returns to adjudicating (23.557353ms)
+✔ frivolous ruling forfeits the bond and has no appeal as of right (0.408393ms)
+✔ withdraw forfeits the bond from any non-terminal state (64.70292ms)
+✔ illegal transitions are rejected with invalid_transition (26.405266ms)
+✔ dispute cost is capped at 25% of the bounty across the whole escalation (33.33713ms)
+✔ unavailable is an overlay, not a state (12.611936ms)
+✔ reason codes come from the fixed vocabulary (0.645749ms)
+✔ malformed inputs are refused (7.3567ms)
+✔ finalize fires the single onDisputeFinalized callback once (6.132423ms)
+✔ withdraw notifies the escrow with a withdrawn terminal (16.407062ms)
+✔ appealed ladder fires exactly once with the final tier outcome (9.237092ms)
+✔ a throwing escrow handler still leaves the dispute terminal (8.083291ms)
+✔ no handler configured is fine; non-function handler is refused (45.374614ms)
+✔ genesis issues 100 credits per lane and conservation holds on empty room (428.888465ms)
+✔ canonicalLane maps room member ids to ledger lanes (0.891207ms)
+✔ normalizeActor derives agent/human kinds and honors explicit actors (66.927378ms)
+✔ post creates PROPOSED: locks nothing, sequential id, poster auto-watches (536.56067ms)
+✔ proposed bounties are not claimable and are excluded from metrics (54.668351ms)
+✔ post rejects negative, zero, oversized and over-precise amounts (23.856772ms)
+✔ fund locks the budget: poster-only, single transition, needs funds (89.00495ms)
+✔ decline cancels with a reason; duplicate cancels with Duplicate label (74.456107ms)
+✔ snooze defers a proposal: stays open, keeps time-in-state (20.691191ms)
+✔ proposed bounties past deadline expire unfunded via the keeper (47.836749ms)
+✔ claim locks the 1-credit bond; double claim is rejected; only funded is claimable (24.125315ms)
+✔ watch is sticky: claim expiry does not unfollow (21.773075ms)
+✔ submit stores the evidence receipt; only the claimant may submit (45.121384ms)
+✔ accept is a gated approval event: attribution is its explicit consequence (35.579604ms)
+✔ time-in-state is computed on reads and resets on transition (180.33471ms)
+✔ challenge window auto-approves, then the epoch sweep pays 99% + 1% pool fee and returns the bond (215.577448ms)
+✖ dispute bond must be exactly 25% of the bounty (178.806666ms)
+✖ dispute RELEASE path: rejected challenge vests the award, bond compensates the worker (10.020588ms)
+✖ dispute CANCEL path: upheld challenge refunds the poster in full, no fee (17.059341ms)
+✔ timeout refunds the award in full with no fee and forfeits the claim bond (anti-flake ladder rung 1) (23.846276ms)
+✖ the claimant cannot dispute their own submission; double disputes rejected (206.500637ms)
+✖ no designated verifier means no authorized decider: dispute is honestly unavailable (166.993188ms)
+✖ getDispute is room-scoped: another room's dispute reads as absent (L-P2-10) (95.525346ms)
+✖ unresolved disputes default to RELEASE after 14 days via permissionless finalize (272.155314ms)
+✔ idempotency keys replay the original response without re-executing (194.467509ms)
+✔ a deployed idempotency table converges and does not return another member's body (123.281399ms)
+✔ reputation counts only paid completions (261.965303ms)
+✔ transfers move payable credits; history receipts are actor-attributed with before/after (57.124707ms)
+✔ bracketed and bare bounty references are inert: no side effects, no text scanning (25.795201ms)
+✔ sequential ids are per-room and gapless within a room (34.725853ms)
+✔ metrics exclude proposed items from every count and total (105.882388ms)
+✔ persistence across restart: journal, bounties, watchers and sequences rehydrate (1042.088007ms)
+✖ dispute SPLIT from accepted: exact halves, challenger bond returned (never forfeited) (282.146348ms)
+✖ dispute SPLIT from submitted: award is attributed first, then split — no lost move (176.777201ms)
+✖ dispute SPLIT leaves no duplicate or dust: halves sum to the award exactly (102.510999ms)
+ℹ tests 50
+ℹ suites 0
+ℹ pass 40
+ℹ fail 10
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 10214.98306
+
+✖ failing tests:
+
+test at tests/bounty-escrow.test.js:325:1
+✖ dispute bond must be exactly 25% of the bounty (178.806666ms)
+  AssertionError [ERR_ASSERTION]: expected invalid_bond, got not_authorized: the claimant cannot dispute their own submission
+  + actual - expected
+  
+  + 'not_authorized'
+  - 'invalid_bond'
+  
+      at expectCode (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-escrow.test.js:39:40)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-escrow.test.js:329:5)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'not_authorized',
+    expected: 'invalid_bond',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/bounty-escrow.test.js:336:1
+✖ dispute RELEASE path: rejected challenge vests the award, bond compensates the worker (10.020588ms)
+  Error [EscrowError]: the claimant cannot dispute their own submission
+      at fail (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:545:41)
+      at check (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:547:63)
+      at file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:2281:7
+      at Object.transaction (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-escrow.test.js:24:23)
+      at BountyEscrow.disputeBounty (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:2271:23)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-escrow.test.js:339:30)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19) {
+    code: 'not_authorized'
+  }
+
+test at tests/bounty-escrow.test.js:355:1
+✖ dispute CANCEL path: upheld challenge refunds the poster in full, no fee (17.059341ms)
+  Error [EscrowError]: the claimant cannot dispute their own submission
+      at fail (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:545:41)
+      at check (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:547:63)
+      at file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:2281:7
+      at Object.transaction (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-escrow.test.js:24:23)
+      at BountyEscrow.disputeBounty (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:2271:23)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-escrow.test.js:358:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19) {
+    code: 'not_authorized'
+  }
+
+test at tests/bounty-escrow.test.js:391:1
+✖ the claimant cannot dispute their own submission; double disputes rejected (206.500637ms)
+  AssertionError [ERR_ASSERTION]: expected EscrowError not_authorized, no error thrown
+      at expectCode (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-escrow.test.js:40:10)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-escrow.test.js:394:3)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: undefined,
+    operator: 'fail',
+    diff: 'simple'
+  }
+
+test at tests/bounty-escrow.test.js:400:1
+✖ no designated verifier means no authorized decider: dispute is honestly unavailable (166.993188ms)
+  Error [EscrowError]: the claimant cannot dispute their own submission
+      at fail (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:545:41)
+      at check (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:547:63)
+      at file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:2281:7
+      at Object.transaction (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-escrow.test.js:24:23)
+      at BountyEscrow.disputeBounty (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:2271:23)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-escrow.test.js:403:30)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19) {
+    code: 'not_authorized'
+  }
+
+test at tests/bounty-escrow.test.js:413:1
+✖ getDispute is room-scoped: another room's dispute reads as absent (L-P2-10) (95.525346ms)
+  Error [EscrowError]: the claimant cannot dispute their own submission
+      at fail (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:545:41)
+      at check (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:547:63)
+      at file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:2281:7
+      at Object.transaction (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-escrow.test.js:24:23)
+      at BountyEscrow.disputeBounty (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:2271:23)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-escrow.test.js:418:30)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19) {
+    code: 'not_authorized'
+  }
+
+test at tests/bounty-escrow.test.js:424:1
+✖ unresolved disputes default to RELEASE after 14 days via permissionless finalize (272.155314ms)
+  Error [EscrowError]: the claimant cannot dispute their own submission
+      at fail (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:545:41)
+      at check (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:547:63)
+      at file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:2281:7
+      at Object.transaction (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-escrow.test.js:24:23)
+      at BountyEscrow.disputeBounty (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:2271:23)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-escrow.test.js:427:30)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19) {
+    code: 'not_authorized'
+  }
+
+test at tests/bounty-escrow.test.js:612:1
+✖ dispute SPLIT from accepted: exact halves, challenger bond returned (never forfeited) (282.146348ms)
+  Error [EscrowError]: the claimant cannot dispute their own submission
+      at fail (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:545:41)
+      at check (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:547:63)
+      at file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:2281:7
+      at Object.transaction (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-escrow.test.js:24:23)
+      at BountyEscrow.disputeBounty (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:2271:23)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-escrow.test.js:615:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19) {
+    code: 'not_authorized'
+  }
+
+test at tests/bounty-escrow.test.js:633:1
+✖ dispute SPLIT from submitted: award is attributed first, then split — no lost move (176.777201ms)
+  Error [EscrowError]: the claimant cannot dispute their own submission
+      at fail (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:545:41)
+      at check (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:547:63)
+      at file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:2281:7
+      at Object.transaction (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-escrow.test.js:24:23)
+      at BountyEscrow.disputeBounty (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:2271:23)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-escrow.test.js:636:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19) {
+    code: 'not_authorized'
+  }
+
+test at tests/bounty-escrow.test.js:652:1
+✖ dispute SPLIT leaves no duplicate or dust: halves sum to the award exactly (102.510999ms)
+  Error [EscrowError]: the claimant cannot dispute their own submission
+      at fail (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:545:41)
+      at check (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:547:63)
+      at file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:2281:7
+      at Object.transaction (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-escrow.test.js:24:23)
+      at BountyEscrow.disputeBounty (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:2271:23)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-escrow.test.js:656:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19) {
+    code: 'not_authorized'
+  }

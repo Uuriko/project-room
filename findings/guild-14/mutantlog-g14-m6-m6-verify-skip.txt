@@ -1,0 +1,244 @@
+✔ chain of N receipts builds and fully verifies (57.35949ms)
+✔ empty chain verifies vacuously (0.394362ms)
+✔ genesis receipt has the documented shape (31.244829ms)
+✔ tampered entry content fails verification at that receipt (1.058208ms)
+✔ tampered timestamp fails verification (22.996772ms)
+✔ tampered prevHash breaks the chain at the right index (9.364664ms)
+✔ swapped order is caught by the chain (seq + link continuity) (11.763042ms)
+✔ wrong signing key fails the signature check (11.016032ms)
+✔ tampered signature fails verification (0.693821ms)
+✔ non-genesis first receipt fails the chain at index 0 (8.290211ms)
+✔ canonical JSON is key-order independent (2.341143ms)
+✔ canonical JSON sorts nested keys and preserves array order (0.313591ms)
+✔ canonical JSON rejects non-serializable values (10.829842ms)
+✔ issueReceipt validates its inputs (0.842054ms)
+✔ issueReceipt accepts a Uint8Array key (11.554249ms)
+✔ issueReceipt defaults the timestamp to a current ISO instant (0.565518ms)
+✔ verifyChain is defensive against malformed inputs (0.31317ms)
+✔ timing-safe comparison does not accept prefix-forged values (0.290797ms)
+✔ truncated chain verifies -1 without an anchor (documents the A6 residual) (8.404964ms)
+✔ verifyChain with expectedLength detects truncation at the first missing index (18.007925ms)
+✔ verifyChain with expectedHeadHash detects truncation at the head (22.65609ms)
+✔ verifyChain with a correct length+head anchor verifies a complete chain (41.792419ms)
+✔ verifyChain opts are optional and backward compatible (13.283825ms)
+✔ canonical encoding matches the Python reference vectors byte-for-byte (68.572708ms)
+✔ canonicalJson rejects JSON numbers anywhere in signed bodies (21.579515ms)
+✔ parseStrict rejects duplicate object keys and lone surrogates (16.737688ms)
+✔ signer derives the reference pubkey; signBytes reproduces the reference signatures (139.991195ms)
+✔ generateReceiptKeyPair produces valid test keys (26.939248ms)
+✖ issue + verify round-trips for all five receipt types (109.625205ms)
+✖ verify rejects every tamper class (19.043759ms)
+✖ verify rejects a valid signature from the wrong key (18.852032ms)
+✖ the seen-set gives replay protection on receiptIds (16.405339ms)
+✖ journal linkage binds the receipt to the ledger (90.827595ms)
+✔ payout-released requires net == amount and net + fee == gross (17.377148ms)
+✖ roomId binds the receipt to one room; creditUnit is enforced (29.029024ms)
+✔ receipts are credits-only: no chain, asset, wallet, or cash language anywhere (107.470882ms)
+✔ fund issues a signed escrow-locked receipt stamped on both journal entries (103.022587ms)
+✖ claim and dispute lock signed bond-locked receipts with the bond kind (112.375071ms)
+✔ accept issues a signed attributed receipt linked to the approval event (100.593191ms)
+✔ timeout refund issues a signed refund-issued receipt (reason timeout) (36.524462ms)
+✔ epoch sweep issues a signed payout-released receipt with net + fee == award (118.17816ms)
+✖ dispute cancel issues refund-issued (dispute-cancel); split issues attributed + refund-issued (split) (173.67162ms)
+✖ dispute release from pre-accept issues a signed attributed receipt (42.222804ms)
+✔ without a signer, transitions return signed: [] and the ledger still conserves (147.451971ms)
+✖ the full signed lifecycle conserves the ledger (409.675723ms)
+✔ H-21: rejectWork with signing enabled completes — refund-issued accepts the escrow's reject vocabulary (64.22348ms)
+✔ H-21: refund-issued accepts the escrow's unverified-settlement vocabulary (3.155776ms)
+ℹ tests 47
+ℹ suites 0
+ℹ pass 37
+ℹ fail 10
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4733.705047
+
+✖ failing tests:
+
+test at tests/bounty-receipts.test.js:144:1
+✖ issue + verify round-trips for all five receipt types (109.625205ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + undefined
+  - 'room-bounty-receipt:el:cb4799c4bccdce270a998d3430451c18'
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:160:12)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: 'room-bounty-receipt:el:cb4799c4bccdce270a998d3430451c18',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/bounty-receipts.test.js:171:1
+✖ verify rejects every tamper class (19.043759ms)
+  AssertionError [ERR_ASSERTION]: tamper accepted: amount
+  
+  true !== false
+  
+      at tamper (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:177:12)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:180:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/bounty-receipts.test.js:201:1
+✖ verify rejects a valid signature from the wrong key (18.852032ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  true !== false
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:209:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/bounty-receipts.test.js:213:1
+✖ the seen-set gives replay protection on receiptIds (16.405339ms)
+  AssertionError [ERR_ASSERTION]: The "string" argument must be of type string. Received type undefined (undefined)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:218:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: /duplicate_receipt/,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+test at tests/bounty-receipts.test.js:222:1
+✖ journal linkage binds the receipt to the ledger (90.827595ms)
+  AssertionError [ERR_ASSERTION]: The "string" argument must be of type string. Received type undefined (undefined)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:227:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: /journal_mismatch/,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+test at tests/bounty-receipts.test.js:247:1
+✖ roomId binds the receipt to one room; creditUnit is enforced (29.029024ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  true !== false
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:253:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/bounty-receipts.test.js:366:1
+✖ claim and dispute lock signed bond-locked receipts with the bond kind (112.375071ms)
+  Error [EscrowError]: the claimant cannot dispute their own submission
+      at fail (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:545:41)
+      at check (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:547:63)
+      at file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:2281:7
+      at Object.transaction (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:296:23)
+      at BountyEscrow.disputeBounty (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:2271:23)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:376:46)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19) {
+    code: 'not_authorized'
+  }
+
+test at tests/bounty-receipts.test.js:441:1
+✖ dispute cancel issues refund-issued (dispute-cancel); split issues attributed + refund-issued (split) (173.67162ms)
+  Error [EscrowError]: the claimant cannot dispute their own submission
+      at fail (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:545:41)
+      at check (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:547:63)
+      at file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:2281:7
+      at Object.transaction (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:296:23)
+      at BountyEscrow.disputeBounty (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:2271:23)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:445:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19) {
+    code: 'not_authorized'
+  }
+
+test at tests/bounty-receipts.test.js:468:1
+✖ dispute release from pre-accept issues a signed attributed receipt (42.222804ms)
+  Error [EscrowError]: the claimant cannot dispute their own submission
+      at fail (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:545:41)
+      at check (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:547:63)
+      at file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:2281:7
+      at Object.transaction (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:296:23)
+      at BountyEscrow.disputeBounty (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:2271:23)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:471:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19) {
+    code: 'not_authorized'
+  }
+
+test at tests/bounty-receipts.test.js:497:1
+✖ the full signed lifecycle conserves the ledger (409.675723ms)
+  Error [EscrowError]: the claimant cannot dispute their own submission
+      at fail (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:545:41)
+      at check (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:547:63)
+      at file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:2281:7
+      at Object.transaction (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:296:23)
+      at BountyEscrow.disputeBounty (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:2271:23)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:510:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19) {
+    code: 'not_authorized'
+  }

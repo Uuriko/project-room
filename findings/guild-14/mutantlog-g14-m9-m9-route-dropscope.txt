@@ -1,0 +1,166 @@
+{"event":"room.cold_start","durationMs":1550,"integrity":"eager","phases":{"schema":{"ms":278,"rowsRead":0},"plugin":{"ms":658,"rowsRead":0},"fence":{"ms":386,"rowsRead":0},"verifies":{"ms":82,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":183,"heapBytes":37979888,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+room diagnostic op_cd6OCQdG 409 already_claimed conflict /api/rooms/:roomId/bounties/:item/claim
+{"event":"room.cold_start","durationMs":927,"integrity":"eager","phases":{"schema":{"ms":411,"rowsRead":0},"plugin":{"ms":301,"rowsRead":0},"fence":{"ms":36,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":139,"heapBytes":38196768,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ post → fund → claim → submit → accept → epoch-close → balances (5656.189124ms)
+room diagnostic op_ORTjFSJd 403 not_authorized access /api/rooms/:roomId/bounties/:item/decline
+{"event":"room.cold_start","durationMs":2199,"integrity":"eager","phases":{"schema":{"ms":471,"rowsRead":0},"plugin":{"ms":1038,"rowsRead":0},"fence":{"ms":515,"rowsRead":0},"verifies":{"ms":23,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":158,"heapBytes":47968216,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ triage quartet: decline, duplicate, snooze (3196.55659ms)
+room diagnostic op_A5ZhYD47 422 idempotency_scope_required input /api/rooms/:roomId/bounties/:item/fund
+{"event":"room.cold_start","durationMs":1524,"integrity":"eager","phases":{"schema":{"ms":292,"rowsRead":0},"plugin":{"ms":498,"rowsRead":0},"fence":{"ms":396,"rowsRead":0},"verifies":{"ms":89,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":150,"heapBytes":39751496,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✖ watch is sticky and idempotent; idempotency keys replay safely (4135.271224ms)
+room diagnostic op_Ow8maxre 422 idempotency_scope_required input /api/rooms/:roomId/bounties/:item/fund
+{"event":"room.cold_start","durationMs":1320,"integrity":"eager","phases":{"schema":{"ms":110,"rowsRead":0},"plugin":{"ms":589,"rowsRead":0},"fence":{"ms":97,"rowsRead":0},"verifies":{"ms":10,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":167,"heapBytes":46681904,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✖ an idempotency key does not return another member's body (3495.690081ms)
+room diagnostic op_AoMfcRJs 403 agent_readonly access /api/rooms/:roomId/bounties
+{"event":"room.cold_start","durationMs":1463,"integrity":"eager","phases":{"schema":{"ms":440,"rowsRead":0},"plugin":{"ms":402,"rowsRead":0},"fence":{"ms":309,"rowsRead":0},"verifies":{"ms":14,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":146,"heapBytes":40499280,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a read-only agent cannot post a bounty beside the command path (2903.371606ms)
+room diagnostic op_ESIV3CgI 404 unknown_bounty not_found /api/rooms/:roomId/bounties/:item/fund
+room diagnostic op_v7U6O3-K 422 invalid_bounty_input input /api/rooms/:roomId/bounties
+room diagnostic op_5y0kL253 401 unauthenticated access /api/rooms/:roomId/bounties
+{"event":"room.cold_start","durationMs":1415,"integrity":"eager","phases":{"schema":{"ms":273,"rowsRead":0},"plugin":{"ms":662,"rowsRead":0},"fence":{"ms":293,"rowsRead":0},"verifies":{"ms":14,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":153,"heapBytes":47601432,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ error mapping: unknown bounty, invalid input, unauthenticated (3249.669877ms)
+room diagnostic op_fwD-IWxx 422 invalid_bond input /api/rooms/:roomId/bounties/:item/dispute
+{"event":"room.cold_start","durationMs":741,"integrity":"eager","phases":{"schema":{"ms":72,"rowsRead":0},"plugin":{"ms":476,"rowsRead":0},"fence":{"ms":90,"rowsRead":0},"verifies":{"ms":6,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":135,"heapBytes":42861264,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ dispute bond is exactly 25% and the dispute lifecycle resolves (3712.414381ms)
+room diagnostic op_6t9X10or 403 not_authorized access /api/rooms/:roomId/bounties/:item/rubric
+room diagnostic op_03b0z1sk 422 invalid_state input /api/rooms/:roomId/bounties/:item/rubric
+{"event":"room.cold_start","durationMs":1516,"integrity":"eager","phases":{"schema":{"ms":171,"rowsRead":0},"plugin":{"ms":882,"rowsRead":0},"fence":{"ms":209,"rowsRead":0},"verifies":{"ms":11,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":163,"heapBytes":50587632,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ rubric route: post with rubric, re-pin pre-funding, frozen after fund (3115.892927ms)
+{"event":"room.cold_start","durationMs":1999,"integrity":"eager","phases":{"schema":{"ms":343,"rowsRead":0},"plugin":{"ms":723,"rowsRead":0},"fence":{"ms":637,"rowsRead":0},"verifies":{"ms":44,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":165,"heapBytes":48930152,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ credit history still returns 100 funded movements when SQL rejects more than 100 binds (10814.829434ms)
+{"event":"room.cold_start","durationMs":4246,"integrity":"eager","phases":{"schema":{"ms":282,"rowsRead":0},"plugin":{"ms":2840,"rowsRead":0},"fence":{"ms":815,"rowsRead":0},"verifies":{"ms":76,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":187,"heapBytes":39890456,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ claim still journals 101 decayed flakes when SQL rejects more than 100 binds (6448.735983ms)
+room diagnostic op_2VRowyFM 422 idempotency_scope_required input /api/rooms/:roomId/bounties
+{"event":"room.cold_start","durationMs":816,"integrity":"eager","phases":{"schema":{"ms":297,"rowsRead":0},"plugin":{"ms":331,"rowsRead":0},"fence":{"ms":34,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":134,"heapBytes":46041112,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✖ bounty refuses revoked replay when access changes during body upload (6017.304181ms)
+room diagnostic op_TfSwFVEl 403 agent_readonly access /api/rooms/:roomId/bounties
+{"event":"room.cold_start","durationMs":2458,"integrity":"eager","phases":{"schema":{"ms":420,"rowsRead":0},"plugin":{"ms":1146,"rowsRead":0},"fence":{"ms":602,"rowsRead":0},"verifies":{"ms":61,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":174,"heapBytes":52320904,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ bounty refuses downgraded new write when access changes during body upload (2631.356511ms)
+✔ ?poster=self filters the bounty list to the caller's own bounties (4231.09044ms)
+bounty webhook fan-out failed: webhook down
+✔ isRoomOwner: matching owner id → true (6.546915ms)
+✔ isRoomOwner: non-owner member → false (1.47964ms)
+✔ isRoomOwner: missing member → false (0.664367ms)
+✔ isRoomOwner: store without roomAuthority → false (fails closed) (1.251608ms)
+✔ isRoomOwner: non-string ownerId → false (1.121273ms)
+✔ claim on an unknown bounty → 404 unknown_bounty (17.094785ms)
+✔ post by a lane outside the room membership → 403 not_authorized (26.12763ms)
+✔ claiming an already-claimed bounty → 409 already_claimed (38.702952ms)
+✔ a non-EscrowError is rethrown untouched (the 500 path, no detail wrap) (5.735648ms)
+✔ create missing a required key → 422 invalid_bounty_input (8.943051ms)
+✔ create with an unknown key → 422 invalid_bounty_input (6.295007ms)
+✔ a malformed body is a 422, matching the room body() contract (4.409477ms)
+✖ a replayed idempotency key returns the original 201/body without re-executing (26.348211ms)
+✖ an idempotency key reused with different input → 409 idempotency_key_reused (10.607389ms)
+✔ balances: percent-encoded lane id with slashes decodes and works (63.595989ms)
+✔ balances: control characters in the identity → 422 (10.380668ms)
+✔ balances: identity longer than 256 chars → 422 (11.39418ms)
+✔ balances: undecodable percent-encoding → 404, not a 500 (13.063855ms)
+✔ create → fund → claim moves PROPOSED → FUNDED → CLAIMED (127.082283ms)
+✔ a non-owner resolving a sybil flag → 403 owner_required before the body is read (0.853631ms)
+✔ the owner resolving an unknown flag → 404 unknown_flag (115.398679ms)
+✔ a missing reauthorize function → 403 access_denied (43.010917ms)
+✔ reauthorize reporting a different member → 403 access_denied (53.603613ms)
+✔ GET on the create route → 405 method_not_allowed (8.788309ms)
+✔ list rejects an unknown ?group= → 422 (8.727688ms)
+✔ publishBountyEvent: no agentPlugin → no-op; a throwing fanout is swallowed (34.753605ms)
+✔ publishBountyEvent maps the journal event to the fanout envelope (5.065742ms)
+ℹ tests 40
+ℹ suites 0
+ℹ pass 35
+ℹ fail 5
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 69198.216969
+
+✖ failing tests:
+
+test at tests/bounty-escrow-http.test.js:160:1
+✖ watch is sticky and idempotent; idempotency keys replay safely (4135.271224ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  422 !== 200
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-escrow-http.test.js:173:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 422,
+    expected: 200,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/bounty-escrow-http.test.js:179:1
+✖ an idempotency key does not return another member's body (3495.690081ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  422 !== 200
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-escrow-http.test.js:186:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 422,
+    expected: 200,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/bounty-escrow-http.test.js:378:68
+✖ bounty refuses revoked replay when access changes during body upload (6017.304181ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  422 !== 201
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-escrow-http.test.js:383:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 422,
+    expected: 201,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/bounty-escrow-routes.test.js:194:1
+✖ a replayed idempotency key returns the original 201/body without re-executing (26.348211ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  422 !== 201
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-escrow-routes.test.js:198:10)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 422,
+    expected: 201,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/bounty-escrow-routes.test.js:207:1
+✖ an idempotency key reused with different input → 409 idempotency_key_reused (10.607389ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  422 !== 201
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-escrow-routes.test.js:211:10)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 422,
+    expected: 201,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

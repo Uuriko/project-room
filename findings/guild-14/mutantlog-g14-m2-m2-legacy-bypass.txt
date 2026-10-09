@@ -1,0 +1,118 @@
+{"event":"room.cold_start","durationMs":1752,"integrity":"eager","phases":{"schema":{"ms":377,"rowsRead":0},"plugin":{"ms":649,"rowsRead":0},"fence":{"ms":61,"rowsRead":0},"verifies":{"ms":17,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":173,"heapBytes":38099784,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+room diagnostic op_cYSrcnpe 409 already_claimed conflict /api/rooms/:roomId/bounties/:item/claim
+{"event":"room.cold_start","durationMs":1015,"integrity":"eager","phases":{"schema":{"ms":171,"rowsRead":0},"plugin":{"ms":607,"rowsRead":0},"fence":{"ms":109,"rowsRead":0},"verifies":{"ms":10,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":155,"heapBytes":38190376,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ post → fund → claim → submit → accept → epoch-close → balances (5780.338605ms)
+room diagnostic op_0SVzukQz 403 not_authorized access /api/rooms/:roomId/bounties/:item/decline
+{"event":"room.cold_start","durationMs":1037,"integrity":"eager","phases":{"schema":{"ms":370,"rowsRead":0},"plugin":{"ms":489,"rowsRead":0},"fence":{"ms":57,"rowsRead":0},"verifies":{"ms":6,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":154,"heapBytes":47966488,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ triage quartet: decline, duplicate, snooze (2970.567417ms)
+{"event":"room.cold_start","durationMs":817,"integrity":"eager","phases":{"schema":{"ms":165,"rowsRead":0},"plugin":{"ms":317,"rowsRead":0},"fence":{"ms":170,"rowsRead":0},"verifies":{"ms":20,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":154,"heapBytes":39859448,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ watch is sticky and idempotent; idempotency keys replay safely (2778.838548ms)
+room diagnostic op_MXrJiUz6 422 invalid_state input /api/rooms/:roomId/bounties/:item/fund
+{"event":"room.cold_start","durationMs":1075,"integrity":"eager","phases":{"schema":{"ms":204,"rowsRead":0},"plugin":{"ms":523,"rowsRead":0},"fence":{"ms":139,"rowsRead":0},"verifies":{"ms":54,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":161,"heapBytes":47323096,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ an idempotency key does not return another member's body (2013.78628ms)
+room diagnostic op_iBAEbUJW 403 agent_readonly access /api/rooms/:roomId/bounties
+{"event":"room.cold_start","durationMs":2381,"integrity":"eager","phases":{"schema":{"ms":306,"rowsRead":0},"plugin":{"ms":1624,"rowsRead":0},"fence":{"ms":56,"rowsRead":0},"verifies":{"ms":7,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":173,"heapBytes":40469016,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a read-only agent cannot post a bounty beside the command path (4132.211622ms)
+room diagnostic op_2-DaaYYZ 404 unknown_bounty not_found /api/rooms/:roomId/bounties/:item/fund
+room diagnostic op_m-qtdz3M 422 invalid_bounty_input input /api/rooms/:roomId/bounties
+room diagnostic op_5DJdDpnQ 401 unauthenticated access /api/rooms/:roomId/bounties
+{"event":"room.cold_start","durationMs":2051,"integrity":"eager","phases":{"schema":{"ms":427,"rowsRead":0},"plugin":{"ms":708,"rowsRead":0},"fence":{"ms":528,"rowsRead":0},"verifies":{"ms":18,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":183,"heapBytes":47629144,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ error mapping: unknown bounty, invalid input, unauthenticated (4544.06336ms)
+room diagnostic op_3AAnGb7D 422 invalid_bond input /api/rooms/:roomId/bounties/:item/dispute
+{"event":"room.cold_start","durationMs":1711,"integrity":"eager","phases":{"schema":{"ms":330,"rowsRead":0},"plugin":{"ms":1095,"rowsRead":0},"fence":{"ms":85,"rowsRead":0},"verifies":{"ms":22,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":163,"heapBytes":42987288,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ dispute bond is exactly 25% and the dispute lifecycle resolves (4531.074919ms)
+room diagnostic op_FmtA3ilp 403 not_authorized access /api/rooms/:roomId/bounties/:item/rubric
+room diagnostic op_F_gZlqM9 422 invalid_state input /api/rooms/:roomId/bounties/:item/rubric
+{"event":"room.cold_start","durationMs":931,"integrity":"eager","phases":{"schema":{"ms":92,"rowsRead":0},"plugin":{"ms":497,"rowsRead":0},"fence":{"ms":184,"rowsRead":0},"verifies":{"ms":6,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":151,"heapBytes":50670392,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ rubric route: post with rubric, re-pin pre-funding, frozen after fund (3921.48228ms)
+{"event":"room.cold_start","durationMs":1418,"integrity":"eager","phases":{"schema":{"ms":87,"rowsRead":0},"plugin":{"ms":496,"rowsRead":0},"fence":{"ms":550,"rowsRead":0},"verifies":{"ms":72,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":156,"heapBytes":49021312,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ credit history still returns 100 funded movements when SQL rejects more than 100 binds (13348.551824ms)
+{"event":"room.cold_start","durationMs":1258,"integrity":"eager","phases":{"schema":{"ms":247,"rowsRead":0},"plugin":{"ms":658,"rowsRead":0},"fence":{"ms":166,"rowsRead":0},"verifies":{"ms":19,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":171,"heapBytes":40025232,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ claim still journals 101 decayed flakes when SQL rejects more than 100 binds (5575.902858ms)
+room diagnostic op_0gPxGqh4 401 unauthenticated access /api/rooms/:roomId/bounties
+{"event":"room.cold_start","durationMs":936,"integrity":"eager","phases":{"schema":{"ms":233,"rowsRead":0},"plugin":{"ms":442,"rowsRead":0},"fence":{"ms":92,"rowsRead":0},"verifies":{"ms":23,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":152,"heapBytes":46849384,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ bounty refuses revoked replay when access changes during body upload (3247.75242ms)
+room diagnostic op_opIs4mdi 403 agent_readonly access /api/rooms/:roomId/bounties
+{"event":"room.cold_start","durationMs":1042,"integrity":"eager","phases":{"schema":{"ms":126,"rowsRead":0},"plugin":{"ms":586,"rowsRead":0},"fence":{"ms":137,"rowsRead":0},"verifies":{"ms":26,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":148,"heapBytes":52981704,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ bounty refuses downgraded new write when access changes during body upload (2307.227278ms)
+✔ ?poster=self filters the bounty list to the caller's own bounties (2276.536361ms)
+✔ same key on a different bounty executes instead of replaying the other bounty's body (38.139546ms)
+✔ same key on a different route executes instead of reusing the first route's body (15.891328ms)
+✔ a genuine replay of the same caller, route, bounty and key still short-circuits (12.94042ms)
+✔ one member's key cannot read another member's receipt body (35.71669ms)
+✔ a key with no scope is refused instead of replaying on the raw key (58.800081ms)
+✔ the scoped key is stable across calls and distinguishes only real scope changes (38.230673ms)
+✔ scope survives a database reopen (read from persisted columns, not memory) (54.152086ms)
+✔ a legacy (room, key) row is not replayed under the scoped regime (23.171003ms)
+✔ key validation still rejects malformed keys before any scope work (32.773503ms)
+✔ a null key bypasses idempotency entirely, scoped or not (40.185817ms)
+✖ same scoped key refuses changed payload but accepts reordered object fields (25.3616ms)
+{"event":"room.cold_start","durationMs":2587,"integrity":"eager","phases":{"schema":{"ms":465,"rowsRead":0},"plugin":{"ms":1164,"rowsRead":0},"fence":{"ms":787,"rowsRead":0},"verifies":{"ms":47,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":183,"heapBytes":36956200,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+room diagnostic op_cUAHBJSR 403 not_authorized access /api/rooms/:roomId/bounties/:item/accept
+{"event":"room.cold_start","durationMs":787,"integrity":"eager","phases":{"schema":{"ms":105,"rowsRead":0},"plugin":{"ms":569,"rowsRead":0},"fence":{"ms":94,"rowsRead":0},"verifies":{"ms":11,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":194,"heapBytes":34329504,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":447,"integrity":"eager","phases":{"schema":{"ms":136,"rowsRead":0},"plugin":{"ms":273,"rowsRead":0},"fence":{"ms":34,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":134,"heapBytes":39293232,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":625,"integrity":"eager","phases":{"schema":{"ms":208,"rowsRead":0},"plugin":{"ms":300,"rowsRead":0},"fence":{"ms":105,"rowsRead":0},"verifies":{"ms":11,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":134,"heapBytes":44187352,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1255,"integrity":"eager","phases":{"schema":{"ms":678,"rowsRead":0},"plugin":{"ms":128,"rowsRead":0},"fence":{"ms":398,"rowsRead":0},"verifies":{"ms":42,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":139,"heapBytes":33672944,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1721,"integrity":"eager","phases":{"schema":{"ms":47,"rowsRead":0},"plugin":{"ms":655,"rowsRead":0},"fence":{"ms":972,"rowsRead":0},"verifies":{"ms":46,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":137,"heapBytes":38414664,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1886,"integrity":"eager","phases":{"schema":{"ms":582,"rowsRead":0},"plugin":{"ms":1156,"rowsRead":0},"fence":{"ms":110,"rowsRead":0},"verifies":{"ms":37,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":179,"heapBytes":43318448,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":397,"integrity":"eager","phases":{"schema":{"ms":181,"rowsRead":0},"plugin":{"ms":101,"rowsRead":0},"fence":{"ms":96,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":116,"heapBytes":48058920,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":674,"integrity":"eager","phases":{"schema":{"ms":25,"rowsRead":0},"plugin":{"ms":321,"rowsRead":0},"fence":{"ms":314,"rowsRead":0},"verifies":{"ms":11,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":123,"heapBytes":36554888,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":992,"integrity":"eager","phases":{"schema":{"ms":160,"rowsRead":0},"plugin":{"ms":504,"rowsRead":0},"fence":{"ms":305,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":140,"heapBytes":41556880,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ MCP agent approval mode persists and authorizes only the designated verifier across transports (4479.560501ms)
+✔ an idempotent replay of a priced tool voids the pre-call charge instead of settling twice (868.846984ms)
+✔ a retried bounty_post with the same idempotencyKey replays instead of posting twice (504.921118ms)
+✔ a different idempotencyKey executes a second post (750.431958ms)
+✖ reusing an idempotencyKey with different input is rejected, not replayed (1308.41168ms)
+✔ a retried bounty_fund replays instead of double-locking credits (1959.057549ms)
+✔ writes without an idempotencyKey execute every time (2244.906854ms)
+✔ the retry scope is per-caller: another member's same key executes (428.132ms)
+✔ target-room read-only authority refuses writes and retry receipts without changing state (833.943994ms)
+{"event":"room.cold_start","durationMs":324,"integrity":"eager","phases":{"schema":{"ms":101,"rowsRead":0},"plugin":{"ms":177,"rowsRead":0},"fence":{"ms":36,"rowsRead":0},"verifies":{"ms":5,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":118,"heapBytes":48597888,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":185,"integrity":"eager","phases":{"schema":{"ms":22,"rowsRead":0},"plugin":{"ms":94,"rowsRead":0},"fence":{"ms":62,"rowsRead":0},"verifies":{"ms":6,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":112,"heapBytes":37821992,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ MCP lifecycle events publish once and transport-switch retries replay the same receipt (1690.157809ms)
+✔ an identity with full access elsewhere cannot write into its read-only target room (731.651984ms)
+✔ full membership elsewhere cannot confer bounty writes on a linked guest target (207.504132ms)
+ℹ tests 36
+ℹ suites 0
+ℹ pass 34
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 84343.229973
+
+✖ failing tests:
+
+test at tests/bounty-idempotency-scope.test.js:255:1
+✖ same scoped key refuses changed payload but accepts reordered object fields (25.3616ms)
+  AssertionError [ERR_ASSERTION]: Missing expected exception.
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-idempotency-scope.test.js:262:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: { code: 'idempotency_key_reused' },
+    operator: 'throws',
+    diff: 'simple'
+  }
+
+test at tests/bounty-mcp-idempotency.test.js:143:1
+✖ reusing an idempotencyKey with different input is rejected, not replayed (1308.41168ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection: a key bound to one payload must not silently return another payload's receipt
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-mcp-idempotency.test.js:146:3)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    operator: 'rejects',
+    diff: 'simple'
+  }

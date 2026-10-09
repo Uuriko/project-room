@@ -1,0 +1,21 @@
+{
+  "unit": "g14-m5",
+  "file": "server/settlement-router.mjs",
+  "mutants": 1,
+  "killed": 1,
+  "survived": 0,
+  "skipped": 0,
+  "results": [
+    {
+      "unit": "g14-m5",
+      "file": "server/settlement-router.mjs",
+      "mutant": "m5-custody-flip",
+      "status": "KILLED",
+      "tests": [
+        "tests/demigod-jobs-money.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    }
+  ]
+}

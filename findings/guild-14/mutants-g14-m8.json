@@ -1,0 +1,34 @@
+{
+  "unit": "g14-m8",
+  "file": "server/bounty-reputation.mjs",
+  "mutants": 2,
+  "killed": 2,
+  "survived": 0,
+  "skipped": 0,
+  "results": [
+    {
+      "unit": "g14-m8",
+      "file": "server/bounty-reputation.mjs",
+      "mutant": "m8-probation-offbyone",
+      "status": "KILLED",
+      "tests": [
+        "tests/bounty-reputation.test.js",
+        "tests/bounty-anti-flake.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    },
+    {
+      "unit": "g14-m8",
+      "file": "server/bounty-reputation.mjs",
+      "mutant": "m8-flake-reason-flip",
+      "status": "KILLED",
+      "tests": [
+        "tests/bounty-reputation.test.js",
+        "tests/bounty-anti-flake.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    }
+  ]
+}

@@ -1,0 +1,88 @@
+✔ rung 1: timeout flakes forfeit the bond and journal the strike (416.619212ms)
+✔ rung 2: the next claim requires a double bond, settled in full (120.89007ms)
+✔ rung 2 flake forfeits the doubled bond (175.848276ms)
+✔ rung 3: cooldown gates new claims and is visible on the identity card (256.098959ms)
+✔ cooldown expiry re-opens claims and journals the end; decay resets the rung and journals once (244.622917ms)
+✔ decay journal is idempotent: later claims do not re-journal (140.474581ms)
+✔ dispute-upheld records a flake strike: forfeit plus ladder journal (157.02648ms)
+✔ flakes are lane-scoped and room-scoped: other lanes are unaffected (40.36753ms)
+✔ the ladder never bans and never touches payouts: strikes are not reputation (51.88192ms)
+✔ band boundaries: trusted >= 40, standard >= -20, probation below (10.324314ms)
+✔ honest earner climbs: accepted + paid signals stack toward trusted (702.854658ms)
+✔ projection is deterministic: replaying the event stream changes nothing (172.940192ms)
+✔ failed retries never double-count: rejected transitions emit no events (101.122865ms)
+✖ claim flake penalizes, then decays back toward neutral (310.27449ms)
+✔ dispute upheld: claimant drops to probation and is gated off large claims (646.033857ms)
+✔ dispute rejected: challenger penalized, claimant vindicated (54.565447ms)
+✔ dispute split: both sides share a small loss (108.381529ms)
+✔ listEvents returns the stream in seq order with parsed data (285.89218ms)
+✖ unknown event types and malformed payloads never crash the projector (30.673171ms)
+✔ claimEligibility reports the band and the probation cap (43.647032ms)
+✔ verifier acceptance overturned: upheld dispute penalizes the verifier (overturn-rate feed) (163.101837ms)
+✔ rejected dispute overturns nothing: no acceptance_overturned for the verifier (123.3085ms)
+✔ sybil flag confirmed: member lanes take sybil_confirmed; dismissed stays neutral (78.020325ms)
+✔ probation gate denial produces a review packet for arbiters (never a suspension) (35.582719ms)
+✔ sybil.flag-resolved without member lanes never crashes the projector (1.038909ms)
+✔ routing visibility: per-viewer claimable annotation mirrors the claim gate; never hides, never touches money (419.387276ms)
+✔ routingVisibility mirrors claimEligibility across bands and amounts (no drift) (103.294154ms)
+✔ rejected submission: bond forfeited flows a penalty signal for the claimant (31.919241ms)
+✔ non-verdict lifecycle events flow no reputation signals (46.34494ms)
+ℹ tests 29
+ℹ suites 0
+ℹ pass 27
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 7711.820842
+
+✖ failing tests:
+
+test at tests/bounty-reputation.test.js:121:1
+✖ claim flake penalizes, then decays back toward neutral (310.27449ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  0 !== -6
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-reputation.test.js:129:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: -6,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/bounty-reputation.test.js:234:1
+✖ unknown event types and malformed payloads never crash the projector (30.673171ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + []
+  - [
+  -   {
+  -     agent: 'id:agent/grokbot',
+  -     type: 'claim_flaked'
+  -   }
+  - ]
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-reputation.test.js:239:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [],
+    expected: [ { agent: 'id:agent/grokbot', type: 'claim_flaked' } ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

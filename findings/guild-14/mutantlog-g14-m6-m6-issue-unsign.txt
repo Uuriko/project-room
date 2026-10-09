@@ -1,0 +1,376 @@
+vHash breaks the chain at the right index (115.374152ms)
+✔ swapped order is caught by the chain (seq + link continuity) (32.862908ms)
+✔ wrong signing key fails the signature check (0.650076ms)
+✔ tampered signature fails verification (43.460652ms)
+✔ non-genesis first receipt fails the chain at index 0 (10.767388ms)
+✔ canonical JSON is key-order independent (6.365563ms)
+✔ canonical JSON sorts nested keys and preserves array order (1.674583ms)
+✔ canonical JSON rejects non-serializable values (10.379146ms)
+✔ issueReceipt validates its inputs (15.397828ms)
+✔ issueReceipt accepts a Uint8Array key (5.596709ms)
+✔ issueReceipt defaults the timestamp to a current ISO instant (0.480571ms)
+✔ verifyChain is defensive against malformed inputs (11.734811ms)
+✔ timing-safe comparison does not accept prefix-forged values (10.277844ms)
+✔ truncated chain verifies -1 without an anchor (documents the A6 residual) (13.058296ms)
+✔ verifyChain with expectedLength detects truncation at the first missing index (63.773796ms)
+✔ verifyChain with expectedHeadHash detects truncation at the head (66.293377ms)
+✔ verifyChain with a correct length+head anchor verifies a complete chain (59.788445ms)
+✔ verifyChain opts are optional and backward compatible (28.900661ms)
+✔ canonical encoding matches the Python reference vectors byte-for-byte (9.320748ms)
+✔ canonicalJson rejects JSON numbers anywhere in signed bodies (3.478971ms)
+✔ parseStrict rejects duplicate object keys and lone surrogates (2.483667ms)
+✔ signer derives the reference pubkey; signBytes reproduces the reference signatures (12.089162ms)
+✔ generateReceiptKeyPair produces valid test keys (2.37909ms)
+✖ issue + verify round-trips for all five receipt types (4.723298ms)
+✔ verify rejects every tamper class (36.907297ms)
+✖ verify rejects a valid signature from the wrong key (23.534088ms)
+✖ the seen-set gives replay protection on receiptIds (12.570644ms)
+✖ journal linkage binds the receipt to the ledger (10.916683ms)
+✖ payout-released requires net == amount and net + fee == gross (11.977294ms)
+✖ roomId binds the receipt to one room; creditUnit is enforced (5.304069ms)
+✔ receipts are credits-only: no chain, asset, wallet, or cash language anywhere (21.027616ms)
+✖ fund issues a signed escrow-locked receipt stamped on both journal entries (263.459695ms)
+✖ claim and dispute lock signed bond-locked receipts with the bond kind (467.89285ms)
+✖ accept issues a signed attributed receipt linked to the approval event (82.972377ms)
+✖ timeout refund issues a signed refund-issued receipt (reason timeout) (71.851278ms)
+✖ epoch sweep issues a signed payout-released receipt with net + fee == award (107.94932ms)
+✖ dispute cancel issues refund-issued (dispute-cancel); split issues attributed + refund-issued (split) (13.707881ms)
+✖ dispute release from pre-accept issues a signed attributed receipt (9.481229ms)
+✔ without a signer, transitions return signed: [] and the ledger still conserves (24.625986ms)
+✖ the full signed lifecycle conserves the ledger (47.066212ms)
+✖ H-21: rejectWork with signing enabled completes — refund-issued accepts the escrow's reject vocabulary (300.974965ms)
+✖ H-21: refund-issued accepts the escrow's unverified-settlement vocabulary (24.771775ms)
+ℹ tests 47
+ℹ suites 0
+ℹ pass 31
+ℹ fail 16
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6079.083233
+
+✖ failing tests:
+
+test at tests/bounty-receipts.test.js:144:1
+✖ issue + verify round-trips for all five receipt types (4.723298ms)
+  AssertionError [ERR_ASSERTION]: verify failed for escrow-locked: {"ok":false,"reason":"bad_signature: Ed25519 verification failed"}
+  
+  false !== true
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:159:12)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/bounty-receipts.test.js:201:1
+✖ verify rejects a valid signature from the wrong key (23.534088ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  false !== true
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:206:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/bounty-receipts.test.js:213:1
+✖ the seen-set gives replay protection on receiptIds (12.570644ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  false !== true
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:217:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/bounty-receipts.test.js:222:1
+✖ journal linkage binds the receipt to the ledger (10.916683ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  false !== true
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:225:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/bounty-receipts.test.js:232:1
+✖ payout-released requires net == amount and net + fee == gross (11.977294ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  false !== true
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:238:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/bounty-receipts.test.js:247:1
+✖ roomId binds the receipt to one room; creditUnit is enforced (5.304069ms)
+  AssertionError [ERR_ASSERTION]: roomId is inside the signed body
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:250:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: '00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000',
+    expected: '00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000',
+    operator: 'notStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/bounty-receipts.test.js:343:1
+✖ fund issues a signed escrow-locked receipt stamped on both journal entries (263.459695ms)
+  AssertionError [ERR_ASSERTION]: receipt failed verification: {"ok":false,"reason":"bad_signature: Ed25519 verification failed"} (room-bounty-receipt:el:63ee97314e92dc2b76f9afaf45a2c6e7)
+  
+  false !== true
+  
+      at expectVerifiable (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:339:10)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:355:3)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/bounty-receipts.test.js:366:1
+✖ claim and dispute lock signed bond-locked receipts with the bond kind (467.89285ms)
+  AssertionError [ERR_ASSERTION]: receipt failed verification: {"ok":false,"reason":"bad_signature: Ed25519 verification failed"} (room-bounty-receipt:bl:0de8509a953fc132aa74c653bb73d5e6)
+  
+  false !== true
+  
+      at expectVerifiable (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:339:10)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:375:3)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/bounty-receipts.test.js:385:1
+✖ accept issues a signed attributed receipt linked to the approval event (82.972377ms)
+  AssertionError [ERR_ASSERTION]: receipt failed verification: {"ok":false,"reason":"bad_signature: Ed25519 verification failed"} (room-bounty-receipt:at:18d12fe30a70b87c724a6ff72d1aa7f5)
+  
+  false !== true
+  
+      at expectVerifiable (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:339:10)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:399:3)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/bounty-receipts.test.js:403:1
+✖ timeout refund issues a signed refund-issued receipt (reason timeout) (71.851278ms)
+  AssertionError [ERR_ASSERTION]: receipt failed verification: {"ok":false,"reason":"bad_signature: Ed25519 verification failed"} (room-bounty-receipt:rf:59b1291232862bba8011ad0573a421b8)
+  
+  false !== true
+  
+      at expectVerifiable (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:339:10)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:417:3)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/bounty-receipts.test.js:421:1
+✖ epoch sweep issues a signed payout-released receipt with net + fee == award (107.94932ms)
+  AssertionError [ERR_ASSERTION]: receipt failed verification: {"ok":false,"reason":"bad_signature: Ed25519 verification failed"} (room-bounty-receipt:pr:b131d1ded4bfb0399b11f377fa0855db)
+  
+  false !== true
+  
+      at expectVerifiable (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:339:10)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:437:3)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/bounty-receipts.test.js:441:1
+✖ dispute cancel issues refund-issued (dispute-cancel); split issues attributed + refund-issued (split) (13.707881ms)
+  Error [EscrowError]: the claimant cannot dispute their own submission
+      at fail (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:545:41)
+      at check (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:547:63)
+      at file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:2281:7
+      at Object.transaction (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:296:23)
+      at BountyEscrow.disputeBounty (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:2271:23)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:445:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19) {
+    code: 'not_authorized'
+  }
+
+test at tests/bounty-receipts.test.js:468:1
+✖ dispute release from pre-accept issues a signed attributed receipt (9.481229ms)
+  Error [EscrowError]: the claimant cannot dispute their own submission
+      at fail (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:545:41)
+      at check (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:547:63)
+      at file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:2281:7
+      at Object.transaction (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:296:23)
+      at BountyEscrow.disputeBounty (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:2271:23)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:471:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19) {
+    code: 'not_authorized'
+  }
+
+test at tests/bounty-receipts.test.js:497:1
+✖ the full signed lifecycle conserves the ledger (47.066212ms)
+  Error [EscrowError]: the claimant cannot dispute their own submission
+      at fail (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:545:41)
+      at check (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:547:63)
+      at file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:2281:7
+      at Object.transaction (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:296:23)
+      at BountyEscrow.disputeBounty (file:///home/hatch/workspace/pr-wave1000-guild-14/server/bounty-escrow.mjs:2271:23)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:510:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19) {
+    code: 'not_authorized'
+  }
+
+test at tests/bounty-receipts.test.js:521:1
+✖ H-21: rejectWork with signing enabled completes — refund-issued accepts the escrow's reject vocabulary (300.974965ms)
+  AssertionError [ERR_ASSERTION]: receipt failed verification: {"ok":false,"reason":"bad_signature: Ed25519 verification failed"} (room-bounty-receipt:rf:75c2a9acfded32d4533abb2d735b754c)
+  
+  false !== true
+  
+      at expectVerifiable (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:339:10)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:537:3)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/bounty-receipts.test.js:541:1
+✖ H-21: refund-issued accepts the escrow's unverified-settlement vocabulary (24.771775ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  false !== true
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-receipts.test.js:545:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

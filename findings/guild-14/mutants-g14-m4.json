@@ -1,0 +1,58 @@
+{
+  "unit": "g14-m4",
+  "file": "server/bounty-disputes.mjs",
+  "mutants": 4,
+  "killed": 1,
+  "survived": 3,
+  "skipped": 0,
+  "results": [
+    {
+      "unit": "g14-m4",
+      "file": "server/bounty-disputes.mjs",
+      "mutant": "m4-bond-min-ceil",
+      "status": "SURVIVED",
+      "tests": [
+        "tests/bounty-disputes.test.js",
+        "tests/dispute-arbiters.test.js"
+      ],
+      "exitCode": 0,
+      "failedTests": 0
+    },
+    {
+      "unit": "g14-m4",
+      "file": "server/bounty-disputes.mjs",
+      "mutant": "m4-notify-twice",
+      "status": "SURVIVED",
+      "tests": [
+        "tests/bounty-disputes.test.js",
+        "tests/dispute-arbiters.test.js"
+      ],
+      "exitCode": 0,
+      "failedTests": 0
+    },
+    {
+      "unit": "g14-m4",
+      "file": "server/bounty-disputes.mjs",
+      "mutant": "m4-max-cost-ceil",
+      "status": "SURVIVED",
+      "tests": [
+        "tests/bounty-disputes.test.js",
+        "tests/dispute-arbiters.test.js"
+      ],
+      "exitCode": 0,
+      "failedTests": 0
+    },
+    {
+      "unit": "g14-m4",
+      "file": "server/bounty-disputes.mjs",
+      "mutant": "m4-require-state-skip",
+      "status": "KILLED",
+      "tests": [
+        "tests/bounty-disputes.test.js",
+        "tests/dispute-arbiters.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    }
+  ]
+}

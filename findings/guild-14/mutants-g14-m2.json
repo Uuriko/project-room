@@ -1,0 +1,62 @@
+{
+  "unit": "g14-m2",
+  "file": "server/bounty-escrow.mjs",
+  "mutants": 4,
+  "killed": 3,
+  "survived": 1,
+  "skipped": 0,
+  "results": [
+    {
+      "unit": "g14-m2",
+      "file": "server/bounty-escrow.mjs",
+      "mutant": "m2-drop-hash-check",
+      "status": "KILLED",
+      "tests": [
+        "tests/bounty-idempotency-scope.test.js",
+        "tests/bounty-mcp-idempotency.test.js",
+        "tests/bounty-escrow-http.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    },
+    {
+      "unit": "g14-m2",
+      "file": "server/bounty-escrow.mjs",
+      "mutant": "m2-drop-scope-require",
+      "status": "KILLED",
+      "tests": [
+        "tests/bounty-idempotency-scope.test.js",
+        "tests/bounty-mcp-idempotency.test.js",
+        "tests/bounty-escrow-http.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    },
+    {
+      "unit": "g14-m2",
+      "file": "server/bounty-escrow.mjs",
+      "mutant": "m2-legacy-bypass",
+      "status": "KILLED",
+      "tests": [
+        "tests/bounty-idempotency-scope.test.js",
+        "tests/bounty-mcp-idempotency.test.js",
+        "tests/bounty-escrow-http.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    },
+    {
+      "unit": "g14-m2",
+      "file": "server/bounty-escrow.mjs",
+      "mutant": "m2-skip-version",
+      "status": "SURVIVED",
+      "tests": [
+        "tests/bounty-idempotency-scope.test.js",
+        "tests/bounty-mcp-idempotency.test.js",
+        "tests/bounty-escrow-http.test.js"
+      ],
+      "exitCode": 0,
+      "failedTests": 0
+    }
+  ]
+}

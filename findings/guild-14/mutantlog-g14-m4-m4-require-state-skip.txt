@@ -1,0 +1,126 @@
+✔ full ladder: opened → challenged → evidence → adjudicating → decided → resolved (16.619612ms)
+✔ economic open requires a bond (bond-missing) (3.295295ms)
+✔ appeal doubles the bond per tier and returns to adjudicating (1.47245ms)
+✖ frivolous ruling forfeits the bond and has no appeal as of right (1.807512ms)
+✖ withdraw forfeits the bond from any non-terminal state (0.965008ms)
+✖ illegal transitions are rejected with invalid_transition (0.719099ms)
+✔ dispute cost is capped at 25% of the bounty across the whole escalation (1.511799ms)
+✔ unavailable is an overlay, not a state (0.755774ms)
+✔ reason codes come from the fixed vocabulary (1.746551ms)
+✔ malformed inputs are refused (2.05249ms)
+✖ finalize fires the single onDisputeFinalized callback once (0.892329ms)
+✔ withdraw notifies the escrow with a withdrawn terminal (0.757046ms)
+✔ appealed ladder fires exactly once with the final tier outcome (1.053821ms)
+✖ a throwing escrow handler still leaves the dispute terminal (0.609756ms)
+✔ no handler configured is fine; non-function handler is refused (0.606881ms)
+✔ independent verifier seats cleanly (39.599337ms)
+✔ executor cannot verify its own claim (37.494168ms)
+✔ shared runtime / credential / delegated chain is ineligible (3.487554ms)
+✔ unknown verifier falls through to unavailable, not a silent drop (12.621321ms)
+✔ tier-1 decision records an outcome-independent pay hook (12.1679ms)
+✔ malformed tier-1 decisions are refused (4.754745ms)
+✔ sortition: deterministic 3-seat draw seeded by dispute-id (41.416875ms)
+✔ sortition excludes parties and the executor (4.605401ms)
+✔ panel decision: majority wins with the majority's reason codes (12.834691ms)
+✔ panel decision rejects bad votes and deadlocks (6.439373ms)
+✔ registry read path parses agent-card frontmatter (0.962755ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 21
+ℹ fail 5
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3596.319597
+
+✖ failing tests:
+
+test at tests/bounty-disputes.test.js:67:1
+✖ frivolous ruling forfeits the bond and has no appeal as of right (1.807512ms)
+  AssertionError [ERR_ASSERTION]: Missing expected exception.
+      at throwsCode (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-disputes.test.js:6:41)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-disputes.test.js:72:3)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    operator: 'throws',
+    diff: 'simple'
+  }
+
+test at tests/bounty-disputes.test.js:75:1
+✖ withdraw forfeits the bond from any non-terminal state (0.965008ms)
+  AssertionError [ERR_ASSERTION]: Missing expected exception.
+      at throwsCode (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-disputes.test.js:6:41)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-disputes.test.js:87:3)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    operator: 'throws',
+    diff: 'simple'
+  }
+
+test at tests/bounty-disputes.test.js:90:1
+✖ illegal transitions are rejected with invalid_transition (0.719099ms)
+  AssertionError [ERR_ASSERTION]: Missing expected exception.
+      at throwsCode (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-disputes.test.js:6:41)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-disputes.test.js:93:3)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    operator: 'throws',
+    diff: 'simple'
+  }
+
+test at tests/bounty-disputes.test.js:157:1
+✖ finalize fires the single onDisputeFinalized callback once (0.892329ms)
+  AssertionError [ERR_ASSERTION]: Missing expected exception.
+      at throwsCode (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-disputes.test.js:6:41)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-disputes.test.js:174:3)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    operator: 'throws',
+    diff: 'simple'
+  }
+
+test at tests/bounty-disputes.test.js:206:1
+✖ a throwing escrow handler still leaves the dispute terminal (0.609756ms)
+  AssertionError [ERR_ASSERTION]: Missing expected exception.
+      at throwsCode (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-disputes.test.js:6:41)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-14/tests/bounty-disputes.test.js:211:3)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    operator: 'throws',
+    diff: 'simple'
+  }

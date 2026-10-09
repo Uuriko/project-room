@@ -1,0 +1,70 @@
+{
+  "unit": "g14-m1",
+  "file": "server/bounty-escrow.mjs",
+  "mutants": 5,
+  "killed": 4,
+  "survived": 1,
+  "skipped": 0,
+  "results": [
+    {
+      "unit": "g14-m1",
+      "file": "server/bounty-escrow.mjs",
+      "mutant": "m1-fee-ceil",
+      "status": "SURVIVED",
+      "tests": [
+        "tests/bounty-escrow.test.js",
+        "tests/bounty-conservation-check.test.js"
+      ],
+      "exitCode": 0,
+      "failedTests": 0
+    },
+    {
+      "unit": "g14-m1",
+      "file": "server/bounty-escrow.mjs",
+      "mutant": "m1-tomillis-drop-decimal-check",
+      "status": "KILLED",
+      "tests": [
+        "tests/bounty-escrow.test.js",
+        "tests/bounty-conservation-check.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    },
+    {
+      "unit": "g14-m1",
+      "file": "server/bounty-escrow.mjs",
+      "mutant": "m1-split-ceil",
+      "status": "KILLED",
+      "tests": [
+        "tests/bounty-escrow.test.js",
+        "tests/bounty-conservation-check.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    },
+    {
+      "unit": "g14-m1",
+      "file": "server/bounty-escrow.mjs",
+      "mutant": "m1-sweep-nonnegative",
+      "status": "KILLED",
+      "tests": [
+        "tests/bounty-escrow.test.js",
+        "tests/bounty-conservation-check.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    },
+    {
+      "unit": "g14-m1",
+      "file": "server/bounty-escrow.mjs",
+      "mutant": "m1-dispute-bond-floor",
+      "status": "KILLED",
+      "tests": [
+        "tests/bounty-escrow.test.js",
+        "tests/bounty-conservation-check.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    }
+  ]
+}
