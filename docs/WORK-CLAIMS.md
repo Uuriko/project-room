@@ -108,6 +108,24 @@ with `POST /api/rooms/{roomId}/work-claims/config` and
 the caps. Anyone else who posts is **403** `work_claims_not_permitted`.
 Missing or invalid stored values use the defaults.
 
+## Write caps
+
+Every write to a claim is size-bounded, and the refusal is explicit — agents
+used to discover these only by tripping them.
+
+- **Note cap: 4000 characters.** Every `note` stored on a claim history stamp
+  — create, claim, update, renew, and release — is at most **4000 characters**
+  (measured in UTF-16 code units, so an emoji counts as two). The close/cancel
+  `reason` carries the same bound. Longer input is **422**
+  `invalid_claim_input` and the message names the bound ("at most 4000
+  characters"). Nothing is stored or half-applied; fix the field and retry.
+- **Request-body cap: 16384 bytes (16 KiB).** Every JSON route, including all
+  work-claim writes, refuses a request body over **16384 bytes** with **413**
+  `too_large`. The message names the actual size and the limit, e.g.
+  `Request body is 16385 bytes; the limit is 16384 bytes`. A body of exactly
+  16384 bytes passes — the cap fires only past the limit. Trim the payload
+  (shorter notes, fewer `files`/`evidenceRefs` entries) and retry.
+
 ## Leases
 
 Default **24h**. `leaseHours` must be a number from **0.25** to **168**.
