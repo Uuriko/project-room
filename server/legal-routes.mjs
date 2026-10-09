@@ -9,6 +9,10 @@ import {
 import { ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
 
 const PAGE_PATHS = new Set(LEGAL_SITEMAP_PATHS);
+const API_PATHS = new Set([
+  "/api/reports/public/challenge", "/api/reports/public", "/api/account/terms",
+  "/api/operator/unpublish", "/api/health/jobs",
+]);
 const REPORT_FIELDS = ["kind", "target", "body", "bucket", "nonce"];
 
 function send(res, status, body, type, head) {
@@ -27,28 +31,33 @@ function roomPrefixedLegalPath(pathname) {
 }
 
 export function isLegalPath(pathname) {
-  return Boolean(roomPrefixedLegalPath(pathname)) || PAGE_PATHS.has(pathname) || pathname === "/report"
-    || pathname === "/api/reports/public/challenge" || pathname === "/api/reports/public"
-    || pathname === "/api/account/terms" || pathname === "/api/operator/unpublish"
-    || pathname === "/api/health/jobs";
+  return Boolean(roomPrefixedLegalPath(pathname)) || PAGE_PATHS.has(pathname)
+    || pathname === "/report" || API_PATHS.has(pathname);
 }
 
-export async function handleLegalRequest({ req, res, url, store, rate, remoteAddress, readBody, json, cookie, protectWrite, reject, operatorAccountId, accountCookieName, accountView }) {
+export async function handleLegalRequest({ req, res, url, store, rate, remoteAddress, readBody, json, reject, cookie, protectWrite, accountCookieName, operatorAccountId, accountView }) {
   const pathname = url.pathname;
   if (!isLegalPath(pathname)) return false;
   const head = req.method === "HEAD";
-  const read = req.method === "GET" || head;
+  const get = req.method === "GET" || head;
+
+  const account = () => {
+    if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
+    const token = cookie(req, accountCookieName);
+    if (!token) reject(401, "unauthenticated", "Sign in required");
+    const auth = store.authenticateAccountSession(token);
+    protectWrite(req, auth, false);
+    return auth;
+  };
 
   const alias = roomPrefixedLegalPath(pathname);
-  if (alias) {
-    if (!read) reject(405, "method_not_allowed", "Method not allowed");
-    res.writeHead(301, { Location: `${ROOM_ORIGIN}${alias}${url.search}`, "Cache-Control": "public, max-age=3600" });
-    res.end();
-    return true;
-  }
-
-  if (PAGE_PATHS.has(pathname)) {
-    if (!read) reject(405, "method_not_allowed", "Method not allowed");
+  if (alias || PAGE_PATHS.has(pathname)) {
+    if (!get) reject(405, "method_not_allowed", "Method not allowed");
+    if (alias) {
+      res.writeHead(301, { Location: `${ROOM_ORIGIN}${alias}${url.search}`, "Cache-Control": "public, max-age=3600" });
+      res.end();
+      return true;
+    }
     const html = legalPageHtml(pathname);
     if (!html) reject(404, "not_found", "Not found");
     res.setHeader("Cache-Control", LEGAL_CACHE_CONTROL);
@@ -60,7 +69,7 @@ export async function handleLegalRequest({ req, res, url, store, rate, remoteAdd
     return true;
   }
   if (pathname === "/report") {
-    if (!read) reject(405, "method_not_allowed", "Method not allowed");
+    if (!get) reject(405, "method_not_allowed", "Method not allowed");
     res.setHeader("Content-Security-Policy", REPORT_PAGE_CSP);
     send(res, 200, reportPageHtml(), "text/html; charset=utf-8", head);
     return true;
@@ -71,7 +80,7 @@ export async function handleLegalRequest({ req, res, url, store, rate, remoteAdd
     return true;
   }
   if (pathname === "/api/health/jobs") {
-    if (!read) reject(405, "method_not_allowed", "Method not allowed");
+    if (!get) reject(405, "method_not_allowed", "Method not allowed");
     json(res, 200, { schema: "room.job-health/1", publicReports: countOpenPublicReports(store), servedBy: "node" }, head);
     return true;
   }
@@ -84,21 +93,14 @@ export async function handleLegalRequest({ req, res, url, store, rate, remoteAdd
     if (!REPORT_FIELDS.every(key => Object.hasOwn(data, key)) || !verifyReportProof(data, store.now())) {
       reject(428, "proof_required", "A current proof of work is required");
     }
-    const stored = submitPublicReport(store.db, {
-      kind: data.kind, target: data.target, body: data.body,
-      email: Object.hasOwn(data, "email") ? data.email : null,
-      ipHash: hashReportAddress(String(remoteAddress ?? "")), now: store.now(),
-    });
+    const stored = submitPublicReport(store.db, { kind: data.kind, target: data.target, body: data.body,
+      email: Object.hasOwn(data, "email") ? data.email : null, ipHash: hashReportAddress(String(remoteAddress ?? "")), now: store.now() });
     if (!stored.ok) reject(stored.status, stored.code, stored.message);
     json(res, 201, { received: true, id: stored.id });
     return true;
   }
   if (pathname === "/api/account/terms") {
-    if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
-    const token = cookie(req, accountCookieName);
-    if (!token) reject(401, "unauthenticated", "Sign in required");
-    const auth = store.authenticateAccountSession(token);
-    protectWrite(req, auth, false);
+    const auth = account();
     const data = await readBody(req);
     if (!Object.hasOwn(data, "version") || Object.keys(data).length !== 1) reject(422, "invalid_terms", "Send the terms version");
     const accepted = acceptCurrentTerms(store.db, auth.account.id, data.version, store.now());
@@ -107,23 +109,17 @@ export async function handleLegalRequest({ req, res, url, store, rate, remoteAdd
     return true;
   }
   if (pathname === "/api/operator/unpublish") {
-    if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
-    const token = cookie(req, accountCookieName);
-    if (!token) reject(401, "unauthenticated", "Sign in required");
-    const auth = store.authenticateAccountSession(token);
-    protectWrite(req, auth, false);
+    const auth = account();
     if (!operatorAccountId) reject(403, "operator_unconfigured", "The operator account is not configured");
     if (auth.account.id !== operatorAccountId) reject(403, "forbidden", "Operator access required");
     const data = await readBody(req);
-    if (!exact(data, ["kind", "id"])) reject(422, "invalid_unpublish", "Send kind and id");
+    if (Object.keys(data).length !== 2 || !Object.hasOwn(data, "kind") || !Object.hasOwn(data, "id")) {
+      reject(422, "invalid_unpublish", "Send kind and id");
+    }
     const result = unpublishPublic(store.db, { kind: data.kind, id: data.id, byAccount: auth.account.id, now: store.now() });
     if (!result.ok) reject(result.status, result.code, result.message);
     json(res, 200, { unpublished: true, kind: result.kind, id: result.id });
     return true;
   }
   return false;
-}
-
-function exact(value, fields) {
-  return Object.keys(value).length === fields.length && fields.every(field => Object.hasOwn(value, field));
 }

@@ -7,15 +7,19 @@ import { createOperatorPurge } from "./operator-purge.mjs";
 import { operatorStatus, operatorDrift } from "./operator-status.mjs";
 import { listOperatorActions } from "./operator-actions.mjs";
 
-const POST = "POST";
-const GET = "GET";
 const ROUTES = Object.freeze({
-  "/api/operator/purge/plan": POST,
-  "/api/operator/purge/find": POST,
-  "/api/operator/purge/execute": POST,
-  "/api/operator/actions": GET,
-  "/api/operator/status": GET,
-  "/api/operator/drift": GET
+  "/api/operator/purge/plan": "POST",
+  "/api/operator/purge/find": "POST",
+  "/api/operator/purge/execute": "POST",
+  "/api/operator/actions": "GET",
+  "/api/operator/status": "GET",
+  "/api/operator/drift": "GET"
+});
+// Purge dispatch: all three share the same shape — body(req) in, purge op out.
+const PURGE_OPS = Object.freeze({
+  "/api/operator/purge/plan": "plan",
+  "/api/operator/purge/find": "find",
+  "/api/operator/purge/execute": "execute"
 });
 
 export function createOperatorRoutes({ store, json, reject, body, rate }) {
@@ -26,22 +30,16 @@ export function createOperatorRoutes({ store, json, reject, body, rate }) {
     if (!configuredOperatorTokenHash()) return false;
     rate(`operator:${remoteAddress || "unknown"}`, 10);
     const token = presentedOperatorToken(req.headers.authorization);
-    if (carriesRoomOrAccountCookie(req.headers.cookie) && !token) reject(404, "not_found", "Not found");
-    if (!operatorTokenMatches(token)) reject(404, "not_found", "Not found");
+    if ((carriesRoomOrAccountCookie(req.headers.cookie) && !token) || !operatorTokenMatches(token)) {
+      reject(404, "not_found", "Not found");
+    }
     const expected = ROUTES[path];
     if (!expected) reject(404, "not_found", "Not found");
     if (req.method !== expected) reject(405, "method_not_allowed", "Method not allowed");
     res.setHeader("Cache-Control", "no-store");
-    if (path === "/api/operator/purge/plan") {
-      json(res, 200, purge.plan(await body(req), requestId));
-      return true;
-    }
-    if (path === "/api/operator/purge/find") {
-      json(res, 200, purge.find(await body(req), requestId));
-      return true;
-    }
-    if (path === "/api/operator/purge/execute") {
-      json(res, 200, purge.execute(await body(req), requestId));
+    const purgeOp = PURGE_OPS[path];
+    if (purgeOp) {
+      json(res, 200, purge[purgeOp](await body(req), requestId));
       return true;
     }
     if (path === "/api/operator/actions") {
@@ -51,12 +49,8 @@ export function createOperatorRoutes({ store, json, reject, body, rate }) {
       json(res, 200, { actions: listOperatorActions(store, limit) });
       return true;
     }
-    if (path === "/api/operator/status") {
-      json(res, 200, operatorStatus(store));
-      return true;
-    }
-    const main = url.searchParams.get("main");
-    json(res, 200, operatorDrift(main));
+    // Only /api/operator/status and /api/operator/drift reach here.
+    json(res, 200, path === "/api/operator/status" ? operatorStatus(store) : operatorDrift(url.searchParams.get("main")));
     return true;
   };
 }
