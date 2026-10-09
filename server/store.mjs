@@ -3583,11 +3583,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         ? "No credential. Agents can self-mint an identity at POST /api/agent-identities."
         : "Sign in with an active room key or agent identity secret");
     }
-    const row = this.db.prepare(`SELECT c.*, p.revoked AS parent_revoked, p.expires_at AS parent_expiry, p.account_id AS parent_account_id, p.account_auth_epoch AS parent_account_auth_epoch,
+    // FIX-4: authenticate runs on every read; cache the credential lookup.
+    const row = (this._authenticateStmt ??= this.db.prepare(`SELECT c.*, p.revoked AS parent_revoked, p.expires_at AS parent_expiry, p.account_id AS parent_account_id, p.account_auth_epoch AS parent_account_auth_epoch,
       m.account_id AS bound_account_id, a.active AS account_active, a.revision AS account_revision, a.auth_epoch AS current_account_auth_epoch
       FROM credentials c LEFT JOIN credentials p ON p.hash=c.parent_hash
       LEFT JOIN member_accounts m ON m.room_id=c.room_id AND m.member_id=c.member_id
-      LEFT JOIN accounts a ON a.id=m.account_id WHERE c.hash=?`).get(hash(token));
+      LEFT JOIN accounts a ON a.id=m.account_id WHERE c.hash=?`)).get(hash(token));
     if (!row) {
       if (allowAccountSession && this.db.prepare("SELECT 1 FROM account_session_slots WHERE hash=?").get(hash(token))) return this.authenticateAccountSession(token, roomId ?? null, expectedSessionBinding);
       fail(401, "unauthenticated", "Session or key expired or revoked");
@@ -4330,14 +4331,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (after > sequence) fail(409, "cursor_ahead", "Cursor exceeds room history; fetch a fresh snapshot");
       // Round-2 #110: audit filters. The event log is the audit log —
       // every mutation records actorId + at, so "who did what when" is a
-      // filtered read, not a new table.
-      const events = this.db.prepare(
+      // filtered read, not a new table. FIX-4: the statement is cached —
+      // this query is the hottest read in the room and re-preparing it on
+      // every page cost more than the index scan itself.
+      const events = (this._eventsAfterStmt ??= this.db.prepare(
         `SELECT sequence,body FROM events WHERE room_id=? AND sequence>?
          AND (? IS NULL OR json_extract(body,'$.actorId')=?)
          AND (? IS NULL OR json_extract(body,'$.at')>=?)
          AND (? IS NULL OR json_extract(body,'$.at')<=?)
          ORDER BY sequence LIMIT ?`
-      ).all(roomId, after, actor, actor, since, since, until, until, limit).map(r => ({ sequence: r.sequence, event: JSON.parse(r.body) }));
+      )).all(roomId, after, actor, actor, since, since, until, until, limit).map(r => ({ sequence: r.sequence, event: JSON.parse(r.body) }));
       // The cursor advances by what was SCANNED, not by what was returned.
       // A filter can match nothing in a stretch of the log: taking `next` from
       // the last returned row left it at the caller's own `after`, while
@@ -5164,20 +5167,35 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // throwing and breaking event listing. Any other error still throws.
     let expired;
     try {
-      expired = this.db.prepare(
+      // FIX-4: the guard runs before every event-log read and every SSE
+      // pump; keep the prepared statement cached like the other hot reads.
+      expired = (this._flipGuardStmt ??= this.db.prepare(
         `SELECT 1 FROM mention_states
          WHERE room_id=? AND state IN ('delivered','acknowledged') AND timeout_at<=? LIMIT 1`
-      ).get(roomId, nowMs);
+      )).get(roomId, nowMs);
     } catch (error) {
       if (!/no such table/i.test(error?.message ?? "")) throw error;
       return 0;
     }
     if (!expired) return 0;
-    const run = () => this.db.prepare(
+    const run = () => (this._flipUpdateStmt ??= this.db.prepare(
       `UPDATE mention_states SET state='timed_out', decided_at=?
        WHERE room_id=? AND state IN ('delivered','acknowledged') AND timeout_at<=?`
-    ).run(nowMs, roomId, nowMs);
-    return this.db.isTransaction ? run().changes : this.transaction(run).changes;
+    )).run(nowMs, roomId, nowMs);
+    if (this.db.isTransaction) return run().changes;
+    // FIX-4: the flip touches only mention_states, never rooms. Routing it
+    // through RoomStore#transaction would drop the whole projection cache on
+    // every commit, forcing the read that triggered the flip — and every
+    // concurrent reader queued behind it — into a full synchronous
+    // projection rehydration (JSON.parse + hydrate + deepFreeze of a
+    // multi-megabyte object). The platform transaction keeps the UPDATE
+    // atomic without the cache invalidation; storage failures keep their
+    // typed mapping.
+    try {
+      return this.storagePlatform.transaction(this.db, run, false).changes;
+    } catch (error) {
+      throw this.storageFailure(error, true);
+    }
   }
 
   // #658: explicit acknowledgement. Member-only and idempotent: the caller
@@ -5283,13 +5301,21 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // and the read then fails as HTTP 500 internal_error. Node's SQLite
     // allows far more binds, so the cap only shows up on the Worker.
     const chunkSize = 99;
+    // FIX-4: one batched query per page; cache the prepared statement per
+    // chunk width so the hot read path stops re-preparing it.
+    const chipStmts = this._mentionChipsStmts ??= new Map();
     for (let i = 0; i < eventIds.length; i += chunkSize) {
       const chunk = eventIds.slice(i, i + chunkSize);
       const placeholders = chunk.map(() => "?").join(",");
-      const rows = this.db.prepare(
-        `SELECT message_event_id AS messageEventId, mentioned_member_id AS memberId, state
-         FROM mention_states WHERE room_id=? AND message_event_id IN (${placeholders})`
-      ).all(roomId, ...chunk);
+      const stmt = chipStmts.get(chunk.length) ?? (() => {
+        const prepared = this.db.prepare(
+          `SELECT message_event_id AS messageEventId, mentioned_member_id AS memberId, state
+           FROM mention_states WHERE room_id=? AND message_event_id IN (${placeholders})`
+        );
+        chipStmts.set(chunk.length, prepared);
+        return prepared;
+      })();
+      const rows = stmt.all(roomId, ...chunk);
       for (const row of rows) {
         const list = chips.get(row.messageEventId) ?? [];
         list.push({ memberId: row.memberId, displayName: members[row.memberId]?.displayName ?? row.memberId, state: row.state });

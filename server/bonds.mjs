@@ -150,7 +150,9 @@ export class Bonds {
 
   identityForMember(roomId, memberId) {
     if (!roomId || !memberId) return null;
-    return this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?").get(roomId, memberId)?.identityId ?? null;
+    // FIX-4: runs on every event-log read; cache the statement.
+    return (this._identityForMemberStmt ??= this.db.prepare(
+      "SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?")).get(roomId, memberId)?.identityId ?? null;
   }
 
   _requireIdentity(roomId, memberId) {
