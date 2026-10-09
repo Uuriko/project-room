@@ -1,0 +1,1073 @@
+{
+  "notice": "SYNTHETIC fixture data for the static dashboard prototype (guild-27). Not real room data.",
+  "generatedAt": "2026-10-09T07:00:00-07:00",
+  "bucketMinutes": 15,
+  "totals": {
+    "eventsPerDay": 12222,
+    "byType": {
+      "message.posted": 7383,
+      "work.claimed": 735,
+      "work.heartbeat": 2693,
+      "work.completed": 858,
+      "work.released": 483
+    }
+  },
+  "buckets": [
+    {
+      "bucketStartMinutes": 0,
+      "eventsPerMin": 3.6,
+      "byType": {
+        "message.posted": 2.1,
+        "work.claimed": 0.2,
+        "work.heartbeat": 0.8,
+        "work.completed": 0.3,
+        "work.released": 0.1
+      }
+    },
+    {
+      "bucketStartMinutes": 15,
+      "eventsPerMin": 4.4,
+      "byType": {
+        "message.posted": 2.9,
+        "work.claimed": 0.3,
+        "work.heartbeat": 1,
+        "work.completed": 0.3,
+        "work.released": 0.2
+      }
+    },
+    {
+      "bucketStartMinutes": 30,
+      "eventsPerMin": 2.8,
+      "byType": {
+        "message.posted": 1.6,
+        "work.claimed": 0.2,
+        "work.heartbeat": 0.6,
+        "work.completed": 0.2,
+        "work.released": 0.1
+      }
+    },
+    {
+      "bucketStartMinutes": 45,
+      "eventsPerMin": 3.1,
+      "byType": {
+        "message.posted": 1.8,
+        "work.claimed": 0.2,
+        "work.heartbeat": 0.7,
+        "work.completed": 0.2,
+        "work.released": 0.1
+      }
+    },
+    {
+      "bucketStartMinutes": 60,
+      "eventsPerMin": 3.5,
+      "byType": {
+        "message.posted": 2.2,
+        "work.claimed": 0.2,
+        "work.heartbeat": 0.8,
+        "work.completed": 0.2,
+        "work.released": 0.1
+      }
+    },
+    {
+      "bucketStartMinutes": 75,
+      "eventsPerMin": 2.7,
+      "byType": {
+        "message.posted": 1.6,
+        "work.claimed": 0.2,
+        "work.heartbeat": 0.6,
+        "work.completed": 0.2,
+        "work.released": 0.1
+      }
+    },
+    {
+      "bucketStartMinutes": 90,
+      "eventsPerMin": 3.2,
+      "byType": {
+        "message.posted": 1.9,
+        "work.claimed": 0.2,
+        "work.heartbeat": 0.7,
+        "work.completed": 0.2,
+        "work.released": 0.1
+      }
+    },
+    {
+      "bucketStartMinutes": 105,
+      "eventsPerMin": 4.5,
+      "byType": {
+        "message.posted": 2.6,
+        "work.claimed": 0.3,
+        "work.heartbeat": 1,
+        "work.completed": 0.3,
+        "work.released": 0.2
+      }
+    },
+    {
+      "bucketStartMinutes": 120,
+      "eventsPerMin": 4.1,
+      "byType": {
+        "message.posted": 2.4,
+        "work.claimed": 0.2,
+        "work.heartbeat": 0.9,
+        "work.completed": 0.3,
+        "work.released": 0.2
+      }
+    },
+    {
+      "bucketStartMinutes": 135,
+      "eventsPerMin": 4.1,
+      "byType": {
+        "message.posted": 2.4,
+        "work.claimed": 0.2,
+        "work.heartbeat": 0.9,
+        "work.completed": 0.3,
+        "work.released": 0.2
+      }
+    },
+    {
+      "bucketStartMinutes": 150,
+      "eventsPerMin": 2.7,
+      "byType": {
+        "message.posted": 1.7,
+        "work.claimed": 0.2,
+        "work.heartbeat": 0.6,
+        "work.completed": 0.2,
+        "work.released": 0.1
+      }
+    },
+    {
+      "bucketStartMinutes": 165,
+      "eventsPerMin": 3.7,
+      "byType": {
+        "message.posted": 2.1,
+        "work.claimed": 0.2,
+        "work.heartbeat": 0.8,
+        "work.completed": 0.3,
+        "work.released": 0.1
+      }
+    },
+    {
+      "bucketStartMinutes": 180,
+      "eventsPerMin": 3.9,
+      "byType": {
+        "message.posted": 2.2,
+        "work.claimed": 0.2,
+        "work.heartbeat": 0.9,
+        "work.completed": 0.3,
+        "work.released": 0.2
+      }
+    },
+    {
+      "bucketStartMinutes": 195,
+      "eventsPerMin": 3.5,
+      "byType": {
+        "message.posted": 1.9,
+        "work.claimed": 0.2,
+        "work.heartbeat": 0.8,
+        "work.completed": 0.2,
+        "work.released": 0.1
+      }
+    },
+    {
+      "bucketStartMinutes": 210,
+      "eventsPerMin": 3.6,
+      "byType": {
+        "message.posted": 2.1,
+        "work.claimed": 0.2,
+        "work.heartbeat": 0.8,
+        "work.completed": 0.3,
+        "work.released": 0.1
+      }
+    },
+    {
+      "bucketStartMinutes": 225,
+      "eventsPerMin": 4.6,
+      "byType": {
+        "message.posted": 2.9,
+        "work.claimed": 0.3,
+        "work.heartbeat": 1,
+        "work.completed": 0.3,
+        "work.released": 0.2
+      }
+    },
+    {
+      "bucketStartMinutes": 240,
+      "eventsPerMin": 2.9,
+      "byType": {
+        "message.posted": 1.7,
+        "work.claimed": 0.2,
+        "work.heartbeat": 0.6,
+        "work.completed": 0.2,
+        "work.released": 0.1
+      }
+    },
+    {
+      "bucketStartMinutes": 255,
+      "eventsPerMin": 4.2,
+      "byType": {
+        "message.posted": 2.7,
+        "work.claimed": 0.3,
+        "work.heartbeat": 0.9,
+        "work.completed": 0.3,
+        "work.released": 0.2
+      }
+    },
+    {
+      "bucketStartMinutes": 270,
+      "eventsPerMin": 3.9,
+      "byType": {
+        "message.posted": 2.4,
+        "work.claimed": 0.2,
+        "work.heartbeat": 0.9,
+        "work.completed": 0.3,
+        "work.released": 0.2
+      }
+    },
+    {
+      "bucketStartMinutes": 285,
+      "eventsPerMin": 3.5,
+      "byType": {
+        "message.posted": 2.1,
+        "work.claimed": 0.2,
+        "work.heartbeat": 0.8,
+        "work.completed": 0.2,
+        "work.released": 0.1
+      }
+    },
+    {
+      "bucketStartMinutes": 300,
+      "eventsPerMin": 4.5,
+      "byType": {
+        "message.posted": 2.7,
+        "work.claimed": 0.3,
+        "work.heartbeat": 1,
+        "work.completed": 0.3,
+        "work.released": 0.2
+      }
+    },
+    {
+      "bucketStartMinutes": 315,
+      "eventsPerMin": 3.3,
+      "byType": {
+        "message.posted": 1.9,
+        "work.claimed": 0.2,
+        "work.heartbeat": 0.7,
+        "work.completed": 0.2,
+        "work.released": 0.1
+      }
+    },
+    {
+      "bucketStartMinutes": 330,
+      "eventsPerMin": 3.9,
+      "byType": {
+        "message.posted": 2.3,
+        "work.claimed": 0.2,
+        "work.heartbeat": 0.9,
+        "work.completed": 0.3,
+        "work.released": 0.2
+      }
+    },
+    {
+      "bucketStartMinutes": 345,
+      "eventsPerMin": 5.8,
+      "byType": {
+        "message.posted": 3.7,
+        "work.claimed": 0.3,
+        "work.heartbeat": 1.3,
+        "work.completed": 0.4,
+        "work.released": 0.2
+      }
+    },
+    {
+      "bucketStartMinutes": 360,
+      "eventsPerMin": 6.2,
+      "byType": {
+        "message.posted": 3.6,
+        "work.claimed": 0.4,
+        "work.heartbeat": 1.4,
+        "work.completed": 0.4,
+        "work.released": 0.2
+      }
+    },
+    {
+      "bucketStartMinutes": 375,
+      "eventsPerMin": 6.2,
+      "byType": {
+        "message.posted": 3.7,
+        "work.claimed": 0.4,
+        "work.heartbeat": 1.4,
+        "work.completed": 0.4,
+        "work.released": 0.2
+      }
+    },
+    {
+      "bucketStartMinutes": 390,
+      "eventsPerMin": 5.2,
+      "byType": {
+        "message.posted": 3.2,
+        "work.claimed": 0.3,
+        "work.heartbeat": 1.1,
+        "work.completed": 0.4,
+        "work.released": 0.2
+      }
+    },
+    {
+      "bucketStartMinutes": 405,
+      "eventsPerMin": 6.1,
+      "byType": {
+        "message.posted": 3.4,
+        "work.claimed": 0.4,
+        "work.heartbeat": 1.3,
+        "work.completed": 0.4,
+        "work.released": 0.2
+      }
+    },
+    {
+      "bucketStartMinutes": 420,
+      "eventsPerMin": 7.3,
+      "byType": {
+        "message.posted": 4.5,
+        "work.claimed": 0.4,
+        "work.heartbeat": 1.6,
+        "work.completed": 0.5,
+        "work.released": 0.3
+      }
+    },
+    {
+      "bucketStartMinutes": 435,
+      "eventsPerMin": 6.7,
+      "byType": {
+        "message.posted": 4.3,
+        "work.claimed": 0.4,
+        "work.heartbeat": 1.5,
+        "work.completed": 0.5,
+        "work.released": 0.3
+      }
+    },
+    {
+      "bucketStartMinutes": 450,
+      "eventsPerMin": 8.1,
+      "byType": {
+        "message.posted": 4.7,
+        "work.claimed": 0.5,
+        "work.heartbeat": 1.8,
+        "work.completed": 0.6,
+        "work.released": 0.3
+      }
+    },
+    {
+      "bucketStartMinutes": 465,
+      "eventsPerMin": 8.1,
+      "byType": {
+        "message.posted": 5,
+        "work.claimed": 0.5,
+        "work.heartbeat": 1.8,
+        "work.completed": 0.6,
+        "work.released": 0.3
+      }
+    },
+    {
+      "bucketStartMinutes": 480,
+      "eventsPerMin": 6.2,
+      "byType": {
+        "message.posted": 4,
+        "work.claimed": 0.4,
+        "work.heartbeat": 1.4,
+        "work.completed": 0.4,
+        "work.released": 0.2
+      }
+    },
+    {
+      "bucketStartMinutes": 495,
+      "eventsPerMin": 9.7,
+      "byType": {
+        "message.posted": 6,
+        "work.claimed": 0.6,
+        "work.heartbeat": 2.1,
+        "work.completed": 0.7,
+        "work.released": 0.4
+      }
+    },
+    {
+      "bucketStartMinutes": 510,
+      "eventsPerMin": 7.6,
+      "byType": {
+        "message.posted": 4.5,
+        "work.claimed": 0.5,
+        "work.heartbeat": 1.7,
+        "work.completed": 0.5,
+        "work.released": 0.3
+      }
+    },
+    {
+      "bucketStartMinutes": 525,
+      "eventsPerMin": 10.7,
+      "byType": {
+        "message.posted": 6.3,
+        "work.claimed": 0.6,
+        "work.heartbeat": 2.4,
+        "work.completed": 0.7,
+        "work.released": 0.4
+      }
+    },
+    {
+      "bucketStartMinutes": 540,
+      "eventsPerMin": 6.7,
+      "byType": {
+        "message.posted": 3.8,
+        "work.claimed": 0.4,
+        "work.heartbeat": 1.5,
+        "work.completed": 0.5,
+        "work.released": 0.3
+      }
+    },
+    {
+      "bucketStartMinutes": 555,
+      "eventsPerMin": 8,
+      "byType": {
+        "message.posted": 5.1,
+        "work.claimed": 0.5,
+        "work.heartbeat": 1.8,
+        "work.completed": 0.6,
+        "work.released": 0.3
+      }
+    },
+    {
+      "bucketStartMinutes": 570,
+      "eventsPerMin": 12,
+      "byType": {
+        "message.posted": 6.8,
+        "work.claimed": 0.7,
+        "work.heartbeat": 2.6,
+        "work.completed": 0.8,
+        "work.released": 0.5
+      }
+    },
+    {
+      "bucketStartMinutes": 585,
+      "eventsPerMin": 7.4,
+      "byType": {
+        "message.posted": 4.8,
+        "work.claimed": 0.4,
+        "work.heartbeat": 1.6,
+        "work.completed": 0.5,
+        "work.released": 0.3
+      }
+    },
+    {
+      "bucketStartMinutes": 600,
+      "eventsPerMin": 10.8,
+      "byType": {
+        "message.posted": 6.2,
+        "work.claimed": 0.6,
+        "work.heartbeat": 2.4,
+        "work.completed": 0.8,
+        "work.released": 0.4
+      }
+    },
+    {
+      "bucketStartMinutes": 615,
+      "eventsPerMin": 12,
+      "byType": {
+        "message.posted": 7.1,
+        "work.claimed": 0.7,
+        "work.heartbeat": 2.6,
+        "work.completed": 0.8,
+        "work.released": 0.5
+      }
+    },
+    {
+      "bucketStartMinutes": 630,
+      "eventsPerMin": 10.3,
+      "byType": {
+        "message.posted": 6.7,
+        "work.claimed": 0.6,
+        "work.heartbeat": 2.3,
+        "work.completed": 0.7,
+        "work.released": 0.4
+      }
+    },
+    {
+      "bucketStartMinutes": 645,
+      "eventsPerMin": 12.6,
+      "byType": {
+        "message.posted": 7.2,
+        "work.claimed": 0.8,
+        "work.heartbeat": 2.8,
+        "work.completed": 0.9,
+        "work.released": 0.5
+      }
+    },
+    {
+      "bucketStartMinutes": 660,
+      "eventsPerMin": 13.6,
+      "byType": {
+        "message.posted": 7.9,
+        "work.claimed": 0.8,
+        "work.heartbeat": 3,
+        "work.completed": 1,
+        "work.released": 0.5
+      }
+    },
+    {
+      "bucketStartMinutes": 675,
+      "eventsPerMin": 10.6,
+      "byType": {
+        "message.posted": 6.8,
+        "work.claimed": 0.6,
+        "work.heartbeat": 2.3,
+        "work.completed": 0.7,
+        "work.released": 0.4
+      }
+    },
+    {
+      "bucketStartMinutes": 690,
+      "eventsPerMin": 11.8,
+      "byType": {
+        "message.posted": 7.4,
+        "work.claimed": 0.7,
+        "work.heartbeat": 2.6,
+        "work.completed": 0.8,
+        "work.released": 0.5
+      }
+    },
+    {
+      "bucketStartMinutes": 705,
+      "eventsPerMin": 14.6,
+      "byType": {
+        "message.posted": 9.4,
+        "work.claimed": 0.9,
+        "work.heartbeat": 3.2,
+        "work.completed": 1,
+        "work.released": 0.6
+      }
+    },
+    {
+      "bucketStartMinutes": 720,
+      "eventsPerMin": 12.2,
+      "byType": {
+        "message.posted": 7.2,
+        "work.claimed": 0.7,
+        "work.heartbeat": 2.7,
+        "work.completed": 0.9,
+        "work.released": 0.5
+      }
+    },
+    {
+      "bucketStartMinutes": 735,
+      "eventsPerMin": 11.1,
+      "byType": {
+        "message.posted": 7,
+        "work.claimed": 0.7,
+        "work.heartbeat": 2.4,
+        "work.completed": 0.8,
+        "work.released": 0.4
+      }
+    },
+    {
+      "bucketStartMinutes": 750,
+      "eventsPerMin": 12.1,
+      "byType": {
+        "message.posted": 7.5,
+        "work.claimed": 0.7,
+        "work.heartbeat": 2.7,
+        "work.completed": 0.8,
+        "work.released": 0.5
+      }
+    },
+    {
+      "bucketStartMinutes": 765,
+      "eventsPerMin": 15,
+      "byType": {
+        "message.posted": 8.4,
+        "work.claimed": 0.9,
+        "work.heartbeat": 3.3,
+        "work.completed": 1.1,
+        "work.released": 0.6
+      }
+    },
+    {
+      "bucketStartMinutes": 780,
+      "eventsPerMin": 13.5,
+      "byType": {
+        "message.posted": 8.6,
+        "work.claimed": 0.8,
+        "work.heartbeat": 3,
+        "work.completed": 0.9,
+        "work.released": 0.5
+      }
+    },
+    {
+      "bucketStartMinutes": 795,
+      "eventsPerMin": 16.2,
+      "byType": {
+        "message.posted": 9.6,
+        "work.claimed": 1,
+        "work.heartbeat": 3.6,
+        "work.completed": 1.1,
+        "work.released": 0.6
+      }
+    },
+    {
+      "bucketStartMinutes": 810,
+      "eventsPerMin": 15.1,
+      "byType": {
+        "message.posted": 9.8,
+        "work.claimed": 0.9,
+        "work.heartbeat": 3.3,
+        "work.completed": 1.1,
+        "work.released": 0.6
+      }
+    },
+    {
+      "bucketStartMinutes": 825,
+      "eventsPerMin": 15.2,
+      "byType": {
+        "message.posted": 9.7,
+        "work.claimed": 0.9,
+        "work.heartbeat": 3.3,
+        "work.completed": 1.1,
+        "work.released": 0.6
+      }
+    },
+    {
+      "bucketStartMinutes": 840,
+      "eventsPerMin": 13.1,
+      "byType": {
+        "message.posted": 7.5,
+        "work.claimed": 0.8,
+        "work.heartbeat": 2.9,
+        "work.completed": 0.9,
+        "work.released": 0.5
+      }
+    },
+    {
+      "bucketStartMinutes": 855,
+      "eventsPerMin": 14.3,
+      "byType": {
+        "message.posted": 9.2,
+        "work.claimed": 0.9,
+        "work.heartbeat": 3.1,
+        "work.completed": 1,
+        "work.released": 0.6
+      }
+    },
+    {
+      "bucketStartMinutes": 870,
+      "eventsPerMin": 14.6,
+      "byType": {
+        "message.posted": 8.5,
+        "work.claimed": 0.9,
+        "work.heartbeat": 3.2,
+        "work.completed": 1,
+        "work.released": 0.6
+      }
+    },
+    {
+      "bucketStartMinutes": 885,
+      "eventsPerMin": 12.7,
+      "byType": {
+        "message.posted": 7.9,
+        "work.claimed": 0.8,
+        "work.heartbeat": 2.8,
+        "work.completed": 0.9,
+        "work.released": 0.5
+      }
+    },
+    {
+      "bucketStartMinutes": 900,
+      "eventsPerMin": 18.5,
+      "byType": {
+        "message.posted": 11.1,
+        "work.claimed": 1.1,
+        "work.heartbeat": 4.1,
+        "work.completed": 1.3,
+        "work.released": 0.7
+      }
+    },
+    {
+      "bucketStartMinutes": 915,
+      "eventsPerMin": 15.5,
+      "byType": {
+        "message.posted": 9.3,
+        "work.claimed": 0.9,
+        "work.heartbeat": 3.4,
+        "work.completed": 1.1,
+        "work.released": 0.6
+      }
+    },
+    {
+      "bucketStartMinutes": 930,
+      "eventsPerMin": 12.3,
+      "byType": {
+        "message.posted": 7.2,
+        "work.claimed": 0.7,
+        "work.heartbeat": 2.7,
+        "work.completed": 0.9,
+        "work.released": 0.5
+      }
+    },
+    {
+      "bucketStartMinutes": 945,
+      "eventsPerMin": 17,
+      "byType": {
+        "message.posted": 9.6,
+        "work.claimed": 1,
+        "work.heartbeat": 3.7,
+        "work.completed": 1.2,
+        "work.released": 0.7
+      }
+    },
+    {
+      "bucketStartMinutes": 960,
+      "eventsPerMin": 12.7,
+      "byType": {
+        "message.posted": 7.7,
+        "work.claimed": 0.8,
+        "work.heartbeat": 2.8,
+        "work.completed": 0.9,
+        "work.released": 0.5
+      }
+    },
+    {
+      "bucketStartMinutes": 975,
+      "eventsPerMin": 11.7,
+      "byType": {
+        "message.posted": 6.7,
+        "work.claimed": 0.7,
+        "work.heartbeat": 2.6,
+        "work.completed": 0.8,
+        "work.released": 0.5
+      }
+    },
+    {
+      "bucketStartMinutes": 990,
+      "eventsPerMin": 10.4,
+      "byType": {
+        "message.posted": 6.4,
+        "work.claimed": 0.6,
+        "work.heartbeat": 2.3,
+        "work.completed": 0.7,
+        "work.released": 0.4
+      }
+    },
+    {
+      "bucketStartMinutes": 1005,
+      "eventsPerMin": 13.4,
+      "byType": {
+        "message.posted": 8.6,
+        "work.claimed": 0.8,
+        "work.heartbeat": 2.9,
+        "work.completed": 0.9,
+        "work.released": 0.5
+      }
+    },
+    {
+      "bucketStartMinutes": 1020,
+      "eventsPerMin": 9.3,
+      "byType": {
+        "message.posted": 6,
+        "work.claimed": 0.6,
+        "work.heartbeat": 2,
+        "work.completed": 0.7,
+        "work.released": 0.4
+      }
+    },
+    {
+      "bucketStartMinutes": 1035,
+      "eventsPerMin": 14.9,
+      "byType": {
+        "message.posted": 9.4,
+        "work.claimed": 0.9,
+        "work.heartbeat": 3.3,
+        "work.completed": 1,
+        "work.released": 0.6
+      }
+    },
+    {
+      "bucketStartMinutes": 1050,
+      "eventsPerMin": 13.7,
+      "byType": {
+        "message.posted": 8.1,
+        "work.claimed": 0.8,
+        "work.heartbeat": 3,
+        "work.completed": 1,
+        "work.released": 0.5
+      }
+    },
+    {
+      "bucketStartMinutes": 1065,
+      "eventsPerMin": 14.7,
+      "byType": {
+        "message.posted": 8.1,
+        "work.claimed": 0.9,
+        "work.heartbeat": 3.2,
+        "work.completed": 1,
+        "work.released": 0.6
+      }
+    },
+    {
+      "bucketStartMinutes": 1080,
+      "eventsPerMin": 8.1,
+      "byType": {
+        "message.posted": 5,
+        "work.claimed": 0.5,
+        "work.heartbeat": 1.8,
+        "work.completed": 0.6,
+        "work.released": 0.3
+      }
+    },
+    {
+      "bucketStartMinutes": 1095,
+      "eventsPerMin": 11.3,
+      "byType": {
+        "message.posted": 7,
+        "work.claimed": 0.7,
+        "work.heartbeat": 2.5,
+        "work.completed": 0.8,
+        "work.released": 0.5
+      }
+    },
+    {
+      "bucketStartMinutes": 1110,
+      "eventsPerMin": 13.4,
+      "byType": {
+        "message.posted": 8.1,
+        "work.claimed": 0.8,
+        "work.heartbeat": 2.9,
+        "work.completed": 0.9,
+        "work.released": 0.5
+      }
+    },
+    {
+      "bucketStartMinutes": 1125,
+      "eventsPerMin": 10.3,
+      "byType": {
+        "message.posted": 5.8,
+        "work.claimed": 0.6,
+        "work.heartbeat": 2.3,
+        "work.completed": 0.7,
+        "work.released": 0.4
+      }
+    },
+    {
+      "bucketStartMinutes": 1140,
+      "eventsPerMin": 12.6,
+      "byType": {
+        "message.posted": 7.8,
+        "work.claimed": 0.8,
+        "work.heartbeat": 2.8,
+        "work.completed": 0.9,
+        "work.released": 0.5
+      }
+    },
+    {
+      "bucketStartMinutes": 1155,
+      "eventsPerMin": 9.3,
+      "byType": {
+        "message.posted": 5.7,
+        "work.claimed": 0.6,
+        "work.heartbeat": 2,
+        "work.completed": 0.7,
+        "work.released": 0.4
+      }
+    },
+    {
+      "bucketStartMinutes": 1170,
+      "eventsPerMin": 9.7,
+      "byType": {
+        "message.posted": 6,
+        "work.claimed": 0.6,
+        "work.heartbeat": 2.1,
+        "work.completed": 0.7,
+        "work.released": 0.4
+      }
+    },
+    {
+      "bucketStartMinutes": 1185,
+      "eventsPerMin": 6.5,
+      "byType": {
+        "message.posted": 4.2,
+        "work.claimed": 0.4,
+        "work.heartbeat": 1.4,
+        "work.completed": 0.5,
+        "work.released": 0.3
+      }
+    },
+    {
+      "bucketStartMinutes": 1200,
+      "eventsPerMin": 10.4,
+      "byType": {
+        "message.posted": 6.4,
+        "work.claimed": 0.6,
+        "work.heartbeat": 2.3,
+        "work.completed": 0.7,
+        "work.released": 0.4
+      }
+    },
+    {
+      "bucketStartMinutes": 1215,
+      "eventsPerMin": 5.8,
+      "byType": {
+        "message.posted": 3.7,
+        "work.claimed": 0.3,
+        "work.heartbeat": 1.3,
+        "work.completed": 0.4,
+        "work.released": 0.2
+      }
+    },
+    {
+      "bucketStartMinutes": 1230,
+      "eventsPerMin": 6.5,
+      "byType": {
+        "message.posted": 3.7,
+        "work.claimed": 0.4,
+        "work.heartbeat": 1.4,
+        "work.completed": 0.5,
+        "work.released": 0.3
+      }
+    },
+    {
+      "bucketStartMinutes": 1245,
+      "eventsPerMin": 7.4,
+      "byType": {
+        "message.posted": 4.2,
+        "work.claimed": 0.4,
+        "work.heartbeat": 1.6,
+        "work.completed": 0.5,
+        "work.released": 0.3
+      }
+    },
+    {
+      "bucketStartMinutes": 1260,
+      "eventsPerMin": 8,
+      "byType": {
+        "message.posted": 5,
+        "work.claimed": 0.5,
+        "work.heartbeat": 1.8,
+        "work.completed": 0.6,
+        "work.released": 0.3
+      }
+    },
+    {
+      "bucketStartMinutes": 1275,
+      "eventsPerMin": 8,
+      "byType": {
+        "message.posted": 4.5,
+        "work.claimed": 0.5,
+        "work.heartbeat": 1.8,
+        "work.completed": 0.6,
+        "work.released": 0.3
+      }
+    },
+    {
+      "bucketStartMinutes": 1290,
+      "eventsPerMin": 5.6,
+      "byType": {
+        "message.posted": 3.1,
+        "work.claimed": 0.3,
+        "work.heartbeat": 1.2,
+        "work.completed": 0.4,
+        "work.released": 0.2
+      }
+    },
+    {
+      "bucketStartMinutes": 1305,
+      "eventsPerMin": 5.4,
+      "byType": {
+        "message.posted": 3.1,
+        "work.claimed": 0.3,
+        "work.heartbeat": 1.2,
+        "work.completed": 0.4,
+        "work.released": 0.2
+      }
+    },
+    {
+      "bucketStartMinutes": 1320,
+      "eventsPerMin": 4.9,
+      "byType": {
+        "message.posted": 2.8,
+        "work.claimed": 0.3,
+        "work.heartbeat": 1.1,
+        "work.completed": 0.3,
+        "work.released": 0.2
+      }
+    },
+    {
+      "bucketStartMinutes": 1335,
+      "eventsPerMin": 4.7,
+      "byType": {
+        "message.posted": 2.9,
+        "work.claimed": 0.3,
+        "work.heartbeat": 1,
+        "work.completed": 0.3,
+        "work.released": 0.2
+      }
+    },
+    {
+      "bucketStartMinutes": 1350,
+      "eventsPerMin": 3.9,
+      "byType": {
+        "message.posted": 2.5,
+        "work.claimed": 0.2,
+        "work.heartbeat": 0.9,
+        "work.completed": 0.3,
+        "work.released": 0.2
+      }
+    },
+    {
+      "bucketStartMinutes": 1365,
+      "eventsPerMin": 6.4,
+      "byType": {
+        "message.posted": 4,
+        "work.claimed": 0.4,
+        "work.heartbeat": 1.4,
+        "work.completed": 0.4,
+        "work.released": 0.3
+      }
+    },
+    {
+      "bucketStartMinutes": 1380,
+      "eventsPerMin": 5,
+      "byType": {
+        "message.posted": 2.9,
+        "work.claimed": 0.3,
+        "work.heartbeat": 1.1,
+        "work.completed": 0.4,
+        "work.released": 0.2
+      }
+    },
+    {
+      "bucketStartMinutes": 1395,
+      "eventsPerMin": 5,
+      "byType": {
+        "message.posted": 2.9,
+        "work.claimed": 0.3,
+        "work.heartbeat": 1.1,
+        "work.completed": 0.4,
+        "work.released": 0.2
+      }
+    },
+    {
+      "bucketStartMinutes": 1410,
+      "eventsPerMin": 4.5,
+      "byType": {
+        "message.posted": 2.8,
+        "work.claimed": 0.3,
+        "work.heartbeat": 1,
+        "work.completed": 0.3,
+        "work.released": 0.2
+      }
+    },
+    {
+      "bucketStartMinutes": 1425,
+      "eventsPerMin": 4.4,
+      "byType": {
+        "message.posted": 2.7,
+        "work.claimed": 0.3,
+        "work.heartbeat": 1,
+        "work.completed": 0.3,
+        "work.released": 0.2
+      }
+    }
+  ]
+}

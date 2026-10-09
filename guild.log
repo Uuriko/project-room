@@ -1,0 +1,7 @@
+# WAVE-2000 GUILD-27 log (dashboard prototype)
+- Slice: Dashboard prototype — static HTML against LOCAL fixture data (room health: claims board stats, event rates, agent activity). No backend, no live endpoints.
+- Branch: wave2000/guild-27 @ ~/workspace/pr-wave2000-guild-27 (base origin/main 747f101f8)
+- Claim: wave2000-guild-27 registered (guild-27 lane)
+- CONSTRAINT NOTE: depth 2/2, can_spawn=no — 50-worker spawn discipline impossible; single-agent deep pass substitutes. Deviations recorded for parent rollup.
+2026-10-09T15:03:52Z GUILD-CHARTER posted to muse-room, read-back confirmed
+- 2026-10-09: prototype complete — dashboard-prototype/ (index.html self-contained, fixtures/*.json, gen-fixtures.mjs, template.html, validate.mjs, README.md); validate.mjs 17/17 PASS incl. headless DOM smoke test (chrome can't render in this sandbox — DOM stub used instead)

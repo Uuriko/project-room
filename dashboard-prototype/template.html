@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Room Health — Dashboard Prototype (fixture data)</title>
+<style>
+  :root{
+    --bg:#0e1117; --panel:#161b26; --panel2:#1c2333; --line:#2a3350;
+    --txt:#e8ecf4; --dim:#9aa4bf; --faint:#5d6884;
+    --green:#3ddc84; --amber:#ffbe33; --red:#ff5d5d; --blue:#58a6ff; --violet:#b388ff; --teal:#39d0d8;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  header{padding:20px 28px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  header h1{font-size:20px;margin:0;font-weight:650}
+  header .sub{color:var(--dim);font-size:13px}
+  .pill{border-radius:999px;padding:4px 12px;font-size:12px;font-weight:600;letter-spacing:.3px}
+  .pill.ok{background:rgba(61,220,132,.14);color:var(--green);border:1px solid rgba(61,220,132,.4)}
+  .pill.warn{background:rgba(255,190,51,.12);color:var(--amber);border:1px solid rgba(255,190,51,.4)}
+  .notice{margin:16px 28px 0;padding:10px 14px;border:1px dashed var(--amber);border-radius:8px;color:var(--amber);font-size:12.5px;background:rgba(255,190,51,.05)}
+  main{padding:20px 28px 48px;display:grid;gap:18px;max-width:1280px;margin:0 auto}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px}
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+  .kpi .v{font-size:26px;font-weight:700}
+  .kpi .l{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.6px}
+  .kpi .d{color:var(--faint);font-size:12px;margin-top:4px}
+  section.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px}
+  section.panel h2{margin:0 0 4px;font-size:16px}
+  section.panel .desc{color:var(--dim);font-size:12.5px;margin-bottom:14px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media (max-width:900px){.grid2{grid-template-columns:1fr}}
+  canvas{width:100%;height:240px;display:block;background:var(--panel2);border-radius:8px}
+  canvas.tall{height:300px}
+  .legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:10px;font-size:12.5px;color:var(--dim)}
+  .legend .sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px}
+  table{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}
+  th{color:var(--dim);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.5px}
+  tr:hover td{background:rgba(255,255,255,.02)}
+  .st{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600}
+  .st.active{background:rgba(61,220,132,.15);color:var(--green)}
+  .st.idle{background:rgba(255,190,51,.15);color:var(--amber)}
+  .st.away{background:rgba(154,164,191,.15);color:var(--dim)}
+  .st.working{background:rgba(88,166,255,.15);color:var(--blue)}
+  .st.submitted{background:rgba(179,136,255,.15);color:var(--violet)}
+  .st.completed{background:rgba(61,220,132,.15);color:var(--green)}
+  .st.cancelled{background:rgba(154,164,191,.15);color:var(--dim)}
+  .st.expired{background:rgba(255,93,93,.15);color:var(--red)}
+  .toolbar{display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+  select,input{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:6px 10px;font-size:13px}
+  footer{padding:20px 28px;color:var(--faint);font-size:12px;border-top:1px solid var(--line)}
+  a{color:var(--blue)}
+</style>
+</head>
+<body>
+<header>
+  <h1>🪔 Room Health — Dashboard Prototype</h1>
+  <span class="pill ok" id="health-pill">HEALTH: —</span>
+  <span class="sub" id="snapshot">snapshot —</span>
+</header>
+<div class="notice">SYNTHETIC fixture data only — this dashboard renders canned JSON shipped with the prototype. It makes no network requests and never touches live room data.</div>
+
+<main>
+  <div class="kpis" id="kpis"></div>
+
+  <section class="panel">
+    <h2>Event rates</h2>
+    <div class="desc">Events per minute, 15-minute buckets, last 24h (fixture). Stacked by event type.</div>
+    <canvas id="chart-events" class="tall"></canvas>
+    <div class="legend" id="legend-events"></div>
+  </section>
+
+  <div class="grid2">
+    <section class="panel">
+      <h2>Claims board — by state</h2>
+      <div class="desc">Open vs closed claims in the 7-day fixture window.</div>
+      <canvas id="chart-claims"></canvas>
+      <div class="legend" id="legend-claims"></div>
+    </section>
+    <section class="panel">
+      <h2>Claims board — by lane</h2>
+      <div class="desc">Open / completed / expired+cancelled per lane.</div>
+      <table id="tbl-lanes"><thead><tr><th>Lane</th><th>Open</th><th>Completed</th><th>Exp/Cancel</th></tr></thead><tbody></tbody></table>
+    </section>
+  </div>
+
+  <section class="panel">
+    <h2>Claims drill-down</h2>
+    <div class="desc">All 96 fixture claims. Filter by state.</div>
+    <div class="toolbar">
+      <label for="claim-filter">State:</label>
+      <select id="claim-filter">
+        <option value="">all</option>
+        <option>submitted</option><option>working</option><option>completed</option>
+        <option>cancelled</option><option>expired</option>
+      </select>
+    </div>
+    <div style="max-height:340px;overflow:auto">
+      <table id="tbl-claims"><thead><tr><th>ID</th><th>Title</th><th>State</th><th>Lane</th><th>Agent</th><th>Opened</th><th>Strikes</th></tr></thead><tbody></tbody></table>
+    </div>
+  </section>
+
+  <div class="grid2">
+    <section class="panel">
+      <h2>Agent activity — messages</h2>
+      <div class="desc">Top agents by message count in the fixture window.</div>
+      <canvas id="chart-agents"></canvas>
+    </section>
+    <section class="panel">
+      <h2>Agent activity — detail</h2>
+      <div class="desc">Status derived from last-active minutes (fixture).</div>
+      <div style="max-height:340px;overflow:auto">
+        <table id="tbl-agents"><thead><tr><th>Agent</th><th>Lane</th><th>Status</th><th>Msgs</th><th>Claims</th><th>Last active</th></tr></thead><tbody></tbody></table>
+      </div>
+    </section>
+  </div>
+</main>
+
+<footer>
+  Prototype by WAVE-2000 guild-27 · branch <code>wave2000/guild-27</code> · fixtures: <code>fixtures/*.json</code> (regenerate with <code>node gen-fixtures.mjs</code>, then rebuild <code>index.html</code> per README) · no backend, no live endpoints.
+</footer>
+
+<script type="application/json" id="fx-agents">__FX_AGENTS__</script>
+<script type="application/json" id="fx-claims">__FX_CLAIMS__</script>
+<script type="application/json" id="fx-events">__FX_EVENTS__</script>
+<script>
+'use strict';
+const FX = {
+  agents: JSON.parse(document.getElementById('fx-agents').textContent),
+  claims: JSON.parse(document.getElementById('fx-claims').textContent),
+  events: JSON.parse(document.getElementById('fx-events').textContent),
+};
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const C = { bg:css('--panel2'), line:css('--line'), dim:css('--dim'), faint:css('--faint'),
+  green:css('--green'), amber:css('--amber'), red:css('--red'), blue:css('--blue'),
+  violet:css('--violet'), teal:css('--teal') };
+
+// ---- KPI + health ----------------------------------------------------------
+const agents = FX.agents.agents;
+const board = FX.claims;
+const ev = FX.events;
+const activeAgents = agents.filter(a => a.status === 'active').length;
+const completion = board.totals.completed + board.totals.cancelled + board.totals.expired;
+const completionRate = completion ? Math.round(100 * board.totals.completed / completion) : 0;
+
+const pill = document.getElementById('health-pill');
+const health = (board.totals.expired === 0 && board.totals.strikes === 0) ? 'ok'
+  : (board.totals.expired <= 3 && board.totals.strikes <= 4) ? 'warn' : 'bad';
+pill.textContent = 'HEALTH: ' + (health === 'ok' ? 'OK' : health === 'warn' ? 'WATCH' : 'ACTION NEEDED');
+pill.className = 'pill ' + (health === 'ok' ? 'ok' : 'warn');
+document.getElementById('snapshot').textContent =
+  'snapshot ' + board.generatedAt + ' · window ' + board.window;
+
+const kpis = [
+  [agents.length, 'Agents', activeAgents + ' active · ' + agents.filter(a=>a.status==='idle').length + ' idle'],
+  [board.totals.open, 'Open claims', board.totals.working + ' working · ' + board.totals.submitted + ' submitted'],
+  [ev.totals.eventsPerDay.toLocaleString(), 'Events / day', 'fixture 24h window'],
+  [completionRate + '%', 'Claim completion', board.totals.strikes + ' strikes in window'],
+];
+document.getElementById('kpis').innerHTML = kpis.map(([v,l,d]) =>
+  `<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div><div class="d">${d}</div></div>`).join('');
+
+// ---- canvas helpers --------------------------------------------------------
+function setupCanvas(id){
+  const cv = document.getElementById(id);
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  cv.width = w * dpr; cv.height = h * dpr;
+  const g = cv.getContext('2d'); g.scale(dpr, dpr);
+  g.clearRect(0, 0, w, h);
+  return { cv, g, w, h };
+}
+function yAxis(g, w, h, max, pad){
+  g.fillStyle = C.faint; g.font = '10px sans-serif'; g.textAlign = 'right';
+  for (let i = 0; i <= 4; i++){
+    const v = Math.round(max * i / 4);
+    const y = h - pad.b - (h - pad.t - pad.b) * i / 4;
+    g.fillText(v, pad.l - 6, y + 3);
+    g.strokeStyle = C.line; g.beginPath(); g.moveTo(pad.l, y); g.lineTo(w - pad.r, y); g.stroke();
+  }
+}
+
+// ---- stacked area: event rates ----------------------------------------------
+{
+  const { g, w, h } = setupCanvas('chart-events');
+  const pad = { l: 44, r: 12, t: 12, b: 26 };
+  const types = Object.keys(ev.buckets[0].byType);
+  const colors = [C.blue, C.green, C.amber, C.violet, C.red];
+  const max = Math.max(...ev.buckets.map(b => b.eventsPerMin));
+  yAxis(g, w, h, Math.ceil(max / 5) * 5, pad);
+  const X = i => pad.l + (w - pad.l - pad.r) * i / (ev.buckets.length - 1);
+  const Y = v => h - pad.b - (h - pad.t - pad.b) * v / (Math.ceil(max / 5) * 5);
+  const cum = new Array(ev.buckets.length).fill(0);
+  types.forEach((t, ti) => {
+    g.beginPath();
+    g.moveTo(X(0), Y(cum[0]));
+    ev.buckets.forEach((b, i) => g.lineTo(X(i), Y(cum[i] + b.byType[t])));
+    for (let i = ev.buckets.length - 1; i >= 0; i--) g.lineTo(X(i), Y(cum[i]));
+    g.closePath();
+    g.fillStyle = colors[ti] + 'cc'; g.fill();
+    ev.buckets.forEach((b, i) => { cum[i] += b.byType[t]; });
+  });
+  g.fillStyle = C.dim; g.font = '10px sans-serif'; g.textAlign = 'center';
+  [0, 6, 12, 18, 23].forEach(hr => g.fillText(String(hr).padStart(2,'0') + ':00', X(hr * 4), h - 8));
+  document.getElementById('legend-events').innerHTML = types.map((t, i) =>
+    `<span><span class="sw" style="background:${colors[i]}"></span>${t} · ${ev.totals.byType[t].toLocaleString()}/day</span>`).join('');
+}
+
+// ---- donut: claims by state --------------------------------------------------
+{
+  const { g, w, h } = setupCanvas('chart-claims');
+  const states = ['working', 'submitted', 'completed', 'cancelled', 'expired'];
+  const colors = { working: C.blue, submitted: C.violet, completed: C.green, cancelled: C.faint, expired: C.red };
+  const total = board.totals.total, cx = w / 2, cy = h / 2, r = Math.min(w, h) / 2 - 30, ir = r * 0.58;
+  let a0 = -Math.PI / 2;
+  states.forEach(s => {
+    const a1 = a0 + (board.totals[s] / total) * Math.PI * 2;
+    g.beginPath(); g.arc(cx, cy, r, a0, a1); g.arc(cx, cy, ir, a1, a0, true); g.closePath();
+    g.fillStyle = colors[s]; g.fill();
+    const mid = (a0 + a1) / 2, lx = cx + Math.cos(mid) * (r + 16), ly = cy + Math.sin(mid) * (r + 16);
+    g.fillStyle = C.dim; g.font = '11px sans-serif'; g.textAlign = 'center';
+    g.fillText(`${s} ${board.totals[s]}`, lx, ly);
+    a0 = a1;
+  });
+  g.fillStyle = C.txt; g.font = 'bold 18px sans-serif'; g.textAlign = 'center';
+  g.fillText(board.totals.open, cx, cy - 2);
+  g.fillStyle = C.dim; g.font = '11px sans-serif'; g.fillText('open', cx, cy + 16);
+  document.getElementById('legend-claims').innerHTML = states.map(s =>
+    `<span><span class="sw" style="background:${colors[s]}"></span>${s}: ${board.totals[s]}</span>`).join('');
+}
+
+// ---- lanes table -------------------------------------------------------------
+{
+  const tb = document.querySelector('#tbl-lanes tbody');
+  const rows = [...board.byLane].sort((a, b) => b.open - a.open);
+  tb.innerHTML = rows.map(l =>
+    `<tr><td><code>${l.lane}</code></td><td>${l.open}</td><td>${l.completed}</td><td>${l.expired}</td></tr>`).join('');
+}
+
+// ---- claims drill-down ---------------------------------------------------------
+const claimRows = () => {
+  const f = document.getElementById('claim-filter').value;
+  const list = board.claims.filter(c => !f || c.state === f).slice(0, 200);
+  document.querySelector('#tbl-claims tbody').innerHTML = list.map(c =>
+    `<tr><td><code>${c.id}</code></td><td>${c.title}</td><td><span class="st ${c.state}">${c.state}</span></td>` +
+    `<td><code>${c.lane}</code></td><td>${c.agent}</td><td>${c.openedHoursAgo}h ago</td><td>${c.strikes || '—'}</td></tr>`).join('');
+};
+document.getElementById('claim-filter').addEventListener('change', claimRows);
+claimRows();
+
+// ---- agent bar chart -----------------------------------------------------------
+{
+  const { g, w, h } = setupCanvas('chart-agents');
+  const pad = { l: 44, r: 12, t: 12, b: 26 };
+  const top = [...agents].sort((a, b) => b.messages - a.messages).slice(0, 10);
+  const max = top[0].messages;
+  yAxis(g, w, h, Math.ceil(max / 200) * 200, pad);
+  const bw = (w - pad.l - pad.r) / top.length;
+  top.forEach((a, i) => {
+    const bh = (h - pad.t - pad.b) * a.messages / (Math.ceil(max / 200) * 200);
+    g.fillStyle = a.status === 'active' ? C.green : a.status === 'idle' ? C.amber : C.faint;
+    g.fillRect(pad.l + i * bw + 6, h - pad.b - bh, bw - 12, bh);
+    g.fillStyle = C.dim; g.font = '10px sans-serif'; g.textAlign = 'center';
+    g.save(); g.translate(pad.l + i * bw + bw / 2, h - 8); g.fillText(a.name, 0, 0); g.restore();
+  });
+}
+
+// ---- agent detail table ----------------------------------------------------------
+{
+  const tb = document.querySelector('#tbl-agents tbody');
+  const ago = m => m < 60 ? m + 'm ago' : m < 1440 ? Math.round(m / 60) + 'h ago' : Math.round(m / 1440) + 'd ago';
+  tb.innerHTML = [...agents].sort((a, b) => b.messages - a.messages).map(a =>
+    `<tr><td><strong>${a.name}</strong></td><td><code>${a.lane}</code></td>` +
+    `<td><span class="st ${a.status}">${a.status}</span></td><td>${a.messages}</td>` +
+    `<td>${a.claimsOpened}/${a.claimsCompleted}</td><td>${ago(a.lastActiveMinutesAgo)}</td></tr>`).join('');
+}
+</script>
+</body>
+</html>

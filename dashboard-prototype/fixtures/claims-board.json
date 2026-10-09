@@ -1,0 +1,1057 @@
+{
+  "notice": "SYNTHETIC fixture data for the static dashboard prototype (guild-27). Not real room data.",
+  "generatedAt": "2026-10-09T07:00:00-07:00",
+  "window": "last 7 days",
+  "totals": {
+    "total": 96,
+    "submitted": 12,
+    "working": 18,
+    "completed": 48,
+    "cancelled": 12,
+    "expired": 6,
+    "open": 30,
+    "strikes": 17
+  },
+  "byLane": [
+    {
+      "lane": "LANE-D",
+      "open": 1,
+      "completed": 6,
+      "expired": 1
+    },
+    {
+      "lane": "OWNER",
+      "open": 3,
+      "completed": 2,
+      "expired": 1
+    },
+    {
+      "lane": "LANE-C",
+      "open": 1,
+      "completed": 5,
+      "expired": 1
+    },
+    {
+      "lane": "MERGE",
+      "open": 3,
+      "completed": 3,
+      "expired": 0
+    },
+    {
+      "lane": "PUBLISH",
+      "open": 3,
+      "completed": 6,
+      "expired": 0
+    },
+    {
+      "lane": "BROWSER",
+      "open": 1,
+      "completed": 2,
+      "expired": 3
+    },
+    {
+      "lane": "EXTERNAL",
+      "open": 1,
+      "completed": 1,
+      "expired": 2
+    },
+    {
+      "lane": "BUILD",
+      "open": 4,
+      "completed": 3,
+      "expired": 3
+    },
+    {
+      "lane": "LANE-A",
+      "open": 2,
+      "completed": 1,
+      "expired": 2
+    },
+    {
+      "lane": "LANE-N",
+      "open": 2,
+      "completed": 4,
+      "expired": 2
+    },
+    {
+      "lane": "LANE-J",
+      "open": 2,
+      "completed": 2,
+      "expired": 0
+    },
+    {
+      "lane": "AUTO",
+      "open": 4,
+      "completed": 6,
+      "expired": 3
+    },
+    {
+      "lane": "LANE-R",
+      "open": 3,
+      "completed": 7,
+      "expired": 0
+    }
+  ],
+  "claims": [
+    {
+      "id": "WC-1041",
+      "title": "telemetry-gap: audit",
+      "state": "working",
+      "lane": "MERGE",
+      "agent": "quill",
+      "openedHoursAgo": 85,
+      "leaseHours": 11,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1042",
+      "title": "advisory-review: re-verify",
+      "state": "working",
+      "lane": "AUTO",
+      "agent": "swarmbrain",
+      "openedHoursAgo": 152,
+      "leaseHours": 70,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1043",
+      "title": "advisory-review: audit",
+      "state": "working",
+      "lane": "LANE-A",
+      "agent": "arion",
+      "openedHoursAgo": 118,
+      "leaseHours": 37,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1044",
+      "title": "advisory-review: load test",
+      "state": "working",
+      "lane": "OWNER",
+      "agent": "jill",
+      "openedHoursAgo": 98,
+      "leaseHours": 24,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1045",
+      "title": "invite-flow: re-verify",
+      "state": "working",
+      "lane": "LANE-D",
+      "agent": "instinct",
+      "openedHoursAgo": 21,
+      "leaseHours": 49,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1046",
+      "title": "invite-flow: harness",
+      "state": "working",
+      "lane": "LANE-C",
+      "agent": "codex",
+      "openedHoursAgo": 69,
+      "leaseHours": 70,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1047",
+      "title": "fuzz-corpus: re-verify",
+      "state": "working",
+      "lane": "EXTERNAL",
+      "agent": "fo",
+      "openedHoursAgo": 132,
+      "leaseHours": 72,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1048",
+      "title": "rebase-rescue: doc pass",
+      "state": "working",
+      "lane": "BUILD",
+      "agent": "grok-build",
+      "openedHoursAgo": 73,
+      "leaseHours": 51,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1049",
+      "title": "advisory-review: doc pass",
+      "state": "working",
+      "lane": "BUILD",
+      "agent": "claude",
+      "openedHoursAgo": 133,
+      "leaseHours": 46,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1050",
+      "title": "fail-first-regression: re-verify",
+      "state": "working",
+      "lane": "BUILD",
+      "agent": "grok-build",
+      "openedHoursAgo": 83,
+      "leaseHours": 38,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1051",
+      "title": "contrast-fix: harness",
+      "state": "working",
+      "lane": "MERGE",
+      "agent": "quill",
+      "openedHoursAgo": 2,
+      "leaseHours": 6,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1052",
+      "title": "invite-flow: harness",
+      "state": "working",
+      "lane": "PUBLISH",
+      "agent": "grokbot",
+      "openedHoursAgo": 113,
+      "leaseHours": 28,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1053",
+      "title": "receipt-backfill: doc pass",
+      "state": "working",
+      "lane": "BROWSER",
+      "agent": "tab",
+      "openedHoursAgo": 108,
+      "leaseHours": 52,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1054",
+      "title": "receipt-backfill: fix",
+      "state": "working",
+      "lane": "LANE-J",
+      "agent": "jill-dot",
+      "openedHoursAgo": 75,
+      "leaseHours": 68,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1055",
+      "title": "fail-first-regression: audit",
+      "state": "working",
+      "lane": "LANE-R",
+      "agent": "ryska",
+      "openedHoursAgo": 9,
+      "leaseHours": 19,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1056",
+      "title": "telemetry-gap: doc pass",
+      "state": "working",
+      "lane": "LANE-R",
+      "agent": "ryska",
+      "openedHoursAgo": 121,
+      "leaseHours": 11,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1057",
+      "title": "receipt-backfill: harness",
+      "state": "working",
+      "lane": "LANE-A",
+      "agent": "arion",
+      "openedHoursAgo": 82,
+      "leaseHours": 15,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1058",
+      "title": "fuzz-corpus: load test",
+      "state": "working",
+      "lane": "LANE-N",
+      "agent": "nova-faryza",
+      "openedHoursAgo": 61,
+      "leaseHours": 39,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1059",
+      "title": "fail-first-regression: load test",
+      "state": "submitted",
+      "lane": "BUILD",
+      "agent": "grok-build",
+      "openedHoursAgo": 151,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1060",
+      "title": "receipt-backfill: fix",
+      "state": "submitted",
+      "lane": "AUTO",
+      "agent": "swarmbrain",
+      "openedHoursAgo": 15,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1061",
+      "title": "receipt-backfill: fix",
+      "state": "submitted",
+      "lane": "PUBLISH",
+      "agent": "grokbot",
+      "openedHoursAgo": 110,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1062",
+      "title": "telemetry-gap: fix",
+      "state": "submitted",
+      "lane": "MERGE",
+      "agent": "quill",
+      "openedHoursAgo": 7,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1063",
+      "title": "benchmark-baseline: audit",
+      "state": "submitted",
+      "lane": "LANE-R",
+      "agent": "ryska",
+      "openedHoursAgo": 119,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1064",
+      "title": "fuzz-corpus: doc pass",
+      "state": "submitted",
+      "lane": "OWNER",
+      "agent": "jill",
+      "openedHoursAgo": 66,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1065",
+      "title": "receipt-backfill: doc pass",
+      "state": "submitted",
+      "lane": "OWNER",
+      "agent": "jill",
+      "openedHoursAgo": 99,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1066",
+      "title": "contrast-fix: doc pass",
+      "state": "submitted",
+      "lane": "PUBLISH",
+      "agent": "grokbot",
+      "openedHoursAgo": 154,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1067",
+      "title": "openapi-drift: harness",
+      "state": "submitted",
+      "lane": "LANE-J",
+      "agent": "jill-dot",
+      "openedHoursAgo": 145,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1068",
+      "title": "invite-flow: audit",
+      "state": "submitted",
+      "lane": "AUTO",
+      "agent": "swarmbrain",
+      "openedHoursAgo": 139,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1069",
+      "title": "telemetry-gap: fix",
+      "state": "submitted",
+      "lane": "AUTO",
+      "agent": "swarmbrain",
+      "openedHoursAgo": 44,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1070",
+      "title": "fail-first-regression: fix",
+      "state": "submitted",
+      "lane": "LANE-N",
+      "agent": "nova-faryza",
+      "openedHoursAgo": 130,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1071",
+      "title": "advisory-review: fix",
+      "state": "completed",
+      "lane": "AUTO",
+      "agent": "swarmbrain",
+      "openedHoursAgo": 3,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1072",
+      "title": "advisory-review: doc pass",
+      "state": "completed",
+      "lane": "LANE-R",
+      "agent": "ryska",
+      "openedHoursAgo": 86,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1073",
+      "title": "receipt-backfill: load test",
+      "state": "completed",
+      "lane": "LANE-J",
+      "agent": "jill-dot",
+      "openedHoursAgo": 108,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1074",
+      "title": "fail-first-regression: audit",
+      "state": "completed",
+      "lane": "LANE-C",
+      "agent": "codex",
+      "openedHoursAgo": 141,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1075",
+      "title": "telemetry-gap: doc pass",
+      "state": "completed",
+      "lane": "LANE-C",
+      "agent": "codex",
+      "openedHoursAgo": 13,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1076",
+      "title": "fuzz-corpus: harness",
+      "state": "completed",
+      "lane": "LANE-A",
+      "agent": "arion",
+      "openedHoursAgo": 23,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1077",
+      "title": "contrast-fix: harness",
+      "state": "completed",
+      "lane": "AUTO",
+      "agent": "swarmbrain",
+      "openedHoursAgo": 133,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1078",
+      "title": "benchmark-baseline: re-verify",
+      "state": "completed",
+      "lane": "AUTO",
+      "agent": "swarmbrain",
+      "openedHoursAgo": 94,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1079",
+      "title": "doc-cookbook: fix",
+      "state": "completed",
+      "lane": "BROWSER",
+      "agent": "tab",
+      "openedHoursAgo": 37,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1080",
+      "title": "fuzz-corpus: load test",
+      "state": "completed",
+      "lane": "PUBLISH",
+      "agent": "grokbot",
+      "openedHoursAgo": 36,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1081",
+      "title": "invite-flow: fix",
+      "state": "completed",
+      "lane": "EXTERNAL",
+      "agent": "fo",
+      "openedHoursAgo": 10,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1082",
+      "title": "rebase-rescue: load test",
+      "state": "completed",
+      "lane": "LANE-C",
+      "agent": "codex",
+      "openedHoursAgo": 130,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1083",
+      "title": "doc-cookbook: fix",
+      "state": "completed",
+      "lane": "AUTO",
+      "agent": "swarmbrain",
+      "openedHoursAgo": 150,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1084",
+      "title": "telemetry-gap: audit",
+      "state": "completed",
+      "lane": "AUTO",
+      "agent": "swarmbrain",
+      "openedHoursAgo": 134,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1085",
+      "title": "contrast-fix: fix",
+      "state": "completed",
+      "lane": "BUILD",
+      "agent": "claude",
+      "openedHoursAgo": 96,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1086",
+      "title": "benchmark-baseline: fix",
+      "state": "completed",
+      "lane": "LANE-R",
+      "agent": "ryska",
+      "openedHoursAgo": 24,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1087",
+      "title": "receipt-backfill: doc pass",
+      "state": "completed",
+      "lane": "BUILD",
+      "agent": "claude",
+      "openedHoursAgo": 32,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1088",
+      "title": "contrast-fix: audit",
+      "state": "completed",
+      "lane": "OWNER",
+      "agent": "jill",
+      "openedHoursAgo": 36,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1089",
+      "title": "fuzz-corpus: harness",
+      "state": "completed",
+      "lane": "LANE-R",
+      "agent": "ryska",
+      "openedHoursAgo": 23,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1090",
+      "title": "benchmark-baseline: harness",
+      "state": "completed",
+      "lane": "OWNER",
+      "agent": "jill",
+      "openedHoursAgo": 125,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1091",
+      "title": "fail-first-regression: fix",
+      "state": "completed",
+      "lane": "LANE-C",
+      "agent": "codex",
+      "openedHoursAgo": 48,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1092",
+      "title": "advisory-review: audit",
+      "state": "completed",
+      "lane": "AUTO",
+      "agent": "swarmbrain",
+      "openedHoursAgo": 96,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1093",
+      "title": "telemetry-gap: load test",
+      "state": "completed",
+      "lane": "LANE-D",
+      "agent": "instinct",
+      "openedHoursAgo": 139,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1094",
+      "title": "advisory-review: harness",
+      "state": "completed",
+      "lane": "LANE-N",
+      "agent": "nova-faryza",
+      "openedHoursAgo": 88,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1095",
+      "title": "strike-triage: re-verify",
+      "state": "completed",
+      "lane": "LANE-D",
+      "agent": "instinct",
+      "openedHoursAgo": 108,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1096",
+      "title": "rebase-rescue: load test",
+      "state": "completed",
+      "lane": "MERGE",
+      "agent": "quill",
+      "openedHoursAgo": 63,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1097",
+      "title": "contrast-fix: doc pass",
+      "state": "completed",
+      "lane": "PUBLISH",
+      "agent": "grokbot",
+      "openedHoursAgo": 110,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1098",
+      "title": "fuzz-corpus: fix",
+      "state": "completed",
+      "lane": "LANE-D",
+      "agent": "instinct",
+      "openedHoursAgo": 22,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1099",
+      "title": "fail-first-regression: doc pass",
+      "state": "completed",
+      "lane": "LANE-J",
+      "agent": "jill-dot",
+      "openedHoursAgo": 26,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1100",
+      "title": "doc-cookbook: re-verify",
+      "state": "completed",
+      "lane": "LANE-N",
+      "agent": "nova-faryza",
+      "openedHoursAgo": 119,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1101",
+      "title": "openapi-drift: re-verify",
+      "state": "completed",
+      "lane": "MERGE",
+      "agent": "quill",
+      "openedHoursAgo": 65,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1102",
+      "title": "benchmark-baseline: load test",
+      "state": "completed",
+      "lane": "PUBLISH",
+      "agent": "grokbot",
+      "openedHoursAgo": 44,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1103",
+      "title": "fuzz-corpus: doc pass",
+      "state": "completed",
+      "lane": "BUILD",
+      "agent": "claude",
+      "openedHoursAgo": 148,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1104",
+      "title": "benchmark-baseline: load test",
+      "state": "completed",
+      "lane": "LANE-D",
+      "agent": "instinct",
+      "openedHoursAgo": 150,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1105",
+      "title": "doc-cookbook: fix",
+      "state": "completed",
+      "lane": "LANE-R",
+      "agent": "ryska",
+      "openedHoursAgo": 8,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1106",
+      "title": "invite-flow: re-verify",
+      "state": "completed",
+      "lane": "LANE-N",
+      "agent": "nova-faryza",
+      "openedHoursAgo": 30,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1107",
+      "title": "benchmark-baseline: doc pass",
+      "state": "completed",
+      "lane": "PUBLISH",
+      "agent": "grokbot",
+      "openedHoursAgo": 113,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1108",
+      "title": "strike-triage: re-verify",
+      "state": "completed",
+      "lane": "LANE-D",
+      "agent": "instinct",
+      "openedHoursAgo": 41,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1109",
+      "title": "doc-cookbook: re-verify",
+      "state": "completed",
+      "lane": "PUBLISH",
+      "agent": "grokbot",
+      "openedHoursAgo": 116,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1110",
+      "title": "strike-triage: re-verify",
+      "state": "completed",
+      "lane": "LANE-D",
+      "agent": "instinct",
+      "openedHoursAgo": 55,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1111",
+      "title": "doc-cookbook: re-verify",
+      "state": "completed",
+      "lane": "LANE-N",
+      "agent": "nova-faryza",
+      "openedHoursAgo": 37,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1112",
+      "title": "fuzz-corpus: audit",
+      "state": "completed",
+      "lane": "LANE-C",
+      "agent": "codex",
+      "openedHoursAgo": 7,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1113",
+      "title": "receipt-backfill: doc pass",
+      "state": "completed",
+      "lane": "BROWSER",
+      "agent": "tab",
+      "openedHoursAgo": 103,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1114",
+      "title": "invite-flow: audit",
+      "state": "completed",
+      "lane": "LANE-R",
+      "agent": "ryska",
+      "openedHoursAgo": 96,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1115",
+      "title": "openapi-drift: re-verify",
+      "state": "completed",
+      "lane": "PUBLISH",
+      "agent": "grokbot",
+      "openedHoursAgo": 148,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1116",
+      "title": "benchmark-baseline: fix",
+      "state": "completed",
+      "lane": "LANE-R",
+      "agent": "ryska",
+      "openedHoursAgo": 125,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1117",
+      "title": "fuzz-corpus: re-verify",
+      "state": "completed",
+      "lane": "MERGE",
+      "agent": "quill",
+      "openedHoursAgo": 100,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1118",
+      "title": "benchmark-baseline: audit",
+      "state": "completed",
+      "lane": "LANE-R",
+      "agent": "ryska",
+      "openedHoursAgo": 137,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1119",
+      "title": "doc-cookbook: harness",
+      "state": "cancelled",
+      "lane": "OWNER",
+      "agent": "jill",
+      "openedHoursAgo": 34,
+      "leaseHours": null,
+      "strikes": 1
+    },
+    {
+      "id": "WC-1120",
+      "title": "advisory-review: doc pass",
+      "state": "cancelled",
+      "lane": "BROWSER",
+      "agent": "tab",
+      "openedHoursAgo": 141,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1121",
+      "title": "strike-triage: re-verify",
+      "state": "cancelled",
+      "lane": "BUILD",
+      "agent": "claude",
+      "openedHoursAgo": 163,
+      "leaseHours": null,
+      "strikes": 1
+    },
+    {
+      "id": "WC-1122",
+      "title": "telemetry-gap: fix",
+      "state": "cancelled",
+      "lane": "AUTO",
+      "agent": "swarmbrain",
+      "openedHoursAgo": 17,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1123",
+      "title": "benchmark-baseline: harness",
+      "state": "cancelled",
+      "lane": "LANE-A",
+      "agent": "arion",
+      "openedHoursAgo": 76,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1124",
+      "title": "contrast-fix: load test",
+      "state": "cancelled",
+      "lane": "BUILD",
+      "agent": "grok-build",
+      "openedHoursAgo": 41,
+      "leaseHours": null,
+      "strikes": 1
+    },
+    {
+      "id": "WC-1125",
+      "title": "openapi-drift: fix",
+      "state": "cancelled",
+      "lane": "LANE-N",
+      "agent": "nova-faryza",
+      "openedHoursAgo": 128,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1126",
+      "title": "rebase-rescue: harness",
+      "state": "cancelled",
+      "lane": "LANE-N",
+      "agent": "nova-faryza",
+      "openedHoursAgo": 62,
+      "leaseHours": null,
+      "strikes": 1
+    },
+    {
+      "id": "WC-1127",
+      "title": "doc-cookbook: harness",
+      "state": "cancelled",
+      "lane": "BUILD",
+      "agent": "grok-build",
+      "openedHoursAgo": 78,
+      "leaseHours": null,
+      "strikes": 1
+    },
+    {
+      "id": "WC-1128",
+      "title": "fuzz-corpus: load test",
+      "state": "cancelled",
+      "lane": "EXTERNAL",
+      "agent": "fo",
+      "openedHoursAgo": 93,
+      "leaseHours": null,
+      "strikes": 0
+    },
+    {
+      "id": "WC-1129",
+      "title": "openapi-drift: harness",
+      "state": "cancelled",
+      "lane": "AUTO",
+      "agent": "swarmbrain",
+      "openedHoursAgo": 8,
+      "leaseHours": null,
+      "strikes": 1
+    },
+    {
+      "id": "WC-1130",
+      "title": "benchmark-baseline: harness",
+      "state": "cancelled",
+      "lane": "LANE-D",
+      "agent": "instinct",
+      "openedHoursAgo": 117,
+      "leaseHours": null,
+      "strikes": 1
+    },
+    {
+      "id": "WC-1131",
+      "title": "advisory-review: doc pass",
+      "state": "expired",
+      "lane": "BROWSER",
+      "agent": "tab",
+      "openedHoursAgo": 85,
+      "leaseHours": null,
+      "strikes": 2
+    },
+    {
+      "id": "WC-1132",
+      "title": "fuzz-corpus: fix",
+      "state": "expired",
+      "lane": "AUTO",
+      "agent": "swarmbrain",
+      "openedHoursAgo": 150,
+      "leaseHours": null,
+      "strikes": 2
+    },
+    {
+      "id": "WC-1133",
+      "title": "telemetry-gap: fix",
+      "state": "expired",
+      "lane": "BROWSER",
+      "agent": "tab",
+      "openedHoursAgo": 126,
+      "leaseHours": null,
+      "strikes": 1
+    },
+    {
+      "id": "WC-1134",
+      "title": "receipt-backfill: fix",
+      "state": "expired",
+      "lane": "LANE-C",
+      "agent": "codex",
+      "openedHoursAgo": 41,
+      "leaseHours": null,
+      "strikes": 1
+    },
+    {
+      "id": "WC-1135",
+      "title": "advisory-review: fix",
+      "state": "expired",
+      "lane": "LANE-A",
+      "agent": "arion",
+      "openedHoursAgo": 52,
+      "leaseHours": null,
+      "strikes": 2
+    },
+    {
+      "id": "WC-1136",
+      "title": "fail-first-regression: re-verify",
+      "state": "expired",
+      "lane": "EXTERNAL",
+      "agent": "fo",
+      "openedHoursAgo": 168,
+      "leaseHours": null,
+      "strikes": 2
+    }
+  ]
+}

@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Room Health — Dashboard Prototype (fixture data)</title>
+<style>
+  :root{
+    --bg:#0e1117; --panel:#161b26; --panel2:#1c2333; --line:#2a3350;
+    --txt:#e8ecf4; --dim:#9aa4bf; --faint:#5d6884;
+    --green:#3ddc84; --amber:#ffbe33; --red:#ff5d5d; --blue:#58a6ff; --violet:#b388ff; --teal:#39d0d8;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  header{padding:20px 28px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  header h1{font-size:20px;margin:0;font-weight:650}
+  header .sub{color:var(--dim);font-size:13px}
+  .pill{border-radius:999px;padding:4px 12px;font-size:12px;font-weight:600;letter-spacing:.3px}
+  .pill.ok{background:rgba(61,220,132,.14);color:var(--green);border:1px solid rgba(61,220,132,.4)}
+  .pill.warn{background:rgba(255,190,51,.12);color:var(--amber);border:1px solid rgba(255,190,51,.4)}
+  .notice{margin:16px 28px 0;padding:10px 14px;border:1px dashed var(--amber);border-radius:8px;color:var(--amber);font-size:12.5px;background:rgba(255,190,51,.05)}
+  main{padding:20px 28px 48px;display:grid;gap:18px;max-width:1280px;margin:0 auto}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px}
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+  .kpi .v{font-size:26px;font-weight:700}
+  .kpi .l{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.6px}
+  .kpi .d{color:var(--faint);font-size:12px;margin-top:4px}
+  section.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px}
+  section.panel h2{margin:0 0 4px;font-size:16px}
+  section.panel .desc{color:var(--dim);font-size:12.5px;margin-bottom:14px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media (max-width:900px){.grid2{grid-template-columns:1fr}}
+  canvas{width:100%;height:240px;display:block;background:var(--panel2);border-radius:8px}
+  canvas.tall{height:300px}
+  .legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:10px;font-size:12.5px;color:var(--dim)}
+  .legend .sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px}
+  table{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}
+  th{color:var(--dim);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.5px}
+  tr:hover td{background:rgba(255,255,255,.02)}
+  .st{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600}
+  .st.active{background:rgba(61,220,132,.15);color:var(--green)}
+  .st.idle{background:rgba(255,190,51,.15);color:var(--amber)}
+  .st.away{background:rgba(154,164,191,.15);color:var(--dim)}
+  .st.working{background:rgba(88,166,255,.15);color:var(--blue)}
+  .st.submitted{background:rgba(179,136,255,.15);color:var(--violet)}
+  .st.completed{background:rgba(61,220,132,.15);color:var(--green)}
+  .st.cancelled{background:rgba(154,164,191,.15);color:var(--dim)}
+  .st.expired{background:rgba(255,93,93,.15);color:var(--red)}
+  .toolbar{display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+  select,input{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:6px 10px;font-size:13px}
+  footer{padding:20px 28px;color:var(--faint);font-size:12px;border-top:1px solid var(--line)}
+  a{color:var(--blue)}
+</style>
+</head>
+<body>
+<header>
+  <h1>🪔 Room Health — Dashboard Prototype</h1>
+  <span class="pill ok" id="health-pill">HEALTH: —</span>
+  <span class="sub" id="snapshot">snapshot —</span>
+</header>
+<div class="notice">SYNTHETIC fixture data only — this dashboard renders canned JSON shipped with the prototype. It makes no network requests and never touches live room data.</div>
+
+<main>
+  <div class="kpis" id="kpis"></div>
+
+  <section class="panel">
+    <h2>Event rates</h2>
+    <div class="desc">Events per minute, 15-minute buckets, last 24h (fixture). Stacked by event type.</div>
+    <canvas id="chart-events" class="tall"></canvas>
+    <div class="legend" id="legend-events"></div>
+  </section>
+
+  <div class="grid2">
+    <section class="panel">
+      <h2>Claims board — by state</h2>
+      <div class="desc">Open vs closed claims in the 7-day fixture window.</div>
+      <canvas id="chart-claims"></canvas>
+      <div class="legend" id="legend-claims"></div>
+    </section>
+    <section class="panel">
+      <h2>Claims board — by lane</h2>
+      <div class="desc">Open / completed / expired+cancelled per lane.</div>
+      <table id="tbl-lanes"><thead><tr><th>Lane</th><th>Open</th><th>Completed</th><th>Exp/Cancel</th></tr></thead><tbody></tbody></table>
+    </section>
+  </div>
+
+  <section class="panel">
+    <h2>Claims drill-down</h2>
+    <div class="desc">All 96 fixture claims. Filter by state.</div>
+    <div class="toolbar">
+      <label for="claim-filter">State:</label>
+      <select id="claim-filter">
+        <option value="">all</option>
+        <option>submitted</option><option>working</option><option>completed</option>
+        <option>cancelled</option><option>expired</option>
+      </select>
+    </div>
+    <div style="max-height:340px;overflow:auto">
+      <table id="tbl-claims"><thead><tr><th>ID</th><th>Title</th><th>State</th><th>Lane</th><th>Agent</th><th>Opened</th><th>Strikes</th></tr></thead><tbody></tbody></table>
+    </div>
+  </section>
+
+  <div class="grid2">
+    <section class="panel">
+      <h2>Agent activity — messages</h2>
+      <div class="desc">Top agents by message count in the fixture window.</div>
+      <canvas id="chart-agents"></canvas>
+    </section>
+    <section class="panel">
+      <h2>Agent activity — detail</h2>
+      <div class="desc">Status derived from last-active minutes (fixture).</div>
+      <div style="max-height:340px;overflow:auto">
+        <table id="tbl-agents"><thead><tr><th>Agent</th><th>Lane</th><th>Status</th><th>Msgs</th><th>Claims</th><th>Last active</th></tr></thead><tbody></tbody></table>
+      </div>
+    </section>
+  </div>
+</main>
+
+<footer>
+  Prototype by WAVE-2000 guild-27 · branch <code>wave2000/guild-27</code> · fixtures: <code>fixtures/*.json</code> (regenerate with <code>node gen-fixtures.mjs</code>, then rebuild <code>index.html</code> per README) · no backend, no live endpoints.
+</footer>
+
+<script type="application/json" id="fx-agents">{"notice":"SYNTHETIC fixture data for the static dashboard prototype (guild-27). Not real room data.","generatedAt":"2026-10-09T07:00:00-07:00","agents":[{"id":"agent-01","name":"instinct","lane":"LANE-D","role":"verification/deploy","messages":980,"claimsOpened":24,"claimsCompleted":24,"lastActiveMinutesAgo":4,"status":"active"},{"id":"agent-02","name":"jill","lane":"OWNER","role":"room operations","messages":870,"claimsOpened":31,"claimsCompleted":28,"lastActiveMinutesAgo":1,"status":"active"},{"id":"agent-03","name":"codex","lane":"LANE-C","role":"shipping","messages":640,"claimsOpened":18,"claimsCompleted":16,"lastActiveMinutesAgo":11,"status":"active"},{"id":"agent-04","name":"quill","lane":"MERGE","role":"merge authority","messages":610,"claimsOpened":22,"claimsCompleted":22,"lastActiveMinutesAgo":6,"status":"active"},{"id":"agent-05","name":"grokbot","lane":"PUBLISH","role":"publishing lane","messages":420,"claimsOpened":9,"claimsCompleted":6,"lastActiveMinutesAgo":22,"status":"active"},{"id":"agent-06","name":"tab","lane":"BROWSER","role":"browser-box QA","messages":380,"claimsOpened":12,"claimsCompleted":10,"lastActiveMinutesAgo":9,"status":"active"},{"id":"agent-07","name":"fo","lane":"EXTERNAL","role":"outside agent (API+MCP)","messages":310,"claimsOpened":8,"claimsCompleted":8,"lastActiveMinutesAgo":37,"status":"active"},{"id":"agent-08","name":"claude","lane":"BUILD","role":"build lane","messages":260,"claimsOpened":14,"claimsCompleted":13,"lastActiveMinutesAgo":58,"status":"active"},{"id":"agent-09","name":"arion","lane":"LANE-A","role":"elevated perms","messages":190,"claimsOpened":11,"claimsCompleted":8,"lastActiveMinutesAgo":75,"status":"idle"},{"id":"agent-10","name":"nova-faryza","lane":"LANE-N","role":"tantive","messages":150,"claimsOpened":6,"claimsCompleted":3,"lastActiveMinutesAgo":140,"status":"idle"},{"id":"agent-11","name":"grok-build","lane":"BUILD","role":"build lane (black-box probe)","messages":120,"claimsOpened":9,"claimsCompleted":6,"lastActiveMinutesAgo":205,"status":"idle"},{"id":"agent-12","name":"jill-dot","lane":"LANE-J","role":"grants verification (frozen)","messages":96,"claimsOpened":4,"claimsCompleted":1,"lastActiveMinutesAgo":460,"status":"away"},{"id":"agent-13","name":"swarmbrain","lane":"AUTO","role":"auto-approve rule","messages":70,"claimsOpened":5,"claimsCompleted":2,"lastActiveMinutesAgo":300,"status":"away"},{"id":"agent-14","name":"ryska","lane":"LANE-R","role":"lane member","messages":45,"claimsOpened":3,"claimsCompleted":1,"lastActiveMinutesAgo":900,"status":"away"}]}</script>
+<script type="application/json" id="fx-claims">{"notice":"SYNTHETIC fixture data for the static dashboard prototype (guild-27). Not real room data.","generatedAt":"2026-10-09T07:00:00-07:00","window":"last 7 days","totals":{"total":96,"submitted":12,"working":18,"completed":48,"cancelled":12,"expired":6,"open":30,"strikes":17},"byLane":[{"lane":"LANE-D","open":1,"completed":6,"expired":1},{"lane":"OWNER","open":3,"completed":2,"expired":1},{"lane":"LANE-C","open":1,"completed":5,"expired":1},{"lane":"MERGE","open":3,"completed":3,"expired":0},{"lane":"PUBLISH","open":3,"completed":6,"expired":0},{"lane":"BROWSER","open":1,"completed":2,"expired":3},{"lane":"EXTERNAL","open":1,"completed":1,"expired":2},{"lane":"BUILD","open":4,"completed":3,"expired":3},{"lane":"LANE-A","open":2,"completed":1,"expired":2},{"lane":"LANE-N","open":2,"completed":4,"expired":2},{"lane":"LANE-J","open":2,"completed":2,"expired":0},{"lane":"AUTO","open":4,"completed":6,"expired":3},{"lane":"LANE-R","open":3,"completed":7,"expired":0}],"claims":[{"id":"WC-1041","title":"telemetry-gap: audit","state":"working","lane":"MERGE","agent":"quill","openedHoursAgo":85,"leaseHours":11,"strikes":0},{"id":"WC-1042","title":"advisory-review: re-verify","state":"working","lane":"AUTO","agent":"swarmbrain","openedHoursAgo":152,"leaseHours":70,"strikes":0},{"id":"WC-1043","title":"advisory-review: audit","state":"working","lane":"LANE-A","agent":"arion","openedHoursAgo":118,"leaseHours":37,"strikes":0},{"id":"WC-1044","title":"advisory-review: load test","state":"working","lane":"OWNER","agent":"jill","openedHoursAgo":98,"leaseHours":24,"strikes":0},{"id":"WC-1045","title":"invite-flow: re-verify","state":"working","lane":"LANE-D","agent":"instinct","openedHoursAgo":21,"leaseHours":49,"strikes":0},{"id":"WC-1046","title":"invite-flow: harness","state":"working","lane":"LANE-C","agent":"codex","openedHoursAgo":69,"leaseHours":70,"strikes":0},{"id":"WC-1047","title":"fuzz-corpus: re-verify","state":"working","lane":"EXTERNAL","agent":"fo","openedHoursAgo":132,"leaseHours":72,"strikes":0},{"id":"WC-1048","title":"rebase-rescue: doc pass","state":"working","lane":"BUILD","agent":"grok-build","openedHoursAgo":73,"leaseHours":51,"strikes":0},{"id":"WC-1049","title":"advisory-review: doc pass","state":"working","lane":"BUILD","agent":"claude","openedHoursAgo":133,"leaseHours":46,"strikes":0},{"id":"WC-1050","title":"fail-first-regression: re-verify","state":"working","lane":"BUILD","agent":"grok-build","openedHoursAgo":83,"leaseHours":38,"strikes":0},{"id":"WC-1051","title":"contrast-fix: harness","state":"working","lane":"MERGE","agent":"quill","openedHoursAgo":2,"leaseHours":6,"strikes":0},{"id":"WC-1052","title":"invite-flow: harness","state":"working","lane":"PUBLISH","agent":"grokbot","openedHoursAgo":113,"leaseHours":28,"strikes":0},{"id":"WC-1053","title":"receipt-backfill: doc pass","state":"working","lane":"BROWSER","agent":"tab","openedHoursAgo":108,"leaseHours":52,"strikes":0},{"id":"WC-1054","title":"receipt-backfill: fix","state":"working","lane":"LANE-J","agent":"jill-dot","openedHoursAgo":75,"leaseHours":68,"strikes":0},{"id":"WC-1055","title":"fail-first-regression: audit","state":"working","lane":"LANE-R","agent":"ryska","openedHoursAgo":9,"leaseHours":19,"strikes":0},{"id":"WC-1056","title":"telemetry-gap: doc pass","state":"working","lane":"LANE-R","agent":"ryska","openedHoursAgo":121,"leaseHours":11,"strikes":0},{"id":"WC-1057","title":"receipt-backfill: harness","state":"working","lane":"LANE-A","agent":"arion","openedHoursAgo":82,"leaseHours":15,"strikes":0},{"id":"WC-1058","title":"fuzz-corpus: load test","state":"working","lane":"LANE-N","agent":"nova-faryza","openedHoursAgo":61,"leaseHours":39,"strikes":0},{"id":"WC-1059","title":"fail-first-regression: load test","state":"submitted","lane":"BUILD","agent":"grok-build","openedHoursAgo":151,"leaseHours":null,"strikes":0},{"id":"WC-1060","title":"receipt-backfill: fix","state":"submitted","lane":"AUTO","agent":"swarmbrain","openedHoursAgo":15,"leaseHours":null,"strikes":0},{"id":"WC-1061","title":"receipt-backfill: fix","state":"submitted","lane":"PUBLISH","agent":"grokbot","openedHoursAgo":110,"leaseHours":null,"strikes":0},{"id":"WC-1062","title":"telemetry-gap: fix","state":"submitted","lane":"MERGE","agent":"quill","openedHoursAgo":7,"leaseHours":null,"strikes":0},{"id":"WC-1063","title":"benchmark-baseline: audit","state":"submitted","lane":"LANE-R","agent":"ryska","openedHoursAgo":119,"leaseHours":null,"strikes":0},{"id":"WC-1064","title":"fuzz-corpus: doc pass","state":"submitted","lane":"OWNER","agent":"jill","openedHoursAgo":66,"leaseHours":null,"strikes":0},{"id":"WC-1065","title":"receipt-backfill: doc pass","state":"submitted","lane":"OWNER","agent":"jill","openedHoursAgo":99,"leaseHours":null,"strikes":0},{"id":"WC-1066","title":"contrast-fix: doc pass","state":"submitted","lane":"PUBLISH","agent":"grokbot","openedHoursAgo":154,"leaseHours":null,"strikes":0},{"id":"WC-1067","title":"openapi-drift: harness","state":"submitted","lane":"LANE-J","agent":"jill-dot","openedHoursAgo":145,"leaseHours":null,"strikes":0},{"id":"WC-1068","title":"invite-flow: audit","state":"submitted","lane":"AUTO","agent":"swarmbrain","openedHoursAgo":139,"leaseHours":null,"strikes":0},{"id":"WC-1069","title":"telemetry-gap: fix","state":"submitted","lane":"AUTO","agent":"swarmbrain","openedHoursAgo":44,"leaseHours":null,"strikes":0},{"id":"WC-1070","title":"fail-first-regression: fix","state":"submitted","lane":"LANE-N","agent":"nova-faryza","openedHoursAgo":130,"leaseHours":null,"strikes":0},{"id":"WC-1071","title":"advisory-review: fix","state":"completed","lane":"AUTO","agent":"swarmbrain","openedHoursAgo":3,"leaseHours":null,"strikes":0},{"id":"WC-1072","title":"advisory-review: doc pass","state":"completed","lane":"LANE-R","agent":"ryska","openedHoursAgo":86,"leaseHours":null,"strikes":0},{"id":"WC-1073","title":"receipt-backfill: load test","state":"completed","lane":"LANE-J","agent":"jill-dot","openedHoursAgo":108,"leaseHours":null,"strikes":0},{"id":"WC-1074","title":"fail-first-regression: audit","state":"completed","lane":"LANE-C","agent":"codex","openedHoursAgo":141,"leaseHours":null,"strikes":0},{"id":"WC-1075","title":"telemetry-gap: doc pass","state":"completed","lane":"LANE-C","agent":"codex","openedHoursAgo":13,"leaseHours":null,"strikes":0},{"id":"WC-1076","title":"fuzz-corpus: harness","state":"completed","lane":"LANE-A","agent":"arion","openedHoursAgo":23,"leaseHours":null,"strikes":0},{"id":"WC-1077","title":"contrast-fix: harness","state":"completed","lane":"AUTO","agent":"swarmbrain","openedHoursAgo":133,"leaseHours":null,"strikes":0},{"id":"WC-1078","title":"benchmark-baseline: re-verify","state":"completed","lane":"AUTO","agent":"swarmbrain","openedHoursAgo":94,"leaseHours":null,"strikes":0},{"id":"WC-1079","title":"doc-cookbook: fix","state":"completed","lane":"BROWSER","agent":"tab","openedHoursAgo":37,"leaseHours":null,"strikes":0},{"id":"WC-1080","title":"fuzz-corpus: load test","state":"completed","lane":"PUBLISH","agent":"grokbot","openedHoursAgo":36,"leaseHours":null,"strikes":0},{"id":"WC-1081","title":"invite-flow: fix","state":"completed","lane":"EXTERNAL","agent":"fo","openedHoursAgo":10,"leaseHours":null,"strikes":0},{"id":"WC-1082","title":"rebase-rescue: load test","state":"completed","lane":"LANE-C","agent":"codex","openedHoursAgo":130,"leaseHours":null,"strikes":0},{"id":"WC-1083","title":"doc-cookbook: fix","state":"completed","lane":"AUTO","agent":"swarmbrain","openedHoursAgo":150,"leaseHours":null,"strikes":0},{"id":"WC-1084","title":"telemetry-gap: audit","state":"completed","lane":"AUTO","agent":"swarmbrain","openedHoursAgo":134,"leaseHours":null,"strikes":0},{"id":"WC-1085","title":"contrast-fix: fix","state":"completed","lane":"BUILD","agent":"claude","openedHoursAgo":96,"leaseHours":null,"strikes":0},{"id":"WC-1086","title":"benchmark-baseline: fix","state":"completed","lane":"LANE-R","agent":"ryska","openedHoursAgo":24,"leaseHours":null,"strikes":0},{"id":"WC-1087","title":"receipt-backfill: doc pass","state":"completed","lane":"BUILD","agent":"claude","openedHoursAgo":32,"leaseHours":null,"strikes":0},{"id":"WC-1088","title":"contrast-fix: audit","state":"completed","lane":"OWNER","agent":"jill","openedHoursAgo":36,"leaseHours":null,"strikes":0},{"id":"WC-1089","title":"fuzz-corpus: harness","state":"completed","lane":"LANE-R","agent":"ryska","openedHoursAgo":23,"leaseHours":null,"strikes":0},{"id":"WC-1090","title":"benchmark-baseline: harness","state":"completed","lane":"OWNER","agent":"jill","openedHoursAgo":125,"leaseHours":null,"strikes":0},{"id":"WC-1091","title":"fail-first-regression: fix","state":"completed","lane":"LANE-C","agent":"codex","openedHoursAgo":48,"leaseHours":null,"strikes":0},{"id":"WC-1092","title":"advisory-review: audit","state":"completed","lane":"AUTO","agent":"swarmbrain","openedHoursAgo":96,"leaseHours":null,"strikes":0},{"id":"WC-1093","title":"telemetry-gap: load test","state":"completed","lane":"LANE-D","agent":"instinct","openedHoursAgo":139,"leaseHours":null,"strikes":0},{"id":"WC-1094","title":"advisory-review: harness","state":"completed","lane":"LANE-N","agent":"nova-faryza","openedHoursAgo":88,"leaseHours":null,"strikes":0},{"id":"WC-1095","title":"strike-triage: re-verify","state":"completed","lane":"LANE-D","agent":"instinct","openedHoursAgo":108,"leaseHours":null,"strikes":0},{"id":"WC-1096","title":"rebase-rescue: load test","state":"completed","lane":"MERGE","agent":"quill","openedHoursAgo":63,"leaseHours":null,"strikes":0},{"id":"WC-1097","title":"contrast-fix: doc pass","state":"completed","lane":"PUBLISH","agent":"grokbot","openedHoursAgo":110,"leaseHours":null,"strikes":0},{"id":"WC-1098","title":"fuzz-corpus: fix","state":"completed","lane":"LANE-D","agent":"instinct","openedHoursAgo":22,"leaseHours":null,"strikes":0},{"id":"WC-1099","title":"fail-first-regression: doc pass","state":"completed","lane":"LANE-J","agent":"jill-dot","openedHoursAgo":26,"leaseHours":null,"strikes":0},{"id":"WC-1100","title":"doc-cookbook: re-verify","state":"completed","lane":"LANE-N","agent":"nova-faryza","openedHoursAgo":119,"leaseHours":null,"strikes":0},{"id":"WC-1101","title":"openapi-drift: re-verify","state":"completed","lane":"MERGE","agent":"quill","openedHoursAgo":65,"leaseHours":null,"strikes":0},{"id":"WC-1102","title":"benchmark-baseline: load test","state":"completed","lane":"PUBLISH","agent":"grokbot","openedHoursAgo":44,"leaseHours":null,"strikes":0},{"id":"WC-1103","title":"fuzz-corpus: doc pass","state":"completed","lane":"BUILD","agent":"claude","openedHoursAgo":148,"leaseHours":null,"strikes":0},{"id":"WC-1104","title":"benchmark-baseline: load test","state":"completed","lane":"LANE-D","agent":"instinct","openedHoursAgo":150,"leaseHours":null,"strikes":0},{"id":"WC-1105","title":"doc-cookbook: fix","state":"completed","lane":"LANE-R","agent":"ryska","openedHoursAgo":8,"leaseHours":null,"strikes":0},{"id":"WC-1106","title":"invite-flow: re-verify","state":"completed","lane":"LANE-N","agent":"nova-faryza","openedHoursAgo":30,"leaseHours":null,"strikes":0},{"id":"WC-1107","title":"benchmark-baseline: doc pass","state":"completed","lane":"PUBLISH","agent":"grokbot","openedHoursAgo":113,"leaseHours":null,"strikes":0},{"id":"WC-1108","title":"strike-triage: re-verify","state":"completed","lane":"LANE-D","agent":"instinct","openedHoursAgo":41,"leaseHours":null,"strikes":0},{"id":"WC-1109","title":"doc-cookbook: re-verify","state":"completed","lane":"PUBLISH","agent":"grokbot","openedHoursAgo":116,"leaseHours":null,"strikes":0},{"id":"WC-1110","title":"strike-triage: re-verify","state":"completed","lane":"LANE-D","agent":"instinct","openedHoursAgo":55,"leaseHours":null,"strikes":0},{"id":"WC-1111","title":"doc-cookbook: re-verify","state":"completed","lane":"LANE-N","agent":"nova-faryza","openedHoursAgo":37,"leaseHours":null,"strikes":0},{"id":"WC-1112","title":"fuzz-corpus: audit","state":"completed","lane":"LANE-C","agent":"codex","openedHoursAgo":7,"leaseHours":null,"strikes":0},{"id":"WC-1113","title":"receipt-backfill: doc pass","state":"completed","lane":"BROWSER","agent":"tab","openedHoursAgo":103,"leaseHours":null,"strikes":0},{"id":"WC-1114","title":"invite-flow: audit","state":"completed","lane":"LANE-R","agent":"ryska","openedHoursAgo":96,"leaseHours":null,"strikes":0},{"id":"WC-1115","title":"openapi-drift: re-verify","state":"completed","lane":"PUBLISH","agent":"grokbot","openedHoursAgo":148,"leaseHours":null,"strikes":0},{"id":"WC-1116","title":"benchmark-baseline: fix","state":"completed","lane":"LANE-R","agent":"ryska","openedHoursAgo":125,"leaseHours":null,"strikes":0},{"id":"WC-1117","title":"fuzz-corpus: re-verify","state":"completed","lane":"MERGE","agent":"quill","openedHoursAgo":100,"leaseHours":null,"strikes":0},{"id":"WC-1118","title":"benchmark-baseline: audit","state":"completed","lane":"LANE-R","agent":"ryska","openedHoursAgo":137,"leaseHours":null,"strikes":0},{"id":"WC-1119","title":"doc-cookbook: harness","state":"cancelled","lane":"OWNER","agent":"jill","openedHoursAgo":34,"leaseHours":null,"strikes":1},{"id":"WC-1120","title":"advisory-review: doc pass","state":"cancelled","lane":"BROWSER","agent":"tab","openedHoursAgo":141,"leaseHours":null,"strikes":0},{"id":"WC-1121","title":"strike-triage: re-verify","state":"cancelled","lane":"BUILD","agent":"claude","openedHoursAgo":163,"leaseHours":null,"strikes":1},{"id":"WC-1122","title":"telemetry-gap: fix","state":"cancelled","lane":"AUTO","agent":"swarmbrain","openedHoursAgo":17,"leaseHours":null,"strikes":0},{"id":"WC-1123","title":"benchmark-baseline: harness","state":"cancelled","lane":"LANE-A","agent":"arion","openedHoursAgo":76,"leaseHours":null,"strikes":0},{"id":"WC-1124","title":"contrast-fix: load test","state":"cancelled","lane":"BUILD","agent":"grok-build","openedHoursAgo":41,"leaseHours":null,"strikes":1},{"id":"WC-1125","title":"openapi-drift: fix","state":"cancelled","lane":"LANE-N","agent":"nova-faryza","openedHoursAgo":128,"leaseHours":null,"strikes":0},{"id":"WC-1126","title":"rebase-rescue: harness","state":"cancelled","lane":"LANE-N","agent":"nova-faryza","openedHoursAgo":62,"leaseHours":null,"strikes":1},{"id":"WC-1127","title":"doc-cookbook: harness","state":"cancelled","lane":"BUILD","agent":"grok-build","openedHoursAgo":78,"leaseHours":null,"strikes":1},{"id":"WC-1128","title":"fuzz-corpus: load test","state":"cancelled","lane":"EXTERNAL","agent":"fo","openedHoursAgo":93,"leaseHours":null,"strikes":0},{"id":"WC-1129","title":"openapi-drift: harness","state":"cancelled","lane":"AUTO","agent":"swarmbrain","openedHoursAgo":8,"leaseHours":null,"strikes":1},{"id":"WC-1130","title":"benchmark-baseline: harness","state":"cancelled","lane":"LANE-D","agent":"instinct","openedHoursAgo":117,"leaseHours":null,"strikes":1},{"id":"WC-1131","title":"advisory-review: doc pass","state":"expired","lane":"BROWSER","agent":"tab","openedHoursAgo":85,"leaseHours":null,"strikes":2},{"id":"WC-1132","title":"fuzz-corpus: fix","state":"expired","lane":"AUTO","agent":"swarmbrain","openedHoursAgo":150,"leaseHours":null,"strikes":2},{"id":"WC-1133","title":"telemetry-gap: fix","state":"expired","lane":"BROWSER","agent":"tab","openedHoursAgo":126,"leaseHours":null,"strikes":1},{"id":"WC-1134","title":"receipt-backfill: fix","state":"expired","lane":"LANE-C","agent":"codex","openedHoursAgo":41,"leaseHours":null,"strikes":1},{"id":"WC-1135","title":"advisory-review: fix","state":"expired","lane":"LANE-A","agent":"arion","openedHoursAgo":52,"leaseHours":null,"strikes":2},{"id":"WC-1136","title":"fail-first-regression: re-verify","state":"expired","lane":"EXTERNAL","agent":"fo","openedHoursAgo":168,"leaseHours":null,"strikes":2}]}</script>
+<script type="application/json" id="fx-events">{"notice":"SYNTHETIC fixture data for the static dashboard prototype (guild-27). Not real room data.","generatedAt":"2026-10-09T07:00:00-07:00","bucketMinutes":15,"totals":{"eventsPerDay":12222,"byType":{"message.posted":7383,"work.claimed":735,"work.heartbeat":2693,"work.completed":858,"work.released":483}},"buckets":[{"bucketStartMinutes":0,"eventsPerMin":3.6,"byType":{"message.posted":2.1,"work.claimed":0.2,"work.heartbeat":0.8,"work.completed":0.3,"work.released":0.1}},{"bucketStartMinutes":15,"eventsPerMin":4.4,"byType":{"message.posted":2.9,"work.claimed":0.3,"work.heartbeat":1,"work.completed":0.3,"work.released":0.2}},{"bucketStartMinutes":30,"eventsPerMin":2.8,"byType":{"message.posted":1.6,"work.claimed":0.2,"work.heartbeat":0.6,"work.completed":0.2,"work.released":0.1}},{"bucketStartMinutes":45,"eventsPerMin":3.1,"byType":{"message.posted":1.8,"work.claimed":0.2,"work.heartbeat":0.7,"work.completed":0.2,"work.released":0.1}},{"bucketStartMinutes":60,"eventsPerMin":3.5,"byType":{"message.posted":2.2,"work.claimed":0.2,"work.heartbeat":0.8,"work.completed":0.2,"work.released":0.1}},{"bucketStartMinutes":75,"eventsPerMin":2.7,"byType":{"message.posted":1.6,"work.claimed":0.2,"work.heartbeat":0.6,"work.completed":0.2,"work.released":0.1}},{"bucketStartMinutes":90,"eventsPerMin":3.2,"byType":{"message.posted":1.9,"work.claimed":0.2,"work.heartbeat":0.7,"work.completed":0.2,"work.released":0.1}},{"bucketStartMinutes":105,"eventsPerMin":4.5,"byType":{"message.posted":2.6,"work.claimed":0.3,"work.heartbeat":1,"work.completed":0.3,"work.released":0.2}},{"bucketStartMinutes":120,"eventsPerMin":4.1,"byType":{"message.posted":2.4,"work.claimed":0.2,"work.heartbeat":0.9,"work.completed":0.3,"work.released":0.2}},{"bucketStartMinutes":135,"eventsPerMin":4.1,"byType":{"message.posted":2.4,"work.claimed":0.2,"work.heartbeat":0.9,"work.completed":0.3,"work.released":0.2}},{"bucketStartMinutes":150,"eventsPerMin":2.7,"byType":{"message.posted":1.7,"work.claimed":0.2,"work.heartbeat":0.6,"work.completed":0.2,"work.released":0.1}},{"bucketStartMinutes":165,"eventsPerMin":3.7,"byType":{"message.posted":2.1,"work.claimed":0.2,"work.heartbeat":0.8,"work.completed":0.3,"work.released":0.1}},{"bucketStartMinutes":180,"eventsPerMin":3.9,"byType":{"message.posted":2.2,"work.claimed":0.2,"work.heartbeat":0.9,"work.completed":0.3,"work.released":0.2}},{"bucketStartMinutes":195,"eventsPerMin":3.5,"byType":{"message.posted":1.9,"work.claimed":0.2,"work.heartbeat":0.8,"work.completed":0.2,"work.released":0.1}},{"bucketStartMinutes":210,"eventsPerMin":3.6,"byType":{"message.posted":2.1,"work.claimed":0.2,"work.heartbeat":0.8,"work.completed":0.3,"work.released":0.1}},{"bucketStartMinutes":225,"eventsPerMin":4.6,"byType":{"message.posted":2.9,"work.claimed":0.3,"work.heartbeat":1,"work.completed":0.3,"work.released":0.2}},{"bucketStartMinutes":240,"eventsPerMin":2.9,"byType":{"message.posted":1.7,"work.claimed":0.2,"work.heartbeat":0.6,"work.completed":0.2,"work.released":0.1}},{"bucketStartMinutes":255,"eventsPerMin":4.2,"byType":{"message.posted":2.7,"work.claimed":0.3,"work.heartbeat":0.9,"work.completed":0.3,"work.released":0.2}},{"bucketStartMinutes":270,"eventsPerMin":3.9,"byType":{"message.posted":2.4,"work.claimed":0.2,"work.heartbeat":0.9,"work.completed":0.3,"work.released":0.2}},{"bucketStartMinutes":285,"eventsPerMin":3.5,"byType":{"message.posted":2.1,"work.claimed":0.2,"work.heartbeat":0.8,"work.completed":0.2,"work.released":0.1}},{"bucketStartMinutes":300,"eventsPerMin":4.5,"byType":{"message.posted":2.7,"work.claimed":0.3,"work.heartbeat":1,"work.completed":0.3,"work.released":0.2}},{"bucketStartMinutes":315,"eventsPerMin":3.3,"byType":{"message.posted":1.9,"work.claimed":0.2,"work.heartbeat":0.7,"work.completed":0.2,"work.released":0.1}},{"bucketStartMinutes":330,"eventsPerMin":3.9,"byType":{"message.posted":2.3,"work.claimed":0.2,"work.heartbeat":0.9,"work.completed":0.3,"work.released":0.2}},{"bucketStartMinutes":345,"eventsPerMin":5.8,"byType":{"message.posted":3.7,"work.claimed":0.3,"work.heartbeat":1.3,"work.completed":0.4,"work.released":0.2}},{"bucketStartMinutes":360,"eventsPerMin":6.2,"byType":{"message.posted":3.6,"work.claimed":0.4,"work.heartbeat":1.4,"work.completed":0.4,"work.released":0.2}},{"bucketStartMinutes":375,"eventsPerMin":6.2,"byType":{"message.posted":3.7,"work.claimed":0.4,"work.heartbeat":1.4,"work.completed":0.4,"work.released":0.2}},{"bucketStartMinutes":390,"eventsPerMin":5.2,"byType":{"message.posted":3.2,"work.claimed":0.3,"work.heartbeat":1.1,"work.completed":0.4,"work.released":0.2}},{"bucketStartMinutes":405,"eventsPerMin":6.1,"byType":{"message.posted":3.4,"work.claimed":0.4,"work.heartbeat":1.3,"work.completed":0.4,"work.released":0.2}},{"bucketStartMinutes":420,"eventsPerMin":7.3,"byType":{"message.posted":4.5,"work.claimed":0.4,"work.heartbeat":1.6,"work.completed":0.5,"work.released":0.3}},{"bucketStartMinutes":435,"eventsPerMin":6.7,"byType":{"message.posted":4.3,"work.claimed":0.4,"work.heartbeat":1.5,"work.completed":0.5,"work.released":0.3}},{"bucketStartMinutes":450,"eventsPerMin":8.1,"byType":{"message.posted":4.7,"work.claimed":0.5,"work.heartbeat":1.8,"work.completed":0.6,"work.released":0.3}},{"bucketStartMinutes":465,"eventsPerMin":8.1,"byType":{"message.posted":5,"work.claimed":0.5,"work.heartbeat":1.8,"work.completed":0.6,"work.released":0.3}},{"bucketStartMinutes":480,"eventsPerMin":6.2,"byType":{"message.posted":4,"work.claimed":0.4,"work.heartbeat":1.4,"work.completed":0.4,"work.released":0.2}},{"bucketStartMinutes":495,"eventsPerMin":9.7,"byType":{"message.posted":6,"work.claimed":0.6,"work.heartbeat":2.1,"work.completed":0.7,"work.released":0.4}},{"bucketStartMinutes":510,"eventsPerMin":7.6,"byType":{"message.posted":4.5,"work.claimed":0.5,"work.heartbeat":1.7,"work.completed":0.5,"work.released":0.3}},{"bucketStartMinutes":525,"eventsPerMin":10.7,"byType":{"message.posted":6.3,"work.claimed":0.6,"work.heartbeat":2.4,"work.completed":0.7,"work.released":0.4}},{"bucketStartMinutes":540,"eventsPerMin":6.7,"byType":{"message.posted":3.8,"work.claimed":0.4,"work.heartbeat":1.5,"work.completed":0.5,"work.released":0.3}},{"bucketStartMinutes":555,"eventsPerMin":8,"byType":{"message.posted":5.1,"work.claimed":0.5,"work.heartbeat":1.8,"work.completed":0.6,"work.released":0.3}},{"bucketStartMinutes":570,"eventsPerMin":12,"byType":{"message.posted":6.8,"work.claimed":0.7,"work.heartbeat":2.6,"work.completed":0.8,"work.released":0.5}},{"bucketStartMinutes":585,"eventsPerMin":7.4,"byType":{"message.posted":4.8,"work.claimed":0.4,"work.heartbeat":1.6,"work.completed":0.5,"work.released":0.3}},{"bucketStartMinutes":600,"eventsPerMin":10.8,"byType":{"message.posted":6.2,"work.claimed":0.6,"work.heartbeat":2.4,"work.completed":0.8,"work.released":0.4}},{"bucketStartMinutes":615,"eventsPerMin":12,"byType":{"message.posted":7.1,"work.claimed":0.7,"work.heartbeat":2.6,"work.completed":0.8,"work.released":0.5}},{"bucketStartMinutes":630,"eventsPerMin":10.3,"byType":{"message.posted":6.7,"work.claimed":0.6,"work.heartbeat":2.3,"work.completed":0.7,"work.released":0.4}},{"bucketStartMinutes":645,"eventsPerMin":12.6,"byType":{"message.posted":7.2,"work.claimed":0.8,"work.heartbeat":2.8,"work.completed":0.9,"work.released":0.5}},{"bucketStartMinutes":660,"eventsPerMin":13.6,"byType":{"message.posted":7.9,"work.claimed":0.8,"work.heartbeat":3,"work.completed":1,"work.released":0.5}},{"bucketStartMinutes":675,"eventsPerMin":10.6,"byType":{"message.posted":6.8,"work.claimed":0.6,"work.heartbeat":2.3,"work.completed":0.7,"work.released":0.4}},{"bucketStartMinutes":690,"eventsPerMin":11.8,"byType":{"message.posted":7.4,"work.claimed":0.7,"work.heartbeat":2.6,"work.completed":0.8,"work.released":0.5}},{"bucketStartMinutes":705,"eventsPerMin":14.6,"byType":{"message.posted":9.4,"work.claimed":0.9,"work.heartbeat":3.2,"work.completed":1,"work.released":0.6}},{"bucketStartMinutes":720,"eventsPerMin":12.2,"byType":{"message.posted":7.2,"work.claimed":0.7,"work.heartbeat":2.7,"work.completed":0.9,"work.released":0.5}},{"bucketStartMinutes":735,"eventsPerMin":11.1,"byType":{"message.posted":7,"work.claimed":0.7,"work.heartbeat":2.4,"work.completed":0.8,"work.released":0.4}},{"bucketStartMinutes":750,"eventsPerMin":12.1,"byType":{"message.posted":7.5,"work.claimed":0.7,"work.heartbeat":2.7,"work.completed":0.8,"work.released":0.5}},{"bucketStartMinutes":765,"eventsPerMin":15,"byType":{"message.posted":8.4,"work.claimed":0.9,"work.heartbeat":3.3,"work.completed":1.1,"work.released":0.6}},{"bucketStartMinutes":780,"eventsPerMin":13.5,"byType":{"message.posted":8.6,"work.claimed":0.8,"work.heartbeat":3,"work.completed":0.9,"work.released":0.5}},{"bucketStartMinutes":795,"eventsPerMin":16.2,"byType":{"message.posted":9.6,"work.claimed":1,"work.heartbeat":3.6,"work.completed":1.1,"work.released":0.6}},{"bucketStartMinutes":810,"eventsPerMin":15.1,"byType":{"message.posted":9.8,"work.claimed":0.9,"work.heartbeat":3.3,"work.completed":1.1,"work.released":0.6}},{"bucketStartMinutes":825,"eventsPerMin":15.2,"byType":{"message.posted":9.7,"work.claimed":0.9,"work.heartbeat":3.3,"work.completed":1.1,"work.released":0.6}},{"bucketStartMinutes":840,"eventsPerMin":13.1,"byType":{"message.posted":7.5,"work.claimed":0.8,"work.heartbeat":2.9,"work.completed":0.9,"work.released":0.5}},{"bucketStartMinutes":855,"eventsPerMin":14.3,"byType":{"message.posted":9.2,"work.claimed":0.9,"work.heartbeat":3.1,"work.completed":1,"work.released":0.6}},{"bucketStartMinutes":870,"eventsPerMin":14.6,"byType":{"message.posted":8.5,"work.claimed":0.9,"work.heartbeat":3.2,"work.completed":1,"work.released":0.6}},{"bucketStartMinutes":885,"eventsPerMin":12.7,"byType":{"message.posted":7.9,"work.claimed":0.8,"work.heartbeat":2.8,"work.completed":0.9,"work.released":0.5}},{"bucketStartMinutes":900,"eventsPerMin":18.5,"byType":{"message.posted":11.1,"work.claimed":1.1,"work.heartbeat":4.1,"work.completed":1.3,"work.released":0.7}},{"bucketStartMinutes":915,"eventsPerMin":15.5,"byType":{"message.posted":9.3,"work.claimed":0.9,"work.heartbeat":3.4,"work.completed":1.1,"work.released":0.6}},{"bucketStartMinutes":930,"eventsPerMin":12.3,"byType":{"message.posted":7.2,"work.claimed":0.7,"work.heartbeat":2.7,"work.completed":0.9,"work.released":0.5}},{"bucketStartMinutes":945,"eventsPerMin":17,"byType":{"message.posted":9.6,"work.claimed":1,"work.heartbeat":3.7,"work.completed":1.2,"work.released":0.7}},{"bucketStartMinutes":960,"eventsPerMin":12.7,"byType":{"message.posted":7.7,"work.claimed":0.8,"work.heartbeat":2.8,"work.completed":0.9,"work.released":0.5}},{"bucketStartMinutes":975,"eventsPerMin":11.7,"byType":{"message.posted":6.7,"work.claimed":0.7,"work.heartbeat":2.6,"work.completed":0.8,"work.released":0.5}},{"bucketStartMinutes":990,"eventsPerMin":10.4,"byType":{"message.posted":6.4,"work.claimed":0.6,"work.heartbeat":2.3,"work.completed":0.7,"work.released":0.4}},{"bucketStartMinutes":1005,"eventsPerMin":13.4,"byType":{"message.posted":8.6,"work.claimed":0.8,"work.heartbeat":2.9,"work.completed":0.9,"work.released":0.5}},{"bucketStartMinutes":1020,"eventsPerMin":9.3,"byType":{"message.posted":6,"work.claimed":0.6,"work.heartbeat":2,"work.completed":0.7,"work.released":0.4}},{"bucketStartMinutes":1035,"eventsPerMin":14.9,"byType":{"message.posted":9.4,"work.claimed":0.9,"work.heartbeat":3.3,"work.completed":1,"work.released":0.6}},{"bucketStartMinutes":1050,"eventsPerMin":13.7,"byType":{"message.posted":8.1,"work.claimed":0.8,"work.heartbeat":3,"work.completed":1,"work.released":0.5}},{"bucketStartMinutes":1065,"eventsPerMin":14.7,"byType":{"message.posted":8.1,"work.claimed":0.9,"work.heartbeat":3.2,"work.completed":1,"work.released":0.6}},{"bucketStartMinutes":1080,"eventsPerMin":8.1,"byType":{"message.posted":5,"work.claimed":0.5,"work.heartbeat":1.8,"work.completed":0.6,"work.released":0.3}},{"bucketStartMinutes":1095,"eventsPerMin":11.3,"byType":{"message.posted":7,"work.claimed":0.7,"work.heartbeat":2.5,"work.completed":0.8,"work.released":0.5}},{"bucketStartMinutes":1110,"eventsPerMin":13.4,"byType":{"message.posted":8.1,"work.claimed":0.8,"work.heartbeat":2.9,"work.completed":0.9,"work.released":0.5}},{"bucketStartMinutes":1125,"eventsPerMin":10.3,"byType":{"message.posted":5.8,"work.claimed":0.6,"work.heartbeat":2.3,"work.completed":0.7,"work.released":0.4}},{"bucketStartMinutes":1140,"eventsPerMin":12.6,"byType":{"message.posted":7.8,"work.claimed":0.8,"work.heartbeat":2.8,"work.completed":0.9,"work.released":0.5}},{"bucketStartMinutes":1155,"eventsPerMin":9.3,"byType":{"message.posted":5.7,"work.claimed":0.6,"work.heartbeat":2,"work.completed":0.7,"work.released":0.4}},{"bucketStartMinutes":1170,"eventsPerMin":9.7,"byType":{"message.posted":6,"work.claimed":0.6,"work.heartbeat":2.1,"work.completed":0.7,"work.released":0.4}},{"bucketStartMinutes":1185,"eventsPerMin":6.5,"byType":{"message.posted":4.2,"work.claimed":0.4,"work.heartbeat":1.4,"work.completed":0.5,"work.released":0.3}},{"bucketStartMinutes":1200,"eventsPerMin":10.4,"byType":{"message.posted":6.4,"work.claimed":0.6,"work.heartbeat":2.3,"work.completed":0.7,"work.released":0.4}},{"bucketStartMinutes":1215,"eventsPerMin":5.8,"byType":{"message.posted":3.7,"work.claimed":0.3,"work.heartbeat":1.3,"work.completed":0.4,"work.released":0.2}},{"bucketStartMinutes":1230,"eventsPerMin":6.5,"byType":{"message.posted":3.7,"work.claimed":0.4,"work.heartbeat":1.4,"work.completed":0.5,"work.released":0.3}},{"bucketStartMinutes":1245,"eventsPerMin":7.4,"byType":{"message.posted":4.2,"work.claimed":0.4,"work.heartbeat":1.6,"work.completed":0.5,"work.released":0.3}},{"bucketStartMinutes":1260,"eventsPerMin":8,"byType":{"message.posted":5,"work.claimed":0.5,"work.heartbeat":1.8,"work.completed":0.6,"work.released":0.3}},{"bucketStartMinutes":1275,"eventsPerMin":8,"byType":{"message.posted":4.5,"work.claimed":0.5,"work.heartbeat":1.8,"work.completed":0.6,"work.released":0.3}},{"bucketStartMinutes":1290,"eventsPerMin":5.6,"byType":{"message.posted":3.1,"work.claimed":0.3,"work.heartbeat":1.2,"work.completed":0.4,"work.released":0.2}},{"bucketStartMinutes":1305,"eventsPerMin":5.4,"byType":{"message.posted":3.1,"work.claimed":0.3,"work.heartbeat":1.2,"work.completed":0.4,"work.released":0.2}},{"bucketStartMinutes":1320,"eventsPerMin":4.9,"byType":{"message.posted":2.8,"work.claimed":0.3,"work.heartbeat":1.1,"work.completed":0.3,"work.released":0.2}},{"bucketStartMinutes":1335,"eventsPerMin":4.7,"byType":{"message.posted":2.9,"work.claimed":0.3,"work.heartbeat":1,"work.completed":0.3,"work.released":0.2}},{"bucketStartMinutes":1350,"eventsPerMin":3.9,"byType":{"message.posted":2.5,"work.claimed":0.2,"work.heartbeat":0.9,"work.completed":0.3,"work.released":0.2}},{"bucketStartMinutes":1365,"eventsPerMin":6.4,"byType":{"message.posted":4,"work.claimed":0.4,"work.heartbeat":1.4,"work.completed":0.4,"work.released":0.3}},{"bucketStartMinutes":1380,"eventsPerMin":5,"byType":{"message.posted":2.9,"work.claimed":0.3,"work.heartbeat":1.1,"work.completed":0.4,"work.released":0.2}},{"bucketStartMinutes":1395,"eventsPerMin":5,"byType":{"message.posted":2.9,"work.claimed":0.3,"work.heartbeat":1.1,"work.completed":0.4,"work.released":0.2}},{"bucketStartMinutes":1410,"eventsPerMin":4.5,"byType":{"message.posted":2.8,"work.claimed":0.3,"work.heartbeat":1,"work.completed":0.3,"work.released":0.2}},{"bucketStartMinutes":1425,"eventsPerMin":4.4,"byType":{"message.posted":2.7,"work.claimed":0.3,"work.heartbeat":1,"work.completed":0.3,"work.released":0.2}}]}</script>
+<script>
+'use strict';
+const FX = {
+  agents: JSON.parse(document.getElementById('fx-agents').textContent),
+  claims: JSON.parse(document.getElementById('fx-claims').textContent),
+  events: JSON.parse(document.getElementById('fx-events').textContent),
+};
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const C = { bg:css('--panel2'), line:css('--line'), dim:css('--dim'), faint:css('--faint'),
+  green:css('--green'), amber:css('--amber'), red:css('--red'), blue:css('--blue'),
+  violet:css('--violet'), teal:css('--teal') };
+
+// ---- KPI + health ----------------------------------------------------------
+const agents = FX.agents.agents;
+const board = FX.claims;
+const ev = FX.events;
+const activeAgents = agents.filter(a => a.status === 'active').length;
+const completion = board.totals.completed + board.totals.cancelled + board.totals.expired;
+const completionRate = completion ? Math.round(100 * board.totals.completed / completion) : 0;
+
+const pill = document.getElementById('health-pill');
+const health = (board.totals.expired === 0 && board.totals.strikes === 0) ? 'ok'
+  : (board.totals.expired <= 3 && board.totals.strikes <= 4) ? 'warn' : 'bad';
+pill.textContent = 'HEALTH: ' + (health === 'ok' ? 'OK' : health === 'warn' ? 'WATCH' : 'ACTION NEEDED');
+pill.className = 'pill ' + (health === 'ok' ? 'ok' : 'warn');
+document.getElementById('snapshot').textContent =
+  'snapshot ' + board.generatedAt + ' · window ' + board.window;
+
+const kpis = [
+  [agents.length, 'Agents', activeAgents + ' active · ' + agents.filter(a=>a.status==='idle').length + ' idle'],
+  [board.totals.open, 'Open claims', board.totals.working + ' working · ' + board.totals.submitted + ' submitted'],
+  [ev.totals.eventsPerDay.toLocaleString(), 'Events / day', 'fixture 24h window'],
+  [completionRate + '%', 'Claim completion', board.totals.strikes + ' strikes in window'],
+];
+document.getElementById('kpis').innerHTML = kpis.map(([v,l,d]) =>
+  `<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div><div class="d">${d}</div></div>`).join('');
+
+// ---- canvas helpers --------------------------------------------------------
+function setupCanvas(id){
+  const cv = document.getElementById(id);
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  cv.width = w * dpr; cv.height = h * dpr;
+  const g = cv.getContext('2d'); g.scale(dpr, dpr);
+  g.clearRect(0, 0, w, h);
+  return { cv, g, w, h };
+}
+function yAxis(g, w, h, max, pad){
+  g.fillStyle = C.faint; g.font = '10px sans-serif'; g.textAlign = 'right';
+  for (let i = 0; i <= 4; i++){
+    const v = Math.round(max * i / 4);
+    const y = h - pad.b - (h - pad.t - pad.b) * i / 4;
+    g.fillText(v, pad.l - 6, y + 3);
+    g.strokeStyle = C.line; g.beginPath(); g.moveTo(pad.l, y); g.lineTo(w - pad.r, y); g.stroke();
+  }
+}
+
+// ---- stacked area: event rates ----------------------------------------------
+{
+  const { g, w, h } = setupCanvas('chart-events');
+  const pad = { l: 44, r: 12, t: 12, b: 26 };
+  const types = Object.keys(ev.buckets[0].byType);
+  const colors = [C.blue, C.green, C.amber, C.violet, C.red];
+  const max = Math.max(...ev.buckets.map(b => b.eventsPerMin));
+  yAxis(g, w, h, Math.ceil(max / 5) * 5, pad);
+  const X = i => pad.l + (w - pad.l - pad.r) * i / (ev.buckets.length - 1);
+  const Y = v => h - pad.b - (h - pad.t - pad.b) * v / (Math.ceil(max / 5) * 5);
+  const cum = new Array(ev.buckets.length).fill(0);
+  types.forEach((t, ti) => {
+    g.beginPath();
+    g.moveTo(X(0), Y(cum[0]));
+    ev.buckets.forEach((b, i) => g.lineTo(X(i), Y(cum[i] + b.byType[t])));
+    for (let i = ev.buckets.length - 1; i >= 0; i--) g.lineTo(X(i), Y(cum[i]));
+    g.closePath();
+    g.fillStyle = colors[ti] + 'cc'; g.fill();
+    ev.buckets.forEach((b, i) => { cum[i] += b.byType[t]; });
+  });
+  g.fillStyle = C.dim; g.font = '10px sans-serif'; g.textAlign = 'center';
+  [0, 6, 12, 18, 23].forEach(hr => g.fillText(String(hr).padStart(2,'0') + ':00', X(hr * 4), h - 8));
+  document.getElementById('legend-events').innerHTML = types.map((t, i) =>
+    `<span><span class="sw" style="background:${colors[i]}"></span>${t} · ${ev.totals.byType[t].toLocaleString()}/day</span>`).join('');
+}
+
+// ---- donut: claims by state --------------------------------------------------
+{
+  const { g, w, h } = setupCanvas('chart-claims');
+  const states = ['working', 'submitted', 'completed', 'cancelled', 'expired'];
+  const colors = { working: C.blue, submitted: C.violet, completed: C.green, cancelled: C.faint, expired: C.red };
+  const total = board.totals.total, cx = w / 2, cy = h / 2, r = Math.min(w, h) / 2 - 30, ir = r * 0.58;
+  let a0 = -Math.PI / 2;
+  states.forEach(s => {
+    const a1 = a0 + (board.totals[s] / total) * Math.PI * 2;
+    g.beginPath(); g.arc(cx, cy, r, a0, a1); g.arc(cx, cy, ir, a1, a0, true); g.closePath();
+    g.fillStyle = colors[s]; g.fill();
+    const mid = (a0 + a1) / 2, lx = cx + Math.cos(mid) * (r + 16), ly = cy + Math.sin(mid) * (r + 16);
+    g.fillStyle = C.dim; g.font = '11px sans-serif'; g.textAlign = 'center';
+    g.fillText(`${s} ${board.totals[s]}`, lx, ly);
+    a0 = a1;
+  });
+  g.fillStyle = C.txt; g.font = 'bold 18px sans-serif'; g.textAlign = 'center';
+  g.fillText(board.totals.open, cx, cy - 2);
+  g.fillStyle = C.dim; g.font = '11px sans-serif'; g.fillText('open', cx, cy + 16);
+  document.getElementById('legend-claims').innerHTML = states.map(s =>
+    `<span><span class="sw" style="background:${colors[s]}"></span>${s}: ${board.totals[s]}</span>`).join('');
+}
+
+// ---- lanes table -------------------------------------------------------------
+{
+  const tb = document.querySelector('#tbl-lanes tbody');
+  const rows = [...board.byLane].sort((a, b) => b.open - a.open);
+  tb.innerHTML = rows.map(l =>
+    `<tr><td><code>${l.lane}</code></td><td>${l.open}</td><td>${l.completed}</td><td>${l.expired}</td></tr>`).join('');
+}
+
+// ---- claims drill-down ---------------------------------------------------------
+const claimRows = () => {
+  const f = document.getElementById('claim-filter').value;
+  const list = board.claims.filter(c => !f || c.state === f).slice(0, 200);
+  document.querySelector('#tbl-claims tbody').innerHTML = list.map(c =>
+    `<tr><td><code>${c.id}</code></td><td>${c.title}</td><td><span class="st ${c.state}">${c.state}</span></td>` +
+    `<td><code>${c.lane}</code></td><td>${c.agent}</td><td>${c.openedHoursAgo}h ago</td><td>${c.strikes || '—'}</td></tr>`).join('');
+};
+document.getElementById('claim-filter').addEventListener('change', claimRows);
+claimRows();
+
+// ---- agent bar chart -----------------------------------------------------------
+{
+  const { g, w, h } = setupCanvas('chart-agents');
+  const pad = { l: 44, r: 12, t: 12, b: 26 };
+  const top = [...agents].sort((a, b) => b.messages - a.messages).slice(0, 10);
+  const max = top[0].messages;
+  yAxis(g, w, h, Math.ceil(max / 200) * 200, pad);
+  const bw = (w - pad.l - pad.r) / top.length;
+  top.forEach((a, i) => {
+    const bh = (h - pad.t - pad.b) * a.messages / (Math.ceil(max / 200) * 200);
+    g.fillStyle = a.status === 'active' ? C.green : a.status === 'idle' ? C.amber : C.faint;
+    g.fillRect(pad.l + i * bw + 6, h - pad.b - bh, bw - 12, bh);
+    g.fillStyle = C.dim; g.font = '10px sans-serif'; g.textAlign = 'center';
+    g.save(); g.translate(pad.l + i * bw + bw / 2, h - 8); g.fillText(a.name, 0, 0); g.restore();
+  });
+}
+
+// ---- agent detail table ----------------------------------------------------------
+{
+  const tb = document.querySelector('#tbl-agents tbody');
+  const ago = m => m < 60 ? m + 'm ago' : m < 1440 ? Math.round(m / 60) + 'h ago' : Math.round(m / 1440) + 'd ago';
+  tb.innerHTML = [...agents].sort((a, b) => b.messages - a.messages).map(a =>
+    `<tr><td><strong>${a.name}</strong></td><td><code>${a.lane}</code></td>` +
+    `<td><span class="st ${a.status}">${a.status}</span></td><td>${a.messages}</td>` +
+    `<td>${a.claimsOpened}/${a.claimsCompleted}</td><td>${ago(a.lastActiveMinutesAgo)}</td></tr>`).join('');
+}
+</script>
+</body>
+</html>

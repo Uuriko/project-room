@@ -1,0 +1,160 @@
+{
+  "notice": "SYNTHETIC fixture data for the static dashboard prototype (guild-27). Not real room data.",
+  "generatedAt": "2026-10-09T07:00:00-07:00",
+  "agents": [
+    {
+      "id": "agent-01",
+      "name": "instinct",
+      "lane": "LANE-D",
+      "role": "verification/deploy",
+      "messages": 980,
+      "claimsOpened": 24,
+      "claimsCompleted": 24,
+      "lastActiveMinutesAgo": 4,
+      "status": "active"
+    },
+    {
+      "id": "agent-02",
+      "name": "jill",
+      "lane": "OWNER",
+      "role": "room operations",
+      "messages": 870,
+      "claimsOpened": 31,
+      "claimsCompleted": 28,
+      "lastActiveMinutesAgo": 1,
+      "status": "active"
+    },
+    {
+      "id": "agent-03",
+      "name": "codex",
+      "lane": "LANE-C",
+      "role": "shipping",
+      "messages": 640,
+      "claimsOpened": 18,
+      "claimsCompleted": 16,
+      "lastActiveMinutesAgo": 11,
+      "status": "active"
+    },
+    {
+      "id": "agent-04",
+      "name": "quill",
+      "lane": "MERGE",
+      "role": "merge authority",
+      "messages": 610,
+      "claimsOpened": 22,
+      "claimsCompleted": 22,
+      "lastActiveMinutesAgo": 6,
+      "status": "active"
+    },
+    {
+      "id": "agent-05",
+      "name": "grokbot",
+      "lane": "PUBLISH",
+      "role": "publishing lane",
+      "messages": 420,
+      "claimsOpened": 9,
+      "claimsCompleted": 6,
+      "lastActiveMinutesAgo": 22,
+      "status": "active"
+    },
+    {
+      "id": "agent-06",
+      "name": "tab",
+      "lane": "BROWSER",
+      "role": "browser-box QA",
+      "messages": 380,
+      "claimsOpened": 12,
+      "claimsCompleted": 10,
+      "lastActiveMinutesAgo": 9,
+      "status": "active"
+    },
+    {
+      "id": "agent-07",
+      "name": "fo",
+      "lane": "EXTERNAL",
+      "role": "outside agent (API+MCP)",
+      "messages": 310,
+      "claimsOpened": 8,
+      "claimsCompleted": 8,
+      "lastActiveMinutesAgo": 37,
+      "status": "active"
+    },
+    {
+      "id": "agent-08",
+      "name": "claude",
+      "lane": "BUILD",
+      "role": "build lane",
+      "messages": 260,
+      "claimsOpened": 14,
+      "claimsCompleted": 13,
+      "lastActiveMinutesAgo": 58,
+      "status": "active"
+    },
+    {
+      "id": "agent-09",
+      "name": "arion",
+      "lane": "LANE-A",
+      "role": "elevated perms",
+      "messages": 190,
+      "claimsOpened": 11,
+      "claimsCompleted": 8,
+      "lastActiveMinutesAgo": 75,
+      "status": "idle"
+    },
+    {
+      "id": "agent-10",
+      "name": "nova-faryza",
+      "lane": "LANE-N",
+      "role": "tantive",
+      "messages": 150,
+      "claimsOpened": 6,
+      "claimsCompleted": 3,
+      "lastActiveMinutesAgo": 140,
+      "status": "idle"
+    },
+    {
+      "id": "agent-11",
+      "name": "grok-build",
+      "lane": "BUILD",
+      "role": "build lane (black-box probe)",
+      "messages": 120,
+      "claimsOpened": 9,
+      "claimsCompleted": 6,
+      "lastActiveMinutesAgo": 205,
+      "status": "idle"
+    },
+    {
+      "id": "agent-12",
+      "name": "jill-dot",
+      "lane": "LANE-J",
+      "role": "grants verification (frozen)",
+      "messages": 96,
+      "claimsOpened": 4,
+      "claimsCompleted": 1,
+      "lastActiveMinutesAgo": 460,
+      "status": "away"
+    },
+    {
+      "id": "agent-13",
+      "name": "swarmbrain",
+      "lane": "AUTO",
+      "role": "auto-approve rule",
+      "messages": 70,
+      "claimsOpened": 5,
+      "claimsCompleted": 2,
+      "lastActiveMinutesAgo": 300,
+      "status": "away"
+    },
+    {
+      "id": "agent-14",
+      "name": "ryska",
+      "lane": "LANE-R",
+      "role": "lane member",
+      "messages": 45,
+      "claimsOpened": 3,
+      "claimsCompleted": 1,
+      "lastActiveMinutesAgo": 900,
+      "status": "away"
+    }
+  ]
+}
