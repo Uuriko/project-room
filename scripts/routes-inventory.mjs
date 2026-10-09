@@ -146,10 +146,12 @@ function topLevelMethods(body) {
 
 // A route if sometimes only calls a helper that owns the method check
 // (/.well-known/security.txt). Methods come from that helper's body.
+// Helpers may be `function` declarations or arrow-function consts.
 function withCalledHelpers(source, body) {
   let extra = body;
   for (const match of body.matchAll(/\b([A-Za-z_][A-Za-z0-9_]*)\s*\(/g)) {
-    const decl = new RegExp(`function ${match[1]}\\s*\\([^)]*\\)\\s*\\{`).exec(source);
+    const decl = new RegExp(`function ${match[1]}\\s*\\([^)]*\\)\\s*\\{`).exec(source)
+      ?? new RegExp(`const ${match[1]}\\s*=\\s*(?:\\([^)]*\\)|[A-Za-z_][A-Za-z0-9_]*)\\s*=>\\s*\\{`).exec(source);
     if (!decl) continue;
     const open = source.indexOf("{", decl.index);
     const close = matchCloser(source, open, "{", "}");
@@ -304,6 +306,54 @@ function scanSwitches(source, names, bag) {
   }
 }
 
+// The agent-plugin dispatcher is a data-driven ROUTES table rather than an
+// if-chain:
+//   ["METHOD", fixed("/api/path") | either("/a", PATH_CONST) |
+//              captured(REGEX_CONST, …) | identityCaptured(REGEX_CONST), handler]
+// Static extraction reads the (method, path) pairs back out of the table rows
+// so the legacy-chain parity gate keeps working after the if-chain refactor.
+// Regex consts resolve through indexRegexConsts; bare path consts (e.g. the
+// imported WELL_KNOWN_PATH) resolve through string consts in the manifest.
+function scanPluginRouteTable(source, manifestSource, bag) {
+  const table = /const ROUTES = \[([\s\S]*?)\n  \];/.exec(source);
+  if (!table) return;
+  const stringConsts = new Map();
+  for (const m of manifestSource.matchAll(/(?:export )?const (\w+) = "([^"]*)";/g)) stringConsts.set(m[1], m[2]);
+  const bindings = indexRegexConsts(source);
+  const rowRe = /\["([A-Z]+)",\s*(?:fixed\("([^"]+)"\)|either\(([^)]*)\)|(?:identityCaptured|captured)\(\s*(\w+))/g;
+  let row;
+  while ((row = rowRe.exec(table[1]))) {
+    const method = row[1];
+    if (row[2] !== undefined) { addRoute(bag, method, row[2]); continue; }
+    if (row[3] !== undefined) {
+      for (const part of row[3].matchAll(/"([^"]+)"|([A-Za-z_]\w*)/g)) {
+        const path = part[1] ?? stringConsts.get(part[2]);
+        if (path) addRoute(bag, method, path);
+      }
+      continue;
+    }
+    if (row[4] !== undefined) for (const path of bindings.get(row[4]) ?? []) addRoute(bag, method, path);
+  }
+}
+
+// The escrow dispatcher is a data-driven MUTATIONS table keyed by route name:
+//   const MUTATIONS = { create: {…}, fund: {…}, "dispute-decide": {…}, … };
+//   const mutation = MUTATIONS[escrowRoute];
+//   if (mutation && req.method === "POST") { … }
+// Static extraction reads the table keys and pairs each with its POST method
+// and the escrowRoute:<name> paths from the http.mjs matchers, replacing the
+// old `escrowRoute === "name" && req.method === "POST"` if-chain scan.
+function scanEscrowMutations(source, matchers, bag) {
+  const table = /const MUTATIONS = \{([\s\S]*?)\n  \};/.exec(source);
+  if (!table) return;
+  for (const m of table[1].matchAll(/^    (?:"([^"]+)"|([A-Za-z0-9_-]+))\s*:/gm)) {
+    const name = m[1] ?? m[2];
+    const paths = matchers.get(`escrowRoute:${name}`);
+    if (!paths) continue;
+    for (const path of paths) addRoute(bag, "POST", path);
+  }
+}
+
 function scanSource(source, bag, { names, matchers, bindings }) {
   const apply = (methods, paths) => {
     for (const method of methods) for (const path of paths) addRoute(bag, method, path);
@@ -388,6 +438,7 @@ export function loadRouteSources(root) {
     collab: read("server/inbox-collab-routes.mjs"),
     worker: read("cloudflare/room.mjs"),
     legal: read("server/legal-routes.mjs"),
+    pluginManifest: read("server/agent-plugin-manifest.mjs"),
     constants: readConstants(root),
   };
 }
@@ -404,6 +455,8 @@ export function extractLegacyRoutes(sources) {
     scanSource(text, bag, { names, matchers: byVar, bindings: indexRegexConsts(text) });
   }
   scanSwitches(sources.collab, byVar, bag);
+  scanPluginRouteTable(sources.plugin, sources.pluginManifest, bag);
+  scanEscrowMutations(sources.bounty, byVar, bag);
 
   catalogPaths(sources.http, /isRoomMcpPath\(/, ROOM_MCP_PATHS, ["GET", "HEAD", "POST", "OPTIONS"], bag);
   catalogPaths(sources.http, /isA2aPath\(/, A2A_PATHS, ["POST", "OPTIONS"], bag);

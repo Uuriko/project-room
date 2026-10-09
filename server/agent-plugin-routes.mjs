@@ -904,7 +904,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
 
   // ---- Route table ----
   // Rows are tried in order; the first (method, path) match wins, exactly
-  // like the if-chain this replaces. Fixed paths stay as "/api/…" string
+  // like the if-chain this replaces. Fixed paths stay as plain string
   // literals and regexes stay as anchored constants above — the route-docs
   // gate extracts the served surface from those source literals, and
   // tests/open-routes.test.js reads KEY_ACTION_ROUTE from its declaration.
