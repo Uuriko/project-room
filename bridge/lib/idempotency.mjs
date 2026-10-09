@@ -27,6 +27,33 @@ export class IdempotencyCache {
     if (rec.inputHash !== inputHash) return { hit: false, conflict: true };
     return { hit: true, response: rec.response };
   }
+  /**
+   * Run `fn` once per key. The key is claimed BEFORE `fn` runs, so a retry that
+   * arrives while the first call is still in flight waits for it instead of
+   * executing the write a second time. A failed `fn` releases the key so the
+   * caller can retry; only successes stay cached for the TTL.
+   * @returns {Promise<{conflict:true}|{hit:boolean, response:any}>}
+   */
+  async run(key, inputHash, fn) {
+    this._sweep();
+    const rec = this.map.get(key);
+    if (rec) {
+      if (rec.inputHash !== inputHash) return { conflict: true };
+      return { hit: true, response: rec.pending ? await rec.pending : rec.response };
+    }
+    const entry = { response: undefined, inputHash, pending: null, expiresAt: Infinity };
+    entry.pending = Promise.resolve().then(fn);
+    this.map.set(key, entry);
+    try {
+      entry.response = await entry.pending;
+      entry.pending = null;
+      entry.expiresAt = Date.now() + this.ttlMs;
+      return { hit: false, response: entry.response };
+    } catch (err) {
+      if (this.map.get(key) === entry) this.map.delete(key);
+      throw err;
+    }
+  }
   store(key, inputHash, response) {
     this._sweep();
     this.map.set(key, { response, inputHash, expiresAt: Date.now() + this.ttlMs });
