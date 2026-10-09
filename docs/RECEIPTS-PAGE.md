@@ -26,6 +26,11 @@ the pull request when the stored URL is an https pull-request link, the
 time the room recorded a merge, and hash evidence already stored as
 `sha256:` values. It does not invent a merge commit.
 
+Names are as recorded by the room — member display names on work-claim and
+work-item receipts, a self-supplied name on public-work receipts — not
+identity-verified. Hash values are stored as recorded, not re-verified at
+read time.
+
 The JSON envelope is unsigned. Receipt Standard v1 was not used: that
 draft requires a fresh signature, and these pages are durable records of
 work the room already stored. The server does not sign a statement the

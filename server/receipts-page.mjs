@@ -93,6 +93,17 @@ export function renderReceiptDetailHtml(receipt) {
   const hashes = receipt.hashes?.length
     ? `<div><dt>Hash evidence</dt><dd>${receipt.hashes.map(hash => `<code>${escapeHtml(hash)}</code>`).join("<br>")}</dd></div>`
     : "";
+  // Receipt honesty: say precisely what this record proves, no more. Only a
+  // work-claim receipt carries a server-verified merge (the server's own
+  // poll wrote pr_merged + syncedAt; a member-supplied outcome "merged"
+  // never qualifies — server/public-read-model.mjs serverVerifiedMerge).
+  // Names are room data (member display names, or a self-supplied name on
+  // public-work receipts), never identity-verified. Hashes are stored
+  // sha256: values, never re-verified at read time. The JSON envelope is
+  // unsigned (docs/RECEIPTS-PAGE.md).
+  const provenNote = receipt.mergedAt && receipt.pullRequest
+    ? "What this record proves: the server verified the merge against the linked pull request. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
+    : "What this record proves: the room recorded this work and made it public. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned.";
   return `${head({ title: receipt.title, description, path: `/receipts/${receipt.id}` })}
 <body><header><p><a href="/">Project Room</a> · <a href="/receipts">Public receipts</a></p></header>
 <main>
@@ -104,6 +115,7 @@ ${room}
 ${pr}${merged}${hashes}
 <div><dt>Recorded</dt><dd><time datetime="${escapeHtml(receipt.at)}">${escapeHtml(receipt.at)}</time></dd></div>
 </dl>
+<p class="meta">${provenNote}</p>
 <p><a href="${escapeHtml(reportHref("receipt", receipt.id))}">Report</a></p>
 </main>
 <footer><a href="${escapeHtml(receipt.startHref)}">Made in Project Room — start your own room</a><p>${LEGAL_FOOTER_LINKS}</p></footer>
