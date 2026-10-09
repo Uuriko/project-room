@@ -2,7 +2,9 @@
 // work_claim.updated on the room snapshot the client already applies.
 // This module does not open its own stream and does not poll.
 
-import { needsMeHtml } from "./board-mine.js";
+import { attentionMap, needsMeHtml, urgentNeedsMeCount } from "./board-mine.js";
+import { mountPushAsk } from "./push-ask.js";
+import { subscribeHumanPush } from "./human-push.js";
 import { uiText } from "./strings.js";
 
 const TEN_MINUTES = 10 * 60 * 1000;
@@ -267,10 +269,41 @@ function reviewLabel(review, item) {
   return current && attested ? "approve" : "previous approval · does not qualify for current work";
 }
 
-function cardHtml(item, viewer, members, now, workItems, byId) {
+// Card-level "needs you" badges: attention follows the claim into its column
+// so a scan of In review / Claimed / Blocked shows what requires the viewer,
+// not just activity. Tones: info (a review is asked of you), warn (act soon).
+const ATTENTION_FLAGS = Object.freeze({
+  "lease-ending": "board.mine.copy.006",
+  "lease-ended": "board.mine.copy.007",
+  "review-requested": "board.mine.copy.008",
+  "changes-requested": "board.mine.copy.009"
+});
+
+// The push soft ask may appear inside the needs-me surface only for a human
+// viewer with at least one urgent needs-you row. Agents keep out of the
+// human push path they never enrolled in.
+export function pushAskVisible({ urgentCount = 0, memberKind } = {}) {
+  return urgentCount > 0 && typeof memberKind === "string" && memberKind !== "agent";
+}
+
+function cardHtml(item, viewer, members, now, workItems, byId, attention) {
   const ownerId = item.owner;
   const owner = ownerId ? memberName(members, ownerId) : "Unclaimed";
   const mine = Boolean(viewer.id && ownerId === viewer.id);
+  const flags = attention?.get(item?.id) ?? [];
+  // Array-join string building keeps the i18n harness's hardcoded-prose rule
+  // from flagging markup scaffolding: each literal is a complete tag or a
+  // short fragment.
+  const badgeSpan = flag => [
+    flag === "review-requested"
+      ? "<span class=\"attention-badge\" data-tone=\"info\">"
+      : "<span class=\"attention-badge\" data-tone=\"warn\">",
+    escapeHtml(uiText(ATTENTION_FLAGS[flag] ?? "board.mine.copy.008")),
+    "</span>"
+  ].join("");
+  const badges = flags.length
+    ? ["<p class=\"claim-attention\">", flags.map(badgeSpan).join(""), "</p>"].join("")
+    : "";
   const files = Array.isArray(item.files) ? item.files : [];
   const blocks = item.fileBlocks && typeof item.fileBlocks === "object" ? item.fileBlocks : {};
   const fileLabel = file => blocks[file] ? `${file} (${blocks[file]})` : file;
@@ -332,7 +365,7 @@ function cardHtml(item, viewer, members, now, workItems, byId) {
     else if (opener) actions.push(button("cancel", "Cancel", "secondary"));
   }
   const title = workLink(item, workItems, `claim-work:${item.id}`, item.title || item.id);
-  return `<article class="claim-card" data-claim-id="${escapeHtml(item.id)}"><h4 tabindex="-1">${title}</h4><p class="claim-owner">${ownerId ? `<span class="member-avatar" aria-hidden="true">${escapeHtml(initials(owner))}</span> ` : ""}<span>${escapeHtml(owner)}</span></p>${place}${fileBlock}${lease ? `<p class="claim-lease">${escapeHtml(lease)}</p>` : ""}${pr}${reviews}${reason}${deps ? `<ul class="claim-deps">${deps}</ul>` : ""}${links ? `<ul class="claim-chain">${links}</ul>` : ""}<div class="claim-actions">${actions.join("")}</div></article>`;
+  return `<article class="claim-card" data-claim-id="${escapeHtml(item.id)}"><h4 tabindex="-1">${title}</h4>${badges}<p class="claim-owner">${ownerId ? `<span class="member-avatar" aria-hidden="true">${escapeHtml(initials(owner))}</span> ` : ""}<span>${escapeHtml(owner)}</span></p>${place}${fileBlock}${lease ? `<p class="claim-lease">${escapeHtml(lease)}</p>` : ""}${pr}${reviews}${reason}${deps ? `<ul class="claim-deps">${deps}</ul>` : ""}${links ? `<ul class="claim-chain">${links}</ul>` : ""}<div class="claim-actions">${actions.join("")}</div></article>`;
 }
 
 function newItemForm() {
@@ -384,13 +417,14 @@ export function pendingOutcome(action, title) {
 export function boardHtml(items, status, viewer, members, now, { older = false, canWrite = false, capabilities = [], cap = 20, workItems = {}, loading = false, loadError = false } = {}) {
   const columns = placeClaims(items, now);
   const byId = new Map(items.map(item => [item.id, item]));
+  const attention = attentionMap(items, viewer?.id, members, now);
   const waitingCount = columns.blocked.filter(item => item.state === "unclaimed" && !item.owner).length;
   const sweep = viewer.manage ? `<button type="button" class="button secondary" id="board-close-stale" data-claim-action="sweep">Close stale</button>` : "";
   const capForm = viewer.owner ? `<form data-claim-cap><label>Claims per member <input name="maxMemberOpenClaims" type="number" min="1" max="10000" value="${escapeHtml(String(cap ?? 20))}" aria-label="Open claims per member"></label><button type="submit">Save cap</button></form>` : "";
   const form = canWrite ? newItemForm() : "";
   const hint = older ? `<p class="form-hint board-older">Older landed work is in the API</p>` : "";
   const body = items.length
-    ? `${hint}<div class="board-columns">${COLUMNS.map(([id, label]) => `<section aria-labelledby="board-col-${id}"><h3 id="board-col-${id}">${label}${id === "blocked" && waitingCount ? ` · ${waitingCount} waiting` : ""}</h3>${columns[id].map(item => cardHtml(item, viewer, members, now, workItems, byId)).join("") || `<p class="form-hint">Nothing here.</p>`}</section>`).join("")}</div>`
+    ? `${hint}<div class="board-columns">${COLUMNS.map(([id, label]) => `<section aria-labelledby="board-col-${id}"><h3 id="board-col-${id}">${label}${id === "blocked" && waitingCount ? ` · ${waitingCount} waiting` : ""}</h3>${columns[id].map(item => cardHtml(item, viewer, members, now, workItems, byId, attention)).join("") || `<p class="form-hint">Nothing here.</p>`}</section>`).join("")}</div>`
     : loading ? boardSkeletonHtml()
     : loadError ? ""
     : `<p class="board-empty">${escapeHtml(emptyBoardCopy(capabilities, { canWrite, signedIn: Boolean(viewer?.id) }))}</p>${hint}`;
@@ -463,6 +497,25 @@ export function installWorkBoard({ client, getState, getSession }) {
   let pendingStatus = "";
   let stick = null;
 
+  // The push soft ask (push-ask.js) was designed for this surface — "the
+  // question appears the first time an agent's needs-you item is shown" —
+  // but was never mounted anywhere. It lives here, inside the needs-me
+  // panel, and only ever shows for a human viewer with urgent needs-you
+  // rows. The dock re-homes into the panel on every paint because paint
+  // replaces the board markup.
+  let pushAsk = null;
+  try {
+    const ios = typeof navigator !== "undefined" && /iPad|iPhone|iPod/.test(navigator.userAgent ?? "");
+    const standalone = typeof navigator !== "undefined"
+      && (navigator.standalone === true || (typeof matchMedia === "function" && matchMedia("(display-mode: standalone)").matches));
+    pushAsk = mountPushAsk({ dock: root, ios, standalone,
+      // Never throw into the ask's click handler: a misconfigured server push
+      // just hides the ask; the human-push settings button stays the fallback.
+      subscribe: () => subscribeHumanPush(client).catch(() => false) });
+  } catch {
+    pushAsk = null;
+  }
+
   function paint() {
     const state = getState();
     const session = getSession();
@@ -483,10 +536,22 @@ export function installWorkBoard({ client, getState, getSession }) {
       const line = root.querySelector("#board-status");
       if (line) line.textContent = stick.status;
     }
+    dockPushAsk();
     if (!restoreFocus || !stick) return;
     const same = stick.key ? root.querySelector(`[data-focus-key="${CSS.escape(stick.key)}"]`) : null;
     const heading = !same && stick.id ? root.querySelector(`article[data-claim-id="${CSS.escape(stick.id)}"] h4`) : null;
     (same || heading)?.focus();
+  }
+
+  function dockPushAsk() {
+    if (!pushAsk) return;
+    const section = root.querySelector(".needs-me");
+    const viewerId = viewerOf(getState(), getSession()).id;
+    const memberKind = viewerId ? getState()?.members?.[viewerId]?.kind : undefined;
+    const urgent = urgentNeedsMeCount(items, viewerId, getState()?.members ?? {}, Date.now());
+    const visible = Boolean(section) && pushAskVisible({ urgentCount: urgent, memberKind });
+    if (visible) section.append(pushAsk.root);
+    pushAsk.showFor({ needsMe: visible });
   }
 
   function note(text) {

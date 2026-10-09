@@ -148,5 +148,9 @@
   "human.decisionReceiptUnknown": "Save receipt could not be confirmed",
   "human.decisionRationaleChanged": "Your reason was posted. Review the changed result before deciding.",
   "human.cancelDeleted": "<button type=\"button\" class=\"text-button\" data-pause-run=\"{runId}\" data-cancel=\"true\" data-revision=\"{revision}\">Cancel</button>",
-  "human.deletedRequest": "Deleted request"
+  "human.deletedRequest": "Deleted request",
+  "board.mine.copy.006": "Lease ending soon",
+  "board.mine.copy.007": "Lease ended",
+  "board.mine.copy.008": "Review requested",
+  "board.mine.copy.009": "Changes requested"
 }
