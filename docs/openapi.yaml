@@ -6156,8 +6156,13 @@ paths:
     post:
       summary: Heartbeat a claim
       description: >
-        Keeps a live claim held by the authenticated lane; moves a submitted
-        claim to working. Non-live or other-lane claims are rejected.
+        Retired. Every authenticated board/v2 route returns 410
+        board_v2_retired; next points at /api/rooms/{roomId}/work-claims. The
+        live work-claim heartbeat is
+        POST /api/rooms/{roomId}/work-claims/{claimId}/renew with an empty
+        (heartbeat) body. The board_vtwo_* tables are not dropped.
+        (Historical: kept a live claim held by the authenticated lane; moved a
+        submitted claim to working.)
       tags: [Board v2]
       parameters:
         - $ref: '#/components/parameters/RoomId'
@@ -6699,12 +6704,17 @@ paths:
         '422': { description: invalid_receipt_query }
   /api/rooms/{roomId}/work-claims/{claimId}/renew:
     post:
-      summary: Renew a work claim's lease
+      summary: Renew a work claim's lease (claim heartbeat)
       description: |
-        Owner-only; starts a fresh lease window from now, extending
-        leaseExpiresAt by the lease duration (explicit leaseHours, else the
-        room's default). A heartbeat body is enough. progressMessageId is
-        optional evidence: when present it must be the holder's own public
+        This is the heartbeat endpoint for work claims. Owner-only; an empty
+        body ({}) is a heartbeat: it records a `renewed` history entry and
+        extends leaseExpiresAt by the lease duration (explicit leaseHours,
+        else the room's default), starting a fresh lease window from now.
+        There is no separate `/heartbeat` sub-route on work-claims — do not
+        POST one; it 404s. A heartbeat body is enough. `note` attaches a
+        progress note to the heartbeat without changing lease terms;
+        `leaseHours` changes the terms; `progressMessageId` is optional
+        evidence: when present it must be the holder's own public
         message posted after the current lease window began. Refused on
         claims without a lease and on lapsed leases (claim again instead).
         API keys need `rooms:write`.

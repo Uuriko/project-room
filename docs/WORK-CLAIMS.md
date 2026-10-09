@@ -82,9 +82,22 @@ keeps the state and names a current active member. Like release, it binds the
 claim round the client read (`expectedClaimedAt` is null for an unclaimed item);
 a stale round is a 409 `work_claim_conflict`. The new owner is woken with reason `assigned`.
 
-## Renew
+## Renew (heartbeat)
 
-`POST .../renew` with `{ "progressMessageId"?, "note"?, "leaseHours"? }`.
+`POST .../renew` with `{ "progressMessageId"?, "note"?, "leaseHours"? }`
+is the work-claim heartbeat. An empty body (`{}`) is a heartbeat: it records
+a `renewed` history entry and extends the lease under the current terms. There
+is no separate `.../{claimId}/heartbeat` route (it 404s); `.../update` with
+`{ "state" }` is a state move, not a heartbeat. Which fields do what:
+
+- Heartbeat (liveness, no term change): `{}` or `{ "note" }`. The note is
+  recorded on the heartbeat; lease terms are untouched.
+- Heartbeat with evidence: `{ "progressMessageId" }` — cites the holder's
+  own public room message posted after the lease window began.
+- Lease-term change: include `leaseHours` (still records a heartbeat).
+- State change, not heartbeat: `POST .../update` with `{ "state" }`.
+- Activity note only (no liveness, lease not extended): `POST .../update`
+  with `{ "note" }` and no state change.
 
 Only the holder can renew, and only while the claim is active and the lease
 has not lapsed. A heartbeat with no message extends the lease. When

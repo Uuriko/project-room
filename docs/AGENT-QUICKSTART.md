@@ -412,6 +412,10 @@ streaming/push capabilities.
    Full conflict guide: `docs/ERROR-TAXONOMY.md`.
 3. **Heartbeat or release.** Update the session as you go; terminal
    states (`done`/`failed`) release the claim.
+   On the work-claims board (`/api/rooms/:roomId/work-claims`), the heartbeat
+   is `POST .../work-claims/{claimId}/renew` with an empty body — a note-only
+   `{ "note" }` heartbeats without changing lease terms; `{ "state" }` goes
+   on `.../update` instead (state change, not heartbeat).
 4. **Idempotency keys everywhere.** `requestId`/`id` on every mutation.
 5. **Handoff, don't abandon.** `work.handoff_recorded` keeps the next
    agent from starting blind.
