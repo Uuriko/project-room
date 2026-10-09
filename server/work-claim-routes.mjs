@@ -147,15 +147,14 @@ const BOARD_QUERY = new Set(["queue", "auth", "limit", "cursor", "state", "view"
 // reviews, attestations, dependsOn). Trust markers stamped before the
 // projection survive, so member-authored titles stay marked untrusted.
 function summarizeBoardClaim(item) {
-  const summary = {
+  return {
     id: item.id,
     title: item.title ?? item.id,
     state: item.state,
     owner: item.owner ?? null,
     leaseExpiresAt: item.leaseExpiresAt ?? null,
+    ...(item.untrusted === true ? { untrusted: true } : {}),
   };
-  if (item.untrusted === true) summary.untrusted = true;
-  return summary;
 }
 
 function resolveWorkClaimAccess(store, roomId, auth) {
@@ -199,9 +198,11 @@ function mayReviewWorkClaims(access) {
     && (mayWriteWorkClaims(access) || (access.member.permissions ?? []).includes("verify")));
 }
 
+const memberIdsWhere = (members, pred) => Object.values(members).filter(pred).map(member => member.id);
+
 const reviewersOf = (store, roomId) => {
   const authority = store.roomAuthority(roomId);
-  return Object.values(authority.members).filter(member => mayReviewWorkClaims({ ownerId: authority.ownerId, member })).map(member => member.id);
+  return memberIdsWhere(authority.members, member => mayReviewWorkClaims({ ownerId: authority.ownerId, member }));
 };
 
 function mayManageAnyClaim(access) {
@@ -267,14 +268,21 @@ const boardLimitOf = (reject, raw) => {
   return Number(raw);
 };
 
-const boardCursorOf = (reject, raw) => {
+// Decoded opaque base64url JSON cursor, or null when it is not one.
+const jsonCursorOf = value => {
   try {
-    const parsed = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      if (parsed.q === "ready" && typeof parsed.i === "string") return parsed;
-      if (typeof parsed.u === "string" && typeof parsed.i === "string" && parsed.q === undefined) return parsed;
-    }
-  } catch { /* rejected below */ }
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+  } catch { /* rejected by the caller */ }
+  return null;
+};
+
+const boardCursorOf = (reject, raw) => {
+  const parsed = jsonCursorOf(raw);
+  if (parsed) {
+    if (parsed.q === "ready" && typeof parsed.i === "string") return parsed;
+    if (typeof parsed.u === "string" && typeof parsed.i === "string" && parsed.q === undefined) return parsed;
+  }
   invalidInput(reject, "cursor as the opaque nextCursor from a prior work-claims page");
 };
 
@@ -301,25 +309,23 @@ const finishPage = (list, start, limit, cursorOf) => {
   };
 };
 
+const startAfter = (cursor, list, after) => {
+  if (!cursor) return 0;
+  const start = list.findIndex(after);
+  return start < 0 ? list.length : start;
+};
+
 function pageBoard(items, limit, cursor, state = null) {
   const sorted = [...items].sort(compareBoard);
-  let start = 0;
-  if (cursor) {
-    start = sorted.findIndex(item => {
-      const updatedAt = claimUpdatedAt(item);
-      return updatedAt < cursor.u || (updatedAt === cursor.u && item.id > cursor.i);
-    });
-    if (start < 0) start = sorted.length;
-  }
+  const start = startAfter(cursor, sorted, item => {
+    const updatedAt = claimUpdatedAt(item);
+    return updatedAt < cursor.u || (updatedAt === cursor.u && item.id > cursor.i);
+  });
   return finishPage(sorted, start, limit, last => ({ u: claimUpdatedAt(last), i: last.id, s: state }));
 }
 
 function pageReady(items, limit, cursor) {
-  let start = 0;
-  if (cursor) {
-    start = items.findIndex(item => item.id > cursor.i);
-    if (start < 0) start = items.length;
-  }
+  const start = startAfter(cursor, items, item => item.id > cursor.i);
   return finishPage(items, start, limit, last => ({ q: "ready", i: last.id }));
 }
 
@@ -391,12 +397,8 @@ function sweepRoom(registry, roomId, nowMs, onRelease = () => {}) {
   return released;
 }
 
-const verifiersOf = (store, roomId) => {
-  const members = store.roomAuthority(roomId).members;
-  return Object.values(members)
-    .filter(member => member && member.active !== false && (member.permissions ?? []).includes("verify"))
-    .map(member => member.id);
-};
+const verifiersOf = (store, roomId) => memberIdsWhere(store.roomAuthority(roomId).members,
+  member => member && member.active !== false && (member.permissions ?? []).includes("verify"));
 
 const runPure = (reject, fn) => {
   try { return fn(); }
@@ -426,8 +428,7 @@ const doneStampOf = item => [...item.history].reverse().find(entry => entry.acti
 const doneAtMsOf = item => { const stamp = doneStampOf(item); return stamp ? Date.parse(stamp.at) : 0; };
 
 const receiptOf = item => {
-  const stamp = doneStampOf(item);
-  const note = stamp?.note;
+  const note = doneStampOf(item)?.note;
   const text = typeof note === "string" && note.trim().length > 0 ? note : (item.title ?? item.id);
   return Object.freeze({
     receiptId: `rc_${item.id}`,
@@ -461,13 +462,9 @@ const receiptsQueryOf = (reject, params) => {
   return { q, tags, limit, cursor: params.get("cursor") };
 };
 
-const cursorEncode = offset => Buffer.from(JSON.stringify({ offset }), "utf8").toString("base64url");
 const cursorDecode = (reject, value) => {
-  try {
-    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      && Number.isSafeInteger(parsed.offset) && parsed.offset >= 0) return parsed.offset;
-  } catch { /* fall through to the rejection below */ }
+  const parsed = jsonCursorOf(value);
+  if (parsed && Number.isSafeInteger(parsed.offset) && parsed.offset >= 0) return parsed.offset;
   reject(400, "bad_cursor", "cursor must be the opaque nextCursor from a prior receipts response");
 };
 
@@ -555,7 +552,7 @@ export function linkWorkClaimPullRequest({ store, roomId, auth, claimId, data, r
   const reject = serviceReject;
   const run = () => {
     const current = callerOf(reject, auth, reauthorize);
-    const access = mutationPrelude(reject, { store, roomId, current, registry, claimId,
+    mutationPrelude(reject, { store, roomId, current, registry, claimId,
       action: "POST work-claim update", archivedMessage: "This room is archived; no PR link was recorded" });
     if (!shape(data, { required: ["appendPullRequest", "expectedClaimedAt", "expectedHistoryLength"] })) {
       invalidInput(reject, "{appendPullRequest, expectedClaimedAt, expectedHistoryLength} without other update fields");
@@ -834,7 +831,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const nextOffset = offset + limit;
     return json(res, 200, stampReceipts({
       receipts: page.map(receiptOf),
-      nextCursor: nextOffset < ranked.length ? cursorEncode(nextOffset) : null,
+      nextCursor: nextOffset < ranked.length ? boardCursorEncode({ offset: nextOffset }) : null,
     }, caller));
   }
   if (workClaimRoute === "sweep" && req.method === "POST") {
