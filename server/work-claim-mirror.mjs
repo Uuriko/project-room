@@ -61,7 +61,12 @@ function claimBoard(store, roomId, actorId, id, data, nowMs) {
       id, title: data.workItemId, workItemId: data.workItemId,
       files: fields.files, pullRequests: fields.pullRequests, repo: fields.repo, branch: fields.branch
     }, { now: nowMs, agentId: actorId });
-    registry.set(roomId, item);
+    // PRODUCT-200 D4 (2026-10-09): the board write must emit its room
+    // event at the mutation site. A bare registry.set here left the create
+    // invisible to the event stream (event-replay could not rebuild the
+    // board: a "claimed" event for an item that was never "created").
+    // The mirror's commit() writes the row and emits, like the routes'.
+    commit(store, roomId, actorId, item, "created", nowMs);
   }
   if (item.state !== "unclaimed") return item;
   const held = registry.list(roomId).filter(entry => entry.owner === actorId && ACTIVE.has(entry.state)).length;
