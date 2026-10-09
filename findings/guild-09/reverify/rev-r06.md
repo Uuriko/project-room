@@ -21,3 +21,9 @@
 ## Verdict
 
 - REBASE FAILED — branch may be stale/conflicted; results are on the un-rebased head.
+- CONFLICT DETAIL (guild-09, verified 2026-10-09): rebase onto origin/main
+  stops at `server/work-claim-routes.mjs` — commit db43c1af9 ("qa8: closed/done
+  Board items answer 409 work_claim_terminal on every verb") conflicts with
+  main. That file is claim-route code (guild-08 territory); the branch owner
+  must resolve. The branch's my-slice suite (qa8-board-terminal-errors.test.js)
+  is green on the un-rebased head.

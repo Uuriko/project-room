@@ -19,3 +19,8 @@
 ## Verdict
 
 - REBASE FAILED — branch may be stale/conflicted; results are on the un-rebased head.
+- CONFLICT DETAIL (guild-09, verified 2026-10-09): rebase onto origin/main
+  stops at `server/store.mjs` — commit d9dc50b04 ("DMs: the room owner cannot
+  edit a DM between two other members") conflicts with main's store.mjs.
+  Branch owner must resolve. The branch's my-slice suite (owner-dm-edit.test.js)
+  is green on the un-rebased head; no test/assert removals.

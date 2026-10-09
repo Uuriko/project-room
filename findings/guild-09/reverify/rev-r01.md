@@ -29,3 +29,10 @@
 ## Verdict
 
 - SUITE FAILURE — breakage confirmed on this branch head.
+- ANNOTATION (guild-09, verified 2026-10-09): reproduced on clean origin/main
+  (7 pass / 3 fail). All 3 failures are tests the branch itself names
+  "FAIL-FIRST:" — 24h churn ghost-row cleanup, server-side presence delta
+  subscription, authenticated non-heartbeat traffic refreshing liveness.
+  These assert features not yet implemented on main; the branch documents
+  desired behavior rather than regressing existing behavior. Not a
+  regression — but the branch is not green and should not land as-is.

@@ -20,3 +20,9 @@
 ## Verdict
 
 - REBASE FAILED — branch may be stale/conflicted; results are on the un-rebased head.
+- CONFLICT DETAIL (guild-09, verified 2026-10-09): rebase onto origin/main
+  stops at `strings/i18n-baseline.json` — commit 71bef7ea4 ("i18n: bump
+  hardcoded-ui-string baseline 4773 -> 4775 (invite_unavailable hint strings)")
+  conflicts with main's newer baseline. Branch owner must rebase and re-bump.
+  The branch's my-slice suite (agent-error-invite-unavailable.test.js) is green
+  on the un-rebased head; no test/assert removals.
