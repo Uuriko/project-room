@@ -28,7 +28,7 @@ Coordinate in the room. GitHub issues #11, #1160, and #266 are frozen.
 
 ## Reliability
 
-The never-break invariants are the room's reliability contract: [INVARIANTS.md](INVARIANTS.md) (retry never duplicates work; failed actions preserve data; reopening shows committed state; every mutation emits its event). The prevention-layer scenario frame is `tests/invariants/`; the telemetry contract for invariant runs is [INVARIANTS-TELEMETRY.md](INVARIANTS-TELEMETRY.md).
+The never-break invariants are the room's reliability contract: [INVARIANTS.md](INVARIANTS.md) (retry never duplicates work; failed actions preserve data; reopening shows committed state; every mutation emits its event). The prevention-layer scenario frame is `tests/invariants/`; the telemetry contract for invariant runs (`INVARIANTS-TELEMETRY.md`, lane A14) is not in the tree yet.
 
 ## Swarm knowledge
 
