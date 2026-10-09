@@ -370,117 +370,124 @@ function loadJson(path, label) {
   return JSON.parse(readFileSync(path, "utf8"));
 }
 
-const args = process.argv.slice(2);
-const mode = args.find((a) => ["--extract", "--check", "--baseline", "--report", "--counts"].includes(a)) ?? "--check";
+// Run the CLI only when executed directly. Importing the module (the test
+// file does) must not run --check: with declared growth and the committed
+// baseline untouched, an import-time --check in a job without the PR event
+// would exit 1 and fail the importing test file.
+const isCli = Boolean(process.argv[1]) && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isCli) {
+  const args = process.argv.slice(2);
+  const mode = args.find((a) => ["--extract", "--check", "--baseline", "--report", "--counts"].includes(a)) ?? "--check";
 
-if (mode === "--counts") {
-  console.log(JSON.stringify(summarize(runExtraction()).counts));
-} else if (mode === "--extract") {
-  console.log(JSON.stringify(runExtraction(), null, 2));
-} else if (mode === "--report") {
-  const violations = runExtraction();
-  const s = summarize(violations);
-  console.log(`# i18n readiness report\n`);
-  console.log(`- files scanned: ${scannableRels().length}`);
-  console.log(`- violations: ${s.total} across ${s.files} files`);
-  for (const r of RULES) console.log(`- ${r}: ${s.counts[r]}`);
-} else if (mode === "--baseline") {
-  const violations = runExtraction();
-  const s = summarize(violations);
-  const baseline = {
-    generatedAt: new Date().toISOString(),
-    note: "Ratchet baseline: counts on the tree it was generated from. --check fails when any rule count grows beyond this.",
-    counts: s.counts,
-    total: s.total,
-  };
-  writeFileSync(BASELINE_PATH, JSON.stringify(baseline, null, 2) + "\n");
-  const scanned = scannableRels();
-  writeFileSync(SCOPE_PATH, JSON.stringify(scanned, null, 2) + "\n");
-  console.log(`baseline written to ${relative(root, BASELINE_PATH)}: ${JSON.stringify(s.counts)}`);
-  console.log(`scope manifest written to ${relative(root, SCOPE_PATH)}: ${scanned.length} files`);
-} else if (mode === "--check") {
-  const baseline = loadJson(BASELINE_PATH);
-  if (!baseline) {
-    console.error("i18n-harness: no baseline (strings/i18n-baseline.json). Run `node scripts/i18n-harness.mjs --baseline`.");
-    process.exit(2);
-  }
-  const manifest = loadJson(SCOPE_PATH);
-  if (!manifest) {
-    console.error("i18n-harness: no scope manifest (strings/i18n-scope.json). Run `node scripts/i18n-harness.mjs --baseline`.");
-    process.exit(2);
-  }
-  let failed = false;
-  const violations = runExtraction();
-  const s = summarize(violations);
-  const scanned = scannableRels();
+  if (mode === "--counts") {
+    console.log(JSON.stringify(summarize(runExtraction()).counts));
+  } else if (mode === "--extract") {
+    console.log(JSON.stringify(runExtraction(), null, 2));
+  } else if (mode === "--report") {
+    const violations = runExtraction();
+    const s = summarize(violations);
+    console.log(`# i18n readiness report\n`);
+    console.log(`- files scanned: ${scannableRels().length}`);
+    console.log(`- violations: ${s.total} across ${s.files} files`);
+    for (const r of RULES) console.log(`- ${r}: ${s.counts[r]}`);
+  } else if (mode === "--baseline") {
+    const violations = runExtraction();
+    const s = summarize(violations);
+    const baseline = {
+      generatedAt: new Date().toISOString(),
+      note: "Ratchet baseline: counts on the tree it was generated from. --check fails when any rule count grows beyond this.",
+      counts: s.counts,
+      total: s.total,
+    };
+    writeFileSync(BASELINE_PATH, JSON.stringify(baseline, null, 2) + "\n");
+    const scanned = scannableRels();
+    writeFileSync(SCOPE_PATH, JSON.stringify(scanned, null, 2) + "\n");
+    console.log(`baseline written to ${relative(root, BASELINE_PATH)}: ${JSON.stringify(s.counts)}`);
+    console.log(`scope manifest written to ${relative(root, SCOPE_PATH)}: ${scanned.length} files`);
+  } else if (mode === "--check") {
+    const baseline = loadJson(BASELINE_PATH);
+    if (!baseline) {
+      console.error("i18n-harness: no baseline (strings/i18n-baseline.json). Run `node scripts/i18n-harness.mjs --baseline`.");
+      process.exit(2);
+    }
+    const manifest = loadJson(SCOPE_PATH);
+    if (!manifest) {
+      console.error("i18n-harness: no scope manifest (strings/i18n-scope.json). Run `node scripts/i18n-harness.mjs --baseline`.");
+      process.exit(2);
+    }
+    let failed = false;
+    const violations = runExtraction();
+    const s = summarize(violations);
+    const scanned = scannableRels();
 
-  // 1. Scope lock: manifest-listed files must still be scanned (no silent
-  //    unscanning). A modified manifest must exactly match the current scan.
-  const { dropped, extra } = checkScopeConsistency(manifest, scanned);
-  if (dropped.length > 0) {
-    console.error(`i18n-harness FAIL: scan scope regressed, ${dropped.length} manifest file(s) no longer scanned (showing 5): ${dropped.slice(0, 5).join(", ")}. Regenerate with --baseline if files were legitimately removed.`);
-    failed = true;
-  }
-  if (fileModifiedVsBase("strings/i18n-scope.json") && (dropped.length > 0 || extra.length > 0)) {
-    console.error(`i18n-harness FAIL: scope manifest modified but does not match the current scan (${extra.length} unscanned additions, ${dropped.length} drops). Regenerate with --baseline; hand-edited manifests fail.`);
-    failed = true;
-  }
-  // Independent scope pin: every tracked file in the scan surface must be in
-  // the manifest. Defeats paired regeneration (narrow globs + --baseline):
-  // the shrunken manifest fails because the tree still lists the files.
-  // Never silently skips -- git ls-files either returns the tree or this
-  // fails closed.
-  const expected = expectedTrackedFiles();
-  if (expected === null) {
-    console.error("i18n-harness FAIL: cannot enumerate tracked files (git ls-files failed)");
-    failed = true;
-  } else {
-    const unpinned = findUnpinnedFiles(expected, manifest);
-    if (unpinned.length > 0) {
-      console.error(`i18n-harness FAIL: ${unpinned.length} tracked file(s) in the scan surface are not in strings/i18n-scope.json (showing 5): ${unpinned.slice(0, 5).join(", ")}. Run \`node scripts/i18n-harness.mjs --baseline\`.`);
+    // 1. Scope lock: manifest-listed files must still be scanned (no silent
+    //    unscanning). A modified manifest must exactly match the current scan.
+    const { dropped, extra } = checkScopeConsistency(manifest, scanned);
+    if (dropped.length > 0) {
+      console.error(`i18n-harness FAIL: scan scope regressed, ${dropped.length} manifest file(s) no longer scanned (showing 5): ${dropped.slice(0, 5).join(", ")}. Regenerate with --baseline if files were legitimately removed.`);
       failed = true;
     }
-  }
-
-  // 2. Baseline integrity: a new or modified baseline must exactly match a
-  //    fresh scan of the current tree. This closes the bootstrap gap: there
-  //    is no earlier baseline to compare against, so an inflated (or stale)
-  //    committed baseline fails instead of becoming the new truth. An
-  //    untouched baseline gets the ratchet: fresh counts must not exceed the
-  //    larger of the committed count and the base tree's own count. The base
-  //    tree term means a PR never has to commit strings/i18n-baseline.json
-  //    just because main moved (that file was a merge-conflict magnet);
-  //    real growth over the base needs an explicit growthAllowance().
-  if (fileModifiedVsBase("strings/i18n-baseline.json")) {
-    for (const r of RULES) {
-      const now = s.counts[r] ?? 0;
-      const committed = baseline.counts?.[r] ?? 0;
-      if (now !== committed) {
-        console.error(`i18n-harness FAIL: baseline counts do not match fresh scan on ${r}: committed ${committed}, fresh ${now}. Regenerate with --baseline on this tree; inflated baselines fail.`);
+    if (fileModifiedVsBase("strings/i18n-scope.json") && (dropped.length > 0 || extra.length > 0)) {
+      console.error(`i18n-harness FAIL: scope manifest modified but does not match the current scan (${extra.length} unscanned additions, ${dropped.length} drops). Regenerate with --baseline; hand-edited manifests fail.`);
+      failed = true;
+    }
+    // Independent scope pin: every tracked file in the scan surface must be in
+    // the manifest. Defeats paired regeneration (narrow globs + --baseline):
+    // the shrunken manifest fails because the tree still lists the files.
+    // Never silently skips -- git ls-files either returns the tree or this
+    // fails closed.
+    const expected = expectedTrackedFiles();
+    if (expected === null) {
+      console.error("i18n-harness FAIL: cannot enumerate tracked files (git ls-files failed)");
+      failed = true;
+    } else {
+      const unpinned = findUnpinnedFiles(expected, manifest);
+      if (unpinned.length > 0) {
+        console.error(`i18n-harness FAIL: ${unpinned.length} tracked file(s) in the scan surface are not in strings/i18n-scope.json (showing 5): ${unpinned.slice(0, 5).join(", ")}. Run \`node scripts/i18n-harness.mjs --baseline\`.`);
         failed = true;
       }
     }
-  } else {
-    const ref = baseRef();
-    const baseCounts = baseTreeCounts(ref);
-    if (!baseCounts) console.log(`i18n-harness: base tree ${ref} not available; ratchet uses the committed baseline only`);
-    const allowance = growthAllowance();
-    for (const r of RULES) {
-      const now = s.counts[r] ?? 0;
-      const committed = baseline.counts?.[r] ?? 0;
-      const base = Math.max(committed, baseCounts?.[r] ?? 0);
-      if (now > base) {
-        if (allowance) {
-          console.log(`i18n-harness: ${r} grew ${base} -> ${now}, allowed by ${allowance}`);
-        } else {
-          console.error(`i18n-harness FAIL: ${r} grew ${base} -> ${now} (baseline ratchet; base ${ref}). Move the copy into strings/en.json, or declare it: PR label i18n-growth or a PR body line "i18n-growth: <reason>" (then re-run lint), I18N_ALLOW_GROWTH=1 locally. Do not commit a regenerated baseline for this.`);
+
+    // 2. Baseline integrity: a new or modified baseline must exactly match a
+    //    fresh scan of the current tree. This closes the bootstrap gap: there
+    //    is no earlier baseline to compare against, so an inflated (or stale)
+    //    committed baseline fails instead of becoming the new truth. An
+    //    untouched baseline gets the ratchet: fresh counts must not exceed the
+    //    larger of the committed count and the base tree's own count. The base
+    //    tree term means a PR never has to commit strings/i18n-baseline.json
+    //    just because main moved (that file was a merge-conflict magnet);
+    //    real growth over the base needs an explicit growthAllowance().
+    if (fileModifiedVsBase("strings/i18n-baseline.json")) {
+      for (const r of RULES) {
+        const now = s.counts[r] ?? 0;
+        const committed = baseline.counts?.[r] ?? 0;
+        if (now !== committed) {
+          console.error(`i18n-harness FAIL: baseline counts do not match fresh scan on ${r}: committed ${committed}, fresh ${now}. Regenerate with --baseline on this tree; inflated baselines fail.`);
           failed = true;
         }
       }
+    } else {
+      const ref = baseRef();
+      const baseCounts = baseTreeCounts(ref);
+      if (!baseCounts) console.log(`i18n-harness: base tree ${ref} not available; ratchet uses the committed baseline only`);
+      const allowance = growthAllowance();
+      for (const r of RULES) {
+        const now = s.counts[r] ?? 0;
+        const committed = baseline.counts?.[r] ?? 0;
+        const base = Math.max(committed, baseCounts?.[r] ?? 0);
+        if (now > base) {
+          if (allowance) {
+            console.log(`i18n-harness: ${r} grew ${base} -> ${now}, allowed by ${allowance}`);
+          } else {
+            console.error(`i18n-harness FAIL: ${r} grew ${base} -> ${now} (baseline ratchet; base ${ref}). Move the copy into strings/en.json, or declare it: PR label i18n-growth or a PR body line "i18n-growth: <reason>" (then re-run lint), I18N_ALLOW_GROWTH=1 locally. Do not commit a regenerated baseline for this.`);
+            failed = true;
+          }
+        }
+      }
     }
+    if (failed) process.exit(1);
+    console.log(`i18n-harness OK: ${s.total} violations within baseline ${JSON.stringify(baseline.counts)}`);
   }
-  if (failed) process.exit(1);
-  console.log(`i18n-harness OK: ${s.total} violations within baseline ${JSON.stringify(baseline.counts)}`);
 }
 
 export { CATALOG_PATH, BASELINE_PATH, RULES };
