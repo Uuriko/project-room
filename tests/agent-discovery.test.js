@@ -309,6 +309,12 @@ test("uppercase /SKILL.md serves the agent skill, distinct from the llms.txt pac
   assert.ok(skill.body.includes("Content-Encoding: zstd"), "skill documents the zstd dead end and recovery");
   assert.ok(skill.body.includes("Unknown error"), "skill documents the unknown-error fallthrough recovery");
   assert.ok(skill.body.includes("rooms: []"), "skill documents the fresh-mint 401 / rooms dead end");
+  // PRODUCT-200 A2: an empty match needs honest recovery guidance — what the
+  // empty board means, how to watch for new work, and the no-waitlist reality
+  // (QA-200: 7/7 tasks submitted -> match: [] with zero next steps).
+  assert.ok(skill.body.includes("There is no waitlist and no notification"), "skill states there is no waitlist or notification for new tasks");
+  assert.ok(skill.body.includes("claim.state"), "skill names the claim state a watcher checks for");
+  assert.ok(!skill.body.includes("the list refills as lanes publish work"), "skill drops the vague refill promise");
   assert.ok(!FORBIDDEN.test(skill.body), "skill stays secret-free");
   for (const path of ["/room/SKILL.md", "/project-room/SKILL.md"]) {
     assert.ok(DISCOVERY_PATHS.includes(path), path);
