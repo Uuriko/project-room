@@ -266,6 +266,33 @@ const STREAM_DRAIN_GRACE_MS = 5000;
 // Returns the cached value for key, marking it most-recently-used; when key is
 // absent, makeValue() builds it, the least-recently-used entry is evicted at
 // capacity, and the new value is stored. Exported for unit tests.
+// Per-stream bounded write queue. Every byte a stream emits goes through
+// this queue; the socket write itself is always fire-and-forget — the pump
+// NEVER awaits a write — so one slow consumer can never stall the room or
+// its peers. When the pending bytes exceed the cap the queue reports
+// lagging and the stream is closed alone with a final `stream_lagging`
+// event (wire protocol unchanged; the client resumes with Last-Event-ID).
+// The F1 shared pump (wave300-fanout-perf) reuses this queue per stream in
+// its fan-out step: check queue.lagging() before writing each event, skip
+// the stream for the rest of the tick when it trips, and run the same lag
+// close path. The shared fetch never waits on a stream's socket. Exported
+// for unit tests.
+export function createStreamWriteQueue(target, capBytes) {
+  const queue = {
+    capBytes,
+    pendingBytes: () => target.writableLength,
+    lagging: () => target.writableLength > capBytes,
+    // Writes one chunk; returns false when the write pushed the queue over
+    // the cap (or the socket is gone) — the caller must stop feeding this
+    // stream and run the lag close path instead of writing more.
+    write(chunk) {
+      if (target.destroyed || target.writableEnded) return false;
+      target.write(chunk);
+      return !queue.lagging();
+    },
+  };
+  return queue;
+}
 export function touchLruEntry(map, key, makeValue, capacity) {
   if (map.has(key)) {
     const value = map.get(key);
@@ -845,32 +872,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     const text = await readText(req, limit, actualBytes => new ServiceError(413, "too_large", `Request body is ${actualBytes} bytes; the limit is ${limit} bytes`));
     try { const value = JSON.parse(text); if (!value || Array.isArray(value) || typeof value !== "object") throw new Error(); return value; }
     catch { reject(400, "invalid_json", "Expected a JSON object"); }
-  }
-  // Per-stream bounded write queue. Every byte a stream emits goes through
-  // this queue; the socket write itself is always fire-and-forget — the pump
-  // NEVER awaits a write — so one slow consumer can never stall the room or
-  // its peers. When the pending bytes exceed the cap the queue reports
-  // lagging and the stream is closed alone with a final `stream_lagging`
-  // event (wire protocol unchanged; the client resumes with Last-Event-ID).
-  // The F1 shared pump (wave300-fanout-perf) reuses this queue per stream in
-  // its fan-out step: check queue.lagging() before writing each event, skip
-  // the stream for the rest of the tick when it trips, and run the same lag
-  // close path. The shared fetch never waits on a stream's socket.
-  function createStreamWriteQueue(target, capBytes) {
-    const queue = {
-      capBytes,
-      pendingBytes: () => target.writableLength,
-      lagging: () => target.writableLength > capBytes,
-      // Writes one chunk; returns false when the write pushed the queue over
-      // the cap (or the socket is gone) — the caller must stop feeding this
-      // stream and run the lag close path instead of writing more.
-      write(chunk) {
-        if (target.destroyed || target.writableEnded) return false;
-        target.write(chunk);
-        return !queue.lagging();
-      },
-    };
-    return queue;
   }
   function stream(req, res, token, roomId, after, auth, operationId) {
     const binding = auth.sessionBinding;
