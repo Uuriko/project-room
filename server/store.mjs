@@ -150,9 +150,11 @@ import { LandQueue, landQueueSchema, migrateLandQueueColumns } from "./land-queu
 import { MembersDirectory, membersDirectorySchema } from "./members-directory.mjs"; // RC-2026-09-24-202: members directory + skill cards.
 import {
   MENTION_TIMEOUT_MS_DEFAULT, MENTION_TIMEOUT_MS_MIN, MENTION_TIMEOUT_MS_MAX,
-  assertTransitionMention, identityNamesForRoom, resolveMentionTargetsInText, mentionStateSchema,
+  MAX_MENTIONS_PER_MESSAGE,
+  assertTransitionMention, identityNamesForRoom, resolveMentionTargetsInText, resolveMentionTargetsCapped, mentionStateSchema,
   mentionTargetWarnings,
 } from "./mention-lifecycle.mjs"; // #658: mention lifecycle state machine + schema.
+import { createMentionBudgetRegistry, mentionBudgetNote } from "./mention-budgets.mjs"; // FIX-79: per-sender notification budgets.
 import { activitySchema, recordActivityEvents } from "./activity.mjs"; // Attention: activity feed, read horizons, saved messages, thread mutes.
 import { AgentInvites, agentInviteSchema } from "./agent-invites.mjs";
 import { ReferralInvites, referralInviteSchema } from "./referral-invites.mjs";
@@ -1244,6 +1246,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.agentPlugin = new AgentPluginStore(this); // Lane D: scoped API keys, directory cards, webhook subs (RC-2026-09-18-010).
     this.workWakes = new WorkWakes(this); // Opt-in pointer-only work delivery on heartbeat reads.
     this.agentHeartbeats = new AgentHeartbeats(this); // RC-2026-09-18-051: wakeable agent presence (durable host heartbeats + wake queue).
+    this.mentionBudgets = createMentionBudgetRegistry({ now: () => this.now() }); // FIX-79: per-sender notification budgets (in-memory token buckets).
     this.landQueue = new LandQueue(this);
     this.membersDirectory = new MembersDirectory(this); // RC-2026-09-24-202: members directory + evidence-backed skill cards.
     this.projectOffers = new ProjectOffers(this);
@@ -4874,6 +4877,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, command.data.memberId);
         this.reminders.retireMember(roomId, command.data.memberId);
       }
+      let mentionPlan = null; // FIX-79: one capped+budgeted mention plan per message.posted, shared by all fanout sites.
       // RC-2026-09-18-051: wake-on-mention. An @-mention or DM addressed to
       // an offline wakeable agent enqueues a wake signal (delivered on the
       // agent's next heartbeat) and journals an agent.wake webhook delivery
@@ -4881,12 +4885,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // transaction as the message event, so a wake is never recorded
       // without its triggering message.
       if (command.type === T.MESSAGE_POSTED) {
-        this.maybeWakeOnMention(roomId, state, auth.member.id, command.data, incoming.id);
+        // FIX-79: resolve the capped, budget-shed mention plan ONCE per
+        // message; every fanout site below consumes this same delivered set.
+        mentionPlan = this.planMentionFanout(roomId, state, auth.member.id, command.data);
+        this.maybeWakeOnMention(roomId, state, auth.member.id, command.data, incoming.id, mentionPlan);
         state = this.resumeRoundLimitPauses(roomId, state, auth.member.id, incoming, sequence);
         this.humanPush.notifyPosted({
           roomId, state, senderMemberId: auth.member.id,
           body: command.data.body, toMemberId: command.data.toMemberId,
-          messageId: command.data.messageId || incoming.id, sequence, eventId: incoming.id
+          messageId: command.data.messageId || incoming.id, sequence, eventId: incoming.id,
+          mentionTargets: mentionPlan.delivered
         });
       }
       if (command.type === T.DM_POSTED && incoming.data?.toIdentityId) {
@@ -4922,12 +4930,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // unparseable input — an unresolvable mention is simply not tracked.
       // COMMS-02: trackMentions also returns the poster's mention warnings
       // (@handles whose target is ambiguous or unknown); they ride the response below.
-      let mentionWarnings = null;
-      if (command.type === T.MESSAGE_POSTED) mentionWarnings = this.trackMentions(roomId, state, auth.member.id, command.data, incoming.id);
+      let mentionWarnings = null, mentionBudget = null;
+      if (command.type === T.MESSAGE_POSTED) {
+        const tracked = this.trackMentions(roomId, state, auth.member.id, command.data, incoming.id, mentionPlan);
+        mentionWarnings = tracked.warnings;
+        mentionBudget = tracked.mentionBudget;
+      }
       // Attention: write-time activity fan-out (mention/reply/thread_reply/
       // reaction). Runs in the same transaction as the triggering event.
       // Never throws: a fan-out failure must not fail the command.
-      try { recordActivityEvents(this, roomId, state, auth.member.id, command, incoming); } catch {}
+      try { recordActivityEvents(this, roomId, state, auth.member.id, command, incoming, mentionPlan); } catch {}
       // Jev-harness receipt-acceptance gate, shadow mode (docs/JEV-GATES.md):
       // score the legacy event-sourced work.completed receipt, journal the
       // would-be verdict, accept anyway. Runs in the same transaction as
@@ -4974,7 +4986,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         : null;
       syncRoomPublication(this, { roomId, state, previous: room.state, auth });
       return { sequence, event: incoming, duplicate: false, ...(note ? { note } : {}),
-        ...((Array.isArray(mentionWarnings) && mentionWarnings.length > 0) ? { mentionWarnings } : {}) };
+        ...((Array.isArray(mentionWarnings) && mentionWarnings.length > 0) ? { mentionWarnings } : {}),
+        ...(mentionBudget ? { mentionBudget } : {}) };
     });
   }
 
@@ -5053,12 +5066,64 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return next;
   }
 
+  // FIX-79: the single choke point for mention fanout. Resolves the
+  // message's @mentions once, truncates to the per-message cap (direct
+  // mentions first, then @squad/<name> members into whatever cap remains),
+  // applies DM scoping, and spends the sender's per-room notification
+  // budget exactly once for the whole fanout. Returns a frozen plan:
+  // { delivered, totalResolved, truncated, shed } — delivered is the final
+  // member-id list every fanout site (mention tracking, agent wakes,
+  // activity rows, human push) must use instead of re-resolving.
+  // The post itself is never rejected here; over-cap/over-budget targets
+  // are shed, and the shed is reported on the command response.
+  planMentionFanout(roomId, state, senderMemberId, data) {
+    const members = state?.members ?? {};
+    const body = typeof data?.body === "string" ? data.body : "";
+    const identityNames = identityNamesForRoom(this.db, roomId);
+    const toMemberId = typeof data?.toMemberId === "string" ? data.toMemberId : "";
+    const { targets, totalResolved, truncated } = resolveMentionTargetsCapped(members, identityNames, body, senderMemberId);
+    const direct = toMemberId ? targets.filter(id => id === toMemberId) : targets;
+    const seen = new Set(direct);
+    const squad = [];
+    let squadTruncated = false;
+    for (const memberId of squadMentionTargets(this.db, roomId, body, senderMemberId, members, data?.toMemberId)) {
+      if (seen.has(memberId)) continue;
+      if (direct.length + squad.length >= MAX_MENTIONS_PER_MESSAGE) { squadTruncated = true; break; }
+      seen.add(memberId);
+      squad.push(memberId);
+    }
+    const all = [...direct, ...squad];
+    const { allowed, shed } = this.mentionBudgets.consume({ roomId, senderId: senderMemberId, count: all.length, now: this.now() });
+    return Object.freeze({
+      delivered: Object.freeze(all.slice(0, allowed)),
+      totalResolved,
+      truncated: truncated || squadTruncated,
+      shed,
+    });
+  }
+
   // Wake-on-mention for message.posted: resolve @mentions and the DM target
   // to agent members, then wake the offline ones via their registered
   // agent identity. Never throws for unparseable input — a mention that
   // resolves to nobody (or to an online agent) is simply not woken.
-  maybeWakeOnMention(roomId, state, senderMemberId, data, eventId) {
-    const targets = agentWakeTargets(state, senderMemberId, data, this.db, roomId);
+  maybeWakeOnMention(roomId, state, senderMemberId, data, eventId, mentionPlan = null) {
+    // FIX-79: with a plan, wake exactly the delivered mention set (already
+    // capped, DM-scoped, and budget-shed); the DM target keeps kind "dm"
+    // and is added even when the body names nobody, matching agentWakeTargets.
+    let targets;
+    if (mentionPlan) {
+      const members = state?.members ?? {};
+      const dmId = typeof data?.toMemberId === "string" ? data.toMemberId : "";
+      targets = new Map([...mentionPlan.delivered]
+        .filter(memberId => members[memberId]?.kind === "agent" && (!dmId || dmId === memberId))
+        .map(memberId => [memberId, memberId === dmId ? "dm" : "mention"]));
+      const dm = dmId ? members[dmId] : null;
+      if (dm && dm.active !== false && dm.kind === "agent" && dmId !== senderMemberId && !targets.has(dmId)) {
+        targets.set(dmId, "dm");
+      }
+    } else {
+      targets = agentWakeTargets(state, senderMemberId, data, this.db, roomId);
+    }
     if (targets.size === 0) return;
     const linkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
     for (const [memberId, kind] of targets) {
@@ -5089,7 +5154,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   //   2. @names in the body resolve to room members (never the sender);
   //      each resolved member gets one delivered row for this message event.
   // Unresolved names get no row — never invent a recipient.
-  trackMentions(roomId, state, senderMemberId, data, eventId) {
+  trackMentions(roomId, state, senderMemberId, data, eventId, mentionPlan = null) {
     const nowMs = this.now();
     const replyToId = typeof data.replyToId === "string" ? data.replyToId : "";
     if (replyToId) {
@@ -5109,7 +5174,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       ).run(nowMs, roomId, answered.eventId, senderMemberId);
     }
     const body = typeof data.body === "string" ? data.body : "";
-    if (!body.includes("@")) return [];
+    if (!body.includes("@")) return { warnings: [], mentionBudget: null };
     const members = state?.members ?? {};
     const identityNames = identityNamesForRoom(this.db, roomId);
     const timeoutMs = this.mentionTimeoutMsFor(roomId);
@@ -5118,14 +5183,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
        (room_id,message_event_id,mentioned_member_id,state,created_at,timeout_at,decided_at)
        VALUES(?,?,?,?,?,?,NULL)`);
     const toMemberId = typeof data.toMemberId === "string" ? data.toMemberId : "";
-    for (const memberId of resolveMentionTargetsInText(members, identityNames, body, senderMemberId)) {
-      if (toMemberId && toMemberId !== memberId) continue;
-      insert.run(roomId, eventId, memberId, "delivered", nowMs, nowMs + timeoutMs);
-    }
-    // plan-squads: @squad/<name> fans out to one mention row per active
-    // member (INSERT OR IGNORE dedupes against direct mentions). The
-    // mention lifecycle owns delivery/ack/timeout from here.
-    for (const memberId of squadMentionTargets(this.db, roomId, body, senderMemberId, members, data.toMemberId)) {
+    // FIX-79: the delivered set comes from the once-per-message plan
+    // (per-message cap + DM scoping + squad cap-share + per-sender
+    // budget), computed in command(). INSERT OR IGNORE keeps the
+    // idempotency the squad path relied on.
+    const plan = mentionPlan ?? this.planMentionFanout(roomId, state, senderMemberId, data);
+    for (const memberId of plan.delivered) {
       insert.run(roomId, eventId, memberId, "delivered", nowMs, nowMs + timeoutMs);
     }
     // COMMS-02: warn the poster about @handles whose target is ambiguous
@@ -5133,9 +5196,19 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // disambiguate. Delivery is unchanged — the post still lands; the
     // warnings ride on the command response. In a targeted DM only handles
     // naming the DM target are relevant; other handles never create rows.
+    // Warnings use the uncapped resolver: the poster should see every
+    // unclear handle, not just the ones that fit the cap.
     let warnings = mentionTargetWarnings(members, identityNames, body, senderMemberId);
     if (toMemberId) warnings = warnings.filter(w => w.candidates.some(c => c.memberId === toMemberId));
-    return warnings;
+    const mentionBudget = (plan.truncated || plan.shed > 0) ? {
+      cap: MAX_MENTIONS_PER_MESSAGE,
+      totalResolved: plan.totalResolved,
+      delivered: plan.delivered.length,
+      shedByBudget: plan.shed,
+      truncated: plan.truncated,
+      note: mentionBudgetNote({ totalResolved: plan.totalResolved, delivered: plan.delivered.length, shed: plan.shed, truncated: plan.truncated }),
+    } : null;
+    return { warnings, mentionBudget };
   }
 
   // #658: per-room mention timeout, defaulting to 30 minutes. Owner-

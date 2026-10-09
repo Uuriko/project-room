@@ -9,7 +9,7 @@
 // member sets.
 import { isMutedBy } from "../src/events.js";
 import { notificationFromPush } from "../src/human-push-display.js";
-import { resolveMentionTargetsInText } from "./mention-lifecycle.mjs";
+import { resolveMentionTargetsCapped } from "./mention-lifecycle.mjs";
 import { isQuietAt, normalizeQuietHours, NotifyError } from "./notify-prefs.mjs";
 import { deliverToSubscriptions, normaliseSubscription, richPushPayloadFor } from "./push-subscriptions.mjs";
 
@@ -109,7 +109,7 @@ export const humanPushPrefsSchema = `
 // recipient. An @mention fans out only in the room channel, and only to
 // humans. The sender is never a recipient. Agents are not: they already
 // have the heartbeat doorbell.
-export function humanPushRecipients({ members, senderMemberId, body, toMemberId }) {
+export function humanPushRecipients({ members, senderMemberId, body, toMemberId, mentionTargets = null }) {
   const roster = {};
   for (const [memberId, member] of Object.entries(members ?? {})) {
     if (!member || member.kind !== "human" || member.active === false || memberId === senderMemberId) continue;
@@ -117,7 +117,11 @@ export function humanPushRecipients({ members, senderMemberId, body, toMemberId 
   }
   const dmId = typeof toMemberId === "string" ? toMemberId : "";
   if (dmId) return roster[dmId] ? [{ memberId: dmId, kind: "dm" }] : [];
-  return resolveMentionTargetsInText(members, {}, typeof body === "string" ? body : "", senderMemberId)
+  // FIX-79: push exactly the delivered mention set from the once-per-message
+  // plan when provided; the fallback is the capped resolver, never uncapped.
+  const ids = mentionTargets
+    ?? resolveMentionTargetsCapped(members, {}, typeof body === "string" ? body : "", senderMemberId).targets;
+  return ids
     .filter(memberId => Object.hasOwn(roster, memberId))
     .map(memberId => ({ memberId, kind: "mention" }));
 }
@@ -353,10 +357,10 @@ export class HumanPush {
   // Fire-and-forget. Called from the message.posted transaction after the
   // event is stored. A push failure never fails the post. With no VAPID
   // keys this returns before it looks anyone up.
-  notifyPosted({ roomId, state, senderMemberId, body, toMemberId, messageId, sequence, eventId }) {
+  notifyPosted({ roomId, state, senderMemberId, body, toMemberId, messageId, sequence, eventId, mentionTargets = null }) {
     try {
       if (!this.vapid) return;
-      for (const recipient of humanPushRecipients({ members: state?.members, senderMemberId, body, toMemberId })) {
+      for (const recipient of humanPushRecipients({ members: state?.members, senderMemberId, body, toMemberId, mentionTargets })) {
         if (this._suppressed(roomId, state, recipient.memberId, senderMemberId, messageId)) continue;
         // The member's own push switch. Default on: never touching
         // preferences keeps today's mentions-and-DMs behavior exactly.

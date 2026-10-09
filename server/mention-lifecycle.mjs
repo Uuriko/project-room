@@ -198,6 +198,34 @@ export function resolveMentionTargetsInText(members, identityNames, text, sender
   return found;
 }
 
+// FIX-79: per-message mention cap. The @mention fanout of ONE message is
+// bounded: excess resolved mentions never become notifications (no
+// mention_states row, no activity row, no wake, no push). First-appearance
+// order wins, so a poster's earliest mentions are the ones that land.
+// Why 20: a real coordination message names a handful of people — 20 is far
+// above legitimate use and far below bomb scale (hundreds), and each
+// delivered mention costs a mention_states row, an activity row, and
+// possibly a wake signal plus a push send. The post itself always lands;
+// truncation is reported to the poster on the command response (never a
+// 422 — backward compatible). Detection paths (warnings, pause-resume)
+// keep the uncapped resolver; only fanout is capped.
+export const MAX_MENTIONS_PER_MESSAGE = 20;
+
+// Capped @mention resolution for fanout. Returns a frozen
+// { targets, totalResolved, truncated }: targets is at most `cap` member
+// ids in first-appearance order, totalResolved is how many the text
+// actually resolved to, truncated is whether the cap cut any off.
+export function resolveMentionTargetsCapped(members, identityNames, text, senderMemberId, cap = MAX_MENTIONS_PER_MESSAGE) {
+  const targets = resolveMentionTargetsInText(members, identityNames, text, senderMemberId);
+  const limit = Number.isSafeInteger(cap) && cap >= 0 ? cap : MAX_MENTIONS_PER_MESSAGE;
+  const truncated = targets.length > limit;
+  return Object.freeze({
+    targets: Object.freeze(targets.slice(0, limit)),
+    totalResolved: targets.length,
+    truncated,
+  });
+}
+
 // COMMS-02: per-handle mention warnings for the poster. An @mention whose
 // target is unclear deserves a nudge so the poster can disambiguate. Uses the
 // exact longest-label-first scan as resolveMentionTargetsInText:

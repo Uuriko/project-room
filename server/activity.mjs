@@ -20,7 +20,7 @@
 // never recorded without its triggering message/reaction. Fan-out never
 // throws for unparseable input — like the webhook fan-out, it must not fail
 // the command that triggered it.
-import { identityNamesForRoom, resolveMentionTargetsInText } from "./mention-lifecycle.mjs";
+import { identityNamesForRoom, resolveMentionTargetsInText, resolveMentionTargetsCapped } from "./mention-lifecycle.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
 import { messageInHistory } from "./history-visibility.mjs";
@@ -110,7 +110,7 @@ function identityNamesFor(store, roomId) {
 // recipient qualifies for several types, the most direct one wins
 // (mention > reply > thread_reply). Muted threads generate no thread_reply
 // rows. DM scoping: a DM's events only ever reach the DM's two parties.
-export function recordActivityEvents(store, roomId, state, senderId, command, incoming) {
+export function recordActivityEvents(store, roomId, state, senderId, command, incoming, mentionPlan = null) {
   const db = store.db, now = store.now();
   const members = state?.members ?? {};
   const messages = state?.messages ?? [];
@@ -121,7 +121,13 @@ export function recordActivityEvents(store, roomId, state, senderId, command, in
     const body = typeof data.body === "string" ? data.body : "";
     const identityNames = identityNamesFor(store, roomId);
     const recipients = new Map(); // userId -> { type, threadId }
-    for (const target of resolveMentionTargetsInText(members, identityNames, body, senderId)) {
+    // FIX-79: fan out exactly the delivered mention set from the
+    // once-per-message plan (cap + DM scoping + budget); the fallback is
+    // the capped resolver, never the uncapped one.
+    const mentionIds = mentionPlan
+      ? mentionPlan.delivered
+      : resolveMentionTargetsCapped(members, identityNames, body, senderId).targets;
+    for (const target of mentionIds) {
       recipients.set(target, { type: "mention", threadId: "" });
     }
     let threadRootId = "";
