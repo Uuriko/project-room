@@ -28,3 +28,16 @@ test("parseDiff keeps an added line that starts with ++ on the current file", ()
   assert.ok(findings.some(finding => finding.startsWith("server/pay.mjs:2 ") && finding.includes("stripe-key")));
   assert.equal(findings.some(finding => finding.includes(stripe)), false);
 });
+
+test("parseDiff does not advance the new line for a removed line that starts with --", () => {
+  const diff = [
+    "diff --git a/a.sql b/a.sql",
+    "--- a/a.sql",
+    "+++ b/a.sql",
+    "@@ -1,3 +1,3 @@",
+    " keep",
+    "--- old comment",
+    "+added after",
+  ].join("\n");
+  assert.deepEqual(parseDiff(diff).map(u => [u.path, u.line, u.text]), [["a.sql", 2, "added after"]]);
+});
