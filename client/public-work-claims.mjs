@@ -137,6 +137,30 @@ export class PublicWorkClaimsClient {
   }
 }
 
+// Canonical claim-refusal classifier (FIX-28).
+// A 409 is ambiguous: it can mean "someone else holds this"
+// (work_claim_conflict), "the board is full" (work_board_full), or "you hold
+// too many open claims" (too_many_open_claims). Branch ONLY on error.code —
+// never on HTTP status. ramp2's client matcher missed refusals live because
+// it branched on status. Returns a stable classification plus per-code
+// recovery guidance.
+const claimConflictCodes = new Set(['work_claim_conflict', 'public_work_claim_conflict', 'retry_state_conflict']);
+const claimRefusalRecovery = {
+  conflict: 'Coordinate: re-read the task or board for the current holder and state, then resolve with them (wait, wait for a stale lease, or pick another task). Never blind-retry.',
+  board_full: 'Retry-after: close stale claims (POST …/work-claims/{id}/close or /cancel) and retry later; the board, not your request, is the limit.',
+  cap: 'Back off: release your own stale claims first, then retry with backoff — the cap is per-member, so retrying immediately will refuse again.',
+  unknown: 'Inspect error.code before deciding; do not assume a retry or refusal policy from the HTTP status alone.',
+};
+export function classifyClaimRefusal(err) {
+  const code = typeof err?.code === 'string' ? err.code : null;
+  const classification = code === null ? 'unknown'
+    : claimConflictCodes.has(code) ? 'conflict'
+    : code === 'work_board_full' ? 'board_full'
+    : code === 'too_many_open_claims' ? 'cap'
+    : 'unknown';
+  return { classification, code, recovery: claimRefusalRecovery[classification] };
+}
+
 // Canonical client retry discipline for claim mutations (FIX-6).
 // Blind retry-until-200 is the bug: it double-applies mutations, spins forever
 // on refusals, and lets a stale duplicate release race a fresh re-claim.
@@ -152,7 +176,10 @@ export class PublicWorkClaimsClient {
 // Returns the action outcome plus { attempts, replayed }: replayed is true
 // when the outcome was reconciled from the confirming read rather than a
 // fresh 200. For a reconciled finish, read the receipt via
-// packet.claim.submittedReceiptId.
+// packet.claim.submittedReceiptId. Every terminal refusal is annotated with
+// error.refusal = classifyClaimRefusal(error) (FIX-28): branch on
+// error.refusal.classification — conflict, board_full, cap, or unknown —
+// never on error.status, because one status (409) rides under several codes.
 const retryableActions = ['claim', 'renew', 'release', 'finish'];
 const retryActionNames = { claim: 'claimed', renew: 'renewed', release: 'released', finish: 'submitted' };
 const ambiguousOutcome = error => error instanceof RoomClientError
@@ -191,7 +218,13 @@ export async function withClaimRetryDiscipline(client, taskId, action, input, { 
       const outcome = await client[action](taskId, input, { signal });
       return { ...outcome, attempts, replayed: false };
     } catch (error) {
-      if (!ambiguousOutcome(error)) throw error;
+      if (!ambiguousOutcome(error)) {
+        // FIX-28: every terminal refusal is annotated with its code-based
+        // classification, so callers branch on error.refusal.classification
+        // (never on error.status) for the recovery decision.
+        if (error !== null && (typeof error === 'object' || typeof error === 'function')) error.refusal = classifyClaimRefusal(error);
+        throw error;
+      }
       let packet;
       try {
         packet = await client.read(taskId, { signal });

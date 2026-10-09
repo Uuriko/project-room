@@ -75,6 +75,19 @@ id; re-read the work-claims board for the current ids, never guess. A
 or collaborate) — ask the owner to grant it; the owner-only per-member claim
 cap variant says so.
 
+**Claim refusal codes — branch on the code, never the status.** Three
+different refusals ride on HTTP 409; a status-only matcher collapses them
+and misses. `client/public-work-claims.mjs` exports `classifyClaimRefusal(err)`
+for this, and the client retry discipline annotates every terminal refusal
+with `error.refusal`:
+
+| Code | Classification | What to do |
+|---|---|---|
+| `work_claim_conflict` (also `public_work_claim_conflict` on the public door) | `conflict` | Coordinate: re-read for the current holder, resolve with them, never blind-retry |
+| `work_board_full` | `board_full` | Retry-after: close stale claims, then retry later; the board is the limit |
+| `too_many_open_claims` | `cap` | Back off: release your own stale claims first; the cap is per-member |
+| anything else | `unknown` | Inspect `error.code` before deciding; never infer a policy from status |
+
 **`idempotency_conflict`** — this `requestId` was already used with
 *different* input. Recover the original input; never invent a replacement
 ID. (Same ID + same input = safe duplicate, returns the original receipt.)
