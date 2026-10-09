@@ -6,7 +6,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { createRoomClient, runHostOnce, commandExecutor, scriptedExecute, demo, SCRIPTED_LABEL } from "../scripts/room-assistant-scratch.mjs";
+import { createRoomClient, runHostOnce, commandExecutor, scriptedExecute, demo, SCRIPTED_LABEL, memberNames } from "../scripts/room-assistant-scratch.mjs";
 
 async function setup(t) {
   const f = createAcceptanceFixture({ dmConsent: true });
@@ -52,6 +52,28 @@ test("two people share one request; the host answers once in its thread with bot
   assert.equal((await friend.assistant()).assistant.availability, "awaiting_host", "no unfinished run, so no live host is claimed");
   // A second pass is a no-op: no duplicate claim, report or result post.
   assert.deepEqual((await runHostOnce(producer, { memberId: "producer" })).outcomes, []);
+});
+
+test("the answer names people by their room display name, not their member id", async t => {
+  const { owner, friend, producer } = await setup(t);
+  const members = await owner.members();
+  const ownerName = members.owner?.displayName, guestName = members.guest?.displayName;
+  assert.ok(ownerName && guestName && ownerName !== "owner" && guestName !== "guest", "fixture members carry display names distinct from ids");
+  await ask(owner, friend);
+  const { outcomes } = await runHostOnce(producer, { memberId: "producer" });
+  const answer = await friend.message(outcomes[0].resultMessageId);
+  assert.ok(answer.body.includes(`- ${ownerName}: @Room plan dinner`), answer.body);
+  assert.ok(answer.body.includes(`- ${guestName}: Make it 8pm`), answer.body);
+  assert.doesNotMatch(answer.body, /^- (owner|guest):/m, "no raw member ids in the answer");
+});
+
+test("naming falls back to the member id when the member list can't be read", async () => {
+  const names = memberNames({ members: async () => { throw new Error("403"); } });
+  assert.equal(await names("guest-4e29", null), "guest-4e29");
+  const named = memberNames({ members: async () => ({ m1: { displayName: "  Ana\n Lee " }, m2: { displayName: "" } }) });
+  assert.equal(await named("m1", null), "Ana Lee");
+  assert.equal(await named("m2", null), "m2");
+  assert.equal(await named("m3", { authorName: "Given" }), "Given");
 });
 
 test("an addition that lands after the answer is drafted is answered, never dropped", async t => {

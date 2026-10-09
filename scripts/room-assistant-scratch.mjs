@@ -44,6 +44,7 @@ export function createRoomClient({ origin, roomId, token, fetchImpl = fetch }) {
     act: input => call("POST", "/assistant", input),
     message: async id => (await call("GET", `/conversation?messageId=${encodeURIComponent(id)}`)).messages?.find(m => m.id === id) ?? null,
     recent: async (limit = 100) => (await call("GET", `/conversation?limit=${limit}`)).messages ?? [],
+    members: async () => (await call("GET", ""))?.state?.members ?? {},
     post: (messageId, body, extra = {}) => call("POST", "/commands", { id: stable("cmd", messageId), type: "message.posted", data: { messageId, body, ...extra } })
   };
 }
@@ -77,7 +78,7 @@ async function brief(client, run, names) {
   const inputs = [];
   for (const input of run.inputs) {
     const message = input.sourceMessageId === run.sourceMessageId ? opening : await client.message(input.sourceMessageId);
-    inputs.push({ messageId: input.sourceMessageId, memberId: input.memberId, author: names(input.memberId, message), body: message?.body ?? "", conflict: Boolean(input.conflict), resolution: Boolean(input.resolution) });
+    inputs.push({ messageId: input.sourceMessageId, memberId: input.memberId, author: await names(input.memberId, message), body: message?.body ?? "", conflict: Boolean(input.conflict), resolution: Boolean(input.resolution) });
   }
   return { roomId: client.roomId, runId: run.id, requestMessageId: run.sourceMessageId, initiatorId: run.initiatorId, inputs, opening };
 }
@@ -85,7 +86,20 @@ async function brief(client, run, names) {
 // One pass over every run this host coordinates. Safe to repeat: claims and
 // reports use stable request ids, and result message ids derive from the
 // exact input set, so a retry never posts a second copy.
-export async function runHostOnce(client, { memberId, hostId = memberId, execute = scriptedExecute, log = () => {}, names = (id, m) => m?.authorName || id } = {}) {
+// People are named by their room display name, read once per pass from the
+// room's member list; an unreadable list or a missing name falls back to the
+// member id so a brief is never blocked on naming.
+export function memberNames(client) {
+  let directory;
+  return async (id, message) => {
+    if (message?.authorName) return message.authorName;
+    if (directory === undefined) directory = client.members ? await client.members().catch(() => null) : null;
+    const name = directory?.[id]?.displayName;
+    return typeof name === "string" && name.trim() ? name.replace(/\s+/g, " ").trim() : id;
+  };
+}
+
+export async function runHostOnce(client, { memberId, hostId = memberId, execute = scriptedExecute, log = () => {}, names = memberNames(client) } = {}) {
   const outcomes = [];
   const { runs, assistant } = await client.assistant();
   if (assistant.coordinatorMemberId !== memberId) return { outcomes, skipped: "not_coordinator" };
