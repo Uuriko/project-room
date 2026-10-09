@@ -324,6 +324,20 @@ test("uppercase /SKILL.md serves the agent skill, distinct from the llms.txt pac
   assert.equal(discoveryDoc("/skill.md").body, packet.body, "lowercase /skill.md still aliases llms.txt");
 });
 
+test("served /SKILL.md money framing agrees with the agent card: receipts today, cash later", async t => {
+  // Product-framing contract (product200-docs-skill-a9-money, A9 finding F1):
+  // /SKILL.md used to say USDC offers are "real amounts with the owner's
+  // standing authority" behind an owner tap, while the live agent-card.json
+  // says work earns reputation receipts only and "no real-value payout path
+  // exists yet". The served skill must carry the card's truth: receipts and
+  // ledger credits today, cash only if a payout path is ever configured.
+  // All three assertions fail on the pre-fix text and pass after.
+  const skill = discoveryDoc("/SKILL.md");
+  assert.ok(skill.body.includes("settle ledger credits, not cash"), "skill says settlement today is ledger credits, not cash");
+  assert.ok(skill.body.includes("until a cash payout path exists"), "skill marks cash payout as future, not today");
+  assert.ok(!skill.body.includes("are real amounts with the owner's standing authority behind them"), "skill drops the cash-today framing");
+});
+
 test("www leftover synonyms serve the short packet or agent card, not 404", async t => {
   assert.deepEqual([...SHORT_PACKET_SYNONYMS], [
     "/room/skill", "/room/agents", "/room/llms",
