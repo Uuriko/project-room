@@ -103,9 +103,13 @@ export class MachineBot {
 
   async run() {
     while (!this.stopped) {
-      try { await this.once(); } catch { /* a failed poll retries */ }
+      let result = null;
+      try { result = await this.once(); } catch { /* a failed poll retries */ }
       if (this.stopped) return;
-      if (this.pending && !this.active) await this.sleep(1000);
+      // A halted or paused machine leaves its wakes unacked, so the next
+      // heartbeat hands them straight back; wait instead of spinning on them.
+      const held = (result?.results ?? []).some(item => item?.halted || item?.paused);
+      if ((this.pending && !this.active) || held) await this.sleep(1000);
     }
   }
 
@@ -199,6 +203,10 @@ export class MachineBot {
       if (source.reason === "membership" || source.reason === "handled") await this.api.ack([signalId].filter(Boolean));
       return { signalId, ignored: source.reason };
     }
+    // A halted machine takes no new work. Leave the wake unacked, as a pause
+    // does: claiming the item only to block it at the first step took it off
+    // the board and consumed the wake, so nobody picked it up after resume.
+    if (this.isHalted()) return { signalId, halted: true };
     if (await this.isPaused(roomId)) return { signalId, paused: true };
     const provider = await this.resolveProvider();
     if (provider.name === "none" || provider.missingKey === true) {
@@ -319,7 +327,7 @@ export class MachineBot {
   }
 
   async begin(source) {
-    if (await this.isPaused(source.roomId)) return;
+    if (this.isHalted() || await this.isPaused(source.roomId)) return;
     const memberId = await this.memberId(source.roomId);
     const listed = await this.api.claims(source.roomId);
     const claims = listed.value?.claims ?? [];
