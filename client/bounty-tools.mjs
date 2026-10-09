@@ -43,7 +43,7 @@ const rubric = { type: "array", minItems: 1, maxItems: 20, items: schema({
 
 export const bountyTools = [
   tool("bounty_list",
-    "List this room's bounties with their state, award, deadline, pinned rubric and claimant. Filter by semantic group (proposed, funded, claimed, in-review, paid, cancelled), not by display label. Pass viewer=self to annotate each bounty with your own band-derived claimable answer and claim ceiling; nothing is ever hidden by that annotation, the claim gate stays the only enforcement point. Pass poster=self to see only bounties you posted. A read: never claims, funds or accepts anything.",
+    "List this room's bounties with their state, award, deadline, pinned rubric and claimant. Filter by semantic group (proposed, funded, claimed, in-review, paid, cancelled), not by display label. Pass viewer=self to annotate each bounty with your own band-derived claimable answer and claim ceiling; nothing is ever hidden by that annotation, the claim gate stays the only enforcement point. Pass poster=self to see only bounties you posted. A read: never claims, funds or accepts anything. Awards are valueless room credits: today this pays in reputation receipts; cash comes later.",
     schema({ group: { type: "string", enum: [...BOUNTY_GROUPS] },
              viewer: { ...id, description: "A lane id, or 'self' for your own routing visibility." },
              poster: { ...id, description: "A lane id, or 'self' for bounties you posted." } })),
