@@ -2322,8 +2322,11 @@ function renderMessages() {
   // after them on every arrival. They are repainted after each render.
   list.querySelectorAll(":scope > [data-claim-update]").forEach(node => node.remove());
   for (const [id, node] of previous) if (!keep.has(id) && !node.hasAttribute("data-work-timeline")) node.remove();
-  const firstShownAt = hiddenCount ? Date.parse(messages[0].createdAt) || 0 : 0;
-  const workEntries = currentThreadId || !state ? [] : timelineWorkEntries().filter(e => e.channelId === activeChannelId && (!hiddenCount || e.ts >= firstShownAt));
+  // Work cards are never windowed: only message rows are. Work is few next to
+  // messages, and hiding older cards would make that work unreachable from the
+  // timeline (the crowded reconnect gate pins all 81 cards). Cards older than the
+  // first shown message simply render above it, after the pager.
+  const workEntries = currentThreadId || !state ? [] : timelineWorkEntries().filter(e => e.channelId === activeChannelId);
   const ordered = [];
   // One members array per pass keeps the body HTML cache keyed (see createBodyHtmlCache).
   const mentionable = state ? Object.values(state.members) : [];
