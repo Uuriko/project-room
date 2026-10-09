@@ -26,8 +26,7 @@ const list = value => Array.isArray(value) ? value.filter(item => typeof item ==
 
 function evidenceRef(workItemId, record, source) {
   const url = text(source?.evidenceUrl);
-  if (!url) return null;
-  return { kind: "evidence", workItemId, record, url, evidenceVersion: text(source.evidenceVersion) };
+  return url ? { kind: "evidence", workItemId, record, url, evidenceVersion: text(source.evidenceVersion) } : null;
 }
 
 // Running work-item sessions, one row per item. Heartbeat time is structural.
@@ -79,6 +78,7 @@ export function buildRoomContext({ state, sequence, viewerId, caughtUp, now }) {
   }
   const ownerId = state.room.ownerId ?? null;
   const storedPolicy = state.room.policy ?? {};
+  const policy = roomPolicy(state);
   const items = Object.values(state.workItems ?? {}).filter(item => item && typeof item.id === "string");
   const roster = Object.values(state.members ?? {})
     .filter(member => member && typeof member.id === "string")
@@ -133,8 +133,8 @@ export function buildRoomContext({ state, sequence, viewerId, caughtUp, now }) {
   const stable = {
     roomId: state.room.id, viewerId,
     roster, policy: {
-      requireIndependentReview: roomPolicy(state).requireIndependentReview,
-      requireOwnerDecision: roomPolicy(state).requireOwnerDecision,
+      requireIndependentReview: policy.requireIndependentReview,
+      requireOwnerDecision: policy.requireOwnerDecision,
       revision: Number.isSafeInteger(storedPolicy.revision) ? storedPolicy.revision : 0
     },
     focusWork, locks, deps, liveSessions: liveSessions(items), handoffToYou: handoffToYou(items, viewerId, ownerId),

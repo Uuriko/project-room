@@ -104,12 +104,10 @@ const claimStatusOf = (claim, nowIso) => {
   return Date.parse(claim.expiresAt) > Date.parse(nowIso) ? "active" : "expired";
 };
 
-const reviewPolicyOf = item => {
-  if (item.independentVerificationRequired && item.ownerDecisionRequired) return "independent+owner";
-  if (item.independentVerificationRequired) return "independent";
-  if (item.ownerDecisionRequired) return "owner";
-  return "none";
-};
+const reviewPolicyOf = item =>
+  item.independentVerificationRequired && item.ownerDecisionRequired ? "independent+owner"
+  : item.independentVerificationRequired ? "independent"
+  : item.ownerDecisionRequired ? "owner" : "none";
 
 const memberOf = member => ({
   id: member.id,
@@ -167,10 +165,8 @@ export function buildActivationPack(store, roomSlug, viewerId = null) {
     orientation: annotateOrientation(roomOrientation(state)),
     members,
     openWork,
-    // QA4 Q4-SEC-1: only pins whose message this viewer may read.
-    // (Supersedes the audit-fix F-1 pinVisibleToViewer filter: the shared
-    // messageVisibleToViewer predicate also enforces the history floor, and
-    // keeps the owner non-exempt on DMs.)
+    // QA4 Q4-SEC-1: only pins this viewer may read. The shared messageVisibleToViewer
+    // predicate also enforces the history floor and keeps the owner non-exempt on DMs.
     pinnedResources: pinnedMessages(state).filter(pin => messageVisibleToViewer(pin.message, viewerId, floor)).map(pinnedOf),
     repoHead: null,
     participationRules: { ...roomPolicy(state), trust: roomTrust(state).enabled },

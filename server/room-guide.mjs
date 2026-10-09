@@ -83,10 +83,8 @@ function choiceIdFromItem(item) {
   return stamp.note.slice("choice:".length).split(" ")[0] || null;
 }
 
-function firstJoinedAgent(state) {
-  return Object.values(state.members ?? []).find(member =>
-    member && member.active !== false && member.kind === "agent" && member.system !== true && member.id !== ROOM_GUIDE_ID) ?? null;
-}
+const firstJoinedAgent = state => Object.values(state.members ?? [])
+  .find(m => m && m.active !== false && m.kind === "agent" && m.system !== true && m.id !== ROOM_GUIDE_ID) ?? null;
 
 function commitClaim(store, roomId, item, action, actorId, atMs) {
   store.workClaims.set(roomId, item);
@@ -103,8 +101,11 @@ function step(store, roomId, now) {
   if (!registry) return null;
   const commit = (item, action) => commitClaim(store, roomId, item, action, ROOM_GUIDE_ID, now);
   const welcome = welcomeId(roomId);
+  // One read each: the work-claim registry is untouched by the message
+  // events below, and no branch below mutates it before its own reads.
+  const starter = registry.get(roomId, STARTER_CLAIM_ID);
+  const choices = choiceClaims(registry, roomId);
   if (!state.messages?.some(message => message.id === welcome)) {
-    const choices = choiceClaims(registry, roomId);
     appendRoomEvent(store, roomId, {
       id: welcome,
       type: EVENT_TYPES.MESSAGE_POSTED,
@@ -116,35 +117,27 @@ function step(store, roomId, now) {
         ...(choices.length ? { actions: choices.map(item => ({ claimId: item.id, label: item.title })) } : {})
       }
     });
-    const starter = registry.get(roomId, STARTER_CLAIM_ID);
     if (starter?.state === "unclaimed") commit(claimWork(starter, ROOM_GUIDE_ID, { leaseHours: null, now }), "claimed");
     return "seeded";
   }
-  const starter = registry.get(roomId, STARTER_CLAIM_ID);
-  const choices = choiceClaims(registry, roomId);
-  const choice = pickedChoice(store.room(roomId).state, choices);
+  const choice = pickedChoice(state, choices);
   if (choice && starter && starter.owner === ROOM_GUIDE_ID && starter.state !== "done") {
     let item = starter;
-    if (item.state === "claimed") {
-      item = commit(updateWork(item, ROOM_GUIDE_ID, { state: "in_progress", now }), "state_changed");
-    }
+    if (item.state === "claimed") item = commit(updateWork(item, ROOM_GUIDE_ID, { state: "in_progress", now }), "state_changed");
     if (item.state === "in_progress") {
       commit(updateWork(item, ROOM_GUIDE_ID, {
-        state: "done",
-        deliveryMode: "result",
-        note: `choice:${choice.id} ${choice.title}`,
-        now
+        state: "done", deliveryMode: "result", note: `choice:${choice.id} ${choice.title}`, now
       }), "state_changed");
     }
     return "choice_made";
   }
   if (starter?.state === "done") {
-    const agent = firstJoinedAgent(store.room(roomId).state);
+    const agent = firstJoinedAgent(state);
     const choiceId = choiceIdFromItem(starter);
     const chosen = choiceId ? registry.get(roomId, choiceId) : null;
     if (!agent || !chosen) return null;
     const messageId = stableEventId("ga", `${roomId}\0${agent.id}`);
-    if (store.room(roomId).state.messages?.some(message => message.id === messageId)) return null;
+    if (state.messages?.some(message => message.id === messageId)) return null;
     if (chosen.state === "unclaimed") {
       commit(claimWork(chosen, agent.id, { leaseHours: null, now, note: "Assigned by Room Guide" }), "claimed");
     }

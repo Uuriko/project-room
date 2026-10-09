@@ -82,11 +82,13 @@ const needText = (request, field, max, multiline, message) => {
 // roomId is the idempotency key: the same request returns the same room with
 // duplicate: true; a different room under that id is 409 room_exists.
 const STARTER_FIELDS = Object.freeze(["intent", "start", "templateSlug"]);
+const KNOWN_FIELDS = Object.freeze([...CREATE_FIELDS, ...STARTER_FIELDS]);
+const requestShapeOk = request => request && typeof request === "object" && !Array.isArray(request)
+  && CREATE_FIELDS.every(field => Object.hasOwn(request, field))
+  && Object.keys(request).every(field => KNOWN_FIELDS.includes(field));
 
 export function createAccountRoom(store, token, binding, request) {
-  if (!request || typeof request !== "object" || Array.isArray(request)
-    || !CREATE_FIELDS.every(field => Object.hasOwn(request, field))
-    || Object.keys(request).some(field => !CREATE_FIELDS.includes(field) && !STARTER_FIELDS.includes(field))) {
+  if (!requestShapeOk(request)) {
     fail(422, "invalid_room_request", "Supply roomId, title, purpose, kind and displayName");
   }
   const { roomId, kind } = request;
@@ -135,13 +137,10 @@ export function createAccountRoom(store, token, binding, request) {
     const memberships = store.db.prepare("SELECT room_id, member_id FROM member_accounts WHERE account_id=? ORDER BY room_id").all(accountId);
     if (memberships.length >= ACCOUNT_ROOM_LIMIT) fail(409, "pilot_limit", "Bounded pilot capacity reached; no room was created");
     if (memberships.length > 0) store.accountLogins.assertEmailVerified(accountId);
-    // The same per-room check discovery uses (active human membership with its
-    // invitation evidence intact), then owner or manage_members in that room.
-    // No active memberships means a first room: allowed (an old, inactive
-    // audit binding is not current membership). An account still in rooms keeps the
-    // administration requirement for additional rooms.
-    // A growth-funded room does not count as administering one: owning it
-    // must not unlock the ordinary 100-room allowance.
+    // Same per-room check discovery uses (active human membership with intact
+    // invitation evidence), then owner or manage_members. No active memberships
+    // means a first room: allowed. A growth-funded room does not count as
+    // administering one: owning it must not unlock the ordinary 100-room allowance.
     let foundedWithGrowth = false;
     let activeMemberships = 0;
     const administers = memberships.some(({ room_id }) => {
