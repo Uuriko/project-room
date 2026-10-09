@@ -1,0 +1,243 @@
+{"event":"room.cold_start","durationMs":2179,"integrity":"eager","phases":{"schema":{"ms":159,"rowsRead":0},"plugin":{"ms":963,"rowsRead":0},"fence":{"ms":708,"rowsRead":0},"verifies":{"ms":50,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":183,"heapBytes":38455672,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✖ valid block -> valid:true with taskId and parsed fields (52.866447ms)
+✔ no fenced block -> the exact rebuild error (18.728216ms)
+✖ each missing field reports its exact rebuild error (6.362348ms)
+✖ malformed values report their exact rebuild errors (21.972064ms)
+✖ accepted value shapes stay valid (0.462765ms)
+✖ violations accumulate in field order (22.801529ms)
+✖ duplicate keys: last wins, first-insertion order kept (0.469956ms)
+✖ field parsing details mirror the jq (0.454873ms)
+✔ fence extraction details mirror the jq (0.25936ms)
+✔ validateClaimFields is callable on parsed fields directly (54.716583ms)
+✖ parity with scripts/room validate_claim on every vector (386.244609ms)
+{"event":"room.cold_start","durationMs":1718,"integrity":"eager","phases":{"schema":{"ms":143,"rowsRead":0},"plugin":{"ms":778,"rowsRead":0},"fence":{"ms":603,"rowsRead":0},"verifies":{"ms":39,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":204,"heapBytes":33638344,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✖ POST /api/claims/validate answers 200 with the verdict, anonymously (4036.904214ms)
+{"event":"room.cold_start","durationMs":1253,"integrity":"eager","phases":{"schema":{"ms":210,"rowsRead":0},"plugin":{"ms":654,"rowsRead":0},"fence":{"ms":235,"rowsRead":0},"verifies":{"ms":27,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":144,"heapBytes":39485264,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ malformed request bodies are 422, non-POST is 405 (2225.239179ms)
+{"event":"room.cold_start","durationMs":1244,"integrity":"eager","phases":{"schema":{"ms":266,"rowsRead":0},"plugin":{"ms":605,"rowsRead":0},"fence":{"ms":247,"rowsRead":0},"verifies":{"ms":13,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":138,"heapBytes":44794288,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ text over 64KB is 422 (1492.840314ms)
+{"event":"room.cold_start","durationMs":1429,"integrity":"eager","phases":{"schema":{"ms":227,"rowsRead":0},"plugin":{"ms":716,"rowsRead":0},"fence":{"ms":329,"rowsRead":0},"verifies":{"ms":11,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":148,"heapBytes":36644360,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ secret-looking block content is never logged (1620.947655ms)
+✔ the route is bounded at 30 per address per minute (2676.004133ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 7
+ℹ fail 9
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 19153.403236
+
+✖ failing tests:
+
+test at tests/claim-validate.test.js:35:1
+✖ valid block -> valid:true with taskId and parsed fields (52.866447ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  false !== true
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/claim-validate.test.js:37:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.start (node:internal/test_runner/test:1257:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/claim-validate.test.js:58:1
+✖ each missing field reports its exact rebuild error (6.362348ms)
+  AssertionError [ERR_ASSERTION]: task-id: RC-2026-09-24-204 / files: a.mjs / lease: lease=6h / state: working / reason: r
+  + actual - expected
+  
+    [
+  +   'task-id not RC-YYYY-MM-DD-NNN',
+      'missing lane'
+    ]
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/claim-validate.test.js:70:12)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [ 'task-id not RC-YYYY-MM-DD-NNN', 'missing lane' ],
+    expected: [ 'missing lane' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/claim-validate.test.js:74:1
+✖ malformed values report their exact rebuild errors (21.972064ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  true !== false
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/claim-validate.test.js:97:12)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/claim-validate.test.js:102:1
+✖ accepted value shapes stay valid (0.462765ms)
+  AssertionError [ERR_ASSERTION]: lease=1h
+  
+  false !== true
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/claim-validate.test.js:109:12)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/claim-validate.test.js:117:1
+✖ violations accumulate in field order (22.801529ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    [
+  -   'task-id not RC-YYYY-MM-DD-NNN',
+      'missing lane',
+      'files: * forbidden',
+      'lease must be lease=<N>h',
+      'unknown state word: ???',
+      'missing reason'
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/claim-validate.test.js:119:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'missing lane', 'files: * forbidden', 'lease must be lease=<N>h', 'unknown state word: ???', 'missing reason' ],
+    expected: [ 'task-id not RC-YYYY-MM-DD-NNN', 'missing lane', 'files: * forbidden', 'lease must be lease=<N>h', 'unknown state word: ???', 'missing reason' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/claim-validate.test.js:129:1
+✖ duplicate keys: last wins, first-insertion order kept (0.469956ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  false !== true
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/claim-validate.test.js:136:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/claim-validate.test.js:142:1
+✖ field parsing details mirror the jq (0.454873ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    [
+  +   'task-id not RC-YYYY-MM-DD-NNN',
+      'missing lane'
+    ]
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/claim-validate.test.js:165:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'task-id not RC-YYYY-MM-DD-NNN', 'missing lane' ],
+    expected: [ 'missing lane' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/claim-validate.test.js:234:1
+✖ parity with scripts/room validate_claim on every vector (386.244609ms)
+  AssertionError [ERR_ASSERTION]: errors differ for:
+  ```room-claim
+  task-id: RC-2026-09-24-204
+  lane: jill
+  files: server/claim-validate.mjs
+  lease: lease=6h
+  state: working
+  reason: build the validator
+  ```
+  + actual - expected
+  
+  + [
+  +   'task-id not RC-YYYY-MM-DD-NNN'
+  + ]
+  - []
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/claim-validate.test.js:249:12)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [ 'task-id not RC-YYYY-MM-DD-NNN' ],
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/claim-validate.test.js:279:1
+✖ POST /api/claims/validate answers 200 with the verdict, anonymously (4036.904214ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  false !== true
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/claim-validate.test.js:283:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

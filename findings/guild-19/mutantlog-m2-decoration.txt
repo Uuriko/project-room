@@ -1,0 +1,56 @@
+{"event":"room.cold_start","durationMs":2988,"integrity":"eager","phases":{"schema":{"ms":436,"rowsRead":0},"plugin":{"ms":1411,"rowsRead":0},"fence":{"ms":732,"rowsRead":0},"verifies":{"ms":33,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":185,"heapBytes":35369584,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ NFKC folds compatibility glyphs and width, case and repeated whitespace (27.054351ms)
+✔ mixed-script impersonation is rejected without relying on an existing record (25.569743ms)
+✔ all-Cyrillic and all-Greek common visual clones collide with Latin names (22.297953ms)
+✔ room member display names and global identity records are accepted as inputs (0.675744ms)
+✔ same identity can retry without allowing another record to collide (27.054501ms)
+✔ invisible controls and malformed names fail safely (5.189267ms)
+✔ unrelated ordinary names and non-Latin names are not globally blocked (0.590175ms)
+✔ the guard does not mistake two unrelated non-mapped scripts for Latin (0.371958ms)
+✔ integration: identity mint and room link enforce names at the write boundary (12732.066141ms)
+✔ QA2-SECREG: Latin-script homoglyphs of reserved role words are refused (1.009605ms)
+✖ QA2-SECREG followup: diacritics, combining marks, CJK brackets, and hook/stroke letters do not spoof reserved roles (17.075665ms)
+✔ QA slice D: Latin Extended-B hook letters do not spoof reserved roles or agent names (1.099691ms)
+✔ G16b: shared first-word and duplicate handle collisions are refused (20.525282ms)
+{"event":"room.cold_start","durationMs":1695,"integrity":"eager","phases":{"schema":{"ms":190,"rowsRead":0},"plugin":{"ms":818,"rowsRead":0},"fence":{"ms":388,"rowsRead":0},"verifies":{"ms":102,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":173,"heapBytes":37941032,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1185,"integrity":"eager","phases":{"schema":{"ms":210,"rowsRead":0},"plugin":{"ms":635,"rowsRead":0},"fence":{"ms":165,"rowsRead":0},"verifies":{"ms":13,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":150,"heapBytes":42454912,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ reserved labels, control characters, duplicates, and lookalikes are classified without echoing hidden characters (56.261572ms)
+✔ a live member.added refuses a reserved or duplicate name, and an older unstamped event still replays (2283.49235ms)
+{"event":"room.cold_start","durationMs":1991,"integrity":"eager","phases":{"schema":{"ms":538,"rowsRead":0},"plugin":{"ms":801,"rowsRead":0},"fence":{"ms":340,"rowsRead":0},"verifies":{"ms":23,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":163,"heapBytes":42404776,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ redeem, share-link join, access requests, and referral redeem refuse a taken display name and keep the existing roster (8436.503116ms)
+room diagnostic op_v5HZwi1I 422 display_name_unavailable input /api/rooms/:roomId/commands
+room diagnostic op_VOgY1dce 422 display_name_unavailable input /api/rooms/:roomId/commands
+room diagnostic op_4MlBSOqv 422 display_name_unavailable input /api/rooms/:roomId/commands
+✔ member.added through the command route refuses a confusable or reserved display name (2348.079186ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 16
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 34454.626504
+
+✖ failing tests:
+
+test at tests/display-name-guard.test.js:124:1
+✖ QA2-SECREG followup: diacritics, combining marks, CJK brackets, and hook/stroke letters do not spoof reserved roles (17.075665ms)
+  AssertionError [ERR_ASSERTION]: Bob〈owner〉 must read as reserved
+  
+  false !== true
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/display-name-guard.test.js:141:12)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

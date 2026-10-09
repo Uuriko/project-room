@@ -1,0 +1,54 @@
+{
+  "unit": "m10",
+  "file": "server/guest-invites.mjs",
+  "mutants": 4,
+  "killed": 1,
+  "survived": 3,
+  "skipped": 0,
+  "results": [
+    {
+      "unit": "m10",
+      "file": "server/guest-invites.mjs",
+      "mutant": "code-anchor",
+      "status": "SURVIVED",
+      "tests": [
+        "tests/guest-invite-flow.test.js"
+      ],
+      "exitCode": 0,
+      "failedTests": 0
+    },
+    {
+      "unit": "m10",
+      "file": "server/guest-invites.mjs",
+      "mutant": "ttl-min",
+      "status": "KILLED",
+      "tests": [
+        "tests/guest-invite-flow.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    },
+    {
+      "unit": "m10",
+      "file": "server/guest-invites.mjs",
+      "mutant": "redeem-max",
+      "status": "SURVIVED",
+      "tests": [
+        "tests/guest-invite-flow.test.js"
+      ],
+      "exitCode": 0,
+      "failedTests": 0
+    },
+    {
+      "unit": "m10",
+      "file": "server/guest-invites.mjs",
+      "mutant": "safe-int",
+      "status": "SURVIVED",
+      "tests": [
+        "tests/guest-invite-flow.test.js"
+      ],
+      "exitCode": 0,
+      "failedTests": 0
+    }
+  ]
+}

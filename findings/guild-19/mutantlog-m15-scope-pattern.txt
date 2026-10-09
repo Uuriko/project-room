@@ -1,0 +1,34 @@
+✔ issue generates a prefixed secret shown once and stores only the hash (6.974907ms)
+✔ verify authenticates with the raw secret and updates lastUsedAt (1.067432ms)
+✖ issue validates identity, scopes, expiry, and label (3.192561ms)
+✔ expired and revoked keys do not verify (3.019331ms)
+✔ rotate invalidates the old secret and issues a new one (0.524007ms)
+✔ grants supports prefix wildcards; unknown keys deny (1.904088ms)
+✔ keysForIdentity only lists that identity's keys (1.340672ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 6
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1792.020875
+
+✖ failing tests:
+
+test at tests/agent-plugin-api-keys.test.js:42:1
+✖ issue validates identity, scopes, expiry, and label (3.192561ms)
+  AssertionError [ERR_ASSERTION]: Missing expected exception (ApiKeyError).
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/agent-plugin-api-keys.test.js:46:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    operator: 'throws',
+    diff: 'simple'
+  }

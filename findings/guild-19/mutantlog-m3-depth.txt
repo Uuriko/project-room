@@ -1,0 +1,78 @@
+✖ mime fuzz corpus: pathological inputs parse or raise the pinned MimeError (632.519455ms)
+✔ mime fuzz CLI rejects invalid numeric options instead of false-greening (7153.798253ms)
+✔ mime fuzz: bounded deterministic random sweep holds the invariant (14430.339369ms)
+✔ simple text message: headers, addresses, date and body (15.24611ms)
+✔ multipart/alternative prefers text/plain; html-only falls back to a text preview (3.704409ms)
+✔ nested multipart/mixed lists attachments by name, type and size without keeping bytes (5.57716ms)
+✔ quoted-printable UTF-8 and base64 bodies decode; Latin-1 charset is honoured (4.230849ms)
+✔ RFC 2047 encoded-words: Q and B, UTF-8 and ISO-8859-1, adjacent words, malformed left alone (3.765892ms)
+✔ address lists: names, quotes, comments, groups, multiple headers and invalid entries (6.646805ms)
+✖ caps: oversized raw, header count and length, part count, depth, attachments, text truncation (59.832431ms)
+✔ malformed boundaries and header lines are rejected; prefix-sharing boundaries are not confused (1.079811ms)
+✔ header injection: CR/LF and other control characters never survive into header values (4.85739ms)
+✔ structured headers and html-to-text handle quoting, RFC 2231, comments and pathological input in linear time (111.231145ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 11
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 25013.336009
+
+✖ failing tests:
+
+test at tests/mime-fuzz.test.js:30:1
+✖ mime fuzz corpus: pathological inputs parse or raise the pinned MimeError (632.519455ms)
+  AssertionError [ERR_ASSERTION]: corpus invariant failures:
+  001-deep-nesting-100.eml: expected error:mime_depth_limit, got error:mime_part_limit
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/mime-fuzz.test.js:36:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.start (node:internal/test_runner/test:1257:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/mime-message.test.js:97:1
+✖ caps: oversized raw, header count and length, part count, depth, attachments, text truncation (59.832431ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    Comparison {
+  +   code: 'mime_part_limit'
+  -   code: 'mime_depth_limit'
+    }
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/mime-message.test.js:111:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: MimeError: more than 50 MIME parts
+        at fail (file:///home/hatch/workspace/pr-wave1000-guild-19/server/mime-message.mjs:12:40)
+        at parseEntity (file:///home/hatch/workspace/pr-wave1000-guild-19/server/mime-message.mjs:324:37)
+        at parseEntity (file:///home/hatch/workspace/pr-wave1000-guild-19/server/mime-message.mjs:334:31)
+        at parseEntity (file:///home/hatch/workspace/pr-wave1000-guild-19/server/mime-message.mjs:334:31)
+        at parseEntity (file:///home/hatch/workspace/pr-wave1000-guild-19/server/mime-message.mjs:334:31)
+        at parseEntity (file:///home/hatch/workspace/pr-wave1000-guild-19/server/mime-message.mjs:334:31)
+        at parseEntity (file:///home/hatch/workspace/pr-wave1000-guild-19/server/mime-message.mjs:334:31)
+        at parseEntity (file:///home/hatch/workspace/pr-wave1000-guild-19/server/mime-message.mjs:334:31)
+        at parseEntity (file:///home/hatch/workspace/pr-wave1000-guild-19/server/mime-message.mjs:334:31)
+        at parseEntity (file:///home/hatch/workspace/pr-wave1000-guild-19/server/mime-message.mjs:334:31),
+    expected: { code: 'mime_depth_limit' },
+    operator: 'throws',
+    diff: 'simple'
+  }

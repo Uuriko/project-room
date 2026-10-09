@@ -1,0 +1,32 @@
+{
+  "unit": "m12",
+  "file": "server/email-import.mjs",
+  "mutants": 2,
+  "killed": 1,
+  "survived": 1,
+  "skipped": 0,
+  "results": [
+    {
+      "unit": "m12",
+      "file": "server/email-import.mjs",
+      "mutant": "journal-cap",
+      "status": "KILLED",
+      "tests": [
+        "tests/email-import.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    },
+    {
+      "unit": "m12",
+      "file": "server/email-import.mjs",
+      "mutant": "commands-cap",
+      "status": "SURVIVED",
+      "tests": [
+        "tests/email-import.test.js"
+      ],
+      "exitCode": 0,
+      "failedTests": 0
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "unit": "m14",
+  "file": "server/analytics/schema.mjs",
+  "mutants": 2,
+  "killed": 0,
+  "survived": 2,
+  "skipped": 0,
+  "results": [
+    {
+      "unit": "m14",
+      "file": "server/analytics/schema.mjs",
+      "mutant": "utcday",
+      "status": "SURVIVED",
+      "tests": [
+        "tests/analytics-export.test.js"
+      ],
+      "exitCode": 0,
+      "failedTests": 0
+    },
+    {
+      "unit": "m14",
+      "file": "server/analytics/schema.mjs",
+      "mutant": "daily-default",
+      "status": "SURVIVED",
+      "tests": [
+        "tests/analytics-export.test.js"
+      ],
+      "exitCode": 0,
+      "failedTests": 0
+    }
+  ]
+}

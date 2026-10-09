@@ -1,0 +1,32 @@
+✔ IPv4 embedded in IPv6 inherits the IPv4 verdict (8.270541ms)
+✔ DNS failure fails closed on Node; a public answer passes (7.932805ms)
+✔ any private or malformed answer blocks the host (0.622153ms)
+✔ literal IPs skip DNS and are their own pinned address (2.819791ms)
+✔ pinnedLookup answers only with checked addresses, whatever name is asked (1.657768ms)
+✔ rebinding: the pinned transport connects to the checked address, never re-resolving the name (392.811986ms)
+✔ fetchPage resolves each hop exactly once, through the check (1.276676ms)
+✔ loopback flag only counts inside a test context (0.945469ms)
+web-fetch: WEB_FETCH_ALLOW_LOOPBACK=1 ignored outside a test context
+✔ hw-sec-15: http://127.0.0.1/ subscription is rejected (99.69935ms)
+✔ hw-sec-15: http://169.254.169.254/ subscription is rejected (25.196512ms)
+✔ hw-sec-15: http://10.0.0.5/ subscription is rejected (0.448122ms)
+✔ hw-sec-15: https literal 127.0.0.1 is rejected as not public (13.151226ms)
+✔ hw-sec-15: https literal 169.254.169.254 (cloud metadata) is rejected (18.079462ms)
+✔ hw-sec-15: https literal 10.0.0.5 (RFC1918) is rejected (0.5065ms)
+✔ hw-sec-15: hostname resolving to private space is rejected with a clear error (20.935148ms)
+✔ hw-sec-15: rebind-aware — ANY private answer among several refuses the URL (0.472599ms)
+✔ hw-sec-15: AAAA answer in ULA space is rejected (12.823354ms)
+✔ hw-sec-15: IPv4-mapped private literal is rejected (14.084917ms)
+✔ hw-sec-15: NAT64-wrapped cloud metadata literal is rejected (5.045662ms)
+✔ hw-sec-15: cloud metadata hostname is rejected without needing DNS (41.42073ms)
+✔ hw-sec-15: localhost hostname is rejected (0.507101ms)
+✔ hw-sec-15: normal public https URL passes registration (18.020533ms)
+✔ hw-sec-15: public IPv6 literal passes registration (42.957807ms)
+ℹ tests 23
+ℹ suites 0
+ℹ pass 23
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 7549.604192

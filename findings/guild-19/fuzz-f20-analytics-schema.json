@@ -1,0 +1,69 @@
+{
+ "unit": "f20-analytics-schema",
+ "inputs": 12,
+ "counts": {
+  "ok": 12
+ },
+ "results": [
+  {
+   "name": "real-table",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "real-col",
+   "verdict": "ok",
+   "ms": 3
+  },
+  {
+   "name": "missing-col",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "sqli-table",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "sqli-table2",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "sqli-col",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "sqli-col2",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk-0",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk-1",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk-2",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk-3",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk-4",
+   "verdict": "ok",
+   "ms": 0
+  }
+ ]
+}

@@ -1,0 +1,54 @@
+{
+  "unit": "m15",
+  "file": "server/agent-api-keys.mjs",
+  "mutants": 4,
+  "killed": 3,
+  "survived": 1,
+  "skipped": 0,
+  "results": [
+    {
+      "unit": "m15",
+      "file": "server/agent-api-keys.mjs",
+      "mutant": "identity-pattern",
+      "status": "KILLED",
+      "tests": [
+        "tests/agent-plugin-api-keys.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    },
+    {
+      "unit": "m15",
+      "file": "server/agent-api-keys.mjs",
+      "mutant": "scope-pattern",
+      "status": "KILLED",
+      "tests": [
+        "tests/agent-plugin-api-keys.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    },
+    {
+      "unit": "m15",
+      "file": "server/agent-api-keys.mjs",
+      "mutant": "expires-int",
+      "status": "SURVIVED",
+      "tests": [
+        "tests/agent-plugin-api-keys.test.js"
+      ],
+      "exitCode": 0,
+      "failedTests": 0
+    },
+    {
+      "unit": "m15",
+      "file": "server/agent-api-keys.mjs",
+      "mutant": "label-len",
+      "status": "KILLED",
+      "tests": [
+        "tests/agent-plugin-api-keys.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    }
+  ]
+}

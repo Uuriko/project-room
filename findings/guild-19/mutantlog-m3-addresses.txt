@@ -1,0 +1,21 @@
+✔ mime fuzz corpus: pathological inputs parse or raise the pinned MimeError (415.7376ms)
+✔ mime fuzz CLI rejects invalid numeric options instead of false-greening (5132.154472ms)
+✔ mime fuzz: bounded deterministic random sweep holds the invariant (8574.7409ms)
+✔ simple text message: headers, addresses, date and body (27.015823ms)
+✔ multipart/alternative prefers text/plain; html-only falls back to a text preview (26.937555ms)
+✔ nested multipart/mixed lists attachments by name, type and size without keeping bytes (6.678512ms)
+✔ quoted-printable UTF-8 and base64 bodies decode; Latin-1 charset is honoured (1.27941ms)
+✔ RFC 2047 encoded-words: Q and B, UTF-8 and ISO-8859-1, adjacent words, malformed left alone (1.094963ms)
+✔ address lists: names, quotes, comments, groups, multiple headers and invalid entries (9.775611ms)
+✔ caps: oversized raw, header count and length, part count, depth, attachments, text truncation (33.955968ms)
+✔ malformed boundaries and header lines are rejected; prefix-sharing boundaries are not confused (5.015227ms)
+✔ header injection: CR/LF and other control characters never survive into header values (4.123668ms)
+✔ structured headers and html-to-text handle quoting, RFC 2231, comments and pathological input in linear time (184.185518ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 16580.681519

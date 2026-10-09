@@ -1,0 +1,251 @@
+{
+ "unit": "f5-attachments",
+ "inputs": 47,
+ "counts": {
+  "ok": 1,
+  "reject": 42,
+  "accept": 2,
+  "crash": 2
+ },
+ "results": [
+  {
+   "name": "valid",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "traversal-0",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "traversal-1",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "traversal-2",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "traversal-3",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "traversal-4",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "traversal-5",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "traversal-6",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "traversal-7",
+   "verdict": "accept",
+   "detail": "dangerous attachment accepted: {\"filename\":\".\",\"sizeBytes\":1,\"mimeType\":\"application/pdf\"}",
+   "ms": 1
+  },
+  {
+   "name": "traversal-8",
+   "verdict": "accept",
+   "detail": "dangerous attachment accepted: {\"filename\":\"..\",\"sizeBytes\":1,\"mimeType\":\"application/pdf\"}",
+   "ms": 0
+  },
+  {
+   "name": "traversal-9",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "traversal-10",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "overlong-name",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "nul-name",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "neg-size",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "float-size",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "nan-size",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "inf-size",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "exe",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "empty-name",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-0",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-1",
+   "verdict": "crash",
+   "detail": "TypeError: Cannot destructure property 'filename' of 'object null' as it is null.",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-2",
+   "verdict": "crash",
+   "detail": "TypeError: Cannot destructure property 'filename' of 'undefined' as it is undefined.",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-3",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-4",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-5",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-6",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-7",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-8",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-9",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-10",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-11",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-12",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-13",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-14",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-15",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-16",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-17",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-18",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-19",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-20",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-21",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-22",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-23",
+   "verdict": "reject",
+   "ms": 2
+  },
+  {
+   "name": "junk:case-24",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-25",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-26",
+   "verdict": "reject",
+   "ms": 0
+  }
+ ]
+}

@@ -1,0 +1,22 @@
+{
+  "unit": "m2b",
+  "file": "server/display-name-guard.mjs",
+  "mutants": 1,
+  "killed": 0,
+  "survived": 1,
+  "skipped": 0,
+  "results": [
+    {
+      "unit": "m2b",
+      "file": "server/display-name-guard.mjs",
+      "mutant": "colon-label",
+      "status": "SURVIVED",
+      "tests": [
+        "tests/display-name-guard.test.js",
+        "tests/display-name-impersonation.test.js"
+      ],
+      "exitCode": 0,
+      "failedTests": 0
+    }
+  ]
+}

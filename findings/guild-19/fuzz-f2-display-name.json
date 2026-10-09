@@ -1,0 +1,322 @@
+{
+ "unit": "f2-display-name",
+ "inputs": 62,
+ "counts": {
+  "reject": 25,
+  "accept": 1,
+  "ok": 36
+ },
+ "results": [
+  {
+   "name": "reserved-0",
+   "verdict": "reject",
+   "ms": 3
+  },
+  {
+   "name": "reserved-1",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "reserved-2",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "reserved-3",
+   "verdict": "reject",
+   "ms": 5
+  },
+  {
+   "name": "reserved-4",
+   "verdict": "reject",
+   "ms": 1
+  },
+  {
+   "name": "reserved-5",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "reserved-6",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "reserved-7",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "reserved-8",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "reserved-9",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "reserved-10",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "reserved-11",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "reserved-12",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "reserved-13",
+   "verdict": "reject",
+   "ms": 5
+  },
+  {
+   "name": "reserved-14",
+   "verdict": "reject",
+   "ms": 4
+  },
+  {
+   "name": "reserved-15",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "reserved-16",
+   "verdict": "reject",
+   "ms": 1
+  },
+  {
+   "name": "reserved-17",
+   "verdict": "reject",
+   "ms": 2
+  },
+  {
+   "name": "reserved-18",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "reserved-19",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "reserved-20",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "reserved-21",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "reserved-22",
+   "verdict": "reject",
+   "ms": 1
+  },
+  {
+   "name": "reserved-23",
+   "verdict": "reject",
+   "ms": 1
+  },
+  {
+   "name": "reserved-24",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "reserved-25",
+   "verdict": "accept",
+   "detail": "reserved name admitted: \"sуpport\"",
+   "ms": 0
+  },
+  {
+   "name": "benign-0",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "benign-1",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "benign-2",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "benign-3",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "benign-4",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "benign-5",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "benign-6",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "benign-7",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "benign-8",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-0",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-1",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-2",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-3",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-4",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-5",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-6",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-7",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-8",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-9",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-10",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-11",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-12",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-13",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-14",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-15",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-16",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-17",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-18",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-19",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-20",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-21",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-22",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-23",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-24",
+   "verdict": "ok",
+   "ms": 14
+  },
+  {
+   "name": "junk:case-25",
+   "verdict": "ok",
+   "ms": 605
+  },
+  {
+   "name": "junk:case-26",
+   "verdict": "ok",
+   "ms": 368
+  }
+ ]
+}

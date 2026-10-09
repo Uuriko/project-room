@@ -1,0 +1,80 @@
+{
+ "unit": "f18-download-tracker",
+ "inputs": 12,
+ "counts": {
+  "ok": 2,
+  "reject": 10
+ },
+ "results": [
+  {
+   "name": "no-store",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "size-0",
+   "verdict": "reject",
+   "detail": "maxMessageBytes must be positive",
+   "ms": 0
+  },
+  {
+   "name": "size-1",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "size-2",
+   "verdict": "reject",
+   "detail": "maxMessageBytes must be positive",
+   "ms": 0
+  },
+  {
+   "name": "size-3",
+   "verdict": "reject",
+   "detail": "maxMessageBytes must be positive",
+   "ms": 0
+  },
+  {
+   "name": "size-4",
+   "verdict": "reject",
+   "detail": "maxMessageBytes must be positive",
+   "ms": 0
+  },
+  {
+   "name": "size-5",
+   "verdict": "reject",
+   "detail": "maxMessageBytes must be positive",
+   "ms": 0
+  },
+  {
+   "name": "size-6",
+   "verdict": "reject",
+   "detail": "maxMessageBytes must be positive",
+   "ms": 0
+  },
+  {
+   "name": "size-7",
+   "verdict": "reject",
+   "detail": "maxMessageBytes must be positive",
+   "ms": 0
+  },
+  {
+   "name": "size-8",
+   "verdict": "reject",
+   "detail": "maxMessageBytes must be positive",
+   "ms": 0
+  },
+  {
+   "name": "size-9",
+   "verdict": "reject",
+   "detail": "maxMessageBytes must be positive",
+   "ms": 0
+  },
+  {
+   "name": "size-10",
+   "verdict": "reject",
+   "detail": "maxMessageBytes must be positive",
+   "ms": 0
+  }
+ ]
+}

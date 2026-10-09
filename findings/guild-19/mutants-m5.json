@@ -1,0 +1,54 @@
+{
+  "unit": "m5",
+  "file": "server/attachments.mjs",
+  "mutants": 4,
+  "killed": 2,
+  "survived": 2,
+  "skipped": 0,
+  "results": [
+    {
+      "unit": "m5",
+      "file": "server/attachments.mjs",
+      "mutant": "filename-len",
+      "status": "SURVIVED",
+      "tests": [
+        "tests/attachments.test.js"
+      ],
+      "exitCode": 0,
+      "failedTests": 0
+    },
+    {
+      "unit": "m5",
+      "file": "server/attachments.mjs",
+      "mutant": "separators-flip",
+      "status": "KILLED",
+      "tests": [
+        "tests/attachments.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    },
+    {
+      "unit": "m5",
+      "file": "server/attachments.mjs",
+      "mutant": "size-int",
+      "status": "SURVIVED",
+      "tests": [
+        "tests/attachments.test.js"
+      ],
+      "exitCode": 0,
+      "failedTests": 0
+    },
+    {
+      "unit": "m5",
+      "file": "server/attachments.mjs",
+      "mutant": "blocked-ext",
+      "status": "KILLED",
+      "tests": [
+        "tests/attachments.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    }
+  ]
+}

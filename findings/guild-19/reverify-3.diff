@@ -1,0 +1,874 @@
+diff --git a/server/agent-plugin-store.mjs b/server/agent-plugin-store.mjs
+index 090093fcc..491b844e4 100644
+--- a/server/agent-plugin-store.mjs
++++ b/server/agent-plugin-store.mjs
+@@ -154,6 +154,34 @@ export const RECENT_WEBHOOK_DELIVERIES_SQL =
+    ORDER BY created_at DESC, rowid DESC
+    LIMIT ${WEBHOOK_DELIVERY_KEEP}`;
+ 
++// WAVE-300 F2: how many deliveries one drain keeps in flight. Bounded so a
++// full batch of slow receivers cannot hold the drain (or the event loop)
++// hostage; wide enough that wake fan-out latency stops being the sum of
++// every POST. The pool's only await point is the network POST itself —
++// every DB mutation stays in a synchronous this.mutate(...) callback, so
++// per-delivery transaction semantics are identical to the old sequential
++// loop and workers can never interleave a transaction.
++export const WEBHOOK_DRAIN_CONCURRENCY = 8;
++
++// Run fn over items with at most `limit` promises in flight. Results come
++// back in input order. fn must not hold a database transaction across an
++// await — better-sqlite3 is synchronous and shared here.
++async function runBounded(items, limit, fn) {
++  const results = new Array(items.length);
++  let next = 0;
++  const workers = Array.from(
++    { length: Math.max(1, Math.min(limit, items.length)) },
++    async () => {
++      for (;;) {
++        const i = next++;
++        if (i >= items.length) return;
++        results[i] = await fn(items[i], i);
++      }
++    });
++  await Promise.all(workers);
++  return results;
++}
++
+ function cachedDelivery(row) {
+   return {
+     deliveryId: row.delivery_id,
+@@ -1340,6 +1368,50 @@ export class AgentPluginStore {
+     });
+   }
+ 
++  // WAVE-300 F2: coalescing key for one due row. Multiple pending
++  // agent.wake deliveries to the SAME effective target URL carrying the
++  // SAME eventId are the same signal (the wake ping is receipt-idempotent),
++  // so one batch POSTs it once and marks the duplicates delivered. Null
++  // unless every coalescing condition holds: wake event type, a non-null
++  // eventId (null cannot prove "same signal"), and a resolvable effective
++  // URL (per-row target_url override, else the subscription's URL). Never
++  // coalesces across different eventIds or different URLs.
++  wakeCoalesceKey(row) {
++    if (row.event_type !== WAKE_PING_EVENT) return null;
++    if (typeof row.event_id !== "string" || row.event_id === "") return null;
++    const url = row.target_url ?? this.subs.get(row.subscription_id)?.url;
++    if (typeof url !== "string" || url === "") return null;
++    return `${url}${row.event_id}`;
++  }
++
++  // Attempt a coalesced group: only the leader is POSTed (the dispatch-time
++  // SSRF guard still runs per POST, unchanged). When the leader delivers,
++  // each follower is marked delivered carrying the leader's exact signature
++  // + envelope — the signal that actually went out — with the same
++  // pure-module cache update the leader path does. Any other leader outcome
++  // (retried/deadLettered) leaves followers pending for a later sweep.
++  // Returns the leader's outcome string plus the number of rows the group
++  // settled, for the drain summary.
++  async attemptCoalescedGroup(leader, followers, { fetchImpl, now, dnsResolvers }) {
++    const outcome = await this.attemptStoredDelivery(leader, { fetchImpl, now, dnsResolvers });
++    if (outcome !== "delivered" || followers.length === 0) {
++      return { outcome, settled: 1 };
++    }
++    const posted = this.db.prepare(
++      "SELECT signature, payload_json FROM agent_webhook_deliveries WHERE delivery_id=?")
++      .get(leader.delivery_id);
++    const envelope = JSON.parse(posted.payload_json);
++    for (const follower of followers) {
++      this.mutate(() => {
++        try {
++          this.webhooks.recordAttempt(follower.delivery_id, { ok: true, error: null, terminal: true });
++        } catch { /* cache may lag; the table is authoritative */ }
++        this.markDelivered(follower.delivery_id, { signature: posted.signature, issuedAt: now, envelope, now });
++      });
++    }
++    return { outcome, settled: 1 + followers.length };
++  }
++
+   // Sweep due deliveries (pending/failed with next_attempt_at <= now).
+   // Called by the Cloudflare cron tick and by the agent-triggered process
+   // endpoint (agentId scopes it to one identity's deliveries). Each
+@@ -1351,6 +1423,12 @@ export class AgentPluginStore {
+   // webhook lookup, when set, is the resolver for this drain. fetchImpl is an optional
+   // override (tests); omitted, postDelivery uses its DNS-pinned transport
+   // on Node (plain fetch on Workers) — the M-1 rebinding fix.
++  //
++  // WAVE-300 F2: the batch dispatches through a bounded pool of
++  // WEBHOOK_DRAIN_CONCURRENCY in-flight attempts. Per-delivery transaction
++  // semantics, retry/backoff/dead-letter states, and the dispatch-time SSRF
++  // guard are unchanged; duplicate agent.wake pings to the same URL with
++  // the same eventId coalesce to one POST (wakeCoalesceKey).
+   async drainWebhookDeliveries({ fetchImpl, now = this.store.now(), limit = 25, agentId = null, dnsResolvers } = {}) {
+     const resolvers = dnsResolvers ?? (this.webhookLookup ? { lookup: this.webhookLookup } : undefined);
+     // Only rows that can actually be attempted fill the batch. Deliveries of a
+@@ -1369,10 +1447,29 @@ export class AgentPluginStore {
+          OR EXISTS (SELECT 1 FROM identity_links l WHERE l.room_id = d.room_id AND l.identity_id = d.agent_id))))
+        ORDER BY d.next_attempt_at ASC LIMIT ?`)
+       .all(...(agentId ? [now, agentId, limit] : [now, limit]));
+-    const summary = { processed: 0, delivered: 0, retried: 0, deadLettered: 0, skipped: 0 };
++    // WAVE-300 F2: group duplicate wake pings before dispatch (see
++    // wakeCoalesceKey). The first row in due order leads each group; the
++    // pool below only ever POSTs leaders.
++    const groups = [];
++    const byKey = new Map();
+     for (const row of due) {
+-      summary.processed++;
+-      summary[await this.attemptStoredDelivery(row, { fetchImpl, now, dnsResolvers: resolvers })]++;
++      const key = this.wakeCoalesceKey(row);
++      if (key === null) { groups.push({ leader: row, followers: [] }); continue; }
++      const group = byKey.get(key);
++      if (group) group.followers.push(row);
++      else { const next = { leader: row, followers: [] }; byKey.set(key, next); groups.push(next); }
++    }
++    // Bounded-parallel dispatch (was: one awaited POST per row, so wake
++    // fan-out latency was the sum of every POST). Per-delivery transaction
++    // semantics, retry/backoff/dead-letter states, and the dispatch-time
++    // SSRF guard are exactly as before — the pool's only await point is
++    // the network POST.
++    const summary = { processed: 0, delivered: 0, retried: 0, deadLettered: 0, skipped: 0 };
++    const results = await runBounded(groups, WEBHOOK_DRAIN_CONCURRENCY,
++      group => this.attemptCoalescedGroup(group.leader, group.followers, { fetchImpl, now, dnsResolvers: resolvers }));
++    for (const { outcome, settled } of results) {
++      summary.processed += settled;
++      summary[outcome] += settled;
+     }
+     return Object.freeze(summary);
+   }
+diff --git a/server/http.mjs b/server/http.mjs
+index 92bf43a78..2ba08c9b9 100644
+--- a/server/http.mjs
++++ b/server/http.mjs
+@@ -37,7 +37,7 @@ import { agentErrorBody, errorCategory, mergeErrorDetail, ERROR_COMMAND_TYPE } f
+ import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
+ import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
+ import { redactEventPage, redactEventRows, redactMessageTree, redactSnapshotState } from "./redact-read.mjs";
+-import { messageInHistory, eventInHistory, indexMessages as indexHistoryMessages, requireExportOwner, recordRoomExport } from "./history-visibility.mjs"; // PRIV-2
++import { messageInHistory, eventInHistory, rowInHistory, indexMessages as indexHistoryMessages, requireExportOwner, recordRoomExport } from "./history-visibility.mjs"; // PRIV-2
+ import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
+ import { noteIdentityMint } from "./growth-loop.mjs";
+ import { createWikiReadApi } from "./wiki-read-api.mjs"; // W009: read-only wiki API for agents (prefix-delegated, no route literals here)
+@@ -848,74 +848,170 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
+     try { const value = JSON.parse(text); if (!value || Array.isArray(value) || typeof value !== "object") throw new Error(); return value; }
+     catch { reject(400, "invalid_json", "Expected a JSON object"); }
+   }
+-  function stream(req, res, token, roomId, after, auth, operationId) {
+-    const binding = auth.sessionBinding;
+-    store.eventsAfter(token, roomId, after, 100, binding);
+-    if (streams.size >= 100 || [...streams].filter(item => item.credentialHash === auth.credentialHash).length >= 3) reject(429, "stream_limit", "Close another room connection before opening more");
+-    res.writeHead(200, { "Content-Type": "text/event-stream", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
+-    res.flushHeaders();
+-    const entry = { credentialHash: auth.credentialHash, sessionBinding: binding, memberId: auth.member.id, roomId, res };
+-    streams.add(entry);
+-    let cursor = after;
+-    let timer;
+-    const signal = resolveRequestSignal(req);
+-    const cleanup = () => { clearInterval(timer); streams.delete(entry); signal?.removeEventListener("abort", abort); };
+-    const end = data => { cleanup(); if (!res.destroyed && !res.writableEnded) res.end(data); };
+-    const abort = () => end();
++  // F1 (WAVE-300): one SSE pump interval per roomId instead of one per
++  // stream. Each tick fetches new events ONCE since the room's minimum
++  // stream cursor (capped at the 100-row page, so one far-behind stream
++  // can't blow the batch), redacts once, builds the room projection once,
++  // then fans out per stream: per-stream auth (401/403 → access-ended),
++  // the viewer visibility filter, socket writes, cursor advance, and
++  // typing-ephemeral diffs. Wire protocol unchanged.
++  const roomPumps = new Map(); // roomId -> { streams: Set, timer }
++  const removeStreamEntry = entry => {
++    streams.delete(entry);
++    const pump = roomPumps.get(entry.roomId);
++    if (!pump) return;
++    pump.streams.delete(entry);
++    if (pump.streams.size === 0) { clearInterval(pump.timer); roomPumps.delete(entry.roomId); }
++  };
++  const endStreamEntry = (entry, data) => {
++    removeStreamEntry(entry);
++    const { res } = entry;
++    if (!res.destroyed && !res.writableEnded) res.end(data);
++  };
++  const lagStreamEntry = entry => {
++    const { res, roomId, operationId } = entry;
++    diagnostics.record({ operationId, at: new Date().toISOString(), status: 200, code: "stream_lagging", category: "unavailable", route: "/api/rooms/:roomId/stream", roomId });
++    console.warn(`room diagnostic ${operationId} 200 stream_lagging unavailable /api/rooms/:roomId/stream`);
++    const drop = setTimeout(() => res.destroy(), STREAM_DRAIN_GRACE_MS);
++    drop.unref();
++    res.once("close", () => clearTimeout(drop));
++    endStreamEntry(entry, 'event: stream_lagging\ndata: {"message":"Client fell behind; reconnect with Last-Event-ID to resume"}\n\n');
++  };
++  // The viewer visibility filter the shared page is fanned out through, per
++  // stream. Mirrors store.eventsAfter's filter exactly (DM follow-ups,
++  // PRIV-2 history floor, peer-private events); the shared fetch runs with
++  // { includeInvisible: true } so the page holds the union of every
++  // stream's visible rows and this filter can only narrow it. `messages` is
++  // the projection already built once for the tick; `authority` carries the
++  // room head sequence and owner id.
++  const filterPageForViewer = (auth, roomId, rows, messages, authority) => {
++    const viewerId = auth.member.id;
++    const identityId = store.bonds.identityForMember(roomId, viewerId);
++    const isOwner = viewerId === authority.ownerId;
++    const floor = store.historyFloor(roomId, viewerId, authority.sequence);
++    const floorMessages = floor ? indexHistoryMessages(messages) : null;
++    const dmVisible = dmEventVisibility(viewerId, messages, rows);
++    return rows.filter(row => rowInHistory(row, floor, floorMessages) && dmVisible(row.event)
++      && peerEventVisible(row.event, { memberId: viewerId, identityId, isOwner }));
++  };
++  function pumpStreamEntry(entry, page, messages, authority) {
++    const { res, roomId, operationId } = entry;
++    if (res.destroyed || res.writableEnded) { removeStreamEntry(entry); return; }
+     // Per-connection send queue: a consumer whose unsent bytes exceed the cap
+     // gets one final stream_lagging event and, if it never drains, its socket
+     // dropped. Peers keep their own queues. Reconnecting with Last-Event-ID
+     // resumes from the last event the client actually processed.
+     const lagging = () => res.writableLength > streamQueueCap;
+-    const lag = () => {
+-      diagnostics.record({ operationId, at: new Date().toISOString(), status: 200, code: "stream_lagging", category: "unavailable", route: "/api/rooms/:roomId/stream", roomId });
+-      console.warn(`room diagnostic ${operationId} 200 stream_lagging unavailable /api/rooms/:roomId/stream`);
+-      const drop = setTimeout(() => res.destroy(), STREAM_DRAIN_GRACE_MS);
+-      drop.unref();
+-      res.once("close", () => clearTimeout(drop));
+-      end('event: stream_lagging\ndata: {"message":"Client fell behind; reconnect with Last-Event-ID to resume"}\n\n');
+-    };
+-    const pump = () => {
+-      if (res.destroyed || res.writableEnded) { cleanup(); return; }
+-      try {
+-        const batch = redactEventPage(store.eventsAfter(token, roomId, cursor, 100, binding), projectionMessages(roomId));
+-        if (!batch.events.length) res.write(": connected transport only\n\n");
+-        for (const item of batch.events) {
+-          res.write(`id: ${item.sequence}\nevent: room-event\ndata: ${JSON.stringify(item)}\n\n`);
+-          cursor = item.sequence;
+-          if (lagging()) break;
+-        }
+-        // Ephemeral typing indicators ride the stream as synthetic `typing`
+-        // events with no `id:` — they never disturb Last-Event-ID resume.
+-        // Emitted only when the visible typist set changes for this connection.
+-        if (!lagging()) {
+-          const typists = currentTypists(typingBeats, roomId, entry.memberId);
+-          const key = typingKey(typists);
+-          if (key !== entry.lastTypingKey) {
+-            entry.lastTypingKey = key;
+-            res.write(`event: typing\ndata: ${JSON.stringify({ typists })}\n\n`);
+-          }
++    try {
++      // Per-stream auth every tick: a revoked credential ends only this
++      // stream with access-ended; peers are unaffected.
++      const auth = store.authenticate(entry.token, roomId, entry.sessionBinding);
++      const rows = filterPageForViewer(auth, roomId, page.events, messages, authority)
++        .filter(row => row.sequence > entry.cursor);
++      if (!rows.length) res.write(": connected transport only\n\n");
++      for (const item of rows) {
++        res.write(`id: ${item.sequence}\nevent: room-event\ndata: ${JSON.stringify(item)}\n\n`);
++        entry.cursor = item.sequence;
++        if (lagging()) break;
++      }
++      // Ephemeral typing indicators ride the stream as synthetic `typing`
++      // events with no `id:` — they never disturb Last-Event-ID resume.
++      // Emitted only when the visible typist set changes for this connection.
++      if (!lagging()) {
++        const typists = currentTypists(typingBeats, roomId, entry.memberId);
++        const key = typingKey(typists);
++        if (key !== entry.lastTypingKey) {
++          entry.lastTypingKey = key;
++          res.write(`event: typing\ndata: ${JSON.stringify({ typists })}\n\n`);
+         }
+-        if (lagging()) lag();
+-        // Advance past invisible rows only after the complete visible batch
+-        // was queued. A lagging stream must resume from its last sent event.
+-        else cursor = batch.next;
+-      } catch (error) {
+-        if ([401, 403].includes(error?.status) || error?.code === "session_binding_changed") {
+-          end('event: access-ended\ndata: {"message":"Access ended; sign in again"}\n\n');
+-        } else {
+-          diagnostics.record({ operationId, at: new Date().toISOString(), status: 503, code: "stream_unavailable", category: "unavailable", route: "/api/rooms/:roomId/stream", roomId });
+-          end('event: unavailable\ndata: {"message":"Connection interrupted; reconnect to recover"}\n\n');
++      }
++      if (lagging()) lagStreamEntry(entry);
++      // Advance past invisible rows only after the complete visible batch
++      // was queued. A lagging stream must resume from its last sent event.
++      // max() because the shared page starts at the room's minimum cursor,
++      // which can sit behind this stream's own cursor.
++      else entry.cursor = Math.max(entry.cursor, page.next);
++    } catch (error) {
++      if ([401, 403].includes(error?.status) || error?.code === "session_binding_changed") {
++        endStreamEntry(entry, 'event: access-ended\ndata: {"message":"Access ended; sign in again"}\n\n');
++      } else {
++        diagnostics.record({ operationId, at: new Date().toISOString(), status: 503, code: "stream_unavailable", category: "unavailable", route: "/api/rooms/:roomId/stream", roomId });
++        endStreamEntry(entry, 'event: unavailable\ndata: {"message":"Connection interrupted; reconnect to recover"}\n\n');
++      }
++    }
++  }
++  function pumpRoom(roomId) {
++    const pump = roomPumps.get(roomId);
++    if (!pump) return;
++    for (const entry of [...pump.streams]) {
++      if (entry.res.destroyed || entry.res.writableEnded) removeStreamEntry(entry);
++    }
++    const entries = [...pump.streams];
++    if (entries.length === 0) {
++      clearInterval(pump.timer);
++      roomPumps.delete(roomId);
++      return;
++    }
++    // One fetch per room per tick, from the room's minimum stream cursor.
++    // The 100-row cap keeps one far-behind stream from blowing the batch;
++    // streams ahead of the fetched window wait for it to catch up. The
++    // fetch rides the leading stream's credential.
++    const minCursor = Math.min(...entries.map(entry => entry.cursor));
++    const leader = entries.find(entry => entry.cursor === minCursor) ?? entries[0];
++    let page, messages, authority;
++    try {
++      messages = projectionMessages(roomId);
++      authority = store.roomAuthority(roomId);
++      page = redactEventPage(store.eventsAfter(leader.token, roomId, minCursor, 100, leader.sessionBinding,
++        { includeInvisible: true }), messages);
++    } catch (error) {
++      if ([401, 403].includes(error?.status) || error?.code === "session_binding_changed") {
++        // The shared fetch rides the leading stream's credential, so its
++        // access ending ends that stream now; survivors elect a new leader
++        // on the next tick.
++        endStreamEntry(leader, 'event: access-ended\ndata: {"message":"Access ended; sign in again"}\n\n');
++      } else {
++        // A room-level fetch failure would have failed every stream's own
++        // pump the same way: end them all with `unavailable`, as before.
++        for (const entry of entries) {
++          diagnostics.record({ operationId: entry.operationId, at: new Date().toISOString(), status: 503, code: "stream_unavailable", category: "unavailable", route: "/api/rooms/:roomId/stream", roomId });
++          endStreamEntry(entry, 'event: unavailable\ndata: {"message":"Connection interrupted; reconnect to recover"}\n\n');
+         }
+       }
+-    };
+-    timer = setInterval(pump, streamInterval);
+-    timer.unref();
++      return;
++    }
++    for (const entry of entries) pumpStreamEntry(entry, page, messages, authority);
++  }
++  const ensureRoomPump = roomId => {
++    let pump = roomPumps.get(roomId);
++    if (!pump) {
++      pump = { streams: new Set(), timer: setInterval(() => pumpRoom(roomId), streamInterval) };
++      pump.timer.unref();
++      roomPumps.set(roomId, pump);
++    }
++    return pump;
++  };
++  function stream(req, res, token, roomId, after, auth, operationId) {
++    const binding = auth.sessionBinding;
++    store.eventsAfter(token, roomId, after, 100, binding);
++    if (streams.size >= 100 || [...streams].filter(item => item.credentialHash === auth.credentialHash).length >= 3) reject(429, "stream_limit", "Close another room connection before opening more");
++    res.writeHead(200, { "Content-Type": "text/event-stream", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
++    res.flushHeaders();
++    // The entry carries the per-stream state the shared room pump's fan-out
++    // needs: credential, cursor, and the last-sent typing key.
++    const entry = { credentialHash: auth.credentialHash, sessionBinding: binding, memberId: auth.member.id,
++      roomId, res, token, cursor: after, operationId };
++    streams.add(entry);
++    ensureRoomPump(roomId).streams.add(entry);
++    const signal = resolveRequestSignal(req);
++    const cleanup = () => { removeStreamEntry(entry); signal?.removeEventListener("abort", abort); };
++    const abort = () => endStreamEntry(entry);
+     res.once("close", cleanup); res.once("finish", cleanup); res.once("error", abort);
+     // Workers' Node bridge does not emit close when a browser leaves. The
+     // request-scoped platform signal releases only this stream and its timer.
+     signal?.addEventListener("abort", abort, { once: true });
+-    if (signal?.aborted) abort(); else pump();
++    // The first pump runs synchronously at open, as before.
++    if (signal?.aborted) abort(); else pumpRoom(roomId);
+   }
+   const server = createServer(async (req, res) => {
+     const operationId = `op_${randomBytes(6).toString("base64url")}`;
+diff --git a/server/mcp-full-profile.mjs b/server/mcp-full-profile.mjs
+index 3bb2a9af0..771a915eb 100644
+--- a/server/mcp-full-profile.mjs
++++ b/server/mcp-full-profile.mjs
+@@ -300,7 +300,7 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
+     const snapshot = store.snapshot(secret, roomId);
+     const now = typeof store.now === "function" ? store.now() : Date.now();
+     const { claims, ...claimsPage } = buildWorkClaimPage(store.workClaims.list(roomId), roomId,
+-      auth.member.id, new URLSearchParams(rest), now);
++      auth.member.id, new URLSearchParams(rest), now, store.workClaims.boardSeq(roomId));
+     return { value: stampBoard({ ...projectBoard(snapshot.state, Date.now()), roomId: snapshot.roomId,
+       evaluatedThrough: snapshot.sequence, evaluatedAt: new Date().toISOString(), claims, claimsPage }), isError: false };
+   }
+diff --git a/server/routes/work-claims.mjs b/server/routes/work-claims.mjs
+index 82202130b..b7c462728 100644
+--- a/server/routes/work-claims.mjs
++++ b/server/routes/work-claims.mjs
+@@ -57,7 +57,7 @@ export async function getWorkClaimsRead(ctx) {
+   const { roomId, auth } = authenticateRead(ctx);
+   const now = typeof ctx.store.now === "function" ? ctx.store.now() : Date.now();
+   return ctx.json(ctx.res, 200, buildWorkClaimPage(ctx.store.workClaims.list(roomId), roomId,
+-    auth.member.id, ctx.url.searchParams, now));
++    auth.member.id, ctx.url.searchParams, now, ctx.store.workClaims.boardSeq(roomId)));
+ }
+ 
+ export async function provenanceRoute(ctx) {
+diff --git a/server/store.mjs b/server/store.mjs
+index ee3efe53f..4237ce15d 100644
+--- a/server/store.mjs
++++ b/server/store.mjs
+@@ -1126,13 +1126,15 @@ const LOOKUP_INDEXES = `
+ `;
+ 
+ // MSG-0: parsed projection cache. A hit reads sequence only, so a 64 MiB
+-// room does not JSON.parse again until the sequence changes or a rooms
+-// write drops the entry. Commit and rollback of a write transaction drop
+-// the whole cache, including a parse of uncommitted bytes. Callers receive
+-// a frozen snapshot; a rewrite clones it first.
++// room does not JSON.parse again until its sequence changes. F4: entries
++// are keyed on rooms.sequence and every hot-path writer bumps sequence
++// with the projection, so writes to other rooms (or a rollback, which
++// restores the old sequence) can never serve a stale entry — no blanket
++// invalidation. The rare repair writers that change a projection without
++// bumping sequence invalidate their own room's entry explicitly.
++// Callers receive a frozen snapshot; a rewrite clones it first.
+ const PROJECTION_CACHE_MAX_ROOMS = 32;
+ const PROJECTION_CACHE_MAX_BYTES = 64 * 1024 * 1024;
+-const ROOMS_WRITE = /\b(?:insert\s+into|update|delete\s+from|replace\s+into)\s+rooms\b/i;
+ 
+ function deepFreeze(value) {
+   if (value === null || typeof value !== "object" || Object.isFrozen(value)) return value;
+@@ -1144,6 +1146,16 @@ function deepFreeze(value) {
+ class ProjectionCache {
+   constructor() { this.entries = new Map(); this.bytes = 0; }
+   clear() { this.entries.clear(); this.bytes = 0; }
++  // F4 (wave300-fanout): targeted drop for the rare writers that change a
++  // projection without bumping rooms.sequence (projection repairs). Every
++  // hot-path writer bumps sequence with the projection, so lookup()'s
++  // sequence check already invalidates those — no blanket clear needed.
++  invalidate(roomId) {
++    const prior = this.entries.get(roomId);
++    if (!prior) return;
++    this.entries.delete(roomId);
++    this.bytes -= prior.weight;
++  }
+   lookup(roomId, sequence) {
+     const entry = this.entries.get(roomId);
+     if (!entry || entry.sequence !== sequence) return null;
+@@ -2537,6 +2549,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
+       const state = JSON.parse(row.projection);
+       if (!ensureDefaultChannelState(state)) continue;
+       update.run(this.storedProjection(row.id, state), row.id);
++      // F4: this repair rewrites the projection without bumping sequence,
++      // so the sequence-keyed cache cannot see it — drop this room's entry.
++      this._dropProjectionRoom(row.id);
+     }
+     const linked = this.db.prepare(`
+       SELECT rooms.id AS id, json_extract(rooms.projection, '$.workItems') AS workItems
+@@ -2551,7 +2566,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
+       if (skipIds.has(row.id)) continue;
+       if (!repairInvalidSupersessions({ workItems: parseStoredJson(row.workItems, {}) })) continue;
+       const state = JSON.parse(this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(row.id).projection);
+-      if (repairInvalidSupersessions(state)) update.run(this.storedProjection(row.id, state), row.id);
++      if (repairInvalidSupersessions(state)) {
++        update.run(this.storedProjection(row.id, state), row.id);
++        this._dropProjectionRoom(row.id); // F4: no sequence bump — drop explicitly.
++      }
+     }
+   }
+   replayProvenance(rooms, { upgradeV1 }) {
+@@ -2565,7 +2583,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
+       if (upgradeV1) {
+         const state = JSON.parse(room.projection);
+         const changed = applyProvenanceRepair(state, events);
+-        if (changed) update.run(this.storedProjection(room.id, state), room.id);
++        if (changed) {
++          update.run(this.storedProjection(room.id, state), room.id);
++          this._dropProjectionRoom(room.id); // F4: no sequence bump — drop explicitly.
++        }
+         // Checkpoints keep full bodies (replay applies edits to them).
+         saveCheckpoint.run(room.id, room.sequence, JSON.stringify(hydrateProjection(this.db, room.id, state).state));
+         continue;
+@@ -2578,53 +2599,35 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
+       };
+       if (!applyProvenanceRepair(partial, events)) continue;
+       const state = JSON.parse(this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(room.id).projection);
+-      if (applyProvenanceRepair(state, events)) update.run(this.storedProjection(room.id, state), room.id);
+-    }
+-  }
+-  close() { this._projectionCache?.clear(); this.db.close(); }
+-  // MSG-0: drop parsed projections when a write transaction commits or rolls
+-  // back, so a parse of uncommitted bytes cannot outlive the transaction.
+-  _dropProjectionCache() { this._projectionCache?.clear(); }
+-  _armProjectionWatch() {
+-    if (this._projectionWatch || typeof this.db?.prepare !== "function") return;
+-    this._projectionWatch = true;
+-    const cache = () => this._projectionCache;
+-    const prepare = this.db.prepare.bind(this.db);
+-    this.db.prepare = sql => {
+-      const stmt = prepare(sql);
+-      if (typeof sql === "string" && ROOMS_WRITE.test(sql) && typeof stmt.run === "function") {
+-        const run = stmt.run.bind(stmt);
+-        stmt.run = (...args) => {
+-          const result = run(...args);
+-          cache()?.clear();
+-          return result;
+-        };
++      if (applyProvenanceRepair(state, events)) {
++        update.run(this.storedProjection(room.id, state), room.id);
++        this._dropProjectionRoom(room.id); // F4: no sequence bump — drop explicitly.
+       }
+-      return stmt;
+-    };
+-    if (typeof this.db.exec === "function") {
+-      const exec = this.db.exec.bind(this.db);
+-      this.db.exec = sql => {
+-        const result = exec(sql);
+-        if (typeof sql === "string" && ROOMS_WRITE.test(sql)) cache()?.clear();
+-        return result;
+-      };
+     }
+   }
++  close() { this._projectionCache?.clear(); this.db.close(); }
++  // F4 (wave300-fanout): the blanket projection-cache clear on every write
++  // is gone. lookup() is keyed on rooms.sequence and every hot-path writer
++  // bumps sequence with the projection, so a stale entry is unreachable;
++  // clearing the whole cache on every scratch-room write forced every pump
++  // tick to re-decode every room's projection (measured: warm p99 0.20ms ->
++  // 7.37ms dropped at SIM scale). Only the no-sequence-bump repair writers
++  // below need a targeted drop.
++  _dropProjectionRoom(roomId) { this._projectionCache?.invalidate(roomId); }
+   transaction(fn, { isolated = false } = {}) {
+     // Nested startup helpers share the outer migration transaction and its rollback.
+     const outermost = !this.db.isTransaction;
+-    this._armProjectionWatch();
+     // Only a commit that changed rows proves storage is writable again; an
+     // idempotent replay commits nothing. Measured only while degraded.
+     const before = outermost && this.storageFailures > 0 ? this.storagePlatform.changes?.(this.db) : null;
+     let result;
+     try { result = this.storagePlatform.transaction(this.db, fn, false, { isolated }); }
+     catch (error) {
+-      if (outermost || isolated) this._dropProjectionCache();
++      // F4: no projection-cache drop here. A rollback restores the old
++      // rooms.sequence, so the sequence-keyed lookup misses any entry cached
++      // from uncommitted bytes — staleness is unreachable without a clear.
+       throw this.storageFailure(error, outermost);
+     }
+-    if (outermost || isolated) this._dropProjectionCache();
+     if (before !== null && (before === undefined || this.storagePlatform.changes(this.db) !== before)) this.storageRecovered();
+     return result;
+   }
+@@ -2655,8 +2658,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
+     return { failures: this.storageFailures, threshold: this.storageFailureThreshold, unavailable: this.storageFailures >= this.storageFailureThreshold };
+   }
+   room(roomId) {
+-    // MSG-0 projection cache. The hit path reads sequence only.
+-    this._armProjectionWatch();
++    // MSG-0 projection cache. The hit path reads sequence only. F4: the
++    // sequence check is the invalidation — entries survive writes to other
++    // rooms and any write that leaves this room's sequence alone must
++    // invalidate its own entry explicitly (repair paths below).
+     const cache = this._projectionCache ??= new ProjectionCache();
+     const meta = (this._roomSequenceStmt ??= this.db.prepare("SELECT sequence FROM rooms WHERE id=?")).get(roomId);
+     if (!meta) fail(404, "room_not_found", "Room not found");
+@@ -2679,7 +2684,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
+       for (const { id } of this.db.prepare("SELECT id FROM rooms WHERE projection LIKE '%\"bodyRef\"%'").all()) {
+         const state = this.room(id).state;
+         this.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(storedProjection(this.db, id, state, { enabled: false }), id);
+-        this._projectionCache?.clear?.();
++        this._dropProjectionRoom(id); // F4: no sequence bump — drop this room's entry.
+         count += 1;
+       }
+       return count;
+@@ -4368,17 +4373,24 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
+       // non-targeted messages and room-level events that also carry a
+       // toMemberId, like ownership transfers) are unaffected. The cursor
+       // still advances past filtered events so pagination cannot stall.
++      // F1 (WAVE-300): the shared SSE pump fetches once per room per tick
++      // with { includeInvisible: true } and fans out per viewer itself, so
++      // the page must carry the UNION of every stream's visible rows. The
++      // default path below is unchanged.
+       const viewerId = auth.member.id;
+-      const identityId = this.bonds.identityForMember(roomId, viewerId);
+-      const isOwner = viewerId === authority.ownerId;
+-      // PRIV-2: since_join readers page past events from before their join.
+-      const floor = this.historyFloor(roomId, viewerId, sequence);
+-      const floorMessages = floor ? indexHistoryMessages(this.room(roomId).state.messages) : null;
+-      // SEC-19: thunk keeps the zero-decode polling optimization: the full
+-      // projection only decodes if the page actually holds a follow-up event.
+-      const dmVisible = dmEventVisibility(viewerId, () => this.room(roomId).state.messages, events);
+-      const visible = events.filter(row => rowInHistory(row, floor, floorMessages) && dmVisible(row.event)
+-        && peerEventVisible(row.event, { memberId: viewerId, identityId, isOwner }));
++      let visible = events;
++      if (!opts.includeInvisible) {
++        const identityId = this.bonds.identityForMember(roomId, viewerId);
++        const isOwner = viewerId === authority.ownerId;
++        // PRIV-2: since_join readers page past events from before their join.
++        const floor = this.historyFloor(roomId, viewerId, sequence);
++        const floorMessages = floor ? indexHistoryMessages(this.room(roomId).state.messages) : null;
++        // SEC-19: thunk keeps the zero-decode polling optimization: the full
++        // projection only decodes if the page actually holds a follow-up event.
++        const dmVisible = dmEventVisibility(viewerId, () => this.room(roomId).state.messages, events);
++        visible = events.filter(row => rowInHistory(row, floor, floorMessages) && dmVisible(row.event)
++          && peerEventVisible(row.event, { memberId: viewerId, identityId, isOwner }));
++      }
+       // #658: mention chips ride on message views. One batched query for
+       // the whole page (no N+1); only members who can read the room see it.
+       const messageIds = visible.filter(({ event }) => event?.type === T.MESSAGE_POSTED).map(({ event }) => event.id);
+diff --git a/server/work-claim-routes.mjs b/server/work-claim-routes.mjs
+index 2a7bd84b2..c0edc24dc 100644
+--- a/server/work-claim-routes.mjs
++++ b/server/work-claim-routes.mjs
+@@ -65,16 +65,30 @@ import { isRoomArchived } from "../src/events.js";
+ const CLAIM_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+ 
+ // Per-room registry: roomId -> { items: Map(id -> work item), config: { defaultLeaseHours?, reviewPolicy? } }.
++// F3 (wave300-fanout): each room also carries a monotonic boardSeq, bumped
++// on every set() inside the same (in-memory: trivially atomic) write as the
++// claim mutation. The stored item records the seq of its last mutation.
+ export function createWorkClaimRegistry() {
+   const rooms = new Map();
++  const seqs = new Map();
+   const room = roomId => {
+     let entry = rooms.get(roomId);
+     if (!entry) { entry = { items: new Map(), config: {} }; rooms.set(roomId, entry); }
+     return entry;
+   };
++  const nextBoardSeq = roomId => {
++    const next = (seqs.get(roomId) ?? 0) + 1;
++    seqs.set(roomId, next);
++    return next;
++  };
+   return {
+     get(roomId, id) { return room(roomId).items.get(id) ?? null; },
+-    set(roomId, item) { room(roomId).items.set(item.id, item); return item; },
++    set(roomId, item) {
++      const stamped = { ...item, boardSeq: nextBoardSeq(roomId) };
++      room(roomId).items.set(stamped.id, stamped);
++      return stamped;
++    },
++    boardSeq(roomId) { return seqs.get(roomId) ?? 0; },
+     list(roomId) { return [...room(roomId).items.values()]; },
+     has(roomId, id) { return room(roomId).items.has(id); },
+     configure(roomId, config) {
+@@ -139,7 +153,7 @@ const WORK_CLAIM_PROFILES = Object.freeze({
+ });
+ const BOARD_LIMIT_DEFAULT = 50;
+ const BOARD_LIMIT_MAX = 200;
+-const BOARD_QUERY = new Set(["queue", "auth", "limit", "cursor", "state", "view"]);
++const BOARD_QUERY = new Set(["queue", "auth", "limit", "cursor", "state", "view", "since"]);
+ 
+ // QA7-13: compact per-claim projection for ?view=summary — the fields a
+ // board overview needs (id, title, state, owner, lease expiry) without the
+@@ -278,8 +292,28 @@ const boardLimitOf = (reject, raw) => {
+   return Number(raw);
+ };
+ 
+-const boardCursorOf = (reject, raw) => {
+-  try {
++// F3 (wave300-fanout): the per-claim boardSeq lives in storage and on the
++// delta wire only. Every other surface keeps its existing shape, so strip
++// it before returning a stored item outside the board page.
++const stripBoardSeq = item => {
++  if (!item || !Object.hasOwn(item, "boardSeq")) return item;
++  const { boardSeq: _dropped, ...rest } = item;
++  return rest;
++};
++
++const boardDeltaSinceOf = (reject, params) => {
++  if (!params.has("since")) return null;
++  const raw = params.get("since");
++  if (typeof raw !== "string" || !/^\d+$/.test(raw)) {
++    reject(400, "invalid_input", "Expected since as a non-negative integer boardSeq.");
++  }
++  if (params.has("cursor") || params.has("queue") || params.has("state")) {
++    reject(400, "invalid_input", "since combines only with limit and view, not cursor, queue, or state.");
++  }
++  return Number(raw);
++};
++
++const boardCursorOf = (reject, raw) => {  try {
+     const parsed = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
+     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+       if (parsed.q === "ready" && typeof parsed.i === "string") return parsed;
+@@ -338,25 +372,46 @@ function pageReady(items, limit, cursor) {
+ // Shared stored-state projection. No registry/store access or lifecycle effects:
+ // ordinary GET calls this after housekeeping; derived reads call it directly.
+ // Pages are live, not a snapshot fenced by the legacy room event sequence.
+-export function buildWorkClaimPage(items, roomId, viewerId, query = new URLSearchParams(), nowMs = Date.now()) {
++//
++// F3 (wave300-fanout): boardSeq is the room's current board cursor, supplied
++// by the caller from registry.boardSeq(roomId); every page carries it
++// top-level. With ?since=N the page is a delta: only claims with
++// boardSeq > N, in mutation order, plus room-wide open/terminal counts;
++// each delta claim keeps its boardSeq so the delta is self-describing.
++// Without since the page is today's full page — per-claim boardSeq is
++// stripped so the claim shape is unchanged.
++export function buildWorkClaimPage(items, roomId, viewerId, query = new URLSearchParams(), nowMs = Date.now(), boardSeq = 0) {
+   const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
+   const params = query ?? new URLSearchParams();
+   for (const key of params.keys()) {
+     if (!BOARD_QUERY.has(key) || params.getAll(key).length !== 1) {
+-      invalidInput(reject, "a single queue, state, limit, cursor, or view query parameter");
++      invalidInput(reject, "a single queue, state, limit, cursor, since, or view query parameter");
+     }
+   }
++  const deltaSince = boardDeltaSinceOf(reject, params);
++  const seqNow = Number.isSafeInteger(boardSeq) && boardSeq >= 0 ? boardSeq : 0;
+   const limit = boardLimitOf(reject, params.get("limit"));
+   const cursor = params.has("cursor") ? boardCursorOf(reject, params.get("cursor")) : null;
+   const view = params.get("view");
+   if (view !== null && view !== "summary") invalidInput(reject, "view=summary");
+   const metadata = { roomId, source: "work-claims", evaluatedAt: new Date(nowMs).toISOString(),
+     consistency: "live", limit, historyLimit: LIST_HISTORY_ENTRIES };
+-  const present = page => {
+-    const stamped = stampClaimPage({ ...metadata, ...page,
+-      claims: page.claims.map(item => summarizeClaimHistory(item, LIST_HISTORY_ENTRIES)) }, viewerId);
++  const stripClaimSeq = (item, isDelta) => (isDelta ? item : stripBoardSeq(item));
++  const present = (page, { delta = false } = {}) => {
++    const projected = page.claims
++      .map(item => summarizeClaimHistory(item, LIST_HISTORY_ENTRIES))
++      .map(item => stripClaimSeq(item, delta));
++    const stamped = stampClaimPage({ ...metadata, ...page, boardSeq: seqNow, claims: projected }, viewerId);
+     return view === "summary" ? withContentTrust({ ...stamped, claims: stamped.claims.map(summarizeBoardClaim) }) : stamped;
+   };
++  if (deltaSince !== null) {
++    const changed = items
++      .filter(item => (item.boardSeq ?? 0) > deltaSince)
++      .sort((a, b) => ((a.boardSeq ?? 0) - (b.boardSeq ?? 0)) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
++    const openClaims = items.filter(item => !isTerminalClaimState(item.state)).length;
++    return present({ claims: changed, hasMore: false, nextCursor: null,
++      openClaims, terminalClaims: items.length - openClaims, historyScope: "delta" }, { delta: true });
++  }
+   if (params.has("queue")) {
+     if (params.get("queue") !== "ready") invalidInput(reject, "queue=ready");
+     if (params.has("state")) invalidInput(reject, "either queue=ready or state, not both");
+@@ -573,10 +628,13 @@ export function linkWorkClaimPullRequest({ store, roomId, auth, claimId, data, r
+       }
+       throw refusal;
+     }
+-    if (linked === item) return item;
++    if (linked === item) return stripBoardSeq(item);
+     registry.set(roomId, linked);
+     emitWorkClaimEvent(store, roomId, { actorId: current.member.id, item: linked, action: "state_changed", atMs: now });
+-    return linked;
++    // F3: appendWorkPullRequest spreads the stored item, so the returned
++    // claim can carry a stale boardSeq — the link response keeps its
++    // existing shape.
++    return stripBoardSeq(linked);
+   };
+   return registry.transaction ? registry.transaction(run) : run();
+ }
+@@ -806,7 +864,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
+   if (workClaimRoute === "list" && req.method === "GET") {
+     closeLiveClaims();
+     return json(res, 200, { ...buildWorkClaimPage(registry.list(roomId), roomId, caller,
+-      url?.searchParams, nowMs), swept: sweptIds });
++      url?.searchParams, nowMs, typeof registry.boardSeq === "function" ? registry.boardSeq(roomId) : 0), swept: sweptIds });
+   }
+   if (workClaimRoute === "receipts" && req.method === "GET") {
+     // RC-2026-09-24-205: receipts search. The room block already rejected
+@@ -966,7 +1024,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
+   if (workClaimRoute === "read" && req.method === "GET") {
+     closeLiveClaims();
+     // SEC-2: member-authored text is marked untrusted for the reader.
+-    return json(res, 200, withContentTrust(stampClaim(load(claimIdOf(reject, workClaimId)), caller)));
++    // F3: the stored boardSeq is a board-page concern — the single-claim
++    // read keeps its existing shape.
++    return json(res, 200, withContentTrust(stampClaim(stripBoardSeq(load(claimIdOf(reject, workClaimId))), caller)));
+   }
+   if (workClaimRoute === "claim" && req.method === "POST") {
+     const data = body(req);
+@@ -1159,7 +1219,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
+       if (!duplicate && data.verdict === "changes_requested") {
+         enqueueClaimWake(store, roomId, item.owner, `work-claim:${item.id}:review:${caller}:${nowMs}`, { reason: "review", actorId: caller });
+       }
+-      return json(res, 200, duplicate ? item : reviewed);
++      return json(res, 200, duplicate ? stripBoardSeq(item) : reviewed);
+     }
+     if (!shape(data, { optional: ["note"] })) invalidInput(reject, "{note?} or {verdict, summary, url?}");
+     if (!mayAttestWorkClaims(access)) refuseAttest();
+@@ -1178,7 +1238,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
+     // SEC-2: a repeat note from this reviewer on the same claim round and
+     // revision replaces the stored note without a history entry or event.
+     if (before?.note !== after?.note) { registry.set(roomId, attested); return json(res, 200, attested); }
+-    return json(res, 200, item);
++    return json(res, 200, stripBoardSeq(item));
+   }
+   if ((workClaimRoute === "close" || workClaimRoute === "cancel") && req.method === "POST") {
+     // Claim lifecycle: retire open work without delivering it. close is for
+diff --git a/server/work-claim-sqlite.mjs b/server/work-claim-sqlite.mjs
+index d5c398362..a00001eb3 100644
+--- a/server/work-claim-sqlite.mjs
++++ b/server/work-claim-sqlite.mjs
+@@ -21,14 +21,17 @@ const WORK_CLAIM_FIELDS = ["id", "title", "state", "owner", "history", "claimedA
+   "attestations", "tags", "files", "fileBlocks", "blobs", "dependsOn", "parentClaimId", "evidenceRefs",
+   "premiseFlag", "pullRequest", "pullRequests", "updatedAt",
+   "repo", "branch", "chain", "supersededBy", "workItemId", "squadId",
+-  "kind", "revision", "ci", "reviews", "historyOmitted", "readingAcks", "deploy"];
++  "kind", "revision", "ci", "reviews", "historyOmitted", "readingAcks", "deploy",
++  // F3 (wave300-fanout): the boardSeq at which this claim row was last
++  // mutated. Rows written before boardSeq existed decode as 0.
++  "boardSeq"];
+ const WORK_CLAIM_DEFAULTS = { title: null, state: "unclaimed", owner: null, history: [],
+   claimedAt: null, leaseStartAt: null, leaseExpiresAt: null, deliveryMode: null,
+   reviewPolicy: null, reviewedBy: null, attestations: [], tags: [], files: [], fileBlocks: {}, blobs: [],
+   dependsOn: [], parentClaimId: null, evidenceRefs: [], premiseFlag: null,
+   pullRequest: null, pullRequests: [], updatedAt: null,
+   repo: null, branch: null, chain: [], supersededBy: null, workItemId: null, squadId: null,
+-  kind: "work", revision: null, ci: null, reviews: [], readingAcks: {}, deploy: null };
++  kind: "work", revision: null, ci: null, reviews: [], readingAcks: {}, deploy: null, boardSeq: 0 };
+ const decodeItem = text => {
+   const item = decodeRow(text, { kind: WORK_CLAIM_ROW_KIND, fields: WORK_CLAIM_FIELDS, defaults: WORK_CLAIM_DEFAULTS });
+   if (item.title == null) item.title = item.id; // workOf: title ?? id
+@@ -81,8 +84,34 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
+     return row ? parse(row.config_json) : {};
+   };
+ 
++  // F3 (wave300-fanout): per-room monotonic board cursor. Bumped on every
++  // claim write inside the same transaction as the write — these statements
++  // run on the caller's db connection, so a registry.transaction(run)
++  // wrapper covers the bump and the claim row together. The table is created
++  // lazily and is deliberately NOT part of workClaimSchema, so
++  // verifySchema()'s exact-shape check can never fire on existing databases
++  // (no reconciliation path, no schema version bump). CREATE TABLE IF NOT
++  // EXISTS runs on every bump/read with no ready-flag: it is idempotent, and
++  // a rolled-back write must not leave a stale "table exists" belief behind
++  // (the failing-transaction test covers exactly that).
++  const BOARD_SEQ_TABLE_SQL = `CREATE TABLE IF NOT EXISTS work_claim_board_seq (
++    room_id TEXT PRIMARY KEY,
++    seq INTEGER NOT NULL
++  )`;
++  const bumpBoardSeq = statement(`INSERT INTO work_claim_board_seq (room_id, seq) VALUES (?, 1)
++    ON CONFLICT(room_id) DO UPDATE SET seq = seq + 1 RETURNING seq`);
++  const selectBoardSeq = statement("SELECT seq FROM work_claim_board_seq WHERE room_id=?");
++  const nextBoardSeq = roomId => {
++    db.exec(BOARD_SEQ_TABLE_SQL);
++    return bumpBoardSeq.get(roomId).seq;
++  };
++
+   return {
+     transaction,
++    boardSeq(roomId) {
++      db.exec(BOARD_SEQ_TABLE_SQL);
++      return selectBoardSeq.get(roomId)?.seq ?? 0;
++    },
+     verifySchema({ allowAbsent = false } = {}) {
+       const normalize = sql => sql?.trim().replace(/;$/, "").replace(/IF NOT EXISTS /g, "").replace(/\s+/g, " ");
+       const definitions = workClaimSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean);
+@@ -97,9 +126,11 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
+     },
+     set(roomId, item) {
+       if (!item || typeof item.id !== "string") throw new TypeError("work claim item needs an id");
+-      upsert.run(roomId, item.id, JSON.stringify(encodeRow(WORK_CLAIM_ROW_KIND, item)), now());
++      // F3: the stored row carries the boardSeq of this mutation.
++      const stamped = { ...item, boardSeq: nextBoardSeq(roomId) };
++      upsert.run(roomId, item.id, JSON.stringify(encodeRow(WORK_CLAIM_ROW_KIND, stamped)), now());
+       if (typeof onChange === "function") onChange(roomId);
+-      return item;
++      return stamped;
+     },
+     list(roomId) { return selectRoom.all(roomId).map(row => decodeItem(row.item_json)); },
+     has(roomId, id) { return selectOne.get(roomId, id) != null; },
+@@ -114,8 +145,13 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
+       const dependents = selectRoom.all(roomId)
+         .map(row => decodeItem(row.item_json))
+         .filter(item => item && item.id !== id && Array.isArray(item.dependsOn) && item.dependsOn.includes(id));
++      // F3: a deletion changes the visible board, so it advances the cursor —
++      // one advance for the whole operation, recorded on every touched row
++      // (no tombstones — see the delta protocol notes in
++      // docs/WAVE300-FANOUT-DESIGN.md).
++      const seq = nextBoardSeq(roomId);
+       for (const item of dependents) {
+-        const waived = { ...item, dependsOn: item.dependsOn.filter(dep => dep !== id) };
++        const waived = { ...item, boardSeq: seq, dependsOn: item.dependsOn.filter(dep => dep !== id) };
+         upsert.run(roomId, item.id, JSON.stringify(encodeRow(WORK_CLAIM_ROW_KIND, waived)), now());
+       }
+       db.prepare("DELETE FROM work_claims WHERE room_id=? AND claim_id=?").run(roomId, id);

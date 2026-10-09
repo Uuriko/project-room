@@ -1,0 +1,32 @@
+{
+  "unit": "m13",
+  "file": "server/attachment-schema.mjs",
+  "mutants": 2,
+  "killed": 0,
+  "survived": 2,
+  "skipped": 0,
+  "results": [
+    {
+      "unit": "m13",
+      "file": "server/attachment-schema.mjs",
+      "mutant": "byte-check",
+      "status": "SURVIVED",
+      "tests": [
+        "tests/attachments.test.js"
+      ],
+      "exitCode": 0,
+      "failedTests": 0
+    },
+    {
+      "unit": "m13",
+      "file": "server/attachment-schema.mjs",
+      "mutant": "sha-check",
+      "status": "SURVIVED",
+      "tests": [
+        "tests/attachments.test.js"
+      ],
+      "exitCode": 0,
+      "failedTests": 0
+    }
+  ]
+}

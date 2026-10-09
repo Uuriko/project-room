@@ -1,0 +1,46 @@
+{
+  "unit": "m9",
+  "file": "server/ip-blocklist.mjs",
+  "mutants": 3,
+  "killed": 0,
+  "survived": 3,
+  "skipped": 0,
+  "results": [
+    {
+      "unit": "m9",
+      "file": "server/ip-blocklist.mjs",
+      "mutant": "v4-octet",
+      "status": "SURVIVED",
+      "tests": [
+        "tests/webhook-subscription-ssrf.test.js",
+        "tests/web-fetch-ssrf-hardening.test.js"
+      ],
+      "exitCode": 0,
+      "failedTests": 0
+    },
+    {
+      "unit": "m9",
+      "file": "server/ip-blocklist.mjs",
+      "mutant": "v4-parts",
+      "status": "SURVIVED",
+      "tests": [
+        "tests/webhook-subscription-ssrf.test.js",
+        "tests/web-fetch-ssrf-hardening.test.js"
+      ],
+      "exitCode": 0,
+      "failedTests": 0
+    },
+    {
+      "unit": "m9",
+      "file": "server/ip-blocklist.mjs",
+      "mutant": "v4-digit",
+      "status": "SURVIVED",
+      "tests": [
+        "tests/webhook-subscription-ssrf.test.js",
+        "tests/web-fetch-ssrf-hardening.test.js"
+      ],
+      "exitCode": 0,
+      "failedTests": 0
+    }
+  ]
+}

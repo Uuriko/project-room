@@ -1,0 +1,65 @@
+{"event":"room.cold_start","durationMs":1841,"integrity":"eager","phases":{"schema":{"ms":379,"rowsRead":0},"plugin":{"ms":667,"rowsRead":0},"fence":{"ms":276,"rowsRead":0},"verifies":{"ms":54,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":202,"heapBytes":37124720,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":1814,"integrity":"eager","phases":{"schema":{"ms":176,"rowsRead":0},"plugin":{"ms":1146,"rowsRead":0},"fence":{"ms":100,"rowsRead":0},"verifies":{"ms":51,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":154,"heapBytes":33680408,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ contract advertises the GX public-handoff terms (3548.628406ms)
+room diagnostic op_ldnhJNSz 403 owner_required access /api/rooms/:roomId/guest-invites
+room diagnostic op_ZBVB2DO0 401 unauthenticated access /api/rooms/:roomId/guest-invites
+{"event":"room.cold_start","durationMs":2562,"integrity":"eager","phases":{"schema":{"ms":449,"rowsRead":0},"plugin":{"ms":1291,"rowsRead":0},"fence":{"ms":464,"rowsRead":0},"verifies":{"ms":58,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":182,"heapBytes":40257120,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ owner mint issues a public-safe GX code; strangers and non-owners are refused (3559.659961ms)
+room diagnostic op_yU6-gkr5 422 invalid_guest_invite input /api/rooms/:roomId/guest-invites
+room diagnostic op_8vWI_hWa 422 invalid_guest_invite input /api/rooms/:roomId/guest-invites
+room diagnostic op_0hc5mntL 422 invalid_guest_invite input /api/rooms/:roomId/guest-invites
+room diagnostic op_V4kDCqWp 422 invalid_guest_invite input /api/rooms/:roomId/guest-invites
+{"event":"room.cold_start","durationMs":1090,"integrity":"eager","phases":{"schema":{"ms":136,"rowsRead":0},"plugin":{"ms":537,"rowsRead":0},"fence":{"ms":178,"rowsRead":0},"verifies":{"ms":22,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":146,"heapBytes":47100136,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ mint validates TTL range and tier (3938.209181ms)
+{"event":"room.cold_start","durationMs":2055,"integrity":"eager","phases":{"schema":{"ms":223,"rowsRead":0},"plugin":{"ms":1141,"rowsRead":0},"fence":{"ms":458,"rowsRead":0},"verifies":{"ms":25,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":168,"heapBytes":37790064,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ preview reveals the room and terms but no people-data and no credential (1864.920806ms)
+{"event":"room.cold_start","durationMs":1670,"integrity":"eager","phases":{"schema":{"ms":310,"rowsRead":0},"plugin":{"ms":766,"rowsRead":0},"fence":{"ms":341,"rowsRead":0},"verifies":{"ms":34,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":177,"heapBytes":43160296,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ redemption needs an identity secret and a verifiable signed card (3379.846824ms)
+{"event":"room.cold_start","durationMs":2136,"integrity":"eager","phases":{"schema":{"ms":444,"rowsRead":0},"plugin":{"ms":897,"rowsRead":0},"fence":{"ms":498,"rowsRead":0},"verifies":{"ms":64,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":165,"heapBytes":48292384,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ happy-path redemption issues the ga1. credential, badges the name, journals the owner (2717.481169ms)
+{"event":"room.cold_start","durationMs":1942,"integrity":"eager","phases":{"schema":{"ms":378,"rowsRead":0},"plugin":{"ms":1096,"rowsRead":0},"fence":{"ms":366,"rowsRead":0},"verifies":{"ms":8,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":166,"heapBytes":40744536,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ one seat per identity per room; names come from the card and collide safely (4921.935095ms)
+{"event":"room.cold_start","durationMs":3182,"integrity":"eager","phases":{"schema":{"ms":585,"rowsRead":0},"plugin":{"ms":981,"rowsRead":0},"fence":{"ms":331,"rowsRead":0},"verifies":{"ms":37,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":280,"heapBytes":45850152,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ observer guests chat and react; everything else is refused at the command gate (2891.460581ms)
+{"event":"room.cold_start","durationMs":2478,"integrity":"eager","phases":{"schema":{"ms":704,"rowsRead":0},"plugin":{"ms":1297,"rowsRead":0},"fence":{"ms":261,"rowsRead":0},"verifies":{"ms":48,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":186,"heapBytes":50962104,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ contributor guests may post work-item drafts but nothing else (3829.265219ms)
+{"event":"room.cold_start","durationMs":2046,"integrity":"eager","phases":{"schema":{"ms":308,"rowsRead":0},"plugin":{"ms":1142,"rowsRead":0},"fence":{"ms":401,"rowsRead":0},"verifies":{"ms":17,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":163,"heapBytes":41234128,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ guest votes never count: the exclusion predicate covers every guest member id (3524.017752ms)
+room diagnostic op_CUFiplZD 401 unauthenticated access /api/rooms/:roomId/guest-invites-upgrade
+room diagnostic op_Ul7pJrW4 422 invalid_guest_invite input /api/rooms/:roomId/guest-invites-upgrade
+room diagnostic op_R84JTNZg 404 guest_not_found not_found /api/rooms/:roomId/guest-invites-upgrade
+{"event":"room.cold_start","durationMs":1682,"integrity":"eager","phases":{"schema":{"ms":34,"rowsRead":0},"plugin":{"ms":935,"rowsRead":0},"fence":{"ms":440,"rowsRead":0},"verifies":{"ms":60,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":163,"heapBytes":46849536,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ owner upgrades a guest to contributor explicitly; re-redemption cannot escalate (3205.645249ms)
+{"event":"room.cold_start","durationMs":1371,"integrity":"eager","phases":{"schema":{"ms":358,"rowsRead":0},"plugin":{"ms":663,"rowsRead":0},"fence":{"ms":43,"rowsRead":0},"verifies":{"ms":11,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":157,"heapBytes":51674864,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ expiry stops the credential and the next owner mint sweeps the member (2870.104221ms)
+{"event":"room.cold_start","durationMs":1414,"integrity":"eager","phases":{"schema":{"ms":112,"rowsRead":0},"plugin":{"ms":826,"rowsRead":0},"fence":{"ms":269,"rowsRead":0},"verifies":{"ms":17,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":159,"heapBytes":42396184,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ guests rotate their own credential; the old one dies immediately (2389.075369ms)
+{"event":"room.cold_start","durationMs":1994,"integrity":"eager","phases":{"schema":{"ms":256,"rowsRead":0},"plugin":{"ms":415,"rowsRead":0},"fence":{"ms":123,"rowsRead":0},"verifies":{"ms":12,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":145,"heapBytes":47961264,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ owner disconnect ends one guest; revoke-all ends every guest (2950.820843ms)
+room diagnostic op_-wKjCSUW 403 owner_required access /api/rooms/:roomId/guest-invites-list
+room diagnostic op_Y_bHDGXw 403 owner_required access /api/rooms/:roomId/guest-invites-revoke
+{"event":"room.cold_start","durationMs":978,"integrity":"eager","phases":{"schema":{"ms":241,"rowsRead":0},"plugin":{"ms":488,"rowsRead":0},"fence":{"ms":32,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":141,"heapBytes":53440800,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ owner revokes an unredeemed invite; the list never leaks hashes or codes (3172.174179ms)
+{"event":"room.cold_start","durationMs":1828,"integrity":"eager","phases":{"schema":{"ms":387,"rowsRead":0},"plugin":{"ms":682,"rowsRead":0},"fence":{"ms":435,"rowsRead":0},"verifies":{"ms":33,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":158,"heapBytes":45280024,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a disconnected guest rejoins on the same identity-bound seat (3104.293701ms)
+{"event":"room.cold_start","durationMs":1662,"integrity":"eager","phases":{"schema":{"ms":602,"rowsRead":0},"plugin":{"ms":612,"rowsRead":0},"fence":{"ms":241,"rowsRead":0},"verifies":{"ms":20,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":162,"heapBytes":53742512,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ an expired guest rejoins after the redemption-path sweep; expired seats never consume the five-seat cap (7295.229721ms)
+{"event":"room.cold_start","durationMs":1637,"integrity":"eager","phases":{"schema":{"ms":360,"rowsRead":0},"plugin":{"ms":697,"rowsRead":0},"fence":{"ms":211,"rowsRead":0},"verifies":{"ms":49,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":171,"heapBytes":49985504,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ the absolute ten-seat guest cap holds across disconnects; existing identities may still rejoin (7342.730786ms)
+{"event":"room.cold_start","durationMs":1787,"integrity":"eager","phases":{"schema":{"ms":403,"rowsRead":0},"plugin":{"ms":673,"rowsRead":0},"fence":{"ms":363,"rowsRead":0},"verifies":{"ms":32,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":148,"heapBytes":54820008,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ guest tier upgrade journals a strictly-valid MEMBER_ACCESS_CHANGED event (2582.657869ms)
+{"event":"room.cold_start","durationMs":2105,"integrity":"eager","phases":{"schema":{"ms":127,"rowsRead":0},"plugin":{"ms":1290,"rowsRead":0},"fence":{"ms":358,"rowsRead":0},"verifies":{"ms":73,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":163,"heapBytes":58518656,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ GX redemption refuses a full room while preserving the unused code (9019.575827ms)
+room diagnostic op_aHDrXPq2 422 invalid_guest_invite input /api/rooms/:roomId/guest-invites-upgrade
+room diagnostic op_BcrKmDtX 422 invalid_guest_invite input /api/rooms/:roomId/guest-invites-upgrade
+room diagnostic op_ytwPv97c 422 invalid_guest_invite input /api/rooms/:roomId/guest-invites-upgrade
+✔ guest upgrade diagnoses missing/invalid fields instead of 'not a guest' (2737.091979ms)
+ℹ tests 21
+ℹ suites 0
+ℹ pass 21
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 88364.886273

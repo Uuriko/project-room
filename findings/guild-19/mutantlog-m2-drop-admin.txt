@@ -1,0 +1,98 @@
+{"event":"room.cold_start","durationMs":1761,"integrity":"eager","phases":{"schema":{"ms":65,"rowsRead":0},"plugin":{"ms":514,"rowsRead":0},"fence":{"ms":819,"rowsRead":0},"verifies":{"ms":91,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":186,"heapBytes":35410784,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ NFKC folds compatibility glyphs and width, case and repeated whitespace (112.620791ms)
+✔ mixed-script impersonation is rejected without relying on an existing record (14.775263ms)
+✔ all-Cyrillic and all-Greek common visual clones collide with Latin names (44.972029ms)
+✔ room member display names and global identity records are accepted as inputs (18.062486ms)
+✔ same identity can retry without allowing another record to collide (5.498541ms)
+✔ invisible controls and malformed names fail safely (0.321682ms)
+✔ unrelated ordinary names and non-Latin names are not globally blocked (27.172068ms)
+✔ the guard does not mistake two unrelated non-mapped scripts for Latin (0.538828ms)
+✔ integration: identity mint and room link enforce names at the write boundary (8823.164351ms)
+✖ QA2-SECREG: Latin-script homoglyphs of reserved role words are refused (35.188808ms)
+✖ QA2-SECREG followup: diacritics, combining marks, CJK brackets, and hook/stroke letters do not spoof reserved roles (2.687153ms)
+✖ QA slice D: Latin Extended-B hook letters do not spoof reserved roles or agent names (0.568122ms)
+✔ G16b: shared first-word and duplicate handle collisions are refused (0.674572ms)
+{"event":"room.cold_start","durationMs":1668,"integrity":"eager","phases":{"schema":{"ms":380,"rowsRead":0},"plugin":{"ms":792,"rowsRead":0},"fence":{"ms":234,"rowsRead":0},"verifies":{"ms":25,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":183,"heapBytes":38152000,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2698,"integrity":"eager","phases":{"schema":{"ms":662,"rowsRead":0},"plugin":{"ms":1112,"rowsRead":0},"fence":{"ms":427,"rowsRead":0},"verifies":{"ms":199,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":176,"heapBytes":30209952,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ reserved labels, control characters, duplicates, and lookalikes are classified without echoing hidden characters (43.708073ms)
+✔ a live member.added refuses a reserved or duplicate name, and an older unstamped event still replays (2070.347802ms)
+{"event":"room.cold_start","durationMs":2286,"integrity":"eager","phases":{"schema":{"ms":459,"rowsRead":0},"plugin":{"ms":1231,"rowsRead":0},"fence":{"ms":379,"rowsRead":0},"verifies":{"ms":23,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":156,"heapBytes":42015720,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ redeem, share-link join, access requests, and referral redeem refuse a taken display name and keep the existing roster (20126.447629ms)
+room diagnostic op_pDYArAj- 422 display_name_unavailable input /api/rooms/:roomId/commands
+room diagnostic op_lNgBm4Q3 422 display_name_unavailable input /api/rooms/:roomId/commands
+room diagnostic op_6l816GJl 422 display_name_unavailable input /api/rooms/:roomId/commands
+✔ member.added through the command route refuses a confusable or reserved display name (3378.878992ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 14
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 41782.501686
+
+✖ failing tests:
+
+test at tests/display-name-guard.test.js:97:1
+✖ QA2-SECREG: Latin-script homoglyphs of reserved role words are refused (35.188808ms)
+  AssertionError [ERR_ASSERTION]: admın must read as reserved
+  
+  false !== true
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/display-name-guard.test.js:112:12)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/display-name-guard.test.js:124:1
+✖ QA2-SECREG followup: diacritics, combining marks, CJK brackets, and hook/stroke letters do not spoof reserved roles (2.687153ms)
+  AssertionError [ERR_ASSERTION]: àdmin must read as reserved
+  
+  false !== true
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/display-name-guard.test.js:141:12)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/display-name-guard.test.js:160:1
+✖ QA slice D: Latin Extended-B hook letters do not spoof reserved roles or agent names (0.568122ms)
+  AssertionError [ERR_ASSERTION]: admƖn must read as reserved
+  
+  false !== true
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/display-name-guard.test.js:178:14)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

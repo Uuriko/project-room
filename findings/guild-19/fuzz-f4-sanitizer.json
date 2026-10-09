@@ -1,0 +1,198 @@
+{
+ "unit": "f4-sanitizer",
+ "inputs": 35,
+ "counts": {
+  "ok": 13,
+  "crash": 12,
+  "reject": 10
+ },
+ "results": [
+  {
+   "name": "xss-0",
+   "verdict": "ok",
+   "ms": 42
+  },
+  {
+   "name": "xss-1",
+   "verdict": "ok",
+   "ms": 18
+  },
+  {
+   "name": "xss-2",
+   "verdict": "ok",
+   "ms": 4
+  },
+  {
+   "name": "xss-3",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "xss-4",
+   "verdict": "ok",
+   "ms": 23
+  },
+  {
+   "name": "xss-5",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "xss-6",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "xss-7",
+   "verdict": "ok",
+   "ms": 1
+  },
+  {
+   "name": "xss-8",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-0",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-1",
+   "verdict": "crash",
+   "detail": "no-throw on non-string",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-2",
+   "verdict": "crash",
+   "detail": "no-throw on non-string",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-3",
+   "verdict": "crash",
+   "detail": "no-throw on non-string",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-4",
+   "verdict": "crash",
+   "detail": "no-throw on non-string",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-5",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-6",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-7",
+   "verdict": "crash",
+   "detail": "no-throw on non-string",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-8",
+   "verdict": "crash",
+   "detail": "no-throw on non-string",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-9",
+   "verdict": "crash",
+   "detail": "no-throw on non-string",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-10",
+   "verdict": "crash",
+   "detail": "no-throw on non-string",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-11",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-12",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-13",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-14",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-15",
+   "verdict": "crash",
+   "detail": "no-throw on non-string",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-16",
+   "verdict": "crash",
+   "detail": "no-throw on non-string",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-17",
+   "verdict": "crash",
+   "detail": "no-throw on non-string",
+   "ms": 22
+  },
+  {
+   "name": "junk:case-18",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-19",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-20",
+   "verdict": "crash",
+   "detail": "no-throw on non-string",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-21",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-22",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "huge",
+   "verdict": "ok",
+   "ms": 307
+  },
+  {
+   "name": "nested-1000",
+   "verdict": "ok",
+   "ms": 94
+  },
+  {
+   "name": "attr-bomb",
+   "verdict": "ok",
+   "ms": 32
+  }
+ ]
+}

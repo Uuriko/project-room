@@ -1,0 +1,33 @@
+✔ subscribe validates, stores no secret on the view, and dedups events (129.287422ms)
+✖ subscribe rejects unknown events with the known catalog (98.1804ms)
+✔ match supports wildcard and honors enabled flag (17.128084ms)
+✔ ownership: agents cannot touch other agents' subscriptions (15.213682ms)
+✔ buildDelivery signs payloads; journal records attempts (29.809065ms)
+✔ signPayload/verifySignature are timing-safe and strict (16.987453ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 5
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2866.321624
+
+✖ failing tests:
+
+test at tests/agent-plugin-webhook-subs.test.js:36:1
+✖ subscribe rejects unknown events with the known catalog (98.1804ms)
+  AssertionError [ERR_ASSERTION]: Missing expected exception: unknown event names name the offender and list known events
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/agent-plugin-webhook-subs.test.js:42:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    operator: 'throws',
+    diff: 'simple'
+  }

@@ -1,0 +1,31 @@
+✔ build emits a complete frozen manifest (52.186076ms)
+✖ manifest validates round-trip (26.464665ms)
+✔ build rejects non-https origins and bad room ids (26.938196ms)
+✔ manifest documents the API-key scope vocabulary and it matches enforcement (RC-2026-09-18-019) (32.529637ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 3
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2680.657888
+
+✖ failing tests:
+
+test at tests/agent-plugin-manifest.test.js:40:1
+✖ manifest validates round-trip (26.464665ms)
+  AssertionError [ERR_ASSERTION]: Missing expected exception (ManifestError).
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/agent-plugin-manifest.test.js:47:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    operator: 'throws',
+    diff: 'simple'
+  }

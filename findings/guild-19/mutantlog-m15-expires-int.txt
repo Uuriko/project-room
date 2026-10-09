@@ -1,0 +1,15 @@
+✔ issue generates a prefixed secret shown once and stores only the hash (60.603147ms)
+✔ verify authenticates with the raw secret and updates lastUsedAt (18.461946ms)
+✔ issue validates identity, scopes, expiry, and label (26.017795ms)
+✔ expired and revoked keys do not verify (1.384097ms)
+✔ rotate invalidates the old secret and issues a new one (0.945418ms)
+✔ grants supports prefix wildcards; unknown keys deny (12.435542ms)
+✔ keysForIdentity only lists that identity's keys (0.553731ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1819.466042

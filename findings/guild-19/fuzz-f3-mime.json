@@ -1,0 +1,216 @@
+{
+ "unit": "f3-mime",
+ "inputs": 35,
+ "counts": {
+  "ok": 4,
+  "reject": 31
+ },
+ "results": [
+  {
+   "name": "simple",
+   "verdict": "ok",
+   "ms": 7
+  },
+  {
+   "name": "junk:case-0",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-1",
+   "verdict": "reject",
+   "detail": "invalid_mime_input",
+   "ms": 1
+  },
+  {
+   "name": "junk:case-2",
+   "verdict": "reject",
+   "detail": "invalid_mime_input",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-3",
+   "verdict": "reject",
+   "detail": "invalid_mime_input",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-4",
+   "verdict": "reject",
+   "detail": "invalid_mime_input",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-5",
+   "verdict": "reject",
+   "detail": "invalid_mime_input",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-6",
+   "verdict": "reject",
+   "detail": "invalid_mime_input",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-7",
+   "verdict": "reject",
+   "detail": "invalid_mime_input",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-8",
+   "verdict": "reject",
+   "detail": "invalid_mime_input",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-9",
+   "verdict": "reject",
+   "detail": "invalid_mime_input",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-10",
+   "verdict": "reject",
+   "detail": "invalid_mime_input",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-11",
+   "verdict": "reject",
+   "detail": "invalid_mime_input",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-12",
+   "verdict": "reject",
+   "detail": "invalid_mime_input",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-13",
+   "verdict": "reject",
+   "detail": "invalid_mime_input",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-14",
+   "verdict": "reject",
+   "detail": "invalid_mime_input",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-15",
+   "verdict": "reject",
+   "detail": "invalid_mime_input",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-16",
+   "verdict": "reject",
+   "detail": "invalid_mime_input",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-17",
+   "verdict": "reject",
+   "detail": "invalid_mime_input",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-18",
+   "verdict": "reject",
+   "detail": "invalid_mime_input",
+   "ms": 1
+  },
+  {
+   "name": "junk:case-19",
+   "verdict": "reject",
+   "detail": "invalid_mime_input",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-20",
+   "verdict": "reject",
+   "detail": "invalid_mime_input",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-21",
+   "verdict": "reject",
+   "detail": "invalid_mime_input",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-22",
+   "verdict": "reject",
+   "detail": "malformed_mime_header",
+   "ms": 0
+  },
+  {
+   "name": "1000-headers",
+   "verdict": "reject",
+   "detail": "mime_header_limit",
+   "ms": 0
+  },
+  {
+   "name": "long-header",
+   "verdict": "reject",
+   "detail": "mime_header_limit",
+   "ms": 0
+  },
+  {
+   "name": "deep-multipart",
+   "verdict": "reject",
+   "detail": "malformed_mime_boundary",
+   "ms": 2
+  },
+  {
+   "name": "huge-raw",
+   "verdict": "reject",
+   "detail": "mime_raw_limit",
+   "ms": 13
+  },
+  {
+   "name": "null-bytes",
+   "verdict": "ok",
+   "ms": 2
+  },
+  {
+   "name": "lone-surrogate",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "no-headers",
+   "verdict": "reject",
+   "detail": "malformed_mime_header",
+   "ms": 0
+  },
+  {
+   "name": "overlong-0",
+   "verdict": "reject",
+   "detail": "malformed_mime_header",
+   "ms": 0
+  },
+  {
+   "name": "overlong-1",
+   "verdict": "reject",
+   "detail": "malformed_mime_header",
+   "ms": 1
+  },
+  {
+   "name": "overlong-2",
+   "verdict": "reject",
+   "detail": "malformed_mime_header",
+   "ms": 16
+  },
+  {
+   "name": "overlong-3",
+   "verdict": "reject",
+   "detail": "malformed_mime_header",
+   "ms": 2
+  }
+ ]
+}

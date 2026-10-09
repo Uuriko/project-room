@@ -1,0 +1,70 @@
+{
+  "unit": "m3",
+  "file": "server/mime-message.mjs",
+  "mutants": 5,
+  "killed": 3,
+  "survived": 2,
+  "skipped": 0,
+  "results": [
+    {
+      "unit": "m3",
+      "file": "server/mime-message.mjs",
+      "mutant": "rawbytes",
+      "status": "SURVIVED",
+      "tests": [
+        "tests/mime-message.test.js",
+        "tests/mime-fuzz.test.js"
+      ],
+      "exitCode": 0,
+      "failedTests": 0
+    },
+    {
+      "unit": "m3",
+      "file": "server/mime-message.mjs",
+      "mutant": "headers",
+      "status": "KILLED",
+      "tests": [
+        "tests/mime-message.test.js",
+        "tests/mime-fuzz.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    },
+    {
+      "unit": "m3",
+      "file": "server/mime-message.mjs",
+      "mutant": "depth",
+      "status": "KILLED",
+      "tests": [
+        "tests/mime-message.test.js",
+        "tests/mime-fuzz.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    },
+    {
+      "unit": "m3",
+      "file": "server/mime-message.mjs",
+      "mutant": "controls",
+      "status": "KILLED",
+      "tests": [
+        "tests/mime-message.test.js",
+        "tests/mime-fuzz.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    },
+    {
+      "unit": "m3",
+      "file": "server/mime-message.mjs",
+      "mutant": "addresses",
+      "status": "SURVIVED",
+      "tests": [
+        "tests/mime-message.test.js",
+        "tests/mime-fuzz.test.js"
+      ],
+      "exitCode": 0,
+      "failedTests": 0
+    }
+  ]
+}

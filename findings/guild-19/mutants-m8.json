@@ -1,0 +1,43 @@
+{
+  "unit": "m8",
+  "file": "server/magic-links.mjs",
+  "mutants": 3,
+  "killed": 0,
+  "survived": 3,
+  "skipped": 0,
+  "results": [
+    {
+      "unit": "m8",
+      "file": "server/magic-links.mjs",
+      "mutant": "double-slash",
+      "status": "SURVIVED",
+      "tests": [
+        "tests/magic-links.test.js"
+      ],
+      "exitCode": 0,
+      "failedTests": 0
+    },
+    {
+      "unit": "m8",
+      "file": "server/magic-links.mjs",
+      "mutant": "length-cap",
+      "status": "SURVIVED",
+      "tests": [
+        "tests/magic-links.test.js"
+      ],
+      "exitCode": 0,
+      "failedTests": 0
+    },
+    {
+      "unit": "m8",
+      "file": "server/magic-links.mjs",
+      "mutant": "hash-check",
+      "status": "SURVIVED",
+      "tests": [
+        "tests/magic-links.test.js"
+      ],
+      "exitCode": 0,
+      "failedTests": 0
+    }
+  ]
+}

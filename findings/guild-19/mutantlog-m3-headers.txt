@@ -1,0 +1,78 @@
+✖ mime fuzz corpus: pathological inputs parse or raise the pinned MimeError (669.886903ms)
+✔ mime fuzz CLI rejects invalid numeric options instead of false-greening (8489.64777ms)
+✔ mime fuzz: bounded deterministic random sweep holds the invariant (16311.319616ms)
+✔ simple text message: headers, addresses, date and body (60.390789ms)
+✔ multipart/alternative prefers text/plain; html-only falls back to a text preview (43.664197ms)
+✔ nested multipart/mixed lists attachments by name, type and size without keeping bytes (16.859852ms)
+✔ quoted-printable UTF-8 and base64 bodies decode; Latin-1 charset is honoured (30.900503ms)
+✔ RFC 2047 encoded-words: Q and B, UTF-8 and ISO-8859-1, adjacent words, malformed left alone (9.682791ms)
+✔ address lists: names, quotes, comments, groups, multiple headers and invalid entries (35.88964ms)
+✖ caps: oversized raw, header count and length, part count, depth, attachments, text truncation (727.345382ms)
+✔ malformed boundaries and header lines are rejected; prefix-sharing boundaries are not confused (15.363446ms)
+✔ header injection: CR/LF and other control characters never survive into header values (10.685486ms)
+✔ structured headers and html-to-text handle quoting, RFC 2231, comments and pathological input in linear time (406.068689ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 11
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 30559.764254
+
+✖ failing tests:
+
+test at tests/mime-fuzz.test.js:30:1
+✖ mime fuzz corpus: pathological inputs parse or raise the pinned MimeError (669.886903ms)
+  AssertionError [ERR_ASSERTION]: corpus invariant failures:
+  003-many-headers-500.eml: expected error:mime_header_limit, got ok
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/mime-fuzz.test.js:36:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.start (node:internal/test_runner/test:1257:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/mime-message.test.js:97:1
+✖ caps: oversized raw, header count and length, part count, depth, attachments, text truncation (727.345382ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    Comparison {
+  +   code: 'mime_raw_limit'
+  -   code: 'mime_header_limit'
+    }
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/mime-message.test.js:104:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: MimeError: raw message larger than 1048576 bytes
+        at fail (file:///home/hatch/workspace/pr-wave1000-guild-19/server/mime-message.mjs:12:40)
+        at parseMimeMessage (file:///home/hatch/workspace/pr-wave1000-guild-19/server/mime-message.mjs:362:39)
+        at assert.throws.code (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/mime-message.test.js:104:23)
+        at getActual (node:assert:611:5)
+        at strict.throws (node:assert:759:24)
+        at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/mime-message.test.js:104:10)
+        at Test.runInAsyncScope (node:async_hooks:227:14)
+        at Test.run (node:internal/test_runner/test:1397:25)
+        at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+        at Test.postRun (node:internal/test_runner/test:1537:19),
+    expected: { code: 'mime_header_limit' },
+    operator: 'throws',
+    diff: 'simple'
+  }

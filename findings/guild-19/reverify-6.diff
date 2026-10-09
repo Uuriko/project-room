@@ -1,0 +1,331 @@
+diff --git a/server/room-attachment-bytes.mjs b/server/room-attachment-bytes.mjs
+index 19a74bbc6..f04d2503c 100644
+--- a/server/room-attachment-bytes.mjs
++++ b/server/room-attachment-bytes.mjs
+@@ -18,6 +18,14 @@ import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
+ 
+ const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
+ 
++// Guests may read and chat but may not store room files. stage/commit/
++// discard authenticate directly and bypass store.command, so the RoomStore
++// guest scope gate never runs here — enforce the same denial explicitly.
++// Mirrors RC-2026-09-27-2716 (PR #1156).
++const denyGuestFiles = (auth, verb) => {
++  if (isGuestAgentMemberId(auth.member.id)) fail(403, "guest_scope_denied", `Guest members cannot ${verb} room files`);
++};
++
+ const BLOCKED_MEDIA_TYPES = new Set([
+   "application/x-msdownload",
+   "application/x-msdos-program",
+@@ -101,12 +109,7 @@ export class RoomAttachmentBytes {
+     return this.store.transaction(() => {
+       const auth = this.store.authenticate(token, roomId);
+       enforceAutonomyTierForAction({ db: this.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "room_put_file", fail });
+-      // Guests may read and chat but may not store room files. stage()
+-      // authenticates directly and bypasses store.command, so the RoomStore
+-      // guest scope gate never runs here — enforce the same denial
+-      // explicitly. Mirrors RC-2026-09-27-2716 (PR #1156).
+-      if (isGuestAgentMemberId(auth.member.id))
+-        fail(403, "guest_scope_denied", "Guest members cannot stage room files");
++      denyGuestFiles(auth, "stage");
+       if (!validId(id)) fail(422, "invalid_attachment", "Attachment id is not valid");
+       const now = this.store.now();
+       this.expire(roomId, now);
+@@ -139,7 +142,8 @@ export class RoomAttachmentBytes {
+       ) VALUES(?,?,?,?,?,?,?,?,'staged',?,?,NULL)`).run(
+         roomId, id, auth.member.id, file.filename, file.mediaType, bytes.length, sha, bytes, now, expiresAt
+       );
+-      const row = this.db.prepare("SELECT * FROM room_attachments WHERE room_id=? AND id=?").get(roomId, id);
++      const row = { id, filename: file.filename, media_type: file.mediaType, byte_length: bytes.length,
++        sha256: sha, state: "staged", uploader_id: auth.member.id, created_at: now, expires_at: expiresAt, message_id: null };
+       return { status: "staged", duplicate: false, roomId, attachment: view(row) };
+     });
+   }
+@@ -202,12 +206,7 @@ export class RoomAttachmentBytes {
+     return this.store.transaction(() => {
+       const auth = this.store.authenticate(token, roomId);
+       enforceAutonomyTierForAction({ db: this.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "room_discard_file", fail });
+-      // Guests may read and chat but may not store room files. discard()
+-      // authenticates directly and bypasses store.command, so the RoomStore
+-      // guest scope gate never runs here — enforce the same denial
+-      // explicitly. Mirrors RC-2026-09-27-2716 (PR #1156).
+-      if (isGuestAgentMemberId(auth.member.id))
+-        fail(403, "guest_scope_denied", "Guest members cannot discard room files");
++      denyGuestFiles(auth, "discard");
+       if (!validId(id)) fail(422, "invalid_attachment", "Attachment id is not valid");
+       const now = this.store.now();
+       this.expire(roomId, now);
+@@ -231,12 +230,7 @@ export class RoomAttachmentBytes {
+     return this.store.transaction(() => {
+       const auth = this.store.authenticate(token, roomId);
+       enforceAutonomyTierForAction({ db: this.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "room_commit_file", fail });
+-      // Guests may read and chat but may not store room files. commit()
+-      // authenticates directly and bypasses store.command, so the RoomStore
+-      // guest scope gate never runs here — enforce the same denial
+-      // explicitly. Mirrors RC-2026-09-27-2716 (PR #1156).
+-      if (isGuestAgentMemberId(auth.member.id))
+-        fail(403, "guest_scope_denied", "Guest members cannot commit room files");
++      denyGuestFiles(auth, "commit");
+       if (!validId(id)) fail(422, "invalid_attachment", "Attachment id is not valid");
+       if (!validId(messageId)) fail(422, "invalid_message", "Message id is not valid");
+       this.expire(roomId, this.store.now());
+diff --git a/server/room-directory.mjs b/server/room-directory.mjs
+index e72782613..fec132437 100644
+--- a/server/room-directory.mjs
++++ b/server/room-directory.mjs
+@@ -88,6 +88,24 @@ export class RoomDirectory {
+     if (memberId !== state?.room?.ownerId) fail(403, "owner_only", "Only the room owner may change public discovery settings");
+   }
+ 
++  _ownerState(roomId, memberId) {
++    const state = this._roomState(roomId);
++    this._requireOwner(state, memberId);
++    return state;
++  }
++
++  // Upsert of one toggle column. A room can opt out before it is listed:
++  // the insert starts with discoverable=0, listed_at=NULL, and every later
++  // update preserves the existing listing bits.
++  _upsert(roomId, column, enabled) {
++    this.db.prepare(`INSERT INTO room_directory_settings
++        (room_id, discoverable, listed_at, updated_at, ${column})
++        VALUES (?, 0, NULL, ?, ?)
++        ON CONFLICT(room_id) DO UPDATE SET ${column}=excluded.${column},
++          updated_at=excluded.updated_at`)
++      .run(roomId, nowMs(), enabled ? 1 : 0);
++  }
++
+   // Runs the additive public_receipts migration at most once per instance.
+   _ensureReceiptsColumn() {
+     if (this._receiptsColumnEnsured) return;
+@@ -97,18 +115,15 @@ export class RoomDirectory {
+ 
+   // ---- owner controls ------------------------------------------------------
+   status(roomId, memberId) {
+-    const state = this._roomState(roomId);
+-    this._requireOwner(state, memberId);
++    this._ownerState(roomId, memberId);
+     this._ensureReceiptsColumn();
+     const row = this.db.prepare("SELECT discoverable, listed_at, public_receipts FROM room_directory_settings WHERE room_id=?").get(roomId);
+-    return { roomId, discoverable: row?.discoverable === 1, listedAt: row?.listed_at ?? null,
+-      publicReceipts: row?.public_receipts !== 0 };
++    return { roomId, discoverable: row?.discoverable === 1, listedAt: row?.listed_at ?? null, publicReceipts: row?.public_receipts !== 0 };
+   }
+ 
+   set(roomId, memberId, discoverable) {
+     if (typeof discoverable !== "boolean") fail(422, "invalid_directory", "discoverable (boolean) is the accepted field");
+-    const state = this._roomState(roomId);
+-    this._requireOwner(state, memberId);
++    this._ownerState(roomId, memberId);
+     return this.store.transaction(() => {
+       const at = nowMs();
+       const existing = this.db.prepare("SELECT discoverable, listed_at FROM room_directory_settings WHERE room_id=?").get(roomId);
+@@ -127,25 +142,16 @@ export class RoomDirectory {
+   // Existing discoverable rooms default to feed-on, preserving prior behavior;
+   // turning the feed off does not unlist the room or change its work items.
+   opportunityStatus(roomId, memberId) {
+-    const state = this._roomState(roomId);
+-    this._requireOwner(state, memberId);
++    this._ownerState(roomId, memberId);
+     const row = this.db.prepare("SELECT opportunities_enabled AS enabled FROM room_directory_settings WHERE room_id=?").get(roomId);
+     return { roomId, enabled: row?.enabled !== 0 };
+   }
+ 
+   setOpportunities(roomId, memberId, enabled) {
+     if (typeof enabled !== "boolean") fail(422, "invalid_opportunities", "enabled (boolean) is the accepted field");
+-    const state = this._roomState(roomId);
+-    this._requireOwner(state, memberId);
++    this._ownerState(roomId, memberId);
+     return this.store.transaction(() => {
+-      // A room can opt out before it is listed. Upsert preserves the existing
+-      // listing bit and timestamp on every subsequent owner change.
+-      this.db.prepare(`INSERT INTO room_directory_settings
+-          (room_id, discoverable, listed_at, updated_at, opportunities_enabled)
+-          VALUES (?, 0, NULL, ?, ?)
+-          ON CONFLICT(room_id) DO UPDATE SET opportunities_enabled=excluded.opportunities_enabled,
+-            updated_at=excluded.updated_at`)
+-        .run(roomId, nowMs(), enabled ? 1 : 0);
++      this._upsert(roomId, "opportunities_enabled", enabled);
+       return { roomId, enabled };
+     });
+   }
+@@ -164,25 +170,16 @@ export class RoomDirectory {
+   }
+ 
+   receiptsVisibility(roomId, memberId) {
+-    const state = this._roomState(roomId);
+-    this._requireOwner(state, memberId);
++    this._ownerState(roomId, memberId);
+     return { roomId, publicReceipts: this.publicReceiptsVisible(roomId) };
+   }
+ 
+   setReceiptsVisibility(roomId, memberId, enabled) {
+     if (typeof enabled !== "boolean") fail(422, "invalid_public_receipts", "publicReceipts (boolean) is the accepted field");
+-    const state = this._roomState(roomId);
+-    this._requireOwner(state, memberId);
++    this._ownerState(roomId, memberId);
+     return this.store.transaction(() => {
+       this._ensureReceiptsColumn();
+-      // A room can go private before it is listed. Upsert preserves the
+-      // existing listing bits on every subsequent owner change.
+-      this.db.prepare(`INSERT INTO room_directory_settings
+-          (room_id, discoverable, listed_at, updated_at, public_receipts)
+-          VALUES (?, 0, NULL, ?, ?)
+-          ON CONFLICT(room_id) DO UPDATE SET public_receipts=excluded.public_receipts,
+-            updated_at=excluded.updated_at`)
+-        .run(roomId, nowMs(), enabled ? 1 : 0);
++      this._upsert(roomId, "public_receipts", enabled);
+       return { roomId, publicReceipts: enabled };
+     });
+   }
+diff --git a/server/room-export-html.mjs b/server/room-export-html.mjs
+index 5c300bf62..7dec8624d 100644
+--- a/server/room-export-html.mjs
++++ b/server/room-export-html.mjs
+@@ -103,6 +103,8 @@ export function walkExport(rows) {
+     if (!work.has(id)) work.set(id, blankWork(id));
+     return work.get(id);
+   };
++  const addNote = (event, id, label, text) => workItem(id).notes.push({ at: event.at, actorId: event.actorId, label, text });
++  const addEvidence = (event, id, label, summary, url, version) => workItem(id).evidence.push({ at: event.at, actorId: event.actorId, label, summary, url, version });
+   for (const row of rows) {
+     const { sequence, event } = row;
+     count += 1;
+@@ -150,44 +152,30 @@ export function walkExport(rows) {
+       }
+       case T.WORK_ACCEPTED: workItem(data.workItemId).state = "accepted"; break;
+       case T.WORK_STARTED: workItem(data.workItemId).state = "working"; break;
+-      case T.WORK_BLOCKED: {
+-        const item = workItem(data.workItemId);
+-        item.state = "blocked";
+-        item.notes.push({ at: event.at, actorId: event.actorId, label: "Blocked", text: data.reason });
++      case T.WORK_BLOCKED:
++        workItem(data.workItemId).state = "blocked";
++        addNote(event, data.workItemId, "Blocked", data.reason);
+         break;
+-      }
+-      case T.WORK_BLOCKER_RESOLVED: {
+-        const item = workItem(data.workItemId);
+-        item.notes.push({ at: event.at, actorId: event.actorId, label: "Blocker resolved", text: data.resolution });
++      case T.WORK_BLOCKER_RESOLVED:
++        addNote(event, data.workItemId, "Blocker resolved", data.resolution);
+         break;
+-      }
+-      case T.WORK_COMPLETED: {
+-        const item = workItem(data.workItemId);
+-        item.state = "completed";
+-        item.evidence.push({ at: event.at, actorId: event.actorId, label: "Completion", summary: data.summary, url: data.evidenceUrl ?? null, version: data.evidenceVersion });
++      case T.WORK_COMPLETED:
++        workItem(data.workItemId).state = "completed";
++        addEvidence(event, data.workItemId, "Completion", data.summary, data.evidenceUrl ?? null, data.evidenceVersion);
+         break;
+-      }
+-      case T.WORK_HANDOFF_RECORDED: {
+-        const item = workItem(data.workItemId);
+-        item.evidence.push({ at: event.at, actorId: event.actorId, label: "Handoff", summary: data.doneSummary, url: data.evidenceUrl ?? null, version: data.evidenceVersion ?? null });
++      case T.WORK_HANDOFF_RECORDED:
++        addEvidence(event, data.workItemId, "Handoff", data.doneSummary, data.evidenceUrl ?? null, data.evidenceVersion ?? null);
+         break;
+-      }
+-      case T.VERIFICATION_RECORDED: {
+-        const item = workItem(data.workItemId);
+-        item.notes.push({ at: event.at, actorId: event.actorId, label: `Verification: ${data.result}`, text: data.summary });
++      case T.VERIFICATION_RECORDED:
++        addNote(event, data.workItemId, `Verification: ${data.result}`, data.summary);
+         break;
+-      }
+-      case T.OWNER_DECISION_RECORDED: {
+-        const item = workItem(data.workItemId);
+-        item.notes.push({ at: event.at, actorId: event.actorId, label: `Decision: ${data.decision}`, text: data.reason });
++      case T.OWNER_DECISION_RECORDED:
++        addNote(event, data.workItemId, `Decision: ${data.decision}`, data.reason);
+         break;
+-      }
+-      case T.WORK_SUPERSEDED: {
+-        const item = workItem(data.workItemId);
+-        item.state = "superseded";
+-        item.notes.push({ at: event.at, actorId: event.actorId, label: "Superseded", text: data.reason });
++      case T.WORK_SUPERSEDED:
++        workItem(data.workItemId).state = "superseded";
++        addNote(event, data.workItemId, "Superseded", data.reason);
+         break;
+-      }
+       default: break;
+     }
+   }
+diff --git a/server/room-export.mjs b/server/room-export.mjs
+index 23683ea21..bdcadaa1a 100644
+--- a/server/room-export.mjs
++++ b/server/room-export.mjs
+@@ -43,11 +43,8 @@ export function sanitizeCell(column, value) {
+   // Uint8Array, and JSON.stringify(ArrayBuffer) is {}: every room file's
+   // bytes left production backups as an empty object until this was handled.
+   if (value instanceof Uint8Array) return { $base64: Buffer.from(value).toString("base64") };
+-  if (value instanceof ArrayBuffer) return { $base64: Buffer.from(new Uint8Array(value)).toString("base64") };
+-  // A bare SharedArrayBuffer is neither an ArrayBuffer nor a view, but
+-  // JSON.stringify turns it into {} just the same. Encode it like one.
+-  // (Views over shared memory are already caught by the isView branch.)
+-  if (typeof SharedArrayBuffer !== "undefined" && value instanceof SharedArrayBuffer)
++  if (value instanceof ArrayBuffer
++    || (typeof SharedArrayBuffer !== "undefined" && value instanceof SharedArrayBuffer))
+     return { $base64: Buffer.from(new Uint8Array(value)).toString("base64") };
+   if (ArrayBuffer.isView(value)) return { $base64: Buffer.from(value.buffer, value.byteOffset, value.byteLength).toString("base64") };
+   if (typeof value !== "string") return value;
+@@ -55,9 +52,7 @@ export function sanitizeCell(column, value) {
+ }
+ 
+ function sanitizeRow(row) {
+-  const out = {};
+-  for (const [column, value] of Object.entries(row)) out[column] = sanitizeCell(column, value);
+-  return out;
++  return Object.fromEntries(Object.entries(row).map(([column, value]) => [column, sanitizeCell(column, value)]));
+ }
+ 
+ function tableNames(db) {
+@@ -69,10 +64,11 @@ function tableColumns(db, table) {
+   return db.prepare(`PRAGMA table_info(${quoteIdent(table)})`).all().map(column => column.name);
+ }
+ 
+-function exportTableOrder(db) {
+-  const present = new Set(tableNames(db));
+-  const ordered = FIRST.filter(table => present.has(table));
+-  for (const table of [...present].sort()) if (!ordered.includes(table)) ordered.push(table);
++// FK-safe order: the pinned FIRST tables first, everything else
++// alphabetically. Used by both the export walk and replay's insert pass.
++function tableOrder(names) {
++  const ordered = FIRST.filter(table => names.has(table));
++  for (const table of [...names].sort()) if (!ordered.includes(table)) ordered.push(table);
+   return ordered;
+ }
+ 
+@@ -123,7 +119,7 @@ export function* exportNdjsonLines(db, { pageRows = EXPORT_PAGE_ROWS } = {}) {
+   const rooms = db.prepare("SELECT id, sequence FROM rooms ORDER BY id").all();
+   const events = db.prepare("SELECT count(*) AS n FROM events").get().n;
+   yield JSON.stringify({ kind: "watermark", version: 1, backedUpAt: Date.now(), rooms, events }) + "\n";
+-  for (const table of exportTableOrder(db)) {
++  for (const table of tableOrder(new Set(tableNames(db)))) {
+     const columns = tableColumns(db, table);
+     if (!columns.length) continue;
+     for (const row of exportTableRows(db, table, columns, pageRows)) yield JSON.stringify({ table, row: sanitizeRow(row) }) + "\n";
+@@ -280,12 +276,6 @@ function parseExport(ndjson) {
+   return { watermark, byTable, trailer };
+ }
+ 
+-function insertOrder(names) {
+-  const ordered = FIRST.filter(table => names.has(table));
+-  for (const table of [...names].sort()) if (!ordered.includes(table)) ordered.push(table);
+-  return ordered;
+-}
+-
+ // Tables a production Durable Object export can carry that a fresh Node
+ // store never creates. The two runtime markers belong to the Durable Object
+ // writer fence (cloudflare/storage.mjs) and mean nothing in a sqlite file.
+@@ -331,7 +321,7 @@ export function replayNdjson(ndjson, filename, { audit = "strict" } = {}) {
+       skipped[table] = byTable.get(table).length;
+       byTable.delete(table);
+     }
+-    const order = insertOrder(new Set(byTable.keys()));
++    const order = tableOrder(new Set(byTable.keys()));
+     for (const table of order) if (!existing.has(table)) throw new Error("Export names a table this store does not have");
+     store.db.exec("PRAGMA foreign_keys=OFF");
+     // The public claim fence (server/public-work-claim-fence.mjs) aborts any

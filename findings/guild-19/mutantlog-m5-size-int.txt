@@ -1,0 +1,13 @@
+✔ validateAttachment accepts safe files, blocks dangerous ones (41.686559ms)
+✔ tracker enforces per-message cap and download lifecycle (29.98575ms)
+✔ malformed inputs are refused (43.755293ms)
+✔ validateAttachment reads the extension the way Windows saves the file (trailing dots and spaces) (3.626763ms)
+✔ QA200-REG-14: benign trailing dots/spaces are allowed with the normalized extension (0.399169ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2714.733445

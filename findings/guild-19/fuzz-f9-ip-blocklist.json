@@ -1,0 +1,474 @@
+{
+ "unit": "f9-ip-blocklist",
+ "inputs": 83,
+ "counts": {
+  "ok": 25,
+  "reject": 10,
+  "crash": 48
+ },
+ "results": [
+  {
+   "name": "v4-ok",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "v4-short",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "v4-5parts",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "v4-256",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "v4-alpha",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "v4-empty-part",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "v4-leading-zero",
+   "verdict": "ok",
+   "ms": 18
+  },
+  {
+   "name": "loopback-blocked",
+   "verdict": "reject",
+   "ms": 5
+  },
+  {
+   "name": "private-blocked",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "public-open",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "v6-loopback",
+   "verdict": "reject",
+   "ms": 11
+  },
+  {
+   "name": "mapped-loopback",
+   "verdict": "reject",
+   "ms": 1
+  },
+  {
+   "name": "v6-ok",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "v6-garbage",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-0",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-1",
+   "verdict": "crash",
+   "detail": "parseIpv4 threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-2",
+   "verdict": "crash",
+   "detail": "parseIpv4 threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-3",
+   "verdict": "crash",
+   "detail": "parseIpv4 threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-4",
+   "verdict": "crash",
+   "detail": "parseIpv4 threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-5",
+   "verdict": "crash",
+   "detail": "parseIpv4 threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-6",
+   "verdict": "crash",
+   "detail": "parseIpv4 threw TypeError",
+   "ms": 1
+  },
+  {
+   "name": "v4-junk:case-7",
+   "verdict": "crash",
+   "detail": "parseIpv4 threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-8",
+   "verdict": "crash",
+   "detail": "parseIpv4 threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-9",
+   "verdict": "crash",
+   "detail": "parseIpv4 threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-10",
+   "verdict": "crash",
+   "detail": "parseIpv4 threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-11",
+   "verdict": "crash",
+   "detail": "parseIpv4 threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-12",
+   "verdict": "crash",
+   "detail": "parseIpv4 threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-13",
+   "verdict": "crash",
+   "detail": "parseIpv4 threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-14",
+   "verdict": "crash",
+   "detail": "parseIpv4 threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-15",
+   "verdict": "crash",
+   "detail": "parseIpv4 threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-16",
+   "verdict": "crash",
+   "detail": "parseIpv4 threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-17",
+   "verdict": "crash",
+   "detail": "parseIpv4 threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-18",
+   "verdict": "crash",
+   "detail": "parseIpv4 threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-19",
+   "verdict": "crash",
+   "detail": "parseIpv4 threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-20",
+   "verdict": "crash",
+   "detail": "parseIpv4 threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-21",
+   "verdict": "crash",
+   "detail": "parseIpv4 threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-22",
+   "verdict": "crash",
+   "detail": "parseIpv4 threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-23",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-24",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-25",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-26",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-27",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-28",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-29",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-30",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-31",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-32",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-33",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-34",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-35",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-36",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-37",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-38",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-39",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-40",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-41",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-42",
+   "verdict": "crash",
+   "detail": "parseIpv4 threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-43",
+   "verdict": "crash",
+   "detail": "parseIpv4 threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-44",
+   "verdict": "crash",
+   "detail": "parseIpv4 threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "v4-junk:case-45",
+   "verdict": "crash",
+   "detail": "parseIpv4 threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "blocked-junk:case-0",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "blocked-junk:case-1",
+   "verdict": "crash",
+   "detail": "isBlockedIp threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "blocked-junk:case-2",
+   "verdict": "crash",
+   "detail": "isBlockedIp threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "blocked-junk:case-3",
+   "verdict": "crash",
+   "detail": "isBlockedIp threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "blocked-junk:case-4",
+   "verdict": "crash",
+   "detail": "isBlockedIp threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "blocked-junk:case-5",
+   "verdict": "crash",
+   "detail": "isBlockedIp threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "blocked-junk:case-6",
+   "verdict": "crash",
+   "detail": "isBlockedIp threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "blocked-junk:case-7",
+   "verdict": "crash",
+   "detail": "isBlockedIp threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "blocked-junk:case-8",
+   "verdict": "crash",
+   "detail": "isBlockedIp threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "blocked-junk:case-9",
+   "verdict": "crash",
+   "detail": "isBlockedIp threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "blocked-junk:case-10",
+   "verdict": "crash",
+   "detail": "isBlockedIp threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "blocked-junk:case-11",
+   "verdict": "crash",
+   "detail": "isBlockedIp threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "blocked-junk:case-12",
+   "verdict": "crash",
+   "detail": "isBlockedIp threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "blocked-junk:case-13",
+   "verdict": "crash",
+   "detail": "isBlockedIp threw TypeError",
+   "ms": 17
+  },
+  {
+   "name": "blocked-junk:case-14",
+   "verdict": "crash",
+   "detail": "isBlockedIp threw TypeError",
+   "ms": 1
+  },
+  {
+   "name": "blocked-junk:case-15",
+   "verdict": "crash",
+   "detail": "isBlockedIp threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "blocked-junk:case-16",
+   "verdict": "crash",
+   "detail": "isBlockedIp threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "blocked-junk:case-17",
+   "verdict": "crash",
+   "detail": "isBlockedIp threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "blocked-junk:case-18",
+   "verdict": "crash",
+   "detail": "isBlockedIp threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "blocked-junk:case-19",
+   "verdict": "crash",
+   "detail": "isBlockedIp threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "blocked-junk:case-20",
+   "verdict": "crash",
+   "detail": "isBlockedIp threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "blocked-junk:case-21",
+   "verdict": "crash",
+   "detail": "isBlockedIp threw TypeError",
+   "ms": 0
+  },
+  {
+   "name": "blocked-junk:case-22",
+   "verdict": "crash",
+   "detail": "isBlockedIp threw TypeError",
+   "ms": 0
+  }
+ ]
+}

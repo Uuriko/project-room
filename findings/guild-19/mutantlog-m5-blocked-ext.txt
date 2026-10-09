@@ -1,0 +1,67 @@
+✖ validateAttachment accepts safe files, blocks dangerous ones (32.080614ms)
+✔ tracker enforces per-message cap and download lifecycle (54.936984ms)
+✔ malformed inputs are refused (1.397988ms)
+✖ validateAttachment reads the extension the way Windows saves the file (trailing dots and spaces) (0.420421ms)
+✖ QA200-REG-14: benign trailing dots/spaces are allowed with the normalized extension (0.34662ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 2
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2429.534165
+
+✖ failing tests:
+
+test at tests/attachments.test.js:8:1
+✖ validateAttachment accepts safe files, blocks dangerous ones (32.080614ms)
+  AssertionError [ERR_ASSERTION]: Missing expected exception.
+      at throwsCode (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/attachments.test.js:6:41)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/attachments.test.js:12:3)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.start (node:internal/test_runner/test:1257:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    operator: 'throws',
+    diff: 'simple'
+  }
+
+test at tests/attachments.test.js:38:1
+✖ validateAttachment reads the extension the way Windows saves the file (trailing dots and spaces) (0.420421ms)
+  AssertionError [ERR_ASSERTION]: Missing expected exception.
+      at throwsCode (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/attachments.test.js:6:41)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/attachments.test.js:40:5)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    operator: 'throws',
+    diff: 'simple'
+  }
+
+test at tests/attachments.test.js:46:1
+✖ QA200-REG-14: benign trailing dots/spaces are allowed with the normalized extension (0.34662ms)
+  AssertionError [ERR_ASSERTION]: Missing expected exception.
+      at throwsCode (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/attachments.test.js:6:41)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/attachments.test.js:56:3)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    operator: 'throws',
+    diff: 'simple'
+  }

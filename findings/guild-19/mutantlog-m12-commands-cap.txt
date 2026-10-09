@@ -1,0 +1,71 @@
+{"event":"room.cold_start","durationMs":1714,"integrity":"eager","phases":{"schema":{"ms":493,"rowsRead":0},"plugin":{"ms":396,"rowsRead":0},"fence":{"ms":456,"rowsRead":0},"verifies":{"ms":73,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":177,"heapBytes":38730784,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":428,"cpuMs":44,"heapBytes":38510872,"rooms":1,"sequences":18,"projectionBytes":6094,"events":18}
+{"event":"room.cold_start","durationMs":484,"cpuMs":47,"heapBytes":35916200,"rooms":1,"sequences":18,"projectionBytes":6094,"events":18}
+{"event":"room.cold_start","durationMs":1214,"integrity":"eager","phases":{"schema":{"ms":253,"rowsRead":0},"plugin":{"ms":137,"rowsRead":0},"fence":{"ms":259,"rowsRead":0},"verifies":{"ms":302,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":82,"heapBytes":36142512,"rooms":1,"sequences":18,"projectionBytes":6094,"events":18}
+{"event":"room.cold_start","durationMs":2158,"integrity":"eager","phases":{"schema":{"ms":288,"rowsRead":0},"plugin":{"ms":817,"rowsRead":0},"fence":{"ms":672,"rowsRead":0},"verifies":{"ms":79,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":166,"heapBytes":40137064,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1948,"integrity":"eager","phases":{"schema":{"ms":596,"rowsRead":0},"plugin":{"ms":744,"rowsRead":0},"fence":{"ms":332,"rowsRead":0},"verifies":{"ms":66,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":169,"heapBytes":34766360,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":825,"integrity":"eager","phases":{"schema":{"ms":256,"rowsRead":0},"plugin":{"ms":374,"rowsRead":0},"fence":{"ms":32,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":125,"heapBytes":41678640,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":863,"integrity":"eager","phases":{"schema":{"ms":200,"rowsRead":0},"plugin":{"ms":487,"rowsRead":0},"fence":{"ms":34,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":135,"heapBytes":42112952,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1414,"integrity":"eager","phases":{"schema":{"ms":289,"rowsRead":0},"plugin":{"ms":699,"rowsRead":0},"fence":{"ms":177,"rowsRead":0},"verifies":{"ms":12,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":155,"heapBytes":48567680,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1737,"integrity":"eager","phases":{"schema":{"ms":280,"rowsRead":0},"plugin":{"ms":916,"rowsRead":0},"fence":{"ms":236,"rowsRead":0},"verifies":{"ms":69,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":156,"heapBytes":38139056,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ exact email excerpt shares only selected normalized text and returns a reviewed private draft (11328.575775ms)
+✔ email selections reject invalid offsets, empty or oversized text, HTML and stale context atomically (6772.614149ms)
+✔ saved email can be deliberately shared after disconnect; failed journal writes leave no room excerpt (5601.940442ms)
+✔ negotiated email reading projects inert text and private recipient details without raw provider context (3306.11177ms)
+✔ HTML reading emits no HTML while keeping the existing private draft (2780.055394ms)
+✔ reader uses current disconnected connection state, not the source's historical grant (3393.053714ms)
+{"event":"room.cold_start","durationMs":1576,"integrity":"eager","phases":{"schema":{"ms":379,"rowsRead":0},"plugin":{"ms":759,"rowsRead":0},"fence":{"ms":277,"rowsRead":0},"verifies":{"ms":7,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":187,"heapBytes":47601424,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1927,"integrity":"eager","phases":{"schema":{"ms":242,"rowsRead":0},"plugin":{"ms":1183,"rowsRead":0},"fence":{"ms":270,"rowsRead":0},"verifies":{"ms":28,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":189,"heapBytes":44767152,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1683,"integrity":"eager","phases":{"schema":{"ms":130,"rowsRead":0},"plugin":{"ms":1006,"rowsRead":0},"fence":{"ms":396,"rowsRead":0},"verifies":{"ms":4,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":158,"heapBytes":46583504,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":661,"integrity":"eager","phases":{"schema":{"ms":114,"rowsRead":0},"plugin":{"ms":41,"rowsRead":0},"fence":{"ms":90,"rowsRead":0},"verifies":{"ms":225,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":65,"heapBytes":41217712,"rooms":1,"sequences":10,"projectionBytes":2920,"events":10}
+{"event":"room.cold_start","durationMs":1955,"integrity":"eager","phases":{"schema":{"ms":380,"rowsRead":0},"plugin":{"ms":769,"rowsRead":0},"fence":{"ms":380,"rowsRead":0},"verifies":{"ms":49,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":170,"heapBytes":45651880,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":931,"integrity":"eager","phases":{"schema":{"ms":108,"rowsRead":0},"plugin":{"ms":307,"rowsRead":0},"fence":{"ms":188,"rowsRead":0},"verifies":{"ms":24,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":150,"heapBytes":45787192,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":456,"integrity":"eager","phases":{"schema":{"ms":62,"rowsRead":0},"plugin":{"ms":35,"rowsRead":0},"fence":{"ms":202,"rowsRead":0},"verifies":{"ms":93,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":66,"heapBytes":38558352,"rooms":1,"sequences":10,"projectionBytes":2920,"events":10}
+{"event":"room.cold_start","durationMs":2007,"integrity":"eager","phases":{"schema":{"ms":109,"rowsRead":0},"plugin":{"ms":461,"rowsRead":0},"fence":{"ms":143,"rowsRead":0},"verifies":{"ms":19,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":142,"heapBytes":42798656,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":897,"integrity":"eager","phases":{"schema":{"ms":258,"rowsRead":0},"plugin":{"ms":322,"rowsRead":0},"fence":{"ms":59,"rowsRead":0},"verifies":{"ms":17,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":151,"heapBytes":50790272,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2330,"integrity":"eager","phases":{"schema":{"ms":324,"rowsRead":0},"plugin":{"ms":659,"rowsRead":0},"fence":{"ms":748,"rowsRead":0},"verifies":{"ms":123,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":168,"heapBytes":41572384,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":3433,"integrity":"eager","phases":{"schema":{"ms":405,"rowsRead":0},"plugin":{"ms":1556,"rowsRead":0},"fence":{"ms":412,"rowsRead":0},"verifies":{"ms":36,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":181,"heapBytes":49122416,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1643,"integrity":"eager","phases":{"schema":{"ms":101,"rowsRead":0},"plugin":{"ms":450,"rowsRead":0},"fence":{"ms":595,"rowsRead":0},"verifies":{"ms":173,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":153,"heapBytes":67736616,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1913,"integrity":"eager","phases":{"schema":{"ms":117,"rowsRead":0},"plugin":{"ms":1255,"rowsRead":0},"fence":{"ms":231,"rowsRead":0},"verifies":{"ms":44,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":167,"heapBytes":41454304,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2024,"integrity":"eager","phases":{"schema":{"ms":267,"rowsRead":0},"plugin":{"ms":1118,"rowsRead":0},"fence":{"ms":432,"rowsRead":0},"verifies":{"ms":9,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":172,"heapBytes":46754488,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1256,"integrity":"eager","phases":{"schema":{"ms":382,"rowsRead":0},"plugin":{"ms":371,"rowsRead":0},"fence":{"ms":268,"rowsRead":0},"verifies":{"ms":14,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":156,"heapBytes":53002664,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1380,"integrity":"eager","phases":{"schema":{"ms":191,"rowsRead":0},"plugin":{"ms":632,"rowsRead":0},"fence":{"ms":261,"rowsRead":0},"verifies":{"ms":66,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":161,"heapBytes":60606456,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ HTTP email view is explicit, private, no-store and refuses unknown negotiations (5578.035348ms)
+✔ fixture email import reuses private Inbox storage without changing rooms or old-client lists (4673.119435ms)
+✔ exact page retries and unchanged observations do not create another source revision (4543.790621ms)
+✔ changed email retains the exact old private draft and requires a current source revision (4076.121277ms)
+✔ page journal failure rolls back source versions and sync cursor together (4401.308357ms)
+✔ late competing pages cannot advance a newer cursor and separate processes agree (3407.204ms)
+✔ disconnect and reconnect fence old observations but keep stored messages and drafts (4886.912225ms)
+✔ folder removals and complete rescan omissions never delete a source or its draft (3217.362654ms)
+✔ a message moved between folders keeps one source identity and a stale private draft (6033.144903ms)
+✔ a delayed observation from an old folder cannot overwrite a newer imported message (5308.569509ms)
+✔ account bindings, epoch changes and room-agent credentials cannot import another mailbox (3657.632669ms)
+✔ connection identity cannot silently change mailboxes or duplicate one account's mailbox (3510.887968ms)
+✔ ordinary Inbox commands cannot import, overwrite channel origin, send or share unqualified email (4299.855616ms)
+✔ bounded malformed or out-of-scope observations roll back without consuming sync progress (5168.785284ms)
+{"event":"room.cold_start","durationMs":446,"cpuMs":36,"heapBytes":44587264,"rooms":1,"sequences":10,"projectionBytes":2920,"events":10}
+{"event":"room.cold_start","durationMs":39,"cpuMs":28,"heapBytes":54462848,"rooms":1,"sequences":10,"projectionBytes":2920,"events":10}
+{"event":"room.cold_start","durationMs":993,"integrity":"eager","phases":{"schema":{"ms":91,"rowsRead":0},"plugin":{"ms":461,"rowsRead":0},"fence":{"ms":282,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":189,"heapBytes":63800664,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1115,"integrity":"eager","phases":{"schema":{"ms":80,"rowsRead":0},"plugin":{"ms":438,"rowsRead":0},"fence":{"ms":33,"rowsRead":0},"verifies":{"ms":6,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":147,"heapBytes":70456680,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1420,"integrity":"eager","phases":{"schema":{"ms":303,"rowsRead":0},"plugin":{"ms":529,"rowsRead":0},"fence":{"ms":440,"rowsRead":0},"verifies":{"ms":6,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":149,"heapBytes":78449360,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ populated backup and replay preserve connection, partial scan, imported content and drafts (6308.428693ms)
+✔ email projection tampering and orphan imports require reconciliation (2497.121884ms)
+✔ a full private import journal permits an exact retry and disconnect, but no new import (5027.306025ms)
+{"event":"room.cold_start","durationMs":938,"cpuMs":52,"heapBytes":35749104,"rooms":1,"sequences":10,"projectionBytes":2920,"events":10}
+{"event":"room.cold_start","durationMs":118,"cpuMs":31,"heapBytes":36654912,"rooms":1,"sequences":10,"projectionBytes":2920,"events":10}
+{"event":"room.cold_start","durationMs":65,"cpuMs":28,"heapBytes":39475552,"rooms":1,"sequences":10,"projectionBytes":2920,"events":10}
+{"event":"room.cold_start","durationMs":203,"cpuMs":31,"heapBytes":35652880,"rooms":1,"sequences":10,"projectionBytes":2920,"events":10}
+{"event":"room.cold_start","durationMs":2408,"integrity":"eager","phases":{"schema":{"ms":173,"rowsRead":0},"plugin":{"ms":1441,"rowsRead":0},"fence":{"ms":502,"rowsRead":0},"verifies":{"ms":12,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":190,"heapBytes":39237408,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1062,"integrity":"eager","phases":{"schema":{"ms":135,"rowsRead":0},"plugin":{"ms":71,"rowsRead":0},"fence":{"ms":226,"rowsRead":0},"verifies":{"ms":404,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":136,"heapBytes":52863584,"rooms":1,"sequences":11,"projectionBytes":3173,"events":11}
+✔ offline recovery comparison flags disconnected email authority without emitting private content (5722.6288ms)
+✔ cold allowlisted candidate package reopens imported email and resumes the same partial scan (103264.969399ms)
+ℹ tests 25
+ℹ suites 0
+ℹ pass 25
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 229618.070582

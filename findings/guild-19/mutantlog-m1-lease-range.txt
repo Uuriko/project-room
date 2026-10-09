@@ -1,0 +1,86 @@
+{"event":"room.cold_start","durationMs":2954,"integrity":"eager","phases":{"schema":{"ms":764,"rowsRead":0},"plugin":{"ms":1116,"rowsRead":0},"fence":{"ms":740,"rowsRead":0},"verifies":{"ms":53,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":205,"heapBytes":39505120,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ valid block -> valid:true with taskId and parsed fields (65.309861ms)
+✔ no fenced block -> the exact rebuild error (0.507983ms)
+✔ each missing field reports its exact rebuild error (21.085053ms)
+✖ malformed values report their exact rebuild errors (26.897765ms)
+✔ accepted value shapes stay valid (15.162724ms)
+✔ violations accumulate in field order (0.34002ms)
+✔ duplicate keys: last wins, first-insertion order kept (33.561005ms)
+✔ field parsing details mirror the jq (16.727373ms)
+✔ fence extraction details mirror the jq (0.498098ms)
+✔ validateClaimFields is callable on parsed fields directly (0.422604ms)
+✖ parity with scripts/room validate_claim on every vector (1150.375815ms)
+{"event":"room.cold_start","durationMs":2190,"integrity":"eager","phases":{"schema":{"ms":312,"rowsRead":0},"plugin":{"ms":1062,"rowsRead":0},"fence":{"ms":640,"rowsRead":0},"verifies":{"ms":5,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":177,"heapBytes":33994616,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ POST /api/claims/validate answers 200 with the verdict, anonymously (4111.734542ms)
+{"event":"room.cold_start","durationMs":733,"integrity":"eager","phases":{"schema":{"ms":62,"rowsRead":0},"plugin":{"ms":303,"rowsRead":0},"fence":{"ms":188,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":139,"heapBytes":39674744,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ malformed request bodies are 422, non-POST is 405 (2965.147443ms)
+{"event":"room.cold_start","durationMs":2666,"integrity":"eager","phases":{"schema":{"ms":448,"rowsRead":0},"plugin":{"ms":1055,"rowsRead":0},"fence":{"ms":749,"rowsRead":0},"verifies":{"ms":87,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":165,"heapBytes":45017200,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ text over 64KB is 422 (1424.899474ms)
+{"event":"room.cold_start","durationMs":2248,"integrity":"eager","phases":{"schema":{"ms":143,"rowsRead":0},"plugin":{"ms":1056,"rowsRead":0},"fence":{"ms":692,"rowsRead":0},"verifies":{"ms":91,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":160,"heapBytes":37325416,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ secret-looking block content is never logged (3795.62822ms)
+✔ the route is bounded at 30 per address per minute (5037.167254ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 14
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 28813.844893
+
+✖ failing tests:
+
+test at tests/claim-validate.test.js:74:1
+✖ malformed values report their exact rebuild errors (26.897765ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  true !== false
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/claim-validate.test.js:97:12)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/claim-validate.test.js:234:1
+✖ parity with scripts/room validate_claim on every vector (1150.375815ms)
+  AssertionError [ERR_ASSERTION]: errors differ for:
+  ```room-claim
+  task-id: RC-2026-09-24-204
+  lane: jill
+  files: a.mjs
+  lease: lease=73h
+  state: working
+  reason: r
+  ```
+  + actual - expected
+  
+  + []
+  - [
+  -   'lease out of range 1-72h'
+  - ]
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/claim-validate.test.js:249:12)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [],
+    expected: [ 'lease out of range 1-72h' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

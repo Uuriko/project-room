@@ -1,0 +1,95 @@
+{
+ "unit": "f19-envelope",
+ "inputs": 17,
+ "counts": {
+  "ok": 7,
+  "reject": 10
+ },
+ "results": [
+  {
+   "name": "valid",
+   "verdict": "ok",
+   "ms": 22
+  },
+  {
+   "name": "bad-0",
+   "verdict": "reject",
+   "ms": 10
+  },
+  {
+   "name": "bad-1",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "bad-2",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "bad-3",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "bad-4",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "bad-5",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "bad-6",
+   "verdict": "reject",
+   "ms": 1
+  },
+  {
+   "name": "bad-7",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "bad-8",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "bad-9",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "huge-content",
+   "verdict": "ok",
+   "ms": 62
+  },
+  {
+   "name": "url-bomb",
+   "verdict": "ok",
+   "ms": 29
+  },
+  {
+   "name": "attach-nonarray",
+   "verdict": "ok",
+   "ms": 1
+  },
+  {
+   "name": "attach-items",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "from-array",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "replyto-mixed",
+   "verdict": "ok",
+   "ms": 0
+  }
+ ]
+}

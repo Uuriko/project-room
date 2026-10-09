@@ -1,0 +1,43 @@
+{
+  "unit": "m4",
+  "file": "server/inbox-import-guards.mjs",
+  "mutants": 3,
+  "killed": 0,
+  "survived": 3,
+  "skipped": 0,
+  "results": [
+    {
+      "unit": "m4",
+      "file": "server/inbox-import-guards.mjs",
+      "mutant": "envelope-throw",
+      "status": "SURVIVED",
+      "tests": [
+        "tests/inbox-import-guards.test.js"
+      ],
+      "exitCode": 0,
+      "failedTests": 0
+    },
+    {
+      "unit": "m4",
+      "file": "server/inbox-import-guards.mjs",
+      "mutant": "body-check",
+      "status": "SURVIVED",
+      "tests": [
+        "tests/inbox-import-guards.test.js"
+      ],
+      "exitCode": 0,
+      "failedTests": 0
+    },
+    {
+      "unit": "m4",
+      "file": "server/inbox-import-guards.mjs",
+      "mutant": "array-envelope",
+      "status": "SURVIVED",
+      "tests": [
+        "tests/inbox-import-guards.test.js"
+      ],
+      "exitCode": 0,
+      "failedTests": 0
+    }
+  ]
+}

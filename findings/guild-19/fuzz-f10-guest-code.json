@@ -1,0 +1,280 @@
+{
+ "unit": "f10-guest-code",
+ "inputs": 54,
+ "counts": {
+  "ok": 48,
+  "reject": 6
+ },
+ "results": [
+  {
+   "name": "valid",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "short",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "long",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "no-prefix",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "trailing",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "prefix-only",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "badchar",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "lower-upper",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-0",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-1",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-2",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-3",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-4",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-5",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-6",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-7",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-8",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-9",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-10",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-11",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-12",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-13",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-14",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-15",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-16",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-17",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-18",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-19",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-20",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-21",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-22",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-23",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-24",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-25",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-26",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-27",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-28",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-29",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-30",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-31",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-32",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-33",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-34",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-35",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-36",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-37",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-38",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-39",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-40",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-41",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-42",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-43",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-44",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "junk:case-45",
+   "verdict": "ok",
+   "ms": 0
+  }
+ ]
+}

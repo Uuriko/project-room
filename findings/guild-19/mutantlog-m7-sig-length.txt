@@ -1,0 +1,30 @@
+✔ subscribe validates, stores no secret on the view, and dedups events (57.331808ms)
+✔ subscribe rejects unknown events with the known catalog (0.695814ms)
+✔ match supports wildcard and honors enabled flag (23.959606ms)
+✔ ownership: agents cannot touch other agents' subscriptions (0.795544ms)
+✔ buildDelivery signs payloads; journal records attempts (77.5832ms)
+✖ signPayload/verifySignature are timing-safe and strict (0.762825ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 5
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3851.472366
+
+✖ failing tests:
+
+test at tests/agent-plugin-webhook-subs.test.js:113:1
+✖ signPayload/verifySignature are timing-safe and strict (0.762825ms)
+  RangeError: Input buffers must have the same byte length
+      at verifySignature (file:///home/hatch/workspace/pr-wave1000-guild-19/server/agent-webhook-subscriptions.mjs:293:10)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/agent-plugin-webhook-subs.test.js:117:14)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    code: 'ERR_CRYPTO_TIMING_SAFE_EQUAL_LENGTH'
+  }

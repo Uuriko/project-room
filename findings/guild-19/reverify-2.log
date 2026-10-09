@@ -1,0 +1,34 @@
+=== R2: origin/wave500/presence-w2-pump ===
+Preparing worktree (detached HEAD a0f9ab3d1)
+Updating files:   9% (286/2883)Updating files:  10% (289/2883)Updating files:  11% (318/2883)Updating files:  12% (346/2883)Updating files:  13% (375/2883)Updating files:  14% (404/2883)Updating files:  15% (433/2883)Updating files:  16% (462/2883)Updating files:  17% (491/2883)Updating files:  18% (519/2883)Updating files:  18% (543/2883)Updating files:  19% (548/2883)Updating files:  20% (577/2883)Updating files:  21% (606/2883)Updating files:  22% (635/2883)Updating files:  23% (664/2883)Updating files:  24% (692/2883)Updating files:  25% (721/2883)Updating files:  26% (750/2883)Updating files:  27% (779/2883)Updating files:  28% (808/2883)Updating files:  29% (837/2883)Updating files:  30% (865/2883)Updating files:  31% (894/2883)Updating files:  32% (923/2883)Updating files:  33% (952/2883)Updating files:  34% (981/2883)Updating files:  35% (1010/2883)Updating files:  36% (1038/2883)Updating files:  37% (1067/2883)Updating files:  38% (1096/2883)Updating files:  39% (1125/2883)Updating files:  40% (1154/2883)Updating files:  40% (1167/2883)Updating files:  41% (1183/2883)Updating files:  42% (1211/2883)Updating files:  43% (1240/2883)Updating files:  44% (1269/2883)Updating files:  45% (1298/2883)Updating files:  46% (1327/2883)Updating files:  47% (1356/2883)Updating files:  48% (1384/2883)Updating files:  49% (1413/2883)Updating files:  50% (1442/2883)Updating files:  50% (1466/2883)Updating files:  51% (1471/2883)Updating files:  52% (1500/2883)Updating files:  53% (1528/2883)Updating files:  54% (1557/2883)Updating files:  55% (1586/2883)Updating files:  56% (1615/2883)Updating files:  57% (1644/2883)Updating files:  58% (1673/2883)Updating files:  59% (1701/2883)Updating files:  60% (1730/2883)Updating files:  60% (1731/2883)Updating files:  61% (1759/2883)Updating files:  62% (1788/2883)Updating files:  63% (1817/2883)Updating files:  64% (1846/2883)Updating files:  65% (1874/2883)Updating files:  66% (1903/2883)Updating files:  67% (1932/2883)Updating files:  68% (1961/2883)Updating files:  69% (1990/2883)Updating files:  69% (2003/2883)Updating files:  70% (2019/2883)Updating files:  71% (2047/2883)Updating files:  72% (2076/2883)Updating files:  73% (2105/2883)Updating files:  74% (2134/2883)Updating files:  75% (2163/2883)Updating files:  76% (2192/2883)Updating files:  77% (2220/2883)Updating files:  77% (2236/2883)Updating files:  78% (2249/2883)Updating files:  79% (2278/2883)Updating files:  80% (2307/2883)Updating files:  81% (2336/2883)Updating files:  82% (2365/2883)Updating files:  83% (2393/2883)Updating files:  84% (2422/2883)Updating files:  85% (2451/2883)Updating files:  85% (2477/2883)Updating files:  86% (2480/2883)Updating files:  87% (2509/2883)Updating files:  88% (2538/2883)Updating files:  89% (2566/2883)Updating files:  90% (2595/2883)Updating files:  91% (2624/2883)Updating files:  92% (2653/2883)Updating files:  93% (2682/2883)Updating files:  94% (2711/2883)Updating files:  95% (2739/2883)Updating files:  96% (2768/2883)Updating files:  96% (2772/2883)Updating files:  97% (2797/2883)Updating files:  98% (2826/2883)Updating files:  99% (2855/2883)Updating files: 100% (2883/2883)Updating files: 100% (2883/2883), done.
+HEAD is now at a0f9ab3d1 wave500 W2: F1 shared SSE pump per room (ported from wave300-fanout-perf d6e1daf72+store option)
+Rebasing (1/1)                                                                                Successfully rebased and updated detached HEAD.
+REBASE: ok
+279 /home/hatch/workspace/pr-wave1000-guild-19/findings/guild-19/reverify-2.diff
+TESTS: tests/agent-presence-http.test.js tests/presence.test.js
+{"event":"room.cold_start","durationMs":2839,"integrity":"eager","phases":{"schema":{"ms":224,"rowsRead":0},"plugin":{"ms":1416,"rowsRead":0},"fence":{"ms":793,"rowsRead":0},"verifies":{"ms":194,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":209,"heapBytes":37944768,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":1566,"integrity":"eager","phases":{"schema":{"ms":274,"rowsRead":0},"plugin":{"ms":614,"rowsRead":0},"fence":{"ms":373,"rowsRead":0},"verifies":{"ms":67,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":143,"heapBytes":35677896,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ presence next[] names watch-presence when nobody is online (7514.178629ms)
+{"event":"room.cold_start","durationMs":1319,"integrity":"eager","phases":{"schema":{"ms":161,"rowsRead":0},"plugin":{"ms":550,"rowsRead":0},"fence":{"ms":444,"rowsRead":0},"verifies":{"ms":44,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":148,"heapBytes":44153640,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ presence next[] teaches dm-member for a listed member (4963.988865ms)
+{"event":"room.cold_start","durationMs":1106,"integrity":"eager","phases":{"schema":{"ms":71,"rowsRead":0},"plugin":{"ms":418,"rowsRead":0},"fence":{"ms":469,"rowsRead":0},"verifies":{"ms":20,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":155,"heapBytes":37329136,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ presence next[] counts a heartbeating pull-only agent as around (3538.811874ms)
+✔ presence HTTP separates genuine observations from enrollment and ordinary commands (2931.189553ms)
+{"event":"room.cold_start","durationMs":3736,"integrity":"eager","phases":{"schema":{"ms":197,"rowsRead":0},"plugin":{"ms":2299,"rowsRead":0},"fence":{"ms":736,"rowsRead":0},"verifies":{"ms":38,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":202,"heapBytes":36769848,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+room diagnostic op_vQsxcMn2 401 unauthenticated access /api/rooms/:roomId/presence
+{"event":"room.cold_start","durationMs":2157,"integrity":"eager","phases":{"schema":{"ms":174,"rowsRead":0},"plugin":{"ms":973,"rowsRead":0},"fence":{"ms":786,"rowsRead":0},"verifies":{"ms":36,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":157,"heapBytes":34778712,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ presence mirrors the active roster; claims add workingOn (6325.224008ms)
+✔ presence shows live SSE watchers (2827.391261ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 41916.990204
+TEST_EXIT: 0
+HEAD: 66c968b84
+DONE R2 rebase=ok

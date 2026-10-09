@@ -1,0 +1,46 @@
+✔ mime fuzz corpus: pathological inputs parse or raise the pinned MimeError (767.282866ms)
+✔ mime fuzz CLI rejects invalid numeric options instead of false-greening (6013.68537ms)
+✔ mime fuzz: bounded deterministic random sweep holds the invariant (11345.7379ms)
+✔ simple text message: headers, addresses, date and body (35.965313ms)
+✔ multipart/alternative prefers text/plain; html-only falls back to a text preview (6.357801ms)
+✔ nested multipart/mixed lists attachments by name, type and size without keeping bytes (7.771993ms)
+✔ quoted-printable UTF-8 and base64 bodies decode; Latin-1 charset is honoured (1.689825ms)
+✔ RFC 2047 encoded-words: Q and B, UTF-8 and ISO-8859-1, adjacent words, malformed left alone (3.11874ms)
+✔ address lists: names, quotes, comments, groups, multiple headers and invalid entries (4.372592ms)
+✔ caps: oversized raw, header count and length, part count, depth, attachments, text truncation (97.8275ms)
+✔ malformed boundaries and header lines are rejected; prefix-sharing boundaries are not confused (13.912269ms)
+✖ header injection: CR/LF and other control characters never survive into header values (42.177456ms)
+✔ structured headers and html-to-text handle quoting, RFC 2231, comments and pathological input in linear time (258.233442ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 12
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 21027.627434
+
+✖ failing tests:
+
+test at tests/mime-message.test.js:139:1
+✖ header injection: CR/LF and other control characters never survive into header values (42.177456ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'Line\r\nBcc: evil@example.test tail\x00\x07\x7F'
+  - 'LineBcc: evil@example.test tail'
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/mime-message.test.js:143:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'Line\r\nBcc: evil@example.test tail\x00\x07\x7F',
+    expected: 'LineBcc: evil@example.test tail',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

@@ -1,0 +1,57 @@
+{"event":"room.cold_start","durationMs":1674,"integrity":"eager","phases":{"schema":{"ms":174,"rowsRead":0},"plugin":{"ms":479,"rowsRead":0},"fence":{"ms":627,"rowsRead":0},"verifies":{"ms":83,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":181,"heapBytes":40158616,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ valid block -> valid:true with taskId and parsed fields (30.966832ms)
+✔ no fenced block -> the exact rebuild error (19.205682ms)
+✔ each missing field reports its exact rebuild error (0.798819ms)
+✖ malformed values report their exact rebuild errors (38.2753ms)
+✔ accepted value shapes stay valid (3.008585ms)
+✔ violations accumulate in field order (0.3802ms)
+✔ duplicate keys: last wins, first-insertion order kept (11.914ms)
+✔ field parsing details mirror the jq (0.471537ms)
+✔ fence extraction details mirror the jq (6.055338ms)
+✔ validateClaimFields is callable on parsed fields directly (0.358578ms)
+✔ parity with scripts/room validate_claim on every vector (1776.91747ms)
+{"event":"room.cold_start","durationMs":1066,"integrity":"eager","phases":{"schema":{"ms":304,"rowsRead":0},"plugin":{"ms":500,"rowsRead":0},"fence":{"ms":66,"rowsRead":0},"verifies":{"ms":33,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":181,"heapBytes":33914824,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ POST /api/claims/validate answers 200 with the verdict, anonymously (2777.979559ms)
+{"event":"room.cold_start","durationMs":2373,"integrity":"eager","phases":{"schema":{"ms":377,"rowsRead":0},"plugin":{"ms":1236,"rowsRead":0},"fence":{"ms":557,"rowsRead":0},"verifies":{"ms":72,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":156,"heapBytes":39590856,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ malformed request bodies are 422, non-POST is 405 (1660.561674ms)
+{"event":"room.cold_start","durationMs":1862,"integrity":"eager","phases":{"schema":{"ms":520,"rowsRead":0},"plugin":{"ms":620,"rowsRead":0},"fence":{"ms":425,"rowsRead":0},"verifies":{"ms":62,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":157,"heapBytes":44945008,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ text over 64KB is 422 (2771.558563ms)
+{"event":"room.cold_start","durationMs":2054,"integrity":"eager","phases":{"schema":{"ms":369,"rowsRead":0},"plugin":{"ms":909,"rowsRead":0},"fence":{"ms":561,"rowsRead":0},"verifies":{"ms":20,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":169,"heapBytes":37242976,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ secret-looking block content is never logged (2381.520861ms)
+✔ the route is bounded at 30 per address per minute (3266.618732ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 15
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 22800.089578
+
+✖ failing tests:
+
+test at tests/claim-validate.test.js:74:1
+✖ malformed values report their exact rebuild errors (38.2753ms)
+  AssertionError [ERR_ASSERTION]: state=failed
+  + actual - expected
+  
+    [
+  +   'unknown state word: failed'
+  -   'failed requires a failure code'
+    ]
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/claim-validate.test.js:98:12)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [ 'unknown state word: failed' ],
+    expected: [ 'failed requires a failure code' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

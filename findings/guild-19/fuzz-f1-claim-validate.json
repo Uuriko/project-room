@@ -1,0 +1,355 @@
+{
+ "unit": "f1-claim-validate",
+ "inputs": 69,
+ "counts": {
+  "ok": 13,
+  "reject": 56
+ },
+ "results": [
+  {
+   "name": "valid-claim",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-0",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-1",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-2",
+   "verdict": "reject",
+   "ms": 1
+  },
+  {
+   "name": "validateClaimText:case-3",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-4",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-5",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-6",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-7",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-8",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-9",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-10",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-11",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-12",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-13",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-14",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-15",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-16",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-17",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-18",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-19",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-20",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-21",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-22",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-23",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-24",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-25",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-26",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-27",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-28",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-29",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-30",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-31",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-32",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-33",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-34",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-35",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-36",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-37",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-38",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-39",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-40",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-41",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-42",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-43",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-44",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "validateClaimText:case-45",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "traversal-0",
+   "verdict": "ok",
+   "ms": 1
+  },
+  {
+   "name": "traversal-1",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "traversal-2",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "traversal-3",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "traversal-4",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "traversal-5",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "traversal-6",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "traversal-7",
+   "verdict": "ok",
+   "ms": 4
+  },
+  {
+   "name": "traversal-8",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "traversal-9",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "traversal-10",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "overlong-0",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "overlong-1",
+   "verdict": "reject",
+   "ms": 1
+  },
+  {
+   "name": "overlong-2",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "overlong-3",
+   "verdict": "reject",
+   "ms": 3
+  },
+  {
+   "name": "lease-float",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "lease-neg",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "lease-huge",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "lease-0",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "lease-73",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "state-rtl",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "fields-proto",
+   "verdict": "ok",
+   "ms": 0
+  }
+ ]
+}

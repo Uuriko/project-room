@@ -1,0 +1,147 @@
+{
+ "unit": "f15-numeric",
+ "inputs": 27,
+ "counts": {
+  "reject": 22,
+  "accept": 1,
+  "ok": 4
+ },
+ "results": [
+  {
+   "name": "lease-0",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "lease-1",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "lease-2",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "lease-3",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "lease-4",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "lease-5",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "lease-6",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "lease-7",
+   "verdict": "accept",
+   "detail": "lease-7 errs=[]",
+   "ms": 0
+  },
+  {
+   "name": "lease-8",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "lease-9",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "lease-10",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "lease-11",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "lease-12",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "lease-1h",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "lease-72h",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "credttl-0",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "credttl-1",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "credttl-2",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "credttl-3",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "credttl-4",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "credttl-5",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "credttl-6",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "credttl-7",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "credttl-min",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "credttl-max",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "credttl-below",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "redeem-above",
+   "verdict": "reject",
+   "ms": 0
+  }
+ ]
+}

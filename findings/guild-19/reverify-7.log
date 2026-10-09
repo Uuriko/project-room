@@ -1,0 +1,34 @@
+=== R7: origin/wave300/telemetry-prod ===
+Preparing worktree (detached HEAD a61e07c29)
+Updating files:  12% (369/2849)Updating files:  13% (371/2849)Updating files:  14% (399/2849)Updating files:  15% (428/2849)Updating files:  16% (456/2849)Updating files:  17% (485/2849)Updating files:  18% (513/2849)Updating files:  19% (542/2849)Updating files:  20% (570/2849)Updating files:  21% (599/2849)Updating files:  22% (627/2849)Updating files:  23% (656/2849)Updating files:  24% (684/2849)Updating files:  25% (713/2849)Updating files:  26% (741/2849)Updating files:  27% (770/2849)Updating files:  28% (798/2849)Updating files:  29% (827/2849)Updating files:  30% (855/2849)Updating files:  30% (869/2849)Updating files:  31% (884/2849)Updating files:  32% (912/2849)Updating files:  33% (941/2849)Updating files:  34% (969/2849)Updating files:  35% (998/2849)Updating files:  36% (1026/2849)Updating files:  37% (1055/2849)Updating files:  38% (1083/2849)Updating files:  39% (1112/2849)Updating files:  40% (1140/2849)Updating files:  41% (1169/2849)Updating files:  42% (1197/2849)Updating files:  43% (1226/2849)Updating files:  44% (1254/2849)Updating files:  45% (1283/2849)Updating files:  46% (1311/2849)Updating files:  47% (1340/2849)Updating files:  48% (1368/2849)Updating files:  49% (1397/2849)Updating files:  50% (1425/2849)Updating files:  51% (1453/2849)Updating files:  51% (1458/2849)Updating files:  52% (1482/2849)Updating files:  53% (1510/2849)Updating files:  54% (1539/2849)Updating files:  55% (1567/2849)Updating files:  56% (1596/2849)Updating files:  57% (1624/2849)Updating files:  58% (1653/2849)Updating files:  59% (1681/2849)Updating files:  60% (1710/2849)Updating files:  61% (1738/2849)Updating files:  62% (1767/2849)Updating files:  63% (1795/2849)Updating files:  64% (1824/2849)Updating files:  65% (1852/2849)Updating files:  66% (1881/2849)Updating files:  66% (1905/2849)Updating files:  67% (1909/2849)Updating files:  68% (1938/2849)Updating files:  69% (1966/2849)Updating files:  70% (1995/2849)Updating files:  71% (2023/2849)Updating files:  72% (2052/2849)Updating files:  73% (2080/2849)Updating files:  74% (2109/2849)Updating files:  74% (2111/2849)Updating files:  75% (2137/2849)Updating files:  76% (2166/2849)Updating files:  77% (2194/2849)Updating files:  78% (2223/2849)Updating files:  79% (2251/2849)Updating files:  80% (2280/2849)Updating files:  81% (2308/2849)Updating files:  81% (2314/2849)Updating files:  82% (2337/2849)Updating files:  83% (2365/2849)Updating files:  84% (2394/2849)Updating files:  84% (2395/2849)Updating files:  85% (2422/2849)Updating files:  86% (2451/2849)Updating files:  87% (2479/2849)Updating files:  88% (2508/2849)Updating files:  89% (2536/2849)Updating files:  90% (2565/2849)Updating files:  91% (2593/2849)Updating files:  92% (2622/2849)Updating files:  93% (2650/2849)Updating files:  93% (2654/2849)Updating files:  94% (2679/2849)Updating files:  95% (2707/2849)Updating files:  96% (2736/2849)Updating files:  97% (2764/2849)Updating files:  98% (2793/2849)Updating files:  99% (2821/2849)Updating files: 100% (2849/2849)Updating files: 100% (2849/2849), done.
+HEAD is now at a61e07c29 wave300/telemetry-prod: fix event-loop p99 units (ns->ms) + ignore empty-histogram ticks
+Rebasing (1/13)Rebasing (2/13)Rebasing (3/13)Rebasing (4/13)Rebasing (5/13)Rebasing (6/13)Rebasing (7/13)Rebasing (8/13)Rebasing (9/13)Rebasing (10/13)Rebasing (11/13)Rebasing (12/13)Rebasing (13/13)                                                                                Successfully rebased and updated detached HEAD.
+REBASE: ok
+345 /home/hatch/workspace/pr-wave1000-guild-19/findings/guild-19/reverify-7.diff
+TESTS: tests/diagnostics.test.js
+{"event":"room.cold_start","durationMs":1908,"integrity":"eager","phases":{"schema":{"ms":306,"rowsRead":0},"plugin":{"ms":800,"rowsRead":0},"fence":{"ms":519,"rowsRead":0},"verifies":{"ms":32,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":185,"heapBytes":37242920,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ errorCategory maps status and code to the documented taxonomy (12.977445ms)
+✔ DiagnosticsLog retains a bounded FIFO window per room (16.524358ms)
+✔ DiagnosticsLog evicts least-recently-used rooms past maxRooms (22.595579ms)
+{"event":"room.cold_start","durationMs":1736,"integrity":"eager","phases":{"schema":{"ms":197,"rowsRead":0},"plugin":{"ms":800,"rowsRead":0},"fence":{"ms":444,"rowsRead":0},"verifies":{"ms":57,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":166,"heapBytes":33486112,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ API errors carry a bounded operation ID and category; the header matches the body (3166.845302ms)
+{"event":"room.cold_start","durationMs":2158,"integrity":"eager","phases":{"schema":{"ms":358,"rowsRead":0},"plugin":{"ms":720,"rowsRead":0},"fence":{"ms":784,"rowsRead":0},"verifies":{"ms":61,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":159,"heapBytes":38667584,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ success responses carry the operation header only, unique per request (2274.830821ms)
+room diagnostic op_ZoVdM1XW 401 unauthenticated access /api/rooms/:roomId/events
+{"event":"room.cold_start","durationMs":1812,"integrity":"eager","phases":{"schema":{"ms":139,"rowsRead":0},"plugin":{"ms":580,"rowsRead":0},"fence":{"ms":263,"rowsRead":0},"verifies":{"ms":11,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":161,"heapBytes":44213888,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ owner support export returns bounded room diagnostics without credentials or room ids (2977.914322ms)
+room diagnostic op_uRRvdoto 401 unauthenticated access /api/rooms/:roomId/diagnostics
+room diagnostic op_hzxWYPPA 403 access_denied access /api/rooms/:roomId/diagnostics
+✔ support export requires a signed-in owner session (2949.049204ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 19124.551347
+TEST_EXIT: 0
+HEAD: 7df96364d
+DONE R7 rebase=ok

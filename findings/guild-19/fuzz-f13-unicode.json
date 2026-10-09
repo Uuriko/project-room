@@ -1,0 +1,55 @@
+{
+ "unit": "f13-unicode",
+ "inputs": 9,
+ "counts": {
+  "reject": 8,
+  "ok": 1
+ },
+ "results": [
+  {
+   "name": "rtl-taskid",
+   "verdict": "reject",
+   "ms": 10
+  },
+  {
+   "name": "zw-taskid",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "fullwidth-taskid",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "nfd-lane",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "lone-surr",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "state-homoglyph",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "reserved-homoglyph",
+   "verdict": "reject",
+   "ms": 4
+  },
+  {
+   "name": "reserved-smallcaps",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "reserved-nfd",
+   "verdict": "reject",
+   "ms": 38
+  }
+ ]
+}

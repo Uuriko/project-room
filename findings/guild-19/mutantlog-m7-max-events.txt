@@ -1,0 +1,14 @@
+✔ subscribe validates, stores no secret on the view, and dedups events (5.512943ms)
+✔ subscribe rejects unknown events with the known catalog (1.17967ms)
+✔ match supports wildcard and honors enabled flag (0.701052ms)
+✔ ownership: agents cannot touch other agents' subscriptions (0.856396ms)
+✔ buildDelivery signs payloads; journal records attempts (2.136757ms)
+✔ signPayload/verifySignature are timing-safe and strict (0.435473ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1401.692748

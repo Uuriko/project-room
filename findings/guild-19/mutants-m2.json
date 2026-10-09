@@ -1,0 +1,57 @@
+{
+  "unit": "m2",
+  "file": "server/display-name-guard.mjs",
+  "mutants": 4,
+  "killed": 2,
+  "survived": 1,
+  "skipped": 1,
+  "results": [
+    {
+      "unit": "m2",
+      "file": "server/display-name-guard.mjs",
+      "mutant": "drop-admin",
+      "status": "KILLED",
+      "tests": [
+        "tests/display-name-guard.test.js",
+        "tests/display-name-impersonation.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    },
+    {
+      "unit": "m2",
+      "file": "server/display-name-guard.mjs",
+      "mutant": "flat-reserved",
+      "status": "SURVIVED",
+      "tests": [
+        "tests/display-name-guard.test.js",
+        "tests/display-name-impersonation.test.js"
+      ],
+      "exitCode": 0,
+      "failedTests": 0
+    },
+    {
+      "unit": "m2",
+      "file": "server/display-name-guard.mjs",
+      "mutant": "colon-label",
+      "status": "SKIP",
+      "tests": [
+        "tests/display-name-guard.test.js",
+        "tests/display-name-impersonation.test.js"
+      ],
+      "note": "find string not present in file"
+    },
+    {
+      "unit": "m2",
+      "file": "server/display-name-guard.mjs",
+      "mutant": "decoration",
+      "status": "KILLED",
+      "tests": [
+        "tests/display-name-guard.test.js",
+        "tests/display-name-impersonation.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    }
+  ]
+}

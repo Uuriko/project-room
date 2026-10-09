@@ -1,0 +1,12 @@
+✔ build emits a complete frozen manifest (45.184789ms)
+✔ manifest validates round-trip (25.080439ms)
+✔ build rejects non-https origins and bad room ids (0.530065ms)
+✔ manifest documents the API-key scope vocabulary and it matches enforcement (RC-2026-09-18-019) (16.509556ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2205.644222

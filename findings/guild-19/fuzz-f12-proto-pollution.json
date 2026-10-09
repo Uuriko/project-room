@@ -1,0 +1,29 @@
+{
+ "unit": "f12-proto-pollution",
+ "inputs": 4,
+ "counts": {
+  "ok": 4
+ },
+ "results": [
+  {
+   "name": "claim-proto",
+   "verdict": "ok",
+   "ms": 1
+  },
+  {
+   "name": "claim-ctor",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "envelope-proto",
+   "verdict": "ok",
+   "ms": 2
+  },
+  {
+   "name": "text-proto-keys",
+   "verdict": "ok",
+   "ms": 4
+  }
+ ]
+}

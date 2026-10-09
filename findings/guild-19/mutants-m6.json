@@ -1,0 +1,54 @@
+{
+  "unit": "m6",
+  "file": "server/agent-plugin-manifest.mjs",
+  "mutants": 4,
+  "killed": 3,
+  "survived": 1,
+  "skipped": 0,
+  "results": [
+    {
+      "unit": "m6",
+      "file": "server/agent-plugin-manifest.mjs",
+      "mutant": "origin-http",
+      "status": "KILLED",
+      "tests": [
+        "tests/agent-plugin-manifest.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    },
+    {
+      "unit": "m6",
+      "file": "server/agent-plugin-manifest.mjs",
+      "mutant": "version-drop",
+      "status": "KILLED",
+      "tests": [
+        "tests/agent-plugin-manifest.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    },
+    {
+      "unit": "m6",
+      "file": "server/agent-plugin-manifest.mjs",
+      "mutant": "scopes-empty",
+      "status": "SURVIVED",
+      "tests": [
+        "tests/agent-plugin-manifest.test.js"
+      ],
+      "exitCode": 0,
+      "failedTests": 0
+    },
+    {
+      "unit": "m6",
+      "file": "server/agent-plugin-manifest.mjs",
+      "mutant": "flows-empty",
+      "status": "KILLED",
+      "tests": [
+        "tests/agent-plugin-manifest.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    }
+  ]
+}

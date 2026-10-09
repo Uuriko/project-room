@@ -1,0 +1,15 @@
+{"event":"room.cold_start","durationMs":3681,"integrity":"eager","phases":{"schema":{"ms":613,"rowsRead":0},"plugin":{"ms":1621,"rowsRead":0},"fence":{"ms":772,"rowsRead":0},"verifies":{"ms":98,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":222,"heapBytes":26084440,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ default mailer is unconfigured: honest non-delivery, never a fake send (77.240756ms)
+✔ configured mailer delegates to the injected send and reports delivery (24.665325ms)
+✔ injected memory mailer receives exactly what the model issued (3884.696114ms)
+✔ magicLinkUnavailable() carries the honest disabled shape for the HTTP layer (0.622374ms)
+✔ mailer rejects calls missing a recipient or code before any send (4.291591ms)
+✔ mailer is frozen and ignores a non-function send (0.98582ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 10335.052469

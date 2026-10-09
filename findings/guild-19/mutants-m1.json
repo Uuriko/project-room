@@ -1,0 +1,65 @@
+{
+  "unit": "m1",
+  "file": "server/claim-validate.mjs",
+  "mutants": 5,
+  "killed": 5,
+  "survived": 0,
+  "skipped": 0,
+  "results": [
+    {
+      "unit": "m1",
+      "file": "server/claim-validate.mjs",
+      "mutant": "taskid-loose",
+      "status": "KILLED",
+      "tests": [
+        "tests/claim-validate.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    },
+    {
+      "unit": "m1",
+      "file": "server/claim-validate.mjs",
+      "mutant": "lease-range",
+      "status": "KILLED",
+      "tests": [
+        "tests/claim-validate.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    },
+    {
+      "unit": "m1",
+      "file": "server/claim-validate.mjs",
+      "mutant": "files-star",
+      "status": "KILLED",
+      "tests": [
+        "tests/claim-validate.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    },
+    {
+      "unit": "m1",
+      "file": "server/claim-validate.mjs",
+      "mutant": "state-failed",
+      "status": "KILLED",
+      "tests": [
+        "tests/claim-validate.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    },
+    {
+      "unit": "m1",
+      "file": "server/claim-validate.mjs",
+      "mutant": "taskid-flip",
+      "status": "KILLED",
+      "tests": [
+        "tests/claim-validate.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    }
+  ]
+}

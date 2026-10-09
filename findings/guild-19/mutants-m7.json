@@ -1,0 +1,43 @@
+{
+  "unit": "m7",
+  "file": "server/agent-webhook-subscriptions.mjs",
+  "mutants": 3,
+  "killed": 2,
+  "survived": 1,
+  "skipped": 0,
+  "results": [
+    {
+      "unit": "m7",
+      "file": "server/agent-webhook-subscriptions.mjs",
+      "mutant": "max-events",
+      "status": "SURVIVED",
+      "tests": [
+        "tests/agent-plugin-webhook-subs.test.js"
+      ],
+      "exitCode": 0,
+      "failedTests": 0
+    },
+    {
+      "unit": "m7",
+      "file": "server/agent-webhook-subscriptions.mjs",
+      "mutant": "unknown-events",
+      "status": "KILLED",
+      "tests": [
+        "tests/agent-plugin-webhook-subs.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    },
+    {
+      "unit": "m7",
+      "file": "server/agent-webhook-subscriptions.mjs",
+      "mutant": "sig-length",
+      "status": "KILLED",
+      "tests": [
+        "tests/agent-plugin-webhook-subs.test.js"
+      ],
+      "exitCode": 1,
+      "failedTests": "unknown"
+    }
+  ]
+}

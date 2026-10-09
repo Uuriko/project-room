@@ -1,0 +1,115 @@
+{"event":"room.cold_start","durationMs":2471,"integrity":"eager","phases":{"schema":{"ms":339,"rowsRead":0},"plugin":{"ms":1206,"rowsRead":0},"fence":{"ms":558,"rowsRead":0},"verifies":{"ms":99,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":184,"heapBytes":39009992,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ valid block -> valid:true with taskId and parsed fields (41.486459ms)
+✔ no fenced block -> the exact rebuild error (0.589435ms)
+✔ each missing field reports its exact rebuild error (18.280584ms)
+✖ malformed values report their exact rebuild errors (41.226098ms)
+✔ accepted value shapes stay valid (0.69344ms)
+✖ violations accumulate in field order (15.351638ms)
+✔ duplicate keys: last wins, first-insertion order kept (0.332699ms)
+✔ field parsing details mirror the jq (17.02536ms)
+✔ fence extraction details mirror the jq (0.394913ms)
+✔ validateClaimFields is callable on parsed fields directly (0.327231ms)
+✖ parity with scripts/room validate_claim on every vector (640.823378ms)
+{"event":"room.cold_start","durationMs":1678,"integrity":"eager","phases":{"schema":{"ms":162,"rowsRead":0},"plugin":{"ms":798,"rowsRead":0},"fence":{"ms":504,"rowsRead":0},"verifies":{"ms":18,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":187,"heapBytes":33976976,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ POST /api/claims/validate answers 200 with the verdict, anonymously (3973.043078ms)
+{"event":"room.cold_start","durationMs":2171,"integrity":"eager","phases":{"schema":{"ms":209,"rowsRead":0},"plugin":{"ms":1115,"rowsRead":0},"fence":{"ms":528,"rowsRead":0},"verifies":{"ms":38,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":158,"heapBytes":39649848,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ malformed request bodies are 422, non-POST is 405 (2229.622256ms)
+{"event":"room.cold_start","durationMs":1586,"integrity":"eager","phases":{"schema":{"ms":235,"rowsRead":0},"plugin":{"ms":768,"rowsRead":0},"fence":{"ms":344,"rowsRead":0},"verifies":{"ms":6,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":153,"heapBytes":45001816,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ text over 64KB is 422 (2672.891563ms)
+{"event":"room.cold_start","durationMs":1129,"integrity":"eager","phases":{"schema":{"ms":295,"rowsRead":0},"plugin":{"ms":472,"rowsRead":0},"fence":{"ms":118,"rowsRead":0},"verifies":{"ms":18,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":186,"heapBytes":37402664,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ secret-looking block content is never logged (2043.725049ms)
+✔ the route is bounded at 30 per address per minute (2199.054343ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 13
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 19328.827837
+
+✖ failing tests:
+
+test at tests/claim-validate.test.js:74:1
+✖ malformed values report their exact rebuild errors (41.226098ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  true !== false
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/claim-validate.test.js:97:12)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/claim-validate.test.js:117:1
+✖ violations accumulate in field order (15.351638ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    [
+      'task-id not RC-YYYY-MM-DD-NNN',
+      'missing lane',
+  -   'files: * forbidden',
+      'lease must be lease=<N>h',
+      'unknown state word: ???',
+      'missing reason'
+    ]
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/claim-validate.test.js:119:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'task-id not RC-YYYY-MM-DD-NNN', 'missing lane', 'lease must be lease=<N>h', 'unknown state word: ???', 'missing reason' ],
+    expected: [ 'task-id not RC-YYYY-MM-DD-NNN', 'missing lane', 'files: * forbidden', 'lease must be lease=<N>h', 'unknown state word: ???', 'missing reason' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/claim-validate.test.js:234:1
+✖ parity with scripts/room validate_claim on every vector (640.823378ms)
+  AssertionError [ERR_ASSERTION]: errors differ for:
+  ```room-claim
+  task-id: RC-2026-09-24-204
+  lane: jill
+  files: server/*.mjs
+  lease: lease=6h
+  state: working
+  reason: r
+  ```
+  + actual - expected
+  
+  + []
+  - [
+  -   'files: * forbidden'
+  - ]
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-19/tests/claim-validate.test.js:249:12)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)
+      at Test.postRun (node:internal/test_runner/test:1537:19)
+      at Test.run (node:internal/test_runner/test:1462:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [],
+    expected: [ 'files: * forbidden' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

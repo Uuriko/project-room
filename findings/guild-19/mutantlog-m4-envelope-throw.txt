@@ -1,0 +1,25 @@
+{"event":"room.cold_start","durationMs":2461,"integrity":"eager","phases":{"schema":{"ms":218,"rowsRead":0},"plugin":{"ms":865,"rowsRead":0},"fence":{"ms":896,"rowsRead":0},"verifies":{"ms":142,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":188,"heapBytes":37891848,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1917,"integrity":"eager","phases":{"schema":{"ms":208,"rowsRead":0},"plugin":{"ms":589,"rowsRead":0},"fence":{"ms":834,"rowsRead":0},"verifies":{"ms":78,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":208,"heapBytes":30609480,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1455,"integrity":"eager","phases":{"schema":{"ms":298,"rowsRead":0},"plugin":{"ms":244,"rowsRead":0},"fence":{"ms":604,"rowsRead":0},"verifies":{"ms":6,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":152,"heapBytes":36675984,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1028,"integrity":"eager","phases":{"schema":{"ms":146,"rowsRead":0},"plugin":{"ms":239,"rowsRead":0},"fence":{"ms":62,"rowsRead":0},"verifies":{"ms":8,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":132,"heapBytes":42449288,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2754,"integrity":"eager","phases":{"schema":{"ms":680,"rowsRead":0},"plugin":{"ms":1175,"rowsRead":0},"fence":{"ms":437,"rowsRead":0},"verifies":{"ms":51,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":170,"heapBytes":33582064,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ scannableOfEnvelope maps a telegram envelope with impersonation context (67.662602ms)
+✔ scoreImportedEnvelope quarantines a bot-impersonating giveaway lure (49.818563ms)
+✔ scoreImportedEnvelope leaves a clean telegram message unflagged (31.694213ms)
+✔ scoreImportedEnvelope marks an unscannable envelope instead of throwing (0.353411ms)
+✔ scannableOfEnvelope maps an email envelope with reply-to and recipients (0.586701ms)
+✔ importSource journals the spam flag on the receipt (spammy telegram DM) (5309.67624ms)
+✔ importSource journals a clean spam score and respects quiet hours (3762.547636ms)
+✔ muted level and digest batching surface on the import receipt (3791.179063ms)
+✔ email import through the channel importer also runs the guards (2971.903662ms)
+✔ inbox verify replays guard decisions after the owner edits prefs (4479.398648ms)
+✔ decideImportedNotification/replayImportedNotification round-trip (37.580807ms)
+✔ runImportGuards returns both guards as frozen records (21.189649ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 30342.946705

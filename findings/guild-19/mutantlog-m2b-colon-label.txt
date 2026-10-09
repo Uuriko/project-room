@@ -1,0 +1,33 @@
+{"event":"room.cold_start","durationMs":5138,"integrity":"eager","phases":{"schema":{"ms":503,"rowsRead":0},"plugin":{"ms":1554,"rowsRead":0},"fence":{"ms":808,"rowsRead":0},"verifies":{"ms":21,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":192,"heapBytes":35207416,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ NFKC folds compatibility glyphs and width, case and repeated whitespace (117.820464ms)
+✔ mixed-script impersonation is rejected without relying on an existing record (6.65667ms)
+✔ all-Cyrillic and all-Greek common visual clones collide with Latin names (11.191044ms)
+✔ room member display names and global identity records are accepted as inputs (9.573197ms)
+✔ same identity can retry without allowing another record to collide (9.829331ms)
+✔ invisible controls and malformed names fail safely (24.96153ms)
+✔ unrelated ordinary names and non-Latin names are not globally blocked (0.63242ms)
+✔ the guard does not mistake two unrelated non-mapped scripts for Latin (12.152607ms)
+✔ integration: identity mint and room link enforce names at the write boundary (17316.162188ms)
+✔ QA2-SECREG: Latin-script homoglyphs of reserved role words are refused (3.319652ms)
+✔ QA2-SECREG followup: diacritics, combining marks, CJK brackets, and hook/stroke letters do not spoof reserved roles (5.976779ms)
+✔ QA slice D: Latin Extended-B hook letters do not spoof reserved roles or agent names (4.129427ms)
+✔ G16b: shared first-word and duplicate handle collisions are refused (3.233773ms)
+{"event":"room.cold_start","durationMs":2388,"integrity":"eager","phases":{"schema":{"ms":609,"rowsRead":0},"plugin":{"ms":1046,"rowsRead":0},"fence":{"ms":370,"rowsRead":0},"verifies":{"ms":87,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":196,"heapBytes":37840688,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1019,"integrity":"eager","phases":{"schema":{"ms":369,"rowsRead":0},"plugin":{"ms":317,"rowsRead":0},"fence":{"ms":48,"rowsRead":0},"verifies":{"ms":24,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":135,"heapBytes":42445024,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ reserved labels, control characters, duplicates, and lookalikes are classified without echoing hidden characters (102.659351ms)
+✔ a live member.added refuses a reserved or duplicate name, and an older unstamped event still replays (3104.327351ms)
+{"event":"room.cold_start","durationMs":2421,"integrity":"eager","phases":{"schema":{"ms":530,"rowsRead":0},"plugin":{"ms":915,"rowsRead":0},"fence":{"ms":655,"rowsRead":0},"verifies":{"ms":109,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":174,"heapBytes":41870080,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ redeem, share-link join, access requests, and referral redeem refuse a taken display name and keep the existing roster (12650.460885ms)
+room diagnostic op_XOyl0_XG 422 display_name_unavailable input /api/rooms/:roomId/commands
+room diagnostic op_jbcG1N7c 422 display_name_unavailable input /api/rooms/:roomId/commands
+room diagnostic op_Eq1kL46s 422 display_name_unavailable input /api/rooms/:roomId/commands
+✔ member.added through the command route refuses a confusable or reserved display name (3538.806045ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 17
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 46160.269717

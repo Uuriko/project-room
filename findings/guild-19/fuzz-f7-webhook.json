@@ -1,0 +1,197 @@
+{
+ "unit": "f7-webhook",
+ "inputs": 37,
+ "counts": {
+  "ok": 3,
+  "reject": 33,
+  "accept": 1
+ },
+ "results": [
+  {
+   "name": "known",
+   "verdict": "ok",
+   "ms": 1
+  },
+  {
+   "name": "known-list",
+   "verdict": "ok",
+   "ms": 0
+  },
+  {
+   "name": "unknown",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "unknown2",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "nonarray",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "events:case-0",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "events:case-1",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "events:case-2",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "events:case-3",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "events:case-4",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "events:case-5",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "events:case-6",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "events:case-7",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "events:case-8",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "events:case-9",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "events:case-10",
+   "verdict": "accept",
+   "detail": "unknown events accepted",
+   "ms": 0
+  },
+  {
+   "name": "events:case-11",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "events:case-12",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "events:case-13",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "events:case-14",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "events:case-15",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "events:case-16",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "events:case-17",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "events:case-18",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "events:case-19",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "events:case-20",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "events:case-21",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "events:case-22",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "events:case-23",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "events:case-24",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "events:case-25",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "events:case-26",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "sig-valid",
+   "verdict": "ok",
+   "ms": 11
+  },
+  {
+   "name": "sig-bad",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "sig-empty",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "sig-null",
+   "verdict": "reject",
+   "ms": 0
+  },
+  {
+   "name": "sig-wronglen",
+   "verdict": "reject",
+   "ms": 0
+  }
+ ]
+}
