@@ -370,8 +370,8 @@ export function runOpList({ claims, store, clock, ops, rng, afterEach = true }) 
 const WEAKENINGS = {
   // P1: disable claimWork's anti-collision check (concurrent claims both win).
   p1: [
-    [`check(item.state === "unclaimed", item.owner === agent`,
-     `void(item.state === "unclaimed", item.owner === agent`],
+    [`check(item.state === "unclaimed", item.state !== "claimed"`,
+     `void(item.state === "unclaimed", item.state !== "claimed"`],
   ],
   // P2: release stops clearing the owner (unclaimed item keeps an owner: torn).
   p2: [
