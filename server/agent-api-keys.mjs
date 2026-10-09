@@ -12,6 +12,7 @@
 // no network I/O. Frozen outputs; malformed inputs throw ApiKeyError
 // (coded errors, ContractError-style validation).
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { assertUnique } from "../src/assert-unique.mjs";
 
 class ApiKeyError extends Error {
   constructor(code, message) { super(message); this.name = "ApiKeyError"; this.code = code; }
@@ -62,6 +63,12 @@ export const API_KEY_SCOPES = Object.freeze([
 // A scope ending in ":*" (e.g. "agent:*") grants every scope sharing its
 // prefix, including scopes added in the future.
 export const API_KEY_SCOPE_WILDCARD_NOTE = "prefix:* wildcard grants every scope with that prefix";
+
+// FIX-40 — direct uniqueness assertion on the raw scope registry. The scope
+// vocabulary is the single source of truth read by the HTTP layer and the
+// plug-in manifest; a duplicated scope string would alias two entries
+// silently (COLLIDE-4 exp 2), so fail loudly at module load.
+assertUnique(API_KEY_SCOPES.map(scope => scope.scope), "API_KEY_SCOPES.scopes");
 
 const sha256 = text => createHash("sha256").update(text).digest("hex");
 

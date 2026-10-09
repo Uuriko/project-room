@@ -42,6 +42,17 @@ exists), **open** (promised, not yet pinned).
   subsystem test suites before the `tests/invariants/` frame existed. Those
   suites are named per invariant below and remain the enforcement until a
   scenario migrates into the frame.
+- **Registry uniqueness assertions (FIX-40)** — raw registry arrays whose
+  entries must be unique get a direct `assertUnique(arr, label)` call from
+  `src/assert-unique.mjs` at module load (or in the validator that owns
+  them): `EVENT_TYPES` values and the permission/vocabulary arrays in
+  `src/events.js`, route ids (via `assertRouteTable`) plus `MESSAGE_BODY_READS`
+  ids, `AUTH_CLASSES`, `ROUTE_SCOPES`, `ROUTE_METHODS` in
+  `server/routes/table.mjs`, and `API_KEY_SCOPES.scopes` in
+  `server/agent-api-keys.mjs`. A duplicated entry throws at import time,
+  naming the offender. Corruption of these registries was previously visible
+  only to raw-array assertions (COLLIDE-4 exp 2). Covered by
+  `tests/uniqueness-assertions.test.js`.
 
 ---
 

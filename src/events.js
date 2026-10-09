@@ -7,6 +7,7 @@ import { REPLY_CANCELLED, prepareReplyPost, recordReplyPost, cancelReplyRequest 
 import { WORK_HELP_UPDATED, helpFromEvent } from "./work-help.js";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, helpOfferFromEvent } from "./help-offers.js";
 import { SESSION_EVENT_TYPES, applySessionFields, ensureWorkControlDefaults } from "./work-item-session.js";
+import { assertUnique } from "./assert-unique.mjs";
 
 // message.posted and message.edited bodies. Other event strings stay at 4,096.
 // 65,536 characters is far under the 4 MiB room projection and Durable Object
@@ -2354,3 +2355,16 @@ export function pinnedMessages(state) {
     return message && !message.deletedAt && message.body != null ? [{ ...pin, message }] : [];
   });
 }
+
+// FIX-40 — direct uniqueness assertions on the raw registry arrays. A
+// duplicate event-type string or permission token would silently alias two
+// meanings (COLLIDE-4 exp 2); fail loudly at module load instead.
+assertUnique(Object.values(EVENT_TYPES), "EVENT_TYPES values");
+assertUnique(ROOM_POLICY_FIELDS, "ROOM_POLICY_FIELDS");
+assertUnique(HISTORY_VISIBILITIES, "HISTORY_VISIBILITIES");
+assertUnique(ROOM_EXPORT_FORMATS, "ROOM_EXPORT_FORMATS");
+assertUnique(ROOM_KINDS, "ROOM_KINDS");
+assertUnique(PERMISSIONS, "PERMISSIONS");
+assertUnique(AGENT_AUTONOMY_PERMISSIONS, "AGENT_AUTONOMY_PERMISSIONS");
+assertUnique(AGENT_ADMIN_PERMISSIONS, "AGENT_ADMIN_PERMISSIONS");
+assertUnique(WORK_REVISION_TYPES, "WORK_REVISION_TYPES");

@@ -5,6 +5,7 @@ import {RECORD_RAIL_ROUTES} from "./record-rails.mjs";
 // row. Unmatched paths fall through. Batch C fills `capability`. SPLIT reads
 // `scope`. Both columns are required now.
 
+import { assertUnique, duplicatesOf } from "../../src/assert-unique.mjs";
 import { HUMAN_PUSH_ROUTES } from "./human-push.mjs";
 import { DEMO_ROUTES } from "./demo.mjs";
 import { ROOM_ASSISTANT_ROUTES } from "./room-assistant.mjs";
@@ -101,14 +102,25 @@ export const MESSAGE_BODY_READS = Object.freeze([
 ]);
 
 export function assertRouteTable(routes = ROUTES) {
-  const seen = new Set();
+  // FIX-40: duplicate-id detection runs on the RAW row array through the
+  // shared helper (new Set(arr).size === arr.length semantics); failure lines
+  // keep their historical format so existing gates stay green.
+  const duplicateIds = new Set(duplicatesOf(routes, row => row?.id).map(({ key }) => key));
   const failures = [];
   for (const row of routes) {
     const problems = assertRouteRow(row);
     if (problems.length) failures.push(`${row?.id ?? "(missing id)"}: ${problems.join(", ")}`);
-    else if (seen.has(row.id)) failures.push(`${row.id}: duplicate id`);
-    else seen.add(row.id);
+    else if (duplicateIds.has(row.id)) failures.push(`${row.id}: duplicate id`);
   }
   if (failures.length) throw new Error(`route table rejected:\n${failures.map(line => `  ${line}`).join("\n")}`);
   return routes;
 }
+
+// FIX-40 — direct uniqueness assertions on the raw vocabulary and read-id
+// arrays. Importing this module fails loudly on registry corruption instead
+// of letting a duplicated route id, read id, or vocabulary token shadow a
+// legitimate entry downstream.
+assertUnique(AUTH_CLASSES, "AUTH_CLASSES");
+assertUnique(ROUTE_SCOPES, "ROUTE_SCOPES");
+assertUnique(ROUTE_METHODS, "ROUTE_METHODS");
+assertUnique(MESSAGE_BODY_READS.map(row => row.id), "MESSAGE_BODY_READS ids");
