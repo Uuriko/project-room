@@ -28,7 +28,7 @@
    like the card's other free-text rows. */
 .claim-pr, .claim-repo { overflow-wrap: anywhere; }
 /* M-02 mobile: the per-card file list disclosure had no touch sizing
-   (~20px tall) — below the 44px coarse-pointer floor (#2034). */
+   (~20px tall) — below the 44px coarse-pointer floor from PR 2034. */
 .claim-files summary { min-height: 44px; padding-block: .65rem; cursor: pointer; }
 .claim-owner { display: flex; align-items: center; gap: var(--space-2); }
 .claim-deps, .claim-chain { overflow-wrap: anywhere; }
