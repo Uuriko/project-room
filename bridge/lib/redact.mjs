@@ -13,13 +13,15 @@ export const REDACTED = '[redacted]';
 const SECRET_SHAPES = [
   /sk-[A-Za-z0-9_-]{8,}/g,
   /ghp_[A-Za-z0-9]{8,}/g,
-  /gho_[A-Za-z0-9]{8,}/g,
+  /gh[ousr]_[A-Za-z0-9]{8,}/g,
   /github_pat_[A-Za-z0-9_]{8,}/g,
   /AKIA[0-9A-Z]{16}/g,
   /xox[bap]-[A-Za-z0-9-]{8,}/g,
   /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/g,
   /\bpri_[A-Za-z0-9_-]{8,}/g,
   /\brak_[A-Za-z0-9_-]{8,}/g,
+  /\bga1\.[A-Za-z0-9_-]{16,}/g, // room guest-link credential
+  /\bBearer\s+[A-Za-z0-9._~+\/=-]{16,}/gi,
   /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, // JWT-shaped
 ];
 
