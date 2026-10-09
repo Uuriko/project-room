@@ -115,6 +115,21 @@ lost after commit → user retries → second identity + second personal room`,
 with the first secret shown once and effectively orphaned. This matches B3's
 finding for `/api/agent-identities` (server rejects client keys).
 
+**Resolution note (2026-10-09):** a replayed `requestId` cannot return the
+one-time identity secret (only its hash is stored), so keyed replay is the
+wrong shape for identity mint. The idempotent path already exists: mint with
+a client-generated `pri_` secret (recoverable mint). A retry then returns
+`duplicate: true` for the same identity. Clients that may retry an identity
+mint should send their own secret; a keyless retry makes a second identity.
+The same one-time-credential limit applies to agent-invite codes (only the
+hash is stored); only referral-invite mint can replay, because its token is
+re-signed from the ledger row, and it now accepts an optional `requestId`
+(`POST /api/referral-invites/mint`). Separately, a repeat guest-agent-link
+request (`/api/guest-invites/request`) is a renewal by design: it mints a
+fresh 24h credential and revokes the prior one, so store the newest token
+(docs/history/self-serve-join.md). The anonymous browser `/join` branch is
+still open (see above).
+
 **Fix for B11:** server-side: accept `requestId` on `POST /join` (relax
 `exact()`), keyed replay on identity-mint. Client-side: mint one `requestId`
 per join-page session in `src/join.js` and send it; keep the retry button
