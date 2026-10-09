@@ -81,6 +81,54 @@ test('ordinary chat arrivals preserve historical DOM and fetch only changed requ
   assert.deepEqual(errors, []);
 });
 
+// Board claim lines ("X claimed Y") sit between messages and carry no data-key.
+// renderMessages used to keep every one of them but the last in place and then
+// move each message row after the first claim line, on every arrival.
+test('chat arrivals in a room with board claim lines move no message rows', { timeout: 30000 }, async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'project-room-claim-rows-'));
+  const store = new RoomStore(join(directory, 'room.sqlite'));
+  const start = Date.now() - 3600000, events = [];
+  const at = minute => new Date(start + minute * 60000).toISOString();
+  for (let index = 0; index < 40; index++) events.push(event({ roomId: 'commons', actorId: 'owner', type: T.MESSAGE_POSTED, at: at(index),
+    data: { messageId: `claim-row-history-${index}`, body: `History ${index}` } }));
+  for (const [index, minute] of [[0, 10.5], [1, 22.5], [2, 33.5]]) events.push(event({ roomId: 'commons', actorId: 'owner',
+    type: 'work_claim.updated', at: at(minute), data: { workClaim: `claim-row-${index}`, action: 'claimed', title: `Claim ${index}`, claimState: 'claimed', ownerId: 'owner', leaseExpiresAt: null, paths: [] } }));
+  events.sort((a, b) => a.at.localeCompare(b.at));
+  store.initialize([...initialRoom('commons', 'owner'), ...events]);
+  const ownerKey = store.issueAccessKey('commons', 'owner');
+  const server = createRoomServer({ store, streamInterval: 50 });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+  t.after(async () => {
+    await browser.close(); server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    store.close(); rmSync(directory, { recursive: true, force: true });
+  });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await signInFixture(page, ownerKey);
+  await page.locator('[data-message-record-id="claim-row-history-39"]').waitFor();
+  await page.locator('#message-list > [data-claim-update]').nth(2).waitFor({ state: 'attached' });
+  await page.evaluate(() => {
+    globalThis.claimRowMoves = 0;
+    new MutationObserver(rows => { for (const row of rows) for (const node of row.removedNodes) if (node.classList?.contains('message')) globalThis.claimRowMoves++; })
+      .observe(document.getElementById('message-list'), { childList: true });
+  });
+  for (const id of ['claim-row-arrival-1', 'claim-row-arrival-2']) {
+    store.command(ownerKey, 'commons', { id, type: 'message.posted', data: { messageId: id, body: `Arrival ${id}` } });
+    await page.locator(`[data-message-record-id="${id}"]`).waitFor();
+  }
+  await page.waitForTimeout(200);
+  assert.equal(await page.evaluate(() => globalThis.claimRowMoves), 0, 'message rows stay in place when board claim lines are in the timeline');
+  const order = await page.locator('#message-list > *').evaluateAll(nodes => nodes.map(node => node.dataset.claimUpdate ? `claim:${node.dataset.claimUpdate}` : node.dataset.messageRecordId).filter(Boolean));
+  const after = id => order[order.indexOf(id) + 1];
+  assert.deepEqual([after('claim-row-history-10'), after('claim-row-history-22'), after('claim-row-history-33')], ['claim:claim-row-0', 'claim:claim-row-1', 'claim:claim-row-2']);
+  assert.equal(order.filter(entry => entry.startsWith('claim:')).length, 3, 'each claim line is painted once');
+  assert.deepEqual(order.slice(-2), ['claim-row-arrival-1', 'claim-row-arrival-2']);
+  assert.deepEqual(errors, []);
+});
+
 test('snapshot labels update duplicates while preserving focus and selection, and late old-room data cannot replace new labels', { timeout: 45000 }, async t => {
   const f = createAcceptanceFixture(), other = initialRoom('other', 'owner');
   other[0].data.title = 'Another private room'; other[1].data.displayName = 'Another private owner';
