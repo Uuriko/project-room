@@ -18,15 +18,11 @@ function squadContext(ctx, write) {
   if (selected.bearer && auth.credentialScope !== "room") ctx.reject(403, "access_denied", "Bearer <redacted> sessions are not accepted");
   if (!selected.bearer && auth.kind !== "session") ctx.reject(401, "unauthenticated", "Browser session required");
   ctx.rate(`read:${auth.credentialHash}`, 600);
-  if (write) {
-    ctx.protectWrite(ctx.req, auth, selected.bearer);
-    ctx.rate(`write:${auth.credentialHash}`, 60);
-  }
+  if (write) { ctx.protectWrite(ctx.req, auth, selected.bearer); ctx.rate(`write:${auth.credentialHash}`, 60); }
   if (auth.kind === "api-key") {
-    const requiredScope = write ? "rooms:write" : "rooms:read";
-    const granted = (auth.apiKeyScopes ?? []).some(scope =>
-      scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
-    if (!granted) ctx.reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
+    const need = write ? "rooms:write" : "rooms:read";
+    const ok = (auth.apiKeyScopes ?? []).some(s => s === need || (s.endsWith(":*") && need.startsWith(s.slice(0, -1))));
+    if (!ok) ctx.reject(403, "insufficient_scope", `API key lacks the ${need} scope`);
   }
   return { roomId, selected, fence };
 }
@@ -75,25 +71,20 @@ const membersBody = Object.freeze({ type: "object",
     remove: { type: "array" },
   } });
 
+const response = Object.freeze({ type: "object" });
+
+// Local row builder: same frozen shape/keys as the hand-written rows; keeps the table one row per line.
+const row=(id,method,path,handler,schema)=>Object.freeze({id,method,path,auth:"room",capability:null,scope:"room",handler,schema,events:[]});
+
 export const SQUAD_ROUTES = Object.freeze([
-  Object.freeze({ id: "squads", method: "GET", path: "/api/rooms/{roomId}/squads",
-    auth: "room", capability: null, scope: "room", handler: listSquadsRoute,
-    schema: { params: roomParameters, response: { type: "object" } },
-    events: [] }),
-  Object.freeze({ id: "squads-create", method: "POST", path: "/api/rooms/{roomId}/squads",
-    auth: "room", capability: null, scope: "room", handler: createSquadRoute,
-    schema: { params: roomParameters, body: squadBody, response: { type: "object" } },
-    events: [] }),
-  Object.freeze({ id: "squad", method: "GET", path: "/api/rooms/{roomId}/squads/{squadId}",
-    auth: "room", capability: null, scope: "room", handler: getSquadRoute,
-    schema: { params: squadParameters, response: { type: "object" } },
-    events: [] }),
-  Object.freeze({ id: "squad-members", method: "POST", path: "/api/rooms/{roomId}/squads/{squadId}/members",
-    auth: "room", capability: null, scope: "room", handler: updateSquadMembersRoute,
-    schema: { params: squadParameters, body: membersBody, response: { type: "object" } },
-    events: [] }),
-  Object.freeze({ id: "squad-disband", method: "POST", path: "/api/rooms/{roomId}/squads/{squadId}/disband",
-    auth: "room", capability: null, scope: "room", handler: disbandSquadRoute,
-    schema: { params: squadParameters, response: { type: "object" } },
-    events: [] }),
+  row("squads", "GET", "/api/rooms/{roomId}/squads", listSquadsRoute,
+    { params: roomParameters, response }),
+  row("squads-create", "POST", "/api/rooms/{roomId}/squads", createSquadRoute,
+    { params: roomParameters, body: squadBody, response }),
+  row("squad", "GET", "/api/rooms/{roomId}/squads/{squadId}", getSquadRoute,
+    { params: squadParameters, response }),
+  row("squad-members", "POST", "/api/rooms/{roomId}/squads/{squadId}/members", updateSquadMembersRoute,
+    { params: squadParameters, body: membersBody, response }),
+  row("squad-disband", "POST", "/api/rooms/{roomId}/squads/{squadId}/disband", disbandSquadRoute,
+    { params: squadParameters, response }),
 ]);

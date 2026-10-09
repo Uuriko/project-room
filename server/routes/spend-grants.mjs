@@ -18,21 +18,17 @@ function context(ctx) {
 
 export async function issueSpendGrant(ctx) {
   const { roomId, selected, fence } = context(ctx);
-  const request = await ctx.body(ctx.req);
-  const result = issueSpendGrantRoute(ctx.store, selected.token, roomId, request, fence);
-  return ctx.json(ctx.res, 201, result);
+  return ctx.json(ctx.res, 201, issueSpendGrantRoute(ctx.store, selected.token, roomId, await ctx.body(ctx.req), fence));
 }
 
 export function revokeSpendGrant(ctx) {
   const { roomId, selected, fence } = context(ctx);
-  const result = revokeSpendGrantRoute(ctx.store, selected.token, roomId, ctx.params.agentId, fence);
-  return ctx.json(ctx.res, 200, result);
+  return ctx.json(ctx.res, 200, revokeSpendGrantRoute(ctx.store, selected.token, roomId, ctx.params.agentId, fence));
 }
 
 export function readOwnSpendGrant(ctx) {
   const { roomId, selected, fence } = context(ctx);
-  const result = readSpendGrantRoute(ctx.store, selected.token, roomId, fence);
-  return ctx.json(ctx.res, 200, result);
+  return ctx.json(ctx.res, 200, readSpendGrantRoute(ctx.store, selected.token, roomId, fence));
 }
 
 const roomIdParam = Object.freeze({
@@ -66,17 +62,17 @@ const grantBody = Object.freeze({
 
 const response = Object.freeze({ type: "object" });
 
+// Local row builder: same frozen shape/keys as the hand-written rows; keeps the table one row per line.
+const row=(id,method,path,handler,schema)=>Object.freeze({id,method,path,auth:"room",capability:null,scope:"room",handler,schema,events:[]});
+
 export const SPEND_GRANT_ROUTES = Object.freeze([
   // capability is null like every other route row: the dispatcher never reads
   // it, and the real gate is requireGrantManagement inside each handler.
   // A non-null value here would imply an enforcement that does not exist.
-  Object.freeze({ id: "issue-spend-grant", method: "POST", path: "/api/rooms/{roomId}/spend-grants",
-    auth: "room", capability: null, scope: "room", handler: issueSpendGrant,
-    schema: { params: roomIdParam, body: grantBody, response }, events: [] }),
-  Object.freeze({ id: "revoke-spend-grant", method: "DELETE", path: "/api/rooms/{roomId}/spend-grants/{agentId}",
-    auth: "room", capability: null, scope: "room", handler: revokeSpendGrant,
-    schema: { params: agentIdParam, response }, events: [] }),
-  Object.freeze({ id: "read-own-spend-grant", method: "GET", path: "/api/rooms/{roomId}/spend-grant",
-    auth: "room", capability: null, scope: "room", handler: readOwnSpendGrant,
-    schema: { params: roomIdParam, response }, events: [] }),
+  row("issue-spend-grant", "POST", "/api/rooms/{roomId}/spend-grants", issueSpendGrant,
+    { params: roomIdParam, body: grantBody, response }),
+  row("revoke-spend-grant", "DELETE", "/api/rooms/{roomId}/spend-grants/{agentId}", revokeSpendGrant,
+    { params: agentIdParam, response }),
+  row("read-own-spend-grant", "GET", "/api/rooms/{roomId}/spend-grant", readOwnSpendGrant,
+    { params: roomIdParam, response }),
 ]);
