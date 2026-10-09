@@ -294,23 +294,27 @@ test("a cron deadline does not call GitHub and does not start a second lookup", 
   assert.equal(store.workClaims.get("commons", "other").pullRequest.etag ?? null, null);
 });
 
-// Claim lifecycle on the real store: REST close and the MCP closeWorkClaim
-// path both land the terminal closed state and append one validated
-// work_claim.updated event (action closed, reason closed|cancelled).
+// Claim lifecycle on the real store: the REST close route and the MCP
+// closeWorkClaim verb path both retire the claim and append one validated
+// work_claim.updated event (action closed). The REST route lands the
+// terminal "cancelled" state (history action "closed", event reason
+// "cancelled"); the MCP verb path lands "closed" for both verbs (history
+// action "cancelled" for verb cancel, event reason "cancelled").
 test("close and cancel append a validated closed event on the real store, REST and MCP alike", async t => {
   const { store, call } = await room(t);
-  await call("create", null, { id: "retire-rest" });
-  await call("create", null, { id: "retire-mcp" });
+  await call("create", null, { id: "retire-rest", files: ["test/retire-rest.md"] });
+  await call("create", null, { id: "retire-mcp", files: ["test/retire-mcp.md"] });
   const before = claimEvents(store).length;
   const closed = (await call("close", "retire-rest", { reason: "stale" })).value;
-  assert.equal(closed.state, "closed");
+  assert.equal(closed.state, "cancelled");
+  assert.equal(closed.history.at(-1).action, "closed");
   const auth = { member: { id: "owner", kind: "human", permissions: [] } };
   const cancelled = closeWorkClaim({ store, roomId: "commons", auth, claimId: "retire-mcp", verb: "cancel", reason: "duplicate" });
   assert.equal(cancelled.state, "closed");
   assert.equal(store.workClaims.get("commons", "retire-mcp").history.at(-1).action, "cancelled");
   const events = claimEvents(store).slice(before);
   assert.deepEqual(events.map(event => [event.data.workClaim, event.data.action, event.data.claimState, event.data.reason]),
-    [["retire-rest", "closed", "closed", "closed"], ["retire-mcp", "closed", "closed", "cancelled"]]);
+    [["retire-rest", "closed", "cancelled", "cancelled"], ["retire-mcp", "closed", "closed", "cancelled"]]);
   assert.throws(() => closeWorkClaim({ store, roomId: "commons", auth, claimId: "retire-mcp", verb: "close" }),
     error => error.status === 409 && error.code === "work_claim_terminal");
 });
@@ -373,7 +377,7 @@ test("PR link and event roll back together, and expiry or archived rooms cannot 
 // it. No existing pr-link test covers a second round re-linking the same URL.
 test("re-linking a settled PR URL in a new round resets the link for re-polling", async t => {
   const { store, call } = await room(t);
-  await call("create", null, { id: "relink-pr", title: "relink" });
+  await call("create", null, { id: "relink-pr", title: "relink", files: ["test/relink-pr.md"] });
   const claimed = (await call("claim", "relink-pr", {})).value;
   const linked = (await call("update", "relink-pr", {
     appendPullRequest: URL_A,
@@ -418,7 +422,7 @@ test("re-linking resets a settled PR even when syncedAt equals claimedAt", async
   const { store, call } = await room(t);
   const now = Date.parse("2026-10-03T13:00:00Z");
   store.now = () => now;
-  await call("create", null, { id: "relink-same-ms", title: "relink" });
+  await call("create", null, { id: "relink-same-ms", title: "relink", files: ["test/relink-same-ms.md"] });
   const claimed = (await call("claim", "relink-same-ms", {})).value;
   await call("update", "relink-same-ms", { appendPullRequest: URL_A, expectedClaimedAt: claimed.claimedAt, expectedHistoryLength: claimed.history.length });
   applyPullRequestWebhook(store, { action: "closed", pull_request: { html_url: URL_A, merged: false, state: "closed" } }, { nowMs: now });
@@ -440,7 +444,7 @@ test("re-linking resets a same-ms tie when the first round began via reassign", 
   const { store, call } = await room(t);
   const now = Date.parse("2026-10-03T13:00:00Z");
   store.now = () => now;
-  await call("create", null, { id: "relink-reassign-ms", title: "relink" });
+  await call("create", null, { id: "relink-reassign-ms", title: "relink", files: ["test/relink-reassign-ms.md"] });
   const assigned = (await call("reassign", "relink-reassign-ms", { newOwner: "owner" })).value;
   assert.equal(assigned.state, "claimed");
   assert.equal(assigned.history.at(-1).action, "reassigned:owner");
@@ -465,7 +469,7 @@ test("re-linking resets a same-ms tie even when early claimed stamps were trimme
   const { store, call } = await room(t);
   const now = Date.parse("2026-10-03T13:00:00Z");
   store.now = () => now;
-  await call("create", null, { id: "relink-trimmed-ms", title: "relink" });
+  await call("create", null, { id: "relink-trimmed-ms", title: "relink", files: ["test/relink-trimmed-ms.md"] });
   const claimed = (await call("claim", "relink-trimmed-ms", {})).value;
   await call("update", "relink-trimmed-ms", { appendPullRequest: URL_A, expectedClaimedAt: claimed.claimedAt, expectedHistoryLength: claimed.history.length });
   for (let n = 0; n < 210; n++) await call("update", "relink-trimmed-ms", { note: `filler ${n}` });
@@ -490,7 +494,7 @@ test("re-linking resets same-ms ties across three claim rounds", async t => {
   const { store, call } = await room(t);
   const now = Date.parse("2026-10-03T13:00:00Z");
   store.now = () => now;
-  await call("create", null, { id: "relink-three-ms", title: "relink" });
+  await call("create", null, { id: "relink-three-ms", title: "relink", files: ["test/relink-three-ms.md"] });
   const r1 = (await call("claim", "relink-three-ms", {})).value;
   await call("update", "relink-three-ms", { appendPullRequest: URL_A, expectedClaimedAt: r1.claimedAt, expectedHistoryLength: r1.history.length });
   const webhook = { action: "closed", pull_request: { html_url: URL_A, merged: false, state: "closed" } };
@@ -531,10 +535,10 @@ test("same-ms ties in two rooms reset independently", async t => {
   });
   const callA = forRoom("commons"), callB = forRoom("second");
   const link = item => ({ appendPullRequest: URL_A, expectedClaimedAt: item.claimedAt, expectedHistoryLength: item.history.length });
-  await callA("create", null, { id: "relink-xroom", title: "relink" });
+  await callA("create", null, { id: "relink-xroom", title: "relink", files: ["test/relink-xroom.md"] });
   const a1 = (await callA("claim", "relink-xroom", {})).value;
   await callA("update", "relink-xroom", link(a1));
-  await callB("create", null, { id: "relink-xroom", title: "relink" });
+  await callB("create", null, { id: "relink-xroom", title: "relink", files: ["test/relink-xroom.md"] });
   const b1 = (await callB("claim", "relink-xroom", {})).value;
   await callB("update", "relink-xroom", link(b1));
   const applied = applyPullRequestWebhook(store,

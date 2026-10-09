@@ -41,10 +41,10 @@ const call = (registry, memberId, route, id, body, query = "") => handleWorkClai
 
 test("duplicate CREATE returns 409 work_claim_exists and leaves the claim unchanged", async () => {
   const registry = createWorkClaimRegistry();
-  const first = await call(registry, "owner", "create", null, { id: "idem-1", title: "First write" });
+  const first = await call(registry, "owner", "create", null, { id: "idem-1", title: "First write", files: ["test/idem-1.md"] });
   assert.equal(first.status, 201);
   assert.equal(first.value.title, "First write");
-  const second = await call(registry, "owner", "create", null, { id: "idem-1", title: "Second write" });
+  const second = await call(registry, "owner", "create", null, { id: "idem-1", title: "Second write", files: ["test/idem-1.md"] });
   assert.equal(second.status, 409, "duplicate CREATE must not be accepted");
   assert.equal(second.value.error.code, "work_claim_exists");
   assert.equal(registry.get("room1", "idem-1").title, "First write");
@@ -54,11 +54,11 @@ test("duplicate CREATE returns 409 work_claim_exists and leaves the claim unchan
 test("CREATE with assignee refuses 409 too_many_open_claims when the assignee is at cap", async () => {
   const registry = createWorkClaimRegistry();
   registry.configure("room1", { maxMemberOpenClaims: 1 });
-  const first = await call(registry, "owner", "create", null, { id: "assign-1", title: "First", assignee: "holder" });
+  const first = await call(registry, "owner", "create", null, { id: "assign-1", title: "First", assignee: "holder", files: ["test/assign-1.md"] });
   assert.equal(first.status, 201, "first assign-create should succeed");
   assert.equal(first.value.owner, "holder");
   assert.equal(first.value.state, "claimed");
-  const second = await call(registry, "owner", "create", null, { id: "assign-2", title: "Second", assignee: "holder" });
+  const second = await call(registry, "owner", "create", null, { id: "assign-2", title: "Second", assignee: "holder", files: ["test/assign-2.md"] });
   assert.equal(second.status, 409, "assign-create over the per-member cap must not be accepted");
   assert.equal(second.value.error.code, "too_many_open_claims");
   assert.equal(registry.has("room1", "assign-2"), false);
@@ -71,7 +71,7 @@ test("CREATE with assignee refuses 409 too_many_open_claims when the assignee is
 test("claim route still refuses 409 too_many_open_claims at the default cap", async () => {
   const registry = createWorkClaimRegistry();
   for (let index = 0; index < DEFAULT_MAX_MEMBER_OPEN_CLAIMS + 1; index += 1) {
-    assert.equal((await call(registry, "owner", "create", null, { id: `capm-${index}` })).status, 201);
+    assert.equal((await call(registry, "owner", "create", null, { id: `capm-${index}`, files: [`test/capm-${index}.md`] })).status, 201);
   }
   for (let index = 0; index < DEFAULT_MAX_MEMBER_OPEN_CLAIMS; index += 1) {
     assert.equal((await call(registry, "holder", "claim", `capm-${index}`, {})).status, 200);

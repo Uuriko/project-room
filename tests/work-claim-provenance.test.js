@@ -178,16 +178,18 @@ test("HTTP create/claim/update accept provenance fields; provenance walks the gr
   const f = await httpFixture(t);
   const { keys, call } = f;
   // Old clients keep working: no provenance fields at all.
-  assert.equal((await call(keys.coord, "/work-claims", { id: "root", title: "Root premise" })).status, 201);
+  assert.equal((await call(keys.coord, "/work-claims", { id: "root", title: "Root premise", files: ["test/root.md"] })).status, 201);
   const created = await call(keys.coord, "/work-claims",
-    { id: "child", title: "Child", parentClaimId: "root", evidenceRefs: [SHA_REF, URL_REF] });
+    { id: "child", title: "Child", parentClaimId: "root", evidenceRefs: [SHA_REF, URL_REF], files: ["test/child.md"] });
   assert.equal(created.status, 201);
   assert.equal(created.value.parentClaimId, "root");
   assert.deepEqual(created.value.evidenceRefs, [SHA_REF, URL_REF]);
   assert.equal((await call(keys.worker, "/work-claims/child/claim", { parentClaimId: "root" })).status, 200);
-  assert.equal((await call(keys.coord, "/work-claims", { id: "grandchild", parentClaimId: "child" })).status, 201);
-  // Unknown body keys are still refused (strict shapes).
-  assert.equal((await call(keys.coord, "/work-claims", { id: "bad", parent_claim_id: "root" })).status, 422);
+  assert.equal((await call(keys.coord, "/work-claims", { id: "grandchild", parentClaimId: "child", files: ["test/grandchild.md"] })).status, 201);
+  // Unknown body keys pass through verbatim (schema drift), never dropped.
+  const drifted = await call(keys.coord, "/work-claims", { id: "bad", parent_claim_id: "root", files: ["test/bad.md"] });
+  assert.equal(drifted.status, 201);
+  assert.equal(drifted.value.parent_claim_id, "root");
   // The walk: REST read of the downstream graph.
   const walk = await call(keys.worker, "/work-claims/root/provenance");
   assert.equal(walk.status, 200);
@@ -202,10 +204,10 @@ test("HTTP create/claim/update accept provenance fields; provenance walks the gr
 test("HTTP premise-invalid flags the premise and all downstream claims", async t => {
   const f = await httpFixture(t);
   const { keys, call } = f;
-  assert.equal((await call(keys.coord, "/work-claims", { id: "premise", title: "Bad premise" })).status, 201);
-  assert.equal((await call(keys.coord, "/work-claims", { id: "down-a", parentClaimId: "premise" })).status, 201);
-  assert.equal((await call(keys.coord, "/work-claims", { id: "down-b", parentClaimId: "down-a" })).status, 201);
-  assert.equal((await call(keys.coord, "/work-claims", { id: "other" })).status, 201);
+  assert.equal((await call(keys.coord, "/work-claims", { id: "premise", title: "Bad premise", files: ["test/premise.md"] })).status, 201);
+  assert.equal((await call(keys.coord, "/work-claims", { id: "down-a", parentClaimId: "premise", files: ["test/down-a.md"] })).status, 201);
+  assert.equal((await call(keys.coord, "/work-claims", { id: "down-b", parentClaimId: "down-a", files: ["test/down-b.md"] })).status, 201);
+  assert.equal((await call(keys.coord, "/work-claims", { id: "other", files: ["test/other.md"] })).status, 201);
   // A member who is neither the premise owner nor a claim manager is refused.
   assert.equal((await call(keys.worker, "/work-claims/premise/premise-invalid", { reason: "x" })).status, 403);
   // The premise owner (coord created it, owner key acts with authority) flags it.

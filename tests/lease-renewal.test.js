@@ -309,7 +309,11 @@ test("handler: empty renew is 400 renew_requires_progress and the lease is uncha
 test("handler: renew with a progress: note (no message id) extends the lease", async () => {
   const registry = await claimedRegistry();
   const before = registry.get("room1", "w1").leaseExpiresAt;
-  const { out, error } = await runRoute({ route: "renew", id: "w1", body: { note: "progress: half done, tests green" }, registry });
+  // A longer window than the current 1h makes the extension deterministic:
+  // the renewed window is now+duration, so a renew in the same millisecond
+  // as the claim would otherwise leave leaseExpiresAt unchanged.
+  const { out, error } = await runRoute({ route: "renew", id: "w1",
+    body: { note: "progress: half done, tests green", leaseHours: 2 }, registry });
   assert.equal(error, null);
   assert.ok(Date.parse(out.value.leaseExpiresAt) > Date.parse(before));
   assert.equal(out.value.consecutiveHeartbeats, 0);
@@ -357,11 +361,15 @@ test("handler: renew by a non-owner is refused", async () => {
 
 test("handler: a leaseless claim is backfilled, then renews", async () => {
   // The immortal opt-out is retired: an active claim with no lease gets the
-  // kind default on the next board request (silent backfill), so renew sees
-  // a lease instead of refusing.
+  // kind default on the reaper's sweep (POST /sweep — the member-triggered
+  // equivalent of the 30s server-side reaper tick, which owns backfill under
+  // the lease-first model), so renew sees a lease instead of refusing.
   const registry = createWorkClaimRegistry();
   const planted = claimWork({ id: "w1", title: "t" }, "quill", { leaseHours: 1, now: Date.now() });
   registry.set("room1", { ...planted, leaseStartAt: null, leaseExpiresAt: null });
+  const { error: sweepError } = await runRoute({ route: "sweep", id: null, body: {}, registry });
+  assert.equal(sweepError, null);
+  assert.ok(registry.get("room1", "w1").history.some(entry => entry.action === "lease_backfilled"));
   const { out, error } = await runRoute({ route: "renew", id: "w1", body: { progressMessageId: "progress-1" },
     storeMessages: [liveMessage()], registry });
   assert.equal(error, null);

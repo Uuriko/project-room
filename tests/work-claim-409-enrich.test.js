@@ -35,9 +35,9 @@ const runRoute = async ({ route, id, body = {}, memberId = "agent-a", registry }
 
 test("claim 409 names holder, lease expiry, and next alternatives", async () => {
   const registry = createWorkClaimRegistry();
-  const created = await runRoute({ route: "create", body: { id: "hot", title: "hot scope" }, registry });
+  const created = await runRoute({ route: "create", body: { id: "hot", title: "hot scope", files: ["test/hot.md"] }, registry });
   assert.equal(created.error, null);
-  const alt = await runRoute({ route: "create", body: { id: "free", title: "free scope" }, registry });
+  const alt = await runRoute({ route: "create", body: { id: "free", title: "free scope", files: ["test/free.md"] }, registry });
   assert.equal(alt.error, null);
   const won = await runRoute({ route: "claim", id: "hot", body: {}, registry });
   assert.equal(won.error, null);

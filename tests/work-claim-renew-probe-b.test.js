@@ -27,10 +27,10 @@ const T0 = Date.parse("2026-10-08T00:00:00.000Z");
 const iso = ms => new Date(ms).toISOString();
 
 test("MUT-04B: renew starts a fresh window from now — a smaller renewal duration shortens an unexpired lease (documented behavior)", () => {
-  const claimed = claimWork({ id: "wB" }, "quill", { leaseHours: 6, now: T0 }); // expires T0+6h
-  const renewed = renewWork(claimed, "quill", { leaseHours: 1, now: T0 + 2 * H }); // +2h in, 4h left
-  // Fresh window from now: expiry is T0+3h, NOT T0+7h (old expiry + 1h).
-  // The remaining 4h of the old lease are discarded.
-  assert.equal(renewed.leaseStartAt, iso(T0 + 2 * H));
-  assert.equal(renewed.leaseExpiresAt, iso(T0 + 3 * H));
+  const claimed = claimWork({ id: "wB" }, "quill", { leaseHours: 2, now: T0 }); // expires T0+2h
+  const renewed = renewWork(claimed, "quill", { leaseHours: 1, now: T0 + H }); // +1h in, 1h left
+  // Fresh window from now: expiry is T0+2h, NOT T0+3h (old expiry + 1h).
+  // The remaining 1h of the old lease are discarded.
+  assert.equal(renewed.leaseStartAt, iso(T0 + H));
+  assert.equal(renewed.leaseExpiresAt, iso(T0 + 2 * H));
 });

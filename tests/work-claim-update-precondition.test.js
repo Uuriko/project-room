@@ -36,7 +36,7 @@ const call = (registry, memberId, route, id, body, query = "") => handleWorkClai
 });
 
 const claimFresh = async registry => {
-  await call(registry, "owner", "create", null, { id: "task" });
+  await call(registry, "owner", "create", null, { id: "task", files: ["test/task.md"] });
   const claimed = await call(registry, "worker", "claim", "task", {});
   assert.equal(claimed.status, 200);
   return claimed.value;
@@ -57,10 +57,15 @@ test("stale note payload replayed with its v1-era basis is refused, not applied"
   assert.equal(lastNote(v2.value), "v2");
 
   // The stale client replays its v1-era payload. This must 409, not clobber v2.
-  const replay = await call(registry, "worker", "update", "task", { note: "v1", ...staleBasis });
-  assert.equal(replay.status, 409);
-  assert.equal(replay.value.error.code, "work_claim_conflict");
-  assert.equal(replay.value.next[0].path, "/api/rooms/room1/work-claims/task");
+  // The basis conflict is delivered as a thrown 409 (not the enriched claim-
+  // route body): the message itself is the read-back hint.
+  await assert.rejects(call(registry, "worker", "update", "task", { note: "v1", ...staleBasis }),
+    error => {
+      assert.equal(error.status, 409);
+      assert.equal(error.code, "work_claim_conflict");
+      assert.match(error.message, /changed since it was read/);
+      return true;
+    });
   assert.equal(lastNote(registry.get("room1", "task")), "v2");
 });
 
@@ -79,9 +84,12 @@ test("stale history length alone conflicts even when claimedAt matches", async (
   const v1 = (await call(registry, "worker", "update", "task", { note: "v1" })).value;
   await call(registry, "worker", "update", "task", { note: "v2" });
   const staleLength = { expectedClaimedAt: v1.claimedAt, expectedHistoryLength: v1.history.length };
-  const replay = await call(registry, "worker", "update", "task", { note: "v3", ...staleLength });
-  assert.equal(replay.status, 409);
-  assert.equal(replay.value.error.code, "work_claim_conflict");
+  await assert.rejects(call(registry, "worker", "update", "task", { note: "v3", ...staleLength }),
+    error => {
+      assert.equal(error.status, 409);
+      assert.equal(error.code, "work_claim_conflict");
+      return true;
+    });
   assert.equal(lastNote(registry.get("room1", "task")), "v2");
 });
 
@@ -90,9 +98,13 @@ test("a claimedAt from a different round conflicts even when history length matc
   await claimFresh(registry);
   const v1 = (await call(registry, "worker", "update", "task", { note: "v1" })).value;
   const basis = basisOf(v1);
-  const other = await call(registry, "worker", "update", "task", { note: "v1", ...basis, expectedClaimedAt: "2020-01-01T00:00:00.000Z" });
-  assert.equal(other.status, 409);
-  assert.equal(other.value.error.code, "work_claim_conflict");
+  const other = call(registry, "worker", "update", "task", { note: "v1", ...basis, expectedClaimedAt: "2020-01-01T00:00:00.000Z" });
+  await assert.rejects(other,
+    error => {
+      assert.equal(error.status, 409);
+      assert.equal(error.code, "work_claim_conflict");
+      return true;
+    });
 });
 
 test("malformed preconditions are 422, not silently accepted", async () => {

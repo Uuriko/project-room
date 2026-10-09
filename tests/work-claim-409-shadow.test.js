@@ -43,7 +43,7 @@ test("full board reports work_board_full, not room_event_budget_low", async () =
   const registry = createWorkClaimRegistry();
   registry.configure("room1", { maxOpenClaims: 1 });
   // Fill the board.
-  const first = await runRoute({ route: "create", body: { id: "w1", title: "one" }, registry, sequence: 1 });
+  const first = await runRoute({ route: "create", body: { id: "w1", title: "one", files: ["test/w1.md"] }, registry, sequence: 1 });
   assert.equal(first.error, null);
 
   // Budget exhausted AND board full: the actionable diagnosis is the cap.
@@ -60,7 +60,7 @@ test("budget 409 still fires when the board is NOT full", async () => {
   const registry = createWorkClaimRegistry();
   registry.configure("room1", { maxOpenClaims: 10 });
   const seq = PILOT_LIMITS.eventsPerRoom - 1;
-  const res = await runRoute({ route: "create", body: { id: "w1", title: "one" }, registry, sequence: seq });
+  const res = await runRoute({ route: "create", body: { id: "w1", title: "one", files: ["test/w1.md"] }, registry, sequence: seq });
   const response = res.calls.find(call => call.status === 409) ?? res.error;
   assert.ok(response, "expected a 409");
   const code = response.value?.error?.code ?? response.code;

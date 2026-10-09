@@ -24,8 +24,10 @@ test("reassigning an unclaimed item makes it a claim with the room default lease
 
 test("the room's configured default lease is used", () => {
   const item = createWork({ id: "u2", title: "Review it" }, { now: T0 });
-  const assigned = reassignWork(item, "lead", "fo", { authority: true, now: T0, room: { workClaims: { defaultLeaseHours: 6 } } });
-  assert.equal(Date.parse(assigned.leaseExpiresAt) - T0, 6 * H);
+  // 1.5h: inside the 2h hard cap, distinct from the work-kind default (300s),
+  // so the assertion pins that the room config — not the kind default — wins.
+  const assigned = reassignWork(item, "lead", "fo", { authority: true, now: T0, room: { workClaims: { defaultLeaseHours: 1.5 } } });
+  assert.equal(Date.parse(assigned.leaseExpiresAt) - T0, 1.5 * H);
 });
 
 test("an assigned item expires and returns to the pool like any claim", () => {
@@ -39,7 +41,7 @@ test("an assigned item expires and returns to the pool like any claim", () => {
 });
 
 test("reassigning a held claim keeps its state and current lease", () => {
-  const claimed = claimWork(createWork({ id: "u4", title: "Build it" }, { now: T0 }), "quill", { now: T0, leaseHours: 4 });
+  const claimed = claimWork(createWork({ id: "u4", title: "Build it" }, { now: T0 }), "quill", { now: T0, leaseHours: 2 });
   const moved = reassignWork(claimed, "quill", "instinct", { now: T0 + H });
   assert.equal(moved.state, "claimed");
   assert.equal(moved.owner, "instinct");

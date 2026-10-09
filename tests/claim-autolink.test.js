@@ -76,7 +76,7 @@ const claimEvents = (store, roomId) => store.db.prepare(
 async function liveClaim(make, id, extra = {}) {
   const { store, call, roomId } = make;
   await call("create", null, { id, files: [`server/${id}.mjs`], repo: REPO, branch: id, ...extra.create });
-  await call("claim", id, { leaseHours: 6 });
+  await call("claim", id, { leaseHours: 2 });
   return { store, roomId, id };
 }
 

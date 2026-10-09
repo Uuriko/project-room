@@ -40,7 +40,7 @@ test('SDK retains declared files, overlap warnings, and completion receipt metad
   assert.deepEqual(created.files, ['src/shared.js']);
   assert.deepEqual(created.tags, ['migration']);
   await client.claimWorkItem('holder');
-  await client.workClaimCreate({ id: 'candidate' });
+  await client.workClaimCreate({ id: 'candidate', files: ['test/candidate.md'] });
   await assert.rejects(client.claimWorkItem('candidate', { files: ['src/shared.js', 'docs/claims.md'] }), error => {
     assert.equal(error.status, 409);
     assert.equal(error.code, 'file_lease_conflict');
@@ -84,7 +84,7 @@ test('SDK convenience claim and completion preserve creation metadata and explic
 
 test('SDK sends invalid declarations for server rejection instead of silently dropping them', async t => {
   const { owner: client, peer } = await fixture(t, { reviewerPermissions: ['verify'] });
-  for (const [id, fields] of [['invalid-path', { files: ['../outside'] }], ['invalid-tag', { tags: ['not a tag'] }]]) {
+  for (const [id, fields] of [['invalid-path', { files: ['../outside'] }], ['invalid-tag', { tags: ['not a tag'], files: ['test/invalid-tag.md'] }]]) {
     await assert.rejects(client.workClaimCreate({ id, ...fields }), invalid);
     await assert.rejects(client.workClaimGet(id), error => error.status === 404);
   }
@@ -113,7 +113,7 @@ test('SDK sends invalid declarations for server rejection instead of silently dr
 
 test('SDK preserves legacy notes and requires an explicit approval for reviewed completion', async t => {
   const { owner, peer } = await fixture(t, { reviewerPermissions: ['verify'] });
-  await owner.workClaim('reviewed', { reviewPolicy: 'distinct_member' });
+  await owner.workClaim('reviewed', { reviewPolicy: 'distinct_member', files: ['test/reviewed.md'] });
   await owner.updateWorkItem('reviewed', { state: 'in_progress' });
   const before = stripTrust(await owner.workClaimGet('reviewed'));
   await assert.rejects(owner.workComplete('reviewed', { reviewedBy: 'reviewer' }),
@@ -151,7 +151,7 @@ test('SDK preserves legacy notes and requires an explicit approval for reviewed 
 
 test('SDK lease renewal needs the owner and a fresh public progress message', async t => {
   const { owner, peer } = await fixture(t);
-  const claim = await owner.workClaim('renewed', { leaseHours: 1 });
+  const claim = await owner.workClaim('renewed', { leaseHours: 1, files: ['test/renewed.md'] });
   // The route deliberately requires progress strictly newer than lease start.
   await new Promise(resolve => setTimeout(resolve, 2));
   const progress = (await owner.say('Implemented the client boundary')).event.data.messageId;
@@ -180,7 +180,7 @@ test('SDK lease renewal needs the owner and a fresh public progress message', as
 // SDK dropping one of the mandatory compare-and-set fields before HTTP.
 test('SDK links a later PR with both preconditions and preserves HTTP refusals', async t => {
   const { owner } = await fixture(t);
-  const claimed = await owner.workClaim('later-sdk-pr', { files: ['src/sdk.js'], leaseHours: 6 });
+  const claimed = await owner.workClaim('later-sdk-pr', { files: ['src/sdk.js'], leaseHours: 1 });
   const args = { pullRequest: 'https://github.com/Uuriko/project-room/pull/17/',
     expectedClaimedAt: claimed.claimedAt, expectedHistoryLength: claimed.history.length };
   const linked = await owner.linkWorkItemPullRequest(claimed.id, args);
@@ -214,7 +214,7 @@ test('SDK state filters retrieve older done claims through explicit and automati
     item = updateWork(item, 'owner', { state: 'done', now: old });
     store.workClaims.set('commons', item);
   }
-  await owner.workClaimCreate({ id: 'still-open' });
+  await owner.workClaimCreate({ id: 'still-open', files: ['test/still-open.md'] });
   const normal = await owner.workClaims();
   assert.deepEqual(normal.claims.map(item => item.id), ['still-open']);
   assert.equal(normal.olderDone, 51);
@@ -246,7 +246,7 @@ test('the documented capped-history PR basis succeeds through the SDK', async t 
   assert.equal(basis.example, 203);
   const { owner, store } = await fixture(t);
   await owner.workClaimCreate({ id: 'capped-sdk-pr', files: ['src/capped.js'] });
-  let item = await owner.claimWorkItem('capped-sdk-pr', { leaseHours: 6 });
+  let item = await owner.claimWorkItem('capped-sdk-pr', { leaseHours: 1 });
   const additions = 203 - item.history.length;
   for (let index = 0; index < additions; index++) item = updateWork(item, 'owner', { note: `Progress ${index}` });
   store.workClaims.set('commons', item);

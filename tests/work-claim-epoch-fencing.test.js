@@ -93,7 +93,7 @@ test("epoch fencing (c): epoch bumps on every ownership transition and nothing e
 
 test("epoch fencing (c2): auto-release of an expired lease bumps the epoch", () => {
   const claimed = claimWork(createWork({ id: "e4" }, { now: T0, agentId: "system" }),
-    "a", { leaseHours: 6, now: T0 });
+    "a", { leaseHours: 2, now: T0 });
   assert.equal(claimed.epoch, 1);
   const [released] = releaseExpired([claimed], T0 + 7 * H);
   assert.equal(released.state, "unclaimed");

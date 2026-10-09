@@ -52,8 +52,11 @@ test("a claim survives a restart on the durable registry and is lost on the in-m
   assert.equal(read.value.leaseExpiresAt, claimed.value.leaseExpiresAt);
 
   // Same routes, one more claim attempt by another agent: the durable
-  // anti-collision rule still holds after the restart.
-  await assert.rejects(call(restarted, "grokbot", "claim", "rc-1", {}), error => error.status === 409);
+  // anti-collision rule still holds after the restart. The enriched 409 is
+  // delivered as a resolved response (error.body), not a thrown rejection.
+  const collision = await call(restarted, "grokbot", "claim", "rc-1", {});
+  assert.equal(collision.status, 409);
+  assert.equal(collision.value.error.code, "work_claim_conflict");
 
   const memory = createWorkClaimRegistry();
   await assert.rejects(call(memory, "jill", "read", "rc-1"), error => error.status === 404);

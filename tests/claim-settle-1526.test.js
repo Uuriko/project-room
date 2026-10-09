@@ -91,7 +91,7 @@ test("B2 (#1526): settlePullRequest refuses a claim whose lease has lapsed", () 
 
 test("B2 (#1526): a live lease still settles", () => {
   let item = claimWork(createWork({ id: "b2-live" }, { now: NOW, agentId: "alice" }),
-    "alice", { now: NOW, leaseHours: 4 });
+    "alice", { now: NOW, leaseHours: 2 });
   item = linkPr(item, "alice", PR3, NOW);
   const at = NOW + 3600 * 1000;
   const recorded = recordPullOutcome(item, PR3, "merged", at);

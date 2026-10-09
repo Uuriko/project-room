@@ -13,6 +13,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { migrateLandQueueClaims } from "../server/land-queue.mjs";
 import { handleWorkClaims } from "../server/work-claim-routes.mjs";
 import { SOURCE_REVISION } from "../server/version.mjs";
+import { syncClaimPullRequests } from "../server/claim-pr-sync.mjs";
 // SEC-2: claim reads carry content-trust markers; compare the claim itself.
 const stripTrust = value => JSON.parse(JSON.stringify(value, (key, entry) => (key === "untrusted" || key === "contentTrust" ? undefined : entry)));
 
@@ -449,10 +450,14 @@ test("a superseded claim cannot be manually completed with an otherwise valid ap
 });
 
 test("a deploy claim closes when the live revision matches, and status reports main", async t => {
-  const { call, coordKey } = await fixture(t);
+  const { store, call, coordKey } = await fixture(t);
   const created = await call(coordKey, "/work-claims", { files: ["src/ship.mjs"], id: "ship", kind: "deploy", revision: SOURCE_REVISION, title: "Ship" });
   assert.equal(created.status, 201);
   assert.equal(created.value.kind, "deploy");
+  // Deploy closure runs on the PR-sync tick (closeDeployedClaims), not on
+  // create — run the tick (nothing is due for polling, so no fetch happens).
+  const tick = await syncClaimPullRequests(store, { fetchImpl: () => { throw new Error("no fetch expected"); }, token: null });
+  assert.equal(tick.checked, 0);
   const read = await call(coordKey, "/work-claims/ship");
   assert.equal(read.status, 200);
   assert.equal(read.value.state, "done");

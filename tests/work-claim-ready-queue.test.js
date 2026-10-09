@@ -21,19 +21,19 @@ const call = (registry, route, id, body, queue = null) => handleWorkClaims({
   url: new URL(`https://room.example/api/rooms/room1/work-claims${queue ? `?queue=${queue}` : ""}`),
   store: { roomAuthority: () => ({ members: {
     ada: { id: "ada", kind: "agent", active: true, permissions: ["accept_work", "complete_work"] },
-  } }) }, roomId: "room1",
+  } }), room: () => ({ sequence: 0 }) }, roomId: "room1",
   auth: { member: { id: "ada", kind: "agent", permissions: [] } },
   workClaimRoute: route, workClaimId: id, helpers, registry,
 });
 
 test("the ready queue lists unheld claims whose dependencies are done", async () => {
   const registry = createWorkClaimRegistry();
-  await call(registry, "create", null, { id: "base", title: "Base" });
-  await call(registry, "create", null, { id: "next", dependsOn: ["base"] });
+  await call(registry, "create", null, { id: "base", title: "Base", files: ["test/base.md"] });
+  await call(registry, "create", null, { id: "next", dependsOn: ["base"], files: ["test/next.md"] });
   // Q3-A: dependsOn must name a claim that exists in this room.
-  await assert.rejects(call(registry, "create", null, { id: "later", dependsOn: ["missing"] }),
+  await assert.rejects(call(registry, "create", null, { id: "later", dependsOn: ["missing"], files: ["test/later.md"] }),
     error => error.status === 422 && error.code === "invalid_claim_input" && /dependsOn/.test(error.message));
-  await call(registry, "create", null, { id: "free" });
+  await call(registry, "create", null, { id: "free", files: ["test/free.md"] });
 
   const waiting = await call(registry, "list", null, null, "ready");
   assert.equal(waiting.status, 200);
@@ -53,7 +53,7 @@ test("the ready queue lists unheld claims whose dependencies are done", async ()
 
 test("a claim cannot depend on itself, and an unknown queue is refused", async () => {
   const registry = createWorkClaimRegistry();
-  await assert.rejects(call(registry, "create", null, { id: "loop", dependsOn: ["loop"] }), error => error.status === 422);
+  await assert.rejects(call(registry, "create", null, { id: "loop", dependsOn: ["loop"], files: ["test/loop.md"] }), error => error.status === 422);
   await assert.rejects(call(registry, "list", null, null, "soon"), error => error.status === 422);
 });
 
@@ -69,9 +69,9 @@ test("dependencies survive the durable claim registry", async t => {
     auth: { member: { id: "owner", kind: "human", permissions: [] } },
     workClaimRoute: "create", helpers, registry: store.workClaims,
   });
-  assert.equal((await create({ id: "parent" })).status, 201);
+  assert.equal((await create({ id: "parent", files: ["test/parent.md"] })).status, 201);
   const out = await handleWorkClaims({
-    req: { method: "POST", body: { id: "child", dependsOn: ["parent"] } },
+    req: { method: "POST", body: { id: "child", dependsOn: ["parent"], files: ["test/child.md"] } },
     res: {},
     url: new URL("https://room.example/api/rooms/commons/work-claims"),
     store, roomId: "commons",
@@ -94,9 +94,9 @@ test("#1527: deleting a claim waives it from dependents' dependsOn so they can r
     auth: { member: { id: "owner", kind: "human", permissions: [] } },
     workClaimRoute: "create", helpers, registry: store.workClaims,
   });
-  assert.equal((await create({ id: "doomed" })).status, 201);
-  assert.equal((await create({ id: "waiter", dependsOn: ["doomed"] })).status, 201);
-  assert.equal((await create({ id: "free" })).status, 201);
+  assert.equal((await create({ id: "doomed", files: ["test/doomed.md"] })).status, 201);
+  assert.equal((await create({ id: "waiter", dependsOn: ["doomed"], files: ["test/waiter.md"] })).status, 201);
+  assert.equal((await create({ id: "free", files: ["test/free.md"] })).status, 201);
   // Before the delete, the waiter is stranded: its dependency is neither done
   // nor deletable-away, so it never appears in queue=ready.
   assert.deepEqual(readyClaims(store.workClaims.list("commons")).map(item => item.id).sort(), ["doomed", "free"]);
@@ -106,6 +106,6 @@ test("#1527: deleting a claim waives it from dependents' dependsOn so they can r
   assert.deepEqual(readyClaims(store.workClaims.list("commons")).map(item => item.id).sort(), ["free", "waiter"],
     "the stranded dependent returns to the ready queue");
   // Unrelated dependents keep their other dependencies.
-  await assert.rejects(create({ id: "second", dependsOn: ["doomed"] }),
+  await assert.rejects(create({ id: "second", dependsOn: ["doomed"], files: ["test/second.md"] }),
     error => error.status === 422, "dependsOn must still name an existing claim");
 });

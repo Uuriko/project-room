@@ -122,6 +122,10 @@ test("heartbeat inside the grace window restores the pre-expiry state", async ()
   const item = registry.get("room1", "w1");
   const expiredAt = Date.parse(item.leaseExpiresAt);
   registry.set("room1", { ...item, state: "expired", priorActiveState: "claimed" });
+  // The heartbeat extends the current window from now: sleep past the claim's
+  // millisecond so the extension is strictly observable (same-ms would leave
+  // leaseExpiresAt unchanged and the > below would flake).
+  await new Promise(resolve => setTimeout(resolve, 2));
   const hb = await call(registry, "holder", "heartbeat", "w1", { leaseSeq: 1, idempotencyKey: "grace1" });
   assert.equal(hb.status, 200);
   const after = registry.get("room1", "w1");

@@ -173,9 +173,14 @@ test("W3: reassign to a real active member still works", async () => {
 // ---------------------------------------------------------------------------
 test("W4: renew after the lease lapsed is a 409 that says claim it again", async () => {
   const registry = createWorkClaimRegistry();
-  // A claim whose lease expired an hour ago; the route's own sweep will
-  // auto-release it before the renew handler runs.
+  // A claim whose lease expired an hour ago; the reaper's sweep auto-releases
+  // it (the member-triggered POST /sweep stands in for the 30s server-side
+  // tick, which owns expiry under the lease-first model) — only then does
+  // the renew name the recovery instead of misdiagnosing access.
   registry.set("room1", claimWork({ id: "w-lapsed" }, "quill", { leaseHours: 1, now: Date.now() - 2 * H }));
+  const { error: sweepError } = await runRoute({ route: "sweep", id: null, body: {}, registry });
+  assert.equal(sweepError, null);
+  assert.equal(registry.get("room1", "w-lapsed").state, "unclaimed");
   const { out, error } = await runRoute({ route: "renew", id: "w-lapsed",
     body: { progressMessageId: "progress-1" }, registry, storeMessages: [liveProgress()] });
   assert.equal(out, null);

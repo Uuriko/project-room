@@ -100,7 +100,7 @@ test("reassign of an active claim to a holder of overlapping files refuses (409)
   await call(registry, "jill", "create", null, { id: "a", files: ["server/a.mjs"] });
   await call(registry, "jill", "claim", "a", {});
   // ada deliberately holds the overlap via advisory warn-and-proceed
-  await call(registry, "claude", "create", null, { id: "b" });
+  await call(registry, "claude", "create", null, { id: "b", files: ["test/b.md"] });
   await call(registry, "ada", "claim", "b", { files: ["server/a.mjs"], advisory: true });
   const out = await call(registry, "jill", "reassign", "a", { newOwner: "ada" });
 
@@ -145,6 +145,12 @@ test("a lapsed lease frees the files, and a live lease still blocks", async () =
   assert.equal(blocked.value.holder.owner, "jill");
 
   registry.set("room1", { ...registry.get("room1", "a"), leaseExpiresAt: "2020-01-01T00:00:00.000Z" });
+  // The lease-first reaper owns expiry: lapsed leases are released by the
+  // sweep (the member-triggered equivalent of the 30s server-side tick),
+  // not by the claim route — so sweep before the second claim.
+  const swept = await call(registry, "jill", "sweep", null, {});
+  assert.equal(swept.status, 200);
+  assert.deepEqual(swept.value.released, ["a"]);
   const freed = await call(registry, "claude", "claim", "b", {});
   assert.equal(freed.status, 200);
   assert.equal(freed.value.state, "claimed");

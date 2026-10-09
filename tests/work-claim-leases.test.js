@@ -395,29 +395,29 @@ test("releaseExpired clears the whole lease (leaseStartAt) like updateWork", () 
   assert.equal(manual.leaseExpiresAt, null);
 });
 
-// QA200 regression sweep: renewWork refuses a claim that holds no lease
-// ("has no lease — nothing to renew"). The lapsed-lease refusal is pinned in
-// tests/lease-renewal.test.js, but no test ever exercised the lease-less
-// claim (leaseHours: null) path — a renew there must not mint a fresh lease
-// out of thin air or silently no-op.
+// QA200 regression sweep: the null (immortal) opt-out is retired — a null
+// lease is rejected at claim and at renew (claim_lease_required), never
+// immortal and never an escape hatch out of a lease. A lease-less claim that
+// arrives via legacy data (planted directly, the route cannot mint one)
+// still refuses renewal with "nothing to renew" — and the refused renew
+// must not change the claim.
 test("renewWork: a lease-less claim refuses renewal (nothing to renew)", () => {
-  const claimed = claimWork({ id: "r-nolease" }, "quill", { leaseHours: null, now: T0 });
-  assert.equal(claimed.leaseExpiresAt, null, "precondition: the claim holds no lease");
-  const before = JSON.stringify(claimed);
-  // The refusal must be the lease-less branch, not the lapsed branch:
-  // Date.parse(null) is NaN, so without the explicit null check the error
-  // would misreport as "lease already lapsed".
-  assert.throws(() => renewWork(claimed, "quill", { now: T0 + H }),
-    error => error instanceof ClaimError && error.code === "invalid_claim_input" && /nothing to renew/.test(error.message));
-  assert.equal(JSON.stringify(claimed), before, "the refused renew must not change the claim");
-  // An explicit null on renew is the escape hatch out of a lease, not a way
-  // to renew a lease-less claim: a held lease renews to no lease cleanly.
+  // The null opt-out is retired at claim time: no immortal claims.
+  throwsCode(() => claimWork({ id: "r-nolease" }, "quill", { leaseHours: null, now: T0 }), "claim_lease_required");
+  // ...and at renew time: null is not an escape hatch out of a lease.
   const leased = claimWork({ id: "r-leased" }, "quill", { leaseHours: 1, now: T0 });
-  const cleared = renewWork(leased, "quill", { leaseHours: null, now: T0 });
-  assert.equal(cleared.leaseStartAt, null);
-  assert.equal(cleared.leaseExpiresAt, null);
-  assert.match(cleared.history.at(-1).note, /lease removed/);
-  throwsCode(() => renewWork(cleared, "quill", { now: T0 + H }), "invalid_claim_input");
+  const before = JSON.stringify(leased);
+  throwsCode(() => renewWork(leased, "quill", { leaseHours: null, now: T0 }), "claim_lease_required");
+  assert.equal(JSON.stringify(leased), before, "the refused renew must not change the claim");
+  // The refusal for a genuinely lease-less claim must be the lease-less
+  // branch, not the lapsed branch: Date.parse(null) is NaN, so without the
+  // explicit null check the error would misreport as "lease already lapsed".
+  const leaseless = { ...claimWork({ id: "r-nolease" }, "quill", { leaseHours: 1, now: T0 }), leaseStartAt: null, leaseExpiresAt: null };
+  assert.equal(leaseless.leaseExpiresAt, null, "precondition: the claim holds no lease");
+  const beforeLeaseless = JSON.stringify(leaseless);
+  assert.throws(() => renewWork(leaseless, "quill", { now: T0 + H }),
+    error => error instanceof ClaimError && error.code === "invalid_claim_input" && /nothing to renew/.test(error.message));
+  assert.equal(JSON.stringify(leaseless), beforeLeaseless, "the refused renew must not change the claim");
 });
 
 // QA200 regression sweep: releaseExpired resets fileBlocks, not just files.

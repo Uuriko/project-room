@@ -45,7 +45,7 @@ const runRoute = async ({ store, route, id, body = {}, memberId = "owner" }) => 
 const historyLengthOf = item => item.history.length + (item.historyOmitted ?? 0);
 
 const setupClaimed = async (store, id = "w1") => {
-  const created = await runRoute({ store, route: "create", body: { id, title: "t" } });
+  const created = await runRoute({ store, route: "create", body: { id, title: "t", files: ["test/scope.md"] } });
   assert.equal(created.error, null, `create failed: ${created.error?.message}`);
   const claimed = await runRoute({ store, route: "claim", id, body: { leaseHours: 1 } });
   assert.equal(claimed.error, null, `claim failed: ${claimed.error?.message}`);

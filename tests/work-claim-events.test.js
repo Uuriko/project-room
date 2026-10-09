@@ -85,10 +85,13 @@ test('a lapsed lease is swept once, naming the previous owner and the files that
   await owner.workClaim('short', { files: ['docs/held.md'], leaseHours: 1 });
   const row = store.workClaims.get('commons', 'short');
   store.workClaims.set('commons', { ...row, leaseExpiresAt: new Date(Date.now() - 1000).toISOString() });
-  await owner.workClaims();
-  await owner.workClaims();
+  // The lease-first reaper owns expiry: a board read is pure and never
+  // sweeps. POST /sweep is the member-triggered equivalent of the reaper
+  // tick — it releases the lapsed lease and emits the expiry event.
+  await owner.sweepWorkClaims();
+  await owner.sweepWorkClaims();
   const expired = (await claimEvents(owner)).filter(e => e.action === 'lease_expired');
-  assert.equal(expired.length, 1, 'a later read of the board does not emit the expiry again');
+  assert.equal(expired.length, 1, 'a later sweep does not emit the expiry again');
   assert.deepEqual([expired[0].actor, expired[0].claimState, expired[0].ownerId, expired[0].previousOwnerId], ['owner', 'unclaimed', null, 'owner']);
   assert.deepEqual(expired[0].paths, ['docs/held.md']);
   assert.deepEqual(store.workClaims.get('commons', 'short').files, []);
