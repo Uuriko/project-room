@@ -5,7 +5,7 @@
 // ../cloudflare/node_modules/esbuild path — the hardcoded path assumes npm's
 // flat node_modules layout and breaks under pnpm's symlinked layout.
 import { createRequire } from 'node:module';
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 const cloudflareRequire = createRequire(join(process.cwd(), 'cloudflare', 'package.json'));
 const { build } = cloudflareRequire('esbuild');
@@ -16,7 +16,7 @@ for (const file of Object.keys(result.metafile.inputs).filter(p => p.includes('n
   while (dir !== '.' && (!existsSync(join(dir, 'package.json')) || !JSON.parse(readFileSync(join(dir, 'package.json'))).name)) dir = dirname(dir);
   if (dir === '.' || packages.has(dir)) continue;
   const pkg = JSON.parse(readFileSync(join(dir, 'package.json')));
-  const license = ['LICENSE', 'LICENSE.md', 'LICENSE.txt', 'LICENSE-MIT.txt'].find(name => existsSync(join(dir, name)));
+  const license = readdirSync(dir).find(name => name.toLowerCase().startsWith('license'));
   if (!license && pkg.name !== 'launder') throw new Error('Missing license for ' + pkg.name);
   packages.set(dir, `${pkg.name}@${pkg.version}\n${readFileSync(license ? join(dir, license) : 'scripts/vendor-licenses/apostrophe.txt', 'utf8')}`);
 }
