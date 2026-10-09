@@ -1,0 +1,4 @@
+UNIT m08 mode=mutate test=channel-live-status.test.js src=server/channel-adapters/telegram-config.mjs suites=3 breaks=6
+baseline_exit=0
+attempt flip ===->!== L16: exit=1 syntax_err=False
+VERDICT=killed restored_ok=True

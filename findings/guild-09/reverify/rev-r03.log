@@ -1,0 +1,12 @@
+REVERIFY rr03: origin/fo/rel25-feedback-durable
+rebased onto origin/main: True 
+touched files: 9
+my-slice suites to run: ['feedback-persistence.test.js', 'feedback-state-registration.test.js', 'operator-purge.test.js']
+of which new-on-branch (not in origin/main manifest): ['feedback-persistence.test.js', 'feedback-state-registration.test.js']
+server files: ['server/feedback-persistence.mjs', 'server/feedback-routes.mjs', 'server/feedback-store.mjs', 'server/purge-registry.mjs', 'server/writer-fence.mjs']
+excluded from run (claim/room or non-test): []
+suite feedback-persistence.test.js: exit=0
+suite feedback-state-registration.test.js: exit=0
+suite operator-purge.test.js: exit=0
+verdict: no red flags: suites green, no test/assert removal, clean rebase.
+scratch cleaned

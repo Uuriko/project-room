@@ -1,0 +1,26 @@
+{
+ "unit": "m07",
+ "mode": "mutate",
+ "test": "agent-card-signing.test.js",
+ "src": "server/agent-directory.mjs",
+ "suites": [
+  "agent-card-signing.test.js",
+  "agent-directory-a2a.test.mjs",
+  "agent-directory-owns-reach.test.mjs",
+  "agent-plugin-directory.test.js",
+  "agent-plugin-loop.test.js"
+ ],
+ "baseline_exit": 0,
+ "attempts": [
+  {
+   "break": "flip !==->=== L41",
+   "exit": 1,
+   "syntax_error": false,
+   "tail": " (file:///home/hatch/workspace/pr-wave1000-guild-09/server/agent-directory.mjs:249:5)\n      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-09/tests/agent-plugin-loop.test.js:64:13)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.start (node:internal/test_runner/test:1257:17)\n      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {\n    code: 'invalid_directory'\n  }\n"
+  }
+ ],
+ "verdict": "killed",
+ "killing_break": "flip !==->=== L41",
+ "killing_tail": " (file:///home/hatch/workspace/pr-wave1000-guild-09/server/agent-directory.mjs:249:5)\n      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-09/tests/agent-plugin-loop.test.js:64:13)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.start (node:internal/test_runner/test:1257:17)\n      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {\n    code: 'invalid_directory'\n  }\n",
+ "restored_ok": true
+}

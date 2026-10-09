@@ -1,0 +1,24 @@
+{
+ "unit": "m05",
+ "mode": "mutate",
+ "test": "inbox-import-guards.test.js",
+ "src": "server/channel-adapters/telegram.mjs",
+ "suites": [
+  "inbox-import-guards.test.js",
+  "inbox-quarantine-coverage.test.js",
+  "inbox-quarantine-review.test.js"
+ ],
+ "baseline_exit": 0,
+ "attempts": [
+  {
+   "break": "flip !==->=== L9",
+   "exit": 1,
+   "syntax_error": false,
+   "tail": "00-guild-09/tests/inbox-quarantine-review.test.js:467:33)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)\n      at Test.postRun (node:internal/test_runner/test:1537:19)\n      at Test.run (node:internal/test_runner/test:1462:12)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {\n    code: 'unsupported_telegram_update'\n  }\n"
+  }
+ ],
+ "verdict": "killed",
+ "killing_break": "flip !==->=== L9",
+ "killing_tail": "00-guild-09/tests/inbox-quarantine-review.test.js:467:33)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)\n      at Test.postRun (node:internal/test_runner/test:1537:19)\n      at Test.run (node:internal/test_runner/test:1462:12)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {\n    code: 'unsupported_telegram_update'\n  }\n",
+ "restored_ok": true
+}

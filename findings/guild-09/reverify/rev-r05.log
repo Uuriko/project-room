@@ -1,0 +1,12 @@
+REVERIFY rr05: origin/qa200-EP-03-invite-unavailable-hint
+rebased onto origin/main: False : To abort and get back to the state before "git rebase", run "git rebase --abort".
+Could not apply 71bef7ea4... i18n: bump hardcoded-ui-string baseline 4773 -> 4775 (invite_unavailable hint strings)
+
+touched files: 3
+my-slice suites to run: ['agent-error-invite-unavailable.test.js']
+of which new-on-branch (not in origin/main manifest): ['agent-error-invite-unavailable.test.js']
+server files: []
+excluded from run (claim/room or non-test): []
+suite agent-error-invite-unavailable.test.js: exit=0
+verdict: REBASE FAILED — branch may be stale/conflicted; results are on the un-rebased head.
+scratch cleaned

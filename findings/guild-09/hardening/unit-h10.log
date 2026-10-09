@@ -1,0 +1,4 @@
+UNIT h10 mode=harden test=channel-connection.test.js src=server/email-envelope.mjs suites=1 breaks=6
+baseline_exit=0
+attempt flip !==->=== L9: exit=1 syntax_err=False
+VERDICT=hardened restored_ok=True

@@ -1,0 +1,10 @@
+REVERIFY rr08: origin/wave300/telemetry-prod
+rebased onto origin/main: True 
+touched files: 34
+my-slice suites to run: ['tripwires.test.mjs']
+of which new-on-branch (not in origin/main manifest): ['tripwires.test.mjs']
+server files: ['server/http.mjs', 'server/tripwires.mjs']
+excluded from run (claim/room or non-test): []
+suite tripwires.test.mjs: exit=0
+verdict: no red flags: suites green, no test/assert removal, clean rebase.
+scratch cleaned

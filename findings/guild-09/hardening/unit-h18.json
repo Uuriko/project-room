@@ -1,0 +1,26 @@
+{
+ "unit": "h18",
+ "mode": "harden",
+ "test": "analytics-tail.test.js",
+ "src": "server/receipts-live.mjs",
+ "suites": [
+  "analytics-tail.test.js"
+ ],
+ "baseline_exit": 0,
+ "attempts": [
+  {
+   "break": "flip !==->=== L65",
+   "exit": 0,
+   "syntax_error": false,
+   "tail": "\"checksum\":{\"ms\":0,\"rowsRead\":0}},\"cpuMs\":173,\"heapBytes\":26059320,\"rooms\":0,\"sequences\":0,\"projectionBytes\":0,\"events\":0}\n\u2714 the tail records a productive room once, hides private text, and survives a bad insert (5214.236994ms)\n\u2714 a SQL failure in the tail is counted and does not escape (53.405736ms)\n\u2714 a done merged claim is a receipt in both the live list and the growth predicate (3568.579487ms)\n\u2139 tests 3\n\u2139 suites 0\n\u2139 pass 3\n\u2139 fail 0\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 15191.161408\n"
+  },
+  {
+   "break": "flip !==->=== L102",
+   "exit": 0,
+   "syntax_error": false,
+   "tail": "\"checksum\":{\"ms\":0,\"rowsRead\":0}},\"cpuMs\":148,\"heapBytes\":26090064,\"rooms\":0,\"sequences\":0,\"projectionBytes\":0,\"events\":0}\n\u2714 the tail records a productive room once, hides private text, and survives a bad insert (3201.023914ms)\n\u2714 a SQL failure in the tail is counted and does not escape (38.206667ms)\n\u2714 a done merged claim is a receipt in both the live list and the growth predicate (2236.864415ms)\n\u2139 tests 3\n\u2139 suites 0\n\u2139 pass 3\n\u2139 fail 0\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 13850.370476\n"
+  }
+ ],
+ "verdict": "false-positive",
+ "restored_ok": true
+}

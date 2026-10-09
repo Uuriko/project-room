@@ -1,0 +1,28 @@
+{
+ "unit": "h08",
+ "mode": "harden",
+ "test": "channel-import.test.js",
+ "src": "server/graph-email.mjs",
+ "suites": [
+  "channel-import.test.js"
+ ],
+ "baseline_exit": 0,
+ "attempts": [
+  {
+   "break": "flip ===->!== L7",
+   "exit": 0,
+   "syntax_error": false,
+   "tail": " (4052.563064ms)\n\u2714 a webhook backlog larger than one sync page drains in order across retries instead of blocking (5643.216636ms)\n\u2714 the sync helper refuses non-Telegram connections and rejects malformed recordings without side effects (4007.770944ms)\n\u2714 webhook secrets need entropy, a retried sync must carry the same recording, and a reconnect_required connection refuses deliveries (4100.605481ms)\n\u2139 tests 7\n\u2139 suites 0\n\u2139 pass 7\n\u2139 fail 0\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 35957.37025\n"
+  },
+  {
+   "break": "flip ===->!== L13",
+   "exit": 1,
+   "syntax_error": false,
+   "tail": "channel-import.test.js:139:75\n      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-09/tests/channel-import.test.js:139:144)\n      at async Test.run (node:internal/test_runner/test:1404:7)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {\n    code: 'invalid_email'\n  }\n\ntest at tests/channel-import.test.js:1:1\n\u2716 tests/channel-import.test.js (38814.445529ms)\n  'Promise resolution is still pending but the event loop has already resolved'\n"
+  }
+ ],
+ "verdict": "hardened",
+ "killing_break": "flip ===->!== L13",
+ "killing_tail": "channel-import.test.js:139:75\n      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-09/tests/channel-import.test.js:139:144)\n      at async Test.run (node:internal/test_runner/test:1404:7)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {\n    code: 'invalid_email'\n  }\n\ntest at tests/channel-import.test.js:1:1\n\u2716 tests/channel-import.test.js (38814.445529ms)\n  'Promise resolution is still pending but the event loop has already resolved'\n",
+ "restored_ok": true
+}

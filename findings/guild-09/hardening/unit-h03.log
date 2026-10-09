@@ -1,0 +1,4 @@
+UNIT h03 mode=harden test=admin-routes-autonomy-tier.test.js src=server/autonomy-tiers.mjs suites=1 breaks=6
+baseline_exit=0
+attempt flip ===->!== L90: exit=1 syntax_err=False
+VERDICT=hardened restored_ok=True

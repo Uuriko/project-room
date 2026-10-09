@@ -1,0 +1,22 @@
+{
+ "unit": "h03",
+ "mode": "harden",
+ "test": "admin-routes-autonomy-tier.test.js",
+ "src": "server/autonomy-tiers.mjs",
+ "suites": [
+  "admin-routes-autonomy-tier.test.js"
+ ],
+ "baseline_exit": 0,
+ "attempts": [
+  {
+   "break": "flip ===->!== L90",
+   "exit": 1,
+   "syntax_error": false,
+   "tail": "    at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-09/tests/admin-routes-autonomy-tier.test.js:75:5)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)\n      at Test.postRun (node:internal/test_runner/test:1537:19)\n      at Test.run (node:internal/test_runner/test:1462:12) {\n    status: 422,\n    code: 'invalid_autonomy_tier'\n  }\n"
+  }
+ ],
+ "verdict": "hardened",
+ "killing_break": "flip ===->!== L90",
+ "killing_tail": "    at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-09/tests/admin-routes-autonomy-tier.test.js:75:5)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)\n      at Test.postRun (node:internal/test_runner/test:1537:19)\n      at Test.run (node:internal/test_runner/test:1462:12) {\n    status: 422,\n    code: 'invalid_autonomy_tier'\n  }\n",
+ "restored_ok": true
+}

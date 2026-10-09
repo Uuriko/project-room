@@ -1,0 +1,20 @@
+REVERIFY rr10: origin/wave400/elegant-server
+rebased onto origin/main: False ce/PR links
+hint: 
+hint: It has been rescheduled; To edit the command before continuing, please
+hint: edit the todo list first:
+hint: 
+hint:     git rebase --edit-todo
+hint:     git rebase --continue
+
+touched files: 6
+my-slice suites to run: []
+of which new-on-branch (not in origin/main manifest): []
+server files: ['server/http.mjs', 'server/room-attachment-bytes.mjs', 'server/room-directory.mjs', 'server/room-export-html.mjs', 'server/room-export.mjs', 'server/work-claims.mjs']
+excluded from run (claim/room or non-test): []
+no my-slice tests; running top importing suites for touched server files: ['a2a-card-truth.test.js', 'a2a-jsonrpc.test.js', 'abuse-rate-buckets.test.js']
+suite a2a-card-truth.test.js: exit=0
+suite a2a-jsonrpc.test.js: exit=0
+suite abuse-rate-buckets.test.js: exit=0
+verdict: REBASE FAILED — branch may be stale/conflicted; results are on the un-rebased head.
+scratch cleaned

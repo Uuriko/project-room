@@ -1,0 +1,13 @@
+REVERIFY rr07: origin/fix/owner-dm-edit
+rebased onto origin/main: False git rebase --skip".
+hint: To abort and get back to the state before "git rebase", run "git rebase --abort".
+Could not apply d9dc50b04... DMs: the room owner cannot edit a DM between two other members
+
+touched files: 2
+my-slice suites to run: ['owner-dm-edit.test.js']
+of which new-on-branch (not in origin/main manifest): ['owner-dm-edit.test.js']
+server files: ['server/store.mjs']
+excluded from run (claim/room or non-test): []
+suite owner-dm-edit.test.js: exit=0
+verdict: REBASE FAILED — branch may be stale/conflicted; results are on the un-rebased head.
+scratch cleaned

@@ -1,0 +1,5 @@
+UNIT h18 mode=harden test=analytics-tail.test.js src=server/receipts-live.mjs suites=1 breaks=2
+baseline_exit=0
+attempt flip !==->=== L65: exit=0 syntax_err=False
+attempt flip !==->=== L102: exit=0 syntax_err=False
+VERDICT=false-positive restored_ok=True

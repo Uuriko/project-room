@@ -1,0 +1,22 @@
+{
+ "unit": "h11",
+ "mode": "harden",
+ "test": "agent-heartbeats.test.js",
+ "src": "server/agent-heartbeats.mjs",
+ "suites": [
+  "agent-heartbeats.test.js"
+ ],
+ "baseline_exit": 0,
+ "attempts": [
+  {
+   "break": "flip ===->!== L107",
+   "exit": 1,
+   "syntax_error": false,
+   "tail": "mjs:319:5)\n      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-09/tests/agent-heartbeats.test.js:503:5)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)\n      at Test.postRun (node:internal/test_runner/test:1537:19)\n      at Test.run (node:internal/test_runner/test:1462:12) {\n    status: 422,\n    code: 'invalid_heartbeat'\n  }\n"
+  }
+ ],
+ "verdict": "hardened",
+ "killing_break": "flip ===->!== L107",
+ "killing_tail": "mjs:319:5)\n      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-09/tests/agent-heartbeats.test.js:503:5)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)\n      at Test.postRun (node:internal/test_runner/test:1537:19)\n      at Test.run (node:internal/test_runner/test:1462:12) {\n    status: 422,\n    code: 'invalid_heartbeat'\n  }\n",
+ "restored_ok": true
+}

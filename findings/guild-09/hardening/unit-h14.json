@@ -1,0 +1,50 @@
+{
+ "unit": "h14",
+ "mode": "harden",
+ "test": "audit-wave-low-a.test.js",
+ "src": "server/inbox-spam.mjs",
+ "suites": [
+  "audit-wave-low-a.test.js"
+ ],
+ "baseline_exit": 0,
+ "attempts": [
+  {
+   "break": "flip ===->!== L12",
+   "exit": 0,
+   "syntax_error": false,
+   "tail": "\u2714 L-3: stitch.rotate receipts report each account's own indexed count (82.024294ms)\n\u2714 L-12: createQuarantineQueue uses the injected now() for at and reviewedAt (18.012201ms)\n\u2714 L-13: repeated message ids collapse to one node; messageCount excludes duplicates (50.232274ms)\n\u2714 L-14: expired attachment rows are purged so the records quota stays bounded (49.751332ms)\n\u2139 tests 4\n\u2139 suites 0\n\u2139 pass 4\n\u2139 fail 0\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 4798.545263\n"
+  },
+  {
+   "break": "flip !==->=== L18",
+   "exit": 0,
+   "syntax_error": false,
+   "tail": "\u2714 L-3: stitch.rotate receipts report each account's own indexed count (21.965774ms)\n\u2714 L-12: createQuarantineQueue uses the injected now() for at and reviewedAt (1.114132ms)\n\u2714 L-13: repeated message ids collapse to one node; messageCount excludes duplicates (9.086516ms)\n\u2714 L-14: expired attachment rows are purged so the records quota stays bounded (7.363019ms)\n\u2139 tests 4\n\u2139 suites 0\n\u2139 pass 4\n\u2139 fail 0\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 4246.448047\n"
+  },
+  {
+   "break": "flip ===->!== L20",
+   "exit": 0,
+   "syntax_error": false,
+   "tail": "\u2714 L-3: stitch.rotate receipts report each account's own indexed count (39.30187ms)\n\u2714 L-12: createQuarantineQueue uses the injected now() for at and reviewedAt (4.883449ms)\n\u2714 L-13: repeated message ids collapse to one node; messageCount excludes duplicates (24.291615ms)\n\u2714 L-14: expired attachment rows are purged so the records quota stays bounded (248.786926ms)\n\u2139 tests 4\n\u2139 suites 0\n\u2139 pass 4\n\u2139 fail 0\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 4493.378328\n"
+  },
+  {
+   "break": "flip ===->!== L21",
+   "exit": 0,
+   "syntax_error": false,
+   "tail": "\u2714 L-3: stitch.rotate receipts report each account's own indexed count (46.252882ms)\n\u2714 L-12: createQuarantineQueue uses the injected now() for at and reviewedAt (9.020527ms)\n\u2714 L-13: repeated message ids collapse to one node; messageCount excludes duplicates (22.098724ms)\n\u2714 L-14: expired attachment rows are purged so the records quota stays bounded (20.407255ms)\n\u2139 tests 4\n\u2139 suites 0\n\u2139 pass 4\n\u2139 fail 0\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 2209.814951\n"
+  },
+  {
+   "break": "flip !==->=== L23",
+   "exit": 0,
+   "syntax_error": false,
+   "tail": "\u2714 L-3: stitch.rotate receipts report each account's own indexed count (92.14284ms)\n\u2714 L-12: createQuarantineQueue uses the injected now() for at and reviewedAt (26.936123ms)\n\u2714 L-13: repeated message ids collapse to one node; messageCount excludes duplicates (15.856366ms)\n\u2714 L-14: expired attachment rows are purged so the records quota stays bounded (40.118166ms)\n\u2139 tests 4\n\u2139 suites 0\n\u2139 pass 4\n\u2139 fail 0\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 2668.340453\n"
+  },
+  {
+   "break": "flip !==->=== L24",
+   "exit": 0,
+   "syntax_error": false,
+   "tail": "\u2714 L-3: stitch.rotate receipts report each account's own indexed count (65.433787ms)\n\u2714 L-12: createQuarantineQueue uses the injected now() for at and reviewedAt (4.380725ms)\n\u2714 L-13: repeated message ids collapse to one node; messageCount excludes duplicates (14.049725ms)\n\u2714 L-14: expired attachment rows are purged so the records quota stays bounded (49.348527ms)\n\u2139 tests 4\n\u2139 suites 0\n\u2139 pass 4\n\u2139 fail 0\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 3353.380596\n"
+  }
+ ],
+ "verdict": "false-positive",
+ "restored_ok": true
+}

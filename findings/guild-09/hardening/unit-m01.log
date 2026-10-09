@@ -1,0 +1,4 @@
+UNIT m01 mode=mutate test=inbox-spam.test.js src=server/inbox-spam.mjs suites=5 breaks=6
+baseline_exit=0
+attempt flip ===->!== L12: exit=1 syntax_err=False
+VERDICT=killed restored_ok=True

@@ -1,0 +1,24 @@
+{
+ "unit": "m08",
+ "mode": "mutate",
+ "test": "channel-live-status.test.js",
+ "src": "server/channel-adapters/telegram-config.mjs",
+ "suites": [
+  "channel-live-status.test.js",
+  "channel-send-budgets.test.js",
+  "inbox-send-budget.test.js"
+ ],
+ "baseline_exit": 0,
+ "attempts": [
+  {
+   "break": "flip ===->!== L16",
+   "exit": 1,
+   "syntax_error": false,
+   "tail": "t.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-09/tests/inbox-send-budget.test.js:83:31)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)\n      at Test.postRun (node:internal/test_runner/test:1537:19)\n      at Test.run (node:internal/test_runner/test:1462:12)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7)\n"
+  }
+ ],
+ "verdict": "killed",
+ "killing_break": "flip ===->!== L16",
+ "killing_tail": "t.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-09/tests/inbox-send-budget.test.js:83:31)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)\n      at Test.postRun (node:internal/test_runner/test:1537:19)\n      at Test.run (node:internal/test_runner/test:1462:12)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7)\n",
+ "restored_ok": true
+}

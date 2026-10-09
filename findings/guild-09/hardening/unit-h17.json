@@ -1,0 +1,22 @@
+{
+ "unit": "h17",
+ "mode": "harden",
+ "test": "webhook-dispatch.test.js",
+ "src": "server/webhook-dispatch.mjs",
+ "suites": [
+  "webhook-dispatch.test.js"
+ ],
+ "baseline_exit": 0,
+ "attempts": [
+  {
+   "break": "flip ===->!== L57",
+   "exit": 1,
+   "syntax_error": false,
+   "tail": "workspace/pr-wave1000-guild-09/tests/webhook-dispatch.test.js:45:21)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)\n      at Test.postRun (node:internal/test_runner/test:1537:19)\n      at Test.run (node:internal/test_runner/test:1462:12)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {\n    code: 'invalid_dispatch'\n  }\n"
+  }
+ ],
+ "verdict": "hardened",
+ "killing_break": "flip ===->!== L57",
+ "killing_tail": "workspace/pr-wave1000-guild-09/tests/webhook-dispatch.test.js:45:21)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)\n      at Test.postRun (node:internal/test_runner/test:1537:19)\n      at Test.run (node:internal/test_runner/test:1462:12)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {\n    code: 'invalid_dispatch'\n  }\n",
+ "restored_ok": true
+}

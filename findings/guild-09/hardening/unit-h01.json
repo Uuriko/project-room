@@ -1,0 +1,22 @@
+{
+ "unit": "h01",
+ "mode": "harden",
+ "test": "analytics-derive.test.js",
+ "src": "server/analytics/derive-tables.mjs",
+ "suites": [
+  "analytics-derive.test.js"
+ ],
+ "baseline_exit": 0,
+ "attempts": [
+  {
+   "break": "flip ===->!== L12",
+   "exit": 1,
+   "syntax_error": false,
+   "tail": "tch/workspace/pr-wave1000-guild-09/tests/analytics-derive.test.js:19:10)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.start (node:internal/test_runner/test:1257:17)\n      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: 'share_links:a',\n    expected: 'share_links:a',\n    operator: 'notStrictEqual',\n    diff: 'simple'\n  }\n"
+  }
+ ],
+ "verdict": "hardened",
+ "killing_break": "flip ===->!== L12",
+ "killing_tail": "tch/workspace/pr-wave1000-guild-09/tests/analytics-derive.test.js:19:10)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.start (node:internal/test_runner/test:1257:17)\n      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: 'share_links:a',\n    expected: 'share_links:a',\n    operator: 'notStrictEqual',\n    diff: 'simple'\n  }\n",
+ "restored_ok": true
+}

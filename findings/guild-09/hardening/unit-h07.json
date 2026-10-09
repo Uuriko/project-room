@@ -1,0 +1,22 @@
+{
+ "unit": "h07",
+ "mode": "harden",
+ "test": "agent-card-deploy-consistency.test.js",
+ "src": "server/agent-card-signing.mjs",
+ "suites": [
+  "agent-card-deploy-consistency.test.js"
+ ],
+ "baseline_exit": 0,
+ "attempts": [
+  {
+   "break": "flip !==->=== L50",
+   "exit": 1,
+   "syntax_error": false,
+   "tail": "wave1000-guild-09/tests/agent-card-deploy-consistency.test.js:46:21)\n      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-09/tests/agent-card-deploy-consistency.test.js:256:32)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)\n      at Test.postRun (node:internal/test_runner/test:1537:19) {\n    code: 'invalid_signing_input'\n  }\n"
+  }
+ ],
+ "verdict": "hardened",
+ "killing_break": "flip !==->=== L50",
+ "killing_tail": "wave1000-guild-09/tests/agent-card-deploy-consistency.test.js:46:21)\n      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-09/tests/agent-card-deploy-consistency.test.js:256:32)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)\n      at Test.postRun (node:internal/test_runner/test:1537:19) {\n    code: 'invalid_signing_input'\n  }\n",
+ "restored_ok": true
+}

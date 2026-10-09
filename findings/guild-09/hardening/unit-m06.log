@@ -1,0 +1,4 @@
+UNIT m06 mode=mutate test=agent-plugin-sentinel-secrets.test.js src=server/agent-webhook-subscriptions.mjs suites=6 breaks=6
+baseline_exit=0
+attempt flip !==->=== L51: exit=1 syntax_err=False
+VERDICT=killed restored_ok=True

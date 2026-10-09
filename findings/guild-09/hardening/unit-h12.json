@@ -1,0 +1,20 @@
+{
+ "unit": "h12",
+ "mode": "harden",
+ "test": "messages-backfill.test.js",
+ "src": "server/writer-fence.mjs",
+ "suites": [
+  "messages-backfill.test.js"
+ ],
+ "baseline_exit": 124,
+ "attempts": [
+  {
+   "break": "flip ===->!== L496",
+   "exit": 124,
+   "syntax_error": false,
+   "tail": "TIMEOUT"
+  }
+ ],
+ "verdict": "baseline-red",
+ "restored_ok": true
+}

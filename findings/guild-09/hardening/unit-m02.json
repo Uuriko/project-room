@@ -1,0 +1,25 @@
+{
+ "unit": "m02",
+ "mode": "mutate",
+ "test": "receipts-route.test.js",
+ "src": "server/receipts-live.mjs",
+ "suites": [
+  "receipts-route.test.js",
+  "analytics-tail.test.js",
+  "public-receipts-toggle.test.js",
+  "receipts-live-filter.test.js"
+ ],
+ "baseline_exit": 0,
+ "attempts": [
+  {
+   "break": "flip !==->=== L65",
+   "exit": 1,
+   "syntax_error": false,
+   "tail": "ync_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)\n      at Test.postRun (node:internal/test_runner/test:1537:19)\n      at Test.run (node:internal/test_runner/test:1462:12)\n      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {\n    generatedMessage: false,\n    code: 'ERR_ASSERTION',\n    actual: false,\n    expected: true,\n    operator: '==',\n    diff: 'simple'\n  }\n"
+  }
+ ],
+ "verdict": "killed",
+ "killing_break": "flip !==->=== L65",
+ "killing_tail": "ync_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)\n      at Test.postRun (node:internal/test_runner/test:1537:19)\n      at Test.run (node:internal/test_runner/test:1462:12)\n      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {\n    generatedMessage: false,\n    code: 'ERR_ASSERTION',\n    actual: false,\n    expected: true,\n    operator: '==',\n    diff: 'simple'\n  }\n",
+ "restored_ok": true
+}

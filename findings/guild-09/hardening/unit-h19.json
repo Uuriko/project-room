@@ -1,0 +1,22 @@
+{
+ "unit": "h19",
+ "mode": "harden",
+ "test": "notify-policy.test.js",
+ "src": "server/notify-prefs.mjs",
+ "suites": [
+  "notify-policy.test.js"
+ ],
+ "baseline_exit": 0,
+ "attempts": [
+  {
+   "break": "flip !==->=== L29",
+   "exit": 1,
+   "syntax_error": false,
+   "tail": "/pr-wave1000-guild-09/server/notify-policy.mjs:228:17)\n      at decide (file:///home/hatch/workspace/pr-wave1000-guild-09/server/notify-policy.mjs:300:30)\n      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-09/tests/notify-policy.test.js:200:22)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:969:18) {\n    code: 'invalid_notify'\n  }\n"
+  }
+ ],
+ "verdict": "hardened",
+ "killing_break": "flip !==->=== L29",
+ "killing_tail": "/pr-wave1000-guild-09/server/notify-policy.mjs:228:17)\n      at decide (file:///home/hatch/workspace/pr-wave1000-guild-09/server/notify-policy.mjs:300:30)\n      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-09/tests/notify-policy.test.js:200:22)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:969:18) {\n    code: 'invalid_notify'\n  }\n",
+ "restored_ok": true
+}

@@ -1,0 +1,26 @@
+{
+ "unit": "m01",
+ "mode": "mutate",
+ "test": "inbox-spam.test.js",
+ "src": "server/inbox-spam.mjs",
+ "suites": [
+  "inbox-spam.test.js",
+  "audit-wave-low-a.test.js",
+  "inbox-spam-guard.test.js",
+  "spam-quarantine-journal.test.js",
+  "spam-shadow.test.js"
+ ],
+ "baseline_exit": 0,
+ "attempts": [
+  {
+   "break": "flip ===->!== L12",
+   "exit": 1,
+   "syntax_error": false,
+   "tail": "ks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)\n      at Test.postRun (node:internal/test_runner/test:1537:19)\n      at Test.run (node:internal/test_runner/test:1462:12)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {\n    generatedMessage: false,\n    code: 'ERR_ASSERTION',\n    actual: false,\n    expected: true,\n    operator: 'strictEqual',\n    diff: 'simple'\n  }\n"
+  }
+ ],
+ "verdict": "killed",
+ "killing_break": "flip ===->!== L12",
+ "killing_tail": "ks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)\n      at Test.postRun (node:internal/test_runner/test:1537:19)\n      at Test.run (node:internal/test_runner/test:1462:12)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {\n    generatedMessage: false,\n    code: 'ERR_ASSERTION',\n    actual: false,\n    expected: true,\n    operator: 'strictEqual',\n    diff: 'simple'\n  }\n",
+ "restored_ok": true
+}

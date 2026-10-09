@@ -1,0 +1,24 @@
+{
+ "unit": "m03",
+ "mode": "mutate",
+ "test": "a2a-card-truth.test.js",
+ "src": "server/http.mjs",
+ "suites": [
+  "a2a-card-truth.test.js",
+  "a2a-jsonrpc.test.js",
+  "abuse-rate-buckets.test.js"
+ ],
+ "baseline_exit": 0,
+ "attempts": [
+  {
+   "break": "flip !==->=== L148",
+   "exit": 1,
+   "syntax_error": false,
+   "tail": "/pr-wave1000-guild-09/tests/abuse-rate-buckets.test.js:26:18)\n      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-09/tests/abuse-rate-buckets.test.js:71:27)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)\n      at Test.postRun (node:internal/test_runner/test:1537:19)\n      at Test.run (node:internal/test_runner/test:1462:12)\n"
+  }
+ ],
+ "verdict": "killed",
+ "killing_break": "flip !==->=== L148",
+ "killing_tail": "/pr-wave1000-guild-09/tests/abuse-rate-buckets.test.js:26:18)\n      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-09/tests/abuse-rate-buckets.test.js:71:27)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)\n      at Test.postRun (node:internal/test_runner/test:1537:19)\n      at Test.run (node:internal/test_runner/test:1462:12)\n",
+ "restored_ok": true
+}

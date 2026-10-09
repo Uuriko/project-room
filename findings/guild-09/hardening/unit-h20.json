@@ -1,0 +1,22 @@
+{
+ "unit": "h20",
+ "mode": "harden",
+ "test": "mention-lifecycle.test.js",
+ "src": "server/mention-lifecycle.mjs",
+ "suites": [
+  "mention-lifecycle.test.js"
+ ],
+ "baseline_exit": 0,
+ "attempts": [
+  {
+   "break": "flip ===->!== L29",
+   "exit": 1,
+   "syntax_error": false,
+   "tail": "     at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-09/tests/mention-lifecycle.test.js:329:10)\n      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n      at async Test.run (node:internal/test_runner/test:1404:7)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {\n    generatedMessage: false,\n    code: 'ERR_ASSERTION',\n    actual: 500,\n    expected: 200,\n    operator: 'strictEqual',\n    diff: 'simple'\n  }\n"
+  }
+ ],
+ "verdict": "hardened",
+ "killing_break": "flip ===->!== L29",
+ "killing_tail": "     at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-09/tests/mention-lifecycle.test.js:329:10)\n      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n      at async Test.run (node:internal/test_runner/test:1404:7)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {\n    generatedMessage: false,\n    code: 'ERR_ASSERTION',\n    actual: 500,\n    expected: 200,\n    operator: 'strictEqual',\n    diff: 'simple'\n  }\n",
+ "restored_ok": true
+}

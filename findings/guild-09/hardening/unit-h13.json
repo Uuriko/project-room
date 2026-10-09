@@ -1,0 +1,22 @@
+{
+ "unit": "h13",
+ "mode": "harden",
+ "test": "channel-drain.test.js",
+ "src": "server/channel-import.mjs",
+ "suites": [
+  "channel-drain.test.js"
+ ],
+ "baseline_exit": 0,
+ "attempts": [
+  {
+   "break": "flip ===->!== L26",
+   "exit": 1,
+   "syntax_error": false,
+   "tail": "channel-drain.test.js:187:13)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)\n      at Test.postRun (node:internal/test_runner/test:1537:19)\n      at Test.run (node:internal/test_runner/test:1462:12)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {\n    status: 422,\n    code: 'weak_webhook_secret',\n    headers: null\n  }\n"
+  }
+ ],
+ "verdict": "hardened",
+ "killing_break": "flip ===->!== L26",
+ "killing_tail": "channel-drain.test.js:187:13)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)\n      at Test.postRun (node:internal/test_runner/test:1537:19)\n      at Test.run (node:internal/test_runner/test:1462:12)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {\n    status: 422,\n    code: 'weak_webhook_secret',\n    headers: null\n  }\n",
+ "restored_ok": true
+}

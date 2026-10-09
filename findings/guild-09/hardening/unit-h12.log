@@ -1,0 +1,4 @@
+UNIT h12 mode=harden test=messages-backfill.test.js src=server/writer-fence.mjs suites=1 breaks=4
+baseline_exit=124
+attempt flip ===->!== L496: exit=124 syntax_err=False
+VERDICT=hardened restored_ok=True

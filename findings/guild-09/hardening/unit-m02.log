@@ -1,0 +1,4 @@
+UNIT m02 mode=mutate test=receipts-route.test.js src=server/receipts-live.mjs suites=4 breaks=2
+baseline_exit=0
+attempt flip !==->=== L65: exit=1 syntax_err=False
+VERDICT=killed restored_ok=True

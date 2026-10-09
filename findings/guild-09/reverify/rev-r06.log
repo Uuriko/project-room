@@ -1,0 +1,12 @@
+REVERIFY rr06: origin/qa8/board-terminal-errors
+rebased onto origin/main: False back to the state before "git rebase", run "git rebase --abort".
+Could not apply db43c1af9... qa8: closed/done Board items answer 409 work_claim_terminal on every verb; agent hints for unmapped codes
+
+touched files: 4
+my-slice suites to run: ['qa8-board-terminal-errors.test.js']
+of which new-on-branch (not in origin/main manifest): ['qa8-board-terminal-errors.test.js']
+server files: ['server/work-claim-routes.mjs']
+excluded from run (claim/room or non-test): []
+suite qa8-board-terminal-errors.test.js: exit=0
+verdict: REBASE FAILED — branch may be stale/conflicted; results are on the un-rebased head.
+scratch cleaned

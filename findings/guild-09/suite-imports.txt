@@ -1,0 +1,881 @@
+a2a-card-truth.test.js :: from "../deploy/agent-discovery.mjs"|from "../server/a2a-jsonrpc.mjs"|from "../server/store.mjs"|from "../server/http.mjs"|
+a2a-jsonrpc.test.js :: from "../server/a2a-jsonrpc.mjs"|from "../server/store.mjs"|from "../server/http.mjs"|
+abuse-rate-buckets.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../server/abuse-rate-buckets.mjs"|
+acceptance-fixture.test.js :: from "../scripts/acceptance-fixture.mjs"|
+access-request-cancel.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/access-requests.mjs"|from "../server/identity-ratelimit.mjs"|
+access-request-limits.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/access-requests.mjs"|from "../server/identity-ratelimit.mjs"|
+access-request-status-next.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/access-requests.mjs"|from "../server/identity-ratelimit.mjs"|
+access-request-status-rate.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|
+access-request-upgrade.test.mjs :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/access-requests.mjs"|from "../server/http.mjs"|
+access-requests-admin-gates.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/access-requests.mjs"|from "../server/identity-ratelimit.mjs"|
+access-requests.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/access-requests.mjs"|from "../server/identity-ratelimit.mjs"|
+access-review.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+account-client.test.js :: from "../src/client.js"|
+account-deletion-residual-sec04.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/account-deletion.mjs"|
+account-deletion-residual.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/account-deletion.mjs"|
+account-deletion.test.js :: from "../src/account-deletion.mjs"|
+account-login-methods.test.js :: from "../server/store.mjs"|from "../server/account-login-methods.mjs"|
+account-management.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|
+account-passkeys-http.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../server/account-passkeys.mjs"|
+account-passkeys.test.js :: from "../server/account-passkeys.mjs"|
+account-settings-http.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../server/github-oauth.mjs"|
+account-settings-ui.test.js :: from "../src/account-settings-ui.js"|
+account-setup-ui.test.js :: from "../src/account-setup-ui.js"|
+acquisition-loops.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../server/templates.mjs"|
+action-classes.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/store.mjs"|from "../server/action-classes.mjs"|from "../src/events.js"|
+action-recovery.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../src/events.js"|from "../src/workflow.js"|from "../src/client.js"|
+activity.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+admin-guide-doc.test.js :: 
+admin-routes-autonomy-tier.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|from "../server/autonomy-tiers.mjs"|
+agent-access-requests-http.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|
+agent-autonomy-client.test.js :: from "../client/room-agent.mjs"|from "../server/outside-agents.mjs"|from "../server/store.mjs"|from "../server/http.mjs"|
+agent-browser-signin.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|
+agent-capabilities-http.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../server/autonomy-tiers.mjs"|
+agent-card-deploy-consistency.test.js :: from "../scripts/prod-deploy-smoke.mjs"|from "../server/agent-card-signing.mjs"|
+agent-card-signing.test.js :: from "../server/agent-card-signing.mjs"|from "../server/agent-directory.mjs"|
+agent-card-wellknown.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../deploy/agent-discovery.mjs"|from "../deploy/agent-card-key.mjs"|
+agent-connect-page.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../server/routes/agent-connect.mjs"|
+agent-connection.test.js :: from "../client/room-agent.mjs"|from "../client/agent-connection.mjs"|from "../server/store.mjs"|from "../server/http.mjs"|
+agent-connections-identityid.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|
+agent-directory-a2a.test.mjs :: from "../server/agent-directory.mjs"|from "../server/agent-card-signing.mjs"|
+agent-directory-owns-reach.test.mjs :: from "../server/agent-directory.mjs"|from "../server/agent-card-signing.mjs"|
+agent-discovery-transport.test.js :: from "../client/room-agent.mjs"|
+agent-discovery.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../deploy/room-entry.mjs"|from "../deploy/agent-discovery.mjs"|
+agent-doctor.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../client/room-agent.mjs"|
+agent-enrollment-atomic.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|
+agent-enrollment.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|from "../server/recovery.mjs"|
+agent-error-dm-and-types.test.js :: from "../src/agent-error.mjs"|from "../server/store.mjs"|
+agent-error-hints.test.js :: from "../src/agent-error.mjs"|
+agent-error-next.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../client/room-agent.mjs"|from "../client/work-actions.mjs"|
+agent-first-run-fallback.test.js :: from "../src/agent-first-run.js"|
+agent-fleet.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../server/recovery.mjs"|from "../server/autonomy-tiers.mjs"|
+agent-guide-doc.test.js :: 
+agent-handoff.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../client/room-agent.mjs"|
+agent-heartbeats.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/store.mjs"|from "../server/http.mjs"|from "../server/agent-heartbeats.mjs"|
+agent-identities-deceptive-name.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|
+agent-identities-recoverable-credential.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|
+agent-identities.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../client/room-agent.mjs"|
+agent-identity-secrets.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|
+agent-inbox-keys.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../client/agent-connection.mjs"|
+agent-inbox.test.js :: from "../client/reply-actions.mjs"|from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|
+agent-invite-ui.test.js :: from "../src/agent-invite-ui.js"|
+agent-invites-mail-unconfigured.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|
+agent-invites.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|
+agent-key-registry.test.js :: from "../server/store.mjs"|from "../server/agent-card-signing.mjs"|from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|
+agent-lanes.test.js :: from "../server/agent-lanes.mjs"|from "../server/work-matchmaking.mjs"|
+agent-mentions-inbox.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../client/agent-connection.mjs"|from "../scripts/mcp-test-client.mjs"|
+agent-onboarding-drift.test.mjs :: 
+agent-onboarding.test.js :: from "../scripts/agent-onboard.mjs"|
+agent-plugin-api-keys.test.js :: from "../server/agent-api-keys.mjs"|
+agent-plugin-directory.test.js :: from "../server/agent-directory.mjs"|from "../server/agent-card-signing.mjs"|
+agent-plugin-http.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../server/agent-plugin-manifest.mjs"|from "../server/agent-card-signing.mjs"|
+agent-plugin-loop.test.js :: from "../server/agent-plugin-manifest.mjs"|from "../server/agent-api-keys.mjs"|from "../server/agent-directory.mjs"|from "../server/agent-card-signing.mjs"|
+agent-plugin-manifest.test.js :: from "../server/agent-plugin-manifest.mjs"|
+agent-plugin-sentinel-secrets.test.js :: from "../server/agent-webhook-subscriptions.mjs"|
+agent-plugin-webhook-subs.test.js :: from "../server/agent-webhook-subscriptions.mjs"|
+agent-presence-http.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|
+agent-resume.test.js :: 
+agent-safety-q3d.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../src/events.js"|from "../server/autonomy-tiers.mjs"|
+agent-scope-handoff.test.js :: 
+agent-self-onboarding.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/agent-identities.mjs"|
+agent-setup.test.js :: from "../server/access-requests.mjs"|from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/http.mjs"|
+agent-signin-autocomplete.test.js :: from "../src/agent-signin-ui.js"|
+agent-signin-onboarding.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/autonomy-tiers.mjs"|from "../src/agent-first-run.js"|
+agent-signin-ui.test.js :: from "../src/agent-signin-ui.js"|
+agent-type-catalog.test.js :: from "../src/room-roster.js"|from "../deploy/room-entry.mjs"|from "../scripts/acceptance-fixture.mjs"|from "../src/events.js"|
+agent-upgrade.test.js :: from "../scripts/runtime-package.mjs"|from "../scripts/frozen-runtime-fixture.mjs"|from "../scripts/frozen-runtime-fixture.mjs"|from "../server/store.mjs"|
+agent-wake-poll.test.js :: from "../server/store.mjs"|from "../server/agent-rooms.mjs"|from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|
+agent-wake.test.js :: 
+agent-work-preflight.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../client/room-agent.mjs"|from "../server/recovery.mjs"|
+agent-work-search.test.js :: 
+agent-work-sessions-http.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|
+agent-write-guide.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../client/room-agent.mjs"|
+analytics-activation-funnel.test.js :: from "../server/analytics/activation-funnel.mjs"|
+analytics-attribution.test.js :: from "../server/analytics/attribution.mjs"|
+analytics-backfill.test.js :: from "../scripts/analytics-backfill.mjs"|from "../server/analytics/metrics.mjs"|from "../server/analytics/tail.mjs"|
+analytics-budget.test.js :: from "../server/store.mjs"|from "../src/events.js"|from "../server/analytics/tail.mjs"|
+analytics-catalog.test.js :: from "../server/analytics/catalog.mjs"|from "../server/analytics/schema.mjs"|
+analytics-context.test.js :: from "../server/analytics/context.mjs"|
+analytics-csv-export.test.js :: from "../server/csv-export.mjs"|
+analytics-dashboard-honesty.test.js :: from "../scripts/analytics-backfill.mjs"|from "../server/analytics/dashboard-honesty.mjs"|from "../server/analytics/index.mjs"|
+analytics-derive.test.js :: from "../server/analytics/derive-tables.mjs"|from "../server/analytics/schema.mjs"|from "../server/analytics/tail.mjs"|
+analytics-export.test.js :: from "../cloudflare/platform-fakes.mjs"|from "../server/analytics/export.mjs"|from "../server/analytics/schema.mjs"|
+analytics-map.test.js :: from "../server/analytics/map-room-event.mjs"|
+analytics-retention.test.js :: from "../server/retention.mjs"|
+analytics-sampling.test.js :: from "../server/analytics/tail.mjs"|from "../server/analytics/metrics.mjs"|from "../server/analytics/schema.mjs"|from "../server/analytics/retention.mjs"|
+analytics-tail.test.js :: from "../server/receipts-live.mjs"|from "../server/analytics/map-room-event.mjs"|from "../server/analytics/schema.mjs"|from "../server/analytics/tail.mjs"|
+anon-auth-before-validation.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|
+answer-engine-check.test.js :: from "../scripts/answer-engine-check.mjs"|
+asset-packaging.test.js :: 
+assignment-watcher.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|from "../client/assignment-watcher.mjs"|
+attachments.test.js :: from "../server/attachments.mjs"|
+attention-read-budget.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/http.mjs"|from "../client/room-agent.mjs"|
+attention.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/store.mjs"|from "../server/action-classes.mjs"|
+audit-receipts.test.js :: from "../src/audit-receipts.mjs"|
+audit-retention.test.js :: from "../server/audit-retention.mjs"|
+audit-wave-3b.test.js :: from "../server/agent-heartbeats.mjs"|from "../server/inbox-approval.mjs"|from "../server/inbox-agent-routing.mjs"|from "../server/inbox-stitch.mjs"|
+audit-wave-3c.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|
+audit-wave-low-a.test.js :: from "../server/inbox-stitch-store.mjs"|from "../server/inbox-stitch.mjs"|from "../server/inbox-spam.mjs"|from "../server/inbox-threads.mjs"|
+audit-wave-low-b.test.js :: from "../server/dm-consents.mjs"|from "../server/autonomy-tiers.mjs"|from "../server/dispute-arbiters.mjs"|from "../server/github-oauth.mjs"|
+audit-wave-low-c.test.js :: from "../server/next-actions.mjs"|from "../server/referral-invites.mjs"|from "../server/reputation.mjs"|from "../server/work-claims.mjs"|
+audit-wave-low-d.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|from "../src/outside-agents.mjs"|
+audit2-channel-manage-touch.test.js :: 
+audit2-guest-hint-contrast.test.js :: 
+audit2-light-theme-surfaces.test.js :: 
+auth-signin-ui.test.js :: from "../src/auth-signin-ui.js"|
+autonomy-tiers.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+backlog.test.js :: 
+backup-table-parity.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|from "../server/backup.mjs"|
+backup-verify.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|from "../scripts/backup-verify.mjs"|
+begin-scope-retry.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../client/room-agent.mjs"|from "../client/work-actions.mjs"|
+begin-work.test.js :: from "../client/begin-work.mjs"|from "../client/mcp-stdio.mjs"|from "../src/room-mcp-join.js"|
+board-empty-copy.test.js :: from "../src/board-ui.js"|
+board-needs-me.test.js :: from "../src/board-mine.js"|
+board-new-item.test.js :: from "../src/board-ui.js"|
+board-projection.test.js :: from "../src/board.js"|
+board-ui-helpers.test.js :: from "../src/board-ui.js"|
+board-waiting.test.js :: from "../src/board-ui.js"|
+board-wake-ready-work.test.js :: from "../client/room-agent.mjs"|from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/http.mjs"|
+board-wake.test.js :: from "../client/room-agent.mjs"|from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/http.mjs"|
+bonds-m3.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../server/bonds.mjs"|from "../server/autonomy-tiers.mjs"|
+bonds.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../server/agent-heartbeats.mjs"|from "../server/bonds.mjs"|
+boot-config.test.js :: from "../server/boot-config.mjs"|from "../deploy/agent-discovery.mjs"|from "../deploy/agent-card-signed.mjs"|from "../scripts/sign-agent-card.mjs"|
+bootstrap.test.js :: from "../server/bootstrap.mjs"|from "../src/events.js"|
+bounty-anti-flake.test.js :: from "../server/bounty-escrow.mjs"|
+bounty-approval-modes.test.js :: from "../server/bounty-escrow.mjs"|
+bounty-conservation-check.test.js :: from "../server/bounty-escrow.mjs"|
+bounty-disputes.test.js :: from "../server/bounty-disputes.mjs"|
+bounty-ensure-partial-migration.test.js :: from "../server/bounty-escrow.mjs"|
+bounty-ensure-readonly.test.js :: from "../cloudflare/storage.mjs"|from "../server/bounty-escrow.mjs"|
+bounty-escrow-http.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../server/bounty-escrow.mjs"|from "../server/autonomy-tiers.mjs"|
+bounty-escrow-release-probes.test.js :: from "../server/bounty-escrow.mjs"|
+bounty-escrow-routes.test.js :: from "../server/bounty-escrow.mjs"|from "../server/bounty-escrow-routes.mjs"|from "../server/autonomy-tiers.mjs"|
+bounty-escrow.test.js :: from "../server/bounty-escrow.mjs"|
+bounty-free-miss.test.js :: from "../server/bounty-escrow.mjs"|from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|
+bounty-idempotency-scope.test.js :: from "../server/bounty-escrow.mjs"|
+bounty-identity.test.js :: from "../server/bounty-escrow.mjs"|from "../server/bounty-reputation.mjs"|
+bounty-journal-replay.test.js :: from "../server/bounty-escrow.mjs"|
+bounty-mcp-idempotency.test.js :: from "../server/store.mjs"|from "../server/agent-rooms.mjs"|from "../server/identity-ratelimit.mjs"|from "../server/bootstrap.mjs"|
+bounty-receipts.test.js :: from "../server/bounty-receipts.mjs"|from "../server/bounty-escrow.mjs"|
+bounty-reputation.test.js :: from "../server/bounty-escrow.mjs"|from "../server/reputation.mjs"|from "../server/bounty-reputation.mjs"|
+bounty-review-packets.test.js :: from "../server/bounty-escrow.mjs"|
+bounty-rubrics.test.js :: from "../server/bounty-escrow.mjs"|
+bounty-slug-collision.test.js :: from "../server/bounty-escrow.mjs"|
+bounty-sybil-owner-canonical.test.js :: from "../server/bounty-escrow.mjs"|
+bounty-sybil-route-owner-canonical.test.js :: from "../server/bounty-escrow.mjs"|from "../server/bounty-escrow-routes.mjs"|from "../server/autonomy-tiers.mjs"|
+bounty-sybil.test.js :: from "../server/bounty-escrow.mjs"|from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|
+bounty-tools.test.js :: from "../client/bounty-tools.mjs"|from "../server/mcp-full-profile.mjs"|
+bounty-tracks.test.js :: from "../server/bounty-escrow.mjs"|
+browser-session.test.js :: from "../src/browser-session.js"|
+browser-shards.test.js :: from "../scripts/browser-shards.mjs"|
+buyer-offer-http.test.js :: from "../scripts/record-rails-fixture.mjs"|
+buyer-signoff.test.js :: from "../scripts/record-rails-fixture.mjs"|
+candidate-manifest.test.js :: from "../scripts/candidate-manifest.mjs"|from "../scripts/candidate-manifest.mjs"|
+capabilities.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+capability-visibility.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/agent-rooms.mjs"|from "../server/identity-ratelimit.mjs"|
+channel-adapter-contracts.test.js :: from "../server/channel-connection.mjs"|from "../server/channel-adapters/index.mjs"|from "../scripts/email-contract-fixture.mjs"|from "../scripts/gmail-contract-fixture.mjs"|
+channel-connection.test.js :: from "../server/channel-connection.mjs"|from "../server/email-envelope.mjs"|from "../scripts/email-contract-fixture.mjs"|from "../scripts/telegram-contract-fixture.mjs"|
+channel-drain.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../scripts/telegram-contract-fixture.mjs"|from "../server/channel-import.mjs"|from "../server/channel-journal.mjs"|
+channel-import.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../scripts/email-contract-fixture.mjs"|from "../scripts/telegram-contract-fixture.mjs"|from "../server/graph-email.mjs"|
+channel-inbound-boot.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../scripts/telegram-contract-fixture.mjs"|from "../server/channel-import.mjs"|from "../server/boot-options.mjs"|
+channel-journal-parity.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../scripts/telegram-contract-fixture.mjs"|from "../server/channel-import.mjs"|from "../server/recovery.mjs"|
+channel-journal.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../scripts/telegram-contract-fixture.mjs"|from "../server/store.mjs"|from "../server/channel-import.mjs"|
+channel-live-status.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/store.mjs"|from "../server/channel-live-status.mjs"|from "../server/channel-adapters/telegram-config.mjs"|
+channel-messenger-adapter.test.js :: from "../server/channel-connection.mjs"|from "../server/channel-adapters/messenger.mjs"|from "../server/channel-adapters/index.mjs"|
+channel-send-budgets.test.js :: from "../server/token-bucket.mjs"|from "../server/store.mjs"|from "../server/channel-send-budgets.mjs"|from "../server/channel-adapters/telegram-config.mjs"|
+channel-sender-cache.test.js :: from "../server/http.mjs"|
+channel-sms-adapter.test.js :: from "../server/channel-connection.mjs"|from "../server/channel-adapters/sms.mjs"|from "../server/channel-adapters/index.mjs"|
+channel-webhook-dedupe-property.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../scripts/telegram-contract-fixture.mjs"|from "../server/channel-import.mjs"|
+chaos-drill.test.js :: 
+charter-audit-ownership.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/agent-rooms.mjs"|from "../src/room-charter.js"|
+chat-suggestions.test.js :: from "../src/chat-suggestions.js"|
+check-no-shadow-imports.test.js :: 
+checkpoint-channel-backfill.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/recovery.mjs"|from "../src/events.js"|
+ci-action-pinning.test.js :: 
+ci-changes.test.js :: from "../scripts/ci-changes.mjs"|
+ci-workflow-concurrency.test.js :: 
+claude-channel.test.js :: 
+claude-plugin.test.js :: 
+cli-invite.test.js :: from "../client/room-agent.mjs"|from "../client/agent-connection.mjs"|
+client-stream.test.js :: 
+client.test.js :: from "../src/client.js"|
+cloudflare-platform-fakes.test.js :: from "../cloudflare/platform-fakes.mjs"|
+code-drops-repair.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+code-drops.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+cold-start-budget.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|from "../scripts/recovery-fixture.mjs"|
+cold-start-friction.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/agent-rooms.mjs"|from "../server/identity-ratelimit.mjs"|
+cold-start-probe.test.js :: 
+composer-audience.test.js :: from "../src/composer-files.js"|
+composer-body-limit.test.js :: from "../src/conversation.js"|from "../src/reply-requests.js"|from "../src/events.js"|
+composer-file-chip.test.js :: from "../src/composer-files.js"|
+composer-hint.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|
+composer.test.js :: from "../src/conversation.js"|
+concurrency-race.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|
+connect-snippets.test.js :: from "../server/connect-snippets.mjs"|from "../scripts/build-agent-docs.mjs"|from "../server/store.mjs"|from "../server/http.mjs"|
+connector-briefs.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../scripts/helpers/signed-evidence.mjs"|
+contributing-doc.test.js :: 
+contribution-public.test.js :: from "../src/contribution-brief.js"|
+contribution-steps.test.js :: from "../src/work-selectors.js"|
+conversation-sync.test.js :: 
+conversation.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|from "../server/autonomy-tiers.mjs"|
+cookie-namespace.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|
+coverage-thresholds.test.js :: from "../scripts/coverage-thresholds.mjs"|
+credit-question.test.js :: from "../src/reply-requests.js"|from "../src/conversation.js"|from "../src/client.js"|
+curiosity-rank.test.js :: from "../src/curiosity-rank.mjs"|from "../scripts/results-fixture.mjs"|
+curiosity-sort-mcp.test.js :: from "../scripts/results-fixture.mjs"|from "../server/http.mjs"|from "../client/agent-connection.mjs"|from "../scripts/mcp-test-client.mjs"|
+current-attention-integration.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../client/agent-connection.mjs"|from "../scripts/mcp-test-client.mjs"|
+current-attention.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|from "../client/attention-inbox.mjs"|
+cursor-guards.test.js :: from "../src/work-selectors.js"|
+dasha-bridge.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../client/room-agent.mjs"|
+dead-route-removal.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|
+decision-register.test.js :: 
+decision-source.test.js :: from "../scripts/helpers/signed-evidence.mjs"|from "../server/autonomy-tiers.mjs"|
+delivery-tracing.test.js :: from "../server/delivery-tracing.mjs"|
+demigod-contracts.test.js :: from "../scripts/record-rails-fixture.mjs"|
+demigod-jobs-money.test.js :: 
+demigod-offers.test.js :: 
+dependency-audit.test.js :: from "../scripts/dependency-audit.mjs"|
+deploy-checks.test.js :: from "../scripts/deploy-checks.mjs"|from "../scripts/deploy-recovery.mjs"|
+deploy-discovery.test.js :: from "../scripts/build-capabilities.mjs"|from "../deploy/agent-discovery.mjs"|from "../deploy/push-notifications-supported.mjs"|from "../deploy/capabilities.mjs"|
+deploy-live.test.js :: 
+deployment-marker.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|
+deployment.test.js :: from "../server/deployment.mjs"|from "../server/backup.mjs"|from "../server/store.mjs"|from "../server/bootstrap.mjs"|
+design-tokens-css-sync.test.js :: from "../src/design-tokens.js"|from "../scripts/sync-design-tokens-css.mjs"|
+design-tokens-lint.test.js :: from "../scripts/lint-design-tokens.mjs"|
+design-tokens.test.js :: from "../src/design-tokens.js"|from "../deploy/room-entry.mjs"|from "../server/receipts-page.mjs"|from "../server/room-export-html.mjs"|
+developer-contract.test.js :: from "../scripts/route-docs-check.mjs"|
+diagnostics.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/agent-error.mjs"|
+directory-card-seed.test.mjs :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/http.mjs"|from "../server/agent-card-signing.mjs"|
+directory-card-withdrawal.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../server/agent-card-signing.mjs"|
+disconnected-agent-roundtrip.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|
+discoverability.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../server/discoverability.mjs"|
+discovery-profile.test.js :: 
+disk-door.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../client/room-agent.mjs"|
+display-name-guard.test.js :: 
+display-name-impersonation.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../server/access-requests.mjs"|
+dispute-arbiters.test.js :: from "../server/dispute-arbiters.mjs"|from "../server/bounty-disputes.mjs"|
+dm-consent-ui.test.js :: from "../src/dm-consents.js"|
+dm-consents-autonomy-tier.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|from "../server/autonomy-tiers.mjs"|
+dm-consents.test.js :: from "../server/dm-consents.mjs"|from "../server/autonomy-tiers.mjs"|
+dm-follow-up-privacy.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+dm-nonparty-misc.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|from "../server/activity.mjs"|
+dm-privacy.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../src/events.js"|
+dm-reply-party.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+dm-thread-read-privacy.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../server/store.mjs"|from "../server/bootstrap.mjs"|
+docs-architecture.test.js :: from "../src/events.js"|
+docs-glossary.test.js :: 
+docs-relative-links.test.js :: 
+docs-tool-list.test.js :: from "../server/mcp-discovery.mjs"|from "../client/mcp-stdio.mjs"|from "../src/room-mcp-join.js"|from "../deploy/agent-discovery.mjs"|
+docs-troubleshooting.test.js :: 
+dogfood-agent-surface.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../src/events.js"|from "../server/agent-card-signing.mjs"|
+done-chip-motion.test.js :: 
+done-chip.test.js :: from "../src/workflow.js"|
+door-links-join.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|
+door-links-loop.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../deploy/room-entry.mjs"|
+draft-feedback.test.js :: from "../src/work-selectors.js"|
+draft-return.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../src/events.js"|from "../src/workflow.js"|from "../src/client.js"|
+draft-session-expiry.test.js :: from "../src/conversation.js"|
+durable-object-rpc.test.js :: from "../server/email-routing-inbound.mjs"|
+edge-stall.test.js :: from "../cloudflare/edge-public.mjs"|from "../scripts/stall-probe.mjs"|
+email-contract.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../scripts/email-contract-fixture.mjs"|from "../server/email-envelope.mjs"|from "../server/graph-email.mjs"|
+email-envelope-property.test.js :: 
+email-import.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../scripts/email-contract-fixture.mjs"|from "../server/graph-email.mjs"|from "../server/store.mjs"|
+email-routing-inbound.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/email-routing-inbound.mjs"|from "../server/channel-adapters/email.mjs"|from "../server/email-envelope.mjs"|
+email-verify-migration-backfill.test.js :: from "../server/account-login-methods.mjs"|
+emoji-catalog.test.js :: from "../src/emoji-catalog.js"|
+emoji.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|from "../src/conversation.js"|
+entry-docs-start-here.test.mjs :: 
+error-leak-shapes.test.js :: from "../src/agent-error.mjs"|
+error-shapes-availability.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../src/agent-error.mjs"|
+error-shapes-teach.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../src/agent-error.mjs"|
+evals-harness.test.js :: 
+evals-heldout.test.js :: 
+evals-llm-judge-compat.test.js :: 
+evals-llm-judge.test.js :: 
+evals-splits.test.js :: 
+event-audit.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+events-after-sequence.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+events-cursor-paging.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+events.test.js :: from "../src/events.js"|from "../src/seed.js"|
+external-probe.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../cloudflare/external-probe-worker.mjs"|
+external-producer.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../scripts/runtime-package.mjs"|from "../server/store.mjs"|from "../server/recovery.mjs"|
+f12-board-mcp.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/agent-rooms.mjs"|from "../server/work-claims.mjs"|
+fake-runner.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|from "../server/autonomy-tiers.mjs"|
+faq-doc.test.js :: 
+feedback-routes.test.js :: from "../server/feedback-routes.mjs"|from "../server/feedback-store.mjs"|
+feedback-scrub.test.js :: from "../server/feedback-scrub.mjs"|
+feedback-store.test.js :: from "../server/feedback-store.mjs"|
+first-paint.test.js :: from "../src/browser-session.js"|
+flaky-detect.test.js :: 
+focused-orientation.test.js :: 
+friction-work.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|from "../server/notifications.mjs"|
+friend-bond-ui.test.js :: from "../src/friend-bond.js"|
+fulltext-search.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+github-app-core.test.js :: from "../server/github-app/auth.mjs"|from "../server/github-app/index.mjs"|from "../server/github-app/policy.mjs"|from "../server/github-app/render.mjs"|
+github-door.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../client/room-agent.mjs"|
+github-oauth-http.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../server/github-oauth.mjs"|
+github-oauth.test.js :: from "../server/github-oauth.mjs"|
+github-unconfigured-sweep.test.js :: from "../server/store.mjs"|from "../server/claim-pr-sync.mjs"|from "../server/claim-autolink.mjs"|from "../server/github-app/auth.mjs"|
+github-work-sync.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../client/room-agent.mjs"|
+gmail-actions.test.js :: 
+gmail-adapter.test.js :: from "../scripts/gmail-contract-fixture.mjs"|from "../server/channel-adapters/gmail.mjs"|from "../server/email-envelope.mjs"|from "../server/channel-adapters/index.mjs"|
+gmail-live-fixture.test.js :: from "../scripts/gmail-live-fixture.mjs"|
+gmail-mailbox.test.js :: 
+gmail-sync.test.js :: 
+gmail-ui.test.js :: from "../src/gmail-ui.js"|
+google-oauth-email.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../server/google-oauth.mjs"|
+google-oauth-http.test.js :: from "../scripts/helpers/google-oauth-fixture.mjs"|from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../server/google-oauth.mjs"|
+grants.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|from "../server/http.mjs"|
+graph-fixture-sync.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../scripts/email-contract-fixture.mjs"|from "../server/graph-fixture-sync.mjs"|from "../server/email-envelope.mjs"|
+graph-reply-draft.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../scripts/email-contract-fixture.mjs"|from "../server/graph-email.mjs"|from "../server/graph-reply-draft.mjs"|
+graph-reply-journal.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../scripts/email-contract-fixture.mjs"|from "../server/graph-email.mjs"|from "../server/graph-reply-draft.mjs"|
+graph-reply-update-journal.test.js :: from "../scripts/reply-update-fixture.mjs"|from "../server/store.mjs"|from "../server/recovery.mjs"|from "../server/backup.mjs"|
+graph-reply-update.test.js :: from "../server/graph-email.mjs"|from "../server/email-envelope.mjs"|from "../server/graph-reply-draft.mjs"|from "../server/recovery.mjs"|
+grok-host.test.js :: from "../client/grok-host.mjs"|from "../scripts/grok-room-host.mjs"|from "../server/store.mjs"|from "../server/agent-rooms.mjs"|
+growth-alerts.test.js :: from "../src/growth-events.js"|from "../src/growth-collector.js"|from "../src/growth-summary.js"|from "../src/growth-compare.js"|
+growth-collector.test.js :: from "../src/growth-collector.js"|from "../src/growth-events.js"|
+growth-compare.test.js :: from "../src/growth-events.js"|from "../src/growth-collector.js"|from "../src/growth-summary.js"|from "../src/growth-compare.js"|
+growth-digest.test.js :: from "../src/growth-events.js"|from "../src/growth-collector.js"|from "../src/growth-summary.js"|from "../src/growth-digest.js"|
+growth-emit.test.js :: from "../src/events.js"|from "../src/seed.js"|from "../src/growth-collector.js"|from "../src/growth-emit.js"|
+growth-events.test.js :: from "../src/growth-events.js"|
+growth-experiments.test.js :: from "../server/growth-experiments.mjs"|
+growth-fanout.test.js :: from "../src/events.js"|from "../src/seed.js"|from "../src/growth-events.js"|from "../src/growth-collector.js"|
+growth-http.test.js :: from "../src/growth-events.js"|from "../src/growth-collector.js"|from "../src/growth-http.js"|
+growth-loop.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/growth-loop.mjs"|from "../deploy/agent-discovery.mjs"|
+growth-mentions.test.js :: from "../src/events.js"|from "../src/seed.js"|from "../src/growth-collector.js"|from "../src/growth-events.js"|
+growth-persistence.test.js :: from "../src/growth-collector.js"|from "../src/growth-events.js"|from "../src/growth-persistence.js"|
+growth-scheduler.test.js :: from "../src/growth-events.js"|from "../src/growth-collector.js"|from "../src/growth-watch.js"|from "../src/growth-scheduler.js"|
+growth-summary.test.js :: from "../src/growth-events.js"|from "../src/growth-collector.js"|from "../src/growth-summary.js"|
+growth-watch.test.js :: from "../src/growth-events.js"|from "../src/growth-collector.js"|from "../src/growth-fanout.js"|from "../src/growth-watch.js"|
+guest-agent-link-credential-boundary.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/guest-agent-links.mjs"|
+guest-agent-links.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+guest-agent-refresh.test.mjs :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../server/agent-card-signing.mjs"|
+guest-bearer-origin.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../server/agent-card-signing.mjs"|
+guest-invite-expiry-docs.test.mjs :: 
+guest-invite-flow.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+guest-invites-agent-api-docs.test.mjs :: 
+guest-join.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../server/agent-card-signing.mjs"|
+guest-scope-gate-http.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+guest-signout-ui.test.js :: 
+guest-token-expiry.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../server/guest-agent-links.mjs"|
+guest-token-expiry.test.mjs :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../server/agent-card-signing.mjs"|
+handoff-case.test.js :: from "../server/handoff-case.mjs"|from "../server/inbox-handoff.mjs"|
+handoff-envelope.test.js :: from "../server/work-handoff.mjs"|
+handoff-receipt.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../client/room-agent.mjs"|
+handoff-renderer.test.js :: from "../server/work-handoff.mjs"|from "../src/handoff-envelope-ui.js"|
+heartbeat-real-db-errors.test.js :: from "../server/agent-heartbeats.mjs"|
+help-actions.test.js :: from "../client/help-actions.mjs"|from "../client/room-agent.mjs"|
+help-discovery.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../client/room-agent.mjs"|from "../src/events.js"|
+help-mcp.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../client/agent-connection.mjs"|from "../scripts/mcp-test-client.mjs"|
+help-offer-context.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../client/room-agent.mjs"|from "../server/store.mjs"|
+help-offer-service.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../scripts/runtime-package.mjs"|from "../scripts/frozen-runtime-fixture.mjs"|from "../server/store.mjs"|
+help-offers.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/recovery.mjs"|from "../src/events.js"|from "../src/help-offers.js"|
+helper-agent-exercise.test.js :: from "../scripts/helper-agent-exercise.mjs"|from "../client/room-agent.mjs"|from "../client/agent-connection.mjs"|from "../scripts/mcp-test-client.mjs"|
+herdr-backfill.test.js :: from "../scripts/herdr-backfill.mjs"|
+herdr-bridge-adapter.test.js :: 
+herdr-bridge-deploy.test.js :: 
+herdr-bridge.test.js :: 
+herdr-migrate.test.js :: from "../scripts/herdr-migrate.mjs"|
+history-visibility.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../server/routes/table.mjs"|
+host-context-policy.test.js :: from "../client/host-context-policy.mjs"|
+host-policy-boundary.test.js :: from "../client/host-process.mjs"|from "../client/host-subprocess.mjs"|
+host-process.test.js :: from "../client/host-process.mjs"|
+host-result.test.js :: from "../client/host-result.mjs"|
+host-subprocess.test.js :: from "../client/host-subprocess.mjs"|
+host-verification.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../client/request-runner.mjs"|from "../client/host-process.mjs"|
+http-public-dm.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../server/autonomy-tiers.mjs"|
+human-404.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|
+human-onboarding-doors.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|
+human-onboarding-nokey.test.js :: 
+human-push-display.test.js :: from "../src/human-push-display.js"|
+human-push-preferences.test.js :: from "../server/routes/human-push.mjs"|from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|
+human-push-ui.test.js :: 
+human-push.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+i18n-harness.test.js :: from "../scripts/i18n-harness.mjs"|
+id-sec-http.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../server/magic-links.mjs"|from "../server/store.mjs"|
+identity-link-code.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../server/agent-api-keys.mjs"|
+identity-mint-capacity.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../server/autonomy-tiers.mjs"|
+identity-ratelimit.test.js :: from "../server/identity-ratelimit.mjs"|
+identity-verification.test.js :: from "../server/identity-verification.mjs"|from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../server/agent-card-signing.mjs"|
+inbox-adoption.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../scripts/inbox-result-fixture.mjs"|from "../server/store.mjs"|from "../server/recovery.mjs"|
+inbox-agent-routing.test.js :: from "../server/inbox-agent-routing.mjs"|
+inbox-approval.test.js :: from "../server/inbox-approval.mjs"|
+inbox-assign.test.js :: from "../server/inbox-assign.mjs"|
+inbox-attachment-auth.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../scripts/email-contract-fixture.mjs"|from "../server/graph-email.mjs"|
+inbox-attachments-quarantine.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../scripts/email-contract-fixture.mjs"|from "../server/graph-email.mjs"|from "../server/store.mjs"|
+inbox-attachments-routes.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../scripts/email-contract-fixture.mjs"|from "../server/graph-email.mjs"|
+inbox-channel-client.test.js :: from "../src/client.js"|from "../src/inbox-client.js"|from "../scripts/telegram-contract-fixture.mjs"|
+inbox-client-read-validation.test.js :: from "../src/client.js"|from "../src/inbox-client.js"|
+inbox-client.test.js :: from "../src/client.js"|from "../src/inbox-client.js"|
+inbox-collab-http.test.js :: from "../server/autonomy-tiers.mjs"|from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|
+inbox-collision.test.js :: from "../server/inbox-collision.mjs"|
+inbox-conversation-auth.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../scripts/email-contract-fixture.mjs"|from "../server/graph-email.mjs"|
+inbox-digest-sla-routes.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../scripts/email-contract-fixture.mjs"|from "../server/graph-email.mjs"|
+inbox-handoff.test.js :: from "../server/inbox-handoff.mjs"|
+inbox-import-guards.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../scripts/email-contract-fixture.mjs"|from "../server/graph-email.mjs"|from "../server/channel-adapters/telegram.mjs"|
+inbox-internal-notes.test.js :: from "../server/inbox-internal-notes.mjs"|
+inbox-outbox.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../scripts/synthetic-mail-fixture.mjs"|from "../server/inbox-transport.mjs"|from "../server/store.mjs"|
+inbox-pagination.test.js :: from "../scripts/acceptance-fixture.mjs"|
+inbox-quarantine-coverage.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../server/channel-adapters/telegram.mjs"|
+inbox-quarantine-durable.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../scripts/email-contract-fixture.mjs"|from "../server/graph-email.mjs"|from "../server/store.mjs"|
+inbox-quarantine-review.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../server/channel-adapters/telegram.mjs"|from "../server/store.mjs"|
+inbox-quarantine-ui.test.js :: from "../src/inbox-quarantine-ui.js"|
+inbox-quarantine-visibility.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/channel-adapters/telegram.mjs"|from "../server/store.mjs"|
+inbox-read-state.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/store.mjs"|
+inbox-sandbox.test.js :: from "../scripts/inbox-sandbox.mjs"|
+inbox-search-routes.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../scripts/email-contract-fixture.mjs"|from "../server/graph-email.mjs"|
+inbox-search.test.js :: from "../server/inbox-search.mjs"|
+inbox-send-budget.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../scripts/telegram-contract-fixture.mjs"|from "../server/http.mjs"|from "../server/channel-adapters/telegram-config.mjs"|
+inbox-send-ui.test.js :: from "../src/inbox-send-ui.js"|
+inbox-send.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../server/channel-adapters/telegram-config.mjs"|from "../server/inbox-transport.mjs"|
+inbox-spam-guard.test.js :: from "../server/inbox-spam.mjs"|
+inbox-spam.test.js :: from "../server/inbox-spam.mjs"|
+inbox-stitch-fuzz.test.js :: from "../server/inbox-stitch.mjs"|
+inbox-stitch.test.js :: from "../server/store.mjs"|from "../scripts/acceptance-fixture.mjs"|from "../scripts/email-contract-fixture.mjs"|from "../server/graph-email.mjs"|
+inbox-threads-replyindex.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../scripts/email-contract-fixture.mjs"|from "../server/graph-email.mjs"|
+inbox-threads-routes.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../scripts/email-contract-fixture.mjs"|from "../server/graph-email.mjs"|
+inbox-threads.test.js :: from "../server/inbox-threads.mjs"|
+inbox-triage.test.js :: from "../server/inbox-triage.mjs"|
+inbox-unified-routes.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../scripts/telegram-contract-fixture.mjs"|from "../scripts/email-contract-fixture.mjs"|from "../server/graph-email.mjs"|
+inbox-whatsapp-connection.test.js :: from "../src/inbox-client.js"|
+inbox.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/store.mjs"|from "../server/http.mjs"|from "../server/recovery.mjs"|
+index-html-structure.test.js :: 
+install-sh.test.js :: from "../cloudflare/edge-public.mjs"|
+instance-lock.test.js :: from "../server/instance-lock.mjs"|
+integrity-incremental.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|
+invitation-evidence.test.js :: from "../server/invitation-evidence.mjs"|
+invitation-http.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|
+invitation-journal.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/invitation-journal.mjs"|
+invitation-migration-v36.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/agent-rooms.mjs"|from "../server/identity-ratelimit.mjs"|
+invitation-note.test.js :: from "../src/share-links.js"|
+invitation-owner-admin.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/agent-rooms.mjs"|from "../server/identity-ratelimit.mjs"|
+invitation-stats.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|
+invitations.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+invite-flow-abuse.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|
+invite-oauth-context.test.js :: from "../src/invite-context.js"|
+invite-only-boundary.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+invite-redeem-422.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|
+jev-admission.test.js :: from "../server/jev-admission.mjs"|
+jev-receipts.test.js :: from "../server/jev-receipts.mjs"|
+jev-shadow-http.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|
+jev-shadow-journal.test.js :: from "../server/store.mjs"|
+jev-shadow-store.test.js :: from "../scripts/acceptance-fixture.mjs"|
+job-heartbeat.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../cloudflare/job-heartbeat.mjs"|
+jobs-node-retry.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../server/jobs.mjs"|
+jobs-parity.test.js :: from "../server/jobs.mjs"|
+join-any-agent.test.js :: 
+join-handoff.test.js :: 
+join-onboarding-docs.test.js :: 
+join-p2s.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/access-requests.mjs"|from "../server/identity-ratelimit.mjs"|
+join-page.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|
+join-session-1522.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|
+join-vocabulary.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|
+join.test.js :: from "../src/join.js"|
+journey-coverage.test.js :: from "../scripts/journey-coverage.mjs"|
+kb-index.test.js :: 
+land-card-model.test.js :: from "../src/land-queue-board.js"|
+land-queue.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/http.mjs"|from "../server/agent-rooms.mjs"|
+landing-facts.test.js :: from "../scripts/landing-facts.mjs"|
+landing-hero.test.mjs :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|
+lease-renewal.test.js :: from "../server/work-claim-routes.mjs"|from "../server/autonomy-tiers.mjs"|from "../server/work-claims.mjs"|
+legal-pages.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../server/legal-store.mjs"|
+legal-templates-grounding.test.js :: 
+lesson-contradictions.test.js :: from "../scripts/lesson-contradictions.mjs"|
+lesson-scorer.test.js :: from "../scripts/lesson-scorer.mjs"|
+listing-check.test.js :: from "../scripts/listing-check.mjs"|
+live-audit.test.js :: 
+live-smoke.test.js :: from "../scripts/live-smoke.mjs"|
+llms-accuracy.test.js :: from "../deploy/agent-discovery.mjs"|from "../server/store.mjs"|from "../server/http.mjs"|
+load-test-10x.test.js :: from "../client/room-agent.mjs"|from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|
+load-test-smoke.test.js :: 
+lookup-indexes.test.js :: from "../server/store.mjs"|
+low-batch-1529.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|
+machine-bot-halt.test.js :: from "../machine/bot/loop.mjs"|
+machine-control-during-call.test.js :: from "../machine/lib/spawn.mjs"|from "../machine/lib/config.mjs"|from "../machine/lib/daemon.mjs"|from "../machine/test/fake-relay.mjs"|
+machine-pause-duration.test.js :: from "../machine/lib/protocol.mjs"|from "../machine/lib/daemon.mjs"|
+machine-pause-restart.test.js :: from "../machine/lib/daemon.mjs"|from "../machine/lib/config.mjs"|
+magic-account-switch.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../server/magic-links.mjs"|
+magic-code-consume-race.test.js :: from "../server/store.mjs"|
+magic-invalidation.test.js :: from "../server/store.mjs"|
+magic-links-http.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../server/magic-links.mjs"|
+magic-links.test.js :: from "../server/store.mjs"|from "../server/magic-links.mjs"|
+maintenance-signals.test.js :: 
+maintenance.test.js :: from "../server/maintenance.mjs"|
+matchmaking-routes.test.js :: from "../server/matchmaking-routes.mjs"|from "../server/agent-lanes.mjs"|
+mcp-500-error-trace.test.js :: from "../src/agent-error.mjs"|
+mcp-bounty-escrow-errors.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/agent-rooms.mjs"|from "../server/identity-ratelimit.mjs"|
+mcp-calltime-denials.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/agent-rooms.mjs"|from "../server/identity-ratelimit.mjs"|
+mcp-core-profile.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/agent-rooms.mjs"|from "../server/autonomy-tiers.mjs"|
+mcp-discovery-aliases.test.js :: from "../server/mcp-discovery.mjs"|from "../src/room-mcp-join.js"|
+mcp-docs-accuracy.test.js :: from "../scripts/room-mcp-init.mjs"|
+mcp-dotted-aliases.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/agent-rooms.mjs"|from "../src/room-mcp-join.js"|
+mcp-empty-bearer.test.js :: from "../server/mcp-http.mjs"|
+mcp-identity-mint.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/http.mjs"|
+mcp-integration.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../client/agent-connection.mjs"|from "../scripts/mcp-test-client.mjs"|
+mcp-land-queue-autonomy-tier.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/agent-rooms.mjs"|from "../server/identity-ratelimit.mjs"|
+mcp-lifecycle.test.js :: from "../scripts/work-lifecycle-agent-fixture.mjs"|from "../scripts/mcp-test-client.mjs"|from "../client/agent-connection.mjs"|from "../client/room-agent.mjs"|
+mcp-openapi-drift.test.js :: from "../server/mcp-hosted-tools.mjs"|from "../server/mcp-public-work.mjs"|
+mcp-registry-publish.test.js :: 
+mcp-registry-server-json.test.js :: 
+mcp-server-card.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../deploy/room-entry.mjs"|from "../client/mcp-stdio.mjs"|
+mcp-stdio.test.js :: from "../client/mcp-stdio.mjs"|from "../client/room-agent.mjs"|from "../server/store.mjs"|from "../server/bootstrap.mjs"|
+mcp-tools-reconciliation.test.js :: from "../deploy/agent-discovery.mjs"|from "../server/mcp-discovery.mjs"|from "../server/mcp-hosted-tools.mjs"|from "../server/mcp-http.mjs"|
+mcp-untrusted-content.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/agent-rooms.mjs"|from "../server/autonomy-tiers.mjs"|
+mcp-version-negotiation.test.js :: from "../client/mcp-stdio.mjs"|
+mcp-work-context.test.js :: from "../server/store.mjs"|from "../server/agent-rooms.mjs"|from "../server/http.mjs"|from "../client/agent-connection.mjs"|
+measure-cold-start.test.js :: 
+member-cap-active-invariant.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|from "../server/usage-summary.mjs"|
+member-deactivate.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+member-display-names.test.js :: 
+member-permission-requests.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/http.mjs"|from "../server/access-requests.mjs"|
+member-status.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+members-directory.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|
+membership-delegation.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+mention-lifecycle.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|from "../server/mention-lifecycle.mjs"|
+mention-receipts.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/http.mjs"|from "../server/mention-receipts.mjs"|
+mention-span.test.js :: from "../server/mention-lifecycle.mjs"|from "../src/events.js"|
+merge-hold.test.js :: from "../scripts/merge-hold.mjs"|
+merge-queue-eject-budget.test.js :: from "../scripts/merge-queue-eject-budget.mjs"|
+merge-queue.test.js :: from "../server/merge-queue.mjs"|from "../server/merge-queue.mjs"|
+message-delete-channel-copy.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|from "../server/autonomy-tiers.mjs"|
+message-edit-delete.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|from "../server/autonomy-tiers.mjs"|
+message-markdown.test.js :: from "../src/conversation.js"|
+message-posted-body.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../server/store.mjs"|from "../src/agent-error.mjs"|
+message-redaction.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../server/message-redaction.mjs"|
+message-thread.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+messages-backfill.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/writer-fence.mjs"|from "../src/events.js"|
+messages-table.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|from "../server/autonomy-tiers.mjs"|
+mime-fuzz.test.js :: from "../scripts/fuzz-mime.mjs"|
+mime-message.test.js :: 
+mint-budget-docs.test.js :: from "../server/agent-identities.mjs"|
+moderation-dm-privacy.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+moderation-report-autonomy-tier.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|from "../server/autonomy-tiers.mjs"|
+moderation.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/http.mjs"|from "../server/moderation.mjs"|
+native-host-binary-resolution.test.js :: from "../scripts/native-host-binary.mjs"|
+native-host-run-guards.test.js :: 
+needs-attention-retry.test.js :: from "../src/needs-attention.js"|
+needs-me-open-work.test.js :: 
+needs-me.test.js :: 
+next-actions.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/next-actions.mjs"|
+node-jobs-health.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/jobs.mjs"|from "../server/bootstrap.mjs"|
+notification-feed.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+notification-preferences.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|from "../server/autonomy-tiers.mjs"|
+notify-policy.test.js :: from "../server/notify-prefs.mjs"|from "../server/notify-policy.mjs"|
+notify-preferences.test.js :: from "../server/notify-prefs.mjs"|
+notify-quiet-hours.test.js :: from "../server/notify-prefs.mjs"|
+notify-relays.test.js :: from "../server/channel-adapters/webhook-secret.mjs"|from "../server/channel-adapters/slack-webhook.mjs"|from "../server/channel-adapters/discord-webhook.mjs"|from "../server/notify-email.mjs"|
+oauth-authorize-http.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../server/magic-links.mjs"|
+oauth-consent-http.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|
+oauth-persist.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../server/google-oauth.mjs"|
+oauth-provider-attack-cases.test.js :: from "../server/oauth-provider.mjs"|
+oauth-provider-durable.test.js :: from "../server/oauth-provider.mjs"|from "../server/oauth-provider-store.mjs"|from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|
+oauth-provider.test.js :: from "../server/oauth-provider.mjs"|
+oauth-sessions-http.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|
+og-render.test.js :: from "../server/og-render.mjs"|
+onboarding-probe-docs.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../server/agent-identities.mjs"|
+onboarding-probe-gate.test.js :: from "../scripts/onboarding-probe/gate.mjs"|
+onboarding-probe-predeploy.test.js :: from "../scripts/onboarding-probe/predeploy.mjs"|
+onboarding-probe-report.test.js :: from "../scripts/onboarding-probe/docs-publish.mjs"|
+open-questions-ui.test.js :: from "../src/open-questions-ui.js"|
+open-questions.test.js :: 
+open-routes.test.js :: from "../scripts/open-routes.mjs"|
+openapi-415-documented.test.js :: from "../server/discoverability.mjs"|
+openapi-method-accuracy.test.js :: from "../scripts/openapi-method-accuracy.mjs"|from "../scripts/open-routes.mjs"|
+openapi-served-coverage.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../scripts/route-docs-check.mjs"|
+operator-console-link.test.js :: 
+operator-purge.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/purge-registry.mjs"|from "../server/operator-purge.mjs"|
+operator-ui.test.js :: from "../src/operator-ui.js"|
+opportunities-feed-v2.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+orient-endpoint.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/orient.mjs"|from "../src/events.js"|
+otel-wiring.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+outbound-webhooks.test.js :: from "../server/outbound-webhooks.mjs"|
+outside-agents.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../server/outside-agents.mjs"|from "../server/autonomy-tiers.mjs"|
+owed-replies.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|from "../server/updates.mjs"|
+owner-attention.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/access-requests.mjs"|from "../server/identity-ratelimit.mjs"|
+owner-delegated-admin.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/access-requests.mjs"|from "../src/events.js"|
+owner-delegates.test.js :: from "../server/http.mjs"|from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/autonomy-tiers.mjs"|
+owner-project-offers-ui.test.js :: from "../src/owner-project-offers-ui.js"|
+paid-work-offers.test.js :: from "../src/paid-work-offers.js"|from "../server/store.mjs"|from "../src/events.js"|
+passkey-login.test.js :: from "../src/passkey-login.mjs"|
+password-auth.test.js :: from "../src/password-auth.mjs"|
+password-http.test.js :: from "../src/password-auth.mjs"|from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|
+password-reset-http.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/http.mjs"|from "../server/magic-links.mjs"|
+password-reset.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/password-auth.mjs"|
+perf-budget.test.js :: from "../scripts/perf-budget.mjs"|
+perm-matrix-channel.test.js :: from "../src/events.js"|from "../src/seed.js"|
+persisted-row.test.js :: from "../server/persisted-row.mjs"|from "../server/work-claim-sqlite.mjs"|from "../server/bounty-escrow.mjs"|
+pilot-limits-single-source.test.js :: from "../server/store.mjs"|from "../cloudflare/storage.mjs"|
+pinned-messages.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../server/action-classes.mjs"|
+pins-dm-visibility.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|from "../server/pins.mjs"|
+pins-redacted-pin.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|from "../server/pins.mjs"|
+polls.test.js :: from "../src/events.js"|from "../src/seed.js"|from "../src/polls.js"|
+portable-work.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../client/room-agent.mjs"|from "../src/events.js"|
+pr-diff-size-check.test.js :: from "../scripts/pr-diff-size-check.mjs"|
+pr-overlap.test.js :: from "../scripts/pr-overlap.mjs"|
+presence-states.test.js :: from "../src/presence-state.js"|from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+presence.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+private-history-stream.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../server/autonomy-tiers.mjs"|
+probe-prod.test.js :: 
+prod-deploy-smoke.test.js :: from "../server/agent-card-signing.mjs"|
+production-schema-compat.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/store.mjs"|from "../server/writer-fence.mjs"|
+project-offers-http.test.js :: 
+project-offers-raw-http.test.js :: 
+project-offers.test.js :: 
+projection-at-rest.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|from "../server/recovery.mjs"|
+projection-cache.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+proposed-by.test.js :: from "../src/events.js"|from "../server/autonomy-tiers.mjs"|from "../scripts/helpers/signed-evidence.mjs"|from "../server/store.mjs"|
+provider-heartbeats.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+provision.test.js :: from "../server/store.mjs"|
+public-face.test.js :: from "../server/public-face.mjs"|from "../server/room-directory.mjs"|from "../server/public-read-model.mjs"|
+public-pages-hygiene.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|
+public-read-model.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../deploy/room-entry.mjs"|
+public-receipts-toggle.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../server/receipts-live.mjs"|
+public-search-http.test.js :: from "../deploy/public-search.mjs"|from "../deploy/public-assets.mjs"|from "../server/store.mjs"|from "../server/http.mjs"|
+public-work-match-http.test.js :: 
+public-work-mcp.test.js :: 
+public-work-owner-projection.test.js :: 
+public-work-review-schema.test.js :: 
+public-work-reviews-http.test.js :: 
+public-work-reviews.test.js :: 
+public-work-stranger-journey.test.js :: 
+public-work-successor-http.test.js :: 
+public-work-successors.test.js :: 
+pull-only-heartbeat-wakes.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|
+push-subscriptions.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|from "../server/push-subscriptions.mjs"|
+push-sw.test.js :: from "../src/human-push-display.js"|
+pwa-icons.test.js :: from "../server/human-push.mjs"|
+pwa-install.test.js :: from "../src/pwa-install.js"|from "../src/push-ask.js"|
+qa200-reg12-openapi-parity.test.js :: 
+qa4-legal-door-alias.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../server/legal-pages.mjs"|
+qa4-orient-visibility.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../src/events.js"|
+qa5-agent-errors.test.js :: from "../server/mcp-arg-errors.mjs"|from "../server/mcp-http.mjs"|from "../server/mcp-public-work.mjs"|
+qa5-docs-code-a11y.test.js :: from "../scripts/build-agent-docs.mjs"|
+qa5r-board-nav-style.test.js :: 
+qa5r-mcp-public-work-suggest.test.js :: from "../server/mcp-http.mjs"|from "../src/room-mcp-join.js"|
+qa8-guest-history-copy.test.js :: from "../server/share-links.mjs"|from "../src/events.js"|
+qa8-guest-invite-history-copy.test.js :: from "../server/store.mjs"|from "../server/history-visibility.mjs"|from "../server/guest-agent-links.mjs"|from "../src/events.js"|
+qa8-message-body-controls.test.js :: from "../server/store.mjs"|from "../src/events.js"|
+quarantine-review-coverage.test.js :: from "../server/quarantine-review-coverage.mjs"|
+quickstarts-docs.test.mjs :: 
+ralph-loop.test.js :: 
+rate-limit.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|
+read-cursor-unify.test.js :: from "../server/read-cursor.mjs"|
+read-redaction.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+rebuild-determinism.test.js :: 
+rebuild-stale-checkpoint.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/recovery.mjs"|from "../src/events.js"|
+receipt-prose-quality.test.js :: from "../scripts/merge-queue-receipt.mjs"|
+receipt-search.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../server/work-claim-routes.mjs"|
+receipts-live-filter.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/receipts-live.mjs"|
+receipts-route.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../server/receipts-live.mjs"|
+recipe-preview.test.js :: from "../src/work-recipes.js"|
+recovery-audit-sweep.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../src/events.js"|from "../server/text-results.mjs"|from "../server/recovery.mjs"|
+recovery-codes-http.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/http.mjs"|
+recovery-comparison.test.js :: 
+recovery-retired-tables.test.js :: from "../server/store.mjs"|from "../server/recovery.mjs"|
+recovery.test.js :: from "../server/store.mjs"|from "../server/recovery.mjs"|from "../server/backup.mjs"|from "../server/http.mjs"|
+referral-board.test.js :: from "../src/referral-board.js"|
+referral-invites.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+referrals.test.js :: from "../server/store.mjs"|from "../server/access-requests.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|
+regex-parity.test.js :: from "../server/claim-validate.mjs"|from "../scripts/claims-index.mjs"|
+rel14-backup-bytes.test.js :: from "../server/writer-fence.mjs"|from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+relay-pause-minutes.test.js :: from "../relay/src/protocol.mjs"|from "../machine/lib/protocol.mjs"|
+release-checkpoint.test.js :: from "../scripts/release-checkpoint.mjs"|
+release-evidence-cli.test.js :: 
+release-evidence.test.js :: from "../scripts/release-evidence.mjs"|
+release-service.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|
+reminders.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/store.mjs"|from "../server/http.mjs"|from "../client/room-agent.mjs"|
+reply-actions.test.js :: from "../client/reply-actions.mjs"|
+reply-agent.test.js :: from "../client/request-runner.mjs"|from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../client/room-agent.mjs"|
+reply-composer.test.js :: from "../src/reply-requests.js"|from "../src/conversation.js"|from "../src/client.js"|
+reply-request-audit-edits.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/recovery.mjs"|from "../src/events.js"|
+reply-request-audit-ownership.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../src/events.js"|from "../server/recovery.mjs"|
+reply-requests.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../client/room-agent.mjs"|from "../server/bootstrap.mjs"|
+report-test-failures.test.js :: from "../scripts/report-test-failures.mjs"|from "../scripts/browser-ci.mjs"|
+reputation.test.js :: from "../server/reputation.mjs"|
+request-access-door.test.js :: from "../src/request-access.js"|from "../src/invite-context.js"|
+request-attention.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../client/attention-inbox.mjs"|from "../client/watch-journal.mjs"|
+required-reading.test.js :: from "../server/required-reading.mjs"|from "../server/work-claims.mjs"|from "../server/work-claim-routes.mjs"|from "../server/work-claim-sqlite.mjs"|
+resend-mailer.test.js :: from "../server/magic-links.mjs"|from "../server/resend-mailer.mjs"|
+restore-reconciliation.test.js :: 
+result-copy.test.js :: from "../src/work-packet.js"|from "../client/room-agent.mjs"|from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|
+result-diff.test.js :: from "../src/workflow.js"|
+result-evidence.test.js :: from "../src/work-packet.js"|
+retention-live-store.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/retention-run.mjs"|
+retention-run.test.js :: from "../server/retention-run.mjs"|
+retention-ui.test.js :: from "../src/retention-ui.js"|
+return-brief-client.test.js :: from "../src/return-brief.js"|from "../src/return-brief.js"|
+return-brief.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+review-annotations.test.js :: from "../scripts/review-mechanical-report.mjs"|
+review-mechanical-report.test.js :: from "../scripts/review-mechanical-report.mjs"|
+review-scope-check.test.js :: from "../scripts/review-scope-check.mjs"|
+review-state.test.js :: 
+rich-push.test.js :: 
+rollback-readback.test.js :: from "../server/agent-card-signing.mjs"|
+route-acceptance.test.js :: from "../scripts/route-acceptance.mjs"|
+route-auth-table.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|
+route-body-schema.test.js :: from "../server/routes/dispatch.mjs"|from "../server/routes/table.mjs"|
+route-docs-check.test.js :: from "../scripts/route-docs-check.mjs"|
+route-hardening.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+route-permission-declared.test.js :: 
+route-table-parity.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../server/service-error.mjs"|from "../server/routes/table.mjs"|
+routing-address-properties.test.js :: from "../server/email-routing-inbound.mjs"|from "../server/mime-message.mjs"|from "../server/inbox-agent-routing.mjs"|
+runtime-package.test.js :: from "../scripts/runtime-package.mjs"|from "../scripts/runtime-import-closure.mjs"|from "../cloudflare/build-assets.mjs"|from "../scripts/candidate-runtime-fixture.mjs"|
+saved-history-floor.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|from "../server/activity.mjs"|
+scan-secrets-line.test.js :: 
+schema-convergence.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+schema-migration-v33-v35.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/agent-rooms.mjs"|from "../server/identity-ratelimit.mjs"|
+schema-stamp-coverage.test.js :: from "../server/store.mjs"|from "../server/spend-grants.mjs"|
+search-work-newest-integer-ids.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+search-work-newest.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+secret-scan-diff-plusplus.test.js :: from "../scripts/secret-scan-diff.mjs"|
+secret-scan-diff.test.js :: from "../scripts/secret-scan-diff.mjs"|from "../scripts/secret-scan-check.mjs"|from "../server/secret-scan.mjs"|
+secret-scan.test.js :: from "../server/secret-scan.mjs"|
+security-headers.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|
+security-model-doc.test.js :: 
+seed-integrity.test.js :: from "../src/seed.js"|from "../src/events.js"|
+self-serve-join-contract.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/http.mjs"|from "../server/agent-card-signing.mjs"|
+send-journal-export.test.js :: from "../server/csv-export.mjs"|from "../server/inbox-outbox.mjs"|
+server-json-check.test.js :: from "../scripts/server-json-check.mjs"|
+service.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+session-adapter-contract.test.js :: 
+session-expiry.test.js :: from "../src/session-expiry.js"|
+session-fixation.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../server/magic-links.mjs"|from "../server/store.mjs"|
+share-invite-code.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/share-invite-code.js"|from "../src/share-links.js"|
+share-link-access.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/recovery.mjs"|from "../src/events.js"|
+share-link-join-concurrency.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/http.mjs"|
+share-link-referrals.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|
+share-link-ui.test.js :: from "../src/share-links.js"|
+share-links-email-gate.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|
+share-links.test.js :: from "../server/store.mjs"|from "../server/writer-fence.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|
+shared-procedures.test.js :: 
+shed-install.test.js :: 
+shed-loop-attention.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../client/agent-connection.mjs"|
+shed-loop.test.js :: 
+sidebar-section-sync.test.js :: from "../src/room-layout.js"|
+sidebar-sections.test.js :: from "../src/room-layout.js"|
+sign-agent-card-build.test.js :: from "../scripts/sign-agent-card.mjs"|from "../server/agent-card-signing.mjs"|from "../deploy/agent-card-key.mjs"|from "../deploy/agent-discovery.mjs"|
+signed-evidence.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|from "../server/bounty-receipts.mjs"|
+signin-error-visibility.test.js :: from "../src/auth-signin-ui.js"|
+silent-mentions.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/agent-heartbeats.mjs"|from "../server/mention-lifecycle.mjs"|
+skill-pack.test.js :: 
+sla-clocks.test.js :: from "../server/sla-clocks.mjs"|
+sla-dashboard.test.js :: from "../server/sla-dashboard.mjs"|from "../server/sla-clocks.mjs"|
+snippet-adoption.test.js :: from "../scripts/snippet-adoption.mjs"|
+soak-leak-detection.test.js :: 
+spam-quarantine-journal.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/store.mjs"|from "../server/inbox-spam.mjs"|from "../server/spam-quarantine-journal.mjs"|
+spam-shadow-report.test.js :: from "../server/spam-shadow-report.mjs"|
+spam-shadow.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/channel-adapters/telegram.mjs"|from "../server/inbox-spam.mjs"|from "../server/spam-shadow.mjs"|
+spec-links.test.js :: 
+spend-allowance.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+spend-grant-races.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/agent-rooms.mjs"|from "../server/identity-ratelimit.mjs"|
+spend-grants-attacks.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/agent-rooms.mjs"|from "../server/identity-ratelimit.mjs"|
+spend-grants-property.test.js :: from "../server/spend-grants.mjs"|from "../server/grants.mjs"|from "../server/autonomy-tiers.mjs"|
+spend-grants.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/agent-rooms.mjs"|from "../server/identity-ratelimit.mjs"|
+spend-pricing-killswitch-ui.test.js :: from "../src/spend-pricing-ui.js"|
+spend-pricing.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../server/agent-rooms.mjs"|
+squads-ui.test.js :: from "../src/squads-ui.js"|
+squads.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../server/mcp-room-profile.mjs"|
+sse-reconnect-chaos.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|
+sse-sequenceof.test.js :: from "../scripts/qa3/lib/sequence.mjs"|
+staging-config.test.js :: 
+state-machine-invariants.test.js :: from "../src/events.js"|from "../src/seed.js"|
+static-hero-nojs.test.js :: 
+storage-failure.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+stream-backpressure.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+stream-interval.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/http.mjs"|from "../src/events.js"|
+stream-lifecycle.test.js :: 
+stream-recovery.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../server/store.mjs"|
+supervision-routes.test.js :: from "../server/supervision-routes.mjs"|
+supervision.test.js :: from "../server/supervision.mjs"|
+support-export.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../server/diagnostics.mjs"|
+tag-ack.test.js :: from "../src/events.js"|from "../server/notifications.mjs"|from "../server/outbound-webhooks.mjs"|from "../server/agent-heartbeats.mjs"|
+task-result-flow.test.js :: 
+telegram-adapter.test.js :: from "../scripts/telegram-contract-fixture.mjs"|from "../server/channel-adapters/telegram.mjs"|from "../server/email-envelope.mjs"|from "../server/channel-adapters/index.mjs"|
+telegram-live.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../scripts/telegram-contract-fixture.mjs"|from "../server/channel-adapters/telegram.mjs"|from "../server/channel-adapters/telegram-config.mjs"|
+telegram-property.test.js :: 
+telegram-token-leak.test.js :: from "../server/secret-scan.mjs"|from "../server/channel-adapters/telegram-config.mjs"|from "../server/channel-adapters/telegram-transport.mjs"|from "../server/channel-import.mjs"|
+telegram-webhook-rotation.test.js :: 
+test-factories.test.js :: 
+test-failures.test.js :: from "../scripts/failing-tests.mjs"|
+text-plug.test.js :: from "../client/text-plug.mjs"|from "../client/swarm-brief.mjs"|
+text-results.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/store.mjs"|from "../server/http.mjs"|from "../src/events.js"|
+thread-options.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+token-bucket.test.js :: from "../server/token-bucket.mjs"|
+touch-targets-coarse.test.js :: 
+trace-entry.test.mjs :: from "../scripts/trace-entry.mjs"|
+trial-task-http.test.js :: from "../scripts/runtime-package.mjs"|from "../server/operator-purge.mjs"|
+trial-tasks.test.js :: from "../server/trial-tasks.mjs"|
+trust-tools.test.js :: from "../client/trust-tools.mjs"|
+two-trigger-discipline.test.js :: from "../server/notify-prefs.mjs"|from "../server/attention.mjs"|from "../server/mention-lifecycle.mjs"|from "../server/notifications.mjs"|
+typing-client.test.js :: from "../src/client.js"|
+typing-routes.test.js :: from "../server/routes/typing.mjs"|from "../server/typing.mjs"|
+typing.test.js :: from "../server/typing.mjs"|
+unification.test.js :: from "../src/workflow.js"|from "../src/work-status.js"|from "../server/return-selectors.mjs"|from "../src/conversation.js"|
+unit-ci-runner.test.js :: from "../scripts/unit-ci.mjs"|
+unit-shards.test.js :: from "../scripts/unit-shards.mjs"|
+untested-modules-lint.test.js :: from "../server/foo.mjs"|from "../server/sub/deep.mjs"|
+updates-http.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+updates-request-context-privacy.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|from "../server/updates.mjs"|
+updates-ui.test.js :: from "../src/updates-ui.js"|
+usage.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+user-guide-doc.test.js :: 
+ux-copy.test.js :: 
+verify-affected.test.js :: from "../scripts/verify-affected.mjs"|from "../server/feature.mjs"|
+version.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../server/version.mjs"|
+vetting-receipts.test.js :: from "../server/vetting-receipts.mjs"|
+video-walkthrough-shots.test.js :: 
+viewport-interactive-widget.test.js :: 
+wake-live.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../server/agent-heartbeats.mjs"|from "../server/routes/wake-status.mjs"|
+wake-path.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../server/agent-heartbeats.mjs"|from "../deploy/agent-discovery.mjs"|
+wake-pause.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/action-classes.mjs"|from "../server/wake-queue.mjs"|from "../server/http.mjs"|
+wake-queue.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/store.mjs"|from "../src/events.js"|from "../server/wake-queue.mjs"|
+watch-cli.test.js :: from "../scripts/agent-watch.mjs"|from "../client/room-agent.mjs"|from "../client/watch-journal.mjs"|from "../server/bootstrap.mjs"|
+watch-http.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../server/http.mjs"|from "../src/events.js"|
+watch-journal.test.js :: from "../client/watch-journal.mjs"|
+web-fetch-content-decoding.test.js :: from "../server/web-fetch.mjs"|
+web-fetch-ssrf-hardening.test.js :: from "../server/web-fetch.mjs"|
+web-fetch.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+web-push.test.js :: from "../server/web-push.mjs"|
+web-research.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+webhook-delivery-load.test.js :: from "../server/store.mjs"|from "../server/agent-plugin-store.mjs"|
+webhook-dispatch-store.test.js :: 
+webhook-dispatch.test.js :: from "../server/webhook-dispatch.mjs"|
+webhook-doc-contract.test.js :: from "../server/webhook-dispatch.mjs"|from "../server/agent-webhook-subscriptions.mjs"|
+webhook-limits.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../scripts/telegram-contract-fixture.mjs"|from "../server/channel-import.mjs"|from "../server/channel-journal.mjs"|
+webhook-retry-backoff.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/webhook-dispatch.mjs"|
+webhook-ssrf-dns-failclosed.test.js :: from "../server/agent-webhook-subscriptions.mjs"|
+webhook-ssrf-dns.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../server/agent-webhook-subscriptions.mjs"|from "../server/webhook-dispatch.mjs"|
+webhook-ssrf.test.js :: from "../server/outbound-webhooks.mjs"|
+webhook-subscription-ssrf.test.js :: from "../server/agent-webhook-subscriptions.mjs"|
+weekly-learnings.test.js :: from "../scripts/weekly-learnings.mjs"|
+whatsapp-adapter.test.js :: from "../server/channel-adapters/whatsapp.mjs"|from "../server/email-envelope.mjs"|
+wiki-read-api.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../server/wiki-read-api.mjs"|
+work-actions.test.js :: from "../client/work-actions.mjs"|from "../scripts/acceptance-fixture.mjs"|from "../src/events.js"|from "../src/workflow.js"|
+work-collaboration.test.js :: 
+work-context.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../server/store.mjs"|from "../client/room-agent.mjs"|
+work-continuity.test.js :: from "../src/work-status.js"|from "../src/conversation.js"|from "../src/client.js"|
+work-controls.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+work-declarations.test.js :: from "../server/work-declarations.mjs"|from "../server/work-declarations.mjs"|from "../server/work-matchmaking.mjs"|
+work-discussion.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../server/store.mjs"|from "../client/room-agent.mjs"|
+work-evidence-immutable.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../src/events.js"|from "../server/text-results.mjs"|from "../src/work-packet.js"|
+work-handoff.test.js :: from "../server/work-handoff.mjs"|
+work-help-audit-ownership.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../src/events.js"|from "../server/recovery.mjs"|
+work-help-service.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../scripts/runtime-package.mjs"|from "../scripts/frozen-runtime-fixture.mjs"|from "../server/store.mjs"|
+work-help.test.js :: from "../src/events.js"|from "../src/work-help.js"|
+work-history-floor.test.js :: from "../server/store.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+work-history.test.js :: from "../src/workflow.js"|from "../src/events.js"|
+work-item-session.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+work-loops.test.js :: from "../src/work-loops.js"|
+work-matchmaking-adversarial.test.js :: from "../server/work-matchmaking.mjs"|
+work-matchmaking.test.js :: from "../server/work-matchmaking.mjs"|
+work-preparation.test.js :: 
+work-recipes.test.js :: from "../src/work-recipes.js"|
+work-reuse.test.js :: from "../scripts/acceptance-fixture.mjs"|from "../server/http.mjs"|from "../client/room-agent.mjs"|from "../src/workflow.js"|
+work-search.test.js :: 
+work-session-budget.test.js :: from "../server/store.mjs"|from "../server/http.mjs"|from "../server/bootstrap.mjs"|from "../src/events.js"|
+work-snapshot.test.js :: 
+work-templates.test.js :: from "../src/events.js"|from "../src/work-templates.js"|
+workflow.test.js :: from "../src/events.js"|from "../server/bootstrap.mjs"|from "../src/workflow.js"|from "../src/work-selectors.js"|
+writer-fence-property.test.js :: from "../server/writer-fence.mjs"|
+writer-fence-unfenced.test.js :: from "../server/writer-fence.mjs"|
+writer-fence.test.js :: from "../server/store.mjs"|from "../server/writer-fence.mjs"|

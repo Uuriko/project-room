@@ -1,0 +1,4 @@
+UNIT m07 mode=mutate test=agent-card-signing.test.js src=server/agent-directory.mjs suites=5 breaks=6
+baseline_exit=0
+attempt flip !==->=== L41: exit=1 syntax_err=False
+VERDICT=killed restored_ok=True

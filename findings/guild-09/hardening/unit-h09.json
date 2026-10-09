@@ -1,0 +1,20 @@
+{
+ "unit": "h09",
+ "mode": "harden",
+ "test": "id-sec-http.test.js",
+ "src": "server/magic-links.mjs",
+ "suites": [
+  "id-sec-http.test.js"
+ ],
+ "baseline_exit": 1,
+ "attempts": [
+  {
+   "break": "flip ===->!== L33",
+   "exit": 1,
+   "syntax_error": false,
+   "tail": "03\n  \n      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-09/tests/id-sec-http.test.js:125:10)\n      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n      at async Test.run (node:internal/test_runner/test:1404:7)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: 201,\n    expected: 403,\n    operator: 'strictEqual',\n    diff: 'simple'\n  }\n"
+  }
+ ],
+ "verdict": "baseline-red",
+ "restored_ok": true
+}

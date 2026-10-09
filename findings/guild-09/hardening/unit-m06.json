@@ -1,0 +1,27 @@
+{
+ "unit": "m06",
+ "mode": "mutate",
+ "test": "agent-plugin-sentinel-secrets.test.js",
+ "src": "server/agent-webhook-subscriptions.mjs",
+ "suites": [
+  "agent-plugin-sentinel-secrets.test.js",
+  "agent-plugin-webhook-subs.test.js",
+  "webhook-doc-contract.test.js",
+  "webhook-ssrf-dns-failclosed.test.js",
+  "webhook-ssrf-dns.test.js",
+  "webhook-subscription-ssrf.test.js"
+ ],
+ "baseline_exit": 0,
+ "attempts": [
+  {
+   "break": "flip !==->=== L51",
+   "exit": 1,
+   "syntax_error": false,
+   "tail": "-wave1000-guild-09/tests/agent-plugin-webhook-subs.test.js:54:8)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)\n      at Test.postRun (node:internal/test_runner/test:1537:19)\n      at Test.run (node:internal/test_runner/test:1462:12)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {\n    code: 'invalid_subscription'\n  }\n"
+  }
+ ],
+ "verdict": "killed",
+ "killing_break": "flip !==->=== L51",
+ "killing_tail": "-wave1000-guild-09/tests/agent-plugin-webhook-subs.test.js:54:8)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)\n      at Test.postRun (node:internal/test_runner/test:1537:19)\n      at Test.run (node:internal/test_runner/test:1462:12)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {\n    code: 'invalid_subscription'\n  }\n",
+ "restored_ok": true
+}

@@ -1,0 +1,10 @@
+REVERIFY rr01: origin/wave500/presence-w7-presence-tests
+rebased onto origin/main: True 
+touched files: 1
+my-slice suites to run: ['presence-scale.test.js']
+of which new-on-branch (not in origin/main manifest): ['presence-scale.test.js']
+server files: []
+excluded from run (claim/room or non-test): []
+suite presence-scale.test.js: exit=1
+verdict: SUITE FAILURE — breakage confirmed on this branch head.
+scratch cleaned

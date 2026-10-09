@@ -1,0 +1,5 @@
+UNIT h08 mode=harden test=channel-import.test.js src=server/graph-email.mjs suites=1 breaks=6
+baseline_exit=0
+attempt flip ===->!== L7: exit=0 syntax_err=False
+attempt flip ===->!== L13: exit=1 syntax_err=False
+VERDICT=hardened restored_ok=True

@@ -1,0 +1,22 @@
+{
+ "unit": "h15",
+ "mode": "harden",
+ "test": "analytics-backfill.test.js",
+ "src": "server/analytics/tail.mjs",
+ "suites": [
+  "analytics-backfill.test.js"
+ ],
+ "baseline_exit": 0,
+ "attempts": [
+  {
+   "break": "flip ===->!== L27",
+   "exit": 1,
+   "syntax_error": false,
+   "tail": "ror [ERR_ASSERTION]: Expected values to be strictly equal:\n  \n  true !== false\n  \n      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-09/tests/analytics-backfill.test.js:65:10)\n      at async Test.run (node:internal/test_runner/test:1404:7)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: true,\n    expected: false,\n    operator: 'strictEqual',\n    diff: 'simple'\n  }\n"
+  }
+ ],
+ "verdict": "hardened",
+ "killing_break": "flip ===->!== L27",
+ "killing_tail": "ror [ERR_ASSERTION]: Expected values to be strictly equal:\n  \n  true !== false\n  \n      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-09/tests/analytics-backfill.test.js:65:10)\n      at async Test.run (node:internal/test_runner/test:1404:7)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: true,\n    expected: false,\n    operator: 'strictEqual',\n    diff: 'simple'\n  }\n",
+ "restored_ok": true
+}

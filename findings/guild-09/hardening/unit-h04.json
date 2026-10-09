@@ -1,0 +1,40 @@
+{
+ "unit": "h04",
+ "mode": "harden",
+ "test": "bounty-anti-flake.test.js",
+ "src": "server/bounty-escrow.mjs",
+ "suites": [
+  "bounty-anti-flake.test.js"
+ ],
+ "baseline_exit": 0,
+ "attempts": [
+  {
+   "break": "flip ===->!== L450",
+   "exit": 0,
+   "syntax_error": false,
+   "tail": "the end; decay resets the rung and journals once (126.306359ms)\n\u2714 decay journal is idempotent: later claims do not re-journal (75.356628ms)\n\u2714 dispute-upheld records a flake strike: forfeit plus ladder journal (129.289555ms)\n\u2714 flakes are lane-scoped and room-scoped: other lanes are unaffected (40.197675ms)\n\u2714 the ladder never bans and never touches payouts: strikes are not reputation (141.065038ms)\n\u2139 tests 9\n\u2139 suites 0\n\u2139 pass 9\n\u2139 fail 0\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 2249.874479\n"
+  },
+  {
+   "break": "flip ===->!== L533",
+   "exit": 0,
+   "syntax_error": false,
+   "tail": "the end; decay resets the rung and journals once (235.0294ms)\n\u2714 decay journal is idempotent: later claims do not re-journal (137.349341ms)\n\u2714 dispute-upheld records a flake strike: forfeit plus ladder journal (230.250238ms)\n\u2714 flakes are lane-scoped and room-scoped: other lanes are unaffected (151.389882ms)\n\u2714 the ladder never bans and never touches payouts: strikes are not reputation (397.030165ms)\n\u2139 tests 9\n\u2139 suites 0\n\u2139 pass 9\n\u2139 fail 0\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 2936.490036\n"
+  },
+  {
+   "break": "flip ===->!== L536",
+   "exit": 0,
+   "syntax_error": false,
+   "tail": "he end; decay resets the rung and journals once (494.839709ms)\n\u2714 decay journal is idempotent: later claims do not re-journal (134.398293ms)\n\u2714 dispute-upheld records a flake strike: forfeit plus ladder journal (477.616391ms)\n\u2714 flakes are lane-scoped and room-scoped: other lanes are unaffected (268.20019ms)\n\u2714 the ladder never bans and never touches payouts: strikes are not reputation (513.872591ms)\n\u2139 tests 9\n\u2139 suites 0\n\u2139 pass 9\n\u2139 fail 0\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 5131.064466\n"
+  },
+  {
+   "break": "flip !==->=== L553",
+   "exit": 1,
+   "syntax_error": false,
+   "tail": "e/hatch/workspace/pr-wave1000-guild-09/server/bounty-escrow.mjs:1373:23)\n      at post (file:///home/hatch/workspace/pr-wave1000-guild-09/tests/bounty-anti-flake.test.js:36:49)\n      at flakeTimeout (file:///home/hatch/workspace/pr-wave1000-guild-09/tests/bounty-anti-flake.test.js:43:18)\n      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-09/tests/bounty-anti-flake.test.js:225:3)\n      at Test.runInAsyncScope (node:async_hooks:227:14) {\n    code: 'invalid_input'\n  }\n"
+  }
+ ],
+ "verdict": "hardened",
+ "killing_break": "flip !==->=== L553",
+ "killing_tail": "e/hatch/workspace/pr-wave1000-guild-09/server/bounty-escrow.mjs:1373:23)\n      at post (file:///home/hatch/workspace/pr-wave1000-guild-09/tests/bounty-anti-flake.test.js:36:49)\n      at flakeTimeout (file:///home/hatch/workspace/pr-wave1000-guild-09/tests/bounty-anti-flake.test.js:43:18)\n      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-09/tests/bounty-anti-flake.test.js:225:3)\n      at Test.runInAsyncScope (node:async_hooks:227:14) {\n    code: 'invalid_input'\n  }\n",
+ "restored_ok": true
+}

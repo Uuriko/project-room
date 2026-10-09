@@ -1,0 +1,5 @@
+UNIT m10 mode=mutate test=analytics-catalog.test.js src=server/analytics/schema.mjs suites=5 breaks=2
+baseline_exit=0
+attempt return false->true L90: exit=0 syntax_err=False
+attempt flip ===->!== L91: exit=0 syntax_err=False
+VERDICT=survived restored_ok=True

@@ -1,0 +1,7 @@
+UNIT h04 mode=harden test=bounty-anti-flake.test.js src=server/bounty-escrow.mjs suites=1 breaks=6
+baseline_exit=0
+attempt flip ===->!== L450: exit=0 syntax_err=False
+attempt flip ===->!== L533: exit=0 syntax_err=False
+attempt flip ===->!== L536: exit=0 syntax_err=False
+attempt flip !==->=== L553: exit=1 syntax_err=False
+VERDICT=hardened restored_ok=True

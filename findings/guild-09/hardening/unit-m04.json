@@ -1,0 +1,20 @@
+{
+ "unit": "m04",
+ "mode": "mutate",
+ "test": "abuse-rate-buckets.test.js",
+ "src": "server/bootstrap.mjs",
+ "suites": [
+  "abuse-rate-buckets.test.js",
+  "access-request-cancel.test.js",
+  "access-request-limits.test.js",
+  "access-request-status-next.test.js",
+  "access-request-upgrade.test.mjs",
+  "access-requests-admin-gates.test.js"
+ ],
+ "baseline_exit": 1,
+ "attempts": [],
+ "verdict": "baseline-red",
+ "restored_ok": true,
+ "baseline_tail": "ch/workspace/pr-wave1000-guild-09/server/http.mjs:149:23)\n      at warnMissingSecurityContactCheck (file:///home/hatch/workspace/pr-wave1000-guild-09/server/http.mjs:165:8)\n      at createRoomServer (file:///home/hatch/workspace/pr-wave1000-guild-09/server/http.mjs:334:28)\n      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-09/tests/access-request-upgrade.test.mjs:179:18)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)\n      at Test.postRun (node:internal/test_runner/test:1537:19)\n      at Test.run (node:internal/test_runner/test:1462:12)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7)\n",
+ "note": "baseline red only when 6 suites share one node --test process (warnMissingSecurityContactCheck via access-request-upgrade.test.mjs); suite passes 19/19 standalone. Multi-suite runner artifact, not a product bug. breaks=0: no === / !== / return-bool candidates in server/bootstrap.mjs."
+}

@@ -1,0 +1,4 @@
+UNIT m05 mode=mutate test=inbox-import-guards.test.js src=server/channel-adapters/telegram.mjs suites=3 breaks=6
+baseline_exit=0
+attempt flip !==->=== L9: exit=1 syntax_err=False
+VERDICT=killed restored_ok=True

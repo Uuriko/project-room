@@ -1,0 +1,4 @@
+UNIT h06 mode=harden test=access-request-cancel.test.js src=server/identity-ratelimit.mjs suites=1 breaks=3
+baseline_exit=0
+attempt flip ===->!== L12: exit=1 syntax_err=False
+VERDICT=hardened restored_ok=True

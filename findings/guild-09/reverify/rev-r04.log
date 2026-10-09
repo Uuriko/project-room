@@ -1,0 +1,9 @@
+REVERIFY rr04: origin/ch-2056/notfound-hint-followup
+rebased onto origin/main: True 
+touched files: 2
+my-slice suites to run: ['agent-error-next.test.js']
+server files: []
+excluded from run (claim/room or non-test): []
+suite agent-error-next.test.js: exit=0
+verdict: no red flags: suites green, no test/assert removal, clean rebase.
+scratch cleaned

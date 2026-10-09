@@ -1,0 +1,4 @@
+UNIT h07 mode=harden test=agent-card-deploy-consistency.test.js src=server/agent-card-signing.mjs suites=1 breaks=6
+baseline_exit=0
+attempt flip !==->=== L50: exit=1 syntax_err=False
+VERDICT=hardened restored_ok=True

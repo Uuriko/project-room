@@ -1,0 +1,22 @@
+{
+ "unit": "h06",
+ "mode": "harden",
+ "test": "access-request-cancel.test.js",
+ "src": "server/identity-ratelimit.mjs",
+ "suites": [
+  "access-request-cancel.test.js"
+ ],
+ "baseline_exit": 0,
+ "attempts": [
+  {
+   "break": "flip ===->!== L12",
+   "exit": 1,
+   "syntax_error": false,
+   "tail": "ore (file:///home/hatch/workspace/pr-wave1000-guild-09/server/store.mjs:1192:22)\n      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-09/tests/access-request-cancel.test.js:121:17)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)\n      at Test.postRun (node:internal/test_runner/test:1537:19) {\n    code: 'invalid_ratelimit'\n  }\n"
+  }
+ ],
+ "verdict": "hardened",
+ "killing_break": "flip ===->!== L12",
+ "killing_tail": "ore (file:///home/hatch/workspace/pr-wave1000-guild-09/server/store.mjs:1192:22)\n      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-09/tests/access-request-cancel.test.js:121:17)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)\n      at Test.postRun (node:internal/test_runner/test:1537:19) {\n    code: 'invalid_ratelimit'\n  }\n",
+ "restored_ok": true
+}

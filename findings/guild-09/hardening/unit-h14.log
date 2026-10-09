@@ -1,0 +1,9 @@
+UNIT h14 mode=harden test=audit-wave-low-a.test.js src=server/inbox-spam.mjs suites=1 breaks=6
+baseline_exit=0
+attempt flip ===->!== L12: exit=0 syntax_err=False
+attempt flip !==->=== L18: exit=0 syntax_err=False
+attempt flip ===->!== L20: exit=0 syntax_err=False
+attempt flip ===->!== L21: exit=0 syntax_err=False
+attempt flip !==->=== L23: exit=0 syntax_err=False
+attempt flip !==->=== L24: exit=0 syntax_err=False
+VERDICT=false-positive restored_ok=True

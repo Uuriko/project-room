@@ -1,0 +1,4 @@
+UNIT h17 mode=harden test=webhook-dispatch.test.js src=server/webhook-dispatch.mjs suites=1 breaks=6
+baseline_exit=0
+attempt flip ===->!== L57: exit=1 syntax_err=False
+VERDICT=hardened restored_ok=True

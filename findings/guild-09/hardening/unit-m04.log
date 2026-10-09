@@ -1,0 +1,3 @@
+UNIT m04 mode=mutate test=abuse-rate-buckets.test.js src=server/bootstrap.mjs suites=6 breaks=0
+baseline_exit=1
+VERDICT=baseline-red (attempts skipped)

@@ -1,0 +1,22 @@
+{
+ "unit": "h05",
+ "mode": "harden",
+ "test": "agent-enrollment.test.js",
+ "src": "server/recovery.mjs",
+ "suites": [
+  "agent-enrollment.test.js"
+ ],
+ "baseline_exit": 0,
+ "attempts": [
+  {
+   "break": "flip ===->!== L12",
+   "exit": 1,
+   "syntax_error": false,
+   "tail": "guild-09/tests/agent-enrollment.test.js:192:3)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)\n      at Test.postRun (node:internal/test_runner/test:1537:19)\n      at Test.run (node:internal/test_runner/test:1462:12)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {\n    status: 422,\n    code: 'invalid_autonomy_tier'\n  }\n"
+  }
+ ],
+ "verdict": "hardened",
+ "killing_break": "flip ===->!== L12",
+ "killing_tail": "guild-09/tests/agent-enrollment.test.js:192:3)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)\n      at Test.postRun (node:internal/test_runner/test:1537:19)\n      at Test.run (node:internal/test_runner/test:1462:12)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {\n    status: 422,\n    code: 'invalid_autonomy_tier'\n  }\n",
+ "restored_ok": true
+}

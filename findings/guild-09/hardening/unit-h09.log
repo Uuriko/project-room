@@ -1,0 +1,4 @@
+UNIT h09 mode=harden test=id-sec-http.test.js src=server/magic-links.mjs suites=1 breaks=6
+baseline_exit=1
+attempt flip ===->!== L33: exit=1 syntax_err=False
+VERDICT=hardened restored_ok=True

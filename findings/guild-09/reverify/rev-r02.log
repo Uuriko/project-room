@@ -1,0 +1,10 @@
+REVERIFY rr02: origin/wave500/presence-w2-pump
+rebased onto origin/main: True 
+touched files: 4
+my-slice suites to run: ['stream-shared-pump.test.js']
+of which new-on-branch (not in origin/main manifest): ['stream-shared-pump.test.js']
+server files: ['server/http.mjs', 'server/store.mjs']
+excluded from run (claim/room or non-test): ['tests/bench-fanout-f1.mjs']
+suite stream-shared-pump.test.js: exit=0
+verdict: no red flags: suites green, no test/assert removal, clean rebase.
+scratch cleaned

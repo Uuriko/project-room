@@ -1,0 +1,4 @@
+UNIT h19 mode=harden test=notify-policy.test.js src=server/notify-prefs.mjs suites=1 breaks=6
+baseline_exit=0
+attempt flip !==->=== L29: exit=1 syntax_err=False
+VERDICT=hardened restored_ok=True

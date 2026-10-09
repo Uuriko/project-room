@@ -1,0 +1,22 @@
+{
+ "unit": "h02",
+ "mode": "harden",
+ "test": "access-request-cancel.test.js",
+ "src": "server/access-requests.mjs",
+ "suites": [
+  "access-request-cancel.test.js"
+ ],
+ "baseline_exit": 0,
+ "attempts": [
+  {
+   "break": "flip ===->!== L98",
+   "exit": 1,
+   "syntax_error": false,
+   "tail": "t AccessRequests.decide (file:///home/hatch/workspace/pr-wave1000-guild-09/server/access-requests.mjs:630:23)\n      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-09/tests/access-request-cancel.test.js:141:28)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:969:18) {\n    status: 409,\n    code: 'already_decided',\n    headers: null\n  }\n"
+  }
+ ],
+ "verdict": "hardened",
+ "killing_break": "flip ===->!== L98",
+ "killing_tail": "t AccessRequests.decide (file:///home/hatch/workspace/pr-wave1000-guild-09/server/access-requests.mjs:630:23)\n      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-09/tests/access-request-cancel.test.js:141:28)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:969:18) {\n    status: 409,\n    code: 'already_decided',\n    headers: null\n  }\n",
+ "restored_ok": true
+}

@@ -1,0 +1,22 @@
+{
+ "unit": "h10",
+ "mode": "harden",
+ "test": "channel-connection.test.js",
+ "src": "server/email-envelope.mjs",
+ "suites": [
+  "channel-connection.test.js"
+ ],
+ "baseline_exit": 0,
+ "attempts": [
+  {
+   "break": "flip !==->=== L9",
+   "exit": 1,
+   "syntax_error": false,
+   "tail": "-wave1000-guild-09/tests/channel-connection.test.js:23:58)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)\n      at Test.postRun (node:internal/test_runner/test:1537:19)\n      at Test.run (node:internal/test_runner/test:1462:12)\n      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {\n    code: 'invalid_email_connection'\n  }\n"
+  }
+ ],
+ "verdict": "hardened",
+ "killing_break": "flip !==->=== L9",
+ "killing_tail": "-wave1000-guild-09/tests/channel-connection.test.js:23:58)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1397:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:969:18)\n      at Test.postRun (node:internal/test_runner/test:1537:19)\n      at Test.run (node:internal/test_runner/test:1462:12)\n      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {\n    code: 'invalid_email_connection'\n  }\n",
+ "restored_ok": true
+}

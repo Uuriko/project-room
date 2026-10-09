@@ -1,0 +1,4 @@
+UNIT h16 mode=harden test=agent-lanes.test.js src=server/work-matchmaking.mjs suites=1 breaks=6
+baseline_exit=0
+attempt flip ===->!== L36: exit=1 syntax_err=False
+VERDICT=hardened restored_ok=True
