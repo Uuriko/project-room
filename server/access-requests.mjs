@@ -73,7 +73,11 @@ export const accessRequestSchema = `
     created_at INTEGER NOT NULL,
     decided_at INTEGER,
     decided_by TEXT,
-    decision_note TEXT
+    decision_note TEXT,
+    -- FIX-63: the message.posted decision receipt's messageId, so the
+    -- notification feed can only resolve genuine decision receipts
+    -- (see permissionDecisionMessages in member-permission-requests.mjs).
+    decision_message_id TEXT
   );
   CREATE INDEX IF NOT EXISTS access_requests_room ON access_requests(room_id, status);
   CREATE INDEX IF NOT EXISTS access_requests_identity ON access_requests(identity_id);
@@ -127,7 +131,11 @@ const rowToRequest = row => row ? Object.freeze({
   createdAt: row.created_at,
   decidedAt: row.decided_at,
   decidedBy: row.decided_by,
-  decisionNote: row.decision_note
+  decisionNote: row.decision_note,
+  // FIX-63: upgrades keep the decision receipt's message id in the versioned
+  // requested_permissions JSON; admission requests keep it in the
+  // decision_message_id column. Undecided rows carry null.
+  decisionMessageId: requestContents(row).upgrade?.decisionMessageId ?? row.decision_message_id ?? null
 }) : null;
 
 // Mirrors the projection compaction in store.mjs / agent-invites.mjs: strip
@@ -634,6 +642,49 @@ export class AccessRequests {
     return Object.freeze(rows.map(rowToRequest));
   }
 
+  // FIX-63: find the access.requested timeline event that filed this
+  // request, so the decision receipt is causally linked to it. Admission
+  // requests use random event ids (unlike upgrades' deterministic key), so
+  // this scans the room's bounded event tail for the matching requestId.
+  #requestEventId(roomId, requestId) {
+    const rows = this.db.prepare(
+      `SELECT id, body FROM events WHERE room_id=? AND json_extract(body,'$.type')='access.requested' ORDER BY sequence DESC`)
+      .all(roomId);
+    for (const row of rows) {
+      let parsed = null;
+      try { parsed = JSON.parse(row.body); } catch { continue; }
+      if (parsed?.data?.requestId === requestId) return row.id;
+    }
+    return null;
+  }
+
+  // FIX-63: announce the decision on the room timeline and record the
+  // receipt's messageId on the request row, so the notification feed
+  // (server/notifications.mjs) derives the requester's access_decision item
+  // via permissionDecisionMessages(). The receipt is causally linked to the
+  // access.requested event and its id is pinned on the row, so an arbitrary
+  // chat message can never claim to be a decision. The decider is the actor
+  // (mirroring the permission-upgrade review receipt); the private review
+  // note stays on the row, never on the public receipt. Runs inside
+  // decide()'s transaction, so a failed post rolls the decision back with
+  // it — a decision is never recorded without its announcement. Returns the
+  // receipt messageId, or null when the room is archived (writes there stay
+  // refused and there is no live timeline audience to notify).
+  #announceDecision(token, roomId, row, { decision, grants = [], alreadyMember = false }, binding = null) {
+    if (isRoomArchived(this.store.room(roomId).state)) return null;
+    const basisEventId = this.#requestEventId(roomId, row.request_id);
+    const messageId = randomUUID();
+    const body = decision === "approve"
+      ? (alreadyMember
+        ? `Approved access request ${row.request_id} for ${row.display_name}. Already a member; existing permissions are unchanged.`
+        : `Approved access request ${row.request_id} for ${row.display_name}. Granted permissions: ${grants.join(", ") || "read/chat access"}.`)
+      : `Denied access request ${row.request_id} for ${row.display_name}.`;
+    this.store.command(token, roomId, { id: randomUUID(), type: T.MESSAGE_POSTED,
+      ...(basisEventId ? { causationId: basisEventId } : {}), data: { messageId, body } }, binding);
+    this.db.prepare("UPDATE access_requests SET decision_message_id=? WHERE request_id=?").run(messageId, row.request_id);
+    return messageId;
+  }
+
   // Owner or membership-administration delegate (RC-2026-09-18-038):
   // approve or deny. Approval links the identity via the same
   // AgentIdentities.link() path as the manual owner flow.
@@ -659,6 +710,9 @@ export class AccessRequests {
         }
         this.db.prepare("UPDATE access_requests SET status='denied', decided_at=?, decided_by=?, decision_note=? WHERE request_id=?")
           .run(now, auth.member.id, note?.trim() || null, requestId);
+        // FIX-63: announce the denial so the requester's notification feed
+        // derives an access_decision item.
+        this.#announceDecision(token, roomId, row, { decision: "deny" }, expectedSessionBinding);
         return rowToRequest(this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId));
       }
       // Approve: the owner chooses the final permissions (never more than
@@ -684,6 +738,9 @@ export class AccessRequests {
         // decision must not link them again or change the grant they hold.
         this.db.prepare("UPDATE access_requests SET status='approved', decided_at=?, decided_by=?, decision_note=? WHERE request_id=?")
           .run(now, auth.member.id, "already a member; request closed without a second grant", requestId);
+        // FIX-63: announce the decision so the requester's notification feed
+        // derives an access_decision item.
+        this.#announceDecision(token, roomId, row, { decision: "approve", alreadyMember: true }, expectedSessionBinding);
         const updated = rowToRequest(this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId));
         const held = authority.members[existingLink.memberId]?.permissions ?? [];
         return Object.freeze({
@@ -717,6 +774,9 @@ export class AccessRequests {
       }, expectedSessionBinding);
       this.db.prepare("UPDATE access_requests SET status='approved', decided_at=?, decided_by=? WHERE request_id=?")
         .run(now, auth.member.id, requestId);
+      // FIX-63: announce the approval so the new member's notification feed
+      // derives an access_decision item.
+      this.#announceDecision(token, roomId, row, { decision: "approve", grants }, expectedSessionBinding);
       // Journal the completed referral in the same transaction, after the
       // new member exists. Exactly-once per referee via the referrals
       // primary key, so a retried approval cannot double-count.

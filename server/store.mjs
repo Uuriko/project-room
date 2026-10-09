@@ -1708,6 +1708,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const cols = new Set(this.db.prepare("PRAGMA table_info(access_requests)").all().map(c => c.name));
         if (!cols.has("referred_by")) this.db.exec("ALTER TABLE access_requests ADD COLUMN referred_by TEXT");
       }
+      // FIX-63: the decision receipt's messageId, so the notification feed
+      // derives access_decision items for admission decisions too. Converge
+      // deployed databases that predate the column.
+      {
+        const cols = new Set(this.db.prepare("PRAGMA table_info(access_requests)").all().map(c => c.name));
+        if (!cols.has("decision_message_id")) this.db.exec("ALTER TABLE access_requests ADD COLUMN decision_message_id TEXT");
+      }
       // Owner-granted membership administration for agent identities
       // (RC-2026-09-18-038): purely additive, intentionally outside the
       // writer fence like access_requests — older writers have no code path

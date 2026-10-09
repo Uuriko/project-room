@@ -148,8 +148,18 @@ export function permissionDecisionMessages(store, rows) {
     const row = store.db.prepare("SELECT * FROM access_requests WHERE room_id=? AND request_id=?").get(event.roomId, requestEvent.data.requestId);
     if (!row || !["approved", "denied"].includes(row.status)) continue;
     const upgrade = permissionRequestContents(row).upgrade;
-    if (upgrade?.decisionMessageId !== event.data.messageId) continue;
-    decisions.set(event.data.messageId, { requestId: row.request_id, memberId: upgrade.memberId,
+    // FIX-63: upgrades keep the decision receipt's message id in the
+    // versioned requested_permissions JSON; admission requests keep it in
+    // the decision_message_id column. Either way, an arbitrary chat message
+    // cannot claim to be a decision: its ID must match the durable row.
+    const decisionMessageId = upgrade?.decisionMessageId ?? row.decision_message_id ?? null;
+    if (decisionMessageId !== event.data.messageId) continue;
+    decisions.set(event.data.messageId, { requestId: row.request_id,
+      // Admission requests are filed by an identity, not a member; after
+      // approval that identity IS the member id (agent-identities link
+      // defaults memberId to identityId), and a denied requester is never a
+      // member, so identity_id is the right viewer key either way.
+      memberId: upgrade?.memberId ?? row.identity_id,
       outcome: row.status, eventId: event.id });
   }
   return decisions;
