@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS room_assistant_config (room_id TEXT PRIMARY KEY, valu
 CREATE TABLE IF NOT EXISTS room_assistant_runs (room_id TEXT NOT NULL, run_id TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(room_id,run_id));
 CREATE TABLE IF NOT EXISTS room_assistant_ops (room_id TEXT NOT NULL, actor_id TEXT NOT NULL, request_id TEXT NOT NULL, input TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(room_id,actor_id,request_id));`;
 const fail = (code, message, status = 409) => { throw Object.assign(new Error(message), { code, status }); };
+// Usable coordinator: active member record still carrying accept_work (invoke additionally needs kind === 'agent').
+const hostReady = member => Boolean(member?.active && member.permissions.includes('accept_work'));
 const terminal = new Set(['done', 'cancelled', 'failed']);
 const keys = {
   configure: ['name', 'coordinatorMemberId', 'expectedRevision'], invoke: ['runId', 'sourceMessageId'],
@@ -17,7 +19,7 @@ const keys = {
   resolve: ['runId', 'sourceMessageId', 'expectedRevision'],
   claim: ['runId', 'attemptId', 'expectedRevision'],
   report: ['runId', 'attemptId', 'expectedRevision', 'state', 'summary', 'resultMessageId', 'appliedInputMessageIds'],
-  resume: ['runId', 'expectedRevision'], pause: ['runId', 'expectedRevision'], cancel: ['runId', 'expectedRevision']
+  ...Object.fromEntries(['resume', 'pause', 'cancel'].map(action => [action, ['runId', 'expectedRevision']]))
 };
 // Deleted prompts retain only a stop handle for their existing controllers.
 // The history floor still applies: deletion cannot reveal older work to newcomers.
@@ -46,15 +48,13 @@ export class RoomAssistant {
       const config = this.config(roomId), coordinator = state.members[config.coordinatorMemberId];
       const floor = historyFloor(this.store.db, state, roomId, auth.member.id);
       const visible = id => messageVisibleToViewer(state.messages.find(m => m.id === id), auth.member.id, floor);
+      const hostStale = run => !Number.isFinite(run.hostReportedAt) || this.store.now() - run.hostReportedAt > 120000;
       const runs = this.store.db.prepare('SELECT value FROM room_assistant_runs WHERE room_id=? ORDER BY rowid DESC LIMIT 100').all(roomId)
-        .map(row => JSON.parse(row.value)).flatMap(run => {
-          if (visible(run.sourceMessageId)) return [run];
-          const opening = state.messages.find(m => m.id === run.sourceMessageId);
-          return controlsDeletedSource(run, opening, auth.member, state, floor) ? [deletedControl(run)] : [];
-        })
-        .map(run => ({ ...run, status: run.status === 'working' && (!Number.isFinite(run.hostReportedAt) || this.store.now() - run.hostReportedAt > 120000) ? 'unknown' : run.status }));
-      const recent = runs.some(run => run.coordinatorMemberId === config.coordinatorMemberId && run.attemptId && Number.isFinite(run.hostReportedAt) && this.store.now() - run.hostReportedAt <= 120000 && !terminal.has(run.status));
-      return { contractVersion: 1, roomId, assistant: { ...config, availability: !coordinator?.active || !coordinator.permissions.includes('accept_work') ? 'not_connected' : recent ? 'connected' : 'awaiting_host' }, runs };
+        .map(row => JSON.parse(row.value)).flatMap(run => visible(run.sourceMessageId) ? [run]
+          : controlsDeletedSource(run, state.messages.find(m => m.id === run.sourceMessageId), auth.member, state, floor) ? [deletedControl(run)] : [])
+        .map(run => ({ ...run, status: run.status === 'working' && hostStale(run) ? 'unknown' : run.status }));
+      const recent = runs.some(run => run.coordinatorMemberId === config.coordinatorMemberId && run.attemptId && !hostStale(run) && !terminal.has(run.status));
+      return { contractVersion: 1, roomId, assistant: { ...config, availability: !hostReady(coordinator) ? 'not_connected' : recent ? 'connected' : 'awaiting_host' }, runs };
     });
   }
   apply(roomId, input, authorize) {
@@ -95,19 +95,21 @@ export class RoomAssistant {
       if (input.action === 'configure') {
         if (!isOwner) fail('assistant_denied', 'Only the room owner configures its assistant', 403);
         if (input.expectedRevision !== config.revision) fail('assistant_revision_conflict', 'Assistant settings changed; read them before retrying');
+        const candidate = state.members[input.coordinatorMemberId];
         if (typeof input.name !== 'string' || !input.name.trim() || input.name.length > 64
-          || input.coordinatorMemberId !== null && (!validId(input.coordinatorMemberId) || state.members[input.coordinatorMemberId]?.kind !== 'agent' || !state.members[input.coordinatorMemberId]?.active || !state.members[input.coordinatorMemberId]?.permissions.includes('accept_work')))
+          || input.coordinatorMemberId !== null && (!validId(input.coordinatorMemberId) || candidate?.kind !== 'agent' || !hostReady(candidate)))
           fail('invalid_assistant_config', 'Choose a name and an active room agent, or disconnect', 422);
         result = { name: input.name.trim(), coordinatorMemberId: input.coordinatorMemberId, revision: config.revision + 1 };
         this.store.db.prepare('INSERT INTO room_assistant_config VALUES(?,?) ON CONFLICT(room_id) DO UPDATE SET value=excluded.value').run(roomId, JSON.stringify(result));
         if (result.coordinatorMemberId !== config.coordinatorMemberId) {
+          const updateRun = this.store.db.prepare('UPDATE room_assistant_runs SET value=? WHERE room_id=? AND run_id=?');
           for (const row of this.store.db.prepare('SELECT run_id,value FROM room_assistant_runs WHERE room_id=?').all(roomId)) {
             const pending = JSON.parse(row.value);
             if (terminal.has(pending.status)) continue;
             if (!pending.attemptId) pending.coordinatorMemberId = result.coordinatorMemberId;
             else if (!['paused', 'cancel_requested', 'needs_input'].includes(pending.status)) pending.status = 'pause_requested';
             pending.revision++;
-            this.store.db.prepare('UPDATE room_assistant_runs SET value=? WHERE room_id=? AND run_id=?').run(JSON.stringify(pending), roomId, row.run_id);
+            updateRun.run(JSON.stringify(pending), roomId, row.run_id);
           }
         }
       } else {
@@ -118,7 +120,7 @@ export class RoomAssistant {
           if (!isHuman) fail('assistant_denied', 'A human explicitly asks the shared assistant', 403);
           source(input.sourceMessageId);
           const coordinator = state.members[config.coordinatorMemberId];
-          if (!coordinator?.active || coordinator.kind !== 'agent' || !coordinator.permissions.includes('accept_work')) fail('assistant_not_connected', 'Connect an authorized room assistant before asking for work');
+          if (!hostReady(coordinator) || coordinator.kind !== 'agent') fail('assistant_not_connected', 'Connect an authorized room assistant before asking for work');
           if (run || this.store.db.prepare("SELECT 1 FROM room_assistant_runs WHERE room_id=? AND json_extract(value,'$.sourceMessageId')=?").get(roomId, input.sourceMessageId)) fail('assistant_run_exists', 'This message already has a shared request');
           run = { id: input.runId, sourceMessageId: input.sourceMessageId, initiatorId: actor.id,
             coordinatorMemberId: config.coordinatorMemberId, status: 'queued', revision: 0, attemptId: null,
@@ -148,7 +150,7 @@ export class RoomAssistant {
             if (!isHuman || (!isOwner && actor.id !== run.initiatorId)) fail('assistant_denied', 'The requester or owner resumes this request', 403);
             if (run.status !== 'paused') fail('assistant_not_paused', 'Wait for the host to confirm pausing before resuming');
             const coordinator = state.members[config.coordinatorMemberId];
-            if (!coordinator?.active || !coordinator.permissions.includes('accept_work') || run.coordinatorMemberId !== config.coordinatorMemberId)
+            if (!hostReady(coordinator) || run.coordinatorMemberId !== config.coordinatorMemberId)
               fail('assistant_not_connected', 'Reconnect the original authorized assistant before resuming');
             run.status = run.attemptId ? 'resume_requested' : 'queued';
           } else if (['pause', 'cancel'].includes(input.action)) {

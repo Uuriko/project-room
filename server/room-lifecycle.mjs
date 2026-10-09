@@ -67,6 +67,11 @@ export const accountRoomEntry = (row, memberId) => ({
 
 const accountViewer = auth => ({ accountId: auth.account.id, authEpoch: auth.account.authEpoch, sessionRevision: auth.sessionRevision, sessionBinding: auth.sessionBinding });
 const text = (value, max, multiline = false) => typeof value === "string" && value.trim().length > 0 && value.length <= max && !(multiline ? controlExceptBreaks : control).test(value);
+const needText = (request, field, max, multiline, message) => {
+  const value = request[field];
+  if (!text(value, max, multiline)) fail(422, "invalid_room_request", message);
+  return value.trim();
+};
 
 // An account may create a room when it has no rooms yet — a stranger becomes
 // owner of their first room — or when it already administers membership
@@ -77,42 +82,35 @@ const text = (value, max, multiline = false) => typeof value === "string" && val
 // roomId is the idempotency key: the same request returns the same room with
 // duplicate: true; a different room under that id is 409 room_exists.
 const STARTER_FIELDS = Object.freeze(["intent", "start", "templateSlug"]);
+const KNOWN_FIELDS = Object.freeze([...CREATE_FIELDS, ...STARTER_FIELDS]);
+const requestShapeOk = request => request && typeof request === "object" && !Array.isArray(request)
+  && CREATE_FIELDS.every(field => Object.hasOwn(request, field))
+  && Object.keys(request).every(field => KNOWN_FIELDS.includes(field));
 
 export function createAccountRoom(store, token, binding, request) {
-  if (!request || typeof request !== "object" || Array.isArray(request)
-    || !CREATE_FIELDS.every(field => Object.hasOwn(request, field))
-    || Object.keys(request).some(field => !CREATE_FIELDS.includes(field) && !STARTER_FIELDS.includes(field))) {
+  if (!requestShapeOk(request)) {
     fail(422, "invalid_room_request", "Supply roomId, title, purpose, kind and displayName");
   }
   const { roomId, kind } = request;
   if (!validId(roomId) || roomId.length > 64) fail(422, "invalid_room_request", "Room id must be 1 to 64 letters, digits, dots, colons, underscores or hyphens");
-  if (!text(request.title, 120)) fail(422, "invalid_room_request", "Room name must be 1 to 120 characters");
-  if (!text(request.purpose, 1000, true)) fail(422, "invalid_room_request", "Room purpose must be 1 to 1000 characters");
-  if (!text(request.displayName, 80)) fail(422, "invalid_room_request", "Your name in the room must be 1 to 80 characters");
+  let title = needText(request, "title", 120, false, "Room name must be 1 to 120 characters");
+  const purpose = needText(request, "purpose", 1000, true, "Room purpose must be 1 to 1000 characters");
+  const displayName = needText(request, "displayName", 80, false, "Your name in the room must be 1 to 80 characters");
   if (!ROOM_KINDS.includes(kind)) fail(422, "invalid_room_request", "Room kind must be personal or organization");
   // ACT-1a: optional intent / start=1 seed Room Guide. Requests without them
   // keep the existing two-step onboarding. ACT-1b is what sends these fields.
-  let intent = null;
-  if (Object.hasOwn(request, "intent")) {
-    if (!text(request.intent, 80)) fail(422, "invalid_room_request", "intent must be 1 to 80 characters");
-    intent = request.intent.trim();
-  }
-  let start = false;
-  if (Object.hasOwn(request, "start")) {
-    if (request.start !== 1 && request.start !== true) fail(422, "invalid_room_request", "start must be 1");
-    start = true;
-  }
-  let templateSlug = null;
-  if (Object.hasOwn(request, "templateSlug")) {
-    if (typeof request.templateSlug !== "string" || !getRoomTemplate(request.templateSlug)) {
-      fail(422, "invalid_room_request", "templateSlug must name a room template");
-    }
-    templateSlug = request.templateSlug;
-  }
+  // An absent field is null; a present one must validate or the request fails.
+  const needOpt = (field, check, message) => {
+    if (!Object.hasOwn(request, field)) return null;
+    if (!check(request[field])) fail(422, "invalid_room_request", message);
+    return request[field];
+  };
+  const intent = needOpt("intent", value => text(value, 80), "intent must be 1 to 80 characters")?.trim() ?? null;
+  const start = needOpt("start", value => value === 1 || value === true, "start must be 1") !== null;
+  const templateSlug = needOpt("templateSlug", value => typeof value === "string" && getRoomTemplate(value),
+    "templateSlug must name a room template");
   const wantsStarter = Boolean(intent) || start;
-  let title = request.title.trim();
   if (intent) title = starterTitleForIntent(intent);
-  const purpose = request.purpose.trim(), displayName = request.displayName.trim();
   return store.transaction(() => {
     const auth = store.authenticateAccountSession(token, null, binding);
     const accountId = auth.account.id;
@@ -132,13 +130,10 @@ export function createAccountRoom(store, token, binding, request) {
     const memberships = store.db.prepare("SELECT room_id, member_id FROM member_accounts WHERE account_id=? ORDER BY room_id").all(accountId);
     if (memberships.length >= ACCOUNT_ROOM_LIMIT) fail(409, "pilot_limit", "Bounded pilot capacity reached; no room was created");
     if (memberships.length > 0) store.accountLogins.assertEmailVerified(accountId);
-    // The same per-room check discovery uses (active human membership with its
-    // invitation evidence intact), then owner or manage_members in that room.
-    // No active memberships means a first room: allowed (an old, inactive
-    // audit binding is not current membership). An account still in rooms keeps the
-    // administration requirement for additional rooms.
-    // A growth-funded room does not count as administering one: owning it
-    // must not unlock the ordinary 100-room allowance.
+    // Same per-room check discovery uses (active human membership with intact
+    // invitation evidence), then owner or manage_members. No active memberships
+    // means a first room: allowed. A growth-funded room does not count as
+    // administering one: owning it must not unlock the ordinary 100-room allowance.
     let foundedWithGrowth = false;
     let activeMemberships = 0;
     const administers = memberships.some(({ room_id }) => {

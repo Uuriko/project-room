@@ -88,6 +88,8 @@ const OPEN_WORK_STATES = new Set([
   WORK_STATES.PROPOSED, WORK_STATES.ACCEPTED, WORK_STATES.WORKING, WORK_STATES.BLOCKED
 ]);
 
+const byStringKey = key => (a, b) => a[key] < b[key] ? -1 : a[key] > b[key] ? 1 : 0;
+
 // Coordination norms: the room's standing defaults. Frozen so callers cannot
 // mutate the shared reference; buildActivationPack copies them per pack.
 export const COORDINATION_NORMS = Object.freeze({
@@ -96,18 +98,15 @@ export const COORDINATION_NORMS = Object.freeze({
   stopAfterRepeatedNoopWakes: true
 });
 
-const claimStatusOf = (claim, nowIso) => {
-  if (!claim) return null;
-  if (claim.status === "released") return "released";
-  return Date.parse(claim.expiresAt) > Date.parse(nowIso) ? "active" : "expired";
-};
+const claimStatusOf = (claim, nowIso) =>
+  !claim ? null
+  : claim.status === "released" ? "released"
+  : Date.parse(claim.expiresAt) > Date.parse(nowIso) ? "active" : "expired";
 
-const reviewPolicyOf = item => {
-  if (item.independentVerificationRequired && item.ownerDecisionRequired) return "independent+owner";
-  if (item.independentVerificationRequired) return "independent";
-  if (item.ownerDecisionRequired) return "owner";
-  return "none";
-};
+const reviewPolicyOf = item =>
+  item.independentVerificationRequired && item.ownerDecisionRequired ? "independent+owner"
+  : item.independentVerificationRequired ? "independent"
+  : item.ownerDecisionRequired ? "owner" : "none";
 
 const memberOf = member => ({
   id: member.id,
@@ -147,11 +146,11 @@ export function buildActivationPack(store, roomSlug, viewerId = null) {
   const now = new Date(store.now()).toISOString();
   const members = Object.values(state.members ?? {})
     .filter(member => member?.active !== false)
-    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .sort(byStringKey("id"))
     .map(memberOf);
   const openWork = Object.values(state.workItems ?? {})
     .filter(item => item && OPEN_WORK_STATES.has(item.state))
-    .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0))
+    .sort(byStringKey("createdAt"))
     .map(item => workOf(item, now));
   const floor = summaryHistoryFloor(store, roomSlug, viewerId, sequence); // QA4 Q4-SEC-1
   const pack = withContentTrust({
@@ -165,10 +164,8 @@ export function buildActivationPack(store, roomSlug, viewerId = null) {
     orientation: annotateOrientation(roomOrientation(state)),
     members,
     openWork,
-    // QA4 Q4-SEC-1: only pins whose message this viewer may read.
-    // (Supersedes the audit-fix F-1 pinVisibleToViewer filter: the shared
-    // messageVisibleToViewer predicate also enforces the history floor, and
-    // keeps the owner non-exempt on DMs.)
+    // QA4 Q4-SEC-1: only pins this viewer may read. The shared messageVisibleToViewer
+    // predicate also enforces the history floor and keeps the owner non-exempt on DMs.
     pinnedResources: pinnedMessages(state).filter(pin => messageVisibleToViewer(pin.message, viewerId, floor)).map(pinnedOf),
     repoHead: null,
     participationRules: { ...roomPolicy(state), trust: roomTrust(state).enabled },

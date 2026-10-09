@@ -13,6 +13,8 @@ export const ROOM_CONTEXT_OMITTED = Object.freeze([
   "handoff_done_summary", "decision_reason"
 ]);
 
+const byStringKey = key => (a, b) => a[key] < b[key] ? -1 : a[key] > b[key] ? 1 : 0;
+
 const canonical = value => Array.isArray(value)
   ? `[${value.map(canonical).join(",")}]`
   : value && typeof value === "object"
@@ -24,8 +26,7 @@ const list = value => Array.isArray(value) ? value.filter(item => typeof item ==
 
 function evidenceRef(workItemId, record, source) {
   const url = text(source?.evidenceUrl);
-  if (!url) return null;
-  return { kind: "evidence", workItemId, record, url, evidenceVersion: text(source.evidenceVersion) };
+  return url ? { kind: "evidence", workItemId, record, url, evidenceVersion: text(source.evidenceVersion) } : null;
 }
 
 // Running work-item sessions, one row per item. Heartbeat time is structural.
@@ -46,14 +47,13 @@ function liveSessions(items) {
       stopRequested: session.stop_requested_at != null,
     });
   }
-  rows.sort((a, b) => a.workItemId < b.workItemId ? -1 : a.workItemId > b.workItemId ? 1 : 0);
-  return rows;
+  return rows.sort(byStringKey("workItemId"));
 }
 
 // Latest open handoff whose triage member is the viewer. doneSummary is omitted.
 function handoffToYou(items, viewerId, ownerId) {
-  const open = items.filter(item => item.handoff?.open && (item.handoff.triageMemberId ?? ownerId) === viewerId);
-  open.sort((a, b) => (a.handoff.at < b.handoff.at ? 1 : a.handoff.at > b.handoff.at ? -1 : a.id < b.id ? -1 : 1));
+  const open = items.filter(item => item.handoff?.open && (item.handoff.triageMemberId ?? ownerId) === viewerId)
+    .sort((a, b) => a.handoff.at > b.handoff.at ? -1 : a.handoff.at < b.handoff.at ? 1 : a.id < b.id ? -1 : 1);
   const item = open[0];
   if (!item) return null;
   const handoff = item.handoff;
@@ -78,6 +78,7 @@ export function buildRoomContext({ state, sequence, viewerId, caughtUp, now }) {
   }
   const ownerId = state.room.ownerId ?? null;
   const storedPolicy = state.room.policy ?? {};
+  const policy = roomPolicy(state);
   const items = Object.values(state.workItems ?? {}).filter(item => item && typeof item.id === "string");
   const roster = Object.values(state.members ?? {})
     .filter(member => member && typeof member.id === "string")
@@ -85,7 +86,7 @@ export function buildRoomContext({ state, sequence, viewerId, caughtUp, now }) {
       id: member.id, displayName: text(member.displayName), kind: text(member.kind),
       active: member.active !== false, permissions: list(member.permissions)
     }))
-    .sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+    .sort(byStringKey("id"));
   const focusWork = [];
   const locks = [];
   const deps = [];
@@ -122,9 +123,9 @@ export function buildRoomContext({ state, sequence, viewerId, caughtUp, now }) {
       if (ref) fileRefs.push(ref);
     }
   }
-  const byId = (a, b, key = "workItemId") => a[key] < b[key] ? -1 : a[key] > b[key] ? 1 : 0;
+  const byId = byStringKey("workItemId");
   const refKey = ref => [ref.workItemId, ref.kind, ref.record ?? "", ref.path ?? "", ref.url ?? ""].join("\0");
-  focusWork.sort((a, b) => byId(a, b, "id"));
+  focusWork.sort(byStringKey("id"));
   locks.sort(byId);
   deps.sort(byId);
   decisions.sort(byId);
@@ -132,8 +133,8 @@ export function buildRoomContext({ state, sequence, viewerId, caughtUp, now }) {
   const stable = {
     roomId: state.room.id, viewerId,
     roster, policy: {
-      requireIndependentReview: roomPolicy(state).requireIndependentReview,
-      requireOwnerDecision: roomPolicy(state).requireOwnerDecision,
+      requireIndependentReview: policy.requireIndependentReview,
+      requireOwnerDecision: policy.requireOwnerDecision,
       revision: Number.isSafeInteger(storedPolicy.revision) ? storedPolicy.revision : 0
     },
     focusWork, locks, deps, liveSessions: liveSessions(items), handoffToYou: handoffToYou(items, viewerId, ownerId),
