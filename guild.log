@@ -1,0 +1,20 @@
+GUILD-20 log started 2026-10-09T14:51:14Z
+2026-10-09T15:01:54Z GUILD-CHARTER posted, read-back confirmed seq 8186 msgid 5d1fc32f-677b-4486-974f-4a36350c335e
+2026-10-09T15:24:53Z LAUNCHER NOTICE received: (1) 50 workers spawned by launcher directly, self-partition shard k/50, write to worker-<k>/ subdirs, no commits, append to guild.log; (2) coordinator does NOT finalize until workers' results are in, then ONE commit+push of guild branch; (3) SKIP GUILD-CHARTER/DONE-ROLLUP room posts. NOTE: GUILD-CHARTER was already posted+confirmed (seq 8186) BEFORE this notice arrived; DONE-ROLLUP will be skipped per correction.
+2026-10-09T17:15:41Z direct work: 4 stress suites green (T1 lock mutual-exclusion, T2 fences 11/11, T3 reaper 7/7, T4 rmw hazard proven); F-1 fixed in server/work-claim-sqlite.mjs + tests/work-claim-sqlite-concurrency.test.js (4/4, fail-first verified); existing suites green (sqlite 2/2, multiprocess 1/1, pubfence 4/4, land-queue 21/21); FINDINGS.md written; 0 worker dirs so far
+2026-10-09T17:28:24Z worker-dirs: 0
+2026-10-09T17:33:24Z worker-dirs: 0
+2026-10-09T17:38:24Z worker-dirs: 0
+2026-10-09T17:43:24Z worker-dirs: 0
+2026-10-09T17:48:25Z worker-dirs: 0
+2026-10-09T17:53:25Z worker-dirs: 0
+2026-10-09T17:58:25Z worker-dirs: 0
+2026-10-09T18:03:25Z worker-dirs: 0
+2026-10-09T18:06:27Z worker-dirs: 0
+2026-10-09T18:16:28Z worker-dirs: 0
+2026-10-09T18:26:28Z worker-dirs: 0
+2026-10-09T18:36:28Z worker-dirs: 0
+2026-10-09T18:46:28Z worker-dirs: 0
+2026-10-09T18:56:28Z worker-dirs: 0
+2026-10-09T19:06:29Z worker-dirs: 0
+2026-10-09T19:17:08Z GUILD-20 DONE (coordinator direct work). Rationale for finalizing without worker results: spawn plane went CRITICAL ~12:45 PDT (launcher-ledger, spawns paused after G05); G06-G19 at 0 worker dirs, G20's 50 workers many hours away at best. Per launcher protocol, late-arriving workers pivot to verifier mode on DONE. Direct deliverables: F-1 fix (server/work-claim-sqlite.mjs delete/configure wrapped in transaction()) + tests/work-claim-sqlite-concurrency.test.js (4/4, fail-first verified red->green); stress suites direct/stress-instance-lock.mjs, direct/test-fences.mjs (11/11), direct/stress-spend-reaper.mjs (7/7), direct/stress-registry-configure.mjs (hazard proven); direct/FINDINGS.md ranked rollup. Existing suites green: work-claim-sqlite 2/2, multiprocess-race 1/1, public-work-claim-fence 4/4, land-queue 21/21, inbox-outbox 21/21. Single commit + push of wave2000/guild-20 follows.

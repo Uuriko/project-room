@@ -111,20 +111,35 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
       // dropped and survivors re-evaluate on their remaining dependencies.
       // The land-queue delete paths already emit a deletion receipt naming
       // the dependents, so the waiving is visible, not silent.
-      const dependents = selectRoom.all(roomId)
-        .map(row => decodeItem(row.item_json))
-        .filter(item => item && item.id !== id && Array.isArray(item.dependsOn) && item.dependsOn.includes(id));
-      for (const item of dependents) {
-        const waived = { ...item, dependsOn: item.dependsOn.filter(dep => dep !== id) };
-        upsert.run(roomId, item.id, JSON.stringify(encodeRow(WORK_CLAIM_ROW_KIND, waived)), now());
-      }
-      db.prepare("DELETE FROM work_claims WHERE room_id=? AND claim_id=?").run(roomId, id);
+      //
+      // G20 (WAVE-2000 guild 20): the dependent-waiving read-modify-write is
+      // wrapped in transaction() so two concurrent deleters on separate
+      // connections cannot interleave and lose a waiver (re-stranding a
+      // dependent). transaction() is nesting-safe, so this is a no-op when
+      // the caller (e.g. the land-queue delete path) already holds the
+      // store's write transaction.
+      transaction(() => {
+        const dependents = selectRoom.all(roomId)
+          .map(row => decodeItem(row.item_json))
+          .filter(item => item && item.id !== id && Array.isArray(item.dependsOn) && item.dependsOn.includes(id));
+        for (const item of dependents) {
+          const waived = { ...item, dependsOn: item.dependsOn.filter(dep => dep !== id) };
+          upsert.run(roomId, item.id, JSON.stringify(encodeRow(WORK_CLAIM_ROW_KIND, waived)), now());
+        }
+        db.prepare("DELETE FROM work_claims WHERE room_id=? AND claim_id=?").run(roomId, id);
+      });
       if (typeof onChange === "function") onChange(roomId);
     },
     configure(roomId, config) {
       if (config !== undefined && config !== null) {
         if (typeof config !== "object" || Array.isArray(config)) throw new Error("room work-claim config must be an object");
-        upsertConfig.run(roomId, JSON.stringify({ ...rawConfig(roomId), ...config }), now());
+        // G20 (WAVE-2000 guild 20): the read-merge-upsert is wrapped in
+        // transaction() so two concurrent configurers on separate
+        // connections cannot interleave and lose each other's keys.
+        // Nesting-safe (see delete() above).
+        transaction(() => {
+          upsertConfig.run(roomId, JSON.stringify({ ...rawConfig(roomId), ...config }), now());
+        });
       }
       return roomWorkClaimConfig({ workClaims: rawConfig(roomId) });
     },
