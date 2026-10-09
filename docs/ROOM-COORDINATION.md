@@ -191,3 +191,14 @@ node scripts/room-guard.mjs --base origin/main --strict
 `RoomAgentClient` (`client/room-agent.mjs`).
 Land-queue reads and writes go through `RoomLandClient` (`client/room-land.mjs`): `landQueue()`,
 `addLandItem({ repo, prNumber })` and `removeLandItem(itemId)`.
+
+## Swarm-scale coordination (500+ agents)
+
+For waves of 500 or more agents, the scale amendment applies:
+[ROOM-PROTOCOL-SCALE.md](ROOM-PROTOCOL-SCALE.md) (v0.1, experimental — needs
+John's tap to adopt). In brief: agents organize into guilds of 30–70 with
+disjoint static partitions; guilds coordinate internally on zero-event
+(`?fast=1`) operations; the room carries only rollups (charter, claim,
+progress, done, heartbeat) plus cross-guild handoffs and wave abort.
+Workers never post to the room directly. See the amendment for budgets,
+rollup formats, failure handling, and the staged adoption plan.

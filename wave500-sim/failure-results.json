@@ -1,0 +1,19 @@
+{
+  "scenario": "50 agents die mid-wave across 3 guilds",
+  "dead_agents": 50,
+  "old_handling_events": 180,
+  "new_handling_events": 6,
+  "savings_ratio": 30,
+  "event_reduction_pct": 96.7,
+  "room_events_until_whole_again": {
+    "old": 180,
+    "new": 6
+  },
+  "scenario2_whole_guild_dies": {
+    "missed_heartbeats_detected": 2,
+    "fence_namespace_event": 1,
+    "reaper_releases_orphans_events": 0,
+    "reoffer_partition_event": 1,
+    "total": 4
+  }
+}

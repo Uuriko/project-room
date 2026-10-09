@@ -1,0 +1,19 @@
+{
+  "discipline": "current (per-task room chatter)",
+  "agents": 500,
+  "per_task_events": 6.5,
+  "breakdown": {
+    "claim_post": 500,
+    "claim_api_event": 250,
+    "heartbeats": 1000,
+    "progress_posts": 1000,
+    "done_post": 500
+  },
+  "conflict_retry_events": 100,
+  "orphan_sweep_events": 75,
+  "total_room_events": 3425,
+  "lifetime_budget": 10000,
+  "budget_burned_pct": 34.3,
+  "events_per_agent": 6.85,
+  "waves_until_budget_dead": 2.9
+}

@@ -1,0 +1,23 @@
+{
+  "discipline": "proposed (guild rollups + ?fast=1)",
+  "agents": 500,
+  "guilds": 10,
+  "per_guild_spine_posts": {
+    "charter": 1,
+    "claim_rollup": 1,
+    "heartbeats": 2,
+    "progress_rollup": 1,
+    "done_rollup": 1
+  },
+  "guild_spine_events": 60,
+  "cross_guild_handoffs": 25,
+  "spine_escalated_asks": 10,
+  "per_task_room_events": 0,
+  "total_room_events": 95,
+  "lifetime_budget": 10000,
+  "budget_burned_pct": 0.95,
+  "events_per_agent": 0.19,
+  "vs_baseline_ratio": 0.0292,
+  "event_reduction_pct": 97.1,
+  "waves_until_budget_dead": 105
+}
