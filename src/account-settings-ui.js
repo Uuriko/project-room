@@ -299,7 +299,7 @@ function emailVerificationHtml(emailVerification, providers) {
   const verify = unverified
     ? `<form data-form="email-verify" class="settings-form" autocomplete="off">`
       + `<p class="form-hint">${mailOff ? "Email delivery isn’t configured, so this account stays unverified." : "Enter the 6-digit code from your email to verify this address."}</p>`
-      + (mailOff ? "" : `<label>Verification code <input name="code" inputmode="numeric" autocomplete="one-time-code" required minlength="6" maxlength="6"></label><button type="submit" class="button">Verify email</button>`)
+      + (mailOff ? "" : `<label>Verification code <input name="code" inputmode="numeric" autocomplete="one-time-code" required minlength="6" maxlength="6"></label><button type="submit" class="button">Verify email</button> <button type="button" class="text-button" data-action="email-verify-resend">Send a new code</button>`)
       + `</form>`
     : "";
   const banner = reset
@@ -564,6 +564,17 @@ export function createAccountSettingsUI({ accountClient, credentials = null, onA
     }
   };
 
+  const resendVerification = async () => {
+    const session = accountClient.currentSession("sending a verification code", { authenticated: true });
+    status("Sending a new code…");
+    try {
+      const result = await accountClient.request("/api/auth/email/verify/resend", { method: "POST", session, data: {} });
+      if (result?.status === "resent") status("A new code is on its way. It can take a minute to arrive; check spam too.");
+      else if (result?.status === "already_verified") { await refresh(); status("Email already verified."); }
+      else status("We couldn\u2019t send the email just now. Try again in a minute, or contact the operator if it keeps failing.");
+    } catch (error) { status(error?.message || "Could not send a new code."); }
+  };
+
   const onClick = event => {
     const button = event.target?.closest?.("[data-action]");
     if (!button || !container?.contains(button)) return;
@@ -573,6 +584,7 @@ export function createAccountSettingsUI({ accountClient, credentials = null, onA
     if (action === "disable") return mutate("/api/auth/methods/disable", id);
     if (action === "enable") return mutate("/api/auth/methods/enable", id);
     if (action === "remove") return mutate("/api/auth/methods/remove", id, "Remove this sign-in method? You\u2019ll sign in with your remaining methods.");
+    if (action === "email-verify-resend") return resendVerification();
     if (action === "passkey-add") return addPasskey();
     if (action === "recovery-generate") {
       return generateRecoveryCodes(state.methods.some(method => method.type === "recovery-code-set" && !method.disabled));
