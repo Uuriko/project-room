@@ -89,6 +89,19 @@ module doc. Line numbers pinned to origin/main `c5d1c313a`.
   matchmaking/feedback/bounty/credits/boardV2 as `"ownership-transfer"`;
   safe today (all dispatch blocks return) but fragile.
   (bugs/http-c.md)
+- `server/http.mjs:1187` — Google callback failure path sets the
+  client-facing `X-Room-Auth-Diagnostic` header with DB schema fragments
+  (`no such table: <name>`, `UNIQUE constraint failed: <name>`,
+  `writer fence`) — internal schema/constraint names leak to the browser
+  on OAuth failures. (bugs/http-a.md, late arrival — not in the room
+  routing at seq 7888)
+- `server/http.mjs:269` — `touchLruEntry`: `while (map.size >= capacity)`
+  with `capacity <= 0` never terminates (infinite loop / hung request).
+  Latent: only in-tree caller passes 2000. (bugs/http-a.md)
+- `server/http.mjs:675` — `rate()` runs a full O(n) expiry sweep over every
+  live rate key on every call (plus a possible SQLite write per expired
+  durable key); a per-request CPU/IO hotspot under key-count pressure.
+  (bugs/http-a.md)
 - `server/work-claim-events.mjs` (`wakeNamedReviewers`) — head fallback chain
   ends at `"none"`; two headless heads share a message id and coalesce into
   one wake. (bugs/work-claim-events.md)
