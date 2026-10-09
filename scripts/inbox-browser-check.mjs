@@ -2,8 +2,8 @@ import { clickChrome } from "./room-chrome.mjs";
 // Simulated human journeys against the real local service and disposable data.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, rmSync } from "node:fs";
-import { chromium } from "playwright";
+import { rmSync } from "node:fs";
+import { browserPage, contextPage, launchBrowser, listenOrigin, closeRoomServer, sharedPage, shot, signInTo } from "./browser-check-lib.mjs";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { prepareInboxResult } from "./inbox-result-fixture.mjs";
@@ -59,17 +59,14 @@ async function setup(t, mobile = false, simulate = false, accountOnly = false) {
   apply(source()); apply(source("second"));
   const provider = simulate ? new SyntheticMailFixture(join(f.directory, "mail.sqlite")) : null;
   const server = createRoomServer({ store: f.store, streamInterval: 50,
-    syntheticInboxTransport: provider ? new SyntheticInboxTransport(f.store.inbox, provider) : null }); await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  const origin = "http://127.0.0.1:" + server.address().port, browser = await chromium.launch({ headless: true });
-  t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); provider?.close(); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
-  const context = await browser.newContext({ viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 }, isMobile: mobile, hasTouch: mobile, reducedMotion: "reduce" });
-  const page = await context.newPage();
-  page.setDefaultTimeout(9000); const errors = [], external = [];
-  page.on("pageerror", e => errors.push(e.message));
+    syntheticInboxTransport: provider ? new SyntheticInboxTransport(f.store.inbox, provider) : null });
+  const origin = await listenOrigin(server), browser = await launchBrowser();
+  t.after(async () => { await browser.close(); await closeRoomServer(server); provider?.close(); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const errors = [], external = [];
+  const { page } = await contextPage(browser, { viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 }, timeout: 9000, reducedMotion: "reduce", mobile, errors });
   page.on("dialog", dialog => dialog.accept());
   await page.route("**/*", route => { if (new URL(route.request().url()).origin !== origin) { external.push(route.request().url()); return route.abort(); } return route.continue(); });
-  await page.goto(origin + (accountOnly ? "/?account=1#pr-view/rooms" : "/?room=commons"));
-  await signInFixture(page, accountKey); await page.locator(accountOnly ? "#account-rooms-panel" : "#main").waitFor({ state: "visible" });
+  await signInTo(page, origin + (accountOnly ? "/?account=1#pr-view/rooms" : "/?room=commons"), accountKey, { ready: accountOnly ? "#account-rooms-panel" : "#main" });
   // Opening the inbox lists the connections and opens the first message, two independent round
   // trips; on a phone the opened reader covers the sidebar. Settle both before any sidebar step:
   // the reader rendered, and the connection list rendered (the product unhides the add-connection
@@ -86,7 +83,7 @@ async function setup(t, mobile = false, simulate = false, accountOnly = false) {
     await page.locator("#inbox-reader").waitFor({ state: "visible" });
   };
   const saved = () => f.store.inbox.read(slot.token, "note", session.sessionBinding);
-  const capture = async name => { mkdirSync("test-results", { recursive: true }); await page.screenshot({ path: "test-results/inbox-" + name + ".png", fullPage: true }); };
+  const capture = async name => { await shot(page, "test-results/inbox-" + name + ".png", { fullPage: true }); };
   t.after(() => { assert.deepEqual(errors, []); assert.deepEqual(external, []); });
   return { ...f, page, origin, browser, server, inbox, pick, saved, capture, apply, source, slot, session, provider };
 }
@@ -554,9 +551,9 @@ for (const updated of [false, true]) test(`two browser tabs reviewing the same $
   assert.equal(await other.locator("#inbox-reply-confirm").isVisible(), false);
 });
 test("opt-in sample mailbox review is usable from account Inbox without entering a room", { timeout: 35000 }, async t => {
-  const sample = await createInboxSandbox({ includeEmailReview: true }), browser = await chromium.launch({ headless: true });
+  const sample = await createInboxSandbox({ includeEmailReview: true }), browser = await launchBrowser();
   t.after(async () => { await browser.close(); await sample.close(); rmSync(sample.directory, { recursive: true, force: true }); });
-  const page = await browser.newPage(); page.setDefaultTimeout(9000);
+  const page = await browserPage(browser, { timeout: 9000 });
   await page.goto(sample.accountUrl); await signInFixture(page, sample.accountKey, { returnTo: sample.accountUrl }); await page.locator("#inbox-list").getByText("A small collaboration", { exact: true }).click();
   await page.locator("#inbox-reply-open").click(); await page.locator("#inbox-reply-confirm:not([disabled])").waitFor();
   await page.locator("#inbox-reply-confirm").click(); await page.locator("#inbox-reply-status").filter({ hasText: "Reviewed · not sent" }).waitFor();
@@ -851,23 +848,22 @@ test("sample reply: a late preview cannot reopen private text after another tab 
   assert.equal(f.provider.submits, 0);
 });
 test("sample launcher: an empty room owner can sign in and finish a sample reply", { timeout: 35000 }, async t => {
-  const sample = await createInboxSandbox(), browser = await chromium.launch({ headless: true });
+  const sample = await createInboxSandbox(), browser = await launchBrowser();
   t.after(async () => { await browser.close(); await sample.close(); rmSync(sample.directory, { recursive: true, force: true }); });
-  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-  page.setDefaultTimeout(9000); const errors = [];
-  page.on("pageerror", error => errors.push(error.message));
+  const errors = [];
+  const page = await browserPage(browser, { viewport: { width: 1280, height: 900 }, timeout: 9000, errors });
   await page.goto(sample.url); await signInFixture(page, sample.accountKey, { returnTo: sample.url }); await page.locator("#inbox-reader").waitFor();
   assert.equal(await page.locator("#main").isVisible(), false);
   await page.locator("#inbox-draft").fill("Let’s try one small idea.");
   await page.locator("#inbox-save").click(); await page.getByText("Saved · only you", { exact: true }).waitFor();
   await page.locator("#inbox-send-preview").click(); await page.locator("#inbox-send-confirm").click();
   await page.getByText("Sample accepted · delivery unconfirmed", { exact: true }).waitFor();
-  mkdirSync("test-results", { recursive: true }); await page.screenshot({ path: "test-results/inbox-local-sandbox.png", fullPage: true });
+  await shot(page, "test-results/inbox-local-sandbox.png", { fullPage: true });
   assert.deepEqual(errors, []);
 });
 
 test("sample arrival: two samples and existing localhost cookies coexist in one browser", { timeout: 35000 }, async t => {
-  const first = await createInboxSandbox(), second = await createInboxSandbox(), browser = await chromium.launch({ headless: true });
+  const first = await createInboxSandbox(), second = await createInboxSandbox(), browser = await launchBrowser();
   t.after(async () => {
     await browser.close();
     for (const sample of [first, second]) { await sample.close(); rmSync(sample.directory, { recursive: true, force: true }); }
@@ -884,8 +880,7 @@ test("sample arrival: two samples and existing localhost cookies coexist in one 
   });
   const pages = [];
   for (const sample of [first, second]) {
-    const page = await context.newPage(); pages.push(page); page.setDefaultTimeout(9000);
-    page.on("pageerror", error => errors.push(error.message));
+    const page = await sharedPage(context, { timeout: 9000, errors }); pages.push(page);
     await page.goto(sample.url); await signInFixture(page, sample.accountKey, { returnTo: sample.url }); await page.locator("#inbox-reader").waitFor();
   }
   const [a, b] = pages;
@@ -901,8 +896,7 @@ test("sample arrival: two samples and existing localhost cookies coexist in one 
   const cookies = await context.cookies();
   for (const cookie of original) assert.equal(cookies.find(c => c.name === cookie.name)?.value, cookie.value);
   assert.equal(cookies.filter(c => /^sample_.*_account_session$/.test(c.name)).length, 2);
-  mkdirSync("test-results", { recursive: true });
-  await a.screenshot({ path: "test-results/inbox-sample-coexistence.png", fullPage: true });
+  await shot(a, "test-results/inbox-sample-coexistence.png", { fullPage: true });
   assert.deepEqual(errors, []); assert.deepEqual(external, []);
 });
 
@@ -931,8 +925,7 @@ for (const mobile of [false, true]) test(`inbox continuity ${mobile ? "mobile" :
   await p.reload(); await p.locator("#inbox-reader").waitFor();
   assert.equal(await p.locator("#inbox-list [aria-current=true]").getAttribute("data-source-id"), "note");
   await p.waitForFunction(({ mobile, top }) => Math.abs((mobile ? scrollY : document.querySelector("#inbox-reader").scrollTop) - top) < 3, { mobile, top });
-  mkdirSync("test-results", { recursive: true });
-  await p.screenshot({ path: `test-results/inbox-continuity-${mobile ? "mobile" : "desktop"}.png` });
+  await shot(p, `test-results/inbox-continuity-${mobile ? "mobile" : "desktop"}.png`);
   const raw = await p.evaluate(() => sessionStorage.getItem("project-room:inbox-position:v1"));
   assert.equal(JSON.parse(raw).sourceId, "note");
   assert.equal(raw.includes("longer private"), false); assert.equal(raw.includes("maya@example.test"), false);
@@ -1446,10 +1439,10 @@ for (const target of ["account", "room"]) test(`fixture account sign-in waits fo
     if (request.method === "GET") counts.get++;
     if (request.method === "POST") counts.post++;
   });
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  const browser = await chromium.launch({ headless: true });
-  t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
-  const page = await browser.newPage();
+  const origin = await listenOrigin(server);
+  const browser = await launchBrowser();
+  t.after(async () => { await browser.close(); await closeRoomServer(server); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const page = await browserPage(browser);
   let captured, release;
   const held = new Promise(resolve => { captured = resolve; });
   const gate = new Promise(resolve => { release = resolve; });
@@ -1459,7 +1452,7 @@ for (const target of ["account", "room"]) test(`fixture account sign-in waits fo
     first = false; captured(); await gate; await route.continue();
   });
   t.after(() => release());
-  const url = `http://127.0.0.1:${server.address().port}/?${target === "account" ? "account=1" : "room=commons"}`;
+  const url = `${origin}/?${target === "account" ? "account=1" : "room=commons"}`;
   await page.goto(url, { waitUntil: "domcontentloaded" }); await held;
   const login = signInFixture(page, key, { returnTo: url });
   await page.waitForTimeout(150);
@@ -1472,13 +1465,13 @@ for (const target of ["account", "room"]) test(`fixture account sign-in waits fo
 
 test("account-only actual password fixture waits for pending login then opens its existing room", { timeout: 25000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store });
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  const browser = await chromium.launch({ headless: true });
+  const origin = await listenOrigin(server);
+  const browser = await launchBrowser();
   let release, started;
   const pending = new Promise(resolve => { release = resolve; }), reached = new Promise(resolve => { started = resolve; });
-  t.after(async () => { release(); await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
-  const page = await browser.newPage(); page.setDefaultTimeout(8000);
-  await page.goto(`http://127.0.0.1:${server.address().port}/?account=1`);
+  t.after(async () => { release(); await browser.close(); await closeRoomServer(server); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const page = await browserPage(browser, { timeout: 8000 });
+  await page.goto(`${origin}/?account=1`);
   await page.locator('#auth-panel').waitFor({ state: 'visible' });
   await page.route('**/api/auth/password/login', async route => {
     const response = await route.fetch();

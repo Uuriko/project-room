@@ -1,10 +1,10 @@
 // Updates HTTP/SQLite journeys: revision-bound marks, exact retries and retired navigation.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { chromium } from "playwright";
+import { contextPage, launchBrowser, listenOrigin, closeRoomServer, shot } from "./browser-check-lib.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
@@ -36,21 +36,17 @@ async function setup(t, storeOptions = {}) {
     memberId: "agent", displayName: "Reply Agent", kind: "agent", permissions: ["accept_work", "complete_work"]
   }));
   const server = createRoomServer({ store, streamInterval: 60 });
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  const origin = `http://127.0.0.1:${server.address().port}`;
+  const origin = await listenOrigin(server);
   let browser;
   t.after(async () => {
     await browser?.close();
-    server.closeStreams(); server.closeAllConnections();
-    await new Promise(resolve => server.close(resolve));
+    await closeRoomServer(server);
     store.close();
     rmSync(directory, { recursive: true, force: true });
   });
-  browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
-  const page = await (await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: "reduce" })).newPage();
-  page.setDefaultTimeout(8000);
   const errors = [];
-  page.on("pageerror", error => errors.push(error.message));
+  browser = await launchBrowser(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {});
+  const { page } = await contextPage(browser, { viewport: { width: 1440, height: 1000 }, reducedMotion: "reduce", errors });
   const selectUpdatesFilter = async (name, filter) => {
     await page.getByRole("tab", { name }).click();
     await page.waitForFunction(id => {
@@ -1059,9 +1055,8 @@ test("Updates page older authorized work, keep honest counts and restore the cap
     assert.equal(await f.more.isVisible(), true, "the uncaptured third page still needs an explicit click");
     assert.equal(await page.locator("#updates-dialog").evaluate(node => node.scrollWidth <= node.clientWidth + 1), true);
     assert.ok((await page.locator("#updates-dialog").boundingBox()).width <= width);
-    mkdirSync("test-results", { recursive: true });
     await page.locator("#updates-summary").scrollIntoViewIfNeeded();
-    await page.screenshot({ path: `test-results/updates-pagination-return-${width}.png`, animations: "disabled" });
+    await shot(page, `test-results/updates-pagination-return-${width}.png`, { animations: "disabled" });
     await page.locator("#updates-close").click();
   }
 
