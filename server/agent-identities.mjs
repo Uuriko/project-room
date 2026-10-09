@@ -227,16 +227,26 @@ export function enforceAnonymousMintLimits(identities, { name, buckets, proof, r
     "SELECT count(*) AS n FROM agent_identities WHERE mint_address=? AND created_at>=?"
   ).get(buckets.address, now - MINT_MINUTE_MS).n;
   const limited = (message, retryAfter) => fail(429, limitCode, message, { "Retry-After": String(retryAfter) });
+  // A day budget frees one slot when its oldest counted mint leaves the
+  // window, so Retry-After names that moment instead of a flat hour.
+  const dayRetry = (where, args, count, limit) => {
+    const row = db.prepare(`SELECT created_at FROM agent_identities WHERE ${where} AND created_at>=? ORDER BY created_at LIMIT 1 OFFSET ?`)
+      .get(...args, dayStart, Math.max(0, count - limit));
+    return row ? Math.max(1, Math.ceil((row.created_at + IDENTITY_MINT_WINDOW_MS - now) / 1000)) : 3600;
+  };
   if (addressMinute >= identities.addressMinuteLimit) limited("Too many identity mints from this address", 60);
-  if (addressDay >= identities.addressDailyLimit) limited("Identity mint address budget reached", 3600);
+  if (addressDay >= identities.addressDailyLimit)
+    limited("Identity mint address budget reached", dayRetry("mint_address=?", [buckets.address], addressDay, identities.addressDailyLimit));
   const networkDay = db.prepare(
     "SELECT count(*) AS n FROM agent_identities WHERE mint_network=? AND created_at>=?"
   ).get(buckets.network, dayStart).n;
-  if (networkDay >= identities.networkDailyLimit) limited("Identity mint network budget reached", 3600);
+  if (networkDay >= identities.networkDailyLimit)
+    limited("Identity mint network budget reached", dayRetry("mint_network=?", [buckets.network], networkDay, identities.networkDailyLimit));
   const globalDay = db.prepare(
     "SELECT count(*) AS n FROM agent_identities WHERE mint_address IS NOT NULL AND created_at>=?"
   ).get(dayStart).n;
-  if (globalDay >= identities.anonymousDailyLimit) limited("Identity mint daily budget reached", 3600);
+  if (globalDay >= identities.anonymousDailyLimit)
+    limited("Identity mint daily budget reached", dayRetry("mint_address IS NOT NULL", [], globalDay, identities.anonymousDailyLimit));
 }
 
 export function solveIdentityMintProof(displayName, now = Date.now(), bits = IDENTITY_POW_BITS) {
