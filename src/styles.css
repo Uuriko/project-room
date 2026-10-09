@@ -651,7 +651,7 @@ button, .button, .message-to-work { min-height: 44px; }
 /* Error toasts persist: they take pointer events so the text can be selected, copied and dismissed. */
 #status.error { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .9rem; pointer-events: auto; user-select: text; }
 #status.error .status-text { flex: 1 1 14rem; }
-.status-dismiss { flex: none; margin-left: auto; padding: 0 .7rem; border: 1px solid currentColor; border-radius: .35rem; background: transparent; color: inherit; font: inherit; font-size: .74rem; font-weight: 650; cursor: pointer; }
+.status-dismiss { flex: none; margin-left: auto; min-height: 44px; padding: 0 .7rem; border: 1px solid currentColor; border-radius: .35rem; background: transparent; color: inherit; font: inherit; font-size: .74rem; font-weight: 650; cursor: pointer; }
 .status-dismiss:hover { background: rgb(255 255 255 / 8%); }
 .invitation-dialog { width: min(42rem, calc(100vw - 1.5rem)); }
 .invitation-dialog[aria-busy="true"] { cursor: wait; }
