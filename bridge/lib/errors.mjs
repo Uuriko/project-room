@@ -33,6 +33,7 @@ const defs = {
   timeout: [504, 'herdr socket call timed out', true],
   transport_error: [502, 'herdr socket transport failure', true],
   bridge_circuit_open: [503, 'tenant circuit breaker is open'],
+  too_many_streams: [429, 'too many concurrent event streams for this tenant'],
   tenant_unavailable: [503, 'tenant herdr server is unreachable'],
 };
 
