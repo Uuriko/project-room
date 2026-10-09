@@ -68,7 +68,8 @@ test("guests and chat-profile agents cannot create, claim, renew, or update; con
   assert.equal((await call(registry, "review", "create", null, { id: "reviewed" })).status, 201);
   assert.equal((await call(registry, "human", "create", null, { id: "human-item" })).status, 201);
 
-  await call(registry, "owner", "reassign", "contrib", { newOwner: "guest" });
+  const held = registry.get("room1", "contrib");
+  await call(registry, "owner", "reassign", "contrib", { newOwner: "guest", expectedClaimedAt: held.claimedAt, expectedHistoryLength: held.history.length });
   denied(await call(registry, "guest", "update", "contrib", { state: "in_progress" }));
   denied(await call(registry, "guest", "renew", "contrib", { progressMessageId: "msg-1" }));
   assert.equal(registry.get("room1", "contrib").state, "claimed");
