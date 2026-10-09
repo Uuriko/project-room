@@ -23,6 +23,13 @@ test("extractAgentMentions finds ordered, unique mentions and skips emails", () 
   assert.ok(Object.isFrozen(extractAgentMentions("@claude hi")));
   expectCode(() => extractAgentMentions(null), "routing_invalid");
 });
+test("extractAgentMentions drops a trailing sentence period and keeps an interior one", () => {
+  assert.deepEqual(extractAgentMentions("thanks @Grok."), ["Grok"]);
+  assert.deepEqual(extractAgentMentions("thanks @Grok. @Codex."), ["Grok", "Codex"]);
+  assert.deepEqual(extractAgentMentions("ping @Grok.Build please"), ["Grok.Build"]);
+  assert.deepEqual(extractAgentMentions("see @file.txt."), ["file.txt"]);
+  assert.deepEqual(extractAgentMentions("ping @codex-bot:1."), ["codex-bot:1"]);
+});
 test("direct policy routes straight to the named agent", () => {
   const router = createAgentRouter({ clock: fixedClock([1000]), id: ids });
   const { records, mentions } = router.route("thread:1", { text: "@claude review this", from: human });
