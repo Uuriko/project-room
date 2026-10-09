@@ -4,1876 +4,2698 @@
 // Emoji modifier bases: Unicode Emoji 16.0 emoji-data.txt.
 // © 2024 Unicode®, Inc. https://www.unicode.org/terms_of_use.html
 // Custom room emoji packs are not in this catalog.
+//
+// COMPACT ENCODING (product200 m-12, mobile first-paint budget): this file
+// used to be 1870 Object.freeze() literals (~197KB raw). Each data line below
+// is "emoji|primary|extras|categoryIndex|description"; the search text is
+// derived as "description primary extras" except for the rows listed in
+// SEARCH_OVERRIDES ("rowIndex|original search text"), whose original strings
+// are kept verbatim — they carry extra terms (alien -> "ufo"), word order,
+// or duplication that the picker's multi-word queries observe via
+// String.includes. buildRows() reconstructs the exact EMOJI_ROWS contract
+// emoji.js expects: frozen arrays of six strings [emoji, primary, extras,
+// category, description, search]. No field contains "|", newline, backtick,
+// or "${".
 export const MODIFIER_BASE_RANGES = "261D,26F9,270A-270C,270D,1F385,1F3C2-1F3C4,1F3C7,1F3CA,1F3CB-1F3CC,1F442-1F443,1F446-1F450,1F466-1F46B,1F46C-1F46D,1F46E-1F478,1F47C,1F481-1F483,1F485-1F487,1F48F,1F491,1F4AA,1F574-1F575,1F57A,1F590,1F595-1F596,1F645-1F647,1F64B-1F64F,1F6A3,1F6B4-1F6B5,1F6B6,1F6C0,1F6CC,1F90C,1F90F,1F918,1F919-1F91E,1F91F,1F926,1F930,1F931-1F932,1F933-1F939,1F93C-1F93E,1F977,1F9B5-1F9B6,1F9B8-1F9B9,1F9BB,1F9CD-1F9CF,1F9D1-1F9DD,1FAC3-1FAC5,1FAF0-1FAF6,1FAF7-1FAF8";
-export const EMOJI_ROWS = Object.freeze([
-  Object.freeze(["💯","100","","Smileys & Emotion","hundred points","hundred points score perfect 100"]),
-  Object.freeze(["👽","alien","","Smileys & Emotion","alien","alien ufo alien"]),
-  Object.freeze(["💢","anger","","Smileys & Emotion","anger symbol","anger symbol angry anger"]),
-  Object.freeze(["😠","angry","","Smileys & Emotion","angry face","angry face mad annoyed angry"]),
-  Object.freeze(["😧","anguished","","Smileys & Emotion","anguished face","anguished face stunned anguished"]),
-  Object.freeze(["😲","astonished","","Smileys & Emotion","astonished face","astonished face amazed gasp astonished"]),
-  Object.freeze(["🖤","black_heart","","Smileys & Emotion","black heart","black heart black_heart"]),
-  Object.freeze(["💙","blue_heart","","Smileys & Emotion","blue heart","blue heart blue_heart"]),
-  Object.freeze(["😊","blush","","Smileys & Emotion","smiling face with smiling eyes","smiling face with smiling eyes proud blush"]),
-  Object.freeze(["💥","boom","collision","Smileys & Emotion","collision","collision explode boom collision"]),
-  Object.freeze(["💔","broken_heart","","Smileys & Emotion","broken heart","broken heart broken_heart"]),
-  Object.freeze(["🤎","brown_heart","","Smileys & Emotion","brown heart","brown heart brown_heart"]),
-  Object.freeze(["🤡","clown_face","","Smileys & Emotion","clown face","clown face clown_face"]),
-  Object.freeze(["🥶","cold_face","","Smileys & Emotion","cold face","cold face freezing ice cold_face"]),
-  Object.freeze(["😰","cold_sweat","","Smileys & Emotion","anxious face with sweat","anxious face with sweat nervous cold_sweat"]),
-  Object.freeze(["😖","confounded","","Smileys & Emotion","confounded face","confounded face confounded"]),
-  Object.freeze(["😕","confused","","Smileys & Emotion","confused face","confused face confused"]),
-  Object.freeze(["🤠","cowboy_hat_face","","Smileys & Emotion","cowboy hat face","cowboy hat face cowboy_hat_face"]),
-  Object.freeze(["😢","cry","","Smileys & Emotion","crying face","crying face sad tear cry"]),
-  Object.freeze(["😿","crying_cat_face","","Smileys & Emotion","crying cat","crying cat sad tear crying_cat_face"]),
-  Object.freeze(["💘","cupid","","Smileys & Emotion","heart with arrow","heart with arrow love heart cupid"]),
-  Object.freeze(["🤬","cursing_face","","Smileys & Emotion","face with symbols on mouth","face with symbols on mouth foul cursing_face"]),
-  Object.freeze(["💨","dash","","Smileys & Emotion","dashing away","dashing away wind blow fast dash"]),
-  Object.freeze(["😞","disappointed","","Smileys & Emotion","disappointed face","disappointed face sad disappointed"]),
-  Object.freeze(["😥","disappointed_relieved","","Smileys & Emotion","sad but relieved face","sad but relieved face phew sweat nervous disappointed_relieved"]),
-  Object.freeze(["🥸","disguised_face","","Smileys & Emotion","disguised face","disguised face disguised_face"]),
-  Object.freeze(["💫","dizzy","","Smileys & Emotion","dizzy","dizzy star dizzy"]),
-  Object.freeze(["😵","dizzy_face","","Smileys & Emotion","face with crossed-out eyes","face with crossed-out eyes dizzy_face"]),
-  Object.freeze(["🫥","dotted_line_face","","Smileys & Emotion","dotted line face","dotted line face invisible dotted_line_face"]),
-  Object.freeze(["🤤","drooling_face","","Smileys & Emotion","drooling face","drooling face drooling_face"]),
-  Object.freeze(["🤯","exploding_head","","Smileys & Emotion","exploding head","exploding head mind blown exploding_head"]),
-  Object.freeze(["😑","expressionless","","Smileys & Emotion","expressionless face","expressionless face expressionless"]),
-  Object.freeze(["👁️‍🗨️","eye_speech_bubble","","Smileys & Emotion","eye in speech bubble","eye in speech bubble eye_speech_bubble"]),
-  Object.freeze(["😮‍💨","face_exhaling","","Smileys & Emotion","face exhaling","face exhaling face_exhaling"]),
-  Object.freeze(["🥹","face_holding_back_tears","","Smileys & Emotion","face holding back tears","face holding back tears tears gratitude face_holding_back_tears"]),
-  Object.freeze(["😶‍🌫️","face_in_clouds","","Smileys & Emotion","face in clouds","face in clouds face_in_clouds"]),
-  Object.freeze(["🫤","face_with_diagonal_mouth","","Smileys & Emotion","face with diagonal mouth","face with diagonal mouth confused face_with_diagonal_mouth"]),
-  Object.freeze(["🤕","face_with_head_bandage","","Smileys & Emotion","face with head-bandage","face with head-bandage hurt face_with_head_bandage"]),
-  Object.freeze(["🫢","face_with_open_eyes_and_hand_over_mouth","","Smileys & Emotion","face with open eyes and hand over mouth","face with open eyes and hand over mouth gasp shock face_with_open_eyes_and_hand_over_mouth"]),
-  Object.freeze(["🫣","face_with_peeking_eye","","Smileys & Emotion","face with peeking eye","face with peeking eye face_with_peeking_eye"]),
-  Object.freeze(["😵‍💫","face_with_spiral_eyes","","Smileys & Emotion","face with spiral eyes","face with spiral eyes face_with_spiral_eyes"]),
-  Object.freeze(["🤒","face_with_thermometer","","Smileys & Emotion","face with thermometer","face with thermometer sick face_with_thermometer"]),
-  Object.freeze(["😨","fearful","","Smileys & Emotion","fearful face","fearful face scared shocked oops fearful"]),
-  Object.freeze(["😳","flushed","","Smileys & Emotion","flushed face","flushed face flushed"]),
-  Object.freeze(["😦","frowning","","Smileys & Emotion","frowning face with open mouth","frowning face with open mouth frowning"]),
-  Object.freeze(["☹️","frowning_face","","Smileys & Emotion","frowning face","frowning face frowning_face"]),
-  Object.freeze(["👻","ghost","","Smileys & Emotion","ghost","ghost halloween ghost"]),
-  Object.freeze(["💝","gift_heart","","Smileys & Emotion","heart with ribbon","heart with ribbon chocolates gift_heart"]),
-  Object.freeze(["💚","green_heart","","Smileys & Emotion","green heart","green heart green_heart"]),
-  Object.freeze(["🩶","grey_heart","","Smileys & Emotion","grey heart","grey heart grey_heart"]),
-  Object.freeze(["😬","grimacing","","Smileys & Emotion","grimacing face","grimacing face grimacing"]),
-  Object.freeze(["😁","grin","","Smileys & Emotion","beaming face with smiling eyes","beaming face with smiling eyes grin"]),
-  Object.freeze(["😀","grinning","","Smileys & Emotion","grinning face","grinning face smile happy grinning"]),
-  Object.freeze(["🤭","hand_over_mouth","","Smileys & Emotion","face with hand over mouth","face with hand over mouth quiet whoops hand_over_mouth"]),
-  Object.freeze(["💩","hankey","poop shit","Smileys & Emotion","pile of poo","pile of poo crap hankey poop shit"]),
-  Object.freeze(["🙉","hear_no_evil","","Smileys & Emotion","hear-no-evil monkey","hear-no-evil monkey monkey deaf hear_no_evil"]),
-  Object.freeze(["❤️","heart","","Smileys & Emotion","red heart","red heart love heart"]),
-  Object.freeze(["💟","heart_decoration","","Smileys & Emotion","heart decoration","heart decoration heart_decoration"]),
-  Object.freeze(["😍","heart_eyes","","Smileys & Emotion","smiling face with heart-eyes","smiling face with heart-eyes love crush heart_eyes"]),
-  Object.freeze(["😻","heart_eyes_cat","","Smileys & Emotion","smiling cat with heart-eyes","smiling cat with heart-eyes heart_eyes_cat"]),
-  Object.freeze(["❤️‍🔥","heart_on_fire","","Smileys & Emotion","heart on fire","heart on fire heart_on_fire"]),
-  Object.freeze(["💓","heartbeat","","Smileys & Emotion","beating heart","beating heart heartbeat"]),
-  Object.freeze(["💗","heartpulse","","Smileys & Emotion","growing heart","growing heart heartpulse"]),
-  Object.freeze(["❣️","heavy_heart_exclamation","","Smileys & Emotion","heart exclamation","heart exclamation heavy_heart_exclamation"]),
-  Object.freeze(["🕳️","hole","","Smileys & Emotion","hole","hole hole"]),
-  Object.freeze(["🥵","hot_face","","Smileys & Emotion","hot face","hot face heat sweating hot_face"]),
-  Object.freeze(["🤗","hugs","","Smileys & Emotion","smiling face with open hands","smiling face with open hands hugs"]),
-  Object.freeze(["😯","hushed","","Smileys & Emotion","hushed face","hushed face silence speechless hushed"]),
-  Object.freeze(["👿","imp","","Smileys & Emotion","angry face with horns","angry face with horns angry devil evil horns imp"]),
-  Object.freeze(["😇","innocent","","Smileys & Emotion","smiling face with halo","smiling face with halo angel innocent"]),
-  Object.freeze(["👺","japanese_goblin","","Smileys & Emotion","goblin","goblin japanese_goblin"]),
-  Object.freeze(["👹","japanese_ogre","","Smileys & Emotion","ogre","ogre monster japanese_ogre"]),
-  Object.freeze(["😂","joy","","Smileys & Emotion","face with tears of joy","face with tears of joy tears joy"]),
-  Object.freeze(["😹","joy_cat","","Smileys & Emotion","cat with tears of joy","cat with tears of joy joy_cat"]),
-  Object.freeze(["💋","kiss","","Smileys & Emotion","kiss mark","kiss mark lipstick kiss"]),
-  Object.freeze(["😗","kissing","","Smileys & Emotion","kissing face","kissing face kissing"]),
-  Object.freeze(["😽","kissing_cat","","Smileys & Emotion","kissing cat","kissing cat kissing_cat"]),
-  Object.freeze(["😚","kissing_closed_eyes","","Smileys & Emotion","kissing face with closed eyes","kissing face with closed eyes kissing_closed_eyes"]),
-  Object.freeze(["😘","kissing_heart","","Smileys & Emotion","face blowing a kiss","face blowing a kiss flirt kissing_heart"]),
-  Object.freeze(["😙","kissing_smiling_eyes","","Smileys & Emotion","kissing face with smiling eyes","kissing face with smiling eyes kissing_smiling_eyes"]),
-  Object.freeze(["😆","laughing","satisfied","Smileys & Emotion","grinning squinting face","grinning squinting face happy haha laughing satisfied"]),
-  Object.freeze(["🗨️","left_speech_bubble","","Smileys & Emotion","left speech bubble","left speech bubble left_speech_bubble"]),
-  Object.freeze(["🩵","light_blue_heart","","Smileys & Emotion","light blue heart","light blue heart light_blue_heart"]),
-  Object.freeze(["💌","love_letter","","Smileys & Emotion","love letter","love letter email envelope love_letter"]),
-  Object.freeze(["🤥","lying_face","","Smileys & Emotion","lying face","lying face liar lying_face"]),
-  Object.freeze(["😷","mask","","Smileys & Emotion","face with medical mask","face with medical mask sick ill mask"]),
-  Object.freeze(["🫠","melting_face","","Smileys & Emotion","melting face","melting face sarcasm dread melting_face"]),
-  Object.freeze(["❤️‍🩹","mending_heart","","Smileys & Emotion","mending heart","mending heart mending_heart"]),
-  Object.freeze(["🤑","money_mouth_face","","Smileys & Emotion","money-mouth face","money-mouth face rich money_mouth_face"]),
-  Object.freeze(["🧐","monocle_face","","Smileys & Emotion","face with monocle","face with monocle monocle_face"]),
-  Object.freeze(["🤢","nauseated_face","","Smileys & Emotion","nauseated face","nauseated face sick barf disgusted nauseated_face"]),
-  Object.freeze(["🤓","nerd_face","","Smileys & Emotion","nerd face","nerd face geek glasses nerd_face"]),
-  Object.freeze(["😐","neutral_face","","Smileys & Emotion","neutral face","neutral face meh neutral_face"]),
-  Object.freeze(["😶","no_mouth","","Smileys & Emotion","face without mouth","face without mouth mute silence no_mouth"]),
-  Object.freeze(["😮","open_mouth","","Smileys & Emotion","face with open mouth","face with open mouth surprise impressed wow open_mouth"]),
-  Object.freeze(["🧡","orange_heart","","Smileys & Emotion","orange heart","orange heart orange_heart"]),
-  Object.freeze(["🥳","partying_face","","Smileys & Emotion","partying face","partying face celebration birthday partying_face"]),
-  Object.freeze(["😔","pensive","","Smileys & Emotion","pensive face","pensive face pensive"]),
-  Object.freeze(["😣","persevere","","Smileys & Emotion","persevering face","persevering face struggling persevere"]),
-  Object.freeze(["🩷","pink_heart","","Smileys & Emotion","pink heart","pink heart pink_heart"]),
-  Object.freeze(["🥺","pleading_face","","Smileys & Emotion","pleading face","pleading face puppy eyes pleading_face"]),
-  Object.freeze(["😾","pouting_cat","","Smileys & Emotion","pouting cat","pouting cat pouting_cat"]),
-  Object.freeze(["💜","purple_heart","","Smileys & Emotion","purple heart","purple heart purple_heart"]),
-  Object.freeze(["😡","rage","pout","Smileys & Emotion","enraged face","enraged face angry rage pout"]),
-  Object.freeze(["🤨","raised_eyebrow","","Smileys & Emotion","face with raised eyebrow","face with raised eyebrow suspicious raised_eyebrow"]),
-  Object.freeze(["☺️","relaxed","","Smileys & Emotion","smiling face","smiling face blush pleased relaxed"]),
-  Object.freeze(["😌","relieved","","Smileys & Emotion","relieved face","relieved face whew relieved"]),
-  Object.freeze(["💞","revolving_hearts","","Smileys & Emotion","revolving hearts","revolving hearts revolving_hearts"]),
-  Object.freeze(["🗯️","right_anger_bubble","","Smileys & Emotion","right anger bubble","right anger bubble right_anger_bubble"]),
-  Object.freeze(["🤖","robot","","Smileys & Emotion","robot","robot robot"]),
-  Object.freeze(["🤣","rofl","","Smileys & Emotion","rolling on the floor laughing","rolling on the floor laughing lol laughing rofl"]),
-  Object.freeze(["🙄","roll_eyes","","Smileys & Emotion","face with rolling eyes","face with rolling eyes roll_eyes"]),
-  Object.freeze(["🫡","saluting_face","","Smileys & Emotion","saluting face","saluting face respect saluting_face"]),
-  Object.freeze(["😱","scream","","Smileys & Emotion","face screaming in fear","face screaming in fear horror shocked scream"]),
-  Object.freeze(["🙀","scream_cat","","Smileys & Emotion","weary cat","weary cat horror scream_cat"]),
-  Object.freeze(["🙈","see_no_evil","","Smileys & Emotion","see-no-evil monkey","see-no-evil monkey monkey blind ignore see_no_evil"]),
-  Object.freeze(["🫨","shaking_face","","Smileys & Emotion","shaking face","shaking face shock shaking_face"]),
-  Object.freeze(["🤫","shushing_face","","Smileys & Emotion","shushing face","shushing face silence quiet shushing_face"]),
-  Object.freeze(["💀","skull","","Smileys & Emotion","skull","skull dead danger poison skull"]),
-  Object.freeze(["☠️","skull_and_crossbones","","Smileys & Emotion","skull and crossbones","skull and crossbones danger pirate skull_and_crossbones"]),
-  Object.freeze(["😴","sleeping","","Smileys & Emotion","sleeping face","sleeping face zzz sleeping"]),
-  Object.freeze(["😪","sleepy","","Smileys & Emotion","sleepy face","sleepy face tired sleepy"]),
-  Object.freeze(["🙁","slightly_frowning_face","","Smileys & Emotion","slightly frowning face","slightly frowning face slightly_frowning_face"]),
-  Object.freeze(["🙂","slightly_smiling_face","","Smileys & Emotion","slightly smiling face","slightly smiling face slightly_smiling_face"]),
-  Object.freeze(["😄","smile","","Smileys & Emotion","grinning face with smiling eyes","grinning face with smiling eyes happy joy laugh pleased smile"]),
-  Object.freeze(["😸","smile_cat","","Smileys & Emotion","grinning cat with smiling eyes","grinning cat with smiling eyes smile_cat"]),
-  Object.freeze(["😃","smiley","","Smileys & Emotion","grinning face with big eyes","grinning face with big eyes happy joy haha smiley"]),
-  Object.freeze(["😺","smiley_cat","","Smileys & Emotion","grinning cat","grinning cat smiley_cat"]),
-  Object.freeze(["🥲","smiling_face_with_tear","","Smileys & Emotion","smiling face with tear","smiling face with tear smiling_face_with_tear"]),
-  Object.freeze(["🥰","smiling_face_with_three_hearts","","Smileys & Emotion","smiling face with hearts","smiling face with hearts love smiling_face_with_three_hearts"]),
-  Object.freeze(["😈","smiling_imp","","Smileys & Emotion","smiling face with horns","smiling face with horns devil evil horns smiling_imp"]),
-  Object.freeze(["😏","smirk","","Smileys & Emotion","smirking face","smirking face smug smirk"]),
-  Object.freeze(["😼","smirk_cat","","Smileys & Emotion","cat with wry smile","cat with wry smile smirk_cat"]),
-  Object.freeze(["🤧","sneezing_face","","Smileys & Emotion","sneezing face","sneezing face achoo sick sneezing_face"]),
-  Object.freeze(["😭","sob","","Smileys & Emotion","loudly crying face","loudly crying face sad cry bawling sob"]),
-  Object.freeze(["👾","space_invader","","Smileys & Emotion","alien monster","alien monster game retro space_invader"]),
-  Object.freeze(["💖","sparkling_heart","","Smileys & Emotion","sparkling heart","sparkling heart sparkling_heart"]),
-  Object.freeze(["🙊","speak_no_evil","","Smileys & Emotion","speak-no-evil monkey","speak-no-evil monkey monkey mute hush speak_no_evil"]),
-  Object.freeze(["💬","speech_balloon","","Smileys & Emotion","speech balloon","speech balloon comment speech_balloon"]),
-  Object.freeze(["🤩","star_struck","","Smileys & Emotion","star-struck","star-struck eyes star_struck"]),
-  Object.freeze(["😛","stuck_out_tongue","","Smileys & Emotion","face with tongue","face with tongue stuck_out_tongue"]),
-  Object.freeze(["😝","stuck_out_tongue_closed_eyes","","Smileys & Emotion","squinting face with tongue","squinting face with tongue prank stuck_out_tongue_closed_eyes"]),
-  Object.freeze(["😜","stuck_out_tongue_winking_eye","","Smileys & Emotion","winking face with tongue","winking face with tongue prank silly stuck_out_tongue_winking_eye"]),
-  Object.freeze(["😎","sunglasses","","Smileys & Emotion","smiling face with sunglasses","smiling face with sunglasses cool sunglasses"]),
-  Object.freeze(["😓","sweat","","Smileys & Emotion","downcast face with sweat","downcast face with sweat sweat"]),
-  Object.freeze(["💦","sweat_drops","","Smileys & Emotion","sweat droplets","sweat droplets water workout sweat_drops"]),
-  Object.freeze(["😅","sweat_smile","","Smileys & Emotion","grinning face with sweat","grinning face with sweat hot sweat_smile"]),
-  Object.freeze(["🤔","thinking","","Smileys & Emotion","thinking face","thinking face thinking"]),
-  Object.freeze(["💭","thought_balloon","","Smileys & Emotion","thought balloon","thought balloon thinking thought_balloon"]),
-  Object.freeze(["😫","tired_face","","Smileys & Emotion","tired face","tired face upset whine tired_face"]),
-  Object.freeze(["😤","triumph","","Smileys & Emotion","face with steam from nose","face with steam from nose smug triumph"]),
-  Object.freeze(["💕","two_hearts","","Smileys & Emotion","two hearts","two hearts two_hearts"]),
-  Object.freeze(["😒","unamused","","Smileys & Emotion","unamused face","unamused face meh unamused"]),
-  Object.freeze(["🙃","upside_down_face","","Smileys & Emotion","upside-down face","upside-down face upside_down_face"]),
-  Object.freeze(["🤮","vomiting_face","","Smileys & Emotion","face vomiting","face vomiting barf sick vomiting_face"]),
-  Object.freeze(["😩","weary","","Smileys & Emotion","weary face","weary face tired weary"]),
-  Object.freeze(["🤍","white_heart","","Smileys & Emotion","white heart","white heart white_heart"]),
-  Object.freeze(["😉","wink","","Smileys & Emotion","winking face","winking face flirt wink"]),
-  Object.freeze(["🥴","woozy_face","","Smileys & Emotion","woozy face","woozy face groggy woozy_face"]),
-  Object.freeze(["😟","worried","","Smileys & Emotion","worried face","worried face nervous worried"]),
-  Object.freeze(["🥱","yawning_face","","Smileys & Emotion","yawning face","yawning face yawning_face"]),
-  Object.freeze(["💛","yellow_heart","","Smileys & Emotion","yellow heart","yellow heart yellow_heart"]),
-  Object.freeze(["😋","yum","","Smileys & Emotion","face savoring food","face savoring food tongue lick yum"]),
-  Object.freeze(["🤪","zany_face","","Smileys & Emotion","zany face","zany face goofy wacky zany_face"]),
-  Object.freeze(["🤐","zipper_mouth_face","","Smileys & Emotion","zipper-mouth face","zipper-mouth face silence hush zipper_mouth_face"]),
-  Object.freeze(["💤","zzz","","Smileys & Emotion","ZZZ","zzz sleeping zzz"]),
-  Object.freeze(["👍","+1","thumbsup","People & Body","thumbs up","thumbs up approve ok +1 thumbsup"]),
-  Object.freeze(["👎","-1","thumbsdown","People & Body","thumbs down","thumbs down disapprove bury -1 thumbsdown"]),
-  Object.freeze(["🧑","adult","","People & Body","person","person adult"]),
-  Object.freeze(["🫀","anatomical_heart","","People & Body","anatomical heart","anatomical heart anatomical_heart"]),
-  Object.freeze(["👼","angel","","People & Body","baby angel","baby angel angel"]),
-  Object.freeze(["🧑‍🎨","artist","","People & Body","artist","artist artist"]),
-  Object.freeze(["🧑‍🚀","astronaut","","People & Body","astronaut","astronaut astronaut"]),
-  Object.freeze(["👶","baby","","People & Body","baby","baby child newborn baby"]),
-  Object.freeze(["👨‍🦲","bald_man","","People & Body","man: bald","man: bald bald_man"]),
-  Object.freeze(["👩‍🦲","bald_woman","","People & Body","woman: bald","woman: bald bald_woman"]),
-  Object.freeze(["🛀","bath","","People & Body","person taking bath","person taking bath shower bath"]),
-  Object.freeze(["🧔","bearded_person","","People & Body","person: beard","person: beard bearded_person"]),
-  Object.freeze(["🚴","bicyclist","","People & Body","person biking","person biking bicyclist"]),
-  Object.freeze(["🚴‍♂️","biking_man","","People & Body","man biking","man biking biking_man"]),
-  Object.freeze(["🚴‍♀️","biking_woman","","People & Body","woman biking","woman biking biking_woman"]),
-  Object.freeze(["🫦","biting_lip","","People & Body","biting lip","biting lip biting_lip"]),
-  Object.freeze(["👱‍♂️","blond_haired_man","","People & Body","man: blond hair","man: blond hair blond_haired_man"]),
-  Object.freeze(["👱","blond_haired_person","","People & Body","person: blond hair","person: blond hair blond_haired_person"]),
-  Object.freeze(["👱‍♀️","blond_haired_woman","blonde_woman","People & Body","woman: blond hair","woman: blond hair blond_haired_woman blonde_woman"]),
-  Object.freeze(["🦴","bone","","People & Body","bone","bone bone"]),
-  Object.freeze(["⛹️‍♂️","bouncing_ball_man","basketball_man","People & Body","man bouncing ball","man bouncing ball bouncing_ball_man basketball_man"]),
-  Object.freeze(["⛹️","bouncing_ball_person","","People & Body","person bouncing ball","person bouncing ball basketball bouncing_ball_person"]),
-  Object.freeze(["⛹️‍♀️","bouncing_ball_woman","basketball_woman","People & Body","woman bouncing ball","woman bouncing ball bouncing_ball_woman basketball_woman"]),
-  Object.freeze(["🙇","bow","","People & Body","person bowing","person bowing respect thanks bow"]),
-  Object.freeze(["🙇‍♂️","bowing_man","","People & Body","man bowing","man bowing respect thanks bowing_man"]),
-  Object.freeze(["🙇‍♀️","bowing_woman","","People & Body","woman bowing","woman bowing respect thanks bowing_woman"]),
-  Object.freeze(["👦","boy","","People & Body","boy","boy child boy"]),
-  Object.freeze(["🧠","brain","","People & Body","brain","brain brain"]),
-  Object.freeze(["🤱","breast_feeding","","People & Body","breast-feeding","breast-feeding nursing breast_feeding"]),
-  Object.freeze(["🕴️","business_suit_levitating","","People & Body","person in suit levitating","person in suit levitating business_suit_levitating"]),
-  Object.freeze(["👤","bust_in_silhouette","","People & Body","bust in silhouette","bust in silhouette user bust_in_silhouette"]),
-  Object.freeze(["👥","busts_in_silhouette","","People & Body","busts in silhouette","busts in silhouette users group team busts_in_silhouette"]),
-  Object.freeze(["🤙","call_me_hand","","People & Body","call me hand","call me hand call_me_hand"]),
-  Object.freeze(["🤸","cartwheeling","","People & Body","person cartwheeling","person cartwheeling cartwheeling"]),
-  Object.freeze(["🧒","child","","People & Body","child","child child"]),
-  Object.freeze(["👏","clap","","People & Body","clapping hands","clapping hands praise applause clap"]),
-  Object.freeze(["🧗","climbing","","People & Body","person climbing","person climbing bouldering climbing"]),
-  Object.freeze(["🧗‍♂️","climbing_man","","People & Body","man climbing","man climbing bouldering climbing_man"]),
-  Object.freeze(["🧗‍♀️","climbing_woman","","People & Body","woman climbing","woman climbing bouldering climbing_woman"]),
-  Object.freeze(["👷","construction_worker","","People & Body","construction worker","construction worker helmet construction_worker"]),
-  Object.freeze(["👷‍♂️","construction_worker_man","","People & Body","man construction worker","man construction worker helmet construction_worker_man"]),
-  Object.freeze(["👷‍♀️","construction_worker_woman","","People & Body","woman construction worker","woman construction worker helmet construction_worker_woman"]),
-  Object.freeze(["🧑‍🍳","cook","","People & Body","cook","cook cook"]),
-  Object.freeze(["👫","couple","","People & Body","woman and man holding hands","woman and man holding hands date couple"]),
-  Object.freeze(["💑","couple_with_heart","","People & Body","couple with heart","couple with heart couple_with_heart"]),
-  Object.freeze(["👨‍❤️‍👨","couple_with_heart_man_man","","People & Body","couple with heart: man, man","couple with heart: man, man couple_with_heart_man_man"]),
-  Object.freeze(["👩‍❤️‍👨","couple_with_heart_woman_man","","People & Body","couple with heart: woman, man","couple with heart: woman, man couple_with_heart_woman_man"]),
-  Object.freeze(["👩‍❤️‍👩","couple_with_heart_woman_woman","","People & Body","couple with heart: woman, woman","couple with heart: woman, woman couple_with_heart_woman_woman"]),
-  Object.freeze(["💏","couplekiss","","People & Body","kiss","kiss couplekiss"]),
-  Object.freeze(["👨‍❤️‍💋‍👨","couplekiss_man_man","","People & Body","kiss: man, man","kiss: man, man couplekiss_man_man"]),
-  Object.freeze(["👩‍❤️‍💋‍👨","couplekiss_man_woman","","People & Body","kiss: woman, man","kiss: woman, man couplekiss_man_woman"]),
-  Object.freeze(["👩‍❤️‍💋‍👩","couplekiss_woman_woman","","People & Body","kiss: woman, woman","kiss: woman, woman couplekiss_woman_woman"]),
-  Object.freeze(["🤞","crossed_fingers","","People & Body","crossed fingers","crossed fingers luck hopeful crossed_fingers"]),
-  Object.freeze(["👨‍🦱","curly_haired_man","","People & Body","man: curly hair","man: curly hair curly_haired_man"]),
-  Object.freeze(["👩‍🦱","curly_haired_woman","","People & Body","woman: curly hair","woman: curly hair curly_haired_woman"]),
-  Object.freeze(["👯","dancers","","People & Body","people with bunny ears","people with bunny ears bunny dancers"]),
-  Object.freeze(["👯‍♂️","dancing_men","","People & Body","men with bunny ears","men with bunny ears bunny dancing_men"]),
-  Object.freeze(["👯‍♀️","dancing_women","","People & Body","women with bunny ears","women with bunny ears bunny dancing_women"]),
-  Object.freeze(["🧏‍♂️","deaf_man","","People & Body","deaf man","deaf man deaf_man"]),
-  Object.freeze(["🧏","deaf_person","","People & Body","deaf person","deaf person deaf_person"]),
-  Object.freeze(["🧏‍♀️","deaf_woman","","People & Body","deaf woman","deaf woman deaf_woman"]),
-  Object.freeze(["🕵️","detective","","People & Body","detective","detective sleuth detective"]),
-  Object.freeze(["👂","ear","","People & Body","ear","ear hear sound listen ear"]),
-  Object.freeze(["🦻","ear_with_hearing_aid","","People & Body","ear with hearing aid","ear with hearing aid ear_with_hearing_aid"]),
-  Object.freeze(["🧝","elf","","People & Body","elf","elf elf"]),
-  Object.freeze(["🧝‍♂️","elf_man","","People & Body","man elf","man elf elf_man"]),
-  Object.freeze(["🧝‍♀️","elf_woman","","People & Body","woman elf","woman elf elf_woman"]),
-  Object.freeze(["👁️","eye","","People & Body","eye","eye eye"]),
-  Object.freeze(["👀","eyes","","People & Body","eyes","eyes look see watch eyes"]),
-  Object.freeze(["🤦","facepalm","","People & Body","person facepalming","person facepalming facepalm"]),
-  Object.freeze(["🧑‍🏭","factory_worker","","People & Body","factory worker","factory worker factory_worker"]),
-  Object.freeze(["🧚","fairy","","People & Body","fairy","fairy fairy"]),
-  Object.freeze(["🧚‍♂️","fairy_man","","People & Body","man fairy","man fairy fairy_man"]),
-  Object.freeze(["🧚‍♀️","fairy_woman","","People & Body","woman fairy","woman fairy fairy_woman"]),
-  Object.freeze(["👪","family","","People & Body","family","family home parents child family"]),
-  Object.freeze(["👨‍👦","family_man_boy","","People & Body","family: man, boy","family: man, boy family_man_boy"]),
-  Object.freeze(["👨‍👦‍👦","family_man_boy_boy","","People & Body","family: man, boy, boy","family: man, boy, boy family_man_boy_boy"]),
-  Object.freeze(["👨‍👧","family_man_girl","","People & Body","family: man, girl","family: man, girl family_man_girl"]),
-  Object.freeze(["👨‍👧‍👦","family_man_girl_boy","","People & Body","family: man, girl, boy","family: man, girl, boy family_man_girl_boy"]),
-  Object.freeze(["👨‍👧‍👧","family_man_girl_girl","","People & Body","family: man, girl, girl","family: man, girl, girl family_man_girl_girl"]),
-  Object.freeze(["👨‍👨‍👦","family_man_man_boy","","People & Body","family: man, man, boy","family: man, man, boy family_man_man_boy"]),
-  Object.freeze(["👨‍👨‍👦‍👦","family_man_man_boy_boy","","People & Body","family: man, man, boy, boy","family: man, man, boy, boy family_man_man_boy_boy"]),
-  Object.freeze(["👨‍👨‍👧","family_man_man_girl","","People & Body","family: man, man, girl","family: man, man, girl family_man_man_girl"]),
-  Object.freeze(["👨‍👨‍👧‍👦","family_man_man_girl_boy","","People & Body","family: man, man, girl, boy","family: man, man, girl, boy family_man_man_girl_boy"]),
-  Object.freeze(["👨‍👨‍👧‍👧","family_man_man_girl_girl","","People & Body","family: man, man, girl, girl","family: man, man, girl, girl family_man_man_girl_girl"]),
-  Object.freeze(["👨‍👩‍👦","family_man_woman_boy","","People & Body","family: man, woman, boy","family: man, woman, boy family_man_woman_boy"]),
-  Object.freeze(["👨‍👩‍👦‍👦","family_man_woman_boy_boy","","People & Body","family: man, woman, boy, boy","family: man, woman, boy, boy family_man_woman_boy_boy"]),
-  Object.freeze(["👨‍👩‍👧","family_man_woman_girl","","People & Body","family: man, woman, girl","family: man, woman, girl family_man_woman_girl"]),
-  Object.freeze(["👨‍👩‍👧‍👦","family_man_woman_girl_boy","","People & Body","family: man, woman, girl, boy","family: man, woman, girl, boy family_man_woman_girl_boy"]),
-  Object.freeze(["👨‍👩‍👧‍👧","family_man_woman_girl_girl","","People & Body","family: man, woman, girl, girl","family: man, woman, girl, girl family_man_woman_girl_girl"]),
-  Object.freeze(["👩‍👦","family_woman_boy","","People & Body","family: woman, boy","family: woman, boy family_woman_boy"]),
-  Object.freeze(["👩‍👦‍👦","family_woman_boy_boy","","People & Body","family: woman, boy, boy","family: woman, boy, boy family_woman_boy_boy"]),
-  Object.freeze(["👩‍👧","family_woman_girl","","People & Body","family: woman, girl","family: woman, girl family_woman_girl"]),
-  Object.freeze(["👩‍👧‍👦","family_woman_girl_boy","","People & Body","family: woman, girl, boy","family: woman, girl, boy family_woman_girl_boy"]),
-  Object.freeze(["👩‍👧‍👧","family_woman_girl_girl","","People & Body","family: woman, girl, girl","family: woman, girl, girl family_woman_girl_girl"]),
-  Object.freeze(["👩‍👩‍👦","family_woman_woman_boy","","People & Body","family: woman, woman, boy","family: woman, woman, boy family_woman_woman_boy"]),
-  Object.freeze(["👩‍👩‍👦‍👦","family_woman_woman_boy_boy","","People & Body","family: woman, woman, boy, boy","family: woman, woman, boy, boy family_woman_woman_boy_boy"]),
-  Object.freeze(["👩‍👩‍👧","family_woman_woman_girl","","People & Body","family: woman, woman, girl","family: woman, woman, girl family_woman_woman_girl"]),
-  Object.freeze(["👩‍👩‍👧‍👦","family_woman_woman_girl_boy","","People & Body","family: woman, woman, girl, boy","family: woman, woman, girl, boy family_woman_woman_girl_boy"]),
-  Object.freeze(["👩‍👩‍👧‍👧","family_woman_woman_girl_girl","","People & Body","family: woman, woman, girl, girl","family: woman, woman, girl, girl family_woman_woman_girl_girl"]),
-  Object.freeze(["🧑‍🌾","farmer","","People & Body","farmer","farmer farmer"]),
-  Object.freeze(["🕵️‍♀️","female_detective","","People & Body","woman detective","woman detective sleuth female_detective"]),
-  Object.freeze(["🧑‍🚒","firefighter","","People & Body","firefighter","firefighter firefighter"]),
-  Object.freeze(["🤛","fist_left","","People & Body","left-facing fist","left-facing fist fist_left"]),
-  Object.freeze(["👊","fist_oncoming","facepunch punch","People & Body","oncoming fist","oncoming fist attack fist_oncoming facepunch punch"]),
-  Object.freeze(["✊","fist_raised","fist","People & Body","raised fist","raised fist power fist_raised fist"]),
-  Object.freeze(["🤜","fist_right","","People & Body","right-facing fist","right-facing fist fist_right"]),
-  Object.freeze(["🦶","foot","","People & Body","foot","foot foot"]),
-  Object.freeze(["👣","footprints","","People & Body","footprints","footprints feet tracks footprints"]),
-  Object.freeze(["🙍‍♂️","frowning_man","","People & Body","man frowning","man frowning frowning_man"]),
-  Object.freeze(["🙍","frowning_person","","People & Body","person frowning","person frowning frowning_person"]),
-  Object.freeze(["🙍‍♀️","frowning_woman","","People & Body","woman frowning","woman frowning frowning_woman"]),
-  Object.freeze(["🧞","genie","","People & Body","genie","genie genie"]),
-  Object.freeze(["🧞‍♂️","genie_man","","People & Body","man genie","man genie genie_man"]),
-  Object.freeze(["🧞‍♀️","genie_woman","","People & Body","woman genie","woman genie genie_woman"]),
-  Object.freeze(["👧","girl","","People & Body","girl","girl child girl"]),
-  Object.freeze(["🏌️","golfing","","People & Body","person golfing","person golfing golfing"]),
-  Object.freeze(["🏌️‍♂️","golfing_man","","People & Body","man golfing","man golfing golfing_man"]),
-  Object.freeze(["🏌️‍♀️","golfing_woman","","People & Body","woman golfing","woman golfing golfing_woman"]),
-  Object.freeze(["💂","guard","","People & Body","guard","guard guard"]),
-  Object.freeze(["💂‍♂️","guardsman","","People & Body","man guard","man guard guardsman"]),
-  Object.freeze(["💂‍♀️","guardswoman","","People & Body","woman guard","woman guard guardswoman"]),
-  Object.freeze(["💇","haircut","","People & Body","person getting haircut","person getting haircut beauty haircut"]),
-  Object.freeze(["💇‍♂️","haircut_man","","People & Body","man getting haircut","man getting haircut haircut_man"]),
-  Object.freeze(["💇‍♀️","haircut_woman","","People & Body","woman getting haircut","woman getting haircut haircut_woman"]),
-  Object.freeze(["✋","hand","raised_hand","People & Body","raised hand","raised hand highfive stop hand raised_hand"]),
-  Object.freeze(["🫰","hand_with_index_finger_and_thumb_crossed","","People & Body","hand with index finger and thumb crossed","hand with index finger and thumb crossed hand_with_index_finger_and_thumb_crossed"]),
-  Object.freeze(["🤾","handball_person","","People & Body","person playing handball","person playing handball handball_person"]),
-  Object.freeze(["🤝","handshake","","People & Body","handshake","handshake deal handshake"]),
-  Object.freeze(["🧑‍⚕️","health_worker","","People & Body","health worker","health worker health_worker"]),
-  Object.freeze(["🫶","heart_hands","","People & Body","heart hands","heart hands love heart_hands"]),
-  Object.freeze(["🏇","horse_racing","","People & Body","horse racing","horse racing horse_racing"]),
-  Object.freeze(["🫵","index_pointing_at_the_viewer","","People & Body","index pointing at the viewer","index pointing at the viewer index_pointing_at_the_viewer"]),
-  Object.freeze(["🧑‍⚖️","judge","","People & Body","judge","judge judge"]),
-  Object.freeze(["🤹","juggling_person","","People & Body","person juggling","person juggling juggling_person"]),
-  Object.freeze(["🧎‍♂️","kneeling_man","","People & Body","man kneeling","man kneeling kneeling_man"]),
-  Object.freeze(["🧎","kneeling_person","","People & Body","person kneeling","person kneeling kneeling_person"]),
-  Object.freeze(["🧎‍♀️","kneeling_woman","","People & Body","woman kneeling","woman kneeling kneeling_woman"]),
-  Object.freeze(["🫲","leftwards_hand","","People & Body","leftwards hand","leftwards hand leftwards_hand"]),
-  Object.freeze(["🫷","leftwards_pushing_hand","","People & Body","leftwards pushing hand","leftwards pushing hand leftwards_pushing_hand"]),
-  Object.freeze(["🦵","leg","","People & Body","leg","leg leg"]),
-  Object.freeze(["👄","lips","","People & Body","mouth","mouth kiss lips"]),
-  Object.freeze(["🧘","lotus_position","","People & Body","person in lotus position","person in lotus position meditation lotus_position"]),
-  Object.freeze(["🧘‍♂️","lotus_position_man","","People & Body","man in lotus position","man in lotus position meditation lotus_position_man"]),
-  Object.freeze(["🧘‍♀️","lotus_position_woman","","People & Body","woman in lotus position","woman in lotus position meditation lotus_position_woman"]),
-  Object.freeze(["🤟","love_you_gesture","","People & Body","love-you gesture","love-you gesture love_you_gesture"]),
-  Object.freeze(["🫁","lungs","","People & Body","lungs","lungs lungs"]),
-  Object.freeze(["🧙","mage","","People & Body","mage","mage wizard mage"]),
-  Object.freeze(["🧙‍♂️","mage_man","","People & Body","man mage","man mage wizard mage_man"]),
-  Object.freeze(["🧙‍♀️","mage_woman","","People & Body","woman mage","woman mage wizard mage_woman"]),
-  Object.freeze(["🕵️‍♂️","male_detective","","People & Body","man detective","man detective sleuth male_detective"]),
-  Object.freeze(["👨","man","","People & Body","man","man mustache father dad man"]),
-  Object.freeze(["👨‍🎨","man_artist","","People & Body","man artist","man artist painter man_artist"]),
-  Object.freeze(["👨‍🚀","man_astronaut","","People & Body","man astronaut","man astronaut space man_astronaut"]),
-  Object.freeze(["🧔‍♂️","man_beard","","People & Body","man: beard","man: beard man_beard"]),
-  Object.freeze(["🤸‍♂️","man_cartwheeling","","People & Body","man cartwheeling","man cartwheeling man_cartwheeling"]),
-  Object.freeze(["👨‍🍳","man_cook","","People & Body","man cook","man cook chef man_cook"]),
-  Object.freeze(["🕺","man_dancing","","People & Body","man dancing","man dancing dancer man_dancing"]),
-  Object.freeze(["🤦‍♂️","man_facepalming","","People & Body","man facepalming","man facepalming man_facepalming"]),
-  Object.freeze(["👨‍🏭","man_factory_worker","","People & Body","man factory worker","man factory worker man_factory_worker"]),
-  Object.freeze(["👨‍🌾","man_farmer","","People & Body","man farmer","man farmer man_farmer"]),
-  Object.freeze(["👨‍🍼","man_feeding_baby","","People & Body","man feeding baby","man feeding baby man_feeding_baby"]),
-  Object.freeze(["👨‍🚒","man_firefighter","","People & Body","man firefighter","man firefighter man_firefighter"]),
-  Object.freeze(["👨‍⚕️","man_health_worker","","People & Body","man health worker","man health worker doctor nurse man_health_worker"]),
-  Object.freeze(["👨‍🦽","man_in_manual_wheelchair","","People & Body","man in manual wheelchair","man in manual wheelchair man_in_manual_wheelchair"]),
-  Object.freeze(["👨‍🦼","man_in_motorized_wheelchair","","People & Body","man in motorized wheelchair","man in motorized wheelchair man_in_motorized_wheelchair"]),
-  Object.freeze(["🤵‍♂️","man_in_tuxedo","","People & Body","man in tuxedo","man in tuxedo man_in_tuxedo"]),
-  Object.freeze(["👨‍⚖️","man_judge","","People & Body","man judge","man judge justice man_judge"]),
-  Object.freeze(["🤹‍♂️","man_juggling","","People & Body","man juggling","man juggling man_juggling"]),
-  Object.freeze(["👨‍🔧","man_mechanic","","People & Body","man mechanic","man mechanic man_mechanic"]),
-  Object.freeze(["👨‍💼","man_office_worker","","People & Body","man office worker","man office worker business man_office_worker"]),
-  Object.freeze(["👨‍✈️","man_pilot","","People & Body","man pilot","man pilot man_pilot"]),
-  Object.freeze(["🤾‍♂️","man_playing_handball","","People & Body","man playing handball","man playing handball man_playing_handball"]),
-  Object.freeze(["🤽‍♂️","man_playing_water_polo","","People & Body","man playing water polo","man playing water polo man_playing_water_polo"]),
-  Object.freeze(["👨‍🔬","man_scientist","","People & Body","man scientist","man scientist research man_scientist"]),
-  Object.freeze(["🤷‍♂️","man_shrugging","","People & Body","man shrugging","man shrugging man_shrugging"]),
-  Object.freeze(["👨‍🎤","man_singer","","People & Body","man singer","man singer rockstar man_singer"]),
-  Object.freeze(["👨‍🎓","man_student","","People & Body","man student","man student graduation man_student"]),
-  Object.freeze(["👨‍🏫","man_teacher","","People & Body","man teacher","man teacher school professor man_teacher"]),
-  Object.freeze(["👨‍💻","man_technologist","","People & Body","man technologist","man technologist coder man_technologist"]),
-  Object.freeze(["👲","man_with_gua_pi_mao","","People & Body","person with skullcap","person with skullcap man_with_gua_pi_mao"]),
-  Object.freeze(["👨‍🦯","man_with_probing_cane","","People & Body","man with white cane","man with white cane man_with_probing_cane"]),
-  Object.freeze(["👳‍♂️","man_with_turban","","People & Body","man wearing turban","man wearing turban man_with_turban"]),
-  Object.freeze(["👰‍♂️","man_with_veil","","People & Body","man with veil","man with veil man_with_veil"]),
-  Object.freeze(["💆","massage","","People & Body","person getting massage","person getting massage spa massage"]),
-  Object.freeze(["💆‍♂️","massage_man","","People & Body","man getting massage","man getting massage spa massage_man"]),
-  Object.freeze(["💆‍♀️","massage_woman","","People & Body","woman getting massage","woman getting massage spa massage_woman"]),
-  Object.freeze(["🧑‍🔧","mechanic","","People & Body","mechanic","mechanic mechanic"]),
-  Object.freeze(["🦾","mechanical_arm","","People & Body","mechanical arm","mechanical arm mechanical_arm"]),
-  Object.freeze(["🦿","mechanical_leg","","People & Body","mechanical leg","mechanical leg mechanical_leg"]),
-  Object.freeze(["🤼‍♂️","men_wrestling","","People & Body","men wrestling","men wrestling men_wrestling"]),
-  Object.freeze(["🧜‍♀️","mermaid","","People & Body","mermaid","mermaid mermaid"]),
-  Object.freeze(["🧜‍♂️","merman","","People & Body","merman","merman merman"]),
-  Object.freeze(["🧜","merperson","","People & Body","merperson","merperson merperson"]),
-  Object.freeze(["🤘","metal","","People & Body","sign of the horns","sign of the horns metal"]),
-  Object.freeze(["🖕","middle_finger","fu","People & Body","middle finger","middle finger middle_finger fu"]),
-  Object.freeze(["🚵","mountain_bicyclist","","People & Body","person mountain biking","person mountain biking mountain_bicyclist"]),
-  Object.freeze(["🚵‍♂️","mountain_biking_man","","People & Body","man mountain biking","man mountain biking mountain_biking_man"]),
-  Object.freeze(["🚵‍♀️","mountain_biking_woman","","People & Body","woman mountain biking","woman mountain biking mountain_biking_woman"]),
-  Object.freeze(["🤶","mrs_claus","","People & Body","Mrs. Claus","mrs. claus santa mrs_claus"]),
-  Object.freeze(["💪","muscle","","People & Body","flexed biceps","flexed biceps flex bicep strong workout muscle"]),
-  Object.freeze(["🧑‍🎄","mx_claus","","People & Body","mx claus","mx claus mx_claus"]),
-  Object.freeze(["💅","nail_care","","People & Body","nail polish","nail polish beauty manicure nail_care"]),
-  Object.freeze(["🥷","ninja","","People & Body","ninja","ninja ninja"]),
-  Object.freeze(["🙅","no_good","","People & Body","person gesturing NO","person gesturing no stop halt denied no_good"]),
-  Object.freeze(["🙅‍♂️","no_good_man","ng_man","People & Body","man gesturing NO","man gesturing no stop halt denied no_good_man ng_man"]),
-  Object.freeze(["🙅‍♀️","no_good_woman","ng_woman","People & Body","woman gesturing NO","woman gesturing no stop halt denied no_good_woman ng_woman"]),
-  Object.freeze(["👃","nose","","People & Body","nose","nose smell nose"]),
-  Object.freeze(["🧑‍💼","office_worker","","People & Body","office worker","office worker office_worker"]),
-  Object.freeze(["👌","ok_hand","","People & Body","OK hand","ok hand ok_hand"]),
-  Object.freeze(["🙆‍♂️","ok_man","","People & Body","man gesturing OK","man gesturing ok ok_man"]),
-  Object.freeze(["🙆","ok_person","","People & Body","person gesturing OK","person gesturing ok ok_person"]),
-  Object.freeze(["🙆‍♀️","ok_woman","","People & Body","woman gesturing OK","woman gesturing ok ok_woman"]),
-  Object.freeze(["🧓","older_adult","","People & Body","older person","older person older_adult"]),
-  Object.freeze(["👴","older_man","","People & Body","old man","old man older_man"]),
-  Object.freeze(["👵","older_woman","","People & Body","old woman","old woman older_woman"]),
-  Object.freeze(["👐","open_hands","","People & Body","open hands","open hands open_hands"]),
-  Object.freeze(["🫳","palm_down_hand","","People & Body","palm down hand","palm down hand palm_down_hand"]),
-  Object.freeze(["🫴","palm_up_hand","","People & Body","palm up hand","palm up hand palm_up_hand"]),
-  Object.freeze(["🤲","palms_up_together","","People & Body","palms up together","palms up together palms_up_together"]),
-  Object.freeze(["🧑‍🤝‍🧑","people_holding_hands","","People & Body","people holding hands","people holding hands couple date people_holding_hands"]),
-  Object.freeze(["🫂","people_hugging","","People & Body","people hugging","people hugging people_hugging"]),
-  Object.freeze(["🧑‍🦲","person_bald","","People & Body","person: bald","person: bald person_bald"]),
-  Object.freeze(["🧑‍🦱","person_curly_hair","","People & Body","person: curly hair","person: curly hair person_curly_hair"]),
-  Object.freeze(["🧑‍🍼","person_feeding_baby","","People & Body","person feeding baby","person feeding baby person_feeding_baby"]),
-  Object.freeze(["🤺","person_fencing","","People & Body","person fencing","person fencing person_fencing"]),
-  Object.freeze(["🧑‍🦽","person_in_manual_wheelchair","","People & Body","person in manual wheelchair","person in manual wheelchair person_in_manual_wheelchair"]),
-  Object.freeze(["🧑‍🦼","person_in_motorized_wheelchair","","People & Body","person in motorized wheelchair","person in motorized wheelchair person_in_motorized_wheelchair"]),
-  Object.freeze(["🤵","person_in_tuxedo","","People & Body","person in tuxedo","person in tuxedo groom marriage wedding person_in_tuxedo"]),
-  Object.freeze(["🧑‍🦰","person_red_hair","","People & Body","person: red hair","person: red hair person_red_hair"]),
-  Object.freeze(["🧑‍🦳","person_white_hair","","People & Body","person: white hair","person: white hair person_white_hair"]),
-  Object.freeze(["🫅","person_with_crown","","People & Body","person with crown","person with crown person_with_crown"]),
-  Object.freeze(["🧑‍🦯","person_with_probing_cane","","People & Body","person with white cane","person with white cane person_with_probing_cane"]),
-  Object.freeze(["👳","person_with_turban","","People & Body","person wearing turban","person wearing turban person_with_turban"]),
-  Object.freeze(["👰","person_with_veil","","People & Body","person with veil","person with veil marriage wedding person_with_veil"]),
-  Object.freeze(["🧑‍✈️","pilot","","People & Body","pilot","pilot pilot"]),
-  Object.freeze(["🤌","pinched_fingers","","People & Body","pinched fingers","pinched fingers pinched_fingers"]),
-  Object.freeze(["🤏","pinching_hand","","People & Body","pinching hand","pinching hand pinching_hand"]),
-  Object.freeze(["👇","point_down","","People & Body","backhand index pointing down","backhand index pointing down point_down"]),
-  Object.freeze(["👈","point_left","","People & Body","backhand index pointing left","backhand index pointing left point_left"]),
-  Object.freeze(["👉","point_right","","People & Body","backhand index pointing right","backhand index pointing right point_right"]),
-  Object.freeze(["☝️","point_up","","People & Body","index pointing up","index pointing up point_up"]),
-  Object.freeze(["👆","point_up_2","","People & Body","backhand index pointing up","backhand index pointing up point_up_2"]),
-  Object.freeze(["👮","police_officer","cop","People & Body","police officer","police officer law police_officer cop"]),
-  Object.freeze(["👮‍♂️","policeman","","People & Body","man police officer","man police officer law cop policeman"]),
-  Object.freeze(["👮‍♀️","policewoman","","People & Body","woman police officer","woman police officer law cop policewoman"]),
-  Object.freeze(["🙎","pouting_face","","People & Body","person pouting","person pouting pouting_face"]),
-  Object.freeze(["🙎‍♂️","pouting_man","","People & Body","man pouting","man pouting pouting_man"]),
-  Object.freeze(["🙎‍♀️","pouting_woman","","People & Body","woman pouting","woman pouting pouting_woman"]),
-  Object.freeze(["🙏","pray","","People & Body","folded hands","folded hands please hope wish pray"]),
-  Object.freeze(["🫃","pregnant_man","","People & Body","pregnant man","pregnant man pregnant_man"]),
-  Object.freeze(["🫄","pregnant_person","","People & Body","pregnant person","pregnant person pregnant_person"]),
-  Object.freeze(["🤰","pregnant_woman","","People & Body","pregnant woman","pregnant woman pregnant_woman"]),
-  Object.freeze(["🤴","prince","","People & Body","prince","prince crown royal prince"]),
-  Object.freeze(["👸","princess","","People & Body","princess","princess crown royal princess"]),
-  Object.freeze(["🤚","raised_back_of_hand","","People & Body","raised back of hand","raised back of hand raised_back_of_hand"]),
-  Object.freeze(["🖐️","raised_hand_with_fingers_splayed","","People & Body","hand with fingers splayed","hand with fingers splayed raised_hand_with_fingers_splayed"]),
-  Object.freeze(["🙌","raised_hands","","People & Body","raising hands","raising hands hooray raised_hands"]),
-  Object.freeze(["🙋","raising_hand","","People & Body","person raising hand","person raising hand raising_hand"]),
-  Object.freeze(["🙋‍♂️","raising_hand_man","","People & Body","man raising hand","man raising hand raising_hand_man"]),
-  Object.freeze(["🙋‍♀️","raising_hand_woman","","People & Body","woman raising hand","woman raising hand raising_hand_woman"]),
-  Object.freeze(["👨‍🦰","red_haired_man","","People & Body","man: red hair","man: red hair red_haired_man"]),
-  Object.freeze(["👩‍🦰","red_haired_woman","","People & Body","woman: red hair","woman: red hair red_haired_woman"]),
-  Object.freeze(["🫱","rightwards_hand","","People & Body","rightwards hand","rightwards hand rightwards_hand"]),
-  Object.freeze(["🫸","rightwards_pushing_hand","","People & Body","rightwards pushing hand","rightwards pushing hand rightwards_pushing_hand"]),
-  Object.freeze(["🚣","rowboat","","People & Body","person rowing boat","person rowing boat rowboat"]),
-  Object.freeze(["🚣‍♂️","rowing_man","","People & Body","man rowing boat","man rowing boat rowing_man"]),
-  Object.freeze(["🚣‍♀️","rowing_woman","","People & Body","woman rowing boat","woman rowing boat rowing_woman"]),
-  Object.freeze(["🏃","runner","running","People & Body","person running","person running exercise workout marathon runner running"]),
-  Object.freeze(["🏃‍♂️","running_man","","People & Body","man running","man running exercise workout marathon running_man"]),
-  Object.freeze(["🏃‍♀️","running_woman","","People & Body","woman running","woman running exercise workout marathon running_woman"]),
-  Object.freeze(["🎅","santa","","People & Body","Santa Claus","santa claus christmas santa"]),
-  Object.freeze(["🧖‍♂️","sauna_man","","People & Body","man in steamy room","man in steamy room steamy sauna_man"]),
-  Object.freeze(["🧖","sauna_person","","People & Body","person in steamy room","person in steamy room steamy sauna_person"]),
-  Object.freeze(["🧖‍♀️","sauna_woman","","People & Body","woman in steamy room","woman in steamy room steamy sauna_woman"]),
-  Object.freeze(["🧑‍🔬","scientist","","People & Body","scientist","scientist scientist"]),
-  Object.freeze(["🤳","selfie","","People & Body","selfie","selfie selfie"]),
-  Object.freeze(["🤷","shrug","","People & Body","person shrugging","person shrugging shrug"]),
-  Object.freeze(["🧑‍🎤","singer","","People & Body","singer","singer singer"]),
-  Object.freeze(["⛷️","skier","","People & Body","skier","skier skier"]),
-  Object.freeze(["🛌","sleeping_bed","","People & Body","person in bed","person in bed sleeping_bed"]),
-  Object.freeze(["🏂","snowboarder","","People & Body","snowboarder","snowboarder snowboarder"]),
-  Object.freeze(["🗣️","speaking_head","","People & Body","speaking head","speaking head speaking_head"]),
-  Object.freeze(["🧍‍♂️","standing_man","","People & Body","man standing","man standing standing_man"]),
-  Object.freeze(["🧍","standing_person","","People & Body","person standing","person standing standing_person"]),
-  Object.freeze(["🧍‍♀️","standing_woman","","People & Body","woman standing","woman standing standing_woman"]),
-  Object.freeze(["🧑‍🎓","student","","People & Body","student","student student"]),
-  Object.freeze(["🦸","superhero","","People & Body","superhero","superhero superhero"]),
-  Object.freeze(["🦸‍♂️","superhero_man","","People & Body","man superhero","man superhero superhero_man"]),
-  Object.freeze(["🦸‍♀️","superhero_woman","","People & Body","woman superhero","woman superhero superhero_woman"]),
-  Object.freeze(["🦹","supervillain","","People & Body","supervillain","supervillain supervillain"]),
-  Object.freeze(["🦹‍♂️","supervillain_man","","People & Body","man supervillain","man supervillain supervillain_man"]),
-  Object.freeze(["🦹‍♀️","supervillain_woman","","People & Body","woman supervillain","woman supervillain supervillain_woman"]),
-  Object.freeze(["🏄","surfer","","People & Body","person surfing","person surfing surfer"]),
-  Object.freeze(["🏄‍♂️","surfing_man","","People & Body","man surfing","man surfing surfing_man"]),
-  Object.freeze(["🏄‍♀️","surfing_woman","","People & Body","woman surfing","woman surfing surfing_woman"]),
-  Object.freeze(["🏊","swimmer","","People & Body","person swimming","person swimming swimmer"]),
-  Object.freeze(["🏊‍♂️","swimming_man","","People & Body","man swimming","man swimming swimming_man"]),
-  Object.freeze(["🏊‍♀️","swimming_woman","","People & Body","woman swimming","woman swimming swimming_woman"]),
-  Object.freeze(["🧑‍🏫","teacher","","People & Body","teacher","teacher teacher"]),
-  Object.freeze(["🧑‍💻","technologist","","People & Body","technologist","technologist technologist"]),
-  Object.freeze(["💁‍♂️","tipping_hand_man","sassy_man","People & Body","man tipping hand","man tipping hand information tipping_hand_man sassy_man"]),
-  Object.freeze(["💁","tipping_hand_person","information_desk_person","People & Body","person tipping hand","person tipping hand tipping_hand_person information_desk_person"]),
-  Object.freeze(["💁‍♀️","tipping_hand_woman","sassy_woman","People & Body","woman tipping hand","woman tipping hand information tipping_hand_woman sassy_woman"]),
-  Object.freeze(["👅","tongue","","People & Body","tongue","tongue taste tongue"]),
-  Object.freeze(["🦷","tooth","","People & Body","tooth","tooth tooth"]),
-  Object.freeze(["🧌","troll","","People & Body","troll","troll troll"]),
-  Object.freeze(["👬","two_men_holding_hands","","People & Body","men holding hands","men holding hands couple date two_men_holding_hands"]),
-  Object.freeze(["👭","two_women_holding_hands","","People & Body","women holding hands","women holding hands couple date two_women_holding_hands"]),
-  Object.freeze(["✌️","v","","People & Body","victory hand","victory hand victory peace v"]),
-  Object.freeze(["🧛","vampire","","People & Body","vampire","vampire vampire"]),
-  Object.freeze(["🧛‍♂️","vampire_man","","People & Body","man vampire","man vampire vampire_man"]),
-  Object.freeze(["🧛‍♀️","vampire_woman","","People & Body","woman vampire","woman vampire vampire_woman"]),
-  Object.freeze(["🖖","vulcan_salute","","People & Body","vulcan salute","vulcan salute prosper spock vulcan_salute"]),
-  Object.freeze(["🚶","walking","","People & Body","person walking","person walking walking"]),
-  Object.freeze(["🚶‍♂️","walking_man","","People & Body","man walking","man walking walking_man"]),
-  Object.freeze(["🚶‍♀️","walking_woman","","People & Body","woman walking","woman walking walking_woman"]),
-  Object.freeze(["🤽","water_polo","","People & Body","person playing water polo","person playing water polo water_polo"]),
-  Object.freeze(["👋","wave","","People & Body","waving hand","waving hand goodbye wave"]),
-  Object.freeze(["🏋️","weight_lifting","","People & Body","person lifting weights","person lifting weights gym workout weight_lifting"]),
-  Object.freeze(["🏋️‍♂️","weight_lifting_man","","People & Body","man lifting weights","man lifting weights gym workout weight_lifting_man"]),
-  Object.freeze(["🏋️‍♀️","weight_lifting_woman","","People & Body","woman lifting weights","woman lifting weights gym workout weight_lifting_woman"]),
-  Object.freeze(["👨‍🦳","white_haired_man","","People & Body","man: white hair","man: white hair white_haired_man"]),
-  Object.freeze(["👩‍🦳","white_haired_woman","","People & Body","woman: white hair","woman: white hair white_haired_woman"]),
-  Object.freeze(["👩","woman","","People & Body","woman","woman girls woman"]),
-  Object.freeze(["👩‍🎨","woman_artist","","People & Body","woman artist","woman artist painter woman_artist"]),
-  Object.freeze(["👩‍🚀","woman_astronaut","","People & Body","woman astronaut","woman astronaut space woman_astronaut"]),
-  Object.freeze(["🧔‍♀️","woman_beard","","People & Body","woman: beard","woman: beard woman_beard"]),
-  Object.freeze(["🤸‍♀️","woman_cartwheeling","","People & Body","woman cartwheeling","woman cartwheeling woman_cartwheeling"]),
-  Object.freeze(["👩‍🍳","woman_cook","","People & Body","woman cook","woman cook chef woman_cook"]),
-  Object.freeze(["💃","woman_dancing","dancer","People & Body","woman dancing","woman dancing dress woman_dancing dancer"]),
-  Object.freeze(["🤦‍♀️","woman_facepalming","","People & Body","woman facepalming","woman facepalming woman_facepalming"]),
-  Object.freeze(["👩‍🏭","woman_factory_worker","","People & Body","woman factory worker","woman factory worker woman_factory_worker"]),
-  Object.freeze(["👩‍🌾","woman_farmer","","People & Body","woman farmer","woman farmer woman_farmer"]),
-  Object.freeze(["👩‍🍼","woman_feeding_baby","","People & Body","woman feeding baby","woman feeding baby woman_feeding_baby"]),
-  Object.freeze(["👩‍🚒","woman_firefighter","","People & Body","woman firefighter","woman firefighter woman_firefighter"]),
-  Object.freeze(["👩‍⚕️","woman_health_worker","","People & Body","woman health worker","woman health worker doctor nurse woman_health_worker"]),
-  Object.freeze(["👩‍🦽","woman_in_manual_wheelchair","","People & Body","woman in manual wheelchair","woman in manual wheelchair woman_in_manual_wheelchair"]),
-  Object.freeze(["👩‍🦼","woman_in_motorized_wheelchair","","People & Body","woman in motorized wheelchair","woman in motorized wheelchair woman_in_motorized_wheelchair"]),
-  Object.freeze(["🤵‍♀️","woman_in_tuxedo","","People & Body","woman in tuxedo","woman in tuxedo woman_in_tuxedo"]),
-  Object.freeze(["👩‍⚖️","woman_judge","","People & Body","woman judge","woman judge justice woman_judge"]),
-  Object.freeze(["🤹‍♀️","woman_juggling","","People & Body","woman juggling","woman juggling woman_juggling"]),
-  Object.freeze(["👩‍🔧","woman_mechanic","","People & Body","woman mechanic","woman mechanic woman_mechanic"]),
-  Object.freeze(["👩‍💼","woman_office_worker","","People & Body","woman office worker","woman office worker business woman_office_worker"]),
-  Object.freeze(["👩‍✈️","woman_pilot","","People & Body","woman pilot","woman pilot woman_pilot"]),
-  Object.freeze(["🤾‍♀️","woman_playing_handball","","People & Body","woman playing handball","woman playing handball woman_playing_handball"]),
-  Object.freeze(["🤽‍♀️","woman_playing_water_polo","","People & Body","woman playing water polo","woman playing water polo woman_playing_water_polo"]),
-  Object.freeze(["👩‍🔬","woman_scientist","","People & Body","woman scientist","woman scientist research woman_scientist"]),
-  Object.freeze(["🤷‍♀️","woman_shrugging","","People & Body","woman shrugging","woman shrugging woman_shrugging"]),
-  Object.freeze(["👩‍🎤","woman_singer","","People & Body","woman singer","woman singer rockstar woman_singer"]),
-  Object.freeze(["👩‍🎓","woman_student","","People & Body","woman student","woman student graduation woman_student"]),
-  Object.freeze(["👩‍🏫","woman_teacher","","People & Body","woman teacher","woman teacher school professor woman_teacher"]),
-  Object.freeze(["👩‍💻","woman_technologist","","People & Body","woman technologist","woman technologist coder woman_technologist"]),
-  Object.freeze(["🧕","woman_with_headscarf","","People & Body","woman with headscarf","woman with headscarf hijab woman_with_headscarf"]),
-  Object.freeze(["👩‍🦯","woman_with_probing_cane","","People & Body","woman with white cane","woman with white cane woman_with_probing_cane"]),
-  Object.freeze(["👳‍♀️","woman_with_turban","","People & Body","woman wearing turban","woman wearing turban woman_with_turban"]),
-  Object.freeze(["👰‍♀️","woman_with_veil","bride_with_veil","People & Body","woman with veil","woman with veil woman_with_veil bride_with_veil"]),
-  Object.freeze(["🤼‍♀️","women_wrestling","","People & Body","women wrestling","women wrestling women_wrestling"]),
-  Object.freeze(["🤼","wrestling","","People & Body","people wrestling","people wrestling wrestling"]),
-  Object.freeze(["✍️","writing_hand","","People & Body","writing hand","writing hand writing_hand"]),
-  Object.freeze(["🧟","zombie","","People & Body","zombie","zombie zombie"]),
-  Object.freeze(["🧟‍♂️","zombie_man","","People & Body","man zombie","man zombie zombie_man"]),
-  Object.freeze(["🧟‍♀️","zombie_woman","","People & Body","woman zombie","woman zombie zombie_woman"]),
-  Object.freeze(["🐜","ant","","Animals & Nature","ant","ant ant"]),
-  Object.freeze(["🐤","baby_chick","","Animals & Nature","baby chick","baby chick baby_chick"]),
-  Object.freeze(["🦡","badger","","Animals & Nature","badger","badger badger"]),
-  Object.freeze(["🦇","bat","","Animals & Nature","bat","bat bat"]),
-  Object.freeze(["🐻","bear","","Animals & Nature","bear","bear bear"]),
-  Object.freeze(["🦫","beaver","","Animals & Nature","beaver","beaver beaver"]),
-  Object.freeze(["🐝","bee","honeybee","Animals & Nature","honeybee","honeybee bee honeybee"]),
-  Object.freeze(["🪲","beetle","","Animals & Nature","beetle","beetle beetle"]),
-  Object.freeze(["🐦","bird","","Animals & Nature","bird","bird bird"]),
-  Object.freeze(["🦬","bison","","Animals & Nature","bison","bison bison"]),
-  Object.freeze(["🐦‍⬛","black_bird","","Animals & Nature","black bird","black bird black_bird"]),
-  Object.freeze(["🐈‍⬛","black_cat","","Animals & Nature","black cat","black cat black_cat"]),
-  Object.freeze(["🌼","blossom","","Animals & Nature","blossom","blossom blossom"]),
-  Object.freeze(["🐡","blowfish","","Animals & Nature","blowfish","blowfish blowfish"]),
-  Object.freeze(["🐗","boar","","Animals & Nature","boar","boar boar"]),
-  Object.freeze(["💐","bouquet","","Animals & Nature","bouquet","bouquet flowers bouquet"]),
-  Object.freeze(["🐛","bug","","Animals & Nature","bug","bug bug"]),
-  Object.freeze(["🦋","butterfly","","Animals & Nature","butterfly","butterfly butterfly"]),
-  Object.freeze(["🌵","cactus","","Animals & Nature","cactus","cactus cactus"]),
-  Object.freeze(["🐫","camel","","Animals & Nature","two-hump camel","two-hump camel camel"]),
-  Object.freeze(["🐱","cat","","Animals & Nature","cat face","cat face pet cat"]),
-  Object.freeze(["🐈","cat2","","Animals & Nature","cat","cat cat2"]),
-  Object.freeze(["🌸","cherry_blossom","","Animals & Nature","cherry blossom","cherry blossom flower spring cherry_blossom"]),
-  Object.freeze(["🐔","chicken","","Animals & Nature","chicken","chicken chicken"]),
-  Object.freeze(["🐿️","chipmunk","","Animals & Nature","chipmunk","chipmunk chipmunk"]),
-  Object.freeze(["🪳","cockroach","","Animals & Nature","cockroach","cockroach cockroach"]),
-  Object.freeze(["🪸","coral","","Animals & Nature","coral","coral coral"]),
-  Object.freeze(["🐮","cow","","Animals & Nature","cow face","cow face cow"]),
-  Object.freeze(["🐄","cow2","","Animals & Nature","cow","cow cow2"]),
-  Object.freeze(["🦗","cricket","","Animals & Nature","cricket","cricket cricket"]),
-  Object.freeze(["🐊","crocodile","","Animals & Nature","crocodile","crocodile crocodile"]),
-  Object.freeze(["🌳","deciduous_tree","","Animals & Nature","deciduous tree","deciduous tree wood deciduous_tree"]),
-  Object.freeze(["🦌","deer","","Animals & Nature","deer","deer deer"]),
-  Object.freeze(["🦤","dodo","","Animals & Nature","dodo","dodo dodo"]),
-  Object.freeze(["🐶","dog","","Animals & Nature","dog face","dog face pet dog"]),
-  Object.freeze(["🐕","dog2","","Animals & Nature","dog","dog dog2"]),
-  Object.freeze(["🐬","dolphin","flipper","Animals & Nature","dolphin","dolphin dolphin flipper"]),
-  Object.freeze(["🫏","donkey","","Animals & Nature","donkey","donkey mule donkey"]),
-  Object.freeze(["🕊️","dove","","Animals & Nature","dove","dove peace dove"]),
-  Object.freeze(["🐉","dragon","","Animals & Nature","dragon","dragon dragon"]),
-  Object.freeze(["🐲","dragon_face","","Animals & Nature","dragon face","dragon face dragon_face"]),
-  Object.freeze(["🐪","dromedary_camel","","Animals & Nature","camel","camel desert dromedary_camel"]),
-  Object.freeze(["🦆","duck","","Animals & Nature","duck","duck duck"]),
-  Object.freeze(["🦅","eagle","","Animals & Nature","eagle","eagle eagle"]),
-  Object.freeze(["🌾","ear_of_rice","","Animals & Nature","sheaf of rice","sheaf of rice ear_of_rice"]),
-  Object.freeze(["🐘","elephant","","Animals & Nature","elephant","elephant elephant"]),
-  Object.freeze(["🪹","empty_nest","","Animals & Nature","empty nest","empty nest empty_nest"]),
-  Object.freeze(["🌲","evergreen_tree","","Animals & Nature","evergreen tree","evergreen tree wood evergreen_tree"]),
-  Object.freeze(["🍂","fallen_leaf","","Animals & Nature","fallen leaf","fallen leaf autumn fallen_leaf"]),
-  Object.freeze(["🪶","feather","","Animals & Nature","feather","feather feather"]),
-  Object.freeze(["🐾","feet","paw_prints","Animals & Nature","paw prints","paw prints feet paw_prints"]),
-  Object.freeze(["🐟","fish","","Animals & Nature","fish","fish fish"]),
-  Object.freeze(["🦩","flamingo","","Animals & Nature","flamingo","flamingo flamingo"]),
-  Object.freeze(["🪰","fly","","Animals & Nature","fly","fly fly"]),
-  Object.freeze(["🍀","four_leaf_clover","","Animals & Nature","four leaf clover","four leaf clover luck four_leaf_clover"]),
-  Object.freeze(["🦊","fox_face","","Animals & Nature","fox","fox fox_face"]),
-  Object.freeze(["🐸","frog","","Animals & Nature","frog","frog frog"]),
-  Object.freeze(["🦒","giraffe","","Animals & Nature","giraffe","giraffe giraffe"]),
-  Object.freeze(["🐐","goat","","Animals & Nature","goat","goat goat"]),
-  Object.freeze(["🪿","goose","","Animals & Nature","goose","goose honk goose"]),
-  Object.freeze(["🦍","gorilla","","Animals & Nature","gorilla","gorilla gorilla"]),
-  Object.freeze(["🦮","guide_dog","","Animals & Nature","guide dog","guide dog guide_dog"]),
-  Object.freeze(["🐹","hamster","","Animals & Nature","hamster","hamster pet hamster"]),
-  Object.freeze(["🐥","hatched_chick","","Animals & Nature","front-facing baby chick","front-facing baby chick hatched_chick"]),
-  Object.freeze(["🐣","hatching_chick","","Animals & Nature","hatching chick","hatching chick hatching_chick"]),
-  Object.freeze(["🦔","hedgehog","","Animals & Nature","hedgehog","hedgehog hedgehog"]),
-  Object.freeze(["🌿","herb","","Animals & Nature","herb","herb herb"]),
-  Object.freeze(["🌺","hibiscus","","Animals & Nature","hibiscus","hibiscus hibiscus"]),
-  Object.freeze(["🦛","hippopotamus","","Animals & Nature","hippopotamus","hippopotamus hippopotamus"]),
-  Object.freeze(["🐴","horse","","Animals & Nature","horse face","horse face horse"]),
-  Object.freeze(["🪻","hyacinth","","Animals & Nature","hyacinth","hyacinth hyacinth"]),
-  Object.freeze(["🪼","jellyfish","","Animals & Nature","jellyfish","jellyfish jellyfish"]),
-  Object.freeze(["🦘","kangaroo","","Animals & Nature","kangaroo","kangaroo kangaroo"]),
-  Object.freeze(["🐨","koala","","Animals & Nature","koala","koala koala"]),
-  Object.freeze(["🐞","lady_beetle","","Animals & Nature","lady beetle","lady beetle bug lady_beetle"]),
-  Object.freeze(["🍃","leaves","","Animals & Nature","leaf fluttering in wind","leaf fluttering in wind leaf leaves"]),
-  Object.freeze(["🐆","leopard","","Animals & Nature","leopard","leopard leopard"]),
-  Object.freeze(["🦁","lion","","Animals & Nature","lion","lion lion"]),
-  Object.freeze(["🦎","lizard","","Animals & Nature","lizard","lizard lizard"]),
-  Object.freeze(["🦙","llama","","Animals & Nature","llama","llama llama"]),
-  Object.freeze(["🪷","lotus","","Animals & Nature","lotus","lotus lotus"]),
-  Object.freeze(["🦣","mammoth","","Animals & Nature","mammoth","mammoth mammoth"]),
-  Object.freeze(["🍁","maple_leaf","","Animals & Nature","maple leaf","maple leaf canada maple_leaf"]),
-  Object.freeze(["🦠","microbe","","Animals & Nature","microbe","microbe germ microbe"]),
-  Object.freeze(["🐒","monkey","","Animals & Nature","monkey","monkey monkey"]),
-  Object.freeze(["🐵","monkey_face","","Animals & Nature","monkey face","monkey face monkey_face"]),
-  Object.freeze(["🫎","moose","","Animals & Nature","moose","moose canada moose"]),
-  Object.freeze(["🦟","mosquito","","Animals & Nature","mosquito","mosquito mosquito"]),
-  Object.freeze(["🐭","mouse","","Animals & Nature","mouse face","mouse face mouse"]),
-  Object.freeze(["🐁","mouse2","","Animals & Nature","mouse","mouse mouse2"]),
-  Object.freeze(["🍄","mushroom","","Animals & Nature","mushroom","mushroom fungus mushroom"]),
-  Object.freeze(["🪺","nest_with_eggs","","Animals & Nature","nest with eggs","nest with eggs nest_with_eggs"]),
-  Object.freeze(["🐙","octopus","","Animals & Nature","octopus","octopus octopus"]),
-  Object.freeze(["🦧","orangutan","","Animals & Nature","orangutan","orangutan orangutan"]),
-  Object.freeze(["🦦","otter","","Animals & Nature","otter","otter otter"]),
-  Object.freeze(["🦉","owl","","Animals & Nature","owl","owl owl"]),
-  Object.freeze(["🐂","ox","","Animals & Nature","ox","ox ox"]),
-  Object.freeze(["🌴","palm_tree","","Animals & Nature","palm tree","palm tree palm_tree"]),
-  Object.freeze(["🐼","panda_face","","Animals & Nature","panda","panda panda_face"]),
-  Object.freeze(["🦜","parrot","","Animals & Nature","parrot","parrot parrot"]),
-  Object.freeze(["🦚","peacock","","Animals & Nature","peacock","peacock peacock"]),
-  Object.freeze(["🐧","penguin","","Animals & Nature","penguin","penguin penguin"]),
-  Object.freeze(["🐷","pig","","Animals & Nature","pig face","pig face pig"]),
-  Object.freeze(["🐖","pig2","","Animals & Nature","pig","pig pig2"]),
-  Object.freeze(["🐽","pig_nose","","Animals & Nature","pig nose","pig nose pig_nose"]),
-  Object.freeze(["🐻‍❄️","polar_bear","","Animals & Nature","polar bear","polar bear polar_bear"]),
-  Object.freeze(["🐩","poodle","","Animals & Nature","poodle","poodle dog poodle"]),
-  Object.freeze(["🪴","potted_plant","","Animals & Nature","potted plant","potted plant potted_plant"]),
-  Object.freeze(["🐰","rabbit","","Animals & Nature","rabbit face","rabbit face bunny rabbit"]),
-  Object.freeze(["🐇","rabbit2","","Animals & Nature","rabbit","rabbit rabbit2"]),
-  Object.freeze(["🦝","raccoon","","Animals & Nature","raccoon","raccoon raccoon"]),
-  Object.freeze(["🐎","racehorse","","Animals & Nature","horse","horse speed racehorse"]),
-  Object.freeze(["🐏","ram","","Animals & Nature","ram","ram ram"]),
-  Object.freeze(["🐀","rat","","Animals & Nature","rat","rat rat"]),
-  Object.freeze(["🦏","rhinoceros","","Animals & Nature","rhinoceros","rhinoceros rhinoceros"]),
-  Object.freeze(["🐓","rooster","","Animals & Nature","rooster","rooster rooster"]),
-  Object.freeze(["🌹","rose","","Animals & Nature","rose","rose flower rose"]),
-  Object.freeze(["🏵️","rosette","","Animals & Nature","rosette","rosette rosette"]),
-  Object.freeze(["🦕","sauropod","","Animals & Nature","sauropod","sauropod dinosaur sauropod"]),
-  Object.freeze(["🦂","scorpion","","Animals & Nature","scorpion","scorpion scorpion"]),
-  Object.freeze(["🦭","seal","","Animals & Nature","seal","seal seal"]),
-  Object.freeze(["🌱","seedling","","Animals & Nature","seedling","seedling plant seedling"]),
-  Object.freeze(["🐕‍🦺","service_dog","","Animals & Nature","service dog","service dog service_dog"]),
-  Object.freeze(["☘️","shamrock","","Animals & Nature","shamrock","shamrock shamrock"]),
-  Object.freeze(["🦈","shark","","Animals & Nature","shark","shark shark"]),
-  Object.freeze(["🐑","sheep","","Animals & Nature","ewe","ewe sheep"]),
-  Object.freeze(["🐚","shell","","Animals & Nature","spiral shell","spiral shell sea beach shell"]),
-  Object.freeze(["🦨","skunk","","Animals & Nature","skunk","skunk skunk"]),
-  Object.freeze(["🦥","sloth","","Animals & Nature","sloth","sloth sloth"]),
-  Object.freeze(["🐌","snail","","Animals & Nature","snail","snail slow snail"]),
-  Object.freeze(["🐍","snake","","Animals & Nature","snake","snake snake"]),
-  Object.freeze(["🕷️","spider","","Animals & Nature","spider","spider spider"]),
-  Object.freeze(["🕸️","spider_web","","Animals & Nature","spider web","spider web spider_web"]),
-  Object.freeze(["🌻","sunflower","","Animals & Nature","sunflower","sunflower sunflower"]),
-  Object.freeze(["🦢","swan","","Animals & Nature","swan","swan swan"]),
-  Object.freeze(["🦖","t-rex","","Animals & Nature","T-Rex","t-rex dinosaur t-rex"]),
-  Object.freeze(["🐯","tiger","","Animals & Nature","tiger face","tiger face tiger"]),
-  Object.freeze(["🐅","tiger2","","Animals & Nature","tiger","tiger tiger2"]),
-  Object.freeze(["🐠","tropical_fish","","Animals & Nature","tropical fish","tropical fish tropical_fish"]),
-  Object.freeze(["🌷","tulip","","Animals & Nature","tulip","tulip flower tulip"]),
-  Object.freeze(["🦃","turkey","","Animals & Nature","turkey","turkey thanksgiving turkey"]),
-  Object.freeze(["🐢","turtle","","Animals & Nature","turtle","turtle slow turtle"]),
-  Object.freeze(["🦄","unicorn","","Animals & Nature","unicorn","unicorn unicorn"]),
-  Object.freeze(["🐃","water_buffalo","","Animals & Nature","water buffalo","water buffalo water_buffalo"]),
-  Object.freeze(["🐳","whale","","Animals & Nature","spouting whale","spouting whale sea whale"]),
-  Object.freeze(["🐋","whale2","","Animals & Nature","whale","whale whale2"]),
-  Object.freeze(["💮","white_flower","","Animals & Nature","white flower","white flower white_flower"]),
-  Object.freeze(["🥀","wilted_flower","","Animals & Nature","wilted flower","wilted flower wilted_flower"]),
-  Object.freeze(["🪽","wing","","Animals & Nature","wing","wing fly wing"]),
-  Object.freeze(["🐺","wolf","","Animals & Nature","wolf","wolf wolf"]),
-  Object.freeze(["🪱","worm","","Animals & Nature","worm","worm worm"]),
-  Object.freeze(["🦓","zebra","","Animals & Nature","zebra","zebra zebra"]),
-  Object.freeze(["🏺","amphora","","Food & Drink","amphora","amphora amphora"]),
-  Object.freeze(["🍎","apple","","Food & Drink","red apple","red apple apple"]),
-  Object.freeze(["🥑","avocado","","Food & Drink","avocado","avocado avocado"]),
-  Object.freeze(["🍼","baby_bottle","","Food & Drink","baby bottle","baby bottle milk baby_bottle"]),
-  Object.freeze(["🥓","bacon","","Food & Drink","bacon","bacon bacon"]),
-  Object.freeze(["🥯","bagel","","Food & Drink","bagel","bagel bagel"]),
-  Object.freeze(["🥖","baguette_bread","","Food & Drink","baguette bread","baguette bread baguette_bread"]),
-  Object.freeze(["🍌","banana","","Food & Drink","banana","banana fruit banana"]),
-  Object.freeze(["🫘","beans","","Food & Drink","beans","beans beans"]),
-  Object.freeze(["🍺","beer","","Food & Drink","beer mug","beer mug drink beer"]),
-  Object.freeze(["🍻","beers","","Food & Drink","clinking beer mugs","clinking beer mugs drinks beers"]),
-  Object.freeze(["🫑","bell_pepper","","Food & Drink","bell pepper","bell pepper bell_pepper"]),
-  Object.freeze(["🍱","bento","","Food & Drink","bento box","bento box bento"]),
-  Object.freeze(["🧃","beverage_box","","Food & Drink","beverage box","beverage box beverage_box"]),
-  Object.freeze(["🎂","birthday","","Food & Drink","birthday cake","birthday cake party birthday"]),
-  Object.freeze(["🫐","blueberries","","Food & Drink","blueberries","blueberries blueberries"]),
-  Object.freeze(["🥣","bowl_with_spoon","","Food & Drink","bowl with spoon","bowl with spoon bowl_with_spoon"]),
-  Object.freeze(["🍞","bread","","Food & Drink","bread","bread toast bread"]),
-  Object.freeze(["🥦","broccoli","","Food & Drink","broccoli","broccoli broccoli"]),
-  Object.freeze(["🧋","bubble_tea","","Food & Drink","bubble tea","bubble tea bubble_tea"]),
-  Object.freeze(["🌯","burrito","","Food & Drink","burrito","burrito burrito"]),
-  Object.freeze(["🧈","butter","","Food & Drink","butter","butter butter"]),
-  Object.freeze(["🍰","cake","","Food & Drink","shortcake","shortcake dessert cake"]),
-  Object.freeze(["🍬","candy","","Food & Drink","candy","candy sweet candy"]),
-  Object.freeze(["🥫","canned_food","","Food & Drink","canned food","canned food canned_food"]),
-  Object.freeze(["🥕","carrot","","Food & Drink","carrot","carrot carrot"]),
-  Object.freeze(["🍾","champagne","","Food & Drink","bottle with popping cork","bottle with popping cork bottle bubbly celebration champagne"]),
-  Object.freeze(["🧀","cheese","","Food & Drink","cheese wedge","cheese wedge cheese"]),
-  Object.freeze(["🍒","cherries","","Food & Drink","cherries","cherries fruit cherries"]),
-  Object.freeze(["🌰","chestnut","","Food & Drink","chestnut","chestnut chestnut"]),
-  Object.freeze(["🍫","chocolate_bar","","Food & Drink","chocolate bar","chocolate bar chocolate_bar"]),
-  Object.freeze(["🥢","chopsticks","","Food & Drink","chopsticks","chopsticks chopsticks"]),
-  Object.freeze(["🥂","clinking_glasses","","Food & Drink","clinking glasses","clinking glasses cheers toast clinking_glasses"]),
-  Object.freeze(["🍸","cocktail","","Food & Drink","cocktail glass","cocktail glass drink cocktail"]),
-  Object.freeze(["🥥","coconut","","Food & Drink","coconut","coconut coconut"]),
-  Object.freeze(["☕","coffee","","Food & Drink","hot beverage","hot beverage cafe espresso coffee"]),
-  Object.freeze(["🍪","cookie","","Food & Drink","cookie","cookie cookie"]),
-  Object.freeze(["🌽","corn","","Food & Drink","ear of corn","ear of corn corn"]),
-  Object.freeze(["🦀","crab","","Food & Drink","crab","crab crab"]),
-  Object.freeze(["🥐","croissant","","Food & Drink","croissant","croissant croissant"]),
-  Object.freeze(["🥒","cucumber","","Food & Drink","cucumber","cucumber cucumber"]),
-  Object.freeze(["🥤","cup_with_straw","","Food & Drink","cup with straw","cup with straw cup_with_straw"]),
-  Object.freeze(["🧁","cupcake","","Food & Drink","cupcake","cupcake cupcake"]),
-  Object.freeze(["🍛","curry","","Food & Drink","curry rice","curry rice curry"]),
-  Object.freeze(["🍮","custard","","Food & Drink","custard","custard custard"]),
-  Object.freeze(["🥩","cut_of_meat","","Food & Drink","cut of meat","cut of meat cut_of_meat"]),
-  Object.freeze(["🍡","dango","","Food & Drink","dango","dango dango"]),
-  Object.freeze(["🍩","doughnut","","Food & Drink","doughnut","doughnut doughnut"]),
-  Object.freeze(["🥟","dumpling","","Food & Drink","dumpling","dumpling dumpling"]),
-  Object.freeze(["🥚","egg","","Food & Drink","egg","egg egg"]),
-  Object.freeze(["🍆","eggplant","","Food & Drink","eggplant","eggplant aubergine eggplant"]),
-  Object.freeze(["🧆","falafel","","Food & Drink","falafel","falafel falafel"]),
-  Object.freeze(["🍥","fish_cake","","Food & Drink","fish cake with swirl","fish cake with swirl fish_cake"]),
-  Object.freeze(["🫓","flatbread","","Food & Drink","flatbread","flatbread flatbread"]),
-  Object.freeze(["🫕","fondue","","Food & Drink","fondue","fondue fondue"]),
-  Object.freeze(["🍴","fork_and_knife","","Food & Drink","fork and knife","fork and knife cutlery fork_and_knife"]),
-  Object.freeze(["🥠","fortune_cookie","","Food & Drink","fortune cookie","fortune cookie fortune_cookie"]),
-  Object.freeze(["🍳","fried_egg","","Food & Drink","cooking","cooking breakfast fried_egg"]),
-  Object.freeze(["🍤","fried_shrimp","","Food & Drink","fried shrimp","fried shrimp tempura fried_shrimp"]),
-  Object.freeze(["🍟","fries","","Food & Drink","french fries","french fries fries"]),
-  Object.freeze(["🧄","garlic","","Food & Drink","garlic","garlic garlic"]),
-  Object.freeze(["🫚","ginger_root","","Food & Drink","ginger root","ginger root ginger_root"]),
-  Object.freeze(["🍇","grapes","","Food & Drink","grapes","grapes grapes"]),
-  Object.freeze(["🍏","green_apple","","Food & Drink","green apple","green apple fruit green_apple"]),
-  Object.freeze(["🥗","green_salad","","Food & Drink","green salad","green salad green_salad"]),
-  Object.freeze(["🍔","hamburger","","Food & Drink","hamburger","hamburger burger hamburger"]),
-  Object.freeze(["🔪","hocho","knife","Food & Drink","kitchen knife","kitchen knife cut chop hocho knife"]),
-  Object.freeze(["🍯","honey_pot","","Food & Drink","honey pot","honey pot honey_pot"]),
-  Object.freeze(["🌶️","hot_pepper","","Food & Drink","hot pepper","hot pepper spicy hot_pepper"]),
-  Object.freeze(["🌭","hotdog","","Food & Drink","hot dog","hot dog hotdog"]),
-  Object.freeze(["🍨","ice_cream","","Food & Drink","ice cream","ice cream ice_cream"]),
-  Object.freeze(["🧊","ice_cube","","Food & Drink","ice","ice ice_cube"]),
-  Object.freeze(["🍦","icecream","","Food & Drink","soft ice cream","soft ice cream icecream"]),
-  Object.freeze(["🫙","jar","","Food & Drink","jar","jar jar"]),
-  Object.freeze(["🥝","kiwi_fruit","","Food & Drink","kiwi fruit","kiwi fruit kiwi_fruit"]),
-  Object.freeze(["🥬","leafy_green","","Food & Drink","leafy green","leafy green leafy_green"]),
-  Object.freeze(["🍋","lemon","","Food & Drink","lemon","lemon lemon"]),
-  Object.freeze(["🦞","lobster","","Food & Drink","lobster","lobster lobster"]),
-  Object.freeze(["🍭","lollipop","","Food & Drink","lollipop","lollipop lollipop"]),
-  Object.freeze(["🥭","mango","","Food & Drink","mango","mango mango"]),
-  Object.freeze(["🧉","mate","","Food & Drink","mate","mate mate"]),
-  Object.freeze(["🍖","meat_on_bone","","Food & Drink","meat on bone","meat on bone meat_on_bone"]),
-  Object.freeze(["🍈","melon","","Food & Drink","melon","melon melon"]),
-  Object.freeze(["🥛","milk_glass","","Food & Drink","glass of milk","glass of milk milk_glass"]),
-  Object.freeze(["🥮","moon_cake","","Food & Drink","moon cake","moon cake moon_cake"]),
-  Object.freeze(["🍢","oden","","Food & Drink","oden","oden oden"]),
-  Object.freeze(["🫒","olive","","Food & Drink","olive","olive olive"]),
-  Object.freeze(["🧅","onion","","Food & Drink","onion","onion onion"]),
-  Object.freeze(["🦪","oyster","","Food & Drink","oyster","oyster oyster"]),
-  Object.freeze(["🥞","pancakes","","Food & Drink","pancakes","pancakes pancakes"]),
-  Object.freeze(["🫛","pea_pod","","Food & Drink","pea pod","pea pod pea_pod"]),
-  Object.freeze(["🍑","peach","","Food & Drink","peach","peach peach"]),
-  Object.freeze(["🥜","peanuts","","Food & Drink","peanuts","peanuts peanuts"]),
-  Object.freeze(["🍐","pear","","Food & Drink","pear","pear pear"]),
-  Object.freeze(["🥧","pie","","Food & Drink","pie","pie pie"]),
-  Object.freeze(["🍍","pineapple","","Food & Drink","pineapple","pineapple pineapple"]),
-  Object.freeze(["🍕","pizza","","Food & Drink","pizza","pizza pizza"]),
-  Object.freeze(["🍽️","plate_with_cutlery","","Food & Drink","fork and knife with plate","fork and knife with plate dining dinner plate_with_cutlery"]),
-  Object.freeze(["🍿","popcorn","","Food & Drink","popcorn","popcorn popcorn"]),
-  Object.freeze(["🥔","potato","","Food & Drink","potato","potato potato"]),
-  Object.freeze(["🍗","poultry_leg","","Food & Drink","poultry leg","poultry leg meat chicken poultry_leg"]),
-  Object.freeze(["🫗","pouring_liquid","","Food & Drink","pouring liquid","pouring liquid pouring_liquid"]),
-  Object.freeze(["🥨","pretzel","","Food & Drink","pretzel","pretzel pretzel"]),
-  Object.freeze(["🍜","ramen","","Food & Drink","steaming bowl","steaming bowl noodle ramen"]),
-  Object.freeze(["🍚","rice","","Food & Drink","cooked rice","cooked rice rice"]),
-  Object.freeze(["🍙","rice_ball","","Food & Drink","rice ball","rice ball rice_ball"]),
-  Object.freeze(["🍘","rice_cracker","","Food & Drink","rice cracker","rice cracker rice_cracker"]),
-  Object.freeze(["🍶","sake","","Food & Drink","sake","sake sake"]),
-  Object.freeze(["🧂","salt","","Food & Drink","salt","salt salt"]),
-  Object.freeze(["🥪","sandwich","","Food & Drink","sandwich","sandwich sandwich"]),
-  Object.freeze(["🥘","shallow_pan_of_food","","Food & Drink","shallow pan of food","shallow pan of food paella curry shallow_pan_of_food"]),
-  Object.freeze(["🍧","shaved_ice","","Food & Drink","shaved ice","shaved ice shaved_ice"]),
-  Object.freeze(["🦐","shrimp","","Food & Drink","shrimp","shrimp shrimp"]),
-  Object.freeze(["🍝","spaghetti","","Food & Drink","spaghetti","spaghetti pasta spaghetti"]),
-  Object.freeze(["🥄","spoon","","Food & Drink","spoon","spoon spoon"]),
-  Object.freeze(["🦑","squid","","Food & Drink","squid","squid squid"]),
-  Object.freeze(["🍲","stew","","Food & Drink","pot of food","pot of food stew"]),
-  Object.freeze(["🍓","strawberry","","Food & Drink","strawberry","strawberry fruit strawberry"]),
-  Object.freeze(["🥙","stuffed_flatbread","","Food & Drink","stuffed flatbread","stuffed flatbread stuffed_flatbread"]),
-  Object.freeze(["🍣","sushi","","Food & Drink","sushi","sushi sushi"]),
-  Object.freeze(["🍠","sweet_potato","","Food & Drink","roasted sweet potato","roasted sweet potato sweet_potato"]),
-  Object.freeze(["🌮","taco","","Food & Drink","taco","taco taco"]),
-  Object.freeze(["🥡","takeout_box","","Food & Drink","takeout box","takeout box takeout_box"]),
-  Object.freeze(["🫔","tamale","","Food & Drink","tamale","tamale tamale"]),
-  Object.freeze(["🍊","tangerine","orange mandarin","Food & Drink","tangerine","tangerine tangerine orange mandarin"]),
-  Object.freeze(["🍵","tea","","Food & Drink","teacup without handle","teacup without handle green breakfast tea"]),
-  Object.freeze(["🫖","teapot","","Food & Drink","teapot","teapot teapot"]),
-  Object.freeze(["🍅","tomato","","Food & Drink","tomato","tomato tomato"]),
-  Object.freeze(["🍹","tropical_drink","","Food & Drink","tropical drink","tropical drink summer vacation tropical_drink"]),
-  Object.freeze(["🥃","tumbler_glass","","Food & Drink","tumbler glass","tumbler glass whisky tumbler_glass"]),
-  Object.freeze(["🧇","waffle","","Food & Drink","waffle","waffle waffle"]),
-  Object.freeze(["🍉","watermelon","","Food & Drink","watermelon","watermelon watermelon"]),
-  Object.freeze(["🍷","wine_glass","","Food & Drink","wine glass","wine glass wine_glass"]),
-  Object.freeze(["🥇","1st_place_medal","","Activities","1st place medal","1st place medal gold 1st_place_medal"]),
-  Object.freeze(["🥈","2nd_place_medal","","Activities","2nd place medal","2nd place medal silver 2nd_place_medal"]),
-  Object.freeze(["🥉","3rd_place_medal","","Activities","3rd place medal","3rd place medal bronze 3rd_place_medal"]),
-  Object.freeze(["🎱","8ball","","Activities","pool 8 ball","pool 8 ball pool billiards 8ball"]),
-  Object.freeze(["🎨","art","","Activities","artist palette","artist palette design paint art"]),
-  Object.freeze(["🏸","badminton","","Activities","badminton","badminton badminton"]),
-  Object.freeze(["🎈","balloon","","Activities","balloon","balloon party birthday balloon"]),
-  Object.freeze(["🎍","bamboo","","Activities","pine decoration","pine decoration bamboo"]),
-  Object.freeze(["⚾","baseball","","Activities","baseball","baseball sports baseball"]),
-  Object.freeze(["🏀","basketball","","Activities","basketball","basketball sports basketball"]),
-  Object.freeze(["🃏","black_joker","","Activities","joker","joker black_joker"]),
-  Object.freeze(["🎳","bowling","","Activities","bowling","bowling bowling"]),
-  Object.freeze(["🥊","boxing_glove","","Activities","boxing glove","boxing glove boxing_glove"]),
-  Object.freeze(["♟️","chess_pawn","","Activities","chess pawn","chess pawn chess_pawn"]),
-  Object.freeze(["🎄","christmas_tree","","Activities","Christmas tree","christmas tree christmas_tree"]),
-  Object.freeze(["♣️","clubs","","Activities","club suit","club suit clubs"]),
-  Object.freeze(["🎊","confetti_ball","","Activities","confetti ball","confetti ball confetti_ball"]),
-  Object.freeze(["🏏","cricket_game","","Activities","cricket game","cricket game cricket_game"]),
-  Object.freeze(["🔮","crystal_ball","","Activities","crystal ball","crystal ball fortune crystal_ball"]),
-  Object.freeze(["🥌","curling_stone","","Activities","curling stone","curling stone curling_stone"]),
-  Object.freeze(["🎯","dart","","Activities","bullseye","bullseye target dart"]),
-  Object.freeze(["♦️","diamonds","","Activities","diamond suit","diamond suit diamonds"]),
-  Object.freeze(["🤿","diving_mask","","Activities","diving mask","diving mask diving_mask"]),
-  Object.freeze(["🎎","dolls","","Activities","Japanese dolls","japanese dolls dolls"]),
-  Object.freeze(["🏑","field_hockey","","Activities","field hockey","field hockey field_hockey"]),
-  Object.freeze(["🧨","firecracker","","Activities","firecracker","firecracker firecracker"]),
-  Object.freeze(["🎆","fireworks","","Activities","fireworks","fireworks festival celebration fireworks"]),
-  Object.freeze(["🎣","fishing_pole_and_fish","","Activities","fishing pole","fishing pole fishing_pole_and_fish"]),
-  Object.freeze(["🎏","flags","","Activities","carp streamer","carp streamer flags"]),
-  Object.freeze(["🎴","flower_playing_cards","","Activities","flower playing cards","flower playing cards flower_playing_cards"]),
-  Object.freeze(["🥏","flying_disc","","Activities","flying disc","flying disc flying_disc"]),
-  Object.freeze(["🏈","football","","Activities","american football","american football sports football"]),
-  Object.freeze(["🖼️","framed_picture","","Activities","framed picture","framed picture framed_picture"]),
-  Object.freeze(["🎲","game_die","","Activities","game die","game die dice gambling game_die"]),
-  Object.freeze(["🎁","gift","","Activities","wrapped gift","wrapped gift present birthday christmas gift"]),
-  Object.freeze(["🥅","goal_net","","Activities","goal net","goal net goal_net"]),
-  Object.freeze(["⛳","golf","","Activities","flag in hole","flag in hole golf"]),
-  Object.freeze(["🔫","gun","","Activities","water pistol","water pistol shoot weapon gun"]),
-  Object.freeze(["♥️","hearts","","Activities","heart suit","heart suit hearts"]),
-  Object.freeze(["🏒","ice_hockey","","Activities","ice hockey","ice hockey ice_hockey"]),
-  Object.freeze(["⛸️","ice_skate","","Activities","ice skate","ice skate skating ice_skate"]),
-  Object.freeze(["🎃","jack_o_lantern","","Activities","jack-o-lantern","jack-o-lantern halloween jack_o_lantern"]),
-  Object.freeze(["🧩","jigsaw","","Activities","puzzle piece","puzzle piece jigsaw"]),
-  Object.freeze(["🕹️","joystick","","Activities","joystick","joystick joystick"]),
-  Object.freeze(["🪁","kite","","Activities","kite","kite kite"]),
-  Object.freeze(["🪢","knot","","Activities","knot","knot knot"]),
-  Object.freeze(["🥍","lacrosse","","Activities","lacrosse","lacrosse lacrosse"]),
-  Object.freeze(["🪄","magic_wand","","Activities","magic wand","magic wand magic_wand"]),
-  Object.freeze(["🀄","mahjong","","Activities","mahjong red dragon","mahjong red dragon mahjong"]),
-  Object.freeze(["🥋","martial_arts_uniform","","Activities","martial arts uniform","martial arts uniform martial_arts_uniform"]),
-  Object.freeze(["🎖️","medal_military","","Activities","military medal","military medal medal_military"]),
-  Object.freeze(["🏅","medal_sports","","Activities","sports medal","sports medal gold winner medal_sports"]),
-  Object.freeze(["🪩","mirror_ball","","Activities","mirror ball","mirror ball disco party mirror_ball"]),
-  Object.freeze(["🪆","nesting_dolls","","Activities","nesting dolls","nesting dolls nesting_dolls"]),
-  Object.freeze(["🎭","performing_arts","","Activities","performing arts","performing arts theater drama performing_arts"]),
-  Object.freeze(["🪅","pinata","","Activities","piñata","piñata pinata"]),
-  Object.freeze(["🏓","ping_pong","","Activities","ping pong","ping pong ping_pong"]),
-  Object.freeze(["🧧","red_envelope","","Activities","red envelope","red envelope red_envelope"]),
-  Object.freeze(["🎗️","reminder_ribbon","","Activities","reminder ribbon","reminder ribbon reminder_ribbon"]),
-  Object.freeze(["🎀","ribbon","","Activities","ribbon","ribbon ribbon"]),
-  Object.freeze(["🎑","rice_scene","","Activities","moon viewing ceremony","moon viewing ceremony rice_scene"]),
-  Object.freeze(["🏉","rugby_football","","Activities","rugby football","rugby football rugby_football"]),
-  Object.freeze(["🎽","running_shirt_with_sash","","Activities","running shirt","running shirt marathon running_shirt_with_sash"]),
-  Object.freeze(["🪡","sewing_needle","","Activities","sewing needle","sewing needle sewing_needle"]),
-  Object.freeze(["🎿","ski","","Activities","skis","skis ski"]),
-  Object.freeze(["🛷","sled","","Activities","sled","sled sled"]),
-  Object.freeze(["🎰","slot_machine","","Activities","slot machine","slot machine slot_machine"]),
-  Object.freeze(["⚽","soccer","","Activities","soccer ball","soccer ball sports soccer"]),
-  Object.freeze(["🥎","softball","","Activities","softball","softball softball"]),
-  Object.freeze(["♠️","spades","","Activities","spade suit","spade suit spades"]),
-  Object.freeze(["🎇","sparkler","","Activities","sparkler","sparkler sparkler"]),
-  Object.freeze(["✨","sparkles","","Activities","sparkles","sparkles shiny sparkles"]),
-  Object.freeze(["🎉","tada","","Activities","party popper","party popper hooray party tada"]),
-  Object.freeze(["🎋","tanabata_tree","","Activities","tanabata tree","tanabata tree tanabata_tree"]),
-  Object.freeze(["🧸","teddy_bear","","Activities","teddy bear","teddy bear teddy_bear"]),
-  Object.freeze(["🎾","tennis","","Activities","tennis","tennis sports tennis"]),
-  Object.freeze(["🧵","thread","","Activities","thread","thread thread"]),
-  Object.freeze(["🎫","ticket","","Activities","ticket","ticket ticket"]),
-  Object.freeze(["🎟️","tickets","","Activities","admission tickets","admission tickets tickets"]),
-  Object.freeze(["🏆","trophy","","Activities","trophy","trophy award contest winner trophy"]),
-  Object.freeze(["🎮","video_game","","Activities","video game","video game play controller console video_game"]),
-  Object.freeze(["🏐","volleyball","","Activities","volleyball","volleyball volleyball"]),
-  Object.freeze(["🎐","wind_chime","","Activities","wind chime","wind chime wind_chime"]),
-  Object.freeze(["🧶","yarn","","Activities","yarn","yarn yarn"]),
-  Object.freeze(["🪀","yo_yo","","Activities","yo-yo","yo-yo yo_yo"]),
-  Object.freeze(["🚡","aerial_tramway","","Travel & Places","aerial tramway","aerial tramway aerial_tramway"]),
-  Object.freeze(["✈️","airplane","","Travel & Places","airplane","airplane flight airplane"]),
-  Object.freeze(["⏰","alarm_clock","","Travel & Places","alarm clock","alarm clock morning alarm_clock"]),
-  Object.freeze(["🚑","ambulance","","Travel & Places","ambulance","ambulance ambulance"]),
-  Object.freeze(["⚓","anchor","","Travel & Places","anchor","anchor ship anchor"]),
-  Object.freeze(["🚛","articulated_lorry","","Travel & Places","articulated lorry","articulated lorry articulated_lorry"]),
-  Object.freeze(["🛰️","artificial_satellite","","Travel & Places","satellite","satellite orbit space artificial_satellite"]),
-  Object.freeze(["🛺","auto_rickshaw","","Travel & Places","auto rickshaw","auto rickshaw auto_rickshaw"]),
-  Object.freeze(["🏦","bank","","Travel & Places","bank","bank bank"]),
-  Object.freeze(["💈","barber","","Travel & Places","barber pole","barber pole barber"]),
-  Object.freeze(["🏖️","beach_umbrella","","Travel & Places","beach with umbrella","beach with umbrella beach_umbrella"]),
-  Object.freeze(["🛎️","bellhop_bell","","Travel & Places","bellhop bell","bellhop bell bellhop_bell"]),
-  Object.freeze(["🚲","bike","","Travel & Places","bicycle","bicycle bicycle bike"]),
-  Object.freeze(["🚙","blue_car","","Travel & Places","sport utility vehicle","sport utility vehicle blue_car"]),
-  Object.freeze(["⛵","boat","sailboat","Travel & Places","sailboat","sailboat boat sailboat"]),
-  Object.freeze(["🧱","bricks","","Travel & Places","brick","brick bricks"]),
-  Object.freeze(["🌉","bridge_at_night","","Travel & Places","bridge at night","bridge at night bridge_at_night"]),
-  Object.freeze(["🏗️","building_construction","","Travel & Places","building construction","building construction building_construction"]),
-  Object.freeze(["🚅","bullettrain_front","","Travel & Places","bullet train","bullet train train bullettrain_front"]),
-  Object.freeze(["🚄","bullettrain_side","","Travel & Places","high-speed train","high-speed train train bullettrain_side"]),
-  Object.freeze(["🚌","bus","","Travel & Places","bus","bus bus"]),
-  Object.freeze(["🚏","busstop","","Travel & Places","bus stop","bus stop busstop"]),
-  Object.freeze(["🏕️","camping","","Travel & Places","camping","camping camping"]),
-  Object.freeze(["🛶","canoe","","Travel & Places","canoe","canoe canoe"]),
-  Object.freeze(["🚗","car","red_car","Travel & Places","automobile","automobile car red_car"]),
-  Object.freeze(["🎠","carousel_horse","","Travel & Places","carousel horse","carousel horse carousel_horse"]),
-  Object.freeze(["⛪","church","","Travel & Places","church","church church"]),
-  Object.freeze(["🎪","circus_tent","","Travel & Places","circus tent","circus tent circus_tent"]),
-  Object.freeze(["🌇","city_sunrise","","Travel & Places","sunset","sunset city_sunrise"]),
-  Object.freeze(["🌆","city_sunset","","Travel & Places","cityscape at dusk","cityscape at dusk city_sunset"]),
-  Object.freeze(["🏙️","cityscape","","Travel & Places","cityscape","cityscape skyline cityscape"]),
-  Object.freeze(["🏛️","classical_building","","Travel & Places","classical building","classical building classical_building"]),
-  Object.freeze(["🕐","clock1","","Travel & Places","one o’clock","one o’clock clock1"]),
-  Object.freeze(["🕙","clock10","","Travel & Places","ten o’clock","ten o’clock clock10"]),
-  Object.freeze(["🕥","clock1030","","Travel & Places","ten-thirty","ten-thirty clock1030"]),
-  Object.freeze(["🕚","clock11","","Travel & Places","eleven o’clock","eleven o’clock clock11"]),
-  Object.freeze(["🕦","clock1130","","Travel & Places","eleven-thirty","eleven-thirty clock1130"]),
-  Object.freeze(["🕛","clock12","","Travel & Places","twelve o’clock","twelve o’clock clock12"]),
-  Object.freeze(["🕧","clock1230","","Travel & Places","twelve-thirty","twelve-thirty clock1230"]),
-  Object.freeze(["🕜","clock130","","Travel & Places","one-thirty","one-thirty clock130"]),
-  Object.freeze(["🕑","clock2","","Travel & Places","two o’clock","two o’clock clock2"]),
-  Object.freeze(["🕝","clock230","","Travel & Places","two-thirty","two-thirty clock230"]),
-  Object.freeze(["🕒","clock3","","Travel & Places","three o’clock","three o’clock clock3"]),
-  Object.freeze(["🕞","clock330","","Travel & Places","three-thirty","three-thirty clock330"]),
-  Object.freeze(["🕓","clock4","","Travel & Places","four o’clock","four o’clock clock4"]),
-  Object.freeze(["🕟","clock430","","Travel & Places","four-thirty","four-thirty clock430"]),
-  Object.freeze(["🕔","clock5","","Travel & Places","five o’clock","five o’clock clock5"]),
-  Object.freeze(["🕠","clock530","","Travel & Places","five-thirty","five-thirty clock530"]),
-  Object.freeze(["🕕","clock6","","Travel & Places","six o’clock","six o’clock clock6"]),
-  Object.freeze(["🕡","clock630","","Travel & Places","six-thirty","six-thirty clock630"]),
-  Object.freeze(["🕖","clock7","","Travel & Places","seven o’clock","seven o’clock clock7"]),
-  Object.freeze(["🕢","clock730","","Travel & Places","seven-thirty","seven-thirty clock730"]),
-  Object.freeze(["🕗","clock8","","Travel & Places","eight o’clock","eight o’clock clock8"]),
-  Object.freeze(["🕣","clock830","","Travel & Places","eight-thirty","eight-thirty clock830"]),
-  Object.freeze(["🕘","clock9","","Travel & Places","nine o’clock","nine o’clock clock9"]),
-  Object.freeze(["🕤","clock930","","Travel & Places","nine-thirty","nine-thirty clock930"]),
-  Object.freeze(["🌂","closed_umbrella","","Travel & Places","closed umbrella","closed umbrella weather rain closed_umbrella"]),
-  Object.freeze(["☁️","cloud","","Travel & Places","cloud","cloud cloud"]),
-  Object.freeze(["🌩️","cloud_with_lightning","","Travel & Places","cloud with lightning","cloud with lightning cloud_with_lightning"]),
-  Object.freeze(["⛈️","cloud_with_lightning_and_rain","","Travel & Places","cloud with lightning and rain","cloud with lightning and rain cloud_with_lightning_and_rain"]),
-  Object.freeze(["🌧️","cloud_with_rain","","Travel & Places","cloud with rain","cloud with rain cloud_with_rain"]),
-  Object.freeze(["🌨️","cloud_with_snow","","Travel & Places","cloud with snow","cloud with snow cloud_with_snow"]),
-  Object.freeze(["☄️","comet","","Travel & Places","comet","comet comet"]),
-  Object.freeze(["🧭","compass","","Travel & Places","compass","compass compass"]),
-  Object.freeze(["🚧","construction","","Travel & Places","construction","construction wip construction"]),
-  Object.freeze(["🏪","convenience_store","","Travel & Places","convenience store","convenience store convenience_store"]),
-  Object.freeze(["🌙","crescent_moon","","Travel & Places","crescent moon","crescent moon night crescent_moon"]),
-  Object.freeze(["🌀","cyclone","","Travel & Places","cyclone","cyclone swirl cyclone"]),
-  Object.freeze(["🏬","department_store","","Travel & Places","department store","department store department_store"]),
-  Object.freeze(["🏚️","derelict_house","","Travel & Places","derelict house","derelict house derelict_house"]),
-  Object.freeze(["🏜️","desert","","Travel & Places","desert","desert desert"]),
-  Object.freeze(["🏝️","desert_island","","Travel & Places","desert island","desert island desert_island"]),
-  Object.freeze(["💧","droplet","","Travel & Places","droplet","droplet water droplet"]),
-  Object.freeze(["🌍","earth_africa","","Travel & Places","globe showing Europe-Africa","globe showing europe-africa globe world international earth_africa"]),
-  Object.freeze(["🌎","earth_americas","","Travel & Places","globe showing Americas","globe showing americas globe world international earth_americas"]),
-  Object.freeze(["🌏","earth_asia","","Travel & Places","globe showing Asia-Australia","globe showing asia-australia globe world international earth_asia"]),
-  Object.freeze(["🏰","european_castle","","Travel & Places","castle","castle european_castle"]),
-  Object.freeze(["🏤","european_post_office","","Travel & Places","post office","post office european_post_office"]),
-  Object.freeze(["🏭","factory","","Travel & Places","factory","factory factory"]),
-  Object.freeze(["🎡","ferris_wheel","","Travel & Places","ferris wheel","ferris wheel ferris_wheel"]),
-  Object.freeze(["⛴️","ferry","","Travel & Places","ferry","ferry ferry"]),
-  Object.freeze(["🔥","fire","","Travel & Places","fire","fire burn fire"]),
-  Object.freeze(["🚒","fire_engine","","Travel & Places","fire engine","fire engine fire_engine"]),
-  Object.freeze(["🌓","first_quarter_moon","","Travel & Places","first quarter moon","first quarter moon first_quarter_moon"]),
-  Object.freeze(["🌛","first_quarter_moon_with_face","","Travel & Places","first quarter moon face","first quarter moon face first_quarter_moon_with_face"]),
-  Object.freeze(["🛬","flight_arrival","","Travel & Places","airplane arrival","airplane arrival flight_arrival"]),
-  Object.freeze(["🛫","flight_departure","","Travel & Places","airplane departure","airplane departure flight_departure"]),
-  Object.freeze(["🛸","flying_saucer","","Travel & Places","flying saucer","flying saucer ufo flying_saucer"]),
-  Object.freeze(["🌫️","fog","","Travel & Places","fog","fog fog"]),
-  Object.freeze(["🌁","foggy","","Travel & Places","foggy","foggy karl foggy"]),
-  Object.freeze(["⛲","fountain","","Travel & Places","fountain","fountain fountain"]),
-  Object.freeze(["⛽","fuelpump","","Travel & Places","fuel pump","fuel pump fuelpump"]),
-  Object.freeze(["🌕","full_moon","","Travel & Places","full moon","full moon full_moon"]),
-  Object.freeze(["🌝","full_moon_with_face","","Travel & Places","full moon face","full moon face full_moon_with_face"]),
-  Object.freeze(["🌐","globe_with_meridians","","Travel & Places","globe with meridians","globe with meridians world global international globe_with_meridians"]),
-  Object.freeze(["🚁","helicopter","","Travel & Places","helicopter","helicopter helicopter"]),
-  Object.freeze(["🛕","hindu_temple","","Travel & Places","hindu temple","hindu temple hindu_temple"]),
-  Object.freeze(["🏥","hospital","","Travel & Places","hospital","hospital hospital"]),
-  Object.freeze(["🏨","hotel","","Travel & Places","hotel","hotel hotel"]),
-  Object.freeze(["♨️","hotsprings","","Travel & Places","hot springs","hot springs hotsprings"]),
-  Object.freeze(["⌛","hourglass","","Travel & Places","hourglass done","hourglass done time hourglass"]),
-  Object.freeze(["⏳","hourglass_flowing_sand","","Travel & Places","hourglass not done","hourglass not done time hourglass_flowing_sand"]),
-  Object.freeze(["🏠","house","","Travel & Places","house","house house"]),
-  Object.freeze(["🏡","house_with_garden","","Travel & Places","house with garden","house with garden house_with_garden"]),
-  Object.freeze(["🏘️","houses","","Travel & Places","houses","houses houses"]),
-  Object.freeze(["🛖","hut","","Travel & Places","hut","hut hut"]),
-  Object.freeze(["🗾","japan","","Travel & Places","map of Japan","map of japan japan"]),
-  Object.freeze(["🏯","japanese_castle","","Travel & Places","Japanese castle","japanese castle japanese_castle"]),
-  Object.freeze(["🕋","kaaba","","Travel & Places","kaaba","kaaba kaaba"]),
-  Object.freeze(["🛴","kick_scooter","","Travel & Places","kick scooter","kick scooter kick_scooter"]),
-  Object.freeze(["🌗","last_quarter_moon","","Travel & Places","last quarter moon","last quarter moon last_quarter_moon"]),
-  Object.freeze(["🌜","last_quarter_moon_with_face","","Travel & Places","last quarter moon face","last quarter moon face last_quarter_moon_with_face"]),
-  Object.freeze(["🚈","light_rail","","Travel & Places","light rail","light rail light_rail"]),
-  Object.freeze(["🏩","love_hotel","","Travel & Places","love hotel","love hotel love_hotel"]),
-  Object.freeze(["🧳","luggage","","Travel & Places","luggage","luggage luggage"]),
-  Object.freeze(["🕰️","mantelpiece_clock","","Travel & Places","mantelpiece clock","mantelpiece clock mantelpiece_clock"]),
-  Object.freeze(["🦽","manual_wheelchair","","Travel & Places","manual wheelchair","manual wheelchair manual_wheelchair"]),
-  Object.freeze(["🚇","metro","","Travel & Places","metro","metro metro"]),
-  Object.freeze(["🌌","milky_way","","Travel & Places","milky way","milky way milky_way"]),
-  Object.freeze(["🚐","minibus","","Travel & Places","minibus","minibus minibus"]),
-  Object.freeze(["🚝","monorail","","Travel & Places","monorail","monorail monorail"]),
-  Object.freeze(["🌔","moon","waxing_gibbous_moon","Travel & Places","waxing gibbous moon","waxing gibbous moon moon waxing_gibbous_moon"]),
-  Object.freeze(["🕌","mosque","","Travel & Places","mosque","mosque mosque"]),
-  Object.freeze(["🛥️","motor_boat","","Travel & Places","motor boat","motor boat motor_boat"]),
-  Object.freeze(["🛵","motor_scooter","","Travel & Places","motor scooter","motor scooter motor_scooter"]),
-  Object.freeze(["🏍️","motorcycle","","Travel & Places","motorcycle","motorcycle motorcycle"]),
-  Object.freeze(["🦼","motorized_wheelchair","","Travel & Places","motorized wheelchair","motorized wheelchair motorized_wheelchair"]),
-  Object.freeze(["🛣️","motorway","","Travel & Places","motorway","motorway motorway"]),
-  Object.freeze(["🗻","mount_fuji","","Travel & Places","mount fuji","mount fuji mount_fuji"]),
-  Object.freeze(["⛰️","mountain","","Travel & Places","mountain","mountain mountain"]),
-  Object.freeze(["🚠","mountain_cableway","","Travel & Places","mountain cableway","mountain cableway mountain_cableway"]),
-  Object.freeze(["🚞","mountain_railway","","Travel & Places","mountain railway","mountain railway mountain_railway"]),
-  Object.freeze(["🏔️","mountain_snow","","Travel & Places","snow-capped mountain","snow-capped mountain mountain_snow"]),
-  Object.freeze(["🏞️","national_park","","Travel & Places","national park","national park national_park"]),
-  Object.freeze(["🌑","new_moon","","Travel & Places","new moon","new moon new_moon"]),
-  Object.freeze(["🌚","new_moon_with_face","","Travel & Places","new moon face","new moon face new_moon_with_face"]),
-  Object.freeze(["🌃","night_with_stars","","Travel & Places","night with stars","night with stars night_with_stars"]),
-  Object.freeze(["🌊","ocean","","Travel & Places","water wave","water wave sea ocean"]),
-  Object.freeze(["🏢","office","","Travel & Places","office building","office building office"]),
-  Object.freeze(["🛢️","oil_drum","","Travel & Places","oil drum","oil drum oil_drum"]),
-  Object.freeze(["🚘","oncoming_automobile","","Travel & Places","oncoming automobile","oncoming automobile oncoming_automobile"]),
-  Object.freeze(["🚍","oncoming_bus","","Travel & Places","oncoming bus","oncoming bus oncoming_bus"]),
-  Object.freeze(["🚔","oncoming_police_car","","Travel & Places","oncoming police car","oncoming police car oncoming_police_car"]),
-  Object.freeze(["🚖","oncoming_taxi","","Travel & Places","oncoming taxi","oncoming taxi oncoming_taxi"]),
-  Object.freeze(["☂️","open_umbrella","","Travel & Places","umbrella","umbrella open_umbrella"]),
-  Object.freeze(["🪂","parachute","","Travel & Places","parachute","parachute parachute"]),
-  Object.freeze(["⛱️","parasol_on_ground","","Travel & Places","umbrella on ground","umbrella on ground beach_umbrella parasol_on_ground"]),
-  Object.freeze(["⛅","partly_sunny","","Travel & Places","sun behind cloud","sun behind cloud weather cloud partly_sunny"]),
-  Object.freeze(["🛳️","passenger_ship","","Travel & Places","passenger ship","passenger ship cruise passenger_ship"]),
-  Object.freeze(["🛻","pickup_truck","","Travel & Places","pickup truck","pickup truck pickup_truck"]),
-  Object.freeze(["🛝","playground_slide","","Travel & Places","playground slide","playground slide playground_slide"]),
-  Object.freeze(["🚓","police_car","","Travel & Places","police car","police car police_car"]),
-  Object.freeze(["🏣","post_office","","Travel & Places","Japanese post office","japanese post office post_office"]),
-  Object.freeze(["🏎️","racing_car","","Travel & Places","racing car","racing car racing_car"]),
-  Object.freeze(["🚃","railway_car","","Travel & Places","railway car","railway car railway_car"]),
-  Object.freeze(["🛤️","railway_track","","Travel & Places","railway track","railway track railway_track"]),
-  Object.freeze(["🌈","rainbow","","Travel & Places","rainbow","rainbow rainbow"]),
-  Object.freeze(["🛟","ring_buoy","","Travel & Places","ring buoy","ring buoy life preserver ring_buoy"]),
-  Object.freeze(["🪐","ringed_planet","","Travel & Places","ringed planet","ringed planet ringed_planet"]),
-  Object.freeze(["🪨","rock","","Travel & Places","rock","rock rock"]),
-  Object.freeze(["🚀","rocket","","Travel & Places","rocket","rocket ship launch rocket"]),
-  Object.freeze(["🎢","roller_coaster","","Travel & Places","roller coaster","roller coaster roller_coaster"]),
-  Object.freeze(["🛼","roller_skate","","Travel & Places","roller skate","roller skate roller_skate"]),
-  Object.freeze(["🚨","rotating_light","","Travel & Places","police car light","police car light 911 emergency rotating_light"]),
-  Object.freeze(["🏫","school","","Travel & Places","school","school school"]),
-  Object.freeze(["💺","seat","","Travel & Places","seat","seat seat"]),
-  Object.freeze(["⛩️","shinto_shrine","","Travel & Places","shinto shrine","shinto shrine shinto_shrine"]),
-  Object.freeze(["🚢","ship","","Travel & Places","ship","ship ship"]),
-  Object.freeze(["🛹","skateboard","","Travel & Places","skateboard","skateboard skateboard"]),
-  Object.freeze(["🛩️","small_airplane","","Travel & Places","small airplane","small airplane flight small_airplane"]),
-  Object.freeze(["❄️","snowflake","","Travel & Places","snowflake","snowflake winter cold weather snowflake"]),
-  Object.freeze(["⛄","snowman","","Travel & Places","snowman without snow","snowman without snow winter snowman"]),
-  Object.freeze(["☃️","snowman_with_snow","","Travel & Places","snowman","snowman winter christmas snowman_with_snow"]),
-  Object.freeze(["🚤","speedboat","","Travel & Places","speedboat","speedboat ship speedboat"]),
-  Object.freeze(["🏟️","stadium","","Travel & Places","stadium","stadium stadium"]),
-  Object.freeze(["⭐","star","","Travel & Places","star","star star"]),
-  Object.freeze(["🌟","star2","","Travel & Places","glowing star","glowing star star2"]),
-  Object.freeze(["🌠","stars","","Travel & Places","shooting star","shooting star stars"]),
-  Object.freeze(["🚉","station","","Travel & Places","station","station station"]),
-  Object.freeze(["🗽","statue_of_liberty","","Travel & Places","Statue of Liberty","statue of liberty statue_of_liberty"]),
-  Object.freeze(["🚂","steam_locomotive","","Travel & Places","locomotive","locomotive train steam_locomotive"]),
-  Object.freeze(["🛑","stop_sign","","Travel & Places","stop sign","stop sign stop_sign"]),
-  Object.freeze(["⏱️","stopwatch","","Travel & Places","stopwatch","stopwatch stopwatch"]),
-  Object.freeze(["🌥️","sun_behind_large_cloud","","Travel & Places","sun behind large cloud","sun behind large cloud sun_behind_large_cloud"]),
-  Object.freeze(["🌦️","sun_behind_rain_cloud","","Travel & Places","sun behind rain cloud","sun behind rain cloud sun_behind_rain_cloud"]),
-  Object.freeze(["🌤️","sun_behind_small_cloud","","Travel & Places","sun behind small cloud","sun behind small cloud sun_behind_small_cloud"]),
-  Object.freeze(["🌞","sun_with_face","","Travel & Places","sun with face","sun with face summer sun_with_face"]),
-  Object.freeze(["☀️","sunny","","Travel & Places","sun","sun weather sunny"]),
-  Object.freeze(["🌅","sunrise","","Travel & Places","sunrise","sunrise sunrise"]),
-  Object.freeze(["🌄","sunrise_over_mountains","","Travel & Places","sunrise over mountains","sunrise over mountains sunrise_over_mountains"]),
-  Object.freeze(["🚟","suspension_railway","","Travel & Places","suspension railway","suspension railway suspension_railway"]),
-  Object.freeze(["🕍","synagogue","","Travel & Places","synagogue","synagogue synagogue"]),
-  Object.freeze(["🚕","taxi","","Travel & Places","taxi","taxi taxi"]),
-  Object.freeze(["⛺","tent","","Travel & Places","tent","tent camping tent"]),
-  Object.freeze(["🌡️","thermometer","","Travel & Places","thermometer","thermometer thermometer"]),
-  Object.freeze(["⏲️","timer_clock","","Travel & Places","timer clock","timer clock timer_clock"]),
-  Object.freeze(["🗼","tokyo_tower","","Travel & Places","Tokyo tower","tokyo tower tokyo_tower"]),
-  Object.freeze(["🌪️","tornado","","Travel & Places","tornado","tornado tornado"]),
-  Object.freeze(["🚜","tractor","","Travel & Places","tractor","tractor tractor"]),
-  Object.freeze(["🚥","traffic_light","","Travel & Places","horizontal traffic light","horizontal traffic light traffic_light"]),
-  Object.freeze(["🚋","train","","Travel & Places","tram car","tram car train"]),
-  Object.freeze(["🚆","train2","","Travel & Places","train","train train2"]),
-  Object.freeze(["🚊","tram","","Travel & Places","tram","tram tram"]),
-  Object.freeze(["🚎","trolleybus","","Travel & Places","trolleybus","trolleybus trolleybus"]),
-  Object.freeze(["🚚","truck","","Travel & Places","delivery truck","delivery truck truck"]),
-  Object.freeze(["☔","umbrella","","Travel & Places","umbrella with rain drops","umbrella with rain drops rain weather umbrella"]),
-  Object.freeze(["🚦","vertical_traffic_light","","Travel & Places","vertical traffic light","vertical traffic light semaphore vertical_traffic_light"]),
-  Object.freeze(["🌋","volcano","","Travel & Places","volcano","volcano volcano"]),
-  Object.freeze(["🌘","waning_crescent_moon","","Travel & Places","waning crescent moon","waning crescent moon waning_crescent_moon"]),
-  Object.freeze(["🌖","waning_gibbous_moon","","Travel & Places","waning gibbous moon","waning gibbous moon waning_gibbous_moon"]),
-  Object.freeze(["⌚","watch","","Travel & Places","watch","watch time watch"]),
-  Object.freeze(["🌒","waxing_crescent_moon","","Travel & Places","waxing crescent moon","waxing crescent moon waxing_crescent_moon"]),
-  Object.freeze(["💒","wedding","","Travel & Places","wedding","wedding marriage wedding"]),
-  Object.freeze(["🛞","wheel","","Travel & Places","wheel","wheel wheel"]),
-  Object.freeze(["🌬️","wind_face","","Travel & Places","wind face","wind face wind_face"]),
-  Object.freeze(["🪵","wood","","Travel & Places","wood","wood wood"]),
-  Object.freeze(["🗺️","world_map","","Travel & Places","world map","world map travel world_map"]),
-  Object.freeze(["⚡","zap","","Travel & Places","high voltage","high voltage lightning thunder zap"]),
-  Object.freeze(["🧮","abacus","","Objects","abacus","abacus abacus"]),
-  Object.freeze(["🪗","accordion","","Objects","accordion","accordion accordion"]),
-  Object.freeze(["🩹","adhesive_bandage","","Objects","adhesive bandage","adhesive bandage adhesive_bandage"]),
-  Object.freeze(["⚗️","alembic","","Objects","alembic","alembic alembic"]),
-  Object.freeze(["👟","athletic_shoe","","Objects","running shoe","running shoe sneaker sport running athletic_shoe"]),
-  Object.freeze(["🪓","axe","","Objects","axe","axe axe"]),
-  Object.freeze(["⚖️","balance_scale","","Objects","balance scale","balance scale balance_scale"]),
-  Object.freeze(["🩰","ballet_shoes","","Objects","ballet shoes","ballet shoes ballet_shoes"]),
-  Object.freeze(["🗳️","ballot_box","","Objects","ballot box with ballot","ballot box with ballot ballot_box"]),
-  Object.freeze(["🪕","banjo","","Objects","banjo","banjo banjo"]),
-  Object.freeze(["📊","bar_chart","","Objects","bar chart","bar chart stats metrics bar_chart"]),
-  Object.freeze(["🧺","basket","","Objects","basket","basket basket"]),
-  Object.freeze(["🛁","bathtub","","Objects","bathtub","bathtub bathtub"]),
-  Object.freeze(["🔋","battery","","Objects","battery","battery power battery"]),
-  Object.freeze(["🛏️","bed","","Objects","bed","bed bed"]),
-  Object.freeze(["🔔","bell","","Objects","bell","bell sound notification bell"]),
-  Object.freeze(["👙","bikini","","Objects","bikini","bikini beach bikini"]),
-  Object.freeze(["🧢","billed_cap","","Objects","billed cap","billed cap billed_cap"]),
-  Object.freeze(["✒️","black_nib","","Objects","black nib","black nib black_nib"]),
-  Object.freeze(["📘","blue_book","","Objects","blue book","blue book blue_book"]),
-  Object.freeze(["💣","bomb","","Objects","bomb","bomb boom bomb"]),
-  Object.freeze(["📖","book","open_book","Objects","open book","open book book open_book"]),
-  Object.freeze(["🔖","bookmark","","Objects","bookmark","bookmark bookmark"]),
-  Object.freeze(["📑","bookmark_tabs","","Objects","bookmark tabs","bookmark tabs bookmark_tabs"]),
-  Object.freeze(["📚","books","","Objects","books","books library books"]),
-  Object.freeze(["🪃","boomerang","","Objects","boomerang","boomerang boomerang"]),
-  Object.freeze(["👢","boot","","Objects","woman’s boot","woman’s boot boot"]),
-  Object.freeze(["🏹","bow_and_arrow","","Objects","bow and arrow","bow and arrow archery bow_and_arrow"]),
-  Object.freeze(["💼","briefcase","","Objects","briefcase","briefcase business briefcase"]),
-  Object.freeze(["🧹","broom","","Objects","broom","broom broom"]),
-  Object.freeze(["🫧","bubbles","","Objects","bubbles","bubbles bubbles"]),
-  Object.freeze(["🪣","bucket","","Objects","bucket","bucket bucket"]),
-  Object.freeze(["💡","bulb","","Objects","light bulb","light bulb idea light bulb"]),
-  Object.freeze(["📆","calendar","","Objects","tear-off calendar","tear-off calendar schedule calendar"]),
-  Object.freeze(["📲","calling","","Objects","mobile phone with arrow","mobile phone with arrow call incoming calling"]),
-  Object.freeze(["📷","camera","","Objects","camera","camera photo camera"]),
-  Object.freeze(["📸","camera_flash","","Objects","camera with flash","camera with flash photo camera_flash"]),
-  Object.freeze(["🕯️","candle","","Objects","candle","candle candle"]),
-  Object.freeze(["🗃️","card_file_box","","Objects","card file box","card file box card_file_box"]),
-  Object.freeze(["📇","card_index","","Objects","card index","card index card_index"]),
-  Object.freeze(["🗂️","card_index_dividers","","Objects","card index dividers","card index dividers card_index_dividers"]),
-  Object.freeze(["🪚","carpentry_saw","","Objects","carpentry saw","carpentry saw carpentry_saw"]),
-  Object.freeze(["💿","cd","","Objects","optical disk","optical disk cd"]),
-  Object.freeze(["⛓️","chains","","Objects","chains","chains chains"]),
-  Object.freeze(["🪑","chair","","Objects","chair","chair chair"]),
-  Object.freeze(["💹","chart","","Objects","chart increasing with yen","chart increasing with yen chart"]),
-  Object.freeze(["📉","chart_with_downwards_trend","","Objects","chart decreasing","chart decreasing graph metrics chart_with_downwards_trend"]),
-  Object.freeze(["📈","chart_with_upwards_trend","","Objects","chart increasing","chart increasing graph metrics chart_with_upwards_trend"]),
-  Object.freeze(["🗜️","clamp","","Objects","clamp","clamp clamp"]),
-  Object.freeze(["🎬","clapper","","Objects","clapper board","clapper board film clapper"]),
-  Object.freeze(["📋","clipboard","","Objects","clipboard","clipboard clipboard"]),
-  Object.freeze(["📕","closed_book","","Objects","closed book","closed book closed_book"]),
-  Object.freeze(["🔐","closed_lock_with_key","","Objects","locked with key","locked with key security closed_lock_with_key"]),
-  Object.freeze(["🧥","coat","","Objects","coat","coat coat"]),
-  Object.freeze(["⚰️","coffin","","Objects","coffin","coffin funeral coffin"]),
-  Object.freeze(["🪙","coin","","Objects","coin","coin coin"]),
-  Object.freeze(["💻","computer","","Objects","laptop","laptop desktop screen computer"]),
-  Object.freeze(["🖱️","computer_mouse","","Objects","computer mouse","computer mouse computer_mouse"]),
-  Object.freeze(["🎛️","control_knobs","","Objects","control knobs","control knobs control_knobs"]),
-  Object.freeze(["🛋️","couch_and_lamp","","Objects","couch and lamp","couch and lamp couch_and_lamp"]),
-  Object.freeze(["🖍️","crayon","","Objects","crayon","crayon crayon"]),
-  Object.freeze(["💳","credit_card","","Objects","credit card","credit card subscription credit_card"]),
-  Object.freeze(["⚔️","crossed_swords","","Objects","crossed swords","crossed swords crossed_swords"]),
-  Object.freeze(["👑","crown","","Objects","crown","crown king queen royal crown"]),
-  Object.freeze(["🩼","crutch","","Objects","crutch","crutch crutch"]),
-  Object.freeze(["🗡️","dagger","","Objects","dagger","dagger dagger"]),
-  Object.freeze(["🕶️","dark_sunglasses","","Objects","sunglasses","sunglasses dark_sunglasses"]),
-  Object.freeze(["📅","date","","Objects","calendar","calendar calendar schedule date"]),
-  Object.freeze(["🖥️","desktop_computer","","Objects","desktop computer","desktop computer desktop_computer"]),
-  Object.freeze(["🪔","diya_lamp","","Objects","diya lamp","diya lamp diya_lamp"]),
-  Object.freeze(["🧬","dna","","Objects","dna","dna dna"]),
-  Object.freeze(["💵","dollar","","Objects","dollar banknote","dollar banknote money dollar"]),
-  Object.freeze(["🚪","door","","Objects","door","door door"]),
-  Object.freeze(["👗","dress","","Objects","dress","dress dress"]),
-  Object.freeze(["🩸","drop_of_blood","","Objects","drop of blood","drop of blood drop_of_blood"]),
-  Object.freeze(["🥁","drum","","Objects","drum","drum drum"]),
-  Object.freeze(["📀","dvd","","Objects","dvd","dvd dvd"]),
-  Object.freeze(["🔌","electric_plug","","Objects","electric plug","electric plug electric_plug"]),
-  Object.freeze(["🛗","elevator","","Objects","elevator","elevator elevator"]),
-  Object.freeze(["📧","email","e-mail","Objects","e-mail","e-mail email e-mail"]),
-  Object.freeze(["✉️","envelope","","Objects","envelope","envelope letter email envelope"]),
-  Object.freeze(["📩","envelope_with_arrow","","Objects","envelope with arrow","envelope with arrow envelope_with_arrow"]),
-  Object.freeze(["💶","euro","","Objects","euro banknote","euro banknote euro"]),
-  Object.freeze(["👓","eyeglasses","","Objects","glasses","glasses glasses eyeglasses"]),
-  Object.freeze(["📠","fax","","Objects","fax machine","fax machine fax"]),
-  Object.freeze(["🗄️","file_cabinet","","Objects","file cabinet","file cabinet file_cabinet"]),
-  Object.freeze(["📁","file_folder","","Objects","file folder","file folder directory file_folder"]),
-  Object.freeze(["📽️","film_projector","","Objects","film projector","film projector film_projector"]),
-  Object.freeze(["🎞️","film_strip","","Objects","film frames","film frames film_strip"]),
-  Object.freeze(["🧯","fire_extinguisher","","Objects","fire extinguisher","fire extinguisher fire_extinguisher"]),
-  Object.freeze(["🔦","flashlight","","Objects","flashlight","flashlight flashlight"]),
-  Object.freeze(["🥿","flat_shoe","","Objects","flat shoe","flat shoe flat_shoe"]),
-  Object.freeze(["💾","floppy_disk","","Objects","floppy disk","floppy disk save floppy_disk"]),
-  Object.freeze(["🪈","flute","","Objects","flute","flute recorder flute"]),
-  Object.freeze(["🪭","folding_hand_fan","","Objects","folding hand fan","folding hand fan sensu folding_hand_fan"]),
-  Object.freeze(["🖋️","fountain_pen","","Objects","fountain pen","fountain pen fountain_pen"]),
-  Object.freeze(["⚱️","funeral_urn","","Objects","funeral urn","funeral urn funeral_urn"]),
-  Object.freeze(["⚙️","gear","","Objects","gear","gear gear"]),
-  Object.freeze(["💎","gem","","Objects","gem stone","gem stone diamond gem"]),
-  Object.freeze(["🧤","gloves","","Objects","gloves","gloves gloves"]),
-  Object.freeze(["🥽","goggles","","Objects","goggles","goggles goggles"]),
-  Object.freeze(["📗","green_book","","Objects","green book","green book green_book"]),
-  Object.freeze(["🎸","guitar","","Objects","guitar","guitar rock guitar"]),
-  Object.freeze(["🪮","hair_pick","","Objects","hair pick","hair pick hair_pick"]),
-  Object.freeze(["🔨","hammer","","Objects","hammer","hammer tool hammer"]),
-  Object.freeze(["⚒️","hammer_and_pick","","Objects","hammer and pick","hammer and pick hammer_and_pick"]),
-  Object.freeze(["🛠️","hammer_and_wrench","","Objects","hammer and wrench","hammer and wrench hammer_and_wrench"]),
-  Object.freeze(["🪬","hamsa","","Objects","hamsa","hamsa hamsa"]),
-  Object.freeze(["👜","handbag","","Objects","handbag","handbag bag handbag"]),
-  Object.freeze(["🎧","headphones","","Objects","headphone","headphone music earphones headphones"]),
-  Object.freeze(["🪦","headstone","","Objects","headstone","headstone headstone"]),
-  Object.freeze(["👠","high_heel","","Objects","high-heeled shoe","high-heeled shoe shoe high_heel"]),
-  Object.freeze(["🥾","hiking_boot","","Objects","hiking boot","hiking boot hiking_boot"]),
-  Object.freeze(["🪝","hook","","Objects","hook","hook hook"]),
-  Object.freeze(["🪪","identification_card","","Objects","identification card","identification card identification_card"]),
-  Object.freeze(["📥","inbox_tray","","Objects","inbox tray","inbox tray inbox_tray"]),
-  Object.freeze(["📨","incoming_envelope","","Objects","incoming envelope","incoming envelope incoming_envelope"]),
-  Object.freeze(["📱","iphone","","Objects","mobile phone","mobile phone smartphone mobile iphone"]),
-  Object.freeze(["🏮","izakaya_lantern","lantern","Objects","red paper lantern","red paper lantern izakaya_lantern lantern"]),
-  Object.freeze(["👖","jeans","","Objects","jeans","jeans pants jeans"]),
-  Object.freeze(["🔑","key","","Objects","key","key lock password key"]),
-  Object.freeze(["⌨️","keyboard","","Objects","keyboard","keyboard keyboard"]),
-  Object.freeze(["👘","kimono","","Objects","kimono","kimono kimono"]),
-  Object.freeze(["🥼","lab_coat","","Objects","lab coat","lab coat lab_coat"]),
-  Object.freeze(["🏷️","label","","Objects","label","label tag label"]),
-  Object.freeze(["🪜","ladder","","Objects","ladder","ladder ladder"]),
-  Object.freeze(["📒","ledger","","Objects","ledger","ledger ledger"]),
-  Object.freeze(["🎚️","level_slider","","Objects","level slider","level slider level_slider"]),
-  Object.freeze(["🔗","link","","Objects","link","link link"]),
-  Object.freeze(["💄","lipstick","","Objects","lipstick","lipstick makeup lipstick"]),
-  Object.freeze(["🔒","lock","","Objects","locked","locked security private lock"]),
-  Object.freeze(["🔏","lock_with_ink_pen","","Objects","locked with pen","locked with pen lock_with_ink_pen"]),
-  Object.freeze(["🪘","long_drum","","Objects","long drum","long drum long_drum"]),
-  Object.freeze(["🧴","lotion_bottle","","Objects","lotion bottle","lotion bottle lotion_bottle"]),
-  Object.freeze(["🔊","loud_sound","","Objects","speaker high volume","speaker high volume volume loud_sound"]),
-  Object.freeze(["📢","loudspeaker","","Objects","loudspeaker","loudspeaker announcement loudspeaker"]),
-  Object.freeze(["🪫","low_battery","","Objects","low battery","low battery low_battery"]),
-  Object.freeze(["🔍","mag","","Objects","magnifying glass tilted left","magnifying glass tilted left search zoom mag"]),
-  Object.freeze(["🔎","mag_right","","Objects","magnifying glass tilted right","magnifying glass tilted right mag_right"]),
-  Object.freeze(["🧲","magnet","","Objects","magnet","magnet magnet"]),
-  Object.freeze(["📫","mailbox","","Objects","closed mailbox with raised flag","closed mailbox with raised flag mailbox"]),
-  Object.freeze(["📪","mailbox_closed","","Objects","closed mailbox with lowered flag","closed mailbox with lowered flag mailbox_closed"]),
-  Object.freeze(["📬","mailbox_with_mail","","Objects","open mailbox with raised flag","open mailbox with raised flag mailbox_with_mail"]),
-  Object.freeze(["📭","mailbox_with_no_mail","","Objects","open mailbox with lowered flag","open mailbox with lowered flag mailbox_with_no_mail"]),
-  Object.freeze(["👞","mans_shoe","shoe","Objects","man’s shoe","man’s shoe mans_shoe shoe"]),
-  Object.freeze(["🪇","maracas","","Objects","maracas","maracas shaker maracas"]),
-  Object.freeze(["📣","mega","","Objects","megaphone","megaphone mega"]),
-  Object.freeze(["📝","memo","pencil","Objects","memo","memo document note memo pencil"]),
-  Object.freeze(["🎤","microphone","","Objects","microphone","microphone sing microphone"]),
-  Object.freeze(["🔬","microscope","","Objects","microscope","microscope science laboratory investigate microscope"]),
-  Object.freeze(["🪖","military_helmet","","Objects","military helmet","military helmet military_helmet"]),
-  Object.freeze(["💽","minidisc","","Objects","computer disk","computer disk minidisc"]),
-  Object.freeze(["🪞","mirror","","Objects","mirror","mirror mirror"]),
-  Object.freeze(["💸","money_with_wings","","Objects","money with wings","money with wings dollar money_with_wings"]),
-  Object.freeze(["💰","moneybag","","Objects","money bag","money bag dollar cream moneybag"]),
-  Object.freeze(["🎓","mortar_board","","Objects","graduation cap","graduation cap education college university graduation mortar_board"]),
-  Object.freeze(["🪤","mouse_trap","","Objects","mouse trap","mouse trap mouse_trap"]),
-  Object.freeze(["🎥","movie_camera","","Objects","movie camera","movie camera film video movie_camera"]),
-  Object.freeze(["🗿","moyai","","Objects","moai","moai stone moyai"]),
-  Object.freeze(["🎹","musical_keyboard","","Objects","musical keyboard","musical keyboard piano musical_keyboard"]),
-  Object.freeze(["🎵","musical_note","","Objects","musical note","musical note musical_note"]),
-  Object.freeze(["🎼","musical_score","","Objects","musical score","musical score musical_score"]),
-  Object.freeze(["🔇","mute","","Objects","muted speaker","muted speaker sound volume mute"]),
-  Object.freeze(["🧿","nazar_amulet","","Objects","nazar amulet","nazar amulet nazar_amulet"]),
-  Object.freeze(["👔","necktie","","Objects","necktie","necktie shirt formal necktie"]),
-  Object.freeze(["📰","newspaper","","Objects","newspaper","newspaper press newspaper"]),
-  Object.freeze(["🗞️","newspaper_roll","","Objects","rolled-up newspaper","rolled-up newspaper press newspaper_roll"]),
-  Object.freeze(["🔕","no_bell","","Objects","bell with slash","bell with slash volume off no_bell"]),
-  Object.freeze(["📓","notebook","","Objects","notebook","notebook notebook"]),
-  Object.freeze(["📔","notebook_with_decorative_cover","","Objects","notebook with decorative cover","notebook with decorative cover notebook_with_decorative_cover"]),
-  Object.freeze(["🎶","notes","","Objects","musical notes","musical notes music notes"]),
-  Object.freeze(["🔩","nut_and_bolt","","Objects","nut and bolt","nut and bolt nut_and_bolt"]),
-  Object.freeze(["🗝️","old_key","","Objects","old key","old key old_key"]),
-  Object.freeze(["🩱","one_piece_swimsuit","","Objects","one-piece swimsuit","one-piece swimsuit one_piece_swimsuit"]),
-  Object.freeze(["📂","open_file_folder","","Objects","open file folder","open file folder open_file_folder"]),
-  Object.freeze(["📙","orange_book","","Objects","orange book","orange book orange_book"]),
-  Object.freeze(["📤","outbox_tray","","Objects","outbox tray","outbox tray outbox_tray"]),
-  Object.freeze(["📦","package","","Objects","package","package shipping package"]),
-  Object.freeze(["📄","page_facing_up","","Objects","page facing up","page facing up document page_facing_up"]),
-  Object.freeze(["📃","page_with_curl","","Objects","page with curl","page with curl page_with_curl"]),
-  Object.freeze(["📟","pager","","Objects","pager","pager pager"]),
-  Object.freeze(["🖌️","paintbrush","","Objects","paintbrush","paintbrush paintbrush"]),
-  Object.freeze(["📎","paperclip","","Objects","paperclip","paperclip paperclip"]),
-  Object.freeze(["🖇️","paperclips","","Objects","linked paperclips","linked paperclips paperclips"]),
-  Object.freeze(["🖊️","pen","","Objects","pen","pen pen"]),
-  Object.freeze(["✏️","pencil2","","Objects","pencil","pencil pencil2"]),
-  Object.freeze(["🧫","petri_dish","","Objects","petri dish","petri dish petri_dish"]),
-  Object.freeze(["☎️","phone","telephone","Objects","telephone","telephone phone telephone"]),
-  Object.freeze(["⛏️","pick","","Objects","pick","pick pick"]),
-  Object.freeze(["💊","pill","","Objects","pill","pill health medicine pill"]),
-  Object.freeze(["🪧","placard","","Objects","placard","placard placard"]),
-  Object.freeze(["🪠","plunger","","Objects","plunger","plunger plunger"]),
-  Object.freeze(["📯","postal_horn","","Objects","postal horn","postal horn postal_horn"]),
-  Object.freeze(["📮","postbox","","Objects","postbox","postbox postbox"]),
-  Object.freeze(["👝","pouch","","Objects","clutch bag","clutch bag bag pouch"]),
-  Object.freeze(["💷","pound","","Objects","pound banknote","pound banknote pound"]),
-  Object.freeze(["📿","prayer_beads","","Objects","prayer beads","prayer beads prayer_beads"]),
-  Object.freeze(["🖨️","printer","","Objects","printer","printer printer"]),
-  Object.freeze(["🦯","probing_cane","","Objects","white cane","white cane probing_cane"]),
-  Object.freeze(["👛","purse","","Objects","purse","purse purse"]),
-  Object.freeze(["📌","pushpin","","Objects","pushpin","pushpin location pushpin"]),
-  Object.freeze(["📻","radio","","Objects","radio","radio podcast radio"]),
-  Object.freeze(["🪒","razor","","Objects","razor","razor razor"]),
-  Object.freeze(["🧾","receipt","","Objects","receipt","receipt receipt"]),
-  Object.freeze(["⛑️","rescue_worker_helmet","","Objects","rescue worker’s helmet","rescue worker’s helmet rescue_worker_helmet"]),
-  Object.freeze(["💍","ring","","Objects","ring","ring wedding marriage engaged ring"]),
-  Object.freeze(["🧻","roll_of_paper","","Objects","roll of paper","roll of paper toilet roll_of_paper"]),
-  Object.freeze(["📍","round_pushpin","","Objects","round pushpin","round pushpin location round_pushpin"]),
-  Object.freeze(["🧷","safety_pin","","Objects","safety pin","safety pin safety_pin"]),
-  Object.freeze(["🦺","safety_vest","","Objects","safety vest","safety vest safety_vest"]),
-  Object.freeze(["👡","sandal","","Objects","woman’s sandal","woman’s sandal shoe sandal"]),
-  Object.freeze(["🥻","sari","","Objects","sari","sari sari"]),
-  Object.freeze(["📡","satellite","","Objects","satellite antenna","satellite antenna signal satellite"]),
-  Object.freeze(["🎷","saxophone","","Objects","saxophone","saxophone saxophone"]),
-  Object.freeze(["🧣","scarf","","Objects","scarf","scarf scarf"]),
-  Object.freeze(["🎒","school_satchel","","Objects","backpack","backpack school_satchel"]),
-  Object.freeze(["✂️","scissors","","Objects","scissors","scissors cut scissors"]),
-  Object.freeze(["🪛","screwdriver","","Objects","screwdriver","screwdriver screwdriver"]),
-  Object.freeze(["📜","scroll","","Objects","scroll","scroll document scroll"]),
-  Object.freeze(["🛡️","shield","","Objects","shield","shield shield"]),
-  Object.freeze(["👕","shirt","tshirt","Objects","t-shirt","t-shirt shirt tshirt"]),
-  Object.freeze(["🛍️","shopping","","Objects","shopping bags","shopping bags bags shopping"]),
-  Object.freeze(["🛒","shopping_cart","","Objects","shopping cart","shopping cart shopping_cart"]),
-  Object.freeze(["🩳","shorts","","Objects","shorts","shorts shorts"]),
-  Object.freeze(["🚿","shower","","Objects","shower","shower bath shower"]),
-  Object.freeze(["🚬","smoking","","Objects","cigarette","cigarette cigarette smoking"]),
-  Object.freeze(["🧼","soap","","Objects","soap","soap soap"]),
-  Object.freeze(["🧦","socks","","Objects","socks","socks socks"]),
-  Object.freeze(["🔉","sound","","Objects","speaker medium volume","speaker medium volume volume sound"]),
-  Object.freeze(["🔈","speaker","","Objects","speaker low volume","speaker low volume speaker"]),
-  Object.freeze(["🗓️","spiral_calendar","","Objects","spiral calendar","spiral calendar spiral_calendar"]),
-  Object.freeze(["🗒️","spiral_notepad","","Objects","spiral notepad","spiral notepad spiral_notepad"]),
-  Object.freeze(["🧽","sponge","","Objects","sponge","sponge sponge"]),
-  Object.freeze(["🩺","stethoscope","","Objects","stethoscope","stethoscope stethoscope"]),
-  Object.freeze(["📏","straight_ruler","","Objects","straight ruler","straight ruler straight_ruler"]),
-  Object.freeze(["🎙️","studio_microphone","","Objects","studio microphone","studio microphone podcast studio_microphone"]),
-  Object.freeze(["🩲","swim_brief","","Objects","briefs","briefs swim_brief"]),
-  Object.freeze(["💉","syringe","","Objects","syringe","syringe health hospital needle syringe"]),
-  Object.freeze(["📞","telephone_receiver","","Objects","telephone receiver","telephone receiver phone call telephone_receiver"]),
-  Object.freeze(["🔭","telescope","","Objects","telescope","telescope telescope"]),
-  Object.freeze(["🧪","test_tube","","Objects","test tube","test tube test_tube"]),
-  Object.freeze(["🩴","thong_sandal","","Objects","thong sandal","thong sandal thong_sandal"]),
-  Object.freeze(["🚽","toilet","","Objects","toilet","toilet wc toilet"]),
-  Object.freeze(["🧰","toolbox","","Objects","toolbox","toolbox toolbox"]),
-  Object.freeze(["🪥","toothbrush","","Objects","toothbrush","toothbrush toothbrush"]),
-  Object.freeze(["🎩","tophat","","Objects","top hat","top hat hat classy tophat"]),
-  Object.freeze(["🖲️","trackball","","Objects","trackball","trackball trackball"]),
-  Object.freeze(["📐","triangular_ruler","","Objects","triangular ruler","triangular ruler triangular_ruler"]),
-  Object.freeze(["🎺","trumpet","","Objects","trumpet","trumpet trumpet"]),
-  Object.freeze(["📺","tv","","Objects","television","television tv"]),
-  Object.freeze(["🔓","unlock","","Objects","unlocked","unlocked security unlock"]),
-  Object.freeze(["📼","vhs","","Objects","videocassette","videocassette vhs"]),
-  Object.freeze(["📹","video_camera","","Objects","video camera","video camera video_camera"]),
-  Object.freeze(["🎻","violin","","Objects","violin","violin violin"]),
-  Object.freeze(["🗑️","wastebasket","","Objects","wastebasket","wastebasket trash wastebasket"]),
-  Object.freeze(["🪟","window","","Objects","window","window window"]),
-  Object.freeze(["👚","womans_clothes","","Objects","woman’s clothes","woman’s clothes womans_clothes"]),
-  Object.freeze(["👒","womans_hat","","Objects","woman’s hat","woman’s hat womans_hat"]),
-  Object.freeze(["🔧","wrench","","Objects","wrench","wrench tool wrench"]),
-  Object.freeze(["🩻","x_ray","","Objects","x-ray","x-ray x_ray"]),
-  Object.freeze(["💴","yen","","Objects","yen banknote","yen banknote yen"]),
-  Object.freeze(["🔢","1234","","Symbols","input numbers","input numbers numbers 1234"]),
-  Object.freeze(["🅰️","a","","Symbols","A button (blood type)","a button (blood type) a"]),
-  Object.freeze(["🆎","ab","","Symbols","AB button (blood type)","ab button (blood type) ab"]),
-  Object.freeze(["🔤","abc","","Symbols","input latin letters","input latin letters alphabet abc"]),
-  Object.freeze(["🔡","abcd","","Symbols","input latin lowercase","input latin lowercase abcd"]),
-  Object.freeze(["🉑","accept","","Symbols","Japanese “acceptable” button","japanese “acceptable” button accept"]),
-  Object.freeze(["♒","aquarius","","Symbols","Aquarius","aquarius aquarius"]),
-  Object.freeze(["♈","aries","","Symbols","Aries","aries aries"]),
-  Object.freeze(["◀️","arrow_backward","","Symbols","reverse button","reverse button arrow_backward"]),
-  Object.freeze(["⏬","arrow_double_down","","Symbols","fast down button","fast down button arrow_double_down"]),
-  Object.freeze(["⏫","arrow_double_up","","Symbols","fast up button","fast up button arrow_double_up"]),
-  Object.freeze(["⬇️","arrow_down","","Symbols","down arrow","down arrow arrow_down"]),
-  Object.freeze(["🔽","arrow_down_small","","Symbols","downwards button","downwards button arrow_down_small"]),
-  Object.freeze(["▶️","arrow_forward","","Symbols","play button","play button arrow_forward"]),
-  Object.freeze(["⤵️","arrow_heading_down","","Symbols","right arrow curving down","right arrow curving down arrow_heading_down"]),
-  Object.freeze(["⤴️","arrow_heading_up","","Symbols","right arrow curving up","right arrow curving up arrow_heading_up"]),
-  Object.freeze(["⬅️","arrow_left","","Symbols","left arrow","left arrow arrow_left"]),
-  Object.freeze(["↙️","arrow_lower_left","","Symbols","down-left arrow","down-left arrow arrow_lower_left"]),
-  Object.freeze(["↘️","arrow_lower_right","","Symbols","down-right arrow","down-right arrow arrow_lower_right"]),
-  Object.freeze(["➡️","arrow_right","","Symbols","right arrow","right arrow arrow_right"]),
-  Object.freeze(["↪️","arrow_right_hook","","Symbols","left arrow curving right","left arrow curving right arrow_right_hook"]),
-  Object.freeze(["⬆️","arrow_up","","Symbols","up arrow","up arrow arrow_up"]),
-  Object.freeze(["↕️","arrow_up_down","","Symbols","up-down arrow","up-down arrow arrow_up_down"]),
-  Object.freeze(["🔼","arrow_up_small","","Symbols","upwards button","upwards button arrow_up_small"]),
-  Object.freeze(["↖️","arrow_upper_left","","Symbols","up-left arrow","up-left arrow arrow_upper_left"]),
-  Object.freeze(["↗️","arrow_upper_right","","Symbols","up-right arrow","up-right arrow arrow_upper_right"]),
-  Object.freeze(["🔃","arrows_clockwise","","Symbols","clockwise vertical arrows","clockwise vertical arrows arrows_clockwise"]),
-  Object.freeze(["🔄","arrows_counterclockwise","","Symbols","counterclockwise arrows button","counterclockwise arrows button sync arrows_counterclockwise"]),
-  Object.freeze(["*️⃣","asterisk","","Symbols","keycap: *","keycap: * asterisk"]),
-  Object.freeze(["🏧","atm","","Symbols","ATM sign","atm sign atm"]),
-  Object.freeze(["⚛️","atom_symbol","","Symbols","atom symbol","atom symbol atom_symbol"]),
-  Object.freeze(["🅱️","b","","Symbols","B button (blood type)","b button (blood type) b"]),
-  Object.freeze(["🚼","baby_symbol","","Symbols","baby symbol","baby symbol baby_symbol"]),
-  Object.freeze(["🔙","back","","Symbols","BACK arrow","back arrow back"]),
-  Object.freeze(["🛄","baggage_claim","","Symbols","baggage claim","baggage claim airport baggage_claim"]),
-  Object.freeze(["☑️","ballot_box_with_check","","Symbols","check box with check","check box with check ballot_box_with_check"]),
-  Object.freeze(["‼️","bangbang","","Symbols","double exclamation mark","double exclamation mark bangbang"]),
-  Object.freeze(["🔰","beginner","","Symbols","Japanese symbol for beginner","japanese symbol for beginner beginner"]),
-  Object.freeze(["☣️","biohazard","","Symbols","biohazard","biohazard biohazard"]),
-  Object.freeze(["⚫","black_circle","","Symbols","black circle","black circle black_circle"]),
-  Object.freeze(["⬛","black_large_square","","Symbols","black large square","black large square black_large_square"]),
-  Object.freeze(["◾","black_medium_small_square","","Symbols","black medium-small square","black medium-small square black_medium_small_square"]),
-  Object.freeze(["◼️","black_medium_square","","Symbols","black medium square","black medium square black_medium_square"]),
-  Object.freeze(["▪️","black_small_square","","Symbols","black small square","black small square black_small_square"]),
-  Object.freeze(["🔲","black_square_button","","Symbols","black square button","black square button black_square_button"]),
-  Object.freeze(["🟦","blue_square","","Symbols","blue square","blue square blue_square"]),
-  Object.freeze(["🟤","brown_circle","","Symbols","brown circle","brown circle brown_circle"]),
-  Object.freeze(["🟫","brown_square","","Symbols","brown square","brown square brown_square"]),
-  Object.freeze(["♋","cancer","","Symbols","Cancer","cancer cancer"]),
-  Object.freeze(["🔠","capital_abcd","","Symbols","input latin uppercase","input latin uppercase letters capital_abcd"]),
-  Object.freeze(["♑","capricorn","","Symbols","Capricorn","capricorn capricorn"]),
-  Object.freeze(["🚸","children_crossing","","Symbols","children crossing","children crossing children_crossing"]),
-  Object.freeze(["🎦","cinema","","Symbols","cinema","cinema film movie cinema"]),
-  Object.freeze(["🆑","cl","","Symbols","CL button","cl button cl"]),
-  Object.freeze(["㊗️","congratulations","","Symbols","Japanese “congratulations” button","japanese “congratulations” button congratulations"]),
-  Object.freeze(["🆒","cool","","Symbols","COOL button","cool button cool"]),
-  Object.freeze(["©️","copyright","","Symbols","copyright","copyright copyright"]),
-  Object.freeze(["➰","curly_loop","","Symbols","curly loop","curly loop curly_loop"]),
-  Object.freeze(["💱","currency_exchange","","Symbols","currency exchange","currency exchange currency_exchange"]),
-  Object.freeze(["🛃","customs","","Symbols","customs","customs customs"]),
-  Object.freeze(["💠","diamond_shape_with_a_dot_inside","","Symbols","diamond with a dot","diamond with a dot diamond_shape_with_a_dot_inside"]),
-  Object.freeze(["🚯","do_not_litter","","Symbols","no littering","no littering do_not_litter"]),
-  Object.freeze(["8️⃣","eight","","Symbols","keycap: 8","keycap: 8 eight"]),
-  Object.freeze(["✴️","eight_pointed_black_star","","Symbols","eight-pointed star","eight-pointed star eight_pointed_black_star"]),
-  Object.freeze(["✳️","eight_spoked_asterisk","","Symbols","eight-spoked asterisk","eight-spoked asterisk eight_spoked_asterisk"]),
-  Object.freeze(["⏏️","eject_button","","Symbols","eject button","eject button eject_button"]),
-  Object.freeze(["🔚","end","","Symbols","END arrow","end arrow end"]),
-  Object.freeze(["❗","exclamation","heavy_exclamation_mark","Symbols","red exclamation mark","red exclamation mark bang exclamation heavy_exclamation_mark"]),
-  Object.freeze(["⏩","fast_forward","","Symbols","fast-forward button","fast-forward button fast_forward"]),
-  Object.freeze(["♀️","female_sign","","Symbols","female sign","female sign female_sign"]),
-  Object.freeze(["5️⃣","five","","Symbols","keycap: 5","keycap: 5 five"]),
-  Object.freeze(["⚜️","fleur_de_lis","","Symbols","fleur-de-lis","fleur-de-lis fleur_de_lis"]),
-  Object.freeze(["4️⃣","four","","Symbols","keycap: 4","keycap: 4 four"]),
-  Object.freeze(["🆓","free","","Symbols","FREE button","free button free"]),
-  Object.freeze(["♊","gemini","","Symbols","Gemini","gemini gemini"]),
-  Object.freeze(["🟢","green_circle","","Symbols","green circle","green circle green_circle"]),
-  Object.freeze(["🟩","green_square","","Symbols","green square","green square green_square"]),
-  Object.freeze(["❕","grey_exclamation","","Symbols","white exclamation mark","white exclamation mark grey_exclamation"]),
-  Object.freeze(["❔","grey_question","","Symbols","white question mark","white question mark grey_question"]),
-  Object.freeze(["#️⃣","hash","","Symbols","keycap: #","keycap: # number hash"]),
-  Object.freeze(["✔️","heavy_check_mark","","Symbols","check mark","check mark heavy_check_mark"]),
-  Object.freeze(["➗","heavy_division_sign","","Symbols","divide","divide heavy_division_sign"]),
-  Object.freeze(["💲","heavy_dollar_sign","","Symbols","heavy dollar sign","heavy dollar sign heavy_dollar_sign"]),
-  Object.freeze(["🟰","heavy_equals_sign","","Symbols","heavy equals sign","heavy equals sign heavy_equals_sign"]),
-  Object.freeze(["➖","heavy_minus_sign","","Symbols","minus","minus heavy_minus_sign"]),
-  Object.freeze(["✖️","heavy_multiplication_x","","Symbols","multiply","multiply heavy_multiplication_x"]),
-  Object.freeze(["➕","heavy_plus_sign","","Symbols","plus","plus heavy_plus_sign"]),
-  Object.freeze(["🔆","high_brightness","","Symbols","bright button","bright button high_brightness"]),
-  Object.freeze(["🆔","id","","Symbols","ID button","id button id"]),
-  Object.freeze(["🉐","ideograph_advantage","","Symbols","Japanese “bargain” button","japanese “bargain” button ideograph_advantage"]),
-  Object.freeze(["♾️","infinity","","Symbols","infinity","infinity infinity"]),
-  Object.freeze(["ℹ️","information_source","","Symbols","information","information information_source"]),
-  Object.freeze(["⁉️","interrobang","","Symbols","exclamation question mark","exclamation question mark interrobang"]),
-  Object.freeze(["🔟","keycap_ten","","Symbols","keycap: 10","keycap: 10 keycap_ten"]),
-  Object.freeze(["🪯","khanda","","Symbols","khanda","khanda khanda"]),
-  Object.freeze(["🈁","koko","","Symbols","Japanese “here” button","japanese “here” button koko"]),
-  Object.freeze(["🔵","large_blue_circle","","Symbols","blue circle","blue circle large_blue_circle"]),
-  Object.freeze(["🔷","large_blue_diamond","","Symbols","large blue diamond","large blue diamond large_blue_diamond"]),
-  Object.freeze(["🔶","large_orange_diamond","","Symbols","large orange diamond","large orange diamond large_orange_diamond"]),
-  Object.freeze(["✝️","latin_cross","","Symbols","latin cross","latin cross latin_cross"]),
-  Object.freeze(["🛅","left_luggage","","Symbols","left luggage","left luggage left_luggage"]),
-  Object.freeze(["↔️","left_right_arrow","","Symbols","left-right arrow","left-right arrow left_right_arrow"]),
-  Object.freeze(["↩️","leftwards_arrow_with_hook","","Symbols","right arrow curving left","right arrow curving left return leftwards_arrow_with_hook"]),
-  Object.freeze(["♌","leo","","Symbols","Leo","leo leo"]),
-  Object.freeze(["♎","libra","","Symbols","Libra","libra libra"]),
-  Object.freeze(["➿","loop","","Symbols","double curly loop","double curly loop loop"]),
-  Object.freeze(["🔅","low_brightness","","Symbols","dim button","dim button low_brightness"]),
-  Object.freeze(["Ⓜ️","m","","Symbols","circled M","circled m m"]),
-  Object.freeze(["♂️","male_sign","","Symbols","male sign","male sign male_sign"]),
-  Object.freeze(["⚕️","medical_symbol","","Symbols","medical symbol","medical symbol medical_symbol"]),
-  Object.freeze(["🕎","menorah","","Symbols","menorah","menorah menorah"]),
-  Object.freeze(["🚹","mens","","Symbols","men’s room","men’s room mens"]),
-  Object.freeze(["📴","mobile_phone_off","","Symbols","mobile phone off","mobile phone off mute off mobile_phone_off"]),
-  Object.freeze(["📛","name_badge","","Symbols","name badge","name badge name_badge"]),
-  Object.freeze(["❎","negative_squared_cross_mark","","Symbols","cross mark button","cross mark button negative_squared_cross_mark"]),
-  Object.freeze(["🆕","new","","Symbols","NEW button","new button fresh new"]),
-  Object.freeze(["⏭️","next_track_button","","Symbols","next track button","next track button next_track_button"]),
-  Object.freeze(["🆖","ng","","Symbols","NG button","ng button ng"]),
-  Object.freeze(["9️⃣","nine","","Symbols","keycap: 9","keycap: 9 nine"]),
-  Object.freeze(["🚳","no_bicycles","","Symbols","no bicycles","no bicycles no_bicycles"]),
-  Object.freeze(["⛔","no_entry","","Symbols","no entry","no entry limit no_entry"]),
-  Object.freeze(["🚫","no_entry_sign","","Symbols","prohibited","prohibited block forbidden no_entry_sign"]),
-  Object.freeze(["📵","no_mobile_phones","","Symbols","no mobile phones","no mobile phones no_mobile_phones"]),
-  Object.freeze(["🚷","no_pedestrians","","Symbols","no pedestrians","no pedestrians no_pedestrians"]),
-  Object.freeze(["🚭","no_smoking","","Symbols","no smoking","no smoking no_smoking"]),
-  Object.freeze(["🚱","non-potable_water","","Symbols","non-potable water","non-potable water non-potable_water"]),
-  Object.freeze(["⭕","o","","Symbols","hollow red circle","hollow red circle o"]),
-  Object.freeze(["🅾️","o2","","Symbols","O button (blood type)","o button (blood type) o2"]),
-  Object.freeze(["🆗","ok","","Symbols","OK button","ok button yes ok"]),
-  Object.freeze(["🕉️","om","","Symbols","om","om om"]),
-  Object.freeze(["🔛","on","","Symbols","ON! arrow","on! arrow on"]),
-  Object.freeze(["1️⃣","one","","Symbols","keycap: 1","keycap: 1 one"]),
-  Object.freeze(["⛎","ophiuchus","","Symbols","Ophiuchus","ophiuchus ophiuchus"]),
-  Object.freeze(["🟠","orange_circle","","Symbols","orange circle","orange circle orange_circle"]),
-  Object.freeze(["🟧","orange_square","","Symbols","orange square","orange square orange_square"]),
-  Object.freeze(["☦️","orthodox_cross","","Symbols","orthodox cross","orthodox cross orthodox_cross"]),
-  Object.freeze(["🅿️","parking","","Symbols","P button","p button parking"]),
-  Object.freeze(["〽️","part_alternation_mark","","Symbols","part alternation mark","part alternation mark part_alternation_mark"]),
-  Object.freeze(["🛂","passport_control","","Symbols","passport control","passport control passport_control"]),
-  Object.freeze(["⏸️","pause_button","","Symbols","pause button","pause button pause_button"]),
-  Object.freeze(["☮️","peace_symbol","","Symbols","peace symbol","peace symbol peace_symbol"]),
-  Object.freeze(["♓","pisces","","Symbols","Pisces","pisces pisces"]),
-  Object.freeze(["🛐","place_of_worship","","Symbols","place of worship","place of worship place_of_worship"]),
-  Object.freeze(["⏯️","play_or_pause_button","","Symbols","play or pause button","play or pause button play_or_pause_button"]),
-  Object.freeze(["🚰","potable_water","","Symbols","potable water","potable water potable_water"]),
-  Object.freeze(["⏮️","previous_track_button","","Symbols","last track button","last track button previous_track_button"]),
-  Object.freeze(["🟣","purple_circle","","Symbols","purple circle","purple circle purple_circle"]),
-  Object.freeze(["🟪","purple_square","","Symbols","purple square","purple square purple_square"]),
-  Object.freeze(["🚮","put_litter_in_its_place","","Symbols","litter in bin sign","litter in bin sign put_litter_in_its_place"]),
-  Object.freeze(["❓","question","","Symbols","red question mark","red question mark confused question"]),
-  Object.freeze(["🔘","radio_button","","Symbols","radio button","radio button radio_button"]),
-  Object.freeze(["☢️","radioactive","","Symbols","radioactive","radioactive radioactive"]),
-  Object.freeze(["⏺️","record_button","","Symbols","record button","record button record_button"]),
-  Object.freeze(["♻️","recycle","","Symbols","recycling symbol","recycling symbol environment green recycle"]),
-  Object.freeze(["🔴","red_circle","","Symbols","red circle","red circle red_circle"]),
-  Object.freeze(["🟥","red_square","","Symbols","red square","red square red_square"]),
-  Object.freeze(["®️","registered","","Symbols","registered","registered registered"]),
-  Object.freeze(["🔁","repeat","","Symbols","repeat button","repeat button loop repeat"]),
-  Object.freeze(["🔂","repeat_one","","Symbols","repeat single button","repeat single button repeat_one"]),
-  Object.freeze(["🚻","restroom","","Symbols","restroom","restroom toilet restroom"]),
-  Object.freeze(["⏪","rewind","","Symbols","fast reverse button","fast reverse button rewind"]),
-  Object.freeze(["🈂️","sa","","Symbols","Japanese “service charge” button","japanese “service charge” button sa"]),
-  Object.freeze(["♐","sagittarius","","Symbols","Sagittarius","sagittarius sagittarius"]),
-  Object.freeze(["♏","scorpius","","Symbols","Scorpio","scorpio scorpius"]),
-  Object.freeze(["㊙️","secret","","Symbols","Japanese “secret” button","japanese “secret” button secret"]),
-  Object.freeze(["7️⃣","seven","","Symbols","keycap: 7","keycap: 7 seven"]),
-  Object.freeze(["📶","signal_strength","","Symbols","antenna bars","antenna bars wifi signal_strength"]),
-  Object.freeze(["6️⃣","six","","Symbols","keycap: 6","keycap: 6 six"]),
-  Object.freeze(["🔯","six_pointed_star","","Symbols","dotted six-pointed star","dotted six-pointed star six_pointed_star"]),
-  Object.freeze(["🔹","small_blue_diamond","","Symbols","small blue diamond","small blue diamond small_blue_diamond"]),
-  Object.freeze(["🔸","small_orange_diamond","","Symbols","small orange diamond","small orange diamond small_orange_diamond"]),
-  Object.freeze(["🔺","small_red_triangle","","Symbols","red triangle pointed up","red triangle pointed up small_red_triangle"]),
-  Object.freeze(["🔻","small_red_triangle_down","","Symbols","red triangle pointed down","red triangle pointed down small_red_triangle_down"]),
-  Object.freeze(["🔜","soon","","Symbols","SOON arrow","soon arrow soon"]),
-  Object.freeze(["🆘","sos","","Symbols","SOS button","sos button help emergency sos"]),
-  Object.freeze(["❇️","sparkle","","Symbols","sparkle","sparkle sparkle"]),
-  Object.freeze(["☪️","star_and_crescent","","Symbols","star and crescent","star and crescent star_and_crescent"]),
-  Object.freeze(["✡️","star_of_david","","Symbols","star of David","star of david star_of_david"]),
-  Object.freeze(["⏹️","stop_button","","Symbols","stop button","stop button stop_button"]),
-  Object.freeze(["🔣","symbols","","Symbols","input symbols","input symbols symbols"]),
-  Object.freeze(["♉","taurus","","Symbols","Taurus","taurus taurus"]),
-  Object.freeze(["3️⃣","three","","Symbols","keycap: 3","keycap: 3 three"]),
-  Object.freeze(["™️","tm","","Symbols","trade mark","trade mark trademark tm"]),
-  Object.freeze(["🔝","top","","Symbols","TOP arrow","top arrow top"]),
-  Object.freeze(["⚧️","transgender_symbol","","Symbols","transgender symbol","transgender symbol transgender_symbol"]),
-  Object.freeze(["🔱","trident","","Symbols","trident emblem","trident emblem trident"]),
-  Object.freeze(["🔀","twisted_rightwards_arrows","","Symbols","shuffle tracks button","shuffle tracks button shuffle twisted_rightwards_arrows"]),
-  Object.freeze(["2️⃣","two","","Symbols","keycap: 2","keycap: 2 two"]),
-  Object.freeze(["🈹","u5272","","Symbols","Japanese “discount” button","japanese “discount” button u5272"]),
-  Object.freeze(["🈴","u5408","","Symbols","Japanese “passing grade” button","japanese “passing grade” button u5408"]),
-  Object.freeze(["🈺","u55b6","","Symbols","Japanese “open for business” button","japanese “open for business” button u55b6"]),
-  Object.freeze(["🈯","u6307","","Symbols","Japanese “reserved” button","japanese “reserved” button u6307"]),
-  Object.freeze(["🈷️","u6708","","Symbols","Japanese “monthly amount” button","japanese “monthly amount” button u6708"]),
-  Object.freeze(["🈶","u6709","","Symbols","Japanese “not free of charge” button","japanese “not free of charge” button u6709"]),
-  Object.freeze(["🈵","u6e80","","Symbols","Japanese “no vacancy” button","japanese “no vacancy” button u6e80"]),
-  Object.freeze(["🈚","u7121","","Symbols","Japanese “free of charge” button","japanese “free of charge” button u7121"]),
-  Object.freeze(["🈸","u7533","","Symbols","Japanese “application” button","japanese “application” button u7533"]),
-  Object.freeze(["🈲","u7981","","Symbols","Japanese “prohibited” button","japanese “prohibited” button u7981"]),
-  Object.freeze(["🈳","u7a7a","","Symbols","Japanese “vacancy” button","japanese “vacancy” button u7a7a"]),
-  Object.freeze(["🔞","underage","","Symbols","no one under eighteen","no one under eighteen underage"]),
-  Object.freeze(["🆙","up","","Symbols","UP! button","up! button up"]),
-  Object.freeze(["📳","vibration_mode","","Symbols","vibration mode","vibration mode vibration_mode"]),
-  Object.freeze(["♍","virgo","","Symbols","Virgo","virgo virgo"]),
-  Object.freeze(["🆚","vs","","Symbols","VS button","vs button vs"]),
-  Object.freeze(["⚠️","warning","","Symbols","warning","warning wip warning"]),
-  Object.freeze(["〰️","wavy_dash","","Symbols","wavy dash","wavy dash wavy_dash"]),
-  Object.freeze(["🚾","wc","","Symbols","water closet","water closet toilet restroom wc"]),
-  Object.freeze(["☸️","wheel_of_dharma","","Symbols","wheel of dharma","wheel of dharma wheel_of_dharma"]),
-  Object.freeze(["♿","wheelchair","","Symbols","wheelchair symbol","wheelchair symbol accessibility wheelchair"]),
-  Object.freeze(["✅","white_check_mark","","Symbols","check mark button","check mark button white_check_mark"]),
-  Object.freeze(["⚪","white_circle","","Symbols","white circle","white circle white_circle"]),
-  Object.freeze(["⬜","white_large_square","","Symbols","white large square","white large square white_large_square"]),
-  Object.freeze(["◽","white_medium_small_square","","Symbols","white medium-small square","white medium-small square white_medium_small_square"]),
-  Object.freeze(["◻️","white_medium_square","","Symbols","white medium square","white medium square white_medium_square"]),
-  Object.freeze(["▫️","white_small_square","","Symbols","white small square","white small square white_small_square"]),
-  Object.freeze(["🔳","white_square_button","","Symbols","white square button","white square button white_square_button"]),
-  Object.freeze(["🛜","wireless","","Symbols","wireless","wireless wifi wireless"]),
-  Object.freeze(["🚺","womens","","Symbols","women’s room","women’s room womens"]),
-  Object.freeze(["❌","x","","Symbols","cross mark","cross mark x"]),
-  Object.freeze(["🟡","yellow_circle","","Symbols","yellow circle","yellow circle yellow_circle"]),
-  Object.freeze(["🟨","yellow_square","","Symbols","yellow square","yellow square yellow_square"]),
-  Object.freeze(["☯️","yin_yang","","Symbols","yin yang","yin yang yin_yang"]),
-  Object.freeze(["0️⃣","zero","","Symbols","keycap: 0","keycap: 0 zero"]),
-  Object.freeze(["🇦🇫","afghanistan","","Flags","flag: Afghanistan","flag: afghanistan afghanistan"]),
-  Object.freeze(["🇦🇽","aland_islands","","Flags","flag: Åland Islands","flag: åland islands aland_islands"]),
-  Object.freeze(["🇦🇱","albania","","Flags","flag: Albania","flag: albania albania"]),
-  Object.freeze(["🇩🇿","algeria","","Flags","flag: Algeria","flag: algeria algeria"]),
-  Object.freeze(["🇦🇸","american_samoa","","Flags","flag: American Samoa","flag: american samoa american_samoa"]),
-  Object.freeze(["🇦🇩","andorra","","Flags","flag: Andorra","flag: andorra andorra"]),
-  Object.freeze(["🇦🇴","angola","","Flags","flag: Angola","flag: angola angola"]),
-  Object.freeze(["🇦🇮","anguilla","","Flags","flag: Anguilla","flag: anguilla anguilla"]),
-  Object.freeze(["🇦🇶","antarctica","","Flags","flag: Antarctica","flag: antarctica antarctica"]),
-  Object.freeze(["🇦🇬","antigua_barbuda","","Flags","flag: Antigua & Barbuda","flag: antigua & barbuda antigua_barbuda"]),
-  Object.freeze(["🇦🇷","argentina","","Flags","flag: Argentina","flag: argentina argentina"]),
-  Object.freeze(["🇦🇲","armenia","","Flags","flag: Armenia","flag: armenia armenia"]),
-  Object.freeze(["🇦🇼","aruba","","Flags","flag: Aruba","flag: aruba aruba"]),
-  Object.freeze(["🇦🇨","ascension_island","","Flags","flag: Ascension Island","flag: ascension island ascension_island"]),
-  Object.freeze(["🇦🇺","australia","","Flags","flag: Australia","flag: australia australia"]),
-  Object.freeze(["🇦🇹","austria","","Flags","flag: Austria","flag: austria austria"]),
-  Object.freeze(["🇦🇿","azerbaijan","","Flags","flag: Azerbaijan","flag: azerbaijan azerbaijan"]),
-  Object.freeze(["🇧🇸","bahamas","","Flags","flag: Bahamas","flag: bahamas bahamas"]),
-  Object.freeze(["🇧🇭","bahrain","","Flags","flag: Bahrain","flag: bahrain bahrain"]),
-  Object.freeze(["🇧🇩","bangladesh","","Flags","flag: Bangladesh","flag: bangladesh bangladesh"]),
-  Object.freeze(["🇧🇧","barbados","","Flags","flag: Barbados","flag: barbados barbados"]),
-  Object.freeze(["🇧🇾","belarus","","Flags","flag: Belarus","flag: belarus belarus"]),
-  Object.freeze(["🇧🇪","belgium","","Flags","flag: Belgium","flag: belgium belgium"]),
-  Object.freeze(["🇧🇿","belize","","Flags","flag: Belize","flag: belize belize"]),
-  Object.freeze(["🇧🇯","benin","","Flags","flag: Benin","flag: benin benin"]),
-  Object.freeze(["🇧🇲","bermuda","","Flags","flag: Bermuda","flag: bermuda bermuda"]),
-  Object.freeze(["🇧🇹","bhutan","","Flags","flag: Bhutan","flag: bhutan bhutan"]),
-  Object.freeze(["🏴","black_flag","","Flags","black flag","black flag black_flag"]),
-  Object.freeze(["🇧🇴","bolivia","","Flags","flag: Bolivia","flag: bolivia bolivia"]),
-  Object.freeze(["🇧🇦","bosnia_herzegovina","","Flags","flag: Bosnia & Herzegovina","flag: bosnia & herzegovina bosnia_herzegovina"]),
-  Object.freeze(["🇧🇼","botswana","","Flags","flag: Botswana","flag: botswana botswana"]),
-  Object.freeze(["🇧🇻","bouvet_island","","Flags","flag: Bouvet Island","flag: bouvet island bouvet_island"]),
-  Object.freeze(["🇧🇷","brazil","","Flags","flag: Brazil","flag: brazil brazil"]),
-  Object.freeze(["🇮🇴","british_indian_ocean_territory","","Flags","flag: British Indian Ocean Territory","flag: british indian ocean territory british_indian_ocean_territory"]),
-  Object.freeze(["🇻🇬","british_virgin_islands","","Flags","flag: British Virgin Islands","flag: british virgin islands british_virgin_islands"]),
-  Object.freeze(["🇧🇳","brunei","","Flags","flag: Brunei","flag: brunei brunei"]),
-  Object.freeze(["🇧🇬","bulgaria","","Flags","flag: Bulgaria","flag: bulgaria bulgaria"]),
-  Object.freeze(["🇧🇫","burkina_faso","","Flags","flag: Burkina Faso","flag: burkina faso burkina_faso"]),
-  Object.freeze(["🇧🇮","burundi","","Flags","flag: Burundi","flag: burundi burundi"]),
-  Object.freeze(["🇰🇭","cambodia","","Flags","flag: Cambodia","flag: cambodia cambodia"]),
-  Object.freeze(["🇨🇲","cameroon","","Flags","flag: Cameroon","flag: cameroon cameroon"]),
-  Object.freeze(["🇨🇦","canada","","Flags","flag: Canada","flag: canada canada"]),
-  Object.freeze(["🇮🇨","canary_islands","","Flags","flag: Canary Islands","flag: canary islands canary_islands"]),
-  Object.freeze(["🇨🇻","cape_verde","","Flags","flag: Cape Verde","flag: cape verde cape_verde"]),
-  Object.freeze(["🇧🇶","caribbean_netherlands","","Flags","flag: Caribbean Netherlands","flag: caribbean netherlands caribbean_netherlands"]),
-  Object.freeze(["🇰🇾","cayman_islands","","Flags","flag: Cayman Islands","flag: cayman islands cayman_islands"]),
-  Object.freeze(["🇨🇫","central_african_republic","","Flags","flag: Central African Republic","flag: central african republic central_african_republic"]),
-  Object.freeze(["🇪🇦","ceuta_melilla","","Flags","flag: Ceuta & Melilla","flag: ceuta & melilla ceuta_melilla"]),
-  Object.freeze(["🇹🇩","chad","","Flags","flag: Chad","flag: chad chad"]),
-  Object.freeze(["🏁","checkered_flag","","Flags","chequered flag","chequered flag milestone finish checkered_flag"]),
-  Object.freeze(["🇨🇱","chile","","Flags","flag: Chile","flag: chile chile"]),
-  Object.freeze(["🇨🇽","christmas_island","","Flags","flag: Christmas Island","flag: christmas island christmas_island"]),
-  Object.freeze(["🇨🇵","clipperton_island","","Flags","flag: Clipperton Island","flag: clipperton island clipperton_island"]),
-  Object.freeze(["🇨🇳","cn","","Flags","flag: China","flag: china china cn"]),
-  Object.freeze(["🇨🇨","cocos_islands","","Flags","flag: Cocos (Keeling) Islands","flag: cocos (keeling) islands keeling cocos_islands"]),
-  Object.freeze(["🇨🇴","colombia","","Flags","flag: Colombia","flag: colombia colombia"]),
-  Object.freeze(["🇰🇲","comoros","","Flags","flag: Comoros","flag: comoros comoros"]),
-  Object.freeze(["🇨🇬","congo_brazzaville","","Flags","flag: Congo - Brazzaville","flag: congo - brazzaville congo_brazzaville"]),
-  Object.freeze(["🇨🇩","congo_kinshasa","","Flags","flag: Congo - Kinshasa","flag: congo - kinshasa congo_kinshasa"]),
-  Object.freeze(["🇨🇰","cook_islands","","Flags","flag: Cook Islands","flag: cook islands cook_islands"]),
-  Object.freeze(["🇨🇷","costa_rica","","Flags","flag: Costa Rica","flag: costa rica costa_rica"]),
-  Object.freeze(["🇨🇮","cote_divoire","","Flags","flag: Côte d’Ivoire","flag: côte d’ivoire ivory cote_divoire"]),
-  Object.freeze(["🇭🇷","croatia","","Flags","flag: Croatia","flag: croatia croatia"]),
-  Object.freeze(["🎌","crossed_flags","","Flags","crossed flags","crossed flags crossed_flags"]),
-  Object.freeze(["🇨🇺","cuba","","Flags","flag: Cuba","flag: cuba cuba"]),
-  Object.freeze(["🇨🇼","curacao","","Flags","flag: Curaçao","flag: curaçao curacao"]),
-  Object.freeze(["🇨🇾","cyprus","","Flags","flag: Cyprus","flag: cyprus cyprus"]),
-  Object.freeze(["🇨🇿","czech_republic","","Flags","flag: Czechia","flag: czechia czech_republic"]),
-  Object.freeze(["🇩🇪","de","","Flags","flag: Germany","flag: germany flag germany de"]),
-  Object.freeze(["🇩🇰","denmark","","Flags","flag: Denmark","flag: denmark denmark"]),
-  Object.freeze(["🇩🇬","diego_garcia","","Flags","flag: Diego Garcia","flag: diego garcia diego_garcia"]),
-  Object.freeze(["🇩🇯","djibouti","","Flags","flag: Djibouti","flag: djibouti djibouti"]),
-  Object.freeze(["🇩🇲","dominica","","Flags","flag: Dominica","flag: dominica dominica"]),
-  Object.freeze(["🇩🇴","dominican_republic","","Flags","flag: Dominican Republic","flag: dominican republic dominican_republic"]),
-  Object.freeze(["🇪🇨","ecuador","","Flags","flag: Ecuador","flag: ecuador ecuador"]),
-  Object.freeze(["🇪🇬","egypt","","Flags","flag: Egypt","flag: egypt egypt"]),
-  Object.freeze(["🇸🇻","el_salvador","","Flags","flag: El Salvador","flag: el salvador el_salvador"]),
-  Object.freeze(["🏴󠁧󠁢󠁥󠁮󠁧󠁿","england","","Flags","flag: England","flag: england england"]),
-  Object.freeze(["🇬🇶","equatorial_guinea","","Flags","flag: Equatorial Guinea","flag: equatorial guinea equatorial_guinea"]),
-  Object.freeze(["🇪🇷","eritrea","","Flags","flag: Eritrea","flag: eritrea eritrea"]),
-  Object.freeze(["🇪🇸","es","","Flags","flag: Spain","flag: spain spain es"]),
-  Object.freeze(["🇪🇪","estonia","","Flags","flag: Estonia","flag: estonia estonia"]),
-  Object.freeze(["🇪🇹","ethiopia","","Flags","flag: Ethiopia","flag: ethiopia ethiopia"]),
-  Object.freeze(["🇪🇺","eu","european_union","Flags","flag: European Union","flag: european union eu european_union"]),
-  Object.freeze(["🇫🇰","falkland_islands","","Flags","flag: Falkland Islands","flag: falkland islands falkland_islands"]),
-  Object.freeze(["🇫🇴","faroe_islands","","Flags","flag: Faroe Islands","flag: faroe islands faroe_islands"]),
-  Object.freeze(["🇫🇯","fiji","","Flags","flag: Fiji","flag: fiji fiji"]),
-  Object.freeze(["🇫🇮","finland","","Flags","flag: Finland","flag: finland finland"]),
-  Object.freeze(["🇫🇷","fr","","Flags","flag: France","flag: france france french fr"]),
-  Object.freeze(["🇬🇫","french_guiana","","Flags","flag: French Guiana","flag: french guiana french_guiana"]),
-  Object.freeze(["🇵🇫","french_polynesia","","Flags","flag: French Polynesia","flag: french polynesia french_polynesia"]),
-  Object.freeze(["🇹🇫","french_southern_territories","","Flags","flag: French Southern Territories","flag: french southern territories french_southern_territories"]),
-  Object.freeze(["🇬🇦","gabon","","Flags","flag: Gabon","flag: gabon gabon"]),
-  Object.freeze(["🇬🇲","gambia","","Flags","flag: Gambia","flag: gambia gambia"]),
-  Object.freeze(["🇬🇧","gb","uk","Flags","flag: United Kingdom","flag: united kingdom flag british gb uk"]),
-  Object.freeze(["🇬🇪","georgia","","Flags","flag: Georgia","flag: georgia georgia"]),
-  Object.freeze(["🇬🇭","ghana","","Flags","flag: Ghana","flag: ghana ghana"]),
-  Object.freeze(["🇬🇮","gibraltar","","Flags","flag: Gibraltar","flag: gibraltar gibraltar"]),
-  Object.freeze(["🇬🇷","greece","","Flags","flag: Greece","flag: greece greece"]),
-  Object.freeze(["🇬🇱","greenland","","Flags","flag: Greenland","flag: greenland greenland"]),
-  Object.freeze(["🇬🇩","grenada","","Flags","flag: Grenada","flag: grenada grenada"]),
-  Object.freeze(["🇬🇵","guadeloupe","","Flags","flag: Guadeloupe","flag: guadeloupe guadeloupe"]),
-  Object.freeze(["🇬🇺","guam","","Flags","flag: Guam","flag: guam guam"]),
-  Object.freeze(["🇬🇹","guatemala","","Flags","flag: Guatemala","flag: guatemala guatemala"]),
-  Object.freeze(["🇬🇬","guernsey","","Flags","flag: Guernsey","flag: guernsey guernsey"]),
-  Object.freeze(["🇬🇳","guinea","","Flags","flag: Guinea","flag: guinea guinea"]),
-  Object.freeze(["🇬🇼","guinea_bissau","","Flags","flag: Guinea-Bissau","flag: guinea-bissau guinea_bissau"]),
-  Object.freeze(["🇬🇾","guyana","","Flags","flag: Guyana","flag: guyana guyana"]),
-  Object.freeze(["🇭🇹","haiti","","Flags","flag: Haiti","flag: haiti haiti"]),
-  Object.freeze(["🇭🇲","heard_mcdonald_islands","","Flags","flag: Heard & McDonald Islands","flag: heard & mcdonald islands heard_mcdonald_islands"]),
-  Object.freeze(["🇭🇳","honduras","","Flags","flag: Honduras","flag: honduras honduras"]),
-  Object.freeze(["🇭🇰","hong_kong","","Flags","flag: Hong Kong SAR China","flag: hong kong sar china hong_kong"]),
-  Object.freeze(["🇭🇺","hungary","","Flags","flag: Hungary","flag: hungary hungary"]),
-  Object.freeze(["🇮🇸","iceland","","Flags","flag: Iceland","flag: iceland iceland"]),
-  Object.freeze(["🇮🇳","india","","Flags","flag: India","flag: india india"]),
-  Object.freeze(["🇮🇩","indonesia","","Flags","flag: Indonesia","flag: indonesia indonesia"]),
-  Object.freeze(["🇮🇷","iran","","Flags","flag: Iran","flag: iran iran"]),
-  Object.freeze(["🇮🇶","iraq","","Flags","flag: Iraq","flag: iraq iraq"]),
-  Object.freeze(["🇮🇪","ireland","","Flags","flag: Ireland","flag: ireland ireland"]),
-  Object.freeze(["🇮🇲","isle_of_man","","Flags","flag: Isle of Man","flag: isle of man isle_of_man"]),
-  Object.freeze(["🇮🇱","israel","","Flags","flag: Israel","flag: israel israel"]),
-  Object.freeze(["🇮🇹","it","","Flags","flag: Italy","flag: italy italy it"]),
-  Object.freeze(["🇯🇲","jamaica","","Flags","flag: Jamaica","flag: jamaica jamaica"]),
-  Object.freeze(["🇯🇪","jersey","","Flags","flag: Jersey","flag: jersey jersey"]),
-  Object.freeze(["🇯🇴","jordan","","Flags","flag: Jordan","flag: jordan jordan"]),
-  Object.freeze(["🇯🇵","jp","","Flags","flag: Japan","flag: japan japan jp"]),
-  Object.freeze(["🇰🇿","kazakhstan","","Flags","flag: Kazakhstan","flag: kazakhstan kazakhstan"]),
-  Object.freeze(["🇰🇪","kenya","","Flags","flag: Kenya","flag: kenya kenya"]),
-  Object.freeze(["🇰🇮","kiribati","","Flags","flag: Kiribati","flag: kiribati kiribati"]),
-  Object.freeze(["🇽🇰","kosovo","","Flags","flag: Kosovo","flag: kosovo kosovo"]),
-  Object.freeze(["🇰🇷","kr","","Flags","flag: South Korea","flag: south korea korea kr"]),
-  Object.freeze(["🇰🇼","kuwait","","Flags","flag: Kuwait","flag: kuwait kuwait"]),
-  Object.freeze(["🇰🇬","kyrgyzstan","","Flags","flag: Kyrgyzstan","flag: kyrgyzstan kyrgyzstan"]),
-  Object.freeze(["🇱🇦","laos","","Flags","flag: Laos","flag: laos laos"]),
-  Object.freeze(["🇱🇻","latvia","","Flags","flag: Latvia","flag: latvia latvia"]),
-  Object.freeze(["🇱🇧","lebanon","","Flags","flag: Lebanon","flag: lebanon lebanon"]),
-  Object.freeze(["🇱🇸","lesotho","","Flags","flag: Lesotho","flag: lesotho lesotho"]),
-  Object.freeze(["🇱🇷","liberia","","Flags","flag: Liberia","flag: liberia liberia"]),
-  Object.freeze(["🇱🇾","libya","","Flags","flag: Libya","flag: libya libya"]),
-  Object.freeze(["🇱🇮","liechtenstein","","Flags","flag: Liechtenstein","flag: liechtenstein liechtenstein"]),
-  Object.freeze(["🇱🇹","lithuania","","Flags","flag: Lithuania","flag: lithuania lithuania"]),
-  Object.freeze(["🇱🇺","luxembourg","","Flags","flag: Luxembourg","flag: luxembourg luxembourg"]),
-  Object.freeze(["🇲🇴","macau","","Flags","flag: Macao SAR China","flag: macao sar china macau"]),
-  Object.freeze(["🇲🇰","macedonia","","Flags","flag: North Macedonia","flag: north macedonia macedonia"]),
-  Object.freeze(["🇲🇬","madagascar","","Flags","flag: Madagascar","flag: madagascar madagascar"]),
-  Object.freeze(["🇲🇼","malawi","","Flags","flag: Malawi","flag: malawi malawi"]),
-  Object.freeze(["🇲🇾","malaysia","","Flags","flag: Malaysia","flag: malaysia malaysia"]),
-  Object.freeze(["🇲🇻","maldives","","Flags","flag: Maldives","flag: maldives maldives"]),
-  Object.freeze(["🇲🇱","mali","","Flags","flag: Mali","flag: mali mali"]),
-  Object.freeze(["🇲🇹","malta","","Flags","flag: Malta","flag: malta malta"]),
-  Object.freeze(["🇲🇭","marshall_islands","","Flags","flag: Marshall Islands","flag: marshall islands marshall_islands"]),
-  Object.freeze(["🇲🇶","martinique","","Flags","flag: Martinique","flag: martinique martinique"]),
-  Object.freeze(["🇲🇷","mauritania","","Flags","flag: Mauritania","flag: mauritania mauritania"]),
-  Object.freeze(["🇲🇺","mauritius","","Flags","flag: Mauritius","flag: mauritius mauritius"]),
-  Object.freeze(["🇾🇹","mayotte","","Flags","flag: Mayotte","flag: mayotte mayotte"]),
-  Object.freeze(["🇲🇽","mexico","","Flags","flag: Mexico","flag: mexico mexico"]),
-  Object.freeze(["🇫🇲","micronesia","","Flags","flag: Micronesia","flag: micronesia micronesia"]),
-  Object.freeze(["🇲🇩","moldova","","Flags","flag: Moldova","flag: moldova moldova"]),
-  Object.freeze(["🇲🇨","monaco","","Flags","flag: Monaco","flag: monaco monaco"]),
-  Object.freeze(["🇲🇳","mongolia","","Flags","flag: Mongolia","flag: mongolia mongolia"]),
-  Object.freeze(["🇲🇪","montenegro","","Flags","flag: Montenegro","flag: montenegro montenegro"]),
-  Object.freeze(["🇲🇸","montserrat","","Flags","flag: Montserrat","flag: montserrat montserrat"]),
-  Object.freeze(["🇲🇦","morocco","","Flags","flag: Morocco","flag: morocco morocco"]),
-  Object.freeze(["🇲🇿","mozambique","","Flags","flag: Mozambique","flag: mozambique mozambique"]),
-  Object.freeze(["🇲🇲","myanmar","","Flags","flag: Myanmar (Burma)","flag: myanmar (burma) burma myanmar"]),
-  Object.freeze(["🇳🇦","namibia","","Flags","flag: Namibia","flag: namibia namibia"]),
-  Object.freeze(["🇳🇷","nauru","","Flags","flag: Nauru","flag: nauru nauru"]),
-  Object.freeze(["🇳🇵","nepal","","Flags","flag: Nepal","flag: nepal nepal"]),
-  Object.freeze(["🇳🇱","netherlands","","Flags","flag: Netherlands","flag: netherlands netherlands"]),
-  Object.freeze(["🇳🇨","new_caledonia","","Flags","flag: New Caledonia","flag: new caledonia new_caledonia"]),
-  Object.freeze(["🇳🇿","new_zealand","","Flags","flag: New Zealand","flag: new zealand new_zealand"]),
-  Object.freeze(["🇳🇮","nicaragua","","Flags","flag: Nicaragua","flag: nicaragua nicaragua"]),
-  Object.freeze(["🇳🇪","niger","","Flags","flag: Niger","flag: niger niger"]),
-  Object.freeze(["🇳🇬","nigeria","","Flags","flag: Nigeria","flag: nigeria nigeria"]),
-  Object.freeze(["🇳🇺","niue","","Flags","flag: Niue","flag: niue niue"]),
-  Object.freeze(["🇳🇫","norfolk_island","","Flags","flag: Norfolk Island","flag: norfolk island norfolk_island"]),
-  Object.freeze(["🇰🇵","north_korea","","Flags","flag: North Korea","flag: north korea north_korea"]),
-  Object.freeze(["🇲🇵","northern_mariana_islands","","Flags","flag: Northern Mariana Islands","flag: northern mariana islands northern_mariana_islands"]),
-  Object.freeze(["🇳🇴","norway","","Flags","flag: Norway","flag: norway norway"]),
-  Object.freeze(["🇴🇲","oman","","Flags","flag: Oman","flag: oman oman"]),
-  Object.freeze(["🇵🇰","pakistan","","Flags","flag: Pakistan","flag: pakistan pakistan"]),
-  Object.freeze(["🇵🇼","palau","","Flags","flag: Palau","flag: palau palau"]),
-  Object.freeze(["🇵🇸","palestinian_territories","","Flags","flag: Palestinian Territories","flag: palestinian territories palestinian_territories"]),
-  Object.freeze(["🇵🇦","panama","","Flags","flag: Panama","flag: panama panama"]),
-  Object.freeze(["🇵🇬","papua_new_guinea","","Flags","flag: Papua New Guinea","flag: papua new guinea papua_new_guinea"]),
-  Object.freeze(["🇵🇾","paraguay","","Flags","flag: Paraguay","flag: paraguay paraguay"]),
-  Object.freeze(["🇵🇪","peru","","Flags","flag: Peru","flag: peru peru"]),
-  Object.freeze(["🇵🇭","philippines","","Flags","flag: Philippines","flag: philippines philippines"]),
-  Object.freeze(["🏴‍☠️","pirate_flag","","Flags","pirate flag","pirate flag pirate_flag"]),
-  Object.freeze(["🇵🇳","pitcairn_islands","","Flags","flag: Pitcairn Islands","flag: pitcairn islands pitcairn_islands"]),
-  Object.freeze(["🇵🇱","poland","","Flags","flag: Poland","flag: poland poland"]),
-  Object.freeze(["🇵🇹","portugal","","Flags","flag: Portugal","flag: portugal portugal"]),
-  Object.freeze(["🇵🇷","puerto_rico","","Flags","flag: Puerto Rico","flag: puerto rico puerto_rico"]),
-  Object.freeze(["🇶🇦","qatar","","Flags","flag: Qatar","flag: qatar qatar"]),
-  Object.freeze(["🏳️‍🌈","rainbow_flag","","Flags","rainbow flag","rainbow flag pride rainbow_flag"]),
-  Object.freeze(["🇷🇪","reunion","","Flags","flag: Réunion","flag: réunion reunion"]),
-  Object.freeze(["🇷🇴","romania","","Flags","flag: Romania","flag: romania romania"]),
-  Object.freeze(["🇷🇺","ru","","Flags","flag: Russia","flag: russia russia ru"]),
-  Object.freeze(["🇷🇼","rwanda","","Flags","flag: Rwanda","flag: rwanda rwanda"]),
-  Object.freeze(["🇼🇸","samoa","","Flags","flag: Samoa","flag: samoa samoa"]),
-  Object.freeze(["🇸🇲","san_marino","","Flags","flag: San Marino","flag: san marino san_marino"]),
-  Object.freeze(["🇸🇹","sao_tome_principe","","Flags","flag: São Tomé & Príncipe","flag: são tomé & príncipe sao_tome_principe"]),
-  Object.freeze(["🇸🇦","saudi_arabia","","Flags","flag: Saudi Arabia","flag: saudi arabia saudi_arabia"]),
-  Object.freeze(["🏴󠁧󠁢󠁳󠁣󠁴󠁿","scotland","","Flags","flag: Scotland","flag: scotland scotland"]),
-  Object.freeze(["🇸🇳","senegal","","Flags","flag: Senegal","flag: senegal senegal"]),
-  Object.freeze(["🇷🇸","serbia","","Flags","flag: Serbia","flag: serbia serbia"]),
-  Object.freeze(["🇸🇨","seychelles","","Flags","flag: Seychelles","flag: seychelles seychelles"]),
-  Object.freeze(["🇸🇱","sierra_leone","","Flags","flag: Sierra Leone","flag: sierra leone sierra_leone"]),
-  Object.freeze(["🇸🇬","singapore","","Flags","flag: Singapore","flag: singapore singapore"]),
-  Object.freeze(["🇸🇽","sint_maarten","","Flags","flag: Sint Maarten","flag: sint maarten sint_maarten"]),
-  Object.freeze(["🇸🇰","slovakia","","Flags","flag: Slovakia","flag: slovakia slovakia"]),
-  Object.freeze(["🇸🇮","slovenia","","Flags","flag: Slovenia","flag: slovenia slovenia"]),
-  Object.freeze(["🇸🇧","solomon_islands","","Flags","flag: Solomon Islands","flag: solomon islands solomon_islands"]),
-  Object.freeze(["🇸🇴","somalia","","Flags","flag: Somalia","flag: somalia somalia"]),
-  Object.freeze(["🇿🇦","south_africa","","Flags","flag: South Africa","flag: south africa south_africa"]),
-  Object.freeze(["🇬🇸","south_georgia_south_sandwich_islands","","Flags","flag: South Georgia & South Sandwich Islands","flag: south georgia & south sandwich islands south_georgia_south_sandwich_islands"]),
-  Object.freeze(["🇸🇸","south_sudan","","Flags","flag: South Sudan","flag: south sudan south_sudan"]),
-  Object.freeze(["🇱🇰","sri_lanka","","Flags","flag: Sri Lanka","flag: sri lanka sri_lanka"]),
-  Object.freeze(["🇧🇱","st_barthelemy","","Flags","flag: St. Barthélemy","flag: st. barthélemy st_barthelemy"]),
-  Object.freeze(["🇸🇭","st_helena","","Flags","flag: St. Helena","flag: st. helena st_helena"]),
-  Object.freeze(["🇰🇳","st_kitts_nevis","","Flags","flag: St. Kitts & Nevis","flag: st. kitts & nevis st_kitts_nevis"]),
-  Object.freeze(["🇱🇨","st_lucia","","Flags","flag: St. Lucia","flag: st. lucia st_lucia"]),
-  Object.freeze(["🇲🇫","st_martin","","Flags","flag: St. Martin","flag: st. martin st_martin"]),
-  Object.freeze(["🇵🇲","st_pierre_miquelon","","Flags","flag: St. Pierre & Miquelon","flag: st. pierre & miquelon st_pierre_miquelon"]),
-  Object.freeze(["🇻🇨","st_vincent_grenadines","","Flags","flag: St. Vincent & Grenadines","flag: st. vincent & grenadines st_vincent_grenadines"]),
-  Object.freeze(["🇸🇩","sudan","","Flags","flag: Sudan","flag: sudan sudan"]),
-  Object.freeze(["🇸🇷","suriname","","Flags","flag: Suriname","flag: suriname suriname"]),
-  Object.freeze(["🇸🇯","svalbard_jan_mayen","","Flags","flag: Svalbard & Jan Mayen","flag: svalbard & jan mayen svalbard_jan_mayen"]),
-  Object.freeze(["🇸🇿","swaziland","","Flags","flag: Eswatini","flag: eswatini swaziland"]),
-  Object.freeze(["🇸🇪","sweden","","Flags","flag: Sweden","flag: sweden sweden"]),
-  Object.freeze(["🇨🇭","switzerland","","Flags","flag: Switzerland","flag: switzerland switzerland"]),
-  Object.freeze(["🇸🇾","syria","","Flags","flag: Syria","flag: syria syria"]),
-  Object.freeze(["🇹🇼","taiwan","","Flags","flag: Taiwan","flag: taiwan taiwan"]),
-  Object.freeze(["🇹🇯","tajikistan","","Flags","flag: Tajikistan","flag: tajikistan tajikistan"]),
-  Object.freeze(["🇹🇿","tanzania","","Flags","flag: Tanzania","flag: tanzania tanzania"]),
-  Object.freeze(["🇹🇭","thailand","","Flags","flag: Thailand","flag: thailand thailand"]),
-  Object.freeze(["🇹🇱","timor_leste","","Flags","flag: Timor-Leste","flag: timor-leste timor_leste"]),
-  Object.freeze(["🇹🇬","togo","","Flags","flag: Togo","flag: togo togo"]),
-  Object.freeze(["🇹🇰","tokelau","","Flags","flag: Tokelau","flag: tokelau tokelau"]),
-  Object.freeze(["🇹🇴","tonga","","Flags","flag: Tonga","flag: tonga tonga"]),
-  Object.freeze(["🇹🇷","tr","","Flags","flag: Turkey","flag: turkey turkey tr"]),
-  Object.freeze(["🏳️‍⚧️","transgender_flag","","Flags","transgender flag","transgender flag transgender_flag"]),
-  Object.freeze(["🚩","triangular_flag_on_post","","Flags","triangular flag","triangular flag triangular_flag_on_post"]),
-  Object.freeze(["🇹🇹","trinidad_tobago","","Flags","flag: Trinidad & Tobago","flag: trinidad & tobago trinidad_tobago"]),
-  Object.freeze(["🇹🇦","tristan_da_cunha","","Flags","flag: Tristan da Cunha","flag: tristan da cunha tristan_da_cunha"]),
-  Object.freeze(["🇹🇳","tunisia","","Flags","flag: Tunisia","flag: tunisia tunisia"]),
-  Object.freeze(["🇹🇲","turkmenistan","","Flags","flag: Turkmenistan","flag: turkmenistan turkmenistan"]),
-  Object.freeze(["🇹🇨","turks_caicos_islands","","Flags","flag: Turks & Caicos Islands","flag: turks & caicos islands turks_caicos_islands"]),
-  Object.freeze(["🇹🇻","tuvalu","","Flags","flag: Tuvalu","flag: tuvalu tuvalu"]),
-  Object.freeze(["🇺🇬","uganda","","Flags","flag: Uganda","flag: uganda uganda"]),
-  Object.freeze(["🇺🇦","ukraine","","Flags","flag: Ukraine","flag: ukraine ukraine"]),
-  Object.freeze(["🇦🇪","united_arab_emirates","","Flags","flag: United Arab Emirates","flag: united arab emirates united_arab_emirates"]),
-  Object.freeze(["🇺🇳","united_nations","","Flags","flag: United Nations","flag: united nations united_nations"]),
-  Object.freeze(["🇺🇾","uruguay","","Flags","flag: Uruguay","flag: uruguay uruguay"]),
-  Object.freeze(["🇺🇸","us","","Flags","flag: United States","flag: united states flag united america us"]),
-  Object.freeze(["🇺🇲","us_outlying_islands","","Flags","flag: U.S. Outlying Islands","flag: u.s. outlying islands us_outlying_islands"]),
-  Object.freeze(["🇻🇮","us_virgin_islands","","Flags","flag: U.S. Virgin Islands","flag: u.s. virgin islands us_virgin_islands"]),
-  Object.freeze(["🇺🇿","uzbekistan","","Flags","flag: Uzbekistan","flag: uzbekistan uzbekistan"]),
-  Object.freeze(["🇻🇺","vanuatu","","Flags","flag: Vanuatu","flag: vanuatu vanuatu"]),
-  Object.freeze(["🇻🇦","vatican_city","","Flags","flag: Vatican City","flag: vatican city vatican_city"]),
-  Object.freeze(["🇻🇪","venezuela","","Flags","flag: Venezuela","flag: venezuela venezuela"]),
-  Object.freeze(["🇻🇳","vietnam","","Flags","flag: Vietnam","flag: vietnam vietnam"]),
-  Object.freeze(["🏴󠁧󠁢󠁷󠁬󠁳󠁿","wales","","Flags","flag: Wales","flag: wales wales"]),
-  Object.freeze(["🇼🇫","wallis_futuna","","Flags","flag: Wallis & Futuna","flag: wallis & futuna wallis_futuna"]),
-  Object.freeze(["🇪🇭","western_sahara","","Flags","flag: Western Sahara","flag: western sahara western_sahara"]),
-  Object.freeze(["🏳️","white_flag","","Flags","white flag","white flag white_flag"]),
-  Object.freeze(["🇾🇪","yemen","","Flags","flag: Yemen","flag: yemen yemen"]),
-  Object.freeze(["🇿🇲","zambia","","Flags","flag: Zambia","flag: zambia zambia"]),
-  Object.freeze(["🇿🇼","zimbabwe","","Flags","flag: Zimbabwe","flag: zimbabwe zimbabwe"]),
-]);
+
+const CATEGORIES = ["Smileys & Emotion","People & Body","Animals & Nature","Food & Drink","Activities","Travel & Places","Objects","Symbols","Flags"];
+
+// emoji|primary|extras|categoryIndex|description
+const ROW_DATA = `
+💯|100||0|hundred points
+👽|alien||0|alien
+💢|anger||0|anger symbol
+😠|angry||0|angry face
+😧|anguished||0|anguished face
+😲|astonished||0|astonished face
+🖤|black_heart||0|black heart
+💙|blue_heart||0|blue heart
+😊|blush||0|smiling face with smiling eyes
+💥|boom|collision|0|collision
+💔|broken_heart||0|broken heart
+🤎|brown_heart||0|brown heart
+🤡|clown_face||0|clown face
+🥶|cold_face||0|cold face
+😰|cold_sweat||0|anxious face with sweat
+😖|confounded||0|confounded face
+😕|confused||0|confused face
+🤠|cowboy_hat_face||0|cowboy hat face
+😢|cry||0|crying face
+😿|crying_cat_face||0|crying cat
+💘|cupid||0|heart with arrow
+🤬|cursing_face||0|face with symbols on mouth
+💨|dash||0|dashing away
+😞|disappointed||0|disappointed face
+😥|disappointed_relieved||0|sad but relieved face
+🥸|disguised_face||0|disguised face
+💫|dizzy||0|dizzy
+😵|dizzy_face||0|face with crossed-out eyes
+🫥|dotted_line_face||0|dotted line face
+🤤|drooling_face||0|drooling face
+🤯|exploding_head||0|exploding head
+😑|expressionless||0|expressionless face
+👁️‍🗨️|eye_speech_bubble||0|eye in speech bubble
+😮‍💨|face_exhaling||0|face exhaling
+🥹|face_holding_back_tears||0|face holding back tears
+😶‍🌫️|face_in_clouds||0|face in clouds
+🫤|face_with_diagonal_mouth||0|face with diagonal mouth
+🤕|face_with_head_bandage||0|face with head-bandage
+🫢|face_with_open_eyes_and_hand_over_mouth||0|face with open eyes and hand over mouth
+🫣|face_with_peeking_eye||0|face with peeking eye
+😵‍💫|face_with_spiral_eyes||0|face with spiral eyes
+🤒|face_with_thermometer||0|face with thermometer
+😨|fearful||0|fearful face
+😳|flushed||0|flushed face
+😦|frowning||0|frowning face with open mouth
+☹️|frowning_face||0|frowning face
+👻|ghost||0|ghost
+💝|gift_heart||0|heart with ribbon
+💚|green_heart||0|green heart
+🩶|grey_heart||0|grey heart
+😬|grimacing||0|grimacing face
+😁|grin||0|beaming face with smiling eyes
+😀|grinning||0|grinning face
+🤭|hand_over_mouth||0|face with hand over mouth
+💩|hankey|poop shit|0|pile of poo
+🙉|hear_no_evil||0|hear-no-evil monkey
+❤️|heart||0|red heart
+💟|heart_decoration||0|heart decoration
+😍|heart_eyes||0|smiling face with heart-eyes
+😻|heart_eyes_cat||0|smiling cat with heart-eyes
+❤️‍🔥|heart_on_fire||0|heart on fire
+💓|heartbeat||0|beating heart
+💗|heartpulse||0|growing heart
+❣️|heavy_heart_exclamation||0|heart exclamation
+🕳️|hole||0|hole
+🥵|hot_face||0|hot face
+🤗|hugs||0|smiling face with open hands
+😯|hushed||0|hushed face
+👿|imp||0|angry face with horns
+😇|innocent||0|smiling face with halo
+👺|japanese_goblin||0|goblin
+👹|japanese_ogre||0|ogre
+😂|joy||0|face with tears of joy
+😹|joy_cat||0|cat with tears of joy
+💋|kiss||0|kiss mark
+😗|kissing||0|kissing face
+😽|kissing_cat||0|kissing cat
+😚|kissing_closed_eyes||0|kissing face with closed eyes
+😘|kissing_heart||0|face blowing a kiss
+😙|kissing_smiling_eyes||0|kissing face with smiling eyes
+😆|laughing|satisfied|0|grinning squinting face
+🗨️|left_speech_bubble||0|left speech bubble
+🩵|light_blue_heart||0|light blue heart
+💌|love_letter||0|love letter
+🤥|lying_face||0|lying face
+😷|mask||0|face with medical mask
+🫠|melting_face||0|melting face
+❤️‍🩹|mending_heart||0|mending heart
+🤑|money_mouth_face||0|money-mouth face
+🧐|monocle_face||0|face with monocle
+🤢|nauseated_face||0|nauseated face
+🤓|nerd_face||0|nerd face
+😐|neutral_face||0|neutral face
+😶|no_mouth||0|face without mouth
+😮|open_mouth||0|face with open mouth
+🧡|orange_heart||0|orange heart
+🥳|partying_face||0|partying face
+😔|pensive||0|pensive face
+😣|persevere||0|persevering face
+🩷|pink_heart||0|pink heart
+🥺|pleading_face||0|pleading face
+😾|pouting_cat||0|pouting cat
+💜|purple_heart||0|purple heart
+😡|rage|pout|0|enraged face
+🤨|raised_eyebrow||0|face with raised eyebrow
+☺️|relaxed||0|smiling face
+😌|relieved||0|relieved face
+💞|revolving_hearts||0|revolving hearts
+🗯️|right_anger_bubble||0|right anger bubble
+🤖|robot||0|robot
+🤣|rofl||0|rolling on the floor laughing
+🙄|roll_eyes||0|face with rolling eyes
+🫡|saluting_face||0|saluting face
+😱|scream||0|face screaming in fear
+🙀|scream_cat||0|weary cat
+🙈|see_no_evil||0|see-no-evil monkey
+🫨|shaking_face||0|shaking face
+🤫|shushing_face||0|shushing face
+💀|skull||0|skull
+☠️|skull_and_crossbones||0|skull and crossbones
+😴|sleeping||0|sleeping face
+😪|sleepy||0|sleepy face
+🙁|slightly_frowning_face||0|slightly frowning face
+🙂|slightly_smiling_face||0|slightly smiling face
+😄|smile||0|grinning face with smiling eyes
+😸|smile_cat||0|grinning cat with smiling eyes
+😃|smiley||0|grinning face with big eyes
+😺|smiley_cat||0|grinning cat
+🥲|smiling_face_with_tear||0|smiling face with tear
+🥰|smiling_face_with_three_hearts||0|smiling face with hearts
+😈|smiling_imp||0|smiling face with horns
+😏|smirk||0|smirking face
+😼|smirk_cat||0|cat with wry smile
+🤧|sneezing_face||0|sneezing face
+😭|sob||0|loudly crying face
+👾|space_invader||0|alien monster
+💖|sparkling_heart||0|sparkling heart
+🙊|speak_no_evil||0|speak-no-evil monkey
+💬|speech_balloon||0|speech balloon
+🤩|star_struck||0|star-struck
+😛|stuck_out_tongue||0|face with tongue
+😝|stuck_out_tongue_closed_eyes||0|squinting face with tongue
+😜|stuck_out_tongue_winking_eye||0|winking face with tongue
+😎|sunglasses||0|smiling face with sunglasses
+😓|sweat||0|downcast face with sweat
+💦|sweat_drops||0|sweat droplets
+😅|sweat_smile||0|grinning face with sweat
+🤔|thinking||0|thinking face
+💭|thought_balloon||0|thought balloon
+😫|tired_face||0|tired face
+😤|triumph||0|face with steam from nose
+💕|two_hearts||0|two hearts
+😒|unamused||0|unamused face
+🙃|upside_down_face||0|upside-down face
+🤮|vomiting_face||0|face vomiting
+😩|weary||0|weary face
+🤍|white_heart||0|white heart
+😉|wink||0|winking face
+🥴|woozy_face||0|woozy face
+😟|worried||0|worried face
+🥱|yawning_face||0|yawning face
+💛|yellow_heart||0|yellow heart
+😋|yum||0|face savoring food
+🤪|zany_face||0|zany face
+🤐|zipper_mouth_face||0|zipper-mouth face
+💤|zzz||0|ZZZ
+👍|+1|thumbsup|1|thumbs up
+👎|-1|thumbsdown|1|thumbs down
+🧑|adult||1|person
+🫀|anatomical_heart||1|anatomical heart
+👼|angel||1|baby angel
+🧑‍🎨|artist||1|artist
+🧑‍🚀|astronaut||1|astronaut
+👶|baby||1|baby
+👨‍🦲|bald_man||1|man: bald
+👩‍🦲|bald_woman||1|woman: bald
+🛀|bath||1|person taking bath
+🧔|bearded_person||1|person: beard
+🚴|bicyclist||1|person biking
+🚴‍♂️|biking_man||1|man biking
+🚴‍♀️|biking_woman||1|woman biking
+🫦|biting_lip||1|biting lip
+👱‍♂️|blond_haired_man||1|man: blond hair
+👱|blond_haired_person||1|person: blond hair
+👱‍♀️|blond_haired_woman|blonde_woman|1|woman: blond hair
+🦴|bone||1|bone
+⛹️‍♂️|bouncing_ball_man|basketball_man|1|man bouncing ball
+⛹️|bouncing_ball_person||1|person bouncing ball
+⛹️‍♀️|bouncing_ball_woman|basketball_woman|1|woman bouncing ball
+🙇|bow||1|person bowing
+🙇‍♂️|bowing_man||1|man bowing
+🙇‍♀️|bowing_woman||1|woman bowing
+👦|boy||1|boy
+🧠|brain||1|brain
+🤱|breast_feeding||1|breast-feeding
+🕴️|business_suit_levitating||1|person in suit levitating
+👤|bust_in_silhouette||1|bust in silhouette
+👥|busts_in_silhouette||1|busts in silhouette
+🤙|call_me_hand||1|call me hand
+🤸|cartwheeling||1|person cartwheeling
+🧒|child||1|child
+👏|clap||1|clapping hands
+🧗|climbing||1|person climbing
+🧗‍♂️|climbing_man||1|man climbing
+🧗‍♀️|climbing_woman||1|woman climbing
+👷|construction_worker||1|construction worker
+👷‍♂️|construction_worker_man||1|man construction worker
+👷‍♀️|construction_worker_woman||1|woman construction worker
+🧑‍🍳|cook||1|cook
+👫|couple||1|woman and man holding hands
+💑|couple_with_heart||1|couple with heart
+👨‍❤️‍👨|couple_with_heart_man_man||1|couple with heart: man, man
+👩‍❤️‍👨|couple_with_heart_woman_man||1|couple with heart: woman, man
+👩‍❤️‍👩|couple_with_heart_woman_woman||1|couple with heart: woman, woman
+💏|couplekiss||1|kiss
+👨‍❤️‍💋‍👨|couplekiss_man_man||1|kiss: man, man
+👩‍❤️‍💋‍👨|couplekiss_man_woman||1|kiss: woman, man
+👩‍❤️‍💋‍👩|couplekiss_woman_woman||1|kiss: woman, woman
+🤞|crossed_fingers||1|crossed fingers
+👨‍🦱|curly_haired_man||1|man: curly hair
+👩‍🦱|curly_haired_woman||1|woman: curly hair
+👯|dancers||1|people with bunny ears
+👯‍♂️|dancing_men||1|men with bunny ears
+👯‍♀️|dancing_women||1|women with bunny ears
+🧏‍♂️|deaf_man||1|deaf man
+🧏|deaf_person||1|deaf person
+🧏‍♀️|deaf_woman||1|deaf woman
+🕵️|detective||1|detective
+👂|ear||1|ear
+🦻|ear_with_hearing_aid||1|ear with hearing aid
+🧝|elf||1|elf
+🧝‍♂️|elf_man||1|man elf
+🧝‍♀️|elf_woman||1|woman elf
+👁️|eye||1|eye
+👀|eyes||1|eyes
+🤦|facepalm||1|person facepalming
+🧑‍🏭|factory_worker||1|factory worker
+🧚|fairy||1|fairy
+🧚‍♂️|fairy_man||1|man fairy
+🧚‍♀️|fairy_woman||1|woman fairy
+👪|family||1|family
+👨‍👦|family_man_boy||1|family: man, boy
+👨‍👦‍👦|family_man_boy_boy||1|family: man, boy, boy
+👨‍👧|family_man_girl||1|family: man, girl
+👨‍👧‍👦|family_man_girl_boy||1|family: man, girl, boy
+👨‍👧‍👧|family_man_girl_girl||1|family: man, girl, girl
+👨‍👨‍👦|family_man_man_boy||1|family: man, man, boy
+👨‍👨‍👦‍👦|family_man_man_boy_boy||1|family: man, man, boy, boy
+👨‍👨‍👧|family_man_man_girl||1|family: man, man, girl
+👨‍👨‍👧‍👦|family_man_man_girl_boy||1|family: man, man, girl, boy
+👨‍👨‍👧‍👧|family_man_man_girl_girl||1|family: man, man, girl, girl
+👨‍👩‍👦|family_man_woman_boy||1|family: man, woman, boy
+👨‍👩‍👦‍👦|family_man_woman_boy_boy||1|family: man, woman, boy, boy
+👨‍👩‍👧|family_man_woman_girl||1|family: man, woman, girl
+👨‍👩‍👧‍👦|family_man_woman_girl_boy||1|family: man, woman, girl, boy
+👨‍👩‍👧‍👧|family_man_woman_girl_girl||1|family: man, woman, girl, girl
+👩‍👦|family_woman_boy||1|family: woman, boy
+👩‍👦‍👦|family_woman_boy_boy||1|family: woman, boy, boy
+👩‍👧|family_woman_girl||1|family: woman, girl
+👩‍👧‍👦|family_woman_girl_boy||1|family: woman, girl, boy
+👩‍👧‍👧|family_woman_girl_girl||1|family: woman, girl, girl
+👩‍👩‍👦|family_woman_woman_boy||1|family: woman, woman, boy
+👩‍👩‍👦‍👦|family_woman_woman_boy_boy||1|family: woman, woman, boy, boy
+👩‍👩‍👧|family_woman_woman_girl||1|family: woman, woman, girl
+👩‍👩‍👧‍👦|family_woman_woman_girl_boy||1|family: woman, woman, girl, boy
+👩‍👩‍👧‍👧|family_woman_woman_girl_girl||1|family: woman, woman, girl, girl
+🧑‍🌾|farmer||1|farmer
+🕵️‍♀️|female_detective||1|woman detective
+🧑‍🚒|firefighter||1|firefighter
+🤛|fist_left||1|left-facing fist
+👊|fist_oncoming|facepunch punch|1|oncoming fist
+✊|fist_raised|fist|1|raised fist
+🤜|fist_right||1|right-facing fist
+🦶|foot||1|foot
+👣|footprints||1|footprints
+🙍‍♂️|frowning_man||1|man frowning
+🙍|frowning_person||1|person frowning
+🙍‍♀️|frowning_woman||1|woman frowning
+🧞|genie||1|genie
+🧞‍♂️|genie_man||1|man genie
+🧞‍♀️|genie_woman||1|woman genie
+👧|girl||1|girl
+🏌️|golfing||1|person golfing
+🏌️‍♂️|golfing_man||1|man golfing
+🏌️‍♀️|golfing_woman||1|woman golfing
+💂|guard||1|guard
+💂‍♂️|guardsman||1|man guard
+💂‍♀️|guardswoman||1|woman guard
+💇|haircut||1|person getting haircut
+💇‍♂️|haircut_man||1|man getting haircut
+💇‍♀️|haircut_woman||1|woman getting haircut
+✋|hand|raised_hand|1|raised hand
+🫰|hand_with_index_finger_and_thumb_crossed||1|hand with index finger and thumb crossed
+🤾|handball_person||1|person playing handball
+🤝|handshake||1|handshake
+🧑‍⚕️|health_worker||1|health worker
+🫶|heart_hands||1|heart hands
+🏇|horse_racing||1|horse racing
+🫵|index_pointing_at_the_viewer||1|index pointing at the viewer
+🧑‍⚖️|judge||1|judge
+🤹|juggling_person||1|person juggling
+🧎‍♂️|kneeling_man||1|man kneeling
+🧎|kneeling_person||1|person kneeling
+🧎‍♀️|kneeling_woman||1|woman kneeling
+🫲|leftwards_hand||1|leftwards hand
+🫷|leftwards_pushing_hand||1|leftwards pushing hand
+🦵|leg||1|leg
+👄|lips||1|mouth
+🧘|lotus_position||1|person in lotus position
+🧘‍♂️|lotus_position_man||1|man in lotus position
+🧘‍♀️|lotus_position_woman||1|woman in lotus position
+🤟|love_you_gesture||1|love-you gesture
+🫁|lungs||1|lungs
+🧙|mage||1|mage
+🧙‍♂️|mage_man||1|man mage
+🧙‍♀️|mage_woman||1|woman mage
+🕵️‍♂️|male_detective||1|man detective
+👨|man||1|man
+👨‍🎨|man_artist||1|man artist
+👨‍🚀|man_astronaut||1|man astronaut
+🧔‍♂️|man_beard||1|man: beard
+🤸‍♂️|man_cartwheeling||1|man cartwheeling
+👨‍🍳|man_cook||1|man cook
+🕺|man_dancing||1|man dancing
+🤦‍♂️|man_facepalming||1|man facepalming
+👨‍🏭|man_factory_worker||1|man factory worker
+👨‍🌾|man_farmer||1|man farmer
+👨‍🍼|man_feeding_baby||1|man feeding baby
+👨‍🚒|man_firefighter||1|man firefighter
+👨‍⚕️|man_health_worker||1|man health worker
+👨‍🦽|man_in_manual_wheelchair||1|man in manual wheelchair
+👨‍🦼|man_in_motorized_wheelchair||1|man in motorized wheelchair
+🤵‍♂️|man_in_tuxedo||1|man in tuxedo
+👨‍⚖️|man_judge||1|man judge
+🤹‍♂️|man_juggling||1|man juggling
+👨‍🔧|man_mechanic||1|man mechanic
+👨‍💼|man_office_worker||1|man office worker
+👨‍✈️|man_pilot||1|man pilot
+🤾‍♂️|man_playing_handball||1|man playing handball
+🤽‍♂️|man_playing_water_polo||1|man playing water polo
+👨‍🔬|man_scientist||1|man scientist
+🤷‍♂️|man_shrugging||1|man shrugging
+👨‍🎤|man_singer||1|man singer
+👨‍🎓|man_student||1|man student
+👨‍🏫|man_teacher||1|man teacher
+👨‍💻|man_technologist||1|man technologist
+👲|man_with_gua_pi_mao||1|person with skullcap
+👨‍🦯|man_with_probing_cane||1|man with white cane
+👳‍♂️|man_with_turban||1|man wearing turban
+👰‍♂️|man_with_veil||1|man with veil
+💆|massage||1|person getting massage
+💆‍♂️|massage_man||1|man getting massage
+💆‍♀️|massage_woman||1|woman getting massage
+🧑‍🔧|mechanic||1|mechanic
+🦾|mechanical_arm||1|mechanical arm
+🦿|mechanical_leg||1|mechanical leg
+🤼‍♂️|men_wrestling||1|men wrestling
+🧜‍♀️|mermaid||1|mermaid
+🧜‍♂️|merman||1|merman
+🧜|merperson||1|merperson
+🤘|metal||1|sign of the horns
+🖕|middle_finger|fu|1|middle finger
+🚵|mountain_bicyclist||1|person mountain biking
+🚵‍♂️|mountain_biking_man||1|man mountain biking
+🚵‍♀️|mountain_biking_woman||1|woman mountain biking
+🤶|mrs_claus||1|Mrs. Claus
+💪|muscle||1|flexed biceps
+🧑‍🎄|mx_claus||1|mx claus
+💅|nail_care||1|nail polish
+🥷|ninja||1|ninja
+🙅|no_good||1|person gesturing NO
+🙅‍♂️|no_good_man|ng_man|1|man gesturing NO
+🙅‍♀️|no_good_woman|ng_woman|1|woman gesturing NO
+👃|nose||1|nose
+🧑‍💼|office_worker||1|office worker
+👌|ok_hand||1|OK hand
+🙆‍♂️|ok_man||1|man gesturing OK
+🙆|ok_person||1|person gesturing OK
+🙆‍♀️|ok_woman||1|woman gesturing OK
+🧓|older_adult||1|older person
+👴|older_man||1|old man
+👵|older_woman||1|old woman
+👐|open_hands||1|open hands
+🫳|palm_down_hand||1|palm down hand
+🫴|palm_up_hand||1|palm up hand
+🤲|palms_up_together||1|palms up together
+🧑‍🤝‍🧑|people_holding_hands||1|people holding hands
+🫂|people_hugging||1|people hugging
+🧑‍🦲|person_bald||1|person: bald
+🧑‍🦱|person_curly_hair||1|person: curly hair
+🧑‍🍼|person_feeding_baby||1|person feeding baby
+🤺|person_fencing||1|person fencing
+🧑‍🦽|person_in_manual_wheelchair||1|person in manual wheelchair
+🧑‍🦼|person_in_motorized_wheelchair||1|person in motorized wheelchair
+🤵|person_in_tuxedo||1|person in tuxedo
+🧑‍🦰|person_red_hair||1|person: red hair
+🧑‍🦳|person_white_hair||1|person: white hair
+🫅|person_with_crown||1|person with crown
+🧑‍🦯|person_with_probing_cane||1|person with white cane
+👳|person_with_turban||1|person wearing turban
+👰|person_with_veil||1|person with veil
+🧑‍✈️|pilot||1|pilot
+🤌|pinched_fingers||1|pinched fingers
+🤏|pinching_hand||1|pinching hand
+👇|point_down||1|backhand index pointing down
+👈|point_left||1|backhand index pointing left
+👉|point_right||1|backhand index pointing right
+☝️|point_up||1|index pointing up
+👆|point_up_2||1|backhand index pointing up
+👮|police_officer|cop|1|police officer
+👮‍♂️|policeman||1|man police officer
+👮‍♀️|policewoman||1|woman police officer
+🙎|pouting_face||1|person pouting
+🙎‍♂️|pouting_man||1|man pouting
+🙎‍♀️|pouting_woman||1|woman pouting
+🙏|pray||1|folded hands
+🫃|pregnant_man||1|pregnant man
+🫄|pregnant_person||1|pregnant person
+🤰|pregnant_woman||1|pregnant woman
+🤴|prince||1|prince
+👸|princess||1|princess
+🤚|raised_back_of_hand||1|raised back of hand
+🖐️|raised_hand_with_fingers_splayed||1|hand with fingers splayed
+🙌|raised_hands||1|raising hands
+🙋|raising_hand||1|person raising hand
+🙋‍♂️|raising_hand_man||1|man raising hand
+🙋‍♀️|raising_hand_woman||1|woman raising hand
+👨‍🦰|red_haired_man||1|man: red hair
+👩‍🦰|red_haired_woman||1|woman: red hair
+🫱|rightwards_hand||1|rightwards hand
+🫸|rightwards_pushing_hand||1|rightwards pushing hand
+🚣|rowboat||1|person rowing boat
+🚣‍♂️|rowing_man||1|man rowing boat
+🚣‍♀️|rowing_woman||1|woman rowing boat
+🏃|runner|running|1|person running
+🏃‍♂️|running_man||1|man running
+🏃‍♀️|running_woman||1|woman running
+🎅|santa||1|Santa Claus
+🧖‍♂️|sauna_man||1|man in steamy room
+🧖|sauna_person||1|person in steamy room
+🧖‍♀️|sauna_woman||1|woman in steamy room
+🧑‍🔬|scientist||1|scientist
+🤳|selfie||1|selfie
+🤷|shrug||1|person shrugging
+🧑‍🎤|singer||1|singer
+⛷️|skier||1|skier
+🛌|sleeping_bed||1|person in bed
+🏂|snowboarder||1|snowboarder
+🗣️|speaking_head||1|speaking head
+🧍‍♂️|standing_man||1|man standing
+🧍|standing_person||1|person standing
+🧍‍♀️|standing_woman||1|woman standing
+🧑‍🎓|student||1|student
+🦸|superhero||1|superhero
+🦸‍♂️|superhero_man||1|man superhero
+🦸‍♀️|superhero_woman||1|woman superhero
+🦹|supervillain||1|supervillain
+🦹‍♂️|supervillain_man||1|man supervillain
+🦹‍♀️|supervillain_woman||1|woman supervillain
+🏄|surfer||1|person surfing
+🏄‍♂️|surfing_man||1|man surfing
+🏄‍♀️|surfing_woman||1|woman surfing
+🏊|swimmer||1|person swimming
+🏊‍♂️|swimming_man||1|man swimming
+🏊‍♀️|swimming_woman||1|woman swimming
+🧑‍🏫|teacher||1|teacher
+🧑‍💻|technologist||1|technologist
+💁‍♂️|tipping_hand_man|sassy_man|1|man tipping hand
+💁|tipping_hand_person|information_desk_person|1|person tipping hand
+💁‍♀️|tipping_hand_woman|sassy_woman|1|woman tipping hand
+👅|tongue||1|tongue
+🦷|tooth||1|tooth
+🧌|troll||1|troll
+👬|two_men_holding_hands||1|men holding hands
+👭|two_women_holding_hands||1|women holding hands
+✌️|v||1|victory hand
+🧛|vampire||1|vampire
+🧛‍♂️|vampire_man||1|man vampire
+🧛‍♀️|vampire_woman||1|woman vampire
+🖖|vulcan_salute||1|vulcan salute
+🚶|walking||1|person walking
+🚶‍♂️|walking_man||1|man walking
+🚶‍♀️|walking_woman||1|woman walking
+🤽|water_polo||1|person playing water polo
+👋|wave||1|waving hand
+🏋️|weight_lifting||1|person lifting weights
+🏋️‍♂️|weight_lifting_man||1|man lifting weights
+🏋️‍♀️|weight_lifting_woman||1|woman lifting weights
+👨‍🦳|white_haired_man||1|man: white hair
+👩‍🦳|white_haired_woman||1|woman: white hair
+👩|woman||1|woman
+👩‍🎨|woman_artist||1|woman artist
+👩‍🚀|woman_astronaut||1|woman astronaut
+🧔‍♀️|woman_beard||1|woman: beard
+🤸‍♀️|woman_cartwheeling||1|woman cartwheeling
+👩‍🍳|woman_cook||1|woman cook
+💃|woman_dancing|dancer|1|woman dancing
+🤦‍♀️|woman_facepalming||1|woman facepalming
+👩‍🏭|woman_factory_worker||1|woman factory worker
+👩‍🌾|woman_farmer||1|woman farmer
+👩‍🍼|woman_feeding_baby||1|woman feeding baby
+👩‍🚒|woman_firefighter||1|woman firefighter
+👩‍⚕️|woman_health_worker||1|woman health worker
+👩‍🦽|woman_in_manual_wheelchair||1|woman in manual wheelchair
+👩‍🦼|woman_in_motorized_wheelchair||1|woman in motorized wheelchair
+🤵‍♀️|woman_in_tuxedo||1|woman in tuxedo
+👩‍⚖️|woman_judge||1|woman judge
+🤹‍♀️|woman_juggling||1|woman juggling
+👩‍🔧|woman_mechanic||1|woman mechanic
+👩‍💼|woman_office_worker||1|woman office worker
+👩‍✈️|woman_pilot||1|woman pilot
+🤾‍♀️|woman_playing_handball||1|woman playing handball
+🤽‍♀️|woman_playing_water_polo||1|woman playing water polo
+👩‍🔬|woman_scientist||1|woman scientist
+🤷‍♀️|woman_shrugging||1|woman shrugging
+👩‍🎤|woman_singer||1|woman singer
+👩‍🎓|woman_student||1|woman student
+👩‍🏫|woman_teacher||1|woman teacher
+👩‍💻|woman_technologist||1|woman technologist
+🧕|woman_with_headscarf||1|woman with headscarf
+👩‍🦯|woman_with_probing_cane||1|woman with white cane
+👳‍♀️|woman_with_turban||1|woman wearing turban
+👰‍♀️|woman_with_veil|bride_with_veil|1|woman with veil
+🤼‍♀️|women_wrestling||1|women wrestling
+🤼|wrestling||1|people wrestling
+✍️|writing_hand||1|writing hand
+🧟|zombie||1|zombie
+🧟‍♂️|zombie_man||1|man zombie
+🧟‍♀️|zombie_woman||1|woman zombie
+🐜|ant||2|ant
+🐤|baby_chick||2|baby chick
+🦡|badger||2|badger
+🦇|bat||2|bat
+🐻|bear||2|bear
+🦫|beaver||2|beaver
+🐝|bee|honeybee|2|honeybee
+🪲|beetle||2|beetle
+🐦|bird||2|bird
+🦬|bison||2|bison
+🐦‍⬛|black_bird||2|black bird
+🐈‍⬛|black_cat||2|black cat
+🌼|blossom||2|blossom
+🐡|blowfish||2|blowfish
+🐗|boar||2|boar
+💐|bouquet||2|bouquet
+🐛|bug||2|bug
+🦋|butterfly||2|butterfly
+🌵|cactus||2|cactus
+🐫|camel||2|two-hump camel
+🐱|cat||2|cat face
+🐈|cat2||2|cat
+🌸|cherry_blossom||2|cherry blossom
+🐔|chicken||2|chicken
+🐿️|chipmunk||2|chipmunk
+🪳|cockroach||2|cockroach
+🪸|coral||2|coral
+🐮|cow||2|cow face
+🐄|cow2||2|cow
+🦗|cricket||2|cricket
+🐊|crocodile||2|crocodile
+🌳|deciduous_tree||2|deciduous tree
+🦌|deer||2|deer
+🦤|dodo||2|dodo
+🐶|dog||2|dog face
+🐕|dog2||2|dog
+🐬|dolphin|flipper|2|dolphin
+🫏|donkey||2|donkey
+🕊️|dove||2|dove
+🐉|dragon||2|dragon
+🐲|dragon_face||2|dragon face
+🐪|dromedary_camel||2|camel
+🦆|duck||2|duck
+🦅|eagle||2|eagle
+🌾|ear_of_rice||2|sheaf of rice
+🐘|elephant||2|elephant
+🪹|empty_nest||2|empty nest
+🌲|evergreen_tree||2|evergreen tree
+🍂|fallen_leaf||2|fallen leaf
+🪶|feather||2|feather
+🐾|feet|paw_prints|2|paw prints
+🐟|fish||2|fish
+🦩|flamingo||2|flamingo
+🪰|fly||2|fly
+🍀|four_leaf_clover||2|four leaf clover
+🦊|fox_face||2|fox
+🐸|frog||2|frog
+🦒|giraffe||2|giraffe
+🐐|goat||2|goat
+🪿|goose||2|goose
+🦍|gorilla||2|gorilla
+🦮|guide_dog||2|guide dog
+🐹|hamster||2|hamster
+🐥|hatched_chick||2|front-facing baby chick
+🐣|hatching_chick||2|hatching chick
+🦔|hedgehog||2|hedgehog
+🌿|herb||2|herb
+🌺|hibiscus||2|hibiscus
+🦛|hippopotamus||2|hippopotamus
+🐴|horse||2|horse face
+🪻|hyacinth||2|hyacinth
+🪼|jellyfish||2|jellyfish
+🦘|kangaroo||2|kangaroo
+🐨|koala||2|koala
+🐞|lady_beetle||2|lady beetle
+🍃|leaves||2|leaf fluttering in wind
+🐆|leopard||2|leopard
+🦁|lion||2|lion
+🦎|lizard||2|lizard
+🦙|llama||2|llama
+🪷|lotus||2|lotus
+🦣|mammoth||2|mammoth
+🍁|maple_leaf||2|maple leaf
+🦠|microbe||2|microbe
+🐒|monkey||2|monkey
+🐵|monkey_face||2|monkey face
+🫎|moose||2|moose
+🦟|mosquito||2|mosquito
+🐭|mouse||2|mouse face
+🐁|mouse2||2|mouse
+🍄|mushroom||2|mushroom
+🪺|nest_with_eggs||2|nest with eggs
+🐙|octopus||2|octopus
+🦧|orangutan||2|orangutan
+🦦|otter||2|otter
+🦉|owl||2|owl
+🐂|ox||2|ox
+🌴|palm_tree||2|palm tree
+🐼|panda_face||2|panda
+🦜|parrot||2|parrot
+🦚|peacock||2|peacock
+🐧|penguin||2|penguin
+🐷|pig||2|pig face
+🐖|pig2||2|pig
+🐽|pig_nose||2|pig nose
+🐻‍❄️|polar_bear||2|polar bear
+🐩|poodle||2|poodle
+🪴|potted_plant||2|potted plant
+🐰|rabbit||2|rabbit face
+🐇|rabbit2||2|rabbit
+🦝|raccoon||2|raccoon
+🐎|racehorse||2|horse
+🐏|ram||2|ram
+🐀|rat||2|rat
+🦏|rhinoceros||2|rhinoceros
+🐓|rooster||2|rooster
+🌹|rose||2|rose
+🏵️|rosette||2|rosette
+🦕|sauropod||2|sauropod
+🦂|scorpion||2|scorpion
+🦭|seal||2|seal
+🌱|seedling||2|seedling
+🐕‍🦺|service_dog||2|service dog
+☘️|shamrock||2|shamrock
+🦈|shark||2|shark
+🐑|sheep||2|ewe
+🐚|shell||2|spiral shell
+🦨|skunk||2|skunk
+🦥|sloth||2|sloth
+🐌|snail||2|snail
+🐍|snake||2|snake
+🕷️|spider||2|spider
+🕸️|spider_web||2|spider web
+🌻|sunflower||2|sunflower
+🦢|swan||2|swan
+🦖|t-rex||2|T-Rex
+🐯|tiger||2|tiger face
+🐅|tiger2||2|tiger
+🐠|tropical_fish||2|tropical fish
+🌷|tulip||2|tulip
+🦃|turkey||2|turkey
+🐢|turtle||2|turtle
+🦄|unicorn||2|unicorn
+🐃|water_buffalo||2|water buffalo
+🐳|whale||2|spouting whale
+🐋|whale2||2|whale
+💮|white_flower||2|white flower
+🥀|wilted_flower||2|wilted flower
+🪽|wing||2|wing
+🐺|wolf||2|wolf
+🪱|worm||2|worm
+🦓|zebra||2|zebra
+🏺|amphora||3|amphora
+🍎|apple||3|red apple
+🥑|avocado||3|avocado
+🍼|baby_bottle||3|baby bottle
+🥓|bacon||3|bacon
+🥯|bagel||3|bagel
+🥖|baguette_bread||3|baguette bread
+🍌|banana||3|banana
+🫘|beans||3|beans
+🍺|beer||3|beer mug
+🍻|beers||3|clinking beer mugs
+🫑|bell_pepper||3|bell pepper
+🍱|bento||3|bento box
+🧃|beverage_box||3|beverage box
+🎂|birthday||3|birthday cake
+🫐|blueberries||3|blueberries
+🥣|bowl_with_spoon||3|bowl with spoon
+🍞|bread||3|bread
+🥦|broccoli||3|broccoli
+🧋|bubble_tea||3|bubble tea
+🌯|burrito||3|burrito
+🧈|butter||3|butter
+🍰|cake||3|shortcake
+🍬|candy||3|candy
+🥫|canned_food||3|canned food
+🥕|carrot||3|carrot
+🍾|champagne||3|bottle with popping cork
+🧀|cheese||3|cheese wedge
+🍒|cherries||3|cherries
+🌰|chestnut||3|chestnut
+🍫|chocolate_bar||3|chocolate bar
+🥢|chopsticks||3|chopsticks
+🥂|clinking_glasses||3|clinking glasses
+🍸|cocktail||3|cocktail glass
+🥥|coconut||3|coconut
+☕|coffee||3|hot beverage
+🍪|cookie||3|cookie
+🌽|corn||3|ear of corn
+🦀|crab||3|crab
+🥐|croissant||3|croissant
+🥒|cucumber||3|cucumber
+🥤|cup_with_straw||3|cup with straw
+🧁|cupcake||3|cupcake
+🍛|curry||3|curry rice
+🍮|custard||3|custard
+🥩|cut_of_meat||3|cut of meat
+🍡|dango||3|dango
+🍩|doughnut||3|doughnut
+🥟|dumpling||3|dumpling
+🥚|egg||3|egg
+🍆|eggplant||3|eggplant
+🧆|falafel||3|falafel
+🍥|fish_cake||3|fish cake with swirl
+🫓|flatbread||3|flatbread
+🫕|fondue||3|fondue
+🍴|fork_and_knife||3|fork and knife
+🥠|fortune_cookie||3|fortune cookie
+🍳|fried_egg||3|cooking
+🍤|fried_shrimp||3|fried shrimp
+🍟|fries||3|french fries
+🧄|garlic||3|garlic
+🫚|ginger_root||3|ginger root
+🍇|grapes||3|grapes
+🍏|green_apple||3|green apple
+🥗|green_salad||3|green salad
+🍔|hamburger||3|hamburger
+🔪|hocho|knife|3|kitchen knife
+🍯|honey_pot||3|honey pot
+🌶️|hot_pepper||3|hot pepper
+🌭|hotdog||3|hot dog
+🍨|ice_cream||3|ice cream
+🧊|ice_cube||3|ice
+🍦|icecream||3|soft ice cream
+🫙|jar||3|jar
+🥝|kiwi_fruit||3|kiwi fruit
+🥬|leafy_green||3|leafy green
+🍋|lemon||3|lemon
+🦞|lobster||3|lobster
+🍭|lollipop||3|lollipop
+🥭|mango||3|mango
+🧉|mate||3|mate
+🍖|meat_on_bone||3|meat on bone
+🍈|melon||3|melon
+🥛|milk_glass||3|glass of milk
+🥮|moon_cake||3|moon cake
+🍢|oden||3|oden
+🫒|olive||3|olive
+🧅|onion||3|onion
+🦪|oyster||3|oyster
+🥞|pancakes||3|pancakes
+🫛|pea_pod||3|pea pod
+🍑|peach||3|peach
+🥜|peanuts||3|peanuts
+🍐|pear||3|pear
+🥧|pie||3|pie
+🍍|pineapple||3|pineapple
+🍕|pizza||3|pizza
+🍽️|plate_with_cutlery||3|fork and knife with plate
+🍿|popcorn||3|popcorn
+🥔|potato||3|potato
+🍗|poultry_leg||3|poultry leg
+🫗|pouring_liquid||3|pouring liquid
+🥨|pretzel||3|pretzel
+🍜|ramen||3|steaming bowl
+🍚|rice||3|cooked rice
+🍙|rice_ball||3|rice ball
+🍘|rice_cracker||3|rice cracker
+🍶|sake||3|sake
+🧂|salt||3|salt
+🥪|sandwich||3|sandwich
+🥘|shallow_pan_of_food||3|shallow pan of food
+🍧|shaved_ice||3|shaved ice
+🦐|shrimp||3|shrimp
+🍝|spaghetti||3|spaghetti
+🥄|spoon||3|spoon
+🦑|squid||3|squid
+🍲|stew||3|pot of food
+🍓|strawberry||3|strawberry
+🥙|stuffed_flatbread||3|stuffed flatbread
+🍣|sushi||3|sushi
+🍠|sweet_potato||3|roasted sweet potato
+🌮|taco||3|taco
+🥡|takeout_box||3|takeout box
+🫔|tamale||3|tamale
+🍊|tangerine|orange mandarin|3|tangerine
+🍵|tea||3|teacup without handle
+🫖|teapot||3|teapot
+🍅|tomato||3|tomato
+🍹|tropical_drink||3|tropical drink
+🥃|tumbler_glass||3|tumbler glass
+🧇|waffle||3|waffle
+🍉|watermelon||3|watermelon
+🍷|wine_glass||3|wine glass
+🥇|1st_place_medal||4|1st place medal
+🥈|2nd_place_medal||4|2nd place medal
+🥉|3rd_place_medal||4|3rd place medal
+🎱|8ball||4|pool 8 ball
+🎨|art||4|artist palette
+🏸|badminton||4|badminton
+🎈|balloon||4|balloon
+🎍|bamboo||4|pine decoration
+⚾|baseball||4|baseball
+🏀|basketball||4|basketball
+🃏|black_joker||4|joker
+🎳|bowling||4|bowling
+🥊|boxing_glove||4|boxing glove
+♟️|chess_pawn||4|chess pawn
+🎄|christmas_tree||4|Christmas tree
+♣️|clubs||4|club suit
+🎊|confetti_ball||4|confetti ball
+🏏|cricket_game||4|cricket game
+🔮|crystal_ball||4|crystal ball
+🥌|curling_stone||4|curling stone
+🎯|dart||4|bullseye
+♦️|diamonds||4|diamond suit
+🤿|diving_mask||4|diving mask
+🎎|dolls||4|Japanese dolls
+🏑|field_hockey||4|field hockey
+🧨|firecracker||4|firecracker
+🎆|fireworks||4|fireworks
+🎣|fishing_pole_and_fish||4|fishing pole
+🎏|flags||4|carp streamer
+🎴|flower_playing_cards||4|flower playing cards
+🥏|flying_disc||4|flying disc
+🏈|football||4|american football
+🖼️|framed_picture||4|framed picture
+🎲|game_die||4|game die
+🎁|gift||4|wrapped gift
+🥅|goal_net||4|goal net
+⛳|golf||4|flag in hole
+🔫|gun||4|water pistol
+♥️|hearts||4|heart suit
+🏒|ice_hockey||4|ice hockey
+⛸️|ice_skate||4|ice skate
+🎃|jack_o_lantern||4|jack-o-lantern
+🧩|jigsaw||4|puzzle piece
+🕹️|joystick||4|joystick
+🪁|kite||4|kite
+🪢|knot||4|knot
+🥍|lacrosse||4|lacrosse
+🪄|magic_wand||4|magic wand
+🀄|mahjong||4|mahjong red dragon
+🥋|martial_arts_uniform||4|martial arts uniform
+🎖️|medal_military||4|military medal
+🏅|medal_sports||4|sports medal
+🪩|mirror_ball||4|mirror ball
+🪆|nesting_dolls||4|nesting dolls
+🎭|performing_arts||4|performing arts
+🪅|pinata||4|piñata
+🏓|ping_pong||4|ping pong
+🧧|red_envelope||4|red envelope
+🎗️|reminder_ribbon||4|reminder ribbon
+🎀|ribbon||4|ribbon
+🎑|rice_scene||4|moon viewing ceremony
+🏉|rugby_football||4|rugby football
+🎽|running_shirt_with_sash||4|running shirt
+🪡|sewing_needle||4|sewing needle
+🎿|ski||4|skis
+🛷|sled||4|sled
+🎰|slot_machine||4|slot machine
+⚽|soccer||4|soccer ball
+🥎|softball||4|softball
+♠️|spades||4|spade suit
+🎇|sparkler||4|sparkler
+✨|sparkles||4|sparkles
+🎉|tada||4|party popper
+🎋|tanabata_tree||4|tanabata tree
+🧸|teddy_bear||4|teddy bear
+🎾|tennis||4|tennis
+🧵|thread||4|thread
+🎫|ticket||4|ticket
+🎟️|tickets||4|admission tickets
+🏆|trophy||4|trophy
+🎮|video_game||4|video game
+🏐|volleyball||4|volleyball
+🎐|wind_chime||4|wind chime
+🧶|yarn||4|yarn
+🪀|yo_yo||4|yo-yo
+🚡|aerial_tramway||5|aerial tramway
+✈️|airplane||5|airplane
+⏰|alarm_clock||5|alarm clock
+🚑|ambulance||5|ambulance
+⚓|anchor||5|anchor
+🚛|articulated_lorry||5|articulated lorry
+🛰️|artificial_satellite||5|satellite
+🛺|auto_rickshaw||5|auto rickshaw
+🏦|bank||5|bank
+💈|barber||5|barber pole
+🏖️|beach_umbrella||5|beach with umbrella
+🛎️|bellhop_bell||5|bellhop bell
+🚲|bike||5|bicycle
+🚙|blue_car||5|sport utility vehicle
+⛵|boat|sailboat|5|sailboat
+🧱|bricks||5|brick
+🌉|bridge_at_night||5|bridge at night
+🏗️|building_construction||5|building construction
+🚅|bullettrain_front||5|bullet train
+🚄|bullettrain_side||5|high-speed train
+🚌|bus||5|bus
+🚏|busstop||5|bus stop
+🏕️|camping||5|camping
+🛶|canoe||5|canoe
+🚗|car|red_car|5|automobile
+🎠|carousel_horse||5|carousel horse
+⛪|church||5|church
+🎪|circus_tent||5|circus tent
+🌇|city_sunrise||5|sunset
+🌆|city_sunset||5|cityscape at dusk
+🏙️|cityscape||5|cityscape
+🏛️|classical_building||5|classical building
+🕐|clock1||5|one o’clock
+🕙|clock10||5|ten o’clock
+🕥|clock1030||5|ten-thirty
+🕚|clock11||5|eleven o’clock
+🕦|clock1130||5|eleven-thirty
+🕛|clock12||5|twelve o’clock
+🕧|clock1230||5|twelve-thirty
+🕜|clock130||5|one-thirty
+🕑|clock2||5|two o’clock
+🕝|clock230||5|two-thirty
+🕒|clock3||5|three o’clock
+🕞|clock330||5|three-thirty
+🕓|clock4||5|four o’clock
+🕟|clock430||5|four-thirty
+🕔|clock5||5|five o’clock
+🕠|clock530||5|five-thirty
+🕕|clock6||5|six o’clock
+🕡|clock630||5|six-thirty
+🕖|clock7||5|seven o’clock
+🕢|clock730||5|seven-thirty
+🕗|clock8||5|eight o’clock
+🕣|clock830||5|eight-thirty
+🕘|clock9||5|nine o’clock
+🕤|clock930||5|nine-thirty
+🌂|closed_umbrella||5|closed umbrella
+☁️|cloud||5|cloud
+🌩️|cloud_with_lightning||5|cloud with lightning
+⛈️|cloud_with_lightning_and_rain||5|cloud with lightning and rain
+🌧️|cloud_with_rain||5|cloud with rain
+🌨️|cloud_with_snow||5|cloud with snow
+☄️|comet||5|comet
+🧭|compass||5|compass
+🚧|construction||5|construction
+🏪|convenience_store||5|convenience store
+🌙|crescent_moon||5|crescent moon
+🌀|cyclone||5|cyclone
+🏬|department_store||5|department store
+🏚️|derelict_house||5|derelict house
+🏜️|desert||5|desert
+🏝️|desert_island||5|desert island
+💧|droplet||5|droplet
+🌍|earth_africa||5|globe showing Europe-Africa
+🌎|earth_americas||5|globe showing Americas
+🌏|earth_asia||5|globe showing Asia-Australia
+🏰|european_castle||5|castle
+🏤|european_post_office||5|post office
+🏭|factory||5|factory
+🎡|ferris_wheel||5|ferris wheel
+⛴️|ferry||5|ferry
+🔥|fire||5|fire
+🚒|fire_engine||5|fire engine
+🌓|first_quarter_moon||5|first quarter moon
+🌛|first_quarter_moon_with_face||5|first quarter moon face
+🛬|flight_arrival||5|airplane arrival
+🛫|flight_departure||5|airplane departure
+🛸|flying_saucer||5|flying saucer
+🌫️|fog||5|fog
+🌁|foggy||5|foggy
+⛲|fountain||5|fountain
+⛽|fuelpump||5|fuel pump
+🌕|full_moon||5|full moon
+🌝|full_moon_with_face||5|full moon face
+🌐|globe_with_meridians||5|globe with meridians
+🚁|helicopter||5|helicopter
+🛕|hindu_temple||5|hindu temple
+🏥|hospital||5|hospital
+🏨|hotel||5|hotel
+♨️|hotsprings||5|hot springs
+⌛|hourglass||5|hourglass done
+⏳|hourglass_flowing_sand||5|hourglass not done
+🏠|house||5|house
+🏡|house_with_garden||5|house with garden
+🏘️|houses||5|houses
+🛖|hut||5|hut
+🗾|japan||5|map of Japan
+🏯|japanese_castle||5|Japanese castle
+🕋|kaaba||5|kaaba
+🛴|kick_scooter||5|kick scooter
+🌗|last_quarter_moon||5|last quarter moon
+🌜|last_quarter_moon_with_face||5|last quarter moon face
+🚈|light_rail||5|light rail
+🏩|love_hotel||5|love hotel
+🧳|luggage||5|luggage
+🕰️|mantelpiece_clock||5|mantelpiece clock
+🦽|manual_wheelchair||5|manual wheelchair
+🚇|metro||5|metro
+🌌|milky_way||5|milky way
+🚐|minibus||5|minibus
+🚝|monorail||5|monorail
+🌔|moon|waxing_gibbous_moon|5|waxing gibbous moon
+🕌|mosque||5|mosque
+🛥️|motor_boat||5|motor boat
+🛵|motor_scooter||5|motor scooter
+🏍️|motorcycle||5|motorcycle
+🦼|motorized_wheelchair||5|motorized wheelchair
+🛣️|motorway||5|motorway
+🗻|mount_fuji||5|mount fuji
+⛰️|mountain||5|mountain
+🚠|mountain_cableway||5|mountain cableway
+🚞|mountain_railway||5|mountain railway
+🏔️|mountain_snow||5|snow-capped mountain
+🏞️|national_park||5|national park
+🌑|new_moon||5|new moon
+🌚|new_moon_with_face||5|new moon face
+🌃|night_with_stars||5|night with stars
+🌊|ocean||5|water wave
+🏢|office||5|office building
+🛢️|oil_drum||5|oil drum
+🚘|oncoming_automobile||5|oncoming automobile
+🚍|oncoming_bus||5|oncoming bus
+🚔|oncoming_police_car||5|oncoming police car
+🚖|oncoming_taxi||5|oncoming taxi
+☂️|open_umbrella||5|umbrella
+🪂|parachute||5|parachute
+⛱️|parasol_on_ground||5|umbrella on ground
+⛅|partly_sunny||5|sun behind cloud
+🛳️|passenger_ship||5|passenger ship
+🛻|pickup_truck||5|pickup truck
+🛝|playground_slide||5|playground slide
+🚓|police_car||5|police car
+🏣|post_office||5|Japanese post office
+🏎️|racing_car||5|racing car
+🚃|railway_car||5|railway car
+🛤️|railway_track||5|railway track
+🌈|rainbow||5|rainbow
+🛟|ring_buoy||5|ring buoy
+🪐|ringed_planet||5|ringed planet
+🪨|rock||5|rock
+🚀|rocket||5|rocket
+🎢|roller_coaster||5|roller coaster
+🛼|roller_skate||5|roller skate
+🚨|rotating_light||5|police car light
+🏫|school||5|school
+💺|seat||5|seat
+⛩️|shinto_shrine||5|shinto shrine
+🚢|ship||5|ship
+🛹|skateboard||5|skateboard
+🛩️|small_airplane||5|small airplane
+❄️|snowflake||5|snowflake
+⛄|snowman||5|snowman without snow
+☃️|snowman_with_snow||5|snowman
+🚤|speedboat||5|speedboat
+🏟️|stadium||5|stadium
+⭐|star||5|star
+🌟|star2||5|glowing star
+🌠|stars||5|shooting star
+🚉|station||5|station
+🗽|statue_of_liberty||5|Statue of Liberty
+🚂|steam_locomotive||5|locomotive
+🛑|stop_sign||5|stop sign
+⏱️|stopwatch||5|stopwatch
+🌥️|sun_behind_large_cloud||5|sun behind large cloud
+🌦️|sun_behind_rain_cloud||5|sun behind rain cloud
+🌤️|sun_behind_small_cloud||5|sun behind small cloud
+🌞|sun_with_face||5|sun with face
+☀️|sunny||5|sun
+🌅|sunrise||5|sunrise
+🌄|sunrise_over_mountains||5|sunrise over mountains
+🚟|suspension_railway||5|suspension railway
+🕍|synagogue||5|synagogue
+🚕|taxi||5|taxi
+⛺|tent||5|tent
+🌡️|thermometer||5|thermometer
+⏲️|timer_clock||5|timer clock
+🗼|tokyo_tower||5|Tokyo tower
+🌪️|tornado||5|tornado
+🚜|tractor||5|tractor
+🚥|traffic_light||5|horizontal traffic light
+🚋|train||5|tram car
+🚆|train2||5|train
+🚊|tram||5|tram
+🚎|trolleybus||5|trolleybus
+🚚|truck||5|delivery truck
+☔|umbrella||5|umbrella with rain drops
+🚦|vertical_traffic_light||5|vertical traffic light
+🌋|volcano||5|volcano
+🌘|waning_crescent_moon||5|waning crescent moon
+🌖|waning_gibbous_moon||5|waning gibbous moon
+⌚|watch||5|watch
+🌒|waxing_crescent_moon||5|waxing crescent moon
+💒|wedding||5|wedding
+🛞|wheel||5|wheel
+🌬️|wind_face||5|wind face
+🪵|wood||5|wood
+🗺️|world_map||5|world map
+⚡|zap||5|high voltage
+🧮|abacus||6|abacus
+🪗|accordion||6|accordion
+🩹|adhesive_bandage||6|adhesive bandage
+⚗️|alembic||6|alembic
+👟|athletic_shoe||6|running shoe
+🪓|axe||6|axe
+⚖️|balance_scale||6|balance scale
+🩰|ballet_shoes||6|ballet shoes
+🗳️|ballot_box||6|ballot box with ballot
+🪕|banjo||6|banjo
+📊|bar_chart||6|bar chart
+🧺|basket||6|basket
+🛁|bathtub||6|bathtub
+🔋|battery||6|battery
+🛏️|bed||6|bed
+🔔|bell||6|bell
+👙|bikini||6|bikini
+🧢|billed_cap||6|billed cap
+✒️|black_nib||6|black nib
+📘|blue_book||6|blue book
+💣|bomb||6|bomb
+📖|book|open_book|6|open book
+🔖|bookmark||6|bookmark
+📑|bookmark_tabs||6|bookmark tabs
+📚|books||6|books
+🪃|boomerang||6|boomerang
+👢|boot||6|woman’s boot
+🏹|bow_and_arrow||6|bow and arrow
+💼|briefcase||6|briefcase
+🧹|broom||6|broom
+🫧|bubbles||6|bubbles
+🪣|bucket||6|bucket
+💡|bulb||6|light bulb
+📆|calendar||6|tear-off calendar
+📲|calling||6|mobile phone with arrow
+📷|camera||6|camera
+📸|camera_flash||6|camera with flash
+🕯️|candle||6|candle
+🗃️|card_file_box||6|card file box
+📇|card_index||6|card index
+🗂️|card_index_dividers||6|card index dividers
+🪚|carpentry_saw||6|carpentry saw
+💿|cd||6|optical disk
+⛓️|chains||6|chains
+🪑|chair||6|chair
+💹|chart||6|chart increasing with yen
+📉|chart_with_downwards_trend||6|chart decreasing
+📈|chart_with_upwards_trend||6|chart increasing
+🗜️|clamp||6|clamp
+🎬|clapper||6|clapper board
+📋|clipboard||6|clipboard
+📕|closed_book||6|closed book
+🔐|closed_lock_with_key||6|locked with key
+🧥|coat||6|coat
+⚰️|coffin||6|coffin
+🪙|coin||6|coin
+💻|computer||6|laptop
+🖱️|computer_mouse||6|computer mouse
+🎛️|control_knobs||6|control knobs
+🛋️|couch_and_lamp||6|couch and lamp
+🖍️|crayon||6|crayon
+💳|credit_card||6|credit card
+⚔️|crossed_swords||6|crossed swords
+👑|crown||6|crown
+🩼|crutch||6|crutch
+🗡️|dagger||6|dagger
+🕶️|dark_sunglasses||6|sunglasses
+📅|date||6|calendar
+🖥️|desktop_computer||6|desktop computer
+🪔|diya_lamp||6|diya lamp
+🧬|dna||6|dna
+💵|dollar||6|dollar banknote
+🚪|door||6|door
+👗|dress||6|dress
+🩸|drop_of_blood||6|drop of blood
+🥁|drum||6|drum
+📀|dvd||6|dvd
+🔌|electric_plug||6|electric plug
+🛗|elevator||6|elevator
+📧|email|e-mail|6|e-mail
+✉️|envelope||6|envelope
+📩|envelope_with_arrow||6|envelope with arrow
+💶|euro||6|euro banknote
+👓|eyeglasses||6|glasses
+📠|fax||6|fax machine
+🗄️|file_cabinet||6|file cabinet
+📁|file_folder||6|file folder
+📽️|film_projector||6|film projector
+🎞️|film_strip||6|film frames
+🧯|fire_extinguisher||6|fire extinguisher
+🔦|flashlight||6|flashlight
+🥿|flat_shoe||6|flat shoe
+💾|floppy_disk||6|floppy disk
+🪈|flute||6|flute
+🪭|folding_hand_fan||6|folding hand fan
+🖋️|fountain_pen||6|fountain pen
+⚱️|funeral_urn||6|funeral urn
+⚙️|gear||6|gear
+💎|gem||6|gem stone
+🧤|gloves||6|gloves
+🥽|goggles||6|goggles
+📗|green_book||6|green book
+🎸|guitar||6|guitar
+🪮|hair_pick||6|hair pick
+🔨|hammer||6|hammer
+⚒️|hammer_and_pick||6|hammer and pick
+🛠️|hammer_and_wrench||6|hammer and wrench
+🪬|hamsa||6|hamsa
+👜|handbag||6|handbag
+🎧|headphones||6|headphone
+🪦|headstone||6|headstone
+👠|high_heel||6|high-heeled shoe
+🥾|hiking_boot||6|hiking boot
+🪝|hook||6|hook
+🪪|identification_card||6|identification card
+📥|inbox_tray||6|inbox tray
+📨|incoming_envelope||6|incoming envelope
+📱|iphone||6|mobile phone
+🏮|izakaya_lantern|lantern|6|red paper lantern
+👖|jeans||6|jeans
+🔑|key||6|key
+⌨️|keyboard||6|keyboard
+👘|kimono||6|kimono
+🥼|lab_coat||6|lab coat
+🏷️|label||6|label
+🪜|ladder||6|ladder
+📒|ledger||6|ledger
+🎚️|level_slider||6|level slider
+🔗|link||6|link
+💄|lipstick||6|lipstick
+🔒|lock||6|locked
+🔏|lock_with_ink_pen||6|locked with pen
+🪘|long_drum||6|long drum
+🧴|lotion_bottle||6|lotion bottle
+🔊|loud_sound||6|speaker high volume
+📢|loudspeaker||6|loudspeaker
+🪫|low_battery||6|low battery
+🔍|mag||6|magnifying glass tilted left
+🔎|mag_right||6|magnifying glass tilted right
+🧲|magnet||6|magnet
+📫|mailbox||6|closed mailbox with raised flag
+📪|mailbox_closed||6|closed mailbox with lowered flag
+📬|mailbox_with_mail||6|open mailbox with raised flag
+📭|mailbox_with_no_mail||6|open mailbox with lowered flag
+👞|mans_shoe|shoe|6|man’s shoe
+🪇|maracas||6|maracas
+📣|mega||6|megaphone
+📝|memo|pencil|6|memo
+🎤|microphone||6|microphone
+🔬|microscope||6|microscope
+🪖|military_helmet||6|military helmet
+💽|minidisc||6|computer disk
+🪞|mirror||6|mirror
+💸|money_with_wings||6|money with wings
+💰|moneybag||6|money bag
+🎓|mortar_board||6|graduation cap
+🪤|mouse_trap||6|mouse trap
+🎥|movie_camera||6|movie camera
+🗿|moyai||6|moai
+🎹|musical_keyboard||6|musical keyboard
+🎵|musical_note||6|musical note
+🎼|musical_score||6|musical score
+🔇|mute||6|muted speaker
+🧿|nazar_amulet||6|nazar amulet
+👔|necktie||6|necktie
+📰|newspaper||6|newspaper
+🗞️|newspaper_roll||6|rolled-up newspaper
+🔕|no_bell||6|bell with slash
+📓|notebook||6|notebook
+📔|notebook_with_decorative_cover||6|notebook with decorative cover
+🎶|notes||6|musical notes
+🔩|nut_and_bolt||6|nut and bolt
+🗝️|old_key||6|old key
+🩱|one_piece_swimsuit||6|one-piece swimsuit
+📂|open_file_folder||6|open file folder
+📙|orange_book||6|orange book
+📤|outbox_tray||6|outbox tray
+📦|package||6|package
+📄|page_facing_up||6|page facing up
+📃|page_with_curl||6|page with curl
+📟|pager||6|pager
+🖌️|paintbrush||6|paintbrush
+📎|paperclip||6|paperclip
+🖇️|paperclips||6|linked paperclips
+🖊️|pen||6|pen
+✏️|pencil2||6|pencil
+🧫|petri_dish||6|petri dish
+☎️|phone|telephone|6|telephone
+⛏️|pick||6|pick
+💊|pill||6|pill
+🪧|placard||6|placard
+🪠|plunger||6|plunger
+📯|postal_horn||6|postal horn
+📮|postbox||6|postbox
+👝|pouch||6|clutch bag
+💷|pound||6|pound banknote
+📿|prayer_beads||6|prayer beads
+🖨️|printer||6|printer
+🦯|probing_cane||6|white cane
+👛|purse||6|purse
+📌|pushpin||6|pushpin
+📻|radio||6|radio
+🪒|razor||6|razor
+🧾|receipt||6|receipt
+⛑️|rescue_worker_helmet||6|rescue worker’s helmet
+💍|ring||6|ring
+🧻|roll_of_paper||6|roll of paper
+📍|round_pushpin||6|round pushpin
+🧷|safety_pin||6|safety pin
+🦺|safety_vest||6|safety vest
+👡|sandal||6|woman’s sandal
+🥻|sari||6|sari
+📡|satellite||6|satellite antenna
+🎷|saxophone||6|saxophone
+🧣|scarf||6|scarf
+🎒|school_satchel||6|backpack
+✂️|scissors||6|scissors
+🪛|screwdriver||6|screwdriver
+📜|scroll||6|scroll
+🛡️|shield||6|shield
+👕|shirt|tshirt|6|t-shirt
+🛍️|shopping||6|shopping bags
+🛒|shopping_cart||6|shopping cart
+🩳|shorts||6|shorts
+🚿|shower||6|shower
+🚬|smoking||6|cigarette
+🧼|soap||6|soap
+🧦|socks||6|socks
+🔉|sound||6|speaker medium volume
+🔈|speaker||6|speaker low volume
+🗓️|spiral_calendar||6|spiral calendar
+🗒️|spiral_notepad||6|spiral notepad
+🧽|sponge||6|sponge
+🩺|stethoscope||6|stethoscope
+📏|straight_ruler||6|straight ruler
+🎙️|studio_microphone||6|studio microphone
+🩲|swim_brief||6|briefs
+💉|syringe||6|syringe
+📞|telephone_receiver||6|telephone receiver
+🔭|telescope||6|telescope
+🧪|test_tube||6|test tube
+🩴|thong_sandal||6|thong sandal
+🚽|toilet||6|toilet
+🧰|toolbox||6|toolbox
+🪥|toothbrush||6|toothbrush
+🎩|tophat||6|top hat
+🖲️|trackball||6|trackball
+📐|triangular_ruler||6|triangular ruler
+🎺|trumpet||6|trumpet
+📺|tv||6|television
+🔓|unlock||6|unlocked
+📼|vhs||6|videocassette
+📹|video_camera||6|video camera
+🎻|violin||6|violin
+🗑️|wastebasket||6|wastebasket
+🪟|window||6|window
+👚|womans_clothes||6|woman’s clothes
+👒|womans_hat||6|woman’s hat
+🔧|wrench||6|wrench
+🩻|x_ray||6|x-ray
+💴|yen||6|yen banknote
+🔢|1234||7|input numbers
+🅰️|a||7|A button (blood type)
+🆎|ab||7|AB button (blood type)
+🔤|abc||7|input latin letters
+🔡|abcd||7|input latin lowercase
+🉑|accept||7|Japanese “acceptable” button
+♒|aquarius||7|Aquarius
+♈|aries||7|Aries
+◀️|arrow_backward||7|reverse button
+⏬|arrow_double_down||7|fast down button
+⏫|arrow_double_up||7|fast up button
+⬇️|arrow_down||7|down arrow
+🔽|arrow_down_small||7|downwards button
+▶️|arrow_forward||7|play button
+⤵️|arrow_heading_down||7|right arrow curving down
+⤴️|arrow_heading_up||7|right arrow curving up
+⬅️|arrow_left||7|left arrow
+↙️|arrow_lower_left||7|down-left arrow
+↘️|arrow_lower_right||7|down-right arrow
+➡️|arrow_right||7|right arrow
+↪️|arrow_right_hook||7|left arrow curving right
+⬆️|arrow_up||7|up arrow
+↕️|arrow_up_down||7|up-down arrow
+🔼|arrow_up_small||7|upwards button
+↖️|arrow_upper_left||7|up-left arrow
+↗️|arrow_upper_right||7|up-right arrow
+🔃|arrows_clockwise||7|clockwise vertical arrows
+🔄|arrows_counterclockwise||7|counterclockwise arrows button
+*️⃣|asterisk||7|keycap: *
+🏧|atm||7|ATM sign
+⚛️|atom_symbol||7|atom symbol
+🅱️|b||7|B button (blood type)
+🚼|baby_symbol||7|baby symbol
+🔙|back||7|BACK arrow
+🛄|baggage_claim||7|baggage claim
+☑️|ballot_box_with_check||7|check box with check
+‼️|bangbang||7|double exclamation mark
+🔰|beginner||7|Japanese symbol for beginner
+☣️|biohazard||7|biohazard
+⚫|black_circle||7|black circle
+⬛|black_large_square||7|black large square
+◾|black_medium_small_square||7|black medium-small square
+◼️|black_medium_square||7|black medium square
+▪️|black_small_square||7|black small square
+🔲|black_square_button||7|black square button
+🟦|blue_square||7|blue square
+🟤|brown_circle||7|brown circle
+🟫|brown_square||7|brown square
+♋|cancer||7|Cancer
+🔠|capital_abcd||7|input latin uppercase
+♑|capricorn||7|Capricorn
+🚸|children_crossing||7|children crossing
+🎦|cinema||7|cinema
+🆑|cl||7|CL button
+㊗️|congratulations||7|Japanese “congratulations” button
+🆒|cool||7|COOL button
+©️|copyright||7|copyright
+➰|curly_loop||7|curly loop
+💱|currency_exchange||7|currency exchange
+🛃|customs||7|customs
+💠|diamond_shape_with_a_dot_inside||7|diamond with a dot
+🚯|do_not_litter||7|no littering
+8️⃣|eight||7|keycap: 8
+✴️|eight_pointed_black_star||7|eight-pointed star
+✳️|eight_spoked_asterisk||7|eight-spoked asterisk
+⏏️|eject_button||7|eject button
+🔚|end||7|END arrow
+❗|exclamation|heavy_exclamation_mark|7|red exclamation mark
+⏩|fast_forward||7|fast-forward button
+♀️|female_sign||7|female sign
+5️⃣|five||7|keycap: 5
+⚜️|fleur_de_lis||7|fleur-de-lis
+4️⃣|four||7|keycap: 4
+🆓|free||7|FREE button
+♊|gemini||7|Gemini
+🟢|green_circle||7|green circle
+🟩|green_square||7|green square
+❕|grey_exclamation||7|white exclamation mark
+❔|grey_question||7|white question mark
+#️⃣|hash||7|keycap: #
+✔️|heavy_check_mark||7|check mark
+➗|heavy_division_sign||7|divide
+💲|heavy_dollar_sign||7|heavy dollar sign
+🟰|heavy_equals_sign||7|heavy equals sign
+➖|heavy_minus_sign||7|minus
+✖️|heavy_multiplication_x||7|multiply
+➕|heavy_plus_sign||7|plus
+🔆|high_brightness||7|bright button
+🆔|id||7|ID button
+🉐|ideograph_advantage||7|Japanese “bargain” button
+♾️|infinity||7|infinity
+ℹ️|information_source||7|information
+⁉️|interrobang||7|exclamation question mark
+🔟|keycap_ten||7|keycap: 10
+🪯|khanda||7|khanda
+🈁|koko||7|Japanese “here” button
+🔵|large_blue_circle||7|blue circle
+🔷|large_blue_diamond||7|large blue diamond
+🔶|large_orange_diamond||7|large orange diamond
+✝️|latin_cross||7|latin cross
+🛅|left_luggage||7|left luggage
+↔️|left_right_arrow||7|left-right arrow
+↩️|leftwards_arrow_with_hook||7|right arrow curving left
+♌|leo||7|Leo
+♎|libra||7|Libra
+➿|loop||7|double curly loop
+🔅|low_brightness||7|dim button
+Ⓜ️|m||7|circled M
+♂️|male_sign||7|male sign
+⚕️|medical_symbol||7|medical symbol
+🕎|menorah||7|menorah
+🚹|mens||7|men’s room
+📴|mobile_phone_off||7|mobile phone off
+📛|name_badge||7|name badge
+❎|negative_squared_cross_mark||7|cross mark button
+🆕|new||7|NEW button
+⏭️|next_track_button||7|next track button
+🆖|ng||7|NG button
+9️⃣|nine||7|keycap: 9
+🚳|no_bicycles||7|no bicycles
+⛔|no_entry||7|no entry
+🚫|no_entry_sign||7|prohibited
+📵|no_mobile_phones||7|no mobile phones
+🚷|no_pedestrians||7|no pedestrians
+🚭|no_smoking||7|no smoking
+🚱|non-potable_water||7|non-potable water
+⭕|o||7|hollow red circle
+🅾️|o2||7|O button (blood type)
+🆗|ok||7|OK button
+🕉️|om||7|om
+🔛|on||7|ON! arrow
+1️⃣|one||7|keycap: 1
+⛎|ophiuchus||7|Ophiuchus
+🟠|orange_circle||7|orange circle
+🟧|orange_square||7|orange square
+☦️|orthodox_cross||7|orthodox cross
+🅿️|parking||7|P button
+〽️|part_alternation_mark||7|part alternation mark
+🛂|passport_control||7|passport control
+⏸️|pause_button||7|pause button
+☮️|peace_symbol||7|peace symbol
+♓|pisces||7|Pisces
+🛐|place_of_worship||7|place of worship
+⏯️|play_or_pause_button||7|play or pause button
+🚰|potable_water||7|potable water
+⏮️|previous_track_button||7|last track button
+🟣|purple_circle||7|purple circle
+🟪|purple_square||7|purple square
+🚮|put_litter_in_its_place||7|litter in bin sign
+❓|question||7|red question mark
+🔘|radio_button||7|radio button
+☢️|radioactive||7|radioactive
+⏺️|record_button||7|record button
+♻️|recycle||7|recycling symbol
+🔴|red_circle||7|red circle
+🟥|red_square||7|red square
+®️|registered||7|registered
+🔁|repeat||7|repeat button
+🔂|repeat_one||7|repeat single button
+🚻|restroom||7|restroom
+⏪|rewind||7|fast reverse button
+🈂️|sa||7|Japanese “service charge” button
+♐|sagittarius||7|Sagittarius
+♏|scorpius||7|Scorpio
+㊙️|secret||7|Japanese “secret” button
+7️⃣|seven||7|keycap: 7
+📶|signal_strength||7|antenna bars
+6️⃣|six||7|keycap: 6
+🔯|six_pointed_star||7|dotted six-pointed star
+🔹|small_blue_diamond||7|small blue diamond
+🔸|small_orange_diamond||7|small orange diamond
+🔺|small_red_triangle||7|red triangle pointed up
+🔻|small_red_triangle_down||7|red triangle pointed down
+🔜|soon||7|SOON arrow
+🆘|sos||7|SOS button
+❇️|sparkle||7|sparkle
+☪️|star_and_crescent||7|star and crescent
+✡️|star_of_david||7|star of David
+⏹️|stop_button||7|stop button
+🔣|symbols||7|input symbols
+♉|taurus||7|Taurus
+3️⃣|three||7|keycap: 3
+™️|tm||7|trade mark
+🔝|top||7|TOP arrow
+⚧️|transgender_symbol||7|transgender symbol
+🔱|trident||7|trident emblem
+🔀|twisted_rightwards_arrows||7|shuffle tracks button
+2️⃣|two||7|keycap: 2
+🈹|u5272||7|Japanese “discount” button
+🈴|u5408||7|Japanese “passing grade” button
+🈺|u55b6||7|Japanese “open for business” button
+🈯|u6307||7|Japanese “reserved” button
+🈷️|u6708||7|Japanese “monthly amount” button
+🈶|u6709||7|Japanese “not free of charge” button
+🈵|u6e80||7|Japanese “no vacancy” button
+🈚|u7121||7|Japanese “free of charge” button
+🈸|u7533||7|Japanese “application” button
+🈲|u7981||7|Japanese “prohibited” button
+🈳|u7a7a||7|Japanese “vacancy” button
+🔞|underage||7|no one under eighteen
+🆙|up||7|UP! button
+📳|vibration_mode||7|vibration mode
+♍|virgo||7|Virgo
+🆚|vs||7|VS button
+⚠️|warning||7|warning
+〰️|wavy_dash||7|wavy dash
+🚾|wc||7|water closet
+☸️|wheel_of_dharma||7|wheel of dharma
+♿|wheelchair||7|wheelchair symbol
+✅|white_check_mark||7|check mark button
+⚪|white_circle||7|white circle
+⬜|white_large_square||7|white large square
+◽|white_medium_small_square||7|white medium-small square
+◻️|white_medium_square||7|white medium square
+▫️|white_small_square||7|white small square
+🔳|white_square_button||7|white square button
+🛜|wireless||7|wireless
+🚺|womens||7|women’s room
+❌|x||7|cross mark
+🟡|yellow_circle||7|yellow circle
+🟨|yellow_square||7|yellow square
+☯️|yin_yang||7|yin yang
+0️⃣|zero||7|keycap: 0
+🇦🇫|afghanistan||8|flag: Afghanistan
+🇦🇽|aland_islands||8|flag: Åland Islands
+🇦🇱|albania||8|flag: Albania
+🇩🇿|algeria||8|flag: Algeria
+🇦🇸|american_samoa||8|flag: American Samoa
+🇦🇩|andorra||8|flag: Andorra
+🇦🇴|angola||8|flag: Angola
+🇦🇮|anguilla||8|flag: Anguilla
+🇦🇶|antarctica||8|flag: Antarctica
+🇦🇬|antigua_barbuda||8|flag: Antigua & Barbuda
+🇦🇷|argentina||8|flag: Argentina
+🇦🇲|armenia||8|flag: Armenia
+🇦🇼|aruba||8|flag: Aruba
+🇦🇨|ascension_island||8|flag: Ascension Island
+🇦🇺|australia||8|flag: Australia
+🇦🇹|austria||8|flag: Austria
+🇦🇿|azerbaijan||8|flag: Azerbaijan
+🇧🇸|bahamas||8|flag: Bahamas
+🇧🇭|bahrain||8|flag: Bahrain
+🇧🇩|bangladesh||8|flag: Bangladesh
+🇧🇧|barbados||8|flag: Barbados
+🇧🇾|belarus||8|flag: Belarus
+🇧🇪|belgium||8|flag: Belgium
+🇧🇿|belize||8|flag: Belize
+🇧🇯|benin||8|flag: Benin
+🇧🇲|bermuda||8|flag: Bermuda
+🇧🇹|bhutan||8|flag: Bhutan
+🏴|black_flag||8|black flag
+🇧🇴|bolivia||8|flag: Bolivia
+🇧🇦|bosnia_herzegovina||8|flag: Bosnia & Herzegovina
+🇧🇼|botswana||8|flag: Botswana
+🇧🇻|bouvet_island||8|flag: Bouvet Island
+🇧🇷|brazil||8|flag: Brazil
+🇮🇴|british_indian_ocean_territory||8|flag: British Indian Ocean Territory
+🇻🇬|british_virgin_islands||8|flag: British Virgin Islands
+🇧🇳|brunei||8|flag: Brunei
+🇧🇬|bulgaria||8|flag: Bulgaria
+🇧🇫|burkina_faso||8|flag: Burkina Faso
+🇧🇮|burundi||8|flag: Burundi
+🇰🇭|cambodia||8|flag: Cambodia
+🇨🇲|cameroon||8|flag: Cameroon
+🇨🇦|canada||8|flag: Canada
+🇮🇨|canary_islands||8|flag: Canary Islands
+🇨🇻|cape_verde||8|flag: Cape Verde
+🇧🇶|caribbean_netherlands||8|flag: Caribbean Netherlands
+🇰🇾|cayman_islands||8|flag: Cayman Islands
+🇨🇫|central_african_republic||8|flag: Central African Republic
+🇪🇦|ceuta_melilla||8|flag: Ceuta & Melilla
+🇹🇩|chad||8|flag: Chad
+🏁|checkered_flag||8|chequered flag
+🇨🇱|chile||8|flag: Chile
+🇨🇽|christmas_island||8|flag: Christmas Island
+🇨🇵|clipperton_island||8|flag: Clipperton Island
+🇨🇳|cn||8|flag: China
+🇨🇨|cocos_islands||8|flag: Cocos (Keeling) Islands
+🇨🇴|colombia||8|flag: Colombia
+🇰🇲|comoros||8|flag: Comoros
+🇨🇬|congo_brazzaville||8|flag: Congo - Brazzaville
+🇨🇩|congo_kinshasa||8|flag: Congo - Kinshasa
+🇨🇰|cook_islands||8|flag: Cook Islands
+🇨🇷|costa_rica||8|flag: Costa Rica
+🇨🇮|cote_divoire||8|flag: Côte d’Ivoire
+🇭🇷|croatia||8|flag: Croatia
+🎌|crossed_flags||8|crossed flags
+🇨🇺|cuba||8|flag: Cuba
+🇨🇼|curacao||8|flag: Curaçao
+🇨🇾|cyprus||8|flag: Cyprus
+🇨🇿|czech_republic||8|flag: Czechia
+🇩🇪|de||8|flag: Germany
+🇩🇰|denmark||8|flag: Denmark
+🇩🇬|diego_garcia||8|flag: Diego Garcia
+🇩🇯|djibouti||8|flag: Djibouti
+🇩🇲|dominica||8|flag: Dominica
+🇩🇴|dominican_republic||8|flag: Dominican Republic
+🇪🇨|ecuador||8|flag: Ecuador
+🇪🇬|egypt||8|flag: Egypt
+🇸🇻|el_salvador||8|flag: El Salvador
+🏴󠁧󠁢󠁥󠁮󠁧󠁿|england||8|flag: England
+🇬🇶|equatorial_guinea||8|flag: Equatorial Guinea
+🇪🇷|eritrea||8|flag: Eritrea
+🇪🇸|es||8|flag: Spain
+🇪🇪|estonia||8|flag: Estonia
+🇪🇹|ethiopia||8|flag: Ethiopia
+🇪🇺|eu|european_union|8|flag: European Union
+🇫🇰|falkland_islands||8|flag: Falkland Islands
+🇫🇴|faroe_islands||8|flag: Faroe Islands
+🇫🇯|fiji||8|flag: Fiji
+🇫🇮|finland||8|flag: Finland
+🇫🇷|fr||8|flag: France
+🇬🇫|french_guiana||8|flag: French Guiana
+🇵🇫|french_polynesia||8|flag: French Polynesia
+🇹🇫|french_southern_territories||8|flag: French Southern Territories
+🇬🇦|gabon||8|flag: Gabon
+🇬🇲|gambia||8|flag: Gambia
+🇬🇧|gb|uk|8|flag: United Kingdom
+🇬🇪|georgia||8|flag: Georgia
+🇬🇭|ghana||8|flag: Ghana
+🇬🇮|gibraltar||8|flag: Gibraltar
+🇬🇷|greece||8|flag: Greece
+🇬🇱|greenland||8|flag: Greenland
+🇬🇩|grenada||8|flag: Grenada
+🇬🇵|guadeloupe||8|flag: Guadeloupe
+🇬🇺|guam||8|flag: Guam
+🇬🇹|guatemala||8|flag: Guatemala
+🇬🇬|guernsey||8|flag: Guernsey
+🇬🇳|guinea||8|flag: Guinea
+🇬🇼|guinea_bissau||8|flag: Guinea-Bissau
+🇬🇾|guyana||8|flag: Guyana
+🇭🇹|haiti||8|flag: Haiti
+🇭🇲|heard_mcdonald_islands||8|flag: Heard & McDonald Islands
+🇭🇳|honduras||8|flag: Honduras
+🇭🇰|hong_kong||8|flag: Hong Kong SAR China
+🇭🇺|hungary||8|flag: Hungary
+🇮🇸|iceland||8|flag: Iceland
+🇮🇳|india||8|flag: India
+🇮🇩|indonesia||8|flag: Indonesia
+🇮🇷|iran||8|flag: Iran
+🇮🇶|iraq||8|flag: Iraq
+🇮🇪|ireland||8|flag: Ireland
+🇮🇲|isle_of_man||8|flag: Isle of Man
+🇮🇱|israel||8|flag: Israel
+🇮🇹|it||8|flag: Italy
+🇯🇲|jamaica||8|flag: Jamaica
+🇯🇪|jersey||8|flag: Jersey
+🇯🇴|jordan||8|flag: Jordan
+🇯🇵|jp||8|flag: Japan
+🇰🇿|kazakhstan||8|flag: Kazakhstan
+🇰🇪|kenya||8|flag: Kenya
+🇰🇮|kiribati||8|flag: Kiribati
+🇽🇰|kosovo||8|flag: Kosovo
+🇰🇷|kr||8|flag: South Korea
+🇰🇼|kuwait||8|flag: Kuwait
+🇰🇬|kyrgyzstan||8|flag: Kyrgyzstan
+🇱🇦|laos||8|flag: Laos
+🇱🇻|latvia||8|flag: Latvia
+🇱🇧|lebanon||8|flag: Lebanon
+🇱🇸|lesotho||8|flag: Lesotho
+🇱🇷|liberia||8|flag: Liberia
+🇱🇾|libya||8|flag: Libya
+🇱🇮|liechtenstein||8|flag: Liechtenstein
+🇱🇹|lithuania||8|flag: Lithuania
+🇱🇺|luxembourg||8|flag: Luxembourg
+🇲🇴|macau||8|flag: Macao SAR China
+🇲🇰|macedonia||8|flag: North Macedonia
+🇲🇬|madagascar||8|flag: Madagascar
+🇲🇼|malawi||8|flag: Malawi
+🇲🇾|malaysia||8|flag: Malaysia
+🇲🇻|maldives||8|flag: Maldives
+🇲🇱|mali||8|flag: Mali
+🇲🇹|malta||8|flag: Malta
+🇲🇭|marshall_islands||8|flag: Marshall Islands
+🇲🇶|martinique||8|flag: Martinique
+🇲🇷|mauritania||8|flag: Mauritania
+🇲🇺|mauritius||8|flag: Mauritius
+🇾🇹|mayotte||8|flag: Mayotte
+🇲🇽|mexico||8|flag: Mexico
+🇫🇲|micronesia||8|flag: Micronesia
+🇲🇩|moldova||8|flag: Moldova
+🇲🇨|monaco||8|flag: Monaco
+🇲🇳|mongolia||8|flag: Mongolia
+🇲🇪|montenegro||8|flag: Montenegro
+🇲🇸|montserrat||8|flag: Montserrat
+🇲🇦|morocco||8|flag: Morocco
+🇲🇿|mozambique||8|flag: Mozambique
+🇲🇲|myanmar||8|flag: Myanmar (Burma)
+🇳🇦|namibia||8|flag: Namibia
+🇳🇷|nauru||8|flag: Nauru
+🇳🇵|nepal||8|flag: Nepal
+🇳🇱|netherlands||8|flag: Netherlands
+🇳🇨|new_caledonia||8|flag: New Caledonia
+🇳🇿|new_zealand||8|flag: New Zealand
+🇳🇮|nicaragua||8|flag: Nicaragua
+🇳🇪|niger||8|flag: Niger
+🇳🇬|nigeria||8|flag: Nigeria
+🇳🇺|niue||8|flag: Niue
+🇳🇫|norfolk_island||8|flag: Norfolk Island
+🇰🇵|north_korea||8|flag: North Korea
+🇲🇵|northern_mariana_islands||8|flag: Northern Mariana Islands
+🇳🇴|norway||8|flag: Norway
+🇴🇲|oman||8|flag: Oman
+🇵🇰|pakistan||8|flag: Pakistan
+🇵🇼|palau||8|flag: Palau
+🇵🇸|palestinian_territories||8|flag: Palestinian Territories
+🇵🇦|panama||8|flag: Panama
+🇵🇬|papua_new_guinea||8|flag: Papua New Guinea
+🇵🇾|paraguay||8|flag: Paraguay
+🇵🇪|peru||8|flag: Peru
+🇵🇭|philippines||8|flag: Philippines
+🏴‍☠️|pirate_flag||8|pirate flag
+🇵🇳|pitcairn_islands||8|flag: Pitcairn Islands
+🇵🇱|poland||8|flag: Poland
+🇵🇹|portugal||8|flag: Portugal
+🇵🇷|puerto_rico||8|flag: Puerto Rico
+🇶🇦|qatar||8|flag: Qatar
+🏳️‍🌈|rainbow_flag||8|rainbow flag
+🇷🇪|reunion||8|flag: Réunion
+🇷🇴|romania||8|flag: Romania
+🇷🇺|ru||8|flag: Russia
+🇷🇼|rwanda||8|flag: Rwanda
+🇼🇸|samoa||8|flag: Samoa
+🇸🇲|san_marino||8|flag: San Marino
+🇸🇹|sao_tome_principe||8|flag: São Tomé & Príncipe
+🇸🇦|saudi_arabia||8|flag: Saudi Arabia
+🏴󠁧󠁢󠁳󠁣󠁴󠁿|scotland||8|flag: Scotland
+🇸🇳|senegal||8|flag: Senegal
+🇷🇸|serbia||8|flag: Serbia
+🇸🇨|seychelles||8|flag: Seychelles
+🇸🇱|sierra_leone||8|flag: Sierra Leone
+🇸🇬|singapore||8|flag: Singapore
+🇸🇽|sint_maarten||8|flag: Sint Maarten
+🇸🇰|slovakia||8|flag: Slovakia
+🇸🇮|slovenia||8|flag: Slovenia
+🇸🇧|solomon_islands||8|flag: Solomon Islands
+🇸🇴|somalia||8|flag: Somalia
+🇿🇦|south_africa||8|flag: South Africa
+🇬🇸|south_georgia_south_sandwich_islands||8|flag: South Georgia & South Sandwich Islands
+🇸🇸|south_sudan||8|flag: South Sudan
+🇱🇰|sri_lanka||8|flag: Sri Lanka
+🇧🇱|st_barthelemy||8|flag: St. Barthélemy
+🇸🇭|st_helena||8|flag: St. Helena
+🇰🇳|st_kitts_nevis||8|flag: St. Kitts & Nevis
+🇱🇨|st_lucia||8|flag: St. Lucia
+🇲🇫|st_martin||8|flag: St. Martin
+🇵🇲|st_pierre_miquelon||8|flag: St. Pierre & Miquelon
+🇻🇨|st_vincent_grenadines||8|flag: St. Vincent & Grenadines
+🇸🇩|sudan||8|flag: Sudan
+🇸🇷|suriname||8|flag: Suriname
+🇸🇯|svalbard_jan_mayen||8|flag: Svalbard & Jan Mayen
+🇸🇿|swaziland||8|flag: Eswatini
+🇸🇪|sweden||8|flag: Sweden
+🇨🇭|switzerland||8|flag: Switzerland
+🇸🇾|syria||8|flag: Syria
+🇹🇼|taiwan||8|flag: Taiwan
+🇹🇯|tajikistan||8|flag: Tajikistan
+🇹🇿|tanzania||8|flag: Tanzania
+🇹🇭|thailand||8|flag: Thailand
+🇹🇱|timor_leste||8|flag: Timor-Leste
+🇹🇬|togo||8|flag: Togo
+🇹🇰|tokelau||8|flag: Tokelau
+🇹🇴|tonga||8|flag: Tonga
+🇹🇷|tr||8|flag: Turkey
+🏳️‍⚧️|transgender_flag||8|transgender flag
+🚩|triangular_flag_on_post||8|triangular flag
+🇹🇹|trinidad_tobago||8|flag: Trinidad & Tobago
+🇹🇦|tristan_da_cunha||8|flag: Tristan da Cunha
+🇹🇳|tunisia||8|flag: Tunisia
+🇹🇲|turkmenistan||8|flag: Turkmenistan
+🇹🇨|turks_caicos_islands||8|flag: Turks & Caicos Islands
+🇹🇻|tuvalu||8|flag: Tuvalu
+🇺🇬|uganda||8|flag: Uganda
+🇺🇦|ukraine||8|flag: Ukraine
+🇦🇪|united_arab_emirates||8|flag: United Arab Emirates
+🇺🇳|united_nations||8|flag: United Nations
+🇺🇾|uruguay||8|flag: Uruguay
+🇺🇸|us||8|flag: United States
+🇺🇲|us_outlying_islands||8|flag: U.S. Outlying Islands
+🇻🇮|us_virgin_islands||8|flag: U.S. Virgin Islands
+🇺🇿|uzbekistan||8|flag: Uzbekistan
+🇻🇺|vanuatu||8|flag: Vanuatu
+🇻🇦|vatican_city||8|flag: Vatican City
+🇻🇪|venezuela||8|flag: Venezuela
+🇻🇳|vietnam||8|flag: Vietnam
+🏴󠁧󠁢󠁷󠁬󠁳󠁿|wales||8|flag: Wales
+🇼🇫|wallis_futuna||8|flag: Wallis & Futuna
+🇪🇭|western_sahara||8|flag: Western Sahara
+🏳️|white_flag||8|white flag
+🇾🇪|yemen||8|flag: Yemen
+🇿🇲|zambia||8|flag: Zambia
+🇿🇼|zimbabwe||8|flag: Zimbabwe
+`.trim();
+
+// rowIndex|original search text (rows whose search text is not exactly
+// "description primary extras")
+const SEARCH_OVERRIDES = `
+0|hundred points score perfect 100
+1|alien ufo alien
+2|anger symbol angry anger
+3|angry face mad annoyed angry
+4|anguished face stunned anguished
+5|astonished face amazed gasp astonished
+8|smiling face with smiling eyes proud blush
+9|collision explode boom collision
+13|cold face freezing ice cold_face
+14|anxious face with sweat nervous cold_sweat
+18|crying face sad tear cry
+19|crying cat sad tear crying_cat_face
+20|heart with arrow love heart cupid
+21|face with symbols on mouth foul cursing_face
+22|dashing away wind blow fast dash
+23|disappointed face sad disappointed
+24|sad but relieved face phew sweat nervous disappointed_relieved
+26|dizzy star dizzy
+28|dotted line face invisible dotted_line_face
+30|exploding head mind blown exploding_head
+34|face holding back tears tears gratitude face_holding_back_tears
+36|face with diagonal mouth confused face_with_diagonal_mouth
+37|face with head-bandage hurt face_with_head_bandage
+38|face with open eyes and hand over mouth gasp shock face_with_open_eyes_and_hand_over_mouth
+41|face with thermometer sick face_with_thermometer
+42|fearful face scared shocked oops fearful
+46|ghost halloween ghost
+47|heart with ribbon chocolates gift_heart
+52|grinning face smile happy grinning
+53|face with hand over mouth quiet whoops hand_over_mouth
+54|pile of poo crap hankey poop shit
+55|hear-no-evil monkey monkey deaf hear_no_evil
+56|red heart love heart
+58|smiling face with heart-eyes love crush heart_eyes
+65|hot face heat sweating hot_face
+67|hushed face silence speechless hushed
+68|angry face with horns angry devil evil horns imp
+69|smiling face with halo angel innocent
+71|ogre monster japanese_ogre
+72|face with tears of joy tears joy
+74|kiss mark lipstick kiss
+78|face blowing a kiss flirt kissing_heart
+80|grinning squinting face happy haha laughing satisfied
+83|love letter email envelope love_letter
+84|lying face liar lying_face
+85|face with medical mask sick ill mask
+86|melting face sarcasm dread melting_face
+88|money-mouth face rich money_mouth_face
+90|nauseated face sick barf disgusted nauseated_face
+91|nerd face geek glasses nerd_face
+92|neutral face meh neutral_face
+93|face without mouth mute silence no_mouth
+94|face with open mouth surprise impressed wow open_mouth
+96|partying face celebration birthday partying_face
+98|persevering face struggling persevere
+100|pleading face puppy eyes pleading_face
+103|enraged face angry rage pout
+104|face with raised eyebrow suspicious raised_eyebrow
+105|smiling face blush pleased relaxed
+106|relieved face whew relieved
+110|rolling on the floor laughing lol laughing rofl
+112|saluting face respect saluting_face
+113|face screaming in fear horror shocked scream
+114|weary cat horror scream_cat
+115|see-no-evil monkey monkey blind ignore see_no_evil
+116|shaking face shock shaking_face
+117|shushing face silence quiet shushing_face
+118|skull dead danger poison skull
+119|skull and crossbones danger pirate skull_and_crossbones
+120|sleeping face zzz sleeping
+121|sleepy face tired sleepy
+124|grinning face with smiling eyes happy joy laugh pleased smile
+126|grinning face with big eyes happy joy haha smiley
+129|smiling face with hearts love smiling_face_with_three_hearts
+130|smiling face with horns devil evil horns smiling_imp
+131|smirking face smug smirk
+133|sneezing face achoo sick sneezing_face
+134|loudly crying face sad cry bawling sob
+135|alien monster game retro space_invader
+137|speak-no-evil monkey monkey mute hush speak_no_evil
+138|speech balloon comment speech_balloon
+139|star-struck eyes star_struck
+141|squinting face with tongue prank stuck_out_tongue_closed_eyes
+142|winking face with tongue prank silly stuck_out_tongue_winking_eye
+143|smiling face with sunglasses cool sunglasses
+145|sweat droplets water workout sweat_drops
+146|grinning face with sweat hot sweat_smile
+148|thought balloon thinking thought_balloon
+149|tired face upset whine tired_face
+150|face with steam from nose smug triumph
+152|unamused face meh unamused
+154|face vomiting barf sick vomiting_face
+155|weary face tired weary
+157|winking face flirt wink
+158|woozy face groggy woozy_face
+159|worried face nervous worried
+162|face savoring food tongue lick yum
+163|zany face goofy wacky zany_face
+164|zipper-mouth face silence hush zipper_mouth_face
+165|zzz sleeping zzz
+166|thumbs up approve ok +1 thumbsup
+167|thumbs down disapprove bury -1 thumbsdown
+173|baby child newborn baby
+176|person taking bath shower bath
+187|person bouncing ball basketball bouncing_ball_person
+189|person bowing respect thanks bow
+190|man bowing respect thanks bowing_man
+191|woman bowing respect thanks bowing_woman
+192|boy child boy
+194|breast-feeding nursing breast_feeding
+196|bust in silhouette user bust_in_silhouette
+197|busts in silhouette users group team busts_in_silhouette
+201|clapping hands praise applause clap
+202|person climbing bouldering climbing
+203|man climbing bouldering climbing_man
+204|woman climbing bouldering climbing_woman
+205|construction worker helmet construction_worker
+206|man construction worker helmet construction_worker_man
+207|woman construction worker helmet construction_worker_woman
+209|woman and man holding hands date couple
+218|crossed fingers luck hopeful crossed_fingers
+221|people with bunny ears bunny dancers
+222|men with bunny ears bunny dancing_men
+223|women with bunny ears bunny dancing_women
+227|detective sleuth detective
+228|ear hear sound listen ear
+234|eyes look see watch eyes
+240|family home parents child family
+267|woman detective sleuth female_detective
+270|oncoming fist attack fist_oncoming facepunch punch
+271|raised fist power fist_raised fist
+274|footprints feet tracks footprints
+281|girl child girl
+288|person getting haircut beauty haircut
+291|raised hand highfive stop hand raised_hand
+294|handshake deal handshake
+296|heart hands love heart_hands
+307|mouth kiss lips
+308|person in lotus position meditation lotus_position
+309|man in lotus position meditation lotus_position_man
+310|woman in lotus position meditation lotus_position_woman
+313|mage wizard mage
+314|man mage wizard mage_man
+315|woman mage wizard mage_woman
+316|man detective sleuth male_detective
+317|man mustache father dad man
+318|man artist painter man_artist
+319|man astronaut space man_astronaut
+322|man cook chef man_cook
+323|man dancing dancer man_dancing
+329|man health worker doctor nurse man_health_worker
+333|man judge justice man_judge
+336|man office worker business man_office_worker
+340|man scientist research man_scientist
+342|man singer rockstar man_singer
+343|man student graduation man_student
+344|man teacher school professor man_teacher
+345|man technologist coder man_technologist
+350|person getting massage spa massage
+351|man getting massage spa massage_man
+352|woman getting massage spa massage_woman
+365|mrs. claus santa mrs_claus
+366|flexed biceps flex bicep strong workout muscle
+368|nail polish beauty manicure nail_care
+370|person gesturing no stop halt denied no_good
+371|man gesturing no stop halt denied no_good_man ng_man
+372|woman gesturing no stop halt denied no_good_woman ng_woman
+373|nose smell nose
+375|ok hand ok_hand
+376|man gesturing ok ok_man
+377|person gesturing ok ok_person
+378|woman gesturing ok ok_woman
+386|people holding hands couple date people_holding_hands
+394|person in tuxedo groom marriage wedding person_in_tuxedo
+400|person with veil marriage wedding person_with_veil
+409|police officer law police_officer cop
+410|man police officer law cop policeman
+411|woman police officer law cop policewoman
+415|folded hands please hope wish pray
+419|prince crown royal prince
+420|princess crown royal princess
+423|raising hands hooray raised_hands
+434|person running exercise workout marathon runner running
+435|man running exercise workout marathon running_man
+436|woman running exercise workout marathon running_woman
+437|santa claus christmas santa
+438|man in steamy room steamy sauna_man
+439|person in steamy room steamy sauna_person
+440|woman in steamy room steamy sauna_woman
+467|man tipping hand information tipping_hand_man sassy_man
+469|woman tipping hand information tipping_hand_woman sassy_woman
+470|tongue taste tongue
+473|men holding hands couple date two_men_holding_hands
+474|women holding hands couple date two_women_holding_hands
+475|victory hand victory peace v
+479|vulcan salute prosper spock vulcan_salute
+484|waving hand goodbye wave
+485|person lifting weights gym workout weight_lifting
+486|man lifting weights gym workout weight_lifting_man
+487|woman lifting weights gym workout weight_lifting_woman
+490|woman girls woman
+491|woman artist painter woman_artist
+492|woman astronaut space woman_astronaut
+495|woman cook chef woman_cook
+496|woman dancing dress woman_dancing dancer
+502|woman health worker doctor nurse woman_health_worker
+506|woman judge justice woman_judge
+509|woman office worker business woman_office_worker
+513|woman scientist research woman_scientist
+515|woman singer rockstar woman_singer
+516|woman student graduation woman_student
+517|woman teacher school professor woman_teacher
+518|woman technologist coder woman_technologist
+519|woman with headscarf hijab woman_with_headscarf
+544|bouquet flowers bouquet
+549|cat face pet cat
+551|cherry blossom flower spring cherry_blossom
+560|deciduous tree wood deciduous_tree
+563|dog face pet dog
+566|donkey mule donkey
+567|dove peace dove
+570|camel desert dromedary_camel
+576|evergreen tree wood evergreen_tree
+577|fallen leaf autumn fallen_leaf
+583|four leaf clover luck four_leaf_clover
+588|goose honk goose
+591|hamster pet hamster
+603|lady beetle bug lady_beetle
+604|leaf fluttering in wind leaf leaves
+611|maple leaf canada maple_leaf
+612|microbe germ microbe
+615|moose canada moose
+619|mushroom fungus mushroom
+635|poodle dog poodle
+637|rabbit face bunny rabbit
+640|horse speed racehorse
+645|rose flower rose
+647|sauropod dinosaur sauropod
+650|seedling plant seedling
+655|spiral shell sea beach shell
+658|snail slow snail
+664|t-rex dinosaur t-rex
+668|tulip flower tulip
+669|turkey thanksgiving turkey
+670|turtle slow turtle
+673|spouting whale sea whale
+677|wing fly wing
+684|baby bottle milk baby_bottle
+688|banana fruit banana
+690|beer mug drink beer
+691|clinking beer mugs drinks beers
+695|birthday cake party birthday
+698|bread toast bread
+703|shortcake dessert cake
+704|candy sweet candy
+707|bottle with popping cork bottle bubbly celebration champagne
+709|cherries fruit cherries
+713|clinking glasses cheers toast clinking_glasses
+714|cocktail glass drink cocktail
+716|hot beverage cafe espresso coffee
+731|eggplant aubergine eggplant
+736|fork and knife cutlery fork_and_knife
+738|cooking breakfast fried_egg
+739|fried shrimp tempura fried_shrimp
+744|green apple fruit green_apple
+746|hamburger burger hamburger
+747|kitchen knife cut chop hocho knife
+749|hot pepper spicy hot_pepper
+778|fork and knife with plate dining dinner plate_with_cutlery
+781|poultry leg meat chicken poultry_leg
+784|steaming bowl noodle ramen
+791|shallow pan of food paella curry shallow_pan_of_food
+794|spaghetti pasta spaghetti
+798|strawberry fruit strawberry
+806|teacup without handle green breakfast tea
+809|tropical drink summer vacation tropical_drink
+810|tumbler glass whisky tumbler_glass
+814|1st place medal gold 1st_place_medal
+815|2nd place medal silver 2nd_place_medal
+816|3rd place medal bronze 3rd_place_medal
+817|pool 8 ball pool billiards 8ball
+818|artist palette design paint art
+820|balloon party birthday balloon
+822|baseball sports baseball
+823|basketball sports basketball
+828|christmas tree christmas_tree
+832|crystal ball fortune crystal_ball
+834|bullseye target dart
+837|japanese dolls dolls
+840|fireworks festival celebration fireworks
+845|american football sports football
+847|game die dice gambling game_die
+848|wrapped gift present birthday christmas gift
+851|water pistol shoot weapon gun
+854|ice skate skating ice_skate
+855|jack-o-lantern halloween jack_o_lantern
+865|sports medal gold winner medal_sports
+866|mirror ball disco party mirror_ball
+868|performing arts theater drama performing_arts
+876|running shirt marathon running_shirt_with_sash
+881|soccer ball sports soccer
+885|sparkles shiny sparkles
+886|party popper hooray party tada
+889|tennis sports tennis
+893|trophy award contest winner trophy
+894|video game play controller console video_game
+900|airplane flight airplane
+901|alarm clock morning alarm_clock
+903|anchor ship anchor
+905|satellite orbit space artificial_satellite
+911|bicycle bicycle bike
+917|bullet train train bullettrain_front
+918|high-speed train train bullettrain_side
+929|cityscape skyline cityscape
+955|closed umbrella weather rain closed_umbrella
+963|construction wip construction
+965|crescent moon night crescent_moon
+966|cyclone swirl cyclone
+971|droplet water droplet
+972|globe showing europe-africa globe world international earth_africa
+973|globe showing americas globe world international earth_americas
+974|globe showing asia-australia globe world international earth_asia
+980|fire burn fire
+986|flying saucer ufo flying_saucer
+988|foggy karl foggy
+993|globe with meridians world global international globe_with_meridians
+999|hourglass done time hourglass
+1000|hourglass not done time hourglass_flowing_sand
+1005|map of japan japan
+1006|japanese castle japanese_castle
+1036|water wave sea ocean
+1045|umbrella on ground beach_umbrella parasol_on_ground
+1046|sun behind cloud weather cloud partly_sunny
+1047|passenger ship cruise passenger_ship
+1051|japanese post office post_office
+1056|ring buoy life preserver ring_buoy
+1059|rocket ship launch rocket
+1062|police car light 911 emergency rotating_light
+1068|small airplane flight small_airplane
+1069|snowflake winter cold weather snowflake
+1070|snowman without snow winter snowman
+1071|snowman winter christmas snowman_with_snow
+1072|speedboat ship speedboat
+1078|statue of liberty statue_of_liberty
+1079|locomotive train steam_locomotive
+1085|sun with face summer sun_with_face
+1086|sun weather sunny
+1092|tent camping tent
+1095|tokyo tower tokyo_tower
+1104|umbrella with rain drops rain weather umbrella
+1105|vertical traffic light semaphore vertical_traffic_light
+1109|watch time watch
+1111|wedding marriage wedding
+1115|world map travel world_map
+1116|high voltage lightning thunder zap
+1121|running shoe sneaker sport running athletic_shoe
+1127|bar chart stats metrics bar_chart
+1130|battery power battery
+1132|bell sound notification bell
+1133|bikini beach bikini
+1137|bomb boom bomb
+1141|books library books
+1144|bow and arrow archery bow_and_arrow
+1145|briefcase business briefcase
+1149|light bulb idea light bulb
+1150|tear-off calendar schedule calendar
+1151|mobile phone with arrow call incoming calling
+1152|camera photo camera
+1153|camera with flash photo camera_flash
+1163|chart decreasing graph metrics chart_with_downwards_trend
+1164|chart increasing graph metrics chart_with_upwards_trend
+1166|clapper board film clapper
+1169|locked with key security closed_lock_with_key
+1171|coffin funeral coffin
+1173|laptop desktop screen computer
+1178|credit card subscription credit_card
+1180|crown king queen royal crown
+1184|calendar calendar schedule date
+1188|dollar banknote money dollar
+1197|envelope letter email envelope
+1200|glasses glasses eyeglasses
+1203|file folder directory file_folder
+1209|floppy disk save floppy_disk
+1210|flute recorder flute
+1211|folding hand fan sensu folding_hand_fan
+1215|gem stone diamond gem
+1219|guitar rock guitar
+1221|hammer tool hammer
+1225|handbag bag handbag
+1226|headphone music earphones headphones
+1228|high-heeled shoe shoe high_heel
+1234|mobile phone smartphone mobile iphone
+1236|jeans pants jeans
+1237|key lock password key
+1241|label tag label
+1246|lipstick makeup lipstick
+1247|locked security private lock
+1251|speaker high volume volume loud_sound
+1252|loudspeaker announcement loudspeaker
+1254|magnifying glass tilted left search zoom mag
+1262|maracas shaker maracas
+1264|memo document note memo pencil
+1265|microphone sing microphone
+1266|microscope science laboratory investigate microscope
+1270|money with wings dollar money_with_wings
+1271|money bag dollar cream moneybag
+1272|graduation cap education college university graduation mortar_board
+1274|movie camera film video movie_camera
+1275|moai stone moyai
+1276|musical keyboard piano musical_keyboard
+1279|muted speaker sound volume mute
+1281|necktie shirt formal necktie
+1282|newspaper press newspaper
+1283|rolled-up newspaper press newspaper_roll
+1284|bell with slash volume off no_bell
+1287|musical notes music notes
+1294|package shipping package
+1295|page facing up document page_facing_up
+1306|pill health medicine pill
+1311|clutch bag bag pouch
+1317|pushpin location pushpin
+1318|radio podcast radio
+1322|ring wedding marriage engaged ring
+1323|roll of paper toilet roll_of_paper
+1324|round pushpin location round_pushpin
+1327|woman’s sandal shoe sandal
+1329|satellite antenna signal satellite
+1333|scissors cut scissors
+1335|scroll document scroll
+1338|shopping bags bags shopping
+1341|shower bath shower
+1342|cigarette cigarette smoking
+1345|speaker medium volume volume sound
+1352|studio microphone podcast studio_microphone
+1354|syringe health hospital needle syringe
+1355|telephone receiver phone call telephone_receiver
+1359|toilet wc toilet
+1362|top hat hat classy tophat
+1367|unlocked security unlock
+1371|wastebasket trash wastebasket
+1375|wrench tool wrench
+1378|input numbers numbers 1234
+1379|a button (blood type) a
+1380|ab button (blood type) ab
+1381|input latin letters alphabet abc
+1383|japanese “acceptable” button accept
+1384|aquarius aquarius
+1385|aries aries
+1405|counterclockwise arrows button sync arrows_counterclockwise
+1407|atm sign atm
+1409|b button (blood type) b
+1411|back arrow back
+1412|baggage claim airport baggage_claim
+1415|japanese symbol for beginner beginner
+1426|cancer cancer
+1427|input latin uppercase letters capital_abcd
+1428|capricorn capricorn
+1430|cinema film movie cinema
+1431|cl button cl
+1432|japanese “congratulations” button congratulations
+1433|cool button cool
+1444|end arrow end
+1445|red exclamation mark bang exclamation heavy_exclamation_mark
+1451|free button free
+1452|gemini gemini
+1457|keycap: # number hash
+1466|id button id
+1467|japanese “bargain” button ideograph_advantage
+1473|japanese “here” button koko
+1480|right arrow curving left return leftwards_arrow_with_hook
+1481|leo leo
+1482|libra libra
+1485|circled m m
+1490|mobile phone off mute off mobile_phone_off
+1493|new button fresh new
+1495|ng button ng
+1498|no entry limit no_entry
+1499|prohibited block forbidden no_entry_sign
+1505|o button (blood type) o2
+1506|ok button yes ok
+1508|on! arrow on
+1510|ophiuchus ophiuchus
+1514|p button parking
+1519|pisces pisces
+1527|red question mark confused question
+1531|recycling symbol environment green recycle
+1535|repeat button loop repeat
+1537|restroom toilet restroom
+1539|japanese “service charge” button sa
+1540|sagittarius sagittarius
+1541|scorpio scorpius
+1542|japanese “secret” button secret
+1544|antenna bars wifi signal_strength
+1551|soon arrow soon
+1552|sos button help emergency sos
+1555|star of david star_of_david
+1558|taurus taurus
+1560|trade mark trademark tm
+1561|top arrow top
+1564|shuffle tracks button shuffle twisted_rightwards_arrows
+1566|japanese “discount” button u5272
+1567|japanese “passing grade” button u5408
+1568|japanese “open for business” button u55b6
+1569|japanese “reserved” button u6307
+1570|japanese “monthly amount” button u6708
+1571|japanese “not free of charge” button u6709
+1572|japanese “no vacancy” button u6e80
+1573|japanese “free of charge” button u7121
+1574|japanese “application” button u7533
+1575|japanese “prohibited” button u7981
+1576|japanese “vacancy” button u7a7a
+1578|up! button up
+1580|virgo virgo
+1581|vs button vs
+1582|warning wip warning
+1584|water closet toilet restroom wc
+1586|wheelchair symbol accessibility wheelchair
+1594|wireless wifi wireless
+1601|flag: afghanistan afghanistan
+1602|flag: åland islands aland_islands
+1603|flag: albania albania
+1604|flag: algeria algeria
+1605|flag: american samoa american_samoa
+1606|flag: andorra andorra
+1607|flag: angola angola
+1608|flag: anguilla anguilla
+1609|flag: antarctica antarctica
+1610|flag: antigua & barbuda antigua_barbuda
+1611|flag: argentina argentina
+1612|flag: armenia armenia
+1613|flag: aruba aruba
+1614|flag: ascension island ascension_island
+1615|flag: australia australia
+1616|flag: austria austria
+1617|flag: azerbaijan azerbaijan
+1618|flag: bahamas bahamas
+1619|flag: bahrain bahrain
+1620|flag: bangladesh bangladesh
+1621|flag: barbados barbados
+1622|flag: belarus belarus
+1623|flag: belgium belgium
+1624|flag: belize belize
+1625|flag: benin benin
+1626|flag: bermuda bermuda
+1627|flag: bhutan bhutan
+1629|flag: bolivia bolivia
+1630|flag: bosnia & herzegovina bosnia_herzegovina
+1631|flag: botswana botswana
+1632|flag: bouvet island bouvet_island
+1633|flag: brazil brazil
+1634|flag: british indian ocean territory british_indian_ocean_territory
+1635|flag: british virgin islands british_virgin_islands
+1636|flag: brunei brunei
+1637|flag: bulgaria bulgaria
+1638|flag: burkina faso burkina_faso
+1639|flag: burundi burundi
+1640|flag: cambodia cambodia
+1641|flag: cameroon cameroon
+1642|flag: canada canada
+1643|flag: canary islands canary_islands
+1644|flag: cape verde cape_verde
+1645|flag: caribbean netherlands caribbean_netherlands
+1646|flag: cayman islands cayman_islands
+1647|flag: central african republic central_african_republic
+1648|flag: ceuta & melilla ceuta_melilla
+1649|flag: chad chad
+1650|chequered flag milestone finish checkered_flag
+1651|flag: chile chile
+1652|flag: christmas island christmas_island
+1653|flag: clipperton island clipperton_island
+1654|flag: china china cn
+1655|flag: cocos (keeling) islands keeling cocos_islands
+1656|flag: colombia colombia
+1657|flag: comoros comoros
+1658|flag: congo - brazzaville congo_brazzaville
+1659|flag: congo - kinshasa congo_kinshasa
+1660|flag: cook islands cook_islands
+1661|flag: costa rica costa_rica
+1662|flag: côte d’ivoire ivory cote_divoire
+1663|flag: croatia croatia
+1665|flag: cuba cuba
+1666|flag: curaçao curacao
+1667|flag: cyprus cyprus
+1668|flag: czechia czech_republic
+1669|flag: germany flag germany de
+1670|flag: denmark denmark
+1671|flag: diego garcia diego_garcia
+1672|flag: djibouti djibouti
+1673|flag: dominica dominica
+1674|flag: dominican republic dominican_republic
+1675|flag: ecuador ecuador
+1676|flag: egypt egypt
+1677|flag: el salvador el_salvador
+1678|flag: england england
+1679|flag: equatorial guinea equatorial_guinea
+1680|flag: eritrea eritrea
+1681|flag: spain spain es
+1682|flag: estonia estonia
+1683|flag: ethiopia ethiopia
+1684|flag: european union eu european_union
+1685|flag: falkland islands falkland_islands
+1686|flag: faroe islands faroe_islands
+1687|flag: fiji fiji
+1688|flag: finland finland
+1689|flag: france france french fr
+1690|flag: french guiana french_guiana
+1691|flag: french polynesia french_polynesia
+1692|flag: french southern territories french_southern_territories
+1693|flag: gabon gabon
+1694|flag: gambia gambia
+1695|flag: united kingdom flag british gb uk
+1696|flag: georgia georgia
+1697|flag: ghana ghana
+1698|flag: gibraltar gibraltar
+1699|flag: greece greece
+1700|flag: greenland greenland
+1701|flag: grenada grenada
+1702|flag: guadeloupe guadeloupe
+1703|flag: guam guam
+1704|flag: guatemala guatemala
+1705|flag: guernsey guernsey
+1706|flag: guinea guinea
+1707|flag: guinea-bissau guinea_bissau
+1708|flag: guyana guyana
+1709|flag: haiti haiti
+1710|flag: heard & mcdonald islands heard_mcdonald_islands
+1711|flag: honduras honduras
+1712|flag: hong kong sar china hong_kong
+1713|flag: hungary hungary
+1714|flag: iceland iceland
+1715|flag: india india
+1716|flag: indonesia indonesia
+1717|flag: iran iran
+1718|flag: iraq iraq
+1719|flag: ireland ireland
+1720|flag: isle of man isle_of_man
+1721|flag: israel israel
+1722|flag: italy italy it
+1723|flag: jamaica jamaica
+1724|flag: jersey jersey
+1725|flag: jordan jordan
+1726|flag: japan japan jp
+1727|flag: kazakhstan kazakhstan
+1728|flag: kenya kenya
+1729|flag: kiribati kiribati
+1730|flag: kosovo kosovo
+1731|flag: south korea korea kr
+1732|flag: kuwait kuwait
+1733|flag: kyrgyzstan kyrgyzstan
+1734|flag: laos laos
+1735|flag: latvia latvia
+1736|flag: lebanon lebanon
+1737|flag: lesotho lesotho
+1738|flag: liberia liberia
+1739|flag: libya libya
+1740|flag: liechtenstein liechtenstein
+1741|flag: lithuania lithuania
+1742|flag: luxembourg luxembourg
+1743|flag: macao sar china macau
+1744|flag: north macedonia macedonia
+1745|flag: madagascar madagascar
+1746|flag: malawi malawi
+1747|flag: malaysia malaysia
+1748|flag: maldives maldives
+1749|flag: mali mali
+1750|flag: malta malta
+1751|flag: marshall islands marshall_islands
+1752|flag: martinique martinique
+1753|flag: mauritania mauritania
+1754|flag: mauritius mauritius
+1755|flag: mayotte mayotte
+1756|flag: mexico mexico
+1757|flag: micronesia micronesia
+1758|flag: moldova moldova
+1759|flag: monaco monaco
+1760|flag: mongolia mongolia
+1761|flag: montenegro montenegro
+1762|flag: montserrat montserrat
+1763|flag: morocco morocco
+1764|flag: mozambique mozambique
+1765|flag: myanmar (burma) burma myanmar
+1766|flag: namibia namibia
+1767|flag: nauru nauru
+1768|flag: nepal nepal
+1769|flag: netherlands netherlands
+1770|flag: new caledonia new_caledonia
+1771|flag: new zealand new_zealand
+1772|flag: nicaragua nicaragua
+1773|flag: niger niger
+1774|flag: nigeria nigeria
+1775|flag: niue niue
+1776|flag: norfolk island norfolk_island
+1777|flag: north korea north_korea
+1778|flag: northern mariana islands northern_mariana_islands
+1779|flag: norway norway
+1780|flag: oman oman
+1781|flag: pakistan pakistan
+1782|flag: palau palau
+1783|flag: palestinian territories palestinian_territories
+1784|flag: panama panama
+1785|flag: papua new guinea papua_new_guinea
+1786|flag: paraguay paraguay
+1787|flag: peru peru
+1788|flag: philippines philippines
+1790|flag: pitcairn islands pitcairn_islands
+1791|flag: poland poland
+1792|flag: portugal portugal
+1793|flag: puerto rico puerto_rico
+1794|flag: qatar qatar
+1795|rainbow flag pride rainbow_flag
+1796|flag: réunion reunion
+1797|flag: romania romania
+1798|flag: russia russia ru
+1799|flag: rwanda rwanda
+1800|flag: samoa samoa
+1801|flag: san marino san_marino
+1802|flag: são tomé & príncipe sao_tome_principe
+1803|flag: saudi arabia saudi_arabia
+1804|flag: scotland scotland
+1805|flag: senegal senegal
+1806|flag: serbia serbia
+1807|flag: seychelles seychelles
+1808|flag: sierra leone sierra_leone
+1809|flag: singapore singapore
+1810|flag: sint maarten sint_maarten
+1811|flag: slovakia slovakia
+1812|flag: slovenia slovenia
+1813|flag: solomon islands solomon_islands
+1814|flag: somalia somalia
+1815|flag: south africa south_africa
+1816|flag: south georgia & south sandwich islands south_georgia_south_sandwich_islands
+1817|flag: south sudan south_sudan
+1818|flag: sri lanka sri_lanka
+1819|flag: st. barthélemy st_barthelemy
+1820|flag: st. helena st_helena
+1821|flag: st. kitts & nevis st_kitts_nevis
+1822|flag: st. lucia st_lucia
+1823|flag: st. martin st_martin
+1824|flag: st. pierre & miquelon st_pierre_miquelon
+1825|flag: st. vincent & grenadines st_vincent_grenadines
+1826|flag: sudan sudan
+1827|flag: suriname suriname
+1828|flag: svalbard & jan mayen svalbard_jan_mayen
+1829|flag: eswatini swaziland
+1830|flag: sweden sweden
+1831|flag: switzerland switzerland
+1832|flag: syria syria
+1833|flag: taiwan taiwan
+1834|flag: tajikistan tajikistan
+1835|flag: tanzania tanzania
+1836|flag: thailand thailand
+1837|flag: timor-leste timor_leste
+1838|flag: togo togo
+1839|flag: tokelau tokelau
+1840|flag: tonga tonga
+1841|flag: turkey turkey tr
+1844|flag: trinidad & tobago trinidad_tobago
+1845|flag: tristan da cunha tristan_da_cunha
+1846|flag: tunisia tunisia
+1847|flag: turkmenistan turkmenistan
+1848|flag: turks & caicos islands turks_caicos_islands
+1849|flag: tuvalu tuvalu
+1850|flag: uganda uganda
+1851|flag: ukraine ukraine
+1852|flag: united arab emirates united_arab_emirates
+1853|flag: united nations united_nations
+1854|flag: uruguay uruguay
+1855|flag: united states flag united america us
+1856|flag: u.s. outlying islands us_outlying_islands
+1857|flag: u.s. virgin islands us_virgin_islands
+1858|flag: uzbekistan uzbekistan
+1859|flag: vanuatu vanuatu
+1860|flag: vatican city vatican_city
+1861|flag: venezuela venezuela
+1862|flag: vietnam vietnam
+1863|flag: wales wales
+1864|flag: wallis & futuna wallis_futuna
+1865|flag: western sahara western_sahara
+1867|flag: yemen yemen
+1868|flag: zambia zambia
+1869|flag: zimbabwe zimbabwe
+`.trim();
+
+function buildRows() {
+  const overrides = new Map();
+  for (const line of SEARCH_OVERRIDES.split("\n")) {
+    const pipe = line.indexOf("|");
+    overrides.set(Number(line.slice(0, pipe)), line.slice(pipe + 1));
+  }
+  const rows = [];
+  let index = 0;
+  for (const line of ROW_DATA.split("\n")) {
+    const [emoji, primary, extras, categoryIndex, description] = line.split("|");
+    const category = CATEGORIES[Number(categoryIndex)];
+    const search = overrides.get(index) ?? `${description} ${primary} ${extras}`.replace(/\s+/g, " ").trim();
+    rows.push(Object.freeze([emoji, primary, extras, category, description, search]));
+    index += 1;
+  }
+  return rows;
+}
+
+export const EMOJI_ROWS = Object.freeze(buildRows());
