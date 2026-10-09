@@ -7792,7 +7792,11 @@ paths:
         item stays queued. This does not merge the pull request. A land-queue
         mirror consumes the claimant's open-claim slot just like a claim does:
         naming a claimant who already holds the room's cap answers 409
-        too_many_open_claims. API keys need rooms:write.
+        too_many_open_claims. API keys need rooms:write. requestId is an
+        optional caller-supplied idempotency key
+        ([A-Za-z0-9][A-Za-z0-9_-]{0,63}): a retry with the same key replays
+        the stored response instead of re-executing, and reuse for a
+        different operation is 409 idempotency_conflict.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -7807,14 +7811,15 @@ paths:
                 repo: { type: string, description: "GitHub repository as owner/name" }
                 prNumber: { type: integer, minimum: 1 }
                 claimantMemberId: { type: string }
+                requestId: { type: string, description: "Caller-supplied idempotency key; retries with the same key replay the original response." }
       responses:
         '201':
           description: The queued item, with changed empty on the first observation
         '200':
-          description: The pull request was already queued (duplicate true)
+          description: The pull request was already queued (duplicate true), or a requestId replay of the original response
         '401': { description: unauthenticated }
         '404': { description: pr_not_found when a token is set and GitHub has no such pull request }
-        '409': { description: land_queue_full, or too_many_open_claims when the named claimant already holds the room's open-claim cap }
+        '409': { description: land_queue_full, too_many_open_claims when the named claimant already holds the room's open-claim cap, or idempotency_conflict when requestId was reused for a different operation or is still in flight }
         '422': { description: invalid_land_item }
         '503':
           description: >-
@@ -7843,7 +7848,11 @@ paths:
       summary: Remove one land-queue item
       description: >-
         Any member can remove. itemId comes from add_land_item or
-        list_land_queue. API keys need rooms:write.
+        list_land_queue. API keys need rooms:write. requestId is an optional
+        caller-supplied idempotency key ([A-Za-z0-9][A-Za-z0-9_-]{0,63}): a
+        retry with the same key replays the original receipt instead of
+        answering 404, and reuse for a different operation is 409
+        idempotency_conflict.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -7856,10 +7865,12 @@ paths:
               additionalProperties: false
               properties:
                 itemId: { type: string }
+                requestId: { type: string, description: "Caller-supplied idempotency key; retries with the same key replay the original response." }
       responses:
-        '200': { description: "{ roomId, itemId, removed: true }" }
+        '200': { description: "{ roomId, itemId, removed: true }, including requestId replays" }
         '401': { description: unauthenticated }
         '404': { description: land_item_not_found }
+        '409': { description: idempotency_conflict when requestId was reused for a different operation or is still in flight }
         '422': { description: invalid_land_item }
   /api/rooms/{roomId}/report_tip:
     post:
@@ -7869,7 +7880,11 @@ paths:
         including the first report, emits land.updated and wakes the claimant
         through the existing event-push path. The payload is the pull request
         number, head SHA, check/behind/merged state, and what changed. API
-        keys need rooms:write.
+        keys need rooms:write. requestId is an optional caller-supplied
+        idempotency key ([A-Za-z0-9][A-Za-z0-9_-]{0,63}): a retry with the
+        same key replays the original response (including the original
+        changed payload) without emitting a second event, and reuse for a
+        different operation is 409 idempotency_conflict.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -7884,10 +7899,12 @@ paths:
                 itemId: { type: string }
                 sourceRevision: { type: string, maxLength: 200 }
                 buildId: { type: string, maxLength: 200 }
+                requestId: { type: string, description: "Caller-supplied idempotency key; retries with the same key replay the original response." }
       responses:
         '200': { description: "{ item, changed }" }
         '401': { description: unauthenticated }
         '404': { description: land_item_not_found }
+        '409': { description: idempotency_conflict when requestId was reused for a different operation or is still in flight }
         '422': { description: invalid_land_tip }
   /api/rooms/{roomId}/bonds:
     get:
