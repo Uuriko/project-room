@@ -4542,7 +4542,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const room = this.room(roomId);
-      const cursor = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id)?.sequence ?? 0;
+      const cursor = this.catchUpCursor(roomId, auth.member.id);
       const { H, startAfter, C, limit: pageLimit } = resolveHistoryWindow({ sequence: room.sequence, storedCursor: cursor, horizon, after, continuationCursor: frozenCursor, limit });
       const rows = this.db.prepare("SELECT sequence, body FROM events WHERE room_id=? AND sequence>? AND sequence<=? ORDER BY sequence LIMIT ?").all(roomId, startAfter, H, pageLimit)
         .map(r => ({ sequence: r.sequence, event: JSON.parse(r.body) }));
@@ -4558,6 +4558,20 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         && peerEventVisible(row.event, { memberId: auth.member.id, identityId, isOwner }));
       return { roomId, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null, ...brief };
     });
+  }
+  // QA8 (qa8-catchup-counts-own): your own writes are not news. The marker the
+  // return brief (Catch up) reports is the acknowledged cursor moved past the unbroken run of
+  // events they authored right after it, so a room you only wrote in yourself
+  // has nothing to catch up on, while the first event by anyone else (and all
+  // that follows it) stays new. This is a read: no marker is written here, and
+  // only markCaughtUp stores one. Event-resume cursors (snapshot, room context)
+  // keep the stored marker so an agent never skips its own events on resume.
+  catchUpCursor(roomId, memberId) {
+    const stored = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, memberId)?.sequence ?? 0;
+    const next = this.db.prepare(`SELECT sequence FROM events WHERE room_id=? AND sequence>?
+      AND coalesce(json_extract(body, '$.actorId'), '') <> ? ORDER BY sequence LIMIT 1`).get(roomId, stored, memberId)?.sequence ?? null;
+    return this.db.prepare("SELECT coalesce(max(sequence), ?) AS sequence FROM events WHERE room_id=? AND sequence>? AND (? IS NULL OR sequence<?)")
+      .get(stored, roomId, stored, next, next).sequence;
   }
   markCaughtUp(token, roomId, sequence, expectedSessionBinding = null) {
     return this.transaction(() => {
