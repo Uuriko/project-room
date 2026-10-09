@@ -83,6 +83,9 @@ export function formatInviteExpiry(expiresAt, nowMs = Date.now()) {
 // Every branch names what happened and what to do — no dead ends.
 export function joinErrorMessage({ status, code, action = "join" } = {}) {
   const again = "Check your connection and try again.";
+  // M-03: the join POST's own timeout (status 0, like a network failure)
+  // names what happened — the room answered the preview, the redeem stalled.
+  if (code === "join_timeout") return { title: "The join timed out", message: "Check your connection and try again.", retry: true };
   if (status === 0) return { title: "Couldn't reach the room", message: again, retry: true };
   switch (code) {
     case "invite_unavailable":
@@ -126,6 +129,46 @@ export function validateJoinName(name) {
 
 function $(id) { return document.getElementById(id); }
 
+// M-03 (mobile invite-redeem): the join POST was unbounded — a stalled
+// network left "Joining…" on screen forever with the submit button disabled
+// and no watchdog covering that state (the preview fetch is bounded at
+// PREVIEW_TIMEOUT_MS; the loader watchdog only watches the loading card).
+// 15s matches the page watchdog's ceiling.
+export const JOIN_TIMEOUT_MS = 15_000;
+
+// M-03: the Enter-key double-submit guard. Disabling the submit button does
+// not stop an Enter-key submit on the name input from re-firing the handler
+// while the first POST is still in flight; the second redeem dies with
+// invite_already_used. tryBegin() returns false while a submit is in flight.
+export function createSubmitGuard() {
+  let inFlight = false;
+  return {
+    tryBegin() { if (inFlight) return false; inFlight = true; return true; },
+    release() { inFlight = false; },
+  };
+}
+
+// M-03: the consent screen auto-focused the name input on every device. On
+// touch, the soft keyboard pops up over the invite details (room, inviter,
+// permissions, expiry) before the human reads them — focus only where a
+// hardware keyboard exists.
+export function shouldAutofocusName(matchMediaFn = globalThis.matchMedia) {
+  try { return Boolean(matchMediaFn?.("(pointer: fine)")?.matches); }
+  catch { return false; }
+}
+
+// M-03: a bare invite code ("RM-XXXX" texted without the link) was a dead
+// end — /join with no code said "ask a room owner for an invite link" with
+// nowhere to paste the code. The no-invite error screen carries a code
+// entry form that navigates here.
+export function codeEntryHref(code, locationLike = globalThis.location) {
+  const upper = String(code ?? "").trim().toUpperCase();
+  if (!JOIN_CODE_PATTERN.test(upper)) return null;
+  const origin = String(locationLike?.origin ?? "").replace(/\/$/, "");
+  const door = String(locationLike?.pathname ?? "").startsWith("/room/") ? "/room" : "";
+  return `${origin}${door}/join/${upper}`;
+}
+
 function show(section) {
   for (const id of ["join-loading", "join-consent", "join-success", "join-error"]) {
     const el = $(id);
@@ -133,25 +176,37 @@ function show(section) {
   }
 }
 
-function fail({ title, message, retry }) {
+function fail({ title, message, retry, codeEntry = false }) {
   show("join-error");
   const titleEl = $("join-error-title"), messageEl = $("join-error-message"), retryEl = $("join-retry");
   if (titleEl) titleEl.textContent = title;
   if (messageEl) messageEl.textContent = message;
   if (retryEl) retryEl.hidden = !retry;
+  // M-03: the no-invite screens (missing or malformed code in the address
+  // bar) offer the code entry — everywhere else the link is the problem,
+  // not a missing code.
+  const codeForm = $("join-code-form");
+  if (codeForm) codeForm.hidden = !codeEntry;
 }
 
-async function apiFetch(url, { method = "GET", data } = {}) {
+export async function apiFetch(url, { method = "GET", data, timeoutMs = 0, fetchFn } = {}) {
   let response;
   try {
-    response = await fetch(url, {
+    const pending = (fetchFn ?? ((...args) => fetch(...args)))(url, {
       method,
       credentials: "same-origin",
       headers: { ...(data === undefined ? {} : { "Content-Type": "application/json" }) },
       ...(data === undefined ? {} : { body: JSON.stringify(data) }),
     });
-  } catch {
-    return { ok: false, status: 0, error: { code: "network_error" } };
+    response = timeoutMs > 0
+      ? await Promise.race([
+          pending,
+          new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), timeoutMs)),
+        ])
+      : await pending;
+  } catch (err) {
+    const code = err instanceof Error && err.message === "timeout" ? "join_timeout" : "network_error";
+    return { ok: false, status: 0, error: { code } };
   }
   let body = null;
   try { body = await response.json(); } catch { /* non-JSON body */ }
@@ -178,7 +233,9 @@ function renderConsent(preview) {
   const expiryEl = $("join-expiry");
   if (expiryEl) expiryEl.textContent = `Invite expires ${formatInviteExpiry(preview.expiresAt)}`;
   show("join-consent");
-  $("join-name")?.focus();
+  // M-03: touch keyboards stay down until the human taps the field, so the
+  // consent details stay readable. See shouldAutofocusName.
+  if (shouldAutofocusName()) $("join-name")?.focus();
 }
 
 // The preview fetch has no server-side deadline; bound it so a stalled
@@ -203,10 +260,31 @@ async function boot() {
     retryEl.dataset.retryWired = "1";
     retryEl.addEventListener("click", () => boot());
   }
+  // M-03: the bare-code entry (a code texted without the link). Once-only so
+  // repeated boots don't stack duplicate handlers. Navigates to /join/<CODE>
+  // through the same door the page was served from.
+  const codeForm = $("join-code-form");
+  if (codeForm && !codeForm.dataset.codeWired) {
+    codeForm.dataset.codeWired = "1";
+    codeForm.addEventListener("submit", event => {
+      event.preventDefault();
+      const input = $("join-code-input");
+      const statusEl = $("join-code-status");
+      const href = codeEntryHref(input?.value);
+      if (!href) {
+        if (statusEl) { statusEl.textContent = "That doesn't look like an invite code — codes look like RM-XXXX."; statusEl.classList.add("visible"); }
+        input?.focus();
+        return;
+      }
+      globalThis.location.href = href;
+    });
+  }
   if (!code) {
     // #1608: a missing token is not a broken link — name what's missing and
-    // the two ways forward, instead of leaving the loader up.
-    fail({ title: "No invite found", message: "Ask a room owner for an invite link, or sign in and request access.", retry: false });
+    // the two ways forward, instead of leaving the loader up. M-03 adds the
+    // code entry: a bare "RM-XXXX" texted without the link gets a redeem
+    // path instead of a dead end.
+    fail({ title: "No invite found", message: "Ask a room owner for an invite link, or sign in and request access.", retry: false, codeEntry: true });
     return;
   }
   const apiBase = serviceApiBase(globalThis.location?.pathname);
@@ -216,59 +294,77 @@ async function boot() {
   ]);
   if (seq !== bootSeq) return;
   if (!preview.ok) {
-    fail(joinErrorMessage({ status: preview.status, code: preview.error?.code, action: "preview" }));
+    const mapped = joinErrorMessage({ status: preview.status, code: preview.error?.code, action: "preview" });
+    // M-03: when the link itself is the problem (bad/used/expired code), the
+    // code entry gives the human a redeem path for a fresh code.
+    const linkShapeProblem = ["invite_unavailable", "invite_revoked", "invite_expired", "invite_already_used"].includes(preview.error?.code)
+      || preview.status === 422 || preview.status === 404 || preview.status === 410;
+    fail({ ...mapped, codeEntry: linkShapeProblem });
     return;
   }
   renderConsent(preview.body);
 
   const form = $("join-form");
+  // M-03: button.disabled does not stop an Enter-key submit on the name
+  // input — the guard drops the re-fire while a redeem is in flight.
+  const submitGuard = createSubmitGuard();
   form?.addEventListener("submit", async event => {
     event.preventDefault();
-    const name = validateJoinName($("join-name")?.value);
-    const statusEl = $("join-status");
-    if (!name) {
-      if (statusEl) { statusEl.textContent = "Enter a name of 1–80 characters."; statusEl.classList.add("visible"); }
-      $("join-name")?.focus();
-      return;
+    if (!submitGuard.tryBegin()) return;
+    try {
+      const name = validateJoinName($("join-name")?.value);
+      const statusEl = $("join-status");
+      if (!name) {
+        if (statusEl) { statusEl.textContent = "Enter a name of 1–80 characters."; statusEl.classList.add("visible"); }
+        $("join-name")?.focus();
+        return;
+      }
+      const button = $("join-submit");
+      if (button) button.disabled = true;
+      if (statusEl) { statusEl.textContent = "Joining…"; statusEl.classList.add("visible"); }
+      // One call mints the identity and redeems the invite atomically.
+      // /room/api/* is rewritten to /api/* on the www door, so this works on both.
+      // M-03: bounded — a stalled POST used to hang on "Joining…" forever
+      // with the button disabled. On timeout the button re-enables and the
+      // status line offers the retry (joinErrorMessage maps join_timeout).
+      const joined = await apiFetch(`${apiBase}/join`, { method: "POST", data: { displayName: name, inviteCode: code }, timeoutMs: JOIN_TIMEOUT_MS });
+      if (!joined.ok) {
+        if (button) button.disabled = false;
+        // A dead code stays dead: surface the reason instead of a retry loop.
+        // M-03: the code entry stays available — a replacement code often
+        // arrives as bare text, and this is where the human pastes it.
+        const mapped = joinErrorMessage({ status: joined.status, code: joined.error?.code, action: "join" });
+        if (["invite_unavailable", "invite_revoked", "invite_expired", "invite_already_used", "invite_authority_changed"].includes(joined.error?.code)) fail({ ...mapped, codeEntry: true });
+        else if (statusEl) statusEl.textContent = mapped.message;
+        return;
+      }
+      // roomToken is the honest name for the room-scoped credential; identitySecret is its deprecated alias.
+      const { roomId, displayName, sessionExpiresAt } = joined.body ?? {};
+      const identitySecret = joined.body?.roomToken ?? joined.body?.identitySecret;
+      if (typeof identitySecret !== "string" || typeof roomId !== "string") {
+        if (button) button.disabled = false;
+        if (statusEl) statusEl.textContent = "The room answered oddly. Try again.";
+        return;
+      }
+      show("join-success");
+      const nameEl = $("join-success-name"), roomEl = $("join-success-room");
+      if (nameEl) nameEl.textContent = displayName || name;
+      if (roomEl) roomEl.textContent = preview.body.roomTitle || roomId;
+      // The session cookie the response set expires at the server's genuine
+      // session expiry — show the real date/time, never a guess.
+      const expiryEl = $("join-session-expiry");
+      const expiryText = formatSessionExpiry(sessionExpiresAt);
+      if (expiryEl) {
+        if (expiryText) { expiryEl.textContent = `This browser's session expires ${expiryText}.`; expiryEl.hidden = false; }
+        else expiryEl.hidden = true;
+      }
+      const secretEl = $("join-secret");
+      if (secretEl) secretEl.value = identitySecret;
+      const openEl = $("join-open-room");
+      if (openEl) openEl.href = joinNextHref(roomId);
+    } finally {
+      submitGuard.release();
     }
-    const button = $("join-submit");
-    if (button) button.disabled = true;
-    if (statusEl) { statusEl.textContent = "Joining…"; statusEl.classList.add("visible"); }
-    // One call mints the identity and redeems the invite atomically.
-    // /room/api/* is rewritten to /api/* on the www door, so this works on both.
-    const joined = await apiFetch(`${apiBase}/join`, { method: "POST", data: { displayName: name, inviteCode: code } });
-    if (!joined.ok) {
-      if (button) button.disabled = false;
-      // A dead code stays dead: surface the reason instead of a retry loop.
-      const mapped = joinErrorMessage({ status: joined.status, code: joined.error?.code, action: "join" });
-      if (["invite_unavailable", "invite_revoked", "invite_expired", "invite_already_used", "invite_authority_changed"].includes(joined.error?.code)) fail(mapped);
-      else if (statusEl) statusEl.textContent = mapped.message;
-      return;
-    }
-    // roomToken is the honest name for the room-scoped credential; identitySecret is its deprecated alias.
-    const { roomId, displayName, sessionExpiresAt } = joined.body ?? {};
-    const identitySecret = joined.body?.roomToken ?? joined.body?.identitySecret;
-    if (typeof identitySecret !== "string" || typeof roomId !== "string") {
-      if (button) button.disabled = false;
-      if (statusEl) statusEl.textContent = "The room answered oddly. Try again.";
-      return;
-    }
-    show("join-success");
-    const nameEl = $("join-success-name"), roomEl = $("join-success-room");
-    if (nameEl) nameEl.textContent = displayName || name;
-    if (roomEl) roomEl.textContent = preview.body.roomTitle || roomId;
-    // The session cookie the response set expires at the server's genuine
-    // session expiry — show the real date/time, never a guess.
-    const expiryEl = $("join-session-expiry");
-    const expiryText = formatSessionExpiry(sessionExpiresAt);
-    if (expiryEl) {
-      if (expiryText) { expiryEl.textContent = `This browser's session expires ${expiryText}.`; expiryEl.hidden = false; }
-      else expiryEl.hidden = true;
-    }
-    const secretEl = $("join-secret");
-    if (secretEl) secretEl.value = identitySecret;
-    const openEl = $("join-open-room");
-    if (openEl) openEl.href = joinNextHref(roomId);
   });
 
   $("join-copy-secret")?.addEventListener("click", async () => {

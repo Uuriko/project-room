@@ -40,3 +40,13 @@
    summary already had it; this one rendered about one line tall. */
 #account-request-access summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; }
 h1.join-brand { text-align: center; margin: 0 0 1.5rem; font-size: 1rem; font-weight: 650; opacity: .85; }
+/* PRODUCT-200 M-03 (mobile invite-redeem): the join page is a stranger's
+   first touch — its CTAs ("Join room", "Copy", "Open room", "Redeem") read
+   at the text-md token instead of the global .78rem button text. Scoped here
+   so no other surface changes. */
+.join-page .button { font-size: var(--text-md); }
+/* M-03: the bare-code entry on the error screen. Reuses the secret-row flex
+   pattern (input shrinks, Redeem stays tappable). */
+.join-code-form { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+.join-code-form[hidden] { display: none; }
+.join-code-form code { font-family: monospace; }

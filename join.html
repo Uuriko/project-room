@@ -65,6 +65,15 @@
     <div class="join-actions">
       <button id="join-retry" class="button primary" type="button" hidden>Try again</button>
     </div>
+    <form id="join-code-form" class="join-code-form" hidden>
+      <p><strong>Have an invite code?</strong> Paste it here &mdash; codes look like <code>RM-XXXX</code>.</p>
+      <label class="sr-only" for="join-code-input">Invite code</label>
+      <div class="join-secret-row">
+        <input id="join-code-input" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="RM-XXXX">
+        <button id="join-code-submit" class="button primary" type="submit">Redeem</button>
+      </div>
+      <p id="join-code-status" class="form-status" role="status" aria-live="polite"></p>
+    </form>
     <p class="form-hint"><a id="join-home-link" href="{{ASSET_BASE}}/">Back to sign-in</a> &middot; <a href="https://room.trydemigod.com/about">What is Project Room?</a></p>
   </section>
 </main>
