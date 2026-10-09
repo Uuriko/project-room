@@ -225,7 +225,7 @@ export function createBodyHtmlCache(render = messageBodyHtml, limit = 20000) {
   return {
     html(body, members, esc, messageId) {
       if (members !== lastMembers || esc !== lastEsc) {
-        const key = [...(members || [])].map(m => `${m?.id}\u0001${m?.displayName ?? ""}\u0001${m?.kind ?? ""}`).join("\u0002");
+        const key = [...(members || [])].map(m => [m?.id, m?.displayName ?? "", m?.kind ?? ""].join("\u0001")).join("\u0002");
         if (key !== membersKey || esc !== lastEsc) entries.clear();
         lastMembers = members; lastEsc = esc; membersKey = key;
       }
