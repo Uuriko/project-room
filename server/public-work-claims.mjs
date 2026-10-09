@@ -241,7 +241,12 @@ export class PublicWorkClaims {
       if ((secret || input.autoClaim === true) && !identity) fail(401, 'unauthenticated', 'Unknown or revoked identity');
       const recommend = () => {
         const outcome = { recommendations: [], claim: null, inspected: 0, hasMore: false, nextCursor: null, supportedRewards: ['volunteer'] };
-        if (reward !== 'volunteer') return outcome;
+        if (reward !== 'volunteer') {
+          // First-run dead-end guard: a stranger filtering on an unsupported
+          // reward gets an actionable hint, not a silent empty board.
+          outcome.guidance = { nextSteps: ['Only volunteer rewards are supported right now — retry without the reward filter or with reward "volunteer".'] };
+          return outcome;
+        }
         const page = this.list({ limit: 100, after: input.after ?? '' });
         outcome.inspected = page.tasks.length; outcome.hasMore = page.nextCursor !== null; outcome.nextCursor = page.nextCursor;
         const ages = new Map(page.tasks.length ? this.db.prepare(`SELECT offer_id,created_at FROM public_work_tasks WHERE offer_id IN (${page.tasks.map(() => '?').join(',')})`).all(...page.tasks.map(task => task.taskId)).map(row => [row.offer_id, row.created_at]) : []);
@@ -264,6 +269,15 @@ export class PublicWorkClaims {
           outcome.recommendations = [{ task: outcome.claim.task, reasons: candidates[0].reasons }, ...candidates.slice(1).filter(candidate =>
             candidate.task.namespaceId !== selected.namespaceId || !candidate.task.files.some(path => selected.files.some(file => overlaps(path, file))))
             .slice(0, limit - 1).map(({ task, reasons }) => ({ task, reasons }))];
+        }
+        if (!outcome.recommendations.length) {
+          // First-run dead-end guard: an empty board tells the stranger what
+          // to do next instead of stranding them on `recommendations: []`.
+          outcome.guidance = { nextSteps: [
+            'No open volunteer tasks right now — new tasks appear as rooms publish offers, so poll again later.',
+            'Browse all open tasks directly: GET /api/public-work/tasks?limit=20',
+            'See room-board openings across directory-listed rooms: GET /api/opportunities.json',
+          ] };
         }
         return outcome;
       };
