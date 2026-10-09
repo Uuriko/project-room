@@ -13,7 +13,6 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 const SHA = "a".repeat(40);
-const TOKEN = "<redacted>";
 
 function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-land-idem-"));
