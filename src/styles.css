@@ -1544,12 +1544,50 @@ summary { overflow-wrap: anywhere; }
    .text-button/.link-button were ~11px tall with padding:0 and no coarse-pointer
    floor — untappable on phones. Intentional small inline contexts
    (.member-actions .text-button, .dm-consent-actions .text-button) keep their
-   24px rules by higher specificity. This block sits after the base .link-button
+   24px rules by higher specificity on fine pointers; the PRODUCT-200 BU-04
+   follow-through floors them to 44px on coarse pointers (see block below).
+   This block sits after the base .link-button
    rule on purpose: tests/audit2-guest-hint-contrast.test.js resolves
    ruleBody(".link-button") to the FIRST match, which must carry the color. */
 @media (pointer: coarse) {
   .text-button { min-height: 44px; min-width: 44px; }
   .link-button { display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; }
+}
+
+/* PRODUCT-200 BU-04 (2026-10-08): #2034 follow-through — the 44px coarse
+   floor missed several board-UI tap targets:
+   - .message-to-work buttons in .message-links carry only that class (not
+     .text-button), so they rendered ~11px tall with padding:0 on touch; the
+     .thread-link count button likewise. They are standalone row controls on
+     touch (the hover-reveal sizing above is scoped to
+     (hover:hover)/(pointer:fine)).
+   - .member-actions .text-button and .dm-consent-actions .text-button kept
+     24px by higher specificity — on a phone those are primary
+     consent/member-management taps, so they get same-specificity coarse
+     overrides AFTER the base rules (specificity ties win by source order).
+   - details > summary disclosure toggles (people panel, session menu, room
+     creation, inbox, DM consent, work-claim cards, message expander) sat at
+     28-36px or bare text height.
+   - label-row toggles (.also-send-toggle, .inbox-filters label) are the tap
+     targets around intentionally-small checkboxes (QA2-A11Y keeps the boxes
+     at 20px); the rows get the floor.
+   Deliberately NOT floored: inline-in-sentence links (button.source-link,
+   .form-hint a — WCAG-exempt inline links) and raw checkbox/radio inputs. */
+@media (pointer: coarse) {
+  .message-links .message-to-work, .message-links .thread-link {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-height: 44px; min-width: 44px; padding: .25rem .6rem;
+  }
+  .member-actions .text-button, .dm-consent-actions .text-button {
+    min-height: 44px; min-width: 44px;
+  }
+  #connection-details > summary,
+  #session-menu-panel #connection-details > summary,
+  .create-room-details summary, .member-profile-body summary,
+  .member-directory-card > summary, .inbox-add-connection summary,
+  .dm-consent summary, .claim summary, .work-more > summary,
+  .message-expansion > summary { min-height: 44px; }
+  .inbox-filters label, .also-send-toggle { min-height: 44px; }
 }
 
 /* Agent sign-in self-serve creation + first-run orientation (2026-09-24) */
