@@ -7679,7 +7679,7 @@ if (initialInvitationFragment && !initialPasswordReset) openInvitation(initialIn
   $("#signout-button").addEventListener("click", () => { $("#board-dialog").close(); board.reset(); }, true);
   const priorEntries = roomActionEntries;
   roomActionEntries = () => priorEntries().map(entry => entry.id === "landing"
-    ? { id: "board", label: "Board", words: "tasks board claims ci review lease land", always: true } : entry);
+    ? { id: "board", label: "Work board", words: "tasks work board claims claim post complete verify ci review lease land", always: true } : entry);
   const priorChoose = chooseRoomAction;
   // JDOT-COH-NAV begin
   chooseRoomAction = id => { if (id === "board") { closeRoomActions(false); openBoard(); return; } priorChoose(id); };
