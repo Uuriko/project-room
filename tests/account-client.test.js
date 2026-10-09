@@ -209,7 +209,9 @@ test("stale account-session and binding rejections force a fresh restore", async
       method: client => client.acceptInvitation({ invitationToken: "invitation-secret", redemptionId: "redemption", expectedRevision: 0 }),
       status: 409,
       code: "session_binding_changed",
-      message: "Account session binding changed"
+      message: "Account session binding changed",
+      // The client now resolves this fallthrough code to human copy.
+      humanMessage: "Your browser identity changed. Review the invitation again and rejoin."
     }
   ];
   for (const item of cases) {
@@ -217,7 +219,7 @@ test("stale account-session and binding rejections force a fresh restore", async
     client.session = item.code === "stale_session_revision"
       ? accountSession(null, 0)
       : accountSession("account-human", 2);
-    await assert.rejects(item.method(client), new RegExp(item.message));
+    await assert.rejects(item.method(client), new RegExp(item.humanMessage ?? item.message));
     assert.equal(client.session, null);
   }
 });
