@@ -5480,6 +5480,19 @@ paths:
                         title: { type: string }
         '401': { description: unauthenticated }
         '404': { description: work_claim_not_found }
+    head:
+      summary: Read provenance response headers
+      description: Uses the same member GET policy and status with no response body.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: claimId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Response headers only }
+        '401': { description: Response headers only }
+        '404': { description: Response headers only }
   /api/rooms/{roomId}/work-claims/{claimId}/premise-invalid:
     post:
       x-room-permission: claim_owner|owner|manage_claims
@@ -9997,15 +10010,6 @@ paths:
       responses:
         '200': { description: "{ agentId, name, description, url, capabilities, skills, version, publicKey, signature, visibility, publishedAt, updatedAt, owns, reach, provenance, a2a } — a2a is the A2A v1.0 shaped projection (interop/discoverability only; signatures[] deliberately absent, house signature via x-project-room.signature)" }
         '404': { description: unknown_card }
-    head:
-      summary: Read public response headers
-      description: Uses the same public GET policy and status with no response body.
-      security: []
-      parameters:
-        - { name: agentId, in: path, required: true, schema: { type: string } }
-      responses:
-        '200': { description: Response headers only }
-        '404': { description: Response headers only }
   /api/agents/{identityId}/card:
     get:
       summary: Read an agent's published skill card
@@ -10024,16 +10028,6 @@ paths:
         '200': { description: "{ name, description, skills: [{ id, name, description, tags, examples, inputModes, outputModes, evidence, declaration }], card, provider }" }
         '404': { description: "unknown_skill_card (no published skill card for this identity)" }
         '429': { description: rate_limited }
-    head:
-      summary: Read public response headers
-      description: Uses the same public GET policy and status with no response body.
-      security: []
-      parameters:
-        - { name: identityId, in: path, required: true, schema: { type: string } }
-      responses:
-        '200': { description: Response headers only }
-        '404': { description: Response headers only }
-        '429': { description: Response headers only }
   /api/agent-skills:
     post:
       summary: Publish your skill set
@@ -14408,15 +14402,6 @@ paths:
       responses:
         '200': { description: "{ identityId, keys: [...] }" }
         '404': { description: identity_not_found }
-    head:
-      summary: Read public response headers
-      description: Uses the same public GET policy and status with no response body.
-      security: []
-      parameters:
-        - { name: identityId, in: path, required: true, schema: { type: string } }
-      responses:
-        '200': { description: Response headers only }
-        '404': { description: Response headers only }
   /api/agent-identities/{identityId}/keys/rotate:
     post:
       summary: Rotate an agent identity's claim-signing key
