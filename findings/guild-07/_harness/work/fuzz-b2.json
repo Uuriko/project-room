@@ -1,0 +1,148 @@
+{
+  "results": [
+    {
+      "id": "B2",
+      "input": "null",
+      "outcome": "OK-REJECT",
+      "note": "TypeError: Cannot read properties of null (reading 'request')"
+    },
+    {
+      "id": "B2",
+      "input": "xss-fields",
+      "outcome": "OK-REJECT",
+      "note": "Error: Invalid request notice"
+    },
+    {
+      "id": "B2",
+      "input": "wrong-types",
+      "outcome": "OK-REJECT",
+      "note": "Error: Invalid request notice"
+    },
+    {
+      "id": "B2",
+      "input": "deep",
+      "outcome": "OK-REJECT",
+      "note": "Error: Invalid request notice"
+    },
+    {
+      "id": "B2",
+      "input": "proto",
+      "outcome": "OK-REJECT",
+      "note": "Error: Invalid request notice"
+    },
+    {
+      "id": "B3",
+      "input": "never-resolves",
+      "outcome": "HANG-BUG",
+      "note": "settled in 8027ms code=?"
+    },
+    {
+      "id": "B3",
+      "input": "flap-then-ok",
+      "outcome": "OK-REJECT",
+      "note": "code=service_unavailable"
+    },
+    {
+      "id": "B4",
+      "input": "null",
+      "outcome": "OK-boolean(false)",
+      "note": ""
+    },
+    {
+      "id": "B4",
+      "input": "undef",
+      "outcome": "OK-boolean(false)",
+      "note": ""
+    },
+    {
+      "id": "B4",
+      "input": "status-num",
+      "outcome": "OK-boolean(false)",
+      "note": ""
+    },
+    {
+      "id": "B4",
+      "input": "status-xss",
+      "outcome": "OK-boolean(false)",
+      "note": ""
+    },
+    {
+      "id": "B4",
+      "input": "getter-throws",
+      "outcome": "THREW",
+      "note": "Error: getter"
+    },
+    {
+      "id": "B4",
+      "input": "proxy",
+      "outcome": "OK-boolean(false)",
+      "note": ""
+    },
+    {
+      "id": "B4",
+      "input": "open-owned",
+      "outcome": "OK-boolean(false)",
+      "note": ""
+    },
+    {
+      "id": "B4",
+      "input": "open-unowned",
+      "outcome": "OK-boolean(true)",
+      "note": ""
+    },
+    {
+      "id": "B5",
+      "input": "xss",
+      "outcome": "OK-boolean(false)",
+      "note": ""
+    },
+    {
+      "id": "B5",
+      "input": "deep",
+      "outcome": "OK-boolean(false)",
+      "note": ""
+    },
+    {
+      "id": "B5",
+      "input": "circular",
+      "outcome": "OK-boolean(false)",
+      "note": ""
+    },
+    {
+      "id": "B5",
+      "input": "big",
+      "outcome": "OK-boolean(false)",
+      "note": ""
+    },
+    {
+      "id": "B5",
+      "input": "proto",
+      "outcome": "OK-boolean(false)",
+      "note": ""
+    },
+    {
+      "id": "B5",
+      "input": "null",
+      "outcome": "OK-boolean(false)",
+      "note": ""
+    },
+    {
+      "id": "B5",
+      "input": "array",
+      "outcome": "OK-boolean(false)",
+      "note": ""
+    },
+    {
+      "id": "B5",
+      "input": "build-valid",
+      "outcome": "THREW",
+      "note": "Invalid reply action input or identity"
+    },
+    {
+      "id": "B5",
+      "input": "proto-pollution-check",
+      "outcome": "OK-clean",
+      "note": ""
+    }
+  ]
+}

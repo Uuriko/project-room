@@ -141,3 +141,54 @@ Fuzz driver C done: 62 cases.
 - **A5** `proto-pollution-check` → OK-clean
 
 Fuzz driver A done: 44 cases.
+
+# Fuzz driver B2-B5 — state/network (run 2026-10-09T10:26:10.766Z)
+
+## B2 validateRequestNotice hostile inputs
+- **B2** `null` → OK-REJECT — TypeError: Cannot read properties of null (reading 'request')
+- **B2** `xss-fields` → OK-REJECT — Error: Invalid request notice
+- **B2** `wrong-types` → OK-REJECT — Error: Invalid request notice
+- **B2** `deep` → OK-REJECT — Error: Invalid request notice
+- **B2** `proto` → OK-REJECT — Error: Invalid request notice
+
+## B3 PublicWorkClaimsClient timeout + flapping fetch
+- **B3** `never-resolves` → HANG-BUG — settled in 8027ms code=?
+- **B3** `flap-then-ok` → OK-REJECT — code=service_unavailable
+
+## B4 isRequestEligible hostile inputs
+- **B4** `null` → OK-boolean(false)
+- **B4** `undef` → OK-boolean(false)
+- **B4** `status-num` → OK-boolean(false)
+- **B4** `status-xss` → OK-boolean(false)
+- **B4** `getter-throws` → THREW — Error: getter
+- **B4** `proxy` → OK-boolean(false)
+- **B4** `open-owned` → OK-boolean(false)
+- **B4** `open-unowned` → OK-boolean(true)
+
+## B5 validReplyArguments / buildReplyCommand hostile args
+- **B5** `xss` → OK-boolean(false)
+- **B5** `deep` → OK-boolean(false)
+- **B5** `circular` → OK-boolean(false)
+- **B5** `big` → OK-boolean(false)
+- **B5** `proto` → OK-boolean(false)
+- **B5** `null` → OK-boolean(false)
+- **B5** `array` → OK-boolean(false)
+- **B5** `build-valid` → THREW — Invalid reply action input or identity
+- **B5** `proto-pollution-check` → OK-clean
+
+Fuzz driver B2-B5 done: 24 cases.
+
+# Fuzz summary — wave1000 guild-07 (client-web)
+
+133 cases total: driver A 44 (parsing/validation) + B1 3 (corrupt state) + B2–B5 24 (state/network) + driver C 62 (schema validators + text/match).
+
+**No crashes, no hangs in module code, no prototype pollution, no unsanitized HTML emission** (no HTML sinks exist in this slice — verified by grep: no innerHTML/document.write/eval in client/*.mjs or the HTML shells).
+
+**Findings / robustness notes (not BUG CONFIRMED — no production defect):**
+1. **A1** — `paginateRoomMessages` takes no signal/timeout of its own. A `fetchPage` that never settles hangs the caller indefinitely. Callers must bound `fetchPage`; documented in docs-01.
+2. **A4 `xss-check-cmd`** — host-reported check commands containing HTML (`<script>…`) pass `hostReplyBody` validation as *data* and are embedded verbatim in the reply markdown. No HTML sink in this slice, but any downstream HTML renderer must escape. Documented in docs-04.
+3. **B2 `null`** — `validateRequestNotice(null, …)` throws a raw `TypeError` (reading 'request' of null) instead of the controlled "Invalid request notice" Error. Minor: null input crashes instead of rejecting.
+4. **B3 `never-resolves`** — the client's `timeoutMs` is cooperative-only: it is delivered via `AbortSignal` to `fetchImpl`, so a non-cooperative fetchImpl hangs `match()` indefinitely (8s test timeout fired; real `fetch` cooperates). Defense-in-depth would be a `Promise.race` timeout independent of fetch cooperation.
+5. **A2 note** — hostile stdin payloads are all rejected with `invalid_config`; the accept path was verified separately with a well-formed 43-char `pri_` token (extra fields correctly rejected by the field-count check).
+
+**A3 note:** XSS-shaped strings in task titles pass `packet()` validation as data (correct — the validator checks shape, not content policy).

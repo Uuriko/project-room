@@ -1,0 +1,30 @@
+{
+  "results": [
+    {
+      "id": "M6",
+      "file": "client/watch-journal.mjs",
+      "status": "TIMEOUT",
+      "desc": "reconcile: off-by-one throws history_changed on equal sequence (G-eligible normal case)",
+      "detail": "test run exceeded 90000ms — hang/livelock, needs manual review",
+      "tests": [
+        "tests/current-attention.test.js",
+        "tests/assignment-watcher.test.js"
+      ]
+    },
+    {
+      "id": "M9",
+      "file": "client/request-runner.mjs",
+      "status": "TIMEOUT",
+      "desc": "isRequestEligible: flipped — closed/cancelled requests become runnable (G-L2)",
+      "detail": "test run exceeded 90000ms — hang/livelock, needs manual review",
+      "tests": [
+        "tests/reply-agent.test.js"
+      ]
+    }
+  ],
+  "totals": {
+    "k": 0,
+    "s": 0,
+    "i": 2
+  }
+}

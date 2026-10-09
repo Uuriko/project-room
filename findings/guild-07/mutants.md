@@ -80,3 +80,48 @@ Run started 2026-10-09T06:17:41.915Z. One mutant per source file line, affected 
 
 ## Totals
 - mutants: 15, killed: 7, survived: 6, inconclusive/timeout: 2
+
+# Post-analysis (2026-10-09)
+
+## M4 reclassification: EQUIVALENT, not a test gap
+
+Fail-first probing showed the M4 regression test **passes against the mutant** too. Root cause: in `saveAgentConnection`, `mkdirSync(path, {mode: 0o700})` (non-recursive) throws `EEXIST` → mapped to `config_exists` **before** `openSync(..., "wx")` is ever reached. The `"wx"`→`"w"` change is unobservable in-process: the mkdir guard fires first in every reachable path (a second save always hits the existing directory). The `"wx"` flag is defense-in-depth for a near-impossible TOCTOU race (dir created between our mkdir and open). Reclassified M4: **equivalent mutant** — the no-overwrite contract is enforced and tested at the mkdir layer. The M4 regression test is kept as a behavior pin.
+
+## Fail-first validation of regression tests
+
+`findings/guild-07/_harness/regress.test.mjs` — 6 tests, each run against its mutant and the original:
+
+| Test | vs mutant (want FAIL) | vs original (want PASS) | Verdict |
+|---|---|---|---|
+| M2 scan cap = 100 | FAIL | PASS | fail-first OK |
+| M4 no-overwrite | PASS | PASS | equivalent mutant (see above) |
+| M5 capacity gate | FAIL | PASS | fail-first OK |
+| M7 limit ≤ 5 | FAIL | PASS | fail-first OK |
+| M14 destination cap | FAIL | PASS | fail-first OK |
+| M15 single-signal ack | FAIL | PASS | fail-first OK |
+
+5/6 are true fail-first regression tests. (M15's test drives the MCP channel round-trip through `serveRoomMcp` because `room_acknowledge_wake` only exists on the channel tool path — `validRoomToolArguments` does not include it; worth knowing for future test authors.)
+
+## M6 / M9 timeout characterization
+
+Both mutants turned their test files into >240s runs (no clean failure):
+- **M6** (`checkpoint.sequence <= previous.sequence` in `WatchJournal.reconcile`): the spurious `history_changed` on equal sequences livelocks tests that retry reconcile — no bounded retry, no clean error. Production note: if `history_changed` were ever thrown spuriously, watchers would spin, not fail.
+- **M9** (flipped `isRequestEligible`): the queue tests spin waiting for requests that never become eligible — a regression here presents as a stuck runner, not an error.
+
+## BUG CONFIRMED decision
+
+No `BUG CONFIRMED` room posts from this guild: every survived mutant was either an artificial off-by-one with no production manifestation (the repo code is correct at each site — verified by re-reading the originals) or reclassified equivalent (M4). The deliverables are the 5 fail-first regression tests and the test-gap notes above. The pre-existing `reply-agent.test.js` failure on origin/main was reported in reverify.md, not as a BUG CONFIRMED (it fails identically on clean main; environment/timing-sensitive).
+
+# Mutation re-run — M6,M9 (2026-10-09T10:35:52.285Z, timeout 90000ms)
+
+## M6 client/watch-journal.mjs — TIMEOUT
+- reconcile: off-by-one throws history_changed on equal sequence (G-eligible normal case)
+- tests: tests/current-attention.test.js, tests/assignment-watcher.test.js
+- test run exceeded 90000ms — hang/livelock, needs manual review
+
+## M9 client/request-runner.mjs — TIMEOUT
+- isRequestEligible: flipped — closed/cancelled requests become runnable (G-L2)
+- tests: tests/reply-agent.test.js
+- test run exceeded 90000ms — hang/livelock, needs manual review
+
+Totals: mutants 2, killed 0, survived 0, inconclusive/timeout 2
