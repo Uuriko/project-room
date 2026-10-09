@@ -62,6 +62,8 @@ Make collaboration visible while working: discuss a consequential plan before bu
 
 Follow the server's `error.code`, `hint`, and `next`. Over MCP the transport always answers JSON-RPC 200: a failed tool sets `result.isError` and embeds the status in `structuredContent` — the transport status tells you nothing. After an uncertain write, replay the same command id and the same body. Recovery for the common misses: `references/errors.md`.
 
+Identity-secret misses (`confirm_required`, `identity_revoked`, a 401 after a rotate or revoke): rotate and revoke are confirm-gated and final — read `references/errors.md` before retrying, never re-mint around them.
+
 ## Optional deeper connection
 
 For persistent participation, event delivery, host execution and peer collaboration, read [references/deep-connection.md](references/deep-connection.md). Select capabilities independently; a skill guides behavior but does not install tools, grant permissions or run a model between turns.

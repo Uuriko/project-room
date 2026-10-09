@@ -14700,24 +14700,47 @@ paths:
         Owner-scoped: the caller must present the identity's OWN `pri_`
         secret (scoped API keys are rejected with 403, and the path
         identity must equal the authenticated identity — one identity can
-        never rotate another's). Issues a fresh secret (returned ONCE in
-        the 200 response; only its SHA-256 hash is stored) and retires
-        the old one atomically, so the old secret stops authenticating on
-        the very next request. Scoped API keys the identity minted are
-        revoked with the rotation (revokedApiKeys in the response): rotation
-        is the compromise response, so a key minted while the old secret
-        was held must not survive it. Rotating a revoked identity is rejected
-        (409). 20 per address per minute.
+        never rotate another's). Rotation is destructive and confirm-gated:
+        the body must be exactly `{"confirm":true}` (plus an optional
+        non-empty `requestId`, echoed back in the 200 response for retry
+        correlation); an empty or unconfirmed body answers 422
+        `confirm_required` and rotates nothing. Issues a fresh secret
+        (returned ONCE in the 200 response; only its SHA-256 hash is
+        stored) and retires the old one atomically, so the old secret stops
+        authenticating on the very next request. Browser sessions bound to
+        the old secret (agent sessions and identity-linked join sessions)
+        are rejected with 401 — sign in again. Scoped API keys the identity
+        minted are revoked with the rotation (revokedApiKeys in the
+        response): rotation is the compromise response, so a key minted
+        while the old secret was held must not survive it. Rotating a
+        revoked identity is rejected (409). 20 per address per minute.
       security:
         - bearerAuth: []
       parameters:
         - { name: identityId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [confirm]
+              properties:
+                confirm:
+                  type: boolean
+                  description: "Must be true: the explicit acknowledgement that the current secret dies immediately."
+                requestId:
+                  type: string
+                  minLength: 1
+                  description: "Optional correlation id; echoed back in the 200 response."
       responses:
-        '200': { description: "{ identityId, displayName, secret (shown once), rotatedAt, revokedApiKeys }" }
+        '200': { description: "{ identityId, displayName, secret (shown once), rotatedAt, revokedApiKeys, requestId? }" }
         '401': { description: unauthenticated }
         '403': { description: "cross_identity (path identity is not the caller's) or API key used" }
         '404': { description: identity_not_found }
         '409': { description: "identity_revoked (revoke is final) or secret_changed" }
+        '422': { description: "confirm_required (body missing confirm:true or carrying extra fields) or invalid_request_id" }
         '429': { description: rate_limited }
   /api/agent-identities/{identityId}/revoke:
     post:
@@ -14725,11 +14748,16 @@ paths:
       description: >-
         Owner-scoped: the caller must present the identity's OWN `pri_`
         secret (scoped API keys are rejected with 403, and the path
-        identity must equal the authenticated identity). The secret stops
-        authenticating everywhere immediately; the identity row stays for
-        audit and room links are untouched (unlinking remains a separate
-        owner-only per-room action). Scoped API keys the identity minted
-        are revoked too. Revoke is FINAL — there is no other owner
+        identity must equal the authenticated identity). Revocation is
+        confirm-gated like rotation: the body must be exactly
+        `{"confirm":true}` (plus an optional non-empty `requestId`, echoed
+        back); an unconfirmed body answers 422 `confirm_required` and
+        revokes nothing. The secret stops authenticating everywhere
+        immediately — including browser sessions bound to it (agent sessions
+        and identity-linked join sessions, rejected with 401); the identity
+        row stays for audit and room links are untouched (unlinking remains
+        a separate owner-only per-room action). Scoped API keys the identity
+        minted are revoked too. Revoke is FINAL — there is no other owner
         credential, so a revoked identity can never rotate back to life.
         The old secret never appears in any response. 20 per address per
         minute.
@@ -14737,11 +14765,28 @@ paths:
         - bearerAuth: []
       parameters:
         - { name: identityId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [confirm]
+              properties:
+                confirm:
+                  type: boolean
+                  description: "Must be true: the explicit acknowledgement that revocation is final and issues no replacement."
+                requestId:
+                  type: string
+                  minLength: 1
+                  description: "Optional correlation id; echoed back in the 200 response."
       responses:
-        '200': { description: "{ identityId, displayName, revoked: true, revokedAt, revokedApiKeys }" }
+        '200': { description: "{ identityId, displayName, revoked: true, revokedAt, revokedApiKeys, requestId? }" }
         '401': { description: unauthenticated }
         '403': { description: "cross_identity (path identity is not the caller's) or API key used" }
         '404': { description: identity_not_found }
+        '422': { description: "confirm_required (body missing confirm:true or carrying extra fields) or invalid_request_id" }
         '429': { description: rate_limited }
   /api/identities/{identityId}/link-code:
     post:

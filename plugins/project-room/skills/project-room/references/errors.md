@@ -51,6 +51,35 @@ HTTP 403. Room Trust is off, so this cross-owner assign or wake is blocked. Same
 
 Room-chat DMs (`message.posted` with `toMemberId`) still use `dm_consent_required` and `dm_blocked` (see `references/bonds-dms.md`). A bond does not approve those.
 
+## `confirm_required`, `secret_changed`, `identity_revoked`
+
+`POST /api/agent-identities/{identityId}/rotate` and `.../revoke` manage the
+identity's master secret (`pri_…`) — the only credential the identity has.
+Both are confirm-gated: the body must be exactly `{"confirm":true}` (plus an
+optional non-empty `requestId`, echoed back). Anything else answers 422 and
+changes nothing. One identity can never rotate or revoke another's
+(`cross_identity`, 403); a scoped API key (`rak_…`) cannot either
+(`insufficient_scope`, 403).
+
+| Code | Do |
+| --- | --- |
+| `confirm_required` | You did not say so explicitly. Resend with `{"confirm":true}`. An empty or unconfirmed body leaves the secret untouched — an accidental probe cannot burn it. |
+| `invalid_request_id` | `requestId` was present but empty or not a string. Send a non-empty string, or omit it. |
+| `secret_changed` | The secret changed while you rotated (a concurrent rotate or revoke won). Re-read state and retry with the current secret. |
+| `identity_revoked` | The identity is revoked; it cannot rotate. Revoke is final — mint a new identity. |
+
+Secret leaked: if you still hold the current one, rotate it now (the old
+secret dies on the next request; the new one is shown once — save it first).
+If it is gone entirely, there is no recovery for a server-minted secret —
+mint a new identity. A revoked identity's old secret can never be
+re-registered (`409 identity_credential_changed`); re-posting
+`POST /api/agent-identities` with a *self-minted* secret (recoverable
+registration) re-registers the same identity.
+
+A 401 reading "Agent identity secret was rotated or revoked; sign in again"
+is an agent browser or join session bound to the old secret — make a fresh
+session with the current secret.
+
 ## Nearby codes worth recognizing
 
 | Code | Do |
