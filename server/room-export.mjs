@@ -76,16 +76,57 @@ function exportTableOrder(db) {
   return ordered;
 }
 
-export function* exportNdjsonLines(db) {
+// Tables read in keyset pages, never in one .all(): a table dump would
+// otherwise hold every row, including every file and message body, in memory
+// at once. Pages use .all() because the Durable Object database adapter has no
+// iterate(). Row order matches the old unpaged SELECT (rowid order, and the
+// parent-first order for credentials), so the output bytes do not change.
+// Tables holding large cells use small pages.
+const EXPORT_PAGE_ROWS = 500;
+const EXPORT_PAGE_ROWS_BY_TABLE = Object.freeze({ room_attachments: 4, events: 100 });
+
+function* exportTableRows(db, table, columns, pageRows) {
+  const list = columns.map(quoteIdent).join(", ");
+  const name = quoteIdent(table);
+  const limit = Math.max(1, Math.min(pageRows, EXPORT_PAGE_ROWS_BY_TABLE[table] ?? pageRows));
+  if (table === "credentials" && columns.includes("parent_hash")) {
+    // hash is the primary key, so (parent_hash IS NOT NULL, hash) is a unique key.
+    const page = db.prepare(`SELECT ${list}, (parent_hash IS NOT NULL) AS "__k" FROM ${name}
+      WHERE (parent_hash IS NOT NULL) > ? OR ((parent_hash IS NOT NULL) = ? AND hash > ?)
+      ORDER BY parent_hash IS NOT NULL, hash LIMIT ?`);
+    let k = -1;
+    let hash = "";
+    for (;;) {
+      const rows = page.all(k, k, hash, limit);
+      for (const { __k, ...row } of rows) yield row;
+      if (rows.length < limit) return;
+      ({ __k: k, hash } = rows.at(-1));
+    }
+  }
+  const withoutRowid = /WITHOUT\s+ROWID/i.test(db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name=?").get(table)?.sql ?? "");
+  if (withoutRowid || columns.some(column => column.toLowerCase() === "rowid")) {
+    // No rowid to page on: read the table whole, as before.
+    yield* db.prepare(`SELECT ${list} FROM ${name}`).all();
+    return;
+  }
+  const page = db.prepare(`SELECT rowid AS "__rid", ${list} FROM ${name} WHERE rowid > ? ORDER BY rowid LIMIT ?`);
+  let after = Number.MIN_SAFE_INTEGER;
+  for (;;) {
+    const rows = page.all(after, limit);
+    for (const { __rid, ...row } of rows) yield row;
+    if (rows.length < limit) return;
+    after = rows.at(-1).__rid;
+  }
+}
+
+export function* exportNdjsonLines(db, { pageRows = EXPORT_PAGE_ROWS } = {}) {
   const rooms = db.prepare("SELECT id, sequence FROM rooms ORDER BY id").all();
   const events = db.prepare("SELECT count(*) AS n FROM events").get().n;
   yield JSON.stringify({ kind: "watermark", version: 1, backedUpAt: Date.now(), rooms, events }) + "\n";
   for (const table of exportTableOrder(db)) {
     const columns = tableColumns(db, table);
     if (!columns.length) continue;
-    const order = table === "credentials" && columns.includes("parent_hash") ? " ORDER BY parent_hash IS NOT NULL, hash" : "";
-    const sql = `SELECT ${columns.map(quoteIdent).join(", ")} FROM ${quoteIdent(table)}${order}`;
-    for (const row of db.prepare(sql).all()) yield JSON.stringify({ table, row: sanitizeRow(row) }) + "\n";
+    for (const row of exportTableRows(db, table, columns, pageRows)) yield JSON.stringify({ table, row: sanitizeRow(row) }) + "\n";
   }
   yield JSON.stringify(exportTrailer(db)) + "\n";
 }
