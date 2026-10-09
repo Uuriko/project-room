@@ -1,0 +1,2 @@
+# Chaos harness reports are run artifacts, not source. Keep the directory.
+*.jsonl
