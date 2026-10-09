@@ -62,7 +62,7 @@ export const roomTools = [
     verb: { type: "string", enum: ["close", "cancel"], default: "close" },
     reason: { type: "string", minLength: 1, maxLength: 4000, description: "Optional: why it is retired (duplicate, stale, superseded by …)." }
   }, ["claimId"]), false),
-  tool("room_set_member_claim_cap", "Set how many open work-claims one member may hold in this room. Room owner only. Integer 1 to 10000. The default is 20.", schema({ maxMemberOpenClaims: { type: "integer", minimum: 1, maximum: 10000 } }, ["maxMemberOpenClaims"]), false),
+  tool("room_set_member_claim_cap", "Set this room's work-claim caps. Room owner only. maxMemberOpenClaims: open claims one member may hold (default 20). maxOpenClaims: open claims the whole room may hold (default 200). Each an integer 1 to 10000; send one or both.", schema({ maxMemberOpenClaims: { type: "integer", minimum: 1, maximum: 10000 }, maxOpenClaims: { type: "integer", minimum: 1, maximum: 10000 } }, []), false),
   { name: "room_begin_work", description: "Begin already selected work. Confirms this credential is accepted for this member (API identity only, not a host process). Performs the next verified Room operations and reports each confirmed stage. working is the Room work state, not an external host start. Retry an unknown stage with the same invocationRequestId and scope; a recorded accept is reconciled from its operation receipt, then Begin continues. A different scope stops and shows the current claim. Does not reuse an operation id with changed inputs or restart an unknown write at a later revision. A response that never returns the stage id cannot be recovered unless the caller already held that invocationRequestId. The browser records the existing Room action and does not invoke Begin. Write mode needs repository, ref, paths, and expiresAt; those are not guessed. Does not run code outside Room.",
     inputSchema: schema({
       workItemId: id,
@@ -130,7 +130,12 @@ function validArguments(tool, args) {
   if (tool.name === "room_close_work_claim") return typeof args.claimId === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(args.claimId)
     && (args.verb === undefined || args.verb === "close" || args.verb === "cancel")
     && (args.reason === undefined || typeof args.reason === "string" && args.reason.length >= 1 && args.reason.length <= 4000);
-  if (tool.name === "room_set_member_claim_cap") return Number.isSafeInteger(args.maxMemberOpenClaims) && args.maxMemberOpenClaims >= 1 && args.maxMemberOpenClaims <= 10000;
+  if (tool.name === "room_set_member_claim_cap") {
+    const cap = value => value === undefined || Number.isSafeInteger(value) && value >= 1 && value <= 10000;
+    return (args.maxMemberOpenClaims !== undefined || args.maxOpenClaims !== undefined)
+      && cap(args.maxMemberOpenClaims) && cap(args.maxOpenClaims)
+      && Object.keys(args).every(key => key === "maxMemberOpenClaims" || key === "maxOpenClaims");
+  }
   if (tool.name === "room_read_work" && args.discussionSince !== undefined && args.includeDiscussion !== true) return false;
   return Object.entries(args).every(([key, value]) => ["requestId", "workItemId", "packetId", "noticeId", "replyToId"].includes(key) ? validId(value)
     : key === "body" ? tool.name === "room_post_draft" ? validDraftBody(value) : typeof value === "string" && value.trim().length > 0 && value.length <= 4096
@@ -174,7 +179,7 @@ async function callTool(client, identity, name, args, signal) {
     expectedHistoryLength: args.expectedHistoryLength, signal
   });
   if (name === "room_close_work_claim") return client.closeWorkClaim(args.claimId, { verb: args.verb ?? "close", reason: args.reason, signal });
-  if (name === "room_set_member_claim_cap") return client.workClaimConfig({ maxMemberOpenClaims: args.maxMemberOpenClaims, signal });
+  if (name === "room_set_member_claim_cap") return client.workClaimConfig({ maxMemberOpenClaims: args.maxMemberOpenClaims, maxOpenClaims: args.maxOpenClaims, signal });
   if (name === "room_check_access") return client.checkConnection({ signal });
   if (name === "get_room_context") return client.roomContext(args.since_version === undefined ? { signal } : { sinceVersion: args.since_version, signal });
   if (name === "room_list_work") return client.orient({ signal, focus: args.focus ?? "all", query: args.query, sort: args.sort });

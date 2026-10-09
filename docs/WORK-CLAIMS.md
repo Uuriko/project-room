@@ -104,9 +104,11 @@ Open claims are everything that is not `done`.
   `in_progress`, or `blocked`. The next claim is **409**
   `too_many_open_claims`.
 
-These are not `file_lease_conflict`. The room owner sets the per-member cap
+These are not `file_lease_conflict`. The room owner sets either cap, or both,
 with `POST /api/rooms/{roomId}/work-claims/config` and
-`{ "maxMemberOpenClaims": 20 }` (integer 1..10000). `GET` on that path reads
+`{ "maxMemberOpenClaims": 20, "maxOpenClaims": 200 }` (each an integer
+1..10000; send at least one). MCP: `room_set_member_claim_cap` takes the same
+fields. The board's owner form sets both. `GET` on that path reads
 the caps. Anyone else who posts is **403** `work_claims_not_permitted`.
 Missing or invalid stored values use the defaults.
 

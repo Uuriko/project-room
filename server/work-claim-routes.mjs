@@ -1354,14 +1354,23 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   if (workClaimRoute === "config" && (req.method === "GET" || req.method === "POST")) {
     if (req.method === "GET") return json(res, 200, { roomId, ...config });
     const data = body(req);
-    if (!shape(data, { required: ["maxMemberOpenClaims"] })) invalidInput(reject, "{maxMemberOpenClaims}");
+    if (!shape(data, { required: [], optional: ["maxMemberOpenClaims", "maxOpenClaims"] })
+      || (data.maxMemberOpenClaims === undefined && data.maxOpenClaims === undefined)) {
+      invalidInput(reject, "{maxMemberOpenClaims?, maxOpenClaims?} with at least one");
+    }
     const ownerId = typeof access.authority?.ownerId === "string" && access.authority.ownerId.length > 0
       ? access.authority.ownerId : null;
-    if (ownerId !== caller) reject(403, "work_claims_not_permitted", "Only the room owner can set the per-member claim cap.");
-    if (!Number.isSafeInteger(data.maxMemberOpenClaims) || data.maxMemberOpenClaims < 1 || data.maxMemberOpenClaims > 10000) {
-      invalidInput(reject, "maxMemberOpenClaims as an integer 1..10000");
+    if (ownerId !== caller) reject(403, "work_claims_not_permitted", "Only the room owner can set the claim caps.");
+    for (const key of ["maxMemberOpenClaims", "maxOpenClaims"]) {
+      const value = data[key];
+      if (value !== undefined && (!Number.isSafeInteger(value) || value < 1 || value > 10000)) {
+        invalidInput(reject, `${key} as an integer 1..10000`);
+      }
     }
-    const saved = registry.configure(roomId, { maxMemberOpenClaims: data.maxMemberOpenClaims });
+    const patch = {};
+    if (data.maxMemberOpenClaims !== undefined) patch.maxMemberOpenClaims = data.maxMemberOpenClaims;
+    if (data.maxOpenClaims !== undefined) patch.maxOpenClaims = data.maxOpenClaims;
+    const saved = registry.configure(roomId, patch);
     return json(res, 200, { roomId, ...saved });
   }
   if (workClaimRoute === "provenance" && (req.method === "GET" || req.method === "HEAD")) {

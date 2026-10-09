@@ -161,6 +161,34 @@ test("the room owner sets the per-member claim cap and a second claim is refused
   assert.equal(read.value.maxMemberOpenClaims, 1);
 });
 
+test("the room owner sets the room-wide claim cap and the next create is refused", async t => {
+  const { call, ownerKey, coordKey, coord } = await fixture(t);
+  const saved = await call(ownerKey, "/work-claims/config", { maxOpenClaims: 2 });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.value.maxOpenClaims, 2);
+  assert.equal(saved.value.maxMemberOpenClaims, 20);
+  const denied = await call(coordKey, "/work-claims/config", { maxOpenClaims: 500 });
+  assert.equal(denied.status, 403);
+  assert.equal(denied.value.error.code, "work_claims_not_permitted");
+  for (const bad of [{}, { maxOpenClaims: 0 }, { maxOpenClaims: 10001 }, { maxOpenClaims: "5" }, { maxOpenClaims: 5, extra: 1 }]) {
+    const refused = await call(ownerKey, "/work-claims/config", bad);
+    assert.equal(refused.status, 422, JSON.stringify(bad));
+  }
+  await coord.workClaimCreate({ id: "room-cap-1", title: "First" });
+  await coord.workClaimCreate({ id: "room-cap-2", title: "Second" });
+  const third = await call(coordKey, "/work-claims", { id: "room-cap-3", title: "Third" });
+  assert.equal(third.status, 409);
+  assert.equal(third.value.error.code, "work_board_full");
+  const both = await call(ownerKey, "/work-claims/config", { maxOpenClaims: 3, maxMemberOpenClaims: 5 });
+  assert.equal(both.status, 200);
+  assert.equal(both.value.maxOpenClaims, 3);
+  assert.equal(both.value.maxMemberOpenClaims, 5);
+  const retry = await call(coordKey, "/work-claims", { id: "room-cap-3", title: "Third" });
+  assert.ok(retry.status < 300, `create after raise: ${retry.status}`);
+  const read = await call(ownerKey, "/work-claims/config");
+  assert.equal(read.value.maxOpenClaims, 3);
+});
+
 test("an ownerless room refuses a non-member and a member without a claim profile", async t => {
   const { store, call, coordKey, chatKey } = await fixture(t);
   const row = store.db.prepare("SELECT projection FROM rooms WHERE id=?").get("commons");
