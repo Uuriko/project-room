@@ -65,6 +65,15 @@ export function lockCacheMs(env) {
   return Math.min(LOCK_CACHE_MAX_MS, value);
 }
 
+// A pause holds for a real duration only. The daemon ignores 0, negative and
+// non-finite minutes (machine/lib/protocol.mjs pauseUntilFromMinutes), so the
+// relay refuses them too rather than answering paused:true for a no-op.
+export const MAX_PAUSE_MINUTES = 10_080;
+
+export function isPauseMinutes(value) {
+  return Number.isSafeInteger(value) && value >= 1 && value <= MAX_PAUSE_MINUTES;
+}
+
 export function isMachineId(value) {
   return typeof value === "string" && MACHINE_ID.test(value);
 }
@@ -143,4 +152,18 @@ export function challengeHeader(request, machineId) {
   const origin = new URL(request.url).origin;
   const metadata = `${origin}/.well-known/oauth-protected-resource/v0/machines/${machineId}/mcp`;
   return `Bearer realm="project-room-relay", resource_metadata="${metadata}", error="invalid_token"`;
+}
+
+// The control frame a daemon must hear when it links. halt and pause are sent
+// only to a linked daemon, so one issued while the machine was offline (asleep,
+// rebooting) would otherwise never reach it: its bot and local tools check the
+// daemon's own state. Only restrictive state is replayed; a resume issued while
+// offline is not, so a daemon never resumes on the relay's say-so at link time.
+export function controlFrameOnLink(state, now = Date.now()) {
+  if (!state) return null;
+  if (state.halted) return { type: "halt", epoch: state.haltEpoch };
+  if (typeof state.pausedUntil === "number" && now < state.pausedUntil) {
+    return { type: "pause", minutes: Math.max(1, Math.ceil((state.pausedUntil - now) / 60_000)) };
+  }
+  return null;
 }
