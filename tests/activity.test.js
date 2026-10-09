@@ -281,3 +281,29 @@ test("thread mutes: mute and unmute persist per member", async t => {
   assert.equal((await mute(f.mayaKey, { threadId: "root" })).status, 422);
   assert.equal((await f.call("/api/rooms/commons/thread-mutes", { method: "POST", data: { threadId: "root", muted: true } })).status, 401);
 });
+
+test("housekeeping writes have their own rate bucket; chat commands keep the 60/min budget", async t => {
+  const f = await serve(t);
+  seedActivity(f);
+  const set = data => f.call("/api/rooms/commons/read-horizon", { method: "POST", token: f.mayaKey, data });
+  for (let i = 0; i < 100; i++) assert.equal((await set({ lastReadMessageId: "root" })).status, 200, `read-horizon write ${i}`);
+  // 100 read markers did not spend the shared write budget.
+  const post = await f.call("/api/rooms/commons/commands", { method: "POST", token: f.mayaKey,
+    data: { id: randomUUID(), type: T.MESSAGE_POSTED, data: { messageId: "after-markers", body: "still allowed" } } });
+  assert.equal(post.status, 201);
+  // The housekeeping bucket is a limit, not a bypass.
+  let limited = 0;
+  for (let i = 0; i < 160; i++) if ((await set({ lastReadMessageId: "root" })).status === 429) limited++;
+  assert.ok(limited > 0, "housekeeping writes are still capped per minute");
+});
+
+test("pins stay in the shared 60/min write bucket", async t => {
+  const f = await serve(t);
+  seedActivity(f);
+  let limited = 0;
+  for (let i = 0; i < 80; i++) {
+    const res = await f.call("/api/rooms/commons/pins", { method: "POST", token: f.ownerKey, data: { messageId: "root", pinned: i % 2 === 0 } });
+    if (res.status === 429) limited++;
+  }
+  assert.ok(limited > 0, "a pin burst is capped at the 60/min write budget, not the 240/min housekeeping bucket");
+});

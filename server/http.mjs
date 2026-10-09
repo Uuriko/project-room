@@ -300,6 +300,9 @@ function defaultAssetLoader(assetRoot) {
   };
 }
 
+// Per-credential write budget for routes that carry no user-authored content.
+export const HOUSEKEEPING_WRITE_PER_MINUTE = 240;
+export const HOUSEKEEPING_WRITE_ROUTES = Object.freeze(new Set(["cursor", "presence", "activity-read", "activity-read-all", "read-horizon", "saved"]));
 export function createRoomServer({ store, origin, assetRoot = new URL("../", import.meta.url), streamInterval = STREAM_INTERVAL_DEFAULT_MS, streamQueueCap = 65536, trustedLocalProxy = false,
   loadAsset = defaultAssetLoader(assetRoot), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
   resolveRequestSignal = () => null, syntheticInboxTransport = null, channelWebhooks = null, cookieNamespace = "",
@@ -3632,7 +3635,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (selected.bearer && auth.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
       if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
       rate(`read:${auth.credentialHash}`, 600);
-      if (!["GET", "HEAD"].includes(req.method)) { protectWrite(req, auth, selected.bearer); rate(`write:${auth.credentialHash}`, 60); }
+      if (!["GET", "HEAD"].includes(req.method)) {
+        protectWrite(req, auth, selected.bearer);
+        // Housekeeping writes (read markers, saves, presence, cursor)
+        // fire as a side effect of reading and typing. They get their own
+        // bucket so a fast typist's read markers don't spend the 60/min
+        // budget the chat flood guard and real writes share.
+        const housekeeping = HOUSEKEEPING_WRITE_ROUTES.has(route);
+        rate(housekeeping ? `write-hk:${auth.credentialHash}` : `write:${auth.credentialHash}`, housekeeping ? HOUSEKEEPING_WRITE_PER_MINUTE : 60);
+      }
       // RC-2026-09-18-012: API-key callers are confined to their stored
       // scopes on every room route — reads need rooms:read, writes need
       // rooms:write. Owner identity secrets and room credentials are
