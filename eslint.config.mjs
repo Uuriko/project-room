@@ -20,7 +20,7 @@ const rules = {
   // churn for a lint PR. Promote to "error" once the warnings are gone.
   "prefer-const": ["warn", { destructuring: "all" }],
 };
-export const RAW_TRANSACTION_EXEMPT = ["server/store.mjs", "server/spend-grants.mjs", "server/analytics/tail.mjs"];
+export const RAW_TRANSACTION_EXEMPT = ["server/store.mjs", "server/analytics/tail.mjs"];
 const languageOptions = { ecmaVersion: "latest", sourceType: "module" };
 
 export default [
@@ -57,9 +57,10 @@ export default [
     languageOptions: { ...languageOptions, globals: { ...globals.node, ...globals.browser } },
   },
   // TST-07: server code opens transactions only through store.transaction(fn).
-  // store.mjs implements that helper. The other two files predate the rule:
-  // spend-grants.mjs is shelved credits code; analytics/tail.mjs writes the
-  // separate analytics database. Remove an entry when its file moves to the
+  // store.mjs implements that helper. The other file predates the rule:
+  // analytics/tail.mjs writes the separate analytics database. (spend-grants.mjs
+  // is LIVE money code, wired into both MCP profiles; it delegates to
+  // store.transaction and is no longer exempt.) Remove an entry when its file moves to the
   // helper; tests/no-raw-transaction-lint.test.js fails on a stale entry.
   {
     files: ["server.mjs", "server/**/*.mjs"],
