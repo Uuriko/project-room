@@ -60,6 +60,9 @@ test("next-actions ranks heartbeat-due above bounty-match above newcomer-welcome
   const hb = out.items.find(i => i.kind === "heartbeat-due");
   assert.equal(hb.urgency, "high");
   assert.equal(hb.score, 0.95);
+  // FIX-11: the suggested renew action must name the required progress proof —
+  // a body of null would 422 against the renew endpoint.
+  assert.ok(hb.action.api.body.progressMessageId, "renew action suggests a progressMessageId");
 });
 
 // (1) Every item explains itself: reason + scoreReason are the trust contract.

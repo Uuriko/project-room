@@ -1,6 +1,13 @@
-// Lease renewal: a heartbeat with no chat post extends the lease. A message
-// id is optional evidence; when present it must be the holder's own public
-// message posted after the current lease window began.
+// Lease renewal, two mechanisms:
+// - Part 1: the legacy CLAIM_RENEWED event (scope reservations): a heartbeat
+//   with no chat post extends the lease. A message id is optional evidence;
+//   when present it must be the holder's own public message posted after the
+//   current lease window began.
+// - Parts 2-3: the work-claims board (pure renewWork + the HTTP /renew
+//   route). FIX-11 (2026-10-09): bare renews are refused — renewal requires
+//   proof of progress (progressMessageId) — and a renewal preserves the
+//   original lease duration, extending from the current expiry rather than
+//   from now. No silent upgrades to the room default.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -179,16 +186,25 @@ test("changeDescription labels a renewal 'Scope renewed'", () => {
 // ---------------------------------------------------------------------------
 // Part 2: the pure renewWork state machine
 // ---------------------------------------------------------------------------
-test("renewWork starts a fresh lease window from now", () => {
+test("renewWork extends from the current expiry, preserving the original lease duration", () => {
   const claimed = claimWork({ id: "w1" }, "quill", { leaseHours: 6, now: T0 });
   assert.equal(claimed.leaseStartAt, iso(T0));
   const renewed = renewWork(claimed, "quill", { now: T0 + 2 * H });
-  assert.equal(renewed.leaseStartAt, iso(T0 + 2 * H));
-  assert.equal(renewed.leaseExpiresAt, iso(T0 + 26 * H)); // the room's default 24h
+  // The window slides forward to the old expiry — remaining time is never
+  // consumed, and the duration is the claim's own 6h, not the room default.
+  assert.equal(renewed.leaseStartAt, iso(T0 + 6 * H));
+  assert.equal(renewed.leaseExpiresAt, iso(T0 + 12 * H));
   assert.equal(renewed.owner, "quill");
   assert.equal(renewed.state, "claimed");
   assert.equal(renewed.history.at(-1).action, "renewed");
-  assert.match(renewed.history.at(-1).note, /lease: 24h/);
+  assert.match(renewed.history.at(-1).note, /lease: 6h/);
+});
+
+test("renewWork records the cited progress message in the renewal history note", () => {
+  const claimed = claimWork({ id: "w1" }, "quill", { leaseHours: 6, now: T0 });
+  const renewed = renewWork(claimed, "quill", { progressMessageId: "msg-1", now: T0 + H });
+  assert.match(renewed.history.at(-1).note, /lease: 6h/);
+  assert.match(renewed.history.at(-1).note, /msg-1/);
 });
 
 test("renewWork records the caller's note in history", () => {
@@ -197,10 +213,11 @@ test("renewWork records the caller's note in history", () => {
   assert.equal(renewed.history.at(-1).note, "still digging");
 });
 
-test("renewWork honors an explicit leaseHours", () => {
+test("renewWork honors an explicit leaseHours, stacked on the old expiry", () => {
   const claimed = claimWork({ id: "w1" }, "quill", { leaseHours: 6, now: T0 });
   const renewed = renewWork(claimed, "quill", { leaseHours: 6, now: T0 + H });
-  assert.equal(renewed.leaseExpiresAt, iso(T0 + 7 * H));
+  assert.equal(renewed.leaseStartAt, iso(T0 + 6 * H));
+  assert.equal(renewed.leaseExpiresAt, iso(T0 + 12 * H));
 });
 
 test("renewWork refuses a foreign owner, a non-active claim, a leaseless claim, and a lapsed lease", () => {
@@ -258,17 +275,47 @@ test("handler: renew extends the lease on a fresh public check-in", async () => 
   const { out, error } = await runRoute({ route: "renew", id: "w1", body: { progressMessageId: "progress-1" },
     storeMessages: [liveMessage()], registry });
   assert.equal(error, null);
-  assert.ok(Date.parse(out.value.leaseExpiresAt) > Date.parse(before));
+  // Original 6h duration preserved, stacked on the old expiry — no silent
+  // upgrade to the room default, no extend-from-now consumption.
+  assert.equal(Date.parse(out.value.leaseExpiresAt), Date.parse(before) + 6 * H);
+  assert.equal(Date.parse(out.value.leaseStartAt), Date.parse(before));
   assert.ok(Date.parse(out.value.leaseStartAt) >= Date.parse(out.value.claimedAt));
   assert.equal(out.value.history.at(-1).action, "renewed");
 });
 
-test("handler: renew without a progress message id extends the lease", async () => {
+test("handler: renew without a progress message id is refused — proof of progress is required", async () => {
   const registry = await claimedRegistry();
-  const before = registry.get("room1", "w1").leaseExpiresAt;
-  const { out, error } = await runRoute({ route: "renew", id: "w1", body: {}, registry });
-  assert.equal(error, null);
-  assert.ok(Date.parse(out.value.leaseExpiresAt) > Date.parse(before));
+  const before = registry.get("room1", "w1");
+  for (const body of [{}, { progressMessageId: "" }, { progressMessageId: "   " }, { note: "still working" }]) {
+    const { out, error } = await runRoute({ route: "renew", id: "w1", body, registry });
+    assert.equal(out, null);
+    assert.equal(error.status, 422);
+    assert.equal(error.code, "claim_renewal_progress_required");
+    assert.match(error.message, /progressMessageId/);
+  }
+  // The refused renews moved nothing.
+  assert.deepEqual(registry.get("room1", "w1"), before);
+});
+
+test("handler: a second renew needs a check-in newer than the previous expiry", async () => {
+  const registry = await claimedRegistry();
+  const first = await runRoute({ route: "renew", id: "w1", body: { progressMessageId: "progress-1" },
+    storeMessages: [liveMessage()], registry });
+  assert.equal(first.error, null);
+  const firstExpiry = Date.parse(first.out.value.leaseExpiresAt);
+  // The same check-in is now stale — the renewed window starts at the old expiry.
+  const stale = await runRoute({ route: "renew", id: "w1", body: { progressMessageId: "progress-1" },
+    storeMessages: [liveMessage()], registry });
+  assert.equal(stale.out, null);
+  assert.equal(stale.error.status, 422);
+  assert.equal(stale.error.code, "claim_renewal_source_stale");
+  // A fresh check-in posted after the previous expiry renews again, stacking
+  // the original duration on the new expiry.
+  const fresh = await runRoute({ route: "renew", id: "w1", body: { progressMessageId: "progress-2" },
+    storeMessages: [liveMessage({ id: "progress-2", createdAt: new Date(Date.now() + 7 * H).toISOString() })],
+    registry });
+  assert.equal(fresh.error, null);
+  assert.equal(Date.parse(fresh.out.value.leaseExpiresAt), firstExpiry + 6 * H);
 });
 
 test("handler: renew with a DM check-in is refused", async () => {

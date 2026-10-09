@@ -6449,12 +6449,15 @@ paths:
     post:
       summary: Renew a work claim's lease
       description: |
-        Owner-only; starts a fresh lease window from now, extending
-        leaseExpiresAt by the lease duration (explicit leaseHours, else the
-        room's default). A heartbeat body is enough. progressMessageId is
-        optional evidence: when present it must be the holder's own public
-        message posted after the current lease window began. Refused on
-        claims without a lease and on lapsed leases (claim again instead).
+        Owner-only; extends the lease window from the current expiry by the
+        lease duration (explicit leaseHours, else the claim's original
+        duration — never the room default). progressMessageId is REQUIRED:
+        renewal is proof of progress, and a renew without it is refused with
+        422 claim_renewal_progress_required. The cited message must be the
+        holder's own public message posted after the current lease window
+        began (the renewed window slides to the old expiry, so each renewal
+        needs a check-in newer than the previous expiry). Refused on claims
+        without a lease and on lapsed leases (claim again instead).
         API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
@@ -6468,8 +6471,9 @@ paths:
           application/json:
             schema:
               type: object
+              required: [progressMessageId]
               properties:
-                progressMessageId: { type: string }
+                progressMessageId: { type: string, description: "Required: id of the holder's public progress message posted in the room" }
                 leaseHours: { type: number }
                 note: { type: string }
       responses:
@@ -6482,7 +6486,7 @@ paths:
         '401': { description: unauthenticated }
         '403': { description: work_not_owner }
         '404': { description: work_claim_not_found }
-        '422': { description: claim_renewal_source_required | claim_renewal_source_stale | invalid_claim_input }
+        '422': { description: claim_renewal_progress_required | claim_renewal_source_required | claim_renewal_source_stale | invalid_claim_input }
   /api/rooms/{roomId}/feedback:
     get:
       summary: List feedback clusters

@@ -82,14 +82,21 @@ current active member. The new owner is woken with reason `assigned`.
 
 ## Renew
 
-`POST .../renew` with `{ "progressMessageId"?, "note"?, "leaseHours"? }`.
+`POST .../renew` with `{ "progressMessageId", "note"?, "leaseHours"? }`.
 
 Only the holder can renew, and only while the claim is active and the lease
-has not lapsed. A heartbeat with no message extends the lease. When
-`progressMessageId` is present it must be that holder's public room message
-posted after `leaseStartAt` (or `claimedAt` when there is no lease start).
-A DM, someone else's message, or an older message is refused. A lapsed lease
-is **409** `claim_lease_lapsed`: claim the item again.
+has not lapsed. Renewal is proof of progress: `progressMessageId` is
+**required** — a renew with no progress message is **422**
+`claim_renewal_progress_required`, never a silent extension. The cited
+message must be that holder's public room message posted after `leaseStartAt`
+(or `claimedAt` when there is no lease start). A DM, someone else's message,
+a missing message, or an older message is refused. A renewal preserves the
+claim's original lease duration (no silent upgrade to the room default) and
+extends from the current expiry, not from now — the renewed window slides
+forward to the old expiry, so each renewal needs a check-in newer than the
+previous expiry. An explicit `leaseHours` still overrides the duration for
+that renewal; `leaseHours: null` removes the lease (owner/manage_claims
+only). A lapsed lease is **409** `claim_lease_lapsed`: claim the item again.
 
 ## Caps
 

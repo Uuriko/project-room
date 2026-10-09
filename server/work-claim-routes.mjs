@@ -1278,7 +1278,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // the current lease window began. Renewals are discussed in the channel —
     // a stale holder can't hold work indefinitely without showing progress.
     const data = body(req);
-    if (!shape(data, { optional: ["progressMessageId", "note", "leaseHours"] })) invalidInput(reject, "{progressMessageId?, note?, leaseHours?}");
+    if (!shape(data, { optional: ["progressMessageId", "note", "leaseHours"] })) invalidInput(reject, "{progressMessageId, note?, leaseHours?}");
     const item = load(claimIdOf(reject, workClaimId));
     // W4 (QA 2026-09-28): a lapsed lease auto-releases the claim (owner
     // cleared), so the ownership check below would misdiagnose it as an
@@ -1297,30 +1297,33 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     assertBoardLeaseHours(reject, data);
     if (Object.hasOwn(data, "note")) data.note = text("note", data.note, { multiline: true });
     const progressId = data.progressMessageId;
-    if (progressId !== undefined && (typeof progressId !== "string" || !progressId.trim())) invalidInput(reject, "progressMessageId as a message id when citing evidence");
-    const messages = progressId ? (store.room(roomId).state.messages ?? []) : [];
-    const message = progressId ? messages.find(entry => entry.id === progressId) : null;
-    if (progressId) {
-      if (!message || message.deletedAt) {
-        reject(422, "claim_renewal_source_required",
-          "Post a progress update in the room first, then renew the claim with its message id");
-      }
-      if (message.toMemberId) {
-        reject(422, "claim_renewal_source_required",
-          "The progress update must be a public room message, not a DM — post it in the room first");
-      }
-      if (message.authorId !== caller) {
-        reject(403, "claim_renewal_source_foreign",
-          "The progress update must be your own message — only the claim holder's check-in renews the lease");
-      }
-      const leaseStart = item.leaseStartAt ?? item.claimedAt;
-      if (!(Date.parse(message.createdAt) > Date.parse(leaseStart))) {
-        reject(422, "claim_renewal_source_stale",
-          "The progress update must be newer than the current lease start — post a fresh update in the room first");
-      }
+    // FIX-11: renewal is proof of progress — a bare renew with no progress
+    // message is refused with a clear 4xx, never a silent lease extension.
+    if (typeof progressId !== "string" || !progressId.trim()) {
+      reject(422, "claim_renewal_progress_required",
+        "Renewing a work claim requires proof of progress: post a progress update in the room first, then renew with its message id in progressMessageId");
+    }
+    const messages = store.room(roomId).state.messages ?? [];
+    const message = messages.find(entry => entry.id === progressId);
+    if (!message || message.deletedAt) {
+      reject(422, "claim_renewal_source_required",
+        "Post a progress update in the room first, then renew the claim with its message id");
+    }
+    if (message.toMemberId) {
+      reject(422, "claim_renewal_source_required",
+        "The progress update must be a public room message, not a DM — post it in the room first");
+    }
+    if (message.authorId !== caller) {
+      reject(403, "claim_renewal_source_foreign",
+        "The progress update must be your own message — only the claim holder's check-in renews the lease");
+    }
+    const leaseStart = item.leaseStartAt ?? item.claimedAt;
+    if (!(Date.parse(message.createdAt) > Date.parse(leaseStart))) {
+      reject(422, "claim_renewal_source_stale",
+        "The progress update must be newer than the current lease start — post a fresh update in the room first");
     }
     const renewed = runPure(reject, () => renewWork(item, caller,
-      { note: data.note, leaseHours: leaseHoursOfBody(data), room: roomLike, now: nowMs }));
+      { note: data.note, leaseHours: leaseHoursOfBody(data), progressMessageId: progressId, room: roomLike, now: nowMs }));
     commit(renewed, "renewed", { coalesce: true });
     return json(res, 200, renewed);
   }

@@ -596,32 +596,42 @@ export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, p
   return withHistory(claimed, atMs, agent, "claimed",
     effective === null ? note : note ?? `lease: ${effective}h`);
 }
-// Renew a claim's lease: starts a fresh lease window from now, extending
-// leaseExpiresAt by the lease duration (explicit leaseHours, else the
-// room's default). Only the owner may renew, only while the claim is
-// active, and only when the claim carries a lease (claims that opted out
-// of leases have nothing to renew; lapsed leases must be claimed again).
+// Renew a claim's lease: extends the current lease window from the current
+// expiry by the lease duration (explicit leaseHours, else the claim's
+// ORIGINAL duration — never the room default). Only the owner may renew,
+// only while the claim is active, and only when the claim carries a lease
+// (claims that opted out of leases have nothing to renew; lapsed leases
+// must be claimed again). The renewed window slides forward to the old
+// expiry, so a renewal's progress proof must be newer than the previous
+// window — proof of progress per renewal, no indefinite silent holding.
 // The route layer requires the owner's public progress message — posted
 // in the room after the prior lease start — before calling this; the pure
-// machine records the renewal, never the message check.
-export function renewWork(work, agentId, { note, leaseHours, room, now } = {}) {
+// machine records the renewal (and the cited message id), never the message
+// check.
+export function renewWork(work, agentId, { note, leaseHours, progressMessageId, room, now } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can renew it`);
   check(ACTIVE_CLAIM_STATES.includes(item.state), `work "${item.id}" is ${item.state} — only active claims can be renewed`);
   check(item.leaseExpiresAt !== null, `work "${item.id}" has no lease — nothing to renew`);
-  check(Date.parse(item.leaseExpiresAt) > atMs, `work "${item.id}" lease already lapsed — claim it again instead`);
+  const oldExpiryMs = Date.parse(item.leaseExpiresAt);
+  check(oldExpiryMs > atMs, `work "${item.id}" lease already lapsed — claim it again instead`);
   // QA D-1: same 4000-char bound as create — see claimWork.
   if (note !== undefined && note !== null) check(typeof note === "string" && note.length <= 4000, "note must be a string of at most 4000 characters");
   const wanted = leaseHoursOf(leaseHours);
   // Explicit null opts out of leases, exactly like claimWork: the renewed
-  // claim carries no lease window (it previously fell through to the room
-  // default, contradicting claimWork's null handling).
-  const effective = wanted === null ? null : wanted ?? roomWorkClaimConfig(room).defaultLeaseHours;
+  // claim carries no lease window.
+  // FIX-11: with no explicit leaseHours the ORIGINAL lease duration carries
+  // over — a bare renew never silently upgrades to the room default — and
+  // the window extends from the current expiry, not from now, so remaining
+  // time is never consumed.
+  const originalMs = oldExpiryMs - Date.parse(item.leaseStartAt ?? item.claimedAt);
+  const effective = wanted === null ? null : wanted ?? originalMs / 3600e3;
+  const progressNote = progressMessageId === undefined || progressMessageId === null ? "" : ` (progress ${progressMessageId})`;
   const renewed = { ...item,
-    leaseStartAt: effective === null ? null : isoOf(atMs),
-    leaseExpiresAt: effective === null ? null : isoOf(atMs + effective * 3600 * 1000) };
+    leaseStartAt: effective === null ? null : isoOf(oldExpiryMs),
+    leaseExpiresAt: effective === null ? null : isoOf(oldExpiryMs + effective * 3600 * 1000) };
   return withHistory(renewed, atMs, agent, "renewed",
-    note ?? (effective === null ? "lease removed" : `lease: ${effective}h`));
+    note ?? (effective === null ? "lease removed" : `lease: ${effective}h${progressNote}`));
 }
 // Append one URL to the current claim round without replacing its lease or
 // evidence. A fresh duplicate in the same round is a byte-identical no-op;

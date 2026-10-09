@@ -644,7 +644,12 @@ export function installWorkBoard({ client, getState, getSession }) {
     else if (action === "progress") flyButton(button, () => client.request(`${path}/update`, { method: "POST", data: { state: "in_progress" } }), focus);
     else if (action === "done") flyButton(button, () => client.request(`${path}/update`, { method: "POST", data: { state: "done" } }), focus);
     else if (action === "renew") {
-      flyButton(button, () => client.request(`${path}/renew`, { method: "POST", data: {} }), focus);
+      // FIX-11: renew requires proof of progress — prompt for the progress
+      // message id instead of posting a bare renew (the server 422s it).
+      const progressMessageId = window.prompt("Progress message id for this renewal (post a progress update in the room first):");
+      if (progressMessageId === null || !progressMessageId.trim()) return;
+      flyButton(button, () => client.request(`${path}/renew`,
+        { method: "POST", data: { progressMessageId: progressMessageId.trim() } }), focus);
     }
   });
   // Same in-flight treatment for form submits (BU-02): disable the submit

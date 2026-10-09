@@ -136,8 +136,11 @@ export function buildNextActions({ agent, snapshots, dismissals = [], suppressio
       urgency: "high",
       ref: Object.freeze({ workClaimId: claim.id }),
       action: room === null ? null : Object.freeze({
-        api: Object.freeze({ method: "POST", path: `/api/rooms/${room}/work-claims/${claim.id}/renew`, body: null }),
-        note: "cite your progress message id (progressMessageId) — the room renews leases against public progress",
+        // FIX-11: renew requires proof of progress — the caller fills in the
+        // message id of the progress update they posted in the room.
+        api: Object.freeze({ method: "POST", path: `/api/rooms/${room}/work-claims/${claim.id}/renew`,
+          body: Object.freeze({ progressMessageId: "<message id of your progress update>" }) }),
+        note: "post a progress update in the room first, then renew with its message id (progressMessageId) — the room renews leases against public progress",
       }),
       dismissable: true,
     });
