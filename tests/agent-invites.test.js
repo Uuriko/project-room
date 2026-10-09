@@ -109,6 +109,21 @@ test("codes are drawn uniformly from the whole alphabet with no modulo bias", as
   assert.ok(seen.size >= 28, `expected broad alphabet coverage, saw ${seen.size} symbols`);
 });
 
+test("mint defaults to a 24h TTL when expiresInMinutes is omitted", async t => {
+  const { origin, ownerKey } = await serve(t);
+  const res = await mint(origin, ownerKey, { permissions: ["accept_work"] });
+  assert.equal(res.status, 201, JSON.stringify(res.json));
+  // Documented in skills/project-room/references/errors.md and the OpenAPI
+  // mint operation: default 24h (1440 min), valid range 5 min - 30d.
+  assert.equal(res.json.expiresAt - res.json.createdAt, 1440 * 60000, "default invite TTL is 24h");
+  const min = await mint(origin, ownerKey, { permissions: ["accept_work"], expiresInMinutes: 5 });
+  assert.equal(min.status, 201, JSON.stringify(min.json));
+  assert.equal(min.json.expiresAt - min.json.createdAt, 5 * 60000, "5-minute TTL honored at the lower bound");
+  const max = await mint(origin, ownerKey, { permissions: ["accept_work"], expiresInMinutes: 43200 });
+  assert.equal(max.status, 201, JSON.stringify(max.json));
+  assert.equal(max.json.expiresAt - max.json.createdAt, 43200 * 60000, "30-day TTL honored at the upper bound");
+});
+
 test("displayName must be text when present: null is rejected, not stored as \"null\"", async t => {
   const { store, origin, ownerKey } = await serve(t);
   for (const displayName of [null, 42, ["Bot"], { name: "Bot" }]) {

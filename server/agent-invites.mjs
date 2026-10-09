@@ -12,7 +12,9 @@
 // a deterministic scrypt (so lookup by hash still works, and no deployment
 // secret is needed) that costs orders of magnitude more per guess than a
 // bare sha256. Codes minted before the v2 format (8 symbols, sha256 stored)
-// keep redeeming until they expire. Audit is the table: created_by/at,
+// no longer redeem: the unsalted sha256 fallback was removed, so a legacy
+// code answers 404 invite_unavailable ("No invite was issued for this code")
+// like any unknown code. Audit is the table: created_by/at,
 // expires_at, redeemed_at/by, revoked_at, all queryable through list().
 
 import { createHash, randomBytes, randomUUID, scryptSync } from "node:crypto";
