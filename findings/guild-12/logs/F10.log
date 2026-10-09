@@ -1,0 +1,2 @@
+{"event":"room.cold_start","durationMs":1167,"integrity":"eager","phases":{"schema":{"ms":225,"rowsRead":0},"plugin":{"ms":306,"rowsRead":0},"fence":{"ms":377,"rowsRead":0},"verifies":{"ms":64,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":166,"heapBytes":36529136,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+PASS F10 300 pause/resume cycles, pause held every time, 15 wakes due at end

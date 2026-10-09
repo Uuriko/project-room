@@ -1,2 +1,4 @@
-{"event":"room.cold_start","durationMs":1890,"integrity":"eager","phases":{"schema":{"ms":376,"rowsRead":0},"plugin":{"ms":722,"rowsRead":0},"fence":{"ms":314,"rowsRead":0},"verifies":{"ms":69,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":176,"heapBytes":36564368,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
-FAIL F7 negative dueAt: did not throw
+{"event":"room.cold_start","durationMs":2240,"integrity":"eager","phases":{"schema":{"ms":269,"rowsRead":0},"plugin":{"ms":1034,"rowsRead":0},"fence":{"ms":461,"rowsRead":0},"verifies":{"ms":31,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":185,"heapBytes":36359872,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+KNOWN-GAP F7: negative dueAt accepted (tracked in regress/enqueue-negative-dueat.test.js)
+KNOWN-GAP F7: intentBytes counts UTF-16 units, not bytes (8000-byte intent accepted)
+PASS F7 18 hostile payloads rejected cleanly, idempotency intact, 2 known gaps tracked

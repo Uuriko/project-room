@@ -1,0 +1,2 @@
+{"event":"room.cold_start","durationMs":734,"integrity":"eager","phases":{"schema":{"ms":95,"rowsRead":0},"plugin":{"ms":357,"rowsRead":0},"fence":{"ms":114,"rowsRead":0},"verifies":{"ms":15,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":169,"heapBytes":36363352,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+PASS F8 flood: 200 accepted/200 refused at active cap; receipt cap enforced; integrity ok

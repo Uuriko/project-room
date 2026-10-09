@@ -1,0 +1,4 @@
+{"event":"room.cold_start","durationMs":1370,"integrity":"eager","phases":{"schema":{"ms":139,"rowsRead":0},"plugin":{"ms":592,"rowsRead":0},"fence":{"ms":368,"rowsRead":0},"verifies":{"ms":118,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":179,"heapBytes":35930240,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+room diagnostic op_f3-le4hn 429 stream_limit rate_limited /api/rooms/:roomId/stream
+FAIL F2 storm iteration 3: status 429

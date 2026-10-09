@@ -1,0 +1,3 @@
+{"event":"room.cold_start","durationMs":1772,"integrity":"eager","phases":{"schema":{"ms":225,"rowsRead":0},"plugin":{"ms":951,"rowsRead":0},"fence":{"ms":283,"rowsRead":0},"verifies":{"ms":136,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":190,"heapBytes":35971728,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+PASS F1 lagging event after ~40 events, socket dropped in 7716ms, peer got 24 events

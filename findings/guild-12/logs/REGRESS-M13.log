@@ -1,0 +1,11 @@
+{"event":"room.cold_start","durationMs":2027,"integrity":"eager","phases":{"schema":{"ms":174,"rowsRead":0},"plugin":{"ms":962,"rowsRead":0},"fence":{"ms":477,"rowsRead":0},"verifies":{"ms":94,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":182,"heapBytes":37192232,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":957,"integrity":"eager","phases":{"schema":{"ms":270,"rowsRead":0},"plugin":{"ms":190,"rowsRead":0},"fence":{"ms":101,"rowsRead":0},"verifies":{"ms":57,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":70,"heapBytes":33991248,"rooms":1,"sequences":10,"projectionBytes":2920,"events":10}
+✔ a lease younger than leaseMs survives crash recovery (5685.474633ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 15856.245904

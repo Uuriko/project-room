@@ -15,3 +15,4 @@ M08 KILLED file=server/wake-queue.mjs test=tests/wake-queue.test.js dur=37s
 M12 KILLED file=server/work-wakes.mjs test=tests/agent-wake.test.js tests/agent-wake-poll.test.js tests/board-wake.test.js tests/board-wake-ready-work.test.js tests/room-mcp-wake.test.js tests/pull-only-heartbeat-wakes.test.js tests/agent-heartbeats.test.js dur=269s
 M13 SURVIVED file=server/wake-queue-limits.mjs test=tests/wake-queue.test.js dur=29s
 M10 KILLED file=server/work-wakes.mjs test=tests/agent-wake.test.js tests/agent-wake-poll.test.js tests/board-wake.test.js tests/board-wake-ready-work.test.js tests/room-mcp-wake.test.js tests/pull-only-heartbeat-wakes.test.js tests/agent-heartbeats.test.js dur=259s
+M14 SURVIVED file=server/wake-queue-limits.mjs test=tests/wake-queue.test.js dur=33s

@@ -1,0 +1,10 @@
+{"event":"room.cold_start","durationMs":3153,"integrity":"eager","phases":{"schema":{"ms":320,"rowsRead":0},"plugin":{"ms":1957,"rowsRead":0},"fence":{"ms":655,"rowsRead":0},"verifies":{"ms":10,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":189,"heapBytes":36843688,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ fail() backs off the full baseBackoffMs, not less (4922.080803ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 17652.243247

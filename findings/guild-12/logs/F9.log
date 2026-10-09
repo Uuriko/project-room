@@ -1,0 +1,2 @@
+{"event":"room.cold_start","durationMs":1835,"integrity":"eager","phases":{"schema":{"ms":172,"rowsRead":0},"plugin":{"ms":883,"rowsRead":0},"fence":{"ms":402,"rowsRead":0},"verifies":{"ms":135,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":182,"heapBytes":36397288,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+PASS F9 lease race: 1 winner; complete idempotent; cross-wake requestId collision -> 409

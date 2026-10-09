@@ -1,0 +1,13 @@
+{"event":"room.cold_start","durationMs":2052,"integrity":"eager","phases":{"schema":{"ms":247,"rowsRead":0},"plugin":{"ms":589,"rowsRead":0},"fence":{"ms":881,"rowsRead":0},"verifies":{"ms":32,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":194,"heapBytes":37184352,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ enqueue accepts maxAttempts at exactly the legal maximum (4299.034464ms)
+{"event":"room.cold_start","durationMs":1983,"integrity":"eager","phases":{"schema":{"ms":475,"rowsRead":0},"plugin":{"ms":965,"rowsRead":0},"fence":{"ms":228,"rowsRead":0},"verifies":{"ms":89,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":186,"heapBytes":37389808,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1398,"integrity":"eager","phases":{"schema":{"ms":298,"rowsRead":0},"plugin":{"ms":398,"rowsRead":0},"fence":{"ms":388,"rowsRead":0},"verifies":{"ms":59,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":76,"heapBytes":34460560,"rooms":1,"sequences":10,"projectionBytes":2920,"events":10}
+✔ a lease younger than leaseMs survives crash recovery (6518.886989ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 26635.861542

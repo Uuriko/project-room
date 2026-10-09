@@ -1,0 +1,30 @@
+{"event":"room.cold_start","durationMs":2456,"integrity":"eager","phases":{"schema":{"ms":466,"rowsRead":0},"plugin":{"ms":1118,"rowsRead":0},"fence":{"ms":400,"rowsRead":0},"verifies":{"ms":132,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":190,"heapBytes":37084088,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✖ enqueue accepts maxAttempts at exactly the legal maximum (6641.924652ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 16750.861659
+
+✖ failing tests:
+
+test at findings/guild-12/regress/enqueue-maxattempts-boundary.test.js:15:1
+✖ enqueue accepts maxAttempts at exactly the legal maximum (6641.924652ms)
+  Error: Supply a queue key, intent, due time, max attempts and request ID.
+      at fail (file:///home/hatch/workspace/pr-wave1000-guild-12/server/wake-queue.mjs:21:49)
+      at file:///home/hatch/workspace/pr-wave1000-guild-12/server/wake-queue.mjs:179:108
+      at run (file:///home/hatch/workspace/pr-wave1000-guild-12/server/store.mjs:647:22)
+      at Object.transaction (file:///home/hatch/workspace/pr-wave1000-guild-12/server/store.mjs:674:22)
+      at RoomStore.transaction (file:///home/hatch/workspace/pr-wave1000-guild-12/server/store.mjs:2621:41)
+      at WakeQueue.enqueue (file:///home/hatch/workspace/pr-wave1000-guild-12/server/wake-queue.mjs:167:23)
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-12/findings/guild-12/regress/enqueue-maxattempts-boundary.test.js:18:31)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.start (node:internal/test_runner/test:1257:17) {
+    status: 422,
+    code: 'invalid_wake',
+    headers: null
+  }

@@ -1,0 +1,7 @@
+{"event":"room.cold_start","durationMs":1736,"integrity":"eager","phases":{"schema":{"ms":191,"rowsRead":0},"plugin":{"ms":678,"rowsRead":0},"fence":{"ms":390,"rowsRead":0},"verifies":{"ms":69,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":194,"heapBytes":35901904,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+room diagnostic op_dPjTRFYd 401 unauthenticated access /api/rooms/:roomId/stream
+room diagnostic op_cq4GRAbs 401 unauthenticated access /api/rooms/:roomId/stream
+room diagnostic op__ODT9F8g 403 access_denied access /api/rooms/:roomId/stream
+room diagnostic op_aDZd271T 405 method_not_allowed input /api/rooms/:roomId/stream
+PASS F6 no-auth/bad-token/bad-room/post rejected; Last-Event-ID header wins over ?after=

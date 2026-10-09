@@ -1,0 +1,31 @@
+{"event":"room.cold_start","durationMs":1285,"integrity":"eager","phases":{"schema":{"ms":222,"rowsRead":0},"plugin":{"ms":674,"rowsRead":0},"fence":{"ms":250,"rowsRead":0},"verifies":{"ms":31,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":170,"heapBytes":37061240,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✖ fail() backs off the full baseBackoffMs, not less (2741.739394ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 12703.280412
+
+✖ failing tests:
+
+test at findings/guild-12/regress/fail-backoff-pinned.test.js:19:1
+✖ fail() backs off the full baseBackoffMs, not less (2741.739394ms)
+  AssertionError [ERR_ASSERTION]: wake is not due before the full backoff elapses
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave1000-guild-12/findings/guild-12/regress/fail-backoff-pinned.test.js:30:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1397:25)
+      at Test.start (node:internal/test_runner/test:1257:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

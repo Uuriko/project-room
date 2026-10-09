@@ -1,0 +1,46 @@
+{"event":"room.cold_start","durationMs":4264,"integrity":"eager","phases":{"schema":{"ms":178,"rowsRead":0},"plugin":{"ms":611,"rowsRead":0},"fence":{"ms":629,"rowsRead":0},"verifies":{"ms":253,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":434,"heapBytes":21718112,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2065,"integrity":"eager","phases":{"schema":{"ms":776,"rowsRead":0},"plugin":{"ms":843,"rowsRead":0},"fence":{"ms":227,"rowsRead":0},"verifies":{"ms":16,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":153,"heapBytes":26094128,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1540,"integrity":"eager","phases":{"schema":{"ms":343,"rowsRead":0},"plugin":{"ms":726,"rowsRead":0},"fence":{"ms":342,"rowsRead":0},"verifies":{"ms":18,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":152,"heapBytes":30176176,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ F4: a write to another room does not invalidate this room's warm projection (4825.493384ms)
+✔ F4: a write to the same room invalidates its projection (2326.576286ms)
+✔ F4: pump reads do not block behind a write transaction held open on another room (1849.480445ms)
+{"event":"room.cold_start","durationMs":2061,"integrity":"eager","phases":{"schema":{"ms":169,"rowsRead":0},"plugin":{"ms":968,"rowsRead":0},"fence":{"ms":603,"rowsRead":0},"verifies":{"ms":90,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":173,"heapBytes":25944936,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1273,"integrity":"eager","phases":{"schema":{"ms":194,"rowsRead":0},"plugin":{"ms":506,"rowsRead":0},"fence":{"ms":358,"rowsRead":0},"verifies":{"ms":22,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":140,"heapBytes":24630288,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ drain dispatches with bounded parallelism: 10 deliveries beat sequential wall-clock (3423.57701ms)
+{"event":"room.cold_start","durationMs":1152,"integrity":"eager","phases":{"schema":{"ms":82,"rowsRead":0},"plugin":{"ms":696,"rowsRead":0},"fence":{"ms":218,"rowsRead":0},"verifies":{"ms":13,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":143,"heapBytes":28944288,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1114,"integrity":"eager","phases":{"schema":{"ms":90,"rowsRead":0},"plugin":{"ms":540,"rowsRead":0},"fence":{"ms":251,"rowsRead":0},"verifies":{"ms":63,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":149,"heapBytes":32999696,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ drain coalesces duplicate wake pings: same URL + same eventId = one POST (2064.71599ms)
+✔ no coalescing across different eventIds on the same URL (1410.29705ms)
+✔ coalesced followers stay pending when the leader fails (1423.050039ms)
+✖ boardSeq starts at 0 and increments exactly once per mutation (create/claim/release/update/renew/reassign/close/cancel) (178.271954ms)
+✔ refused mutations do not bump boardSeq (25.970594ms)
+✔ ?since=N returns only claims mutated after N, plus boardSeq and open/terminal counts (104.499092ms)
+✔ full page without since keeps its shape and gains only top-level boardSeq (47.93772ms)
+✔ invalid since is 400 invalid_input (38.506977ms)
+✔ single-claim reads keep their existing shape (no boardSeq leak) (29.905099ms)
+✔ durable registry persists boardSeq and per-claim seq across restarts; legacy rows read as 0 (1348.097567ms)
+ℹ tests 14
+ℹ suites 0
+ℹ pass 13
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 32503.952568
+
+✖ failing tests:
+
+test at tests/work-claim-board-seq.test.js:42:1
+✖ boardSeq starts at 0 and increments exactly once per mutation (create/claim/release/update/renew/reassign/close/cancel) (178.271954ms)
+  Error: Expected {expectedClaimedAt, expectedHistoryLength, reason?, note?}.
+      at reject (file:///home/hatch/workspace/pr-wave300-fanout-verify/tests/work-claim-board-seq.test.js:19:54)
+      at invalidInput (file:///home/hatch/workspace/pr-wave300-fanout-verify/server/work-claim-routes.mjs:130:44)
+      at handleWorkClaimsCore (file:///home/hatch/workspace/pr-wave300-fanout-verify/server/work-claim-routes.mjs:1266:7)
+      at run (file:///home/hatch/workspace/pr-wave300-fanout-verify/server/work-claim-routes.mjs:703:21)
+      at handleWorkClaims (file:///home/hatch/workspace/pr-wave300-fanout-verify/server/work-claim-routes.mjs:708:71)
+      at async TestContext.<anonymous> (file:///home/hatch/workspace/pr-wave300-fanout-verify/tests/work-claim-board-seq.test.js:51:17)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    status: 422,
+    code: 'invalid_claim_input'
+  }

@@ -3,3 +3,26 @@ F3 exit=0 :: PASS F3 resumed from 5, got 2 newer events; tip resume clean
 F4 exit=0 :: PASS F4 future cursor -> 409, server healthy
 F7 exit=1 :: FAIL F7 negative dueAt: did not throw
 F5 exit=1 :: FAIL F5 garbage cursor "11111111111111111111" -> unexpected 431
+F5 exit=0 :: PASS F5 12 garbage cursors, no 500s, no hangs
+F6 exit=0 :: PASS F6 no-auth/bad-token/bad-room/post rejected; Last-Event-ID header wins over ?after=
+F8 exit=124 :: 
+F8 exit=1 :: 
+F7 exit=1 :: FAIL F7 unicode intent flood: did not throw
+F9 exit=0 :: PASS F9 lease race: 1 winner; complete idempotent; cross-wake requestId collision -> 409
+F10 exit=1 :: 
+F8 exit=0 :: PASS F8 flood: 200 accepted/200 refused at active cap; receipt cap enforced; integrity ok
+F7 exit=0 :: PASS F7 18 hostile payloads rejected cleanly, idempotency intact, 2 known gaps tracked
+F10 exit=0 :: PASS F10 300 pause/resume cycles, pause held every time, 15 wakes due at end
+F2 exit=1 :: FAIL F2 storm iteration 3: status 429
+F1 exit=2 :: TIMEOUT F1: hung past 90000ms
+F1 exit=0 :: PASS F1 lagging event after ~40 events, socket dropped in 7716ms, peer got 24 events
+F11 exit=1 :: FAIL F11 F11: expected 100 accepted, got 3 (rejected 297)
+F11 exit=1 :: 
+F11 exit=1 :: 
+F11 exit=1 :: FAIL F11 openMany: only 99 credentials for 300 streams
+F11 exit=1 :: FAIL F11 F11: expected 100 accepted, got 279 (rejected 21)
+F11 exit=1 :: FAIL F11 F11: expected 100 accepted, got 67 (rejected 233)
+F11 exit=1 :: FAIL F11 F11: expected 100 accepted, got 56 (rejected 244)
+F11 exit=2 :: TIMEOUT F11: hung past 90000ms
+F11 exit=0 :: PASS F11 300 attempts: 100 accepted/200 rejected in 19813ms, event-loop lag max=8743ms p99=1695ms, cpu=2744ms
+F12 exit=0 :: PASS F12 500 attempts: 100 accepted/400 rejected in 36953ms, event-loop lag max=15808ms p99=1509ms, cpu=6256ms
