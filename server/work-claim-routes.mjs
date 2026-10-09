@@ -65,16 +65,31 @@ import { isRoomArchived } from "../src/events.js";
 const CLAIM_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
 // Per-room registry: roomId -> { items: Map(id -> work item), config: { defaultLeaseHours?, reviewPolicy? } }.
+// F3 (wave500 W4, ported from wave300-fanout-perf): each room also carries a
+// monotonic boardSeq, bumped on every set() inside the same (in-memory:
+// trivially atomic) write as the claim mutation. The stored item records the
+// seq of its last mutation.
 export function createWorkClaimRegistry() {
   const rooms = new Map();
+  const seqs = new Map();
   const room = roomId => {
     let entry = rooms.get(roomId);
     if (!entry) { entry = { items: new Map(), config: {} }; rooms.set(roomId, entry); }
     return entry;
   };
+  const nextBoardSeq = roomId => {
+    const next = (seqs.get(roomId) ?? 0) + 1;
+    seqs.set(roomId, next);
+    return next;
+  };
   return {
     get(roomId, id) { return room(roomId).items.get(id) ?? null; },
-    set(roomId, item) { room(roomId).items.set(item.id, item); return item; },
+    set(roomId, item) {
+      const stamped = { ...item, boardSeq: nextBoardSeq(roomId) };
+      room(roomId).items.set(stamped.id, stamped);
+      return stamped;
+    },
+    boardSeq(roomId) { return seqs.get(roomId) ?? 0; },
     list(roomId) { return [...room(roomId).items.values()]; },
     has(roomId, id) { return room(roomId).items.has(id); },
     configure(roomId, config) {
@@ -139,7 +154,7 @@ const WORK_CLAIM_PROFILES = Object.freeze({
 });
 const BOARD_LIMIT_DEFAULT = 50;
 const BOARD_LIMIT_MAX = 200;
-const BOARD_QUERY = new Set(["queue", "auth", "limit", "cursor", "state", "view"]);
+const BOARD_QUERY = new Set(["queue", "auth", "limit", "cursor", "state", "view", "since"]);
 
 // QA7-13: compact per-claim projection for ?view=summary — the fields a
 // board overview needs (id, title, state, owner, lease expiry) without the
@@ -278,6 +293,28 @@ const boardLimitOf = (reject, raw) => {
   return Number(raw);
 };
 
+// F3 (wave500 W4, ported from wave300-fanout-perf): the per-claim boardSeq
+// lives in storage and on the delta wire only. Every other surface keeps its
+// existing shape, so strip it before returning a stored item outside the
+// board page.
+const stripBoardSeq = item => {
+  if (!item || !Object.hasOwn(item, "boardSeq")) return item;
+  const { boardSeq: _dropped, ...rest } = item;
+  return rest;
+};
+
+const boardDeltaSinceOf = (reject, params) => {
+  if (!params.has("since")) return null;
+  const raw = params.get("since");
+  if (typeof raw !== "string" || !/^\d+$/.test(raw)) {
+    reject(400, "invalid_input", "Expected since as a non-negative integer boardSeq.");
+  }
+  if (params.has("cursor") || params.has("queue") || params.has("state")) {
+    reject(400, "invalid_input", "since combines only with limit and view, not cursor, queue, or state.");
+  }
+  return Number(raw);
+};
+
 const boardCursorOf = (reject, raw) => {
   try {
     const parsed = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
@@ -338,25 +375,46 @@ function pageReady(items, limit, cursor) {
 // Shared stored-state projection. No registry/store access or lifecycle effects:
 // ordinary GET calls this after housekeeping; derived reads call it directly.
 // Pages are live, not a snapshot fenced by the legacy room event sequence.
-export function buildWorkClaimPage(items, roomId, viewerId, query = new URLSearchParams(), nowMs = Date.now()) {
+//
+// F3 (wave500 W4, ported from wave300-fanout-perf): boardSeq is the room's
+// current board cursor, supplied by the caller from registry.boardSeq(roomId);
+// every page carries it top-level. With ?since=N the page is a delta: only
+// claims with boardSeq > N, in mutation order, plus room-wide open/terminal
+// counts; each delta claim keeps its boardSeq so the delta is self-describing.
+// Without since the page is today's full page — per-claim boardSeq is
+// stripped so the claim shape is unchanged.
+export function buildWorkClaimPage(items, roomId, viewerId, query = new URLSearchParams(), nowMs = Date.now(), boardSeq = 0) {
   const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
   const params = query ?? new URLSearchParams();
   for (const key of params.keys()) {
     if (!BOARD_QUERY.has(key) || params.getAll(key).length !== 1) {
-      invalidInput(reject, "a single queue, state, limit, cursor, or view query parameter");
+      invalidInput(reject, "a single queue, state, limit, cursor, since, or view query parameter");
     }
   }
+  const deltaSince = boardDeltaSinceOf(reject, params);
+  const seqNow = Number.isSafeInteger(boardSeq) && boardSeq >= 0 ? boardSeq : 0;
   const limit = boardLimitOf(reject, params.get("limit"));
   const cursor = params.has("cursor") ? boardCursorOf(reject, params.get("cursor")) : null;
   const view = params.get("view");
   if (view !== null && view !== "summary") invalidInput(reject, "view=summary");
   const metadata = { roomId, source: "work-claims", evaluatedAt: new Date(nowMs).toISOString(),
     consistency: "live", limit, historyLimit: LIST_HISTORY_ENTRIES };
-  const present = page => {
-    const stamped = stampClaimPage({ ...metadata, ...page,
-      claims: page.claims.map(item => summarizeClaimHistory(item, LIST_HISTORY_ENTRIES)) }, viewerId);
+  const stripClaimSeq = (item, isDelta) => (isDelta ? item : stripBoardSeq(item));
+  const present = (page, { delta = false } = {}) => {
+    const projected = page.claims
+      .map(item => summarizeClaimHistory(item, LIST_HISTORY_ENTRIES))
+      .map(item => stripClaimSeq(item, delta));
+    const stamped = stampClaimPage({ ...metadata, ...page, boardSeq: seqNow, claims: projected }, viewerId);
     return view === "summary" ? withContentTrust({ ...stamped, claims: stamped.claims.map(summarizeBoardClaim) }) : stamped;
   };
+  if (deltaSince !== null) {
+    const changed = items
+      .filter(item => (item.boardSeq ?? 0) > deltaSince)
+      .sort((a, b) => ((a.boardSeq ?? 0) - (b.boardSeq ?? 0)) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    const openClaims = items.filter(item => !isTerminalClaimState(item.state)).length;
+    return present({ claims: changed, hasMore: false, nextCursor: null,
+      openClaims, terminalClaims: items.length - openClaims, historyScope: "delta" }, { delta: true });
+  }
   if (params.has("queue")) {
     if (params.get("queue") !== "ready") invalidInput(reject, "queue=ready");
     if (params.has("state")) invalidInput(reject, "either queue=ready or state, not both");
@@ -573,10 +631,13 @@ export function linkWorkClaimPullRequest({ store, roomId, auth, claimId, data, r
       }
       throw refusal;
     }
-    if (linked === item) return item;
+    if (linked === item) return stripBoardSeq(item);
     registry.set(roomId, linked);
     emitWorkClaimEvent(store, roomId, { actorId: current.member.id, item: linked, action: "state_changed", atMs: now });
-    return linked;
+    // F3: appendWorkPullRequest spreads the stored item, so the returned
+    // claim can carry a stale boardSeq — the link response keeps its
+    // existing shape.
+    return stripBoardSeq(linked);
   };
   return registry.transaction ? registry.transaction(run) : run();
 }
@@ -806,7 +867,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   if (workClaimRoute === "list" && req.method === "GET") {
     closeLiveClaims();
     return json(res, 200, { ...buildWorkClaimPage(registry.list(roomId), roomId, caller,
-      url?.searchParams, nowMs), swept: sweptIds });
+      url?.searchParams, nowMs, typeof registry.boardSeq === "function" ? registry.boardSeq(roomId) : 0), swept: sweptIds });
   }
   if (workClaimRoute === "receipts" && req.method === "GET") {
     // RC-2026-09-24-205: receipts search. The room block already rejected
@@ -966,7 +1027,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   if (workClaimRoute === "read" && req.method === "GET") {
     closeLiveClaims();
     // SEC-2: member-authored text is marked untrusted for the reader.
-    return json(res, 200, withContentTrust(stampClaim(load(claimIdOf(reject, workClaimId)), caller)));
+    // F3: the stored boardSeq is a board-page concern — the single-claim
+    // read keeps its existing shape.
+    return json(res, 200, withContentTrust(stampClaim(stripBoardSeq(load(claimIdOf(reject, workClaimId))), caller)));
   }
   if (workClaimRoute === "claim" && req.method === "POST") {
     const data = body(req);
@@ -1147,7 +1210,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       if (!duplicate && data.verdict === "changes_requested") {
         enqueueClaimWake(store, roomId, item.owner, `work-claim:${item.id}:review:${caller}:${nowMs}`, { reason: "review", actorId: caller });
       }
-      return json(res, 200, duplicate ? item : reviewed);
+      return json(res, 200, duplicate ? stripBoardSeq(item) : reviewed);
     }
     if (!shape(data, { optional: ["note"] })) invalidInput(reject, "{note?} or {verdict, summary, url?}");
     if (!mayAttestWorkClaims(access)) refuseAttest();
@@ -1166,7 +1229,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // SEC-2: a repeat note from this reviewer on the same claim round and
     // revision replaces the stored note without a history entry or event.
     if (before?.note !== after?.note) { registry.set(roomId, attested); return json(res, 200, attested); }
-    return json(res, 200, item);
+    return json(res, 200, stripBoardSeq(item));
   }
   if ((workClaimRoute === "close" || workClaimRoute === "cancel") && req.method === "POST") {
     // Claim lifecycle: retire open work without delivering it. close is for
