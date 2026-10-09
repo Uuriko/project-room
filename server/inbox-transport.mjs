@@ -80,22 +80,29 @@ export class SyntheticInboxTransport {
   async flush(token, sourceId, binding) {
     const summary = { settled: 0, stillUnknown: 0, ignored: 0 };
     for (const listed of this.inbox.sends(token, sourceId, binding).sends) {
-      const send = this.current(token, sourceId, listed.id, binding);
-      if (send.status !== "unknown") { summary.ignored++; continue; }
-      const afterReconcile = await this.reconcile(token, sourceId, send.id, binding);
-      if (afterReconcile.status !== "unknown") { summary.settled++; continue; }
-      // The provider never saw this message: submit with the same
-      // operationId the original dispatch would have used, then settle from
-      // the observation. A racing flush submitting the same operationId
-      // collapses into the adapter's dedupe.
-      let observed;
-      try { observed = await this.adapter.submit({ operationId: this.correlation(send), envelope: structuredClone(send.envelope) }); }
-      catch { summary.stillUnknown++; continue; }
-      const current = this.current(token, sourceId, send.id, binding);
-      const settled = this.observe(token, current, observed, binding);
-      if (settled.status === "unknown") summary.stillUnknown++; else summary.settled++;
+      if (listed.status !== "unknown") { summary.ignored++; continue; }
+      const after = await this.flushSend(token, sourceId, listed.id, binding);
+      if (after.status === "unknown") summary.stillUnknown++; else summary.settled++;
     }
     return summary;
+  }
+  // One attempt: the body of flush(), also the user-triggered retry behind
+  // POST /api/inbox/channel-sends {action:"flush"}. Only an "unknown" attempt
+  // moves; anything else is returned untouched. minAgeMs skips an attempt
+  // whose last write is that recent, so a retry does not race the original
+  // in-flight dispatch (the adapter's operationId dedupe is the second guard).
+  async flushSend(token, sourceId, sendId, binding, { minAgeMs = 0 } = {}) {
+    const send = this.current(token, sourceId, sendId, binding);
+    if (send.status !== "unknown") return send;
+    if (minAgeMs > 0 && this.inbox.store.now() - Number(send.updatedAt) < minAgeMs) return send;
+    const afterReconcile = await this.reconcile(token, sourceId, send.id, binding);
+    if (afterReconcile.status !== "unknown") return afterReconcile;
+    // The provider has no record: submit with the same operationId the
+    // original dispatch would have used, then settle from the observation.
+    let observed;
+    try { observed = await this.adapter.submit({ operationId: this.correlation(send), envelope: structuredClone(send.envelope) }); }
+    catch { return this.current(token, sourceId, send.id, binding); }
+    return this.observe(token, this.current(token, sourceId, send.id, binding), observed, binding);
   }
   observe(token, send, observed, binding, parentSpan = null) {
     // Missing, uncorrelated and unsupported evidence leaves the attempt unknown;
