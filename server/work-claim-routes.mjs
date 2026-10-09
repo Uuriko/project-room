@@ -982,14 +982,6 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (!shape(data, { optional: ["note", "leaseHours", "files", "advisory", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch"] })) invalidInput(reject, "{note?, leaseHours?, files?, advisory?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?}");
     if ("advisory" in data && typeof data.advisory !== "boolean") invalidInput(reject, "advisory true or false");
     const item = load(claimIdOf(reject, workClaimId));
-    // FIX-45 (COLLIDE-9): claiming a file-less item without declaring files
-    // was a silent 200 with no file-lease protection. When neither the claim
-    // request nor the item declares any files, refuse loudly. An item that
-    // already declares files is claimed without re-declaring (inherited).
-    if ((data.files === undefined || data.files === null) && (item.files ?? []).length === 0) {
-      reject(422, "work_claim_files_required",
-        `work "${item.id}" declares no files: pass files (the exact repo-relative files this claim will touch) to claim it, or files: [] when it touches none. Without declared files the claim gets no file-lease collision protection.`);
-    }
     // H4 (QA-200 2026-10-08): a failed claim's 409 must name the real recovery.
     // The old "release it first" advice destroyed your own claim on self
     // re-claim and was unactionable for a foreign holder (non-owners cannot
@@ -1005,6 +997,15 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     }
     requireWriter();
     requireEventBudget();
+    // FIX-45 (COLLIDE-9): claiming a file-less item without declaring files
+    // was a silent 200 with no file-lease protection. When neither the claim
+    // request nor the item declares any files, refuse loudly. An item that
+    // already declares files is claimed without re-declaring (inherited).
+    // Runs after the state/permission checks so 404/409/403 keep their codes.
+    if ((data.files === undefined || data.files === null) && (item.files ?? []).length === 0) {
+      reject(422, "work_claim_files_required",
+        `work "${item.id}" declares no files: pass files (the exact repo-relative files this claim will touch) to claim it, or files: [] when it touches none. Without declared files the claim gets no file-lease collision protection.`);
+    }
     assertLeaseChoice(data);
     assertBoardLeaseHours(reject, data);
     assertDependsOnKnown(reject, data, { selfId: item.id, has: other => registry.has(roomId, other) });

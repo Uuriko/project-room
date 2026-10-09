@@ -165,23 +165,23 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
   await page.screenshot({ path: "test-results/board-before.png" });
   await page.locator("#board-close").click();
 
-  await post(page, origin, "/work-claims", { id: "notes", title: "Write the notes" }, 201);
+  await post(page, origin, "/work-claims", { id: "notes", title: "Write the notes", files: [] }, 201); // FIX-45
   await post(page, origin, "/work-claims", {
     id: "copy", title: "Write the copy", files: ["src/board-ui.js", "src/board.css", "docs/WORK-CLAIMS.md"]
   }, 201);
-  await post(page, origin, "/work-claims/copy/claim", {});
+  await post(page, origin, "/work-claims/copy/claim", { files: [] }); // FIX-45: files required
   await post(page, origin, "/work-claims", {
-    id: "reviewpr", title: "Review the pull", pullRequest: "https://github.com/Uuriko/project-room/pull/1303"
-  }, 201);
-  await post(page, origin, "/work-claims/reviewpr/claim", {});
-  await post(page, origin, "/work-claims", { id: "stuck", title: "Stuck on a check" }, 201);
-  await post(page, origin, "/work-claims/stuck/claim", {});
+    id: "reviewpr", title: "Review the pull", pullRequest: "https://github.com/Uuriko/project-room/pull/1303", files: []
+  }, 201); // FIX-45
+  await post(page, origin, "/work-claims/reviewpr/claim", { files: [] }); // FIX-45
+  await post(page, origin, "/work-claims", { id: "stuck", title: "Stuck on a check", files: [] }, 201); // FIX-45
+  await post(page, origin, "/work-claims/stuck/claim", { files: [] }); // FIX-45
   await post(page, origin, "/work-claims/stuck/update", { state: "blocked" });
-  await post(page, origin, "/work-claims", { id: "shipped", title: "Shipped the notes" }, 201);
-  await post(page, origin, "/work-claims/shipped/claim", {});
+  await post(page, origin, "/work-claims", { id: "shipped", title: "Shipped the notes", files: [] }, 201); // FIX-45
+  await post(page, origin, "/work-claims/shipped/claim", { files: [] }); // FIX-45
   await post(page, origin, "/work-claims/shipped/update", { state: "in_progress" });
   await post(page, origin, "/work-claims/shipped/update", { state: "done" });
-  await post(page, origin, "/work-claims", { id: "waiting", title: "After the copy", dependsOn: ["copy"] }, 201);
+  await post(page, origin, "/work-claims", { id: "waiting", title: "After the copy", dependsOn: ["copy"], files: [] }, 201); // FIX-45
 
   const copyLine = page.locator("[data-claim-update='copy']");
   await copyLine.waitFor();
@@ -258,7 +258,7 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
     ...Array.from({ length: 6 }, (_, index) => ({ id: `board-context-${index}`, title: `Navigation context ${index}` }))
   ]) seedClaim(fixture.store, { state: "unclaimed", updatedAt, ...item });
   // A normal claim event makes the already-open client refresh its Board list.
-  await post(page, origin, "/work-claims", { id: "board-refresh", title: "Navigation refresh" }, 201);
+  await post(page, origin, "/work-claims", { id: "board-refresh", title: "Navigation refresh", files: [] }, 201); // FIX-45
   await page.waitForFunction(sequence => document.querySelector("#event-count")?.textContent === String(sequence),
     fixture.store.room("commons").sequence);
   const navigationState = () => {
@@ -368,7 +368,7 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
     await linked.press("Enter");
     await assertWork();
     const refreshId = `board-delayed-${dismiss.toLowerCase()}`;
-    await post(page, origin, "/work-claims", { id: refreshId, title: `A delayed Board refresh after ${dismiss}` }, 201);
+    await post(page, origin, "/work-claims", { id: refreshId, title: `A delayed Board refresh after ${dismiss}`, files: [] }, 201); // FIX-45
     await page.waitForFunction(sequence => document.querySelector("#event-count")?.textContent === String(sequence),
       fixture.store.room("commons").sequence);
     const beforeDelayedReturn = navigationState();
@@ -424,7 +424,7 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
   await linked.press("Enter");
   await assertWork();
   fixture.store.workClaims.delete("commons", claimId);
-  await post(page, origin, "/work-claims/board-refresh/claim", {});
+  await post(page, origin, "/work-claims/board-refresh/claim", { files: [] }); // FIX-45
   await page.waitForFunction(sequence => document.querySelector("#event-count")?.textContent === String(sequence),
     fixture.store.room("commons").sequence);
   await assertWork();
@@ -596,7 +596,7 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
     await page.locator("#board-close").click();
   }
   await openBoard();
-  await post(page, origin, "/work-claims/prerequisite/claim", {});
+  await post(page, origin, "/work-claims/prerequisite/claim", { files: [] }); // FIX-45
   await post(page, origin, "/work-claims/prerequisite/update", { state: "in_progress" });
   await post(page, origin, "/work-claims/prerequisite/update", { state: "done" });
   await page.locator("[aria-labelledby='board-col-ready'] article[data-claim-id='dependent']").waitFor();

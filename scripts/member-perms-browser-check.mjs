@@ -107,7 +107,7 @@ async function decide(page, label, expectedStatus = 200) {
 
 for (const width of [390, 1280]) test(`a basic member requests by keyboard at ${width}px, the owner approves, and the member can claim work`, { timeout: 60000 }, async t => {
   const f = await setup(t, { width });
-  assert.equal((await f.api("/api/rooms/commons/work-claims", "owner", { id: "permission-work", title: "Permission browser work" })).status, 201);
+  assert.equal((await f.api("/api/rooms/commons/work-claims", "owner", { id: "permission-work", title: "Permission browser work", files: [] })).status, 201); // FIX-45
   assert.equal((await f.api("/api/rooms/commons/work-claims/permission-work/claim", "requester", {})).status, 403);
   const page = await f.login("requester");
   await openMemberProfile(page, "requester");
