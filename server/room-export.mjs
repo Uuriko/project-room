@@ -43,11 +43,8 @@ export function sanitizeCell(column, value) {
   // Uint8Array, and JSON.stringify(ArrayBuffer) is {}: every room file's
   // bytes left production backups as an empty object until this was handled.
   if (value instanceof Uint8Array) return { $base64: Buffer.from(value).toString("base64") };
-  if (value instanceof ArrayBuffer) return { $base64: Buffer.from(new Uint8Array(value)).toString("base64") };
-  // A bare SharedArrayBuffer is neither an ArrayBuffer nor a view, but
-  // JSON.stringify turns it into {} just the same. Encode it like one.
-  // (Views over shared memory are already caught by the isView branch.)
-  if (typeof SharedArrayBuffer !== "undefined" && value instanceof SharedArrayBuffer)
+  if (value instanceof ArrayBuffer
+    || (typeof SharedArrayBuffer !== "undefined" && value instanceof SharedArrayBuffer))
     return { $base64: Buffer.from(new Uint8Array(value)).toString("base64") };
   if (ArrayBuffer.isView(value)) return { $base64: Buffer.from(value.buffer, value.byteOffset, value.byteLength).toString("base64") };
   if (typeof value !== "string") return value;
@@ -55,9 +52,7 @@ export function sanitizeCell(column, value) {
 }
 
 function sanitizeRow(row) {
-  const out = {};
-  for (const [column, value] of Object.entries(row)) out[column] = sanitizeCell(column, value);
-  return out;
+  return Object.fromEntries(Object.entries(row).map(([column, value]) => [column, sanitizeCell(column, value)]));
 }
 
 function tableNames(db) {
@@ -69,10 +64,11 @@ function tableColumns(db, table) {
   return db.prepare(`PRAGMA table_info(${quoteIdent(table)})`).all().map(column => column.name);
 }
 
-function exportTableOrder(db) {
-  const present = new Set(tableNames(db));
-  const ordered = FIRST.filter(table => present.has(table));
-  for (const table of [...present].sort()) if (!ordered.includes(table)) ordered.push(table);
+// FK-safe order: the pinned FIRST tables first, everything else
+// alphabetically. Used by both the export walk and replay's insert pass.
+function tableOrder(names) {
+  const ordered = FIRST.filter(table => names.has(table));
+  for (const table of [...names].sort()) if (!ordered.includes(table)) ordered.push(table);
   return ordered;
 }
 
@@ -80,7 +76,7 @@ export function* exportNdjsonLines(db) {
   const rooms = db.prepare("SELECT id, sequence FROM rooms ORDER BY id").all();
   const events = db.prepare("SELECT count(*) AS n FROM events").get().n;
   yield JSON.stringify({ kind: "watermark", version: 1, backedUpAt: Date.now(), rooms, events }) + "\n";
-  for (const table of exportTableOrder(db)) {
+  for (const table of tableOrder(new Set(tableNames(db)))) {
     const columns = tableColumns(db, table);
     if (!columns.length) continue;
     const order = table === "credentials" && columns.includes("parent_hash") ? " ORDER BY parent_hash IS NOT NULL, hash" : "";
@@ -226,12 +222,6 @@ function parseExport(ndjson) {
   return { watermark, byTable, trailer };
 }
 
-function insertOrder(names) {
-  const ordered = FIRST.filter(table => names.has(table));
-  for (const table of [...names].sort()) if (!ordered.includes(table)) ordered.push(table);
-  return ordered;
-}
-
 // Tables a production Durable Object export can carry that a fresh Node
 // store never creates. The two runtime markers belong to the Durable Object
 // writer fence (cloudflare/storage.mjs) and mean nothing in a sqlite file.
@@ -277,7 +267,7 @@ export function replayNdjson(ndjson, filename, { audit = "strict" } = {}) {
       skipped[table] = byTable.get(table).length;
       byTable.delete(table);
     }
-    const order = insertOrder(new Set(byTable.keys()));
+    const order = tableOrder(new Set(byTable.keys()));
     for (const table of order) if (!existing.has(table)) throw new Error("Export names a table this store does not have");
     store.db.exec("PRAGMA foreign_keys=OFF");
     // The public claim fence (server/public-work-claim-fence.mjs) aborts any

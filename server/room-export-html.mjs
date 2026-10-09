@@ -194,12 +194,18 @@ export function walkExport(rows) {
   return { room, members, messages, work, count, first, last, lastAt, name };
 }
 
+// Evidence entries and work notes share the same byline header.
+function headHtml(label, actorId, at, name) {
+  return `<span class="head"><span class="author">${esc(label)}</span> <span>${esc(name(actorId))}</span> <time datetime="${attr(at)}">${when(at)}</time></span>`;
+}
+
 function renderEvidence(entry, name) {
+  const head = headHtml(entry.label, entry.actorId, entry.at, name);
   const href = safeEvidenceHref(entry.url);
   const link = href ? `<a href="${attr(href)}" rel="noopener noreferrer nofollow">${esc(href)}</a>`
     : entry.url != null ? `<code>${esc(entry.url)}</code>` : "<em>evidence recorded in the room</em>";
   const version = entry.version != null ? ` <span class="flag">version ${esc(entry.version)}</span>` : "";
-  return `<li><span class="head"><span class="author">${esc(entry.label)}</span> <span>${esc(name(entry.actorId))}</span> <time datetime="${attr(entry.at)}">${when(entry.at)}</time></span>`
+  return `<li>${head}`
     + `<div class="body">${esc(entry.summary)}</div><div>${link}${version}</div></li>`;
 }
 
@@ -260,7 +266,7 @@ export function renderRoomExportHtml(rows, { roomId, generatedAt = new Date().to
     if (item.evidence.length) out.push("<ul class=\"evidence\">", ...item.evidence.map(entry => renderEvidence(entry, name)), "</ul>");
     if (item.notes.length) {
       out.push("<ul class=\"evidence\">");
-      for (const note of item.notes) out.push(`<li><span class="head"><span class="author">${esc(note.label)}</span> <span>${esc(name(note.actorId))}</span> <time datetime="${attr(note.at)}">${when(note.at)}</time></span><div class="body">${esc(note.text)}</div></li>`);
+      for (const note of item.notes) out.push(`<li>${headHtml(note.label, note.actorId, note.at, name)}<div class="body">${esc(note.text)}</div></li>`);
       out.push("</ul>");
     }
     out.push("</section>");
