@@ -19,19 +19,24 @@ echo "=== RV-$N branch=$BRANCH at $(date -u +%FT%TZ)"
 git -C $REPO worktree add $WT -b $SB origin/$BRANCH 2>&1 | tail -1
 cd $WT || { echo "WORKTREE_FAIL"; exit 1; }
 echo "--- rebase onto origin/main"
-if [ -n "$(git status --short | head -3)" ]; then
-  echo "UNEXPECTED_DIRTY_WORKTREE (transient?); recording and cleaning:"
-  git status --short | head -5
-  git checkout -- . 2>&1 | head -2
-fi
 REBASED=no
-if git rebase origin/main > .rebase-out.txt 2>&1; then
-  echo "REBASE_OK"
-  REBASED=yes
-else
-  echo "REBASE_FAILED"
-  tail -5 .rebase-out.txt
+for attempt in 1 2 3; do
+  # Disposable worktree: discard any transient external modification before each attempt.
+  git checkout -- . 2>/dev/null
+  if git rebase origin/main > .rebase-out.txt 2>&1; then
+    echo "REBASE_OK (attempt $attempt)"
+    REBASED=yes
+    break
+  fi
+  echo "rebase attempt $attempt failed:"
+  grep -E "error:|CONFLICT" .rebase-out.txt | head -3
   git rebase --abort 2>/dev/null
+  sleep 5
+done
+if [ "$REBASED" != yes ]; then
+  echo "REBASE_FAILED after 3 attempts"
+  echo "--- conflicting files:"
+  git diff --name-only --diff-filter=U | head -20
 fi
 if [ "$REBASED" = yes ] && git merge-base --is-ancestor origin/main HEAD 2>/dev/null; then
   echo "--- rebased onto $(git rev-parse --short origin/main); head $(git rev-parse --short HEAD)"
