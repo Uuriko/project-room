@@ -1,0 +1,238 @@
+{
+ "partitions": [
+  {
+   "name": "synth-data-plane",
+   "worktree": "/home/hatch/workspace/pr-synth-data-plane",
+   "branches": [
+    "synth/data-plane"
+   ],
+   "claimIds": [
+    "synth-data-plane-01",
+    "synth-data-plane-02",
+    "synth-data-plane-03",
+    "synth-data-plane-04",
+    "synth-data-plane-05"
+   ],
+   "dirs": [
+    "server/synth/data-plane/",
+    "tests/synth-data-plane/"
+   ],
+   "files": [
+    "docs/synth-data-plane-notes.md"
+   ],
+   "_tasks": [
+    "task-01",
+    "task-02",
+    "task-03",
+    "task-04",
+    "task-05"
+   ],
+   "_provenance": "synthetic \u2014 manual disjoint assignment standing in for the missing planner (worker 9's scripts/partition-plan.mjs never landed in the tree; see doc)"
+  },
+  {
+   "name": "synth-reaper",
+   "worktree": "/home/hatch/workspace/pr-synth-reaper",
+   "branches": [
+    "synth/reaper"
+   ],
+   "claimIds": [
+    "synth-reaper-01",
+    "synth-reaper-02",
+    "synth-reaper-03",
+    "synth-reaper-04",
+    "synth-reaper-05"
+   ],
+   "dirs": [
+    "server/synth/reaper/",
+    "tests/synth-reaper/"
+   ],
+   "files": [
+    "docs/synth-reaper-notes.md",
+    "server/synth/shared-registry.mjs"
+   ],
+   "_tasks": [
+    "task-06",
+    "task-07",
+    "task-08",
+    "task-09",
+    "task-10"
+   ],
+   "_provenance": "synthetic \u2014 manual disjoint assignment standing in for the missing planner (worker 9's scripts/partition-plan.mjs never landed in the tree; see doc)"
+  },
+  {
+   "name": "synth-backpressure",
+   "worktree": "/home/hatch/workspace/pr-synth-backpressure",
+   "branches": [
+    "synth/backpressure"
+   ],
+   "claimIds": [
+    "synth-backpressure-01",
+    "synth-backpressure-02",
+    "synth-backpressure-03",
+    "synth-backpressure-04",
+    "synth-backpressure-05"
+   ],
+   "dirs": [
+    "server/synth/backpressure/",
+    "tests/synth-backpressure/"
+   ],
+   "files": [
+    "docs/synth-backpressure-notes.md"
+   ],
+   "_tasks": [
+    "task-11",
+    "task-12",
+    "task-13",
+    "task-14",
+    "task-15"
+   ],
+   "_provenance": "synthetic \u2014 manual disjoint assignment standing in for the missing planner (worker 9's scripts/partition-plan.mjs never landed in the tree; see doc)"
+  },
+  {
+   "name": "synth-fanout",
+   "worktree": "/home/hatch/workspace/pr-synth-fanout",
+   "branches": [
+    "synth/fanout"
+   ],
+   "claimIds": [
+    "synth-fanout-01",
+    "synth-fanout-02",
+    "synth-fanout-03",
+    "synth-fanout-04",
+    "synth-fanout-05"
+   ],
+   "dirs": [
+    "server/synth/fanout/",
+    "tests/synth-fanout/"
+   ],
+   "files": [
+    "docs/synth-fanout-notes.md"
+   ],
+   "_tasks": [
+    "task-16",
+    "task-17",
+    "task-18",
+    "task-19",
+    "task-20"
+   ],
+   "_provenance": "synthetic \u2014 manual disjoint assignment standing in for the missing planner (worker 9's scripts/partition-plan.mjs never landed in the tree; see doc)"
+  },
+  {
+   "name": "synth-shards",
+   "worktree": "/home/hatch/workspace/pr-synth-shards",
+   "branches": [
+    "synth/shards"
+   ],
+   "claimIds": [
+    "synth-shards-01",
+    "synth-shards-02",
+    "synth-shards-03",
+    "synth-shards-04",
+    "synth-shards-05"
+   ],
+   "dirs": [
+    "server/synth/shards/",
+    "tests/synth-shards/"
+   ],
+   "files": [
+    "docs/synth-shards-notes.md",
+    "server/synth/shared-registry.mjs"
+   ],
+   "_tasks": [
+    "task-21",
+    "task-22",
+    "task-23",
+    "task-24",
+    "task-25"
+   ],
+   "_provenance": "synthetic \u2014 manual disjoint assignment standing in for the missing planner (worker 9's scripts/partition-plan.mjs never landed in the tree; see doc)"
+  },
+  {
+   "name": "synth-payloads",
+   "worktree": "/home/hatch/workspace/pr-synth-payloads",
+   "branches": [
+    "synth/payloads"
+   ],
+   "claimIds": [
+    "synth-payloads-01",
+    "synth-payloads-02",
+    "synth-payloads-03",
+    "synth-payloads-04",
+    "synth-payloads-05"
+   ],
+   "dirs": [
+    "server/synth/payloads/",
+    "tests/synth-payloads/"
+   ],
+   "files": [
+    "docs/synth-payloads-notes.md"
+   ],
+   "_tasks": [
+    "task-26",
+    "task-27",
+    "task-28",
+    "task-29",
+    "task-30"
+   ],
+   "_provenance": "synthetic \u2014 manual disjoint assignment standing in for the missing planner (worker 9's scripts/partition-plan.mjs never landed in the tree; see doc)"
+  },
+  {
+   "name": "synth-replay",
+   "worktree": "/home/hatch/workspace/pr-synth-replay",
+   "branches": [
+    "synth/replay"
+   ],
+   "claimIds": [
+    "synth-replay-01",
+    "synth-replay-02",
+    "synth-replay-03",
+    "synth-replay-04",
+    "synth-replay-05"
+   ],
+   "dirs": [
+    "server/synth/replay/",
+    "tests/synth-replay/"
+   ],
+   "files": [
+    "docs/synth-replay-notes.md"
+   ],
+   "_tasks": [
+    "task-31",
+    "task-32",
+    "task-33",
+    "task-34",
+    "task-35"
+   ],
+   "_provenance": "synthetic \u2014 manual disjoint assignment standing in for the missing planner (worker 9's scripts/partition-plan.mjs never landed in the tree; see doc)"
+  },
+  {
+   "name": "synth-telemetry",
+   "worktree": "/home/hatch/workspace/pr-synth-telemetry",
+   "branches": [
+    "synth/telemetry"
+   ],
+   "claimIds": [
+    "synth-telemetry-01",
+    "synth-telemetry-02",
+    "synth-telemetry-03",
+    "synth-telemetry-04",
+    "synth-telemetry-05"
+   ],
+   "dirs": [
+    "server/synth/telemetry/",
+    "tests/synth-telemetry/"
+   ],
+   "files": [
+    "docs/synth-telemetry-notes.md"
+   ],
+   "_tasks": [
+    "task-36",
+    "task-37",
+    "task-38",
+    "task-39",
+    "task-40"
+   ],
+   "_provenance": "synthetic \u2014 manual disjoint assignment standing in for the missing planner (worker 9's scripts/partition-plan.mjs never landed in the tree; see doc)"
+  }
+ ]
+}

@@ -1,0 +1,2 @@
+FAIL — 1 overlap(s) across 2 partitions:
+  [file/dir] qa2-signed-in-agent × qa2-contract: "server/agent-identities.mjs" ↔ "server/agent-identities.mjs"

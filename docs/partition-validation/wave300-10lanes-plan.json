@@ -1,0 +1,772 @@
+{
+  "tool": "partition-plan",
+  "version": 1,
+  "generatedAt": "2026-10-09T04:40:39.917Z",
+  "input": {
+    "taskCount": 40,
+    "requestedPartitions": 10,
+    "claimPrefix": "wave300"
+  },
+  "partitions": [
+    {
+      "index": 0,
+      "claimNamespace": "wave300-p0",
+      "taskIds": [
+        "bp-admission",
+        "dp-fastpath-index",
+        "reaper-docs",
+        "shard-migrate"
+      ],
+      "waves": [
+        [
+          "bp-admission",
+          "dp-fastpath-index",
+          "reaper-docs",
+          "shard-migrate"
+        ]
+      ],
+      "tasks": [
+        {
+          "id": "bp-admission",
+          "lane": "backpressure",
+          "files": [
+            "server/admission.mjs",
+            "tests/admission.test.js"
+          ],
+          "dirs": []
+        },
+        {
+          "id": "dp-fastpath-index",
+          "lane": "data-plane",
+          "files": [
+            "server/data-plane-index.mjs",
+            "tests/data-plane-index.test.js"
+          ],
+          "dirs": []
+        },
+        {
+          "id": "reaper-docs",
+          "lane": "reaper",
+          "files": [
+            "docs/REAPER.md",
+            "docs/READ-PURITY.md"
+          ],
+          "dirs": []
+        },
+        {
+          "id": "shard-migrate",
+          "lane": "shards",
+          "files": [
+            "scripts/shard-migrate.mjs",
+            "docs/SHARD-BOARDS.md"
+          ],
+          "dirs": []
+        }
+      ],
+      "pathCount": 8
+    },
+    {
+      "index": 1,
+      "claimNamespace": "wave300-p1",
+      "taskIds": [
+        "bp-backpressure",
+        "fanout-bench",
+        "reaper-purity",
+        "shard-router"
+      ],
+      "waves": [
+        [
+          "bp-backpressure",
+          "fanout-bench",
+          "reaper-purity",
+          "shard-router"
+        ]
+      ],
+      "tasks": [
+        {
+          "id": "bp-backpressure",
+          "lane": "backpressure",
+          "files": [
+            "server/backpressure.mjs",
+            "tests/backpressure.test.js"
+          ],
+          "dirs": []
+        },
+        {
+          "id": "fanout-bench",
+          "lane": "fanout",
+          "files": [
+            "scripts/fanout-bench.mjs",
+            "docs/FANOUT-PERF.md"
+          ],
+          "dirs": []
+        },
+        {
+          "id": "reaper-purity",
+          "lane": "reaper",
+          "files": [
+            "server/read-purity.mjs",
+            "tests/read-purity.test.js"
+          ],
+          "dirs": []
+        },
+        {
+          "id": "shard-router",
+          "lane": "shards",
+          "files": [
+            "server/shard-router.mjs",
+            "tests/shard-router.test.js"
+          ],
+          "dirs": []
+        }
+      ],
+      "pathCount": 8
+    },
+    {
+      "index": 2,
+      "claimNamespace": "wave300-p2",
+      "taskIds": [
+        "bp-load-shed",
+        "fanout-core",
+        "reaper-scan",
+        "stranger-2min"
+      ],
+      "waves": [
+        [
+          "bp-load-shed",
+          "fanout-core",
+          "reaper-scan",
+          "stranger-2min"
+        ]
+      ],
+      "tasks": [
+        {
+          "id": "bp-load-shed",
+          "lane": "backpressure",
+          "files": [
+            "server/load-shed.mjs",
+            "tests/load-shed.test.js"
+          ],
+          "dirs": []
+        },
+        {
+          "id": "fanout-core",
+          "lane": "fanout",
+          "files": [
+            "server/fanout.mjs",
+            "tests/fanout.test.js"
+          ],
+          "dirs": []
+        },
+        {
+          "id": "reaper-scan",
+          "lane": "reaper",
+          "files": [
+            "scripts/reaper-scan.mjs",
+            "tests/reaper-scan.test.js"
+          ],
+          "dirs": []
+        },
+        {
+          "id": "stranger-2min",
+          "lane": "stranger-qa",
+          "files": [
+            "tests/stranger-two-minute.test.js",
+            "docs/STRANGER-2MIN-RULE.md"
+          ],
+          "dirs": []
+        }
+      ],
+      "pathCount": 8
+    },
+    {
+      "index": 3,
+      "claimNamespace": "wave300-p3",
+      "taskIds": [
+        "bp-policy",
+        "fanout-retry",
+        "reaper-sweep",
+        "stranger-flow"
+      ],
+      "waves": [
+        [
+          "bp-policy",
+          "fanout-retry",
+          "reaper-sweep",
+          "stranger-flow"
+        ]
+      ],
+      "tasks": [
+        {
+          "id": "bp-policy",
+          "lane": "backpressure",
+          "files": [
+            "docs/BACKPRESSURE-POLICY.md",
+            "tests/backpressure-policy.test.js"
+          ],
+          "dirs": []
+        },
+        {
+          "id": "fanout-retry",
+          "lane": "fanout",
+          "files": [
+            "server/fanout-retry.mjs",
+            "tests/fanout-retry.test.js"
+          ],
+          "dirs": []
+        },
+        {
+          "id": "reaper-sweep",
+          "lane": "reaper",
+          "files": [
+            "server/reaper.mjs",
+            "tests/reaper.test.js"
+          ],
+          "dirs": []
+        },
+        {
+          "id": "stranger-flow",
+          "lane": "stranger-qa",
+          "files": [
+            "tests/stranger-flow.test.js",
+            "scripts/stranger-probe.mjs"
+          ],
+          "dirs": []
+        }
+      ],
+      "pathCount": 8
+    },
+    {
+      "index": 4,
+      "claimNamespace": "wave300-p4",
+      "taskIds": [
+        "burndown-board",
+        "fanout-worker",
+        "replay-capture",
+        "stranger-mobile"
+      ],
+      "waves": [
+        [
+          "burndown-board",
+          "fanout-worker",
+          "replay-capture",
+          "stranger-mobile"
+        ]
+      ],
+      "tasks": [
+        {
+          "id": "burndown-board",
+          "lane": "burn-down",
+          "files": [
+            "scripts/burndown-board.mjs",
+            "tests/burndown-board.test.js"
+          ],
+          "dirs": []
+        },
+        {
+          "id": "fanout-worker",
+          "lane": "fanout",
+          "files": [
+            "server/fanout-worker.mjs",
+            "tests/fanout-worker.test.js"
+          ],
+          "dirs": []
+        },
+        {
+          "id": "replay-capture",
+          "lane": "replay",
+          "files": [
+            "server/replay-capture.mjs",
+            "tests/replay-capture.test.js"
+          ],
+          "dirs": []
+        },
+        {
+          "id": "stranger-mobile",
+          "lane": "stranger-qa",
+          "files": [
+            "tests/stranger-mobile.test.js"
+          ],
+          "dirs": []
+        }
+      ],
+      "pathCount": 7
+    },
+    {
+      "index": 5,
+      "claimNamespace": "wave300-p5",
+      "taskIds": [
+        "burndown-report",
+        "payload-docs",
+        "replay-diff",
+        "stranger-onboard"
+      ],
+      "waves": [
+        [
+          "burndown-report",
+          "payload-docs",
+          "replay-diff",
+          "stranger-onboard"
+        ]
+      ],
+      "tasks": [
+        {
+          "id": "burndown-report",
+          "lane": "burn-down",
+          "files": [
+            "scripts/burndown-report.mjs",
+            "docs/RANKED-FIXES.md"
+          ],
+          "dirs": []
+        },
+        {
+          "id": "payload-docs",
+          "lane": "payloads",
+          "files": [
+            "docs/PAYLOAD-STORE.md"
+          ],
+          "dirs": []
+        },
+        {
+          "id": "replay-diff",
+          "lane": "replay",
+          "files": [
+            "scripts/replay-diff.mjs",
+            "tests/replay-diff.test.js"
+          ],
+          "dirs": []
+        },
+        {
+          "id": "stranger-onboard",
+          "lane": "stranger-qa",
+          "files": [
+            "scripts/stranger-onboard-check.mjs",
+            "docs/STRANGER-QA.md"
+          ],
+          "dirs": []
+        }
+      ],
+      "pathCount": 7
+    },
+    {
+      "index": 6,
+      "claimNamespace": "wave300-p6",
+      "taskIds": [
+        "burndown-triage",
+        "payload-encrypt",
+        "replay-docs",
+        "telemetry-alerts"
+      ],
+      "waves": [
+        [
+          "burndown-triage",
+          "payload-encrypt",
+          "replay-docs",
+          "telemetry-alerts"
+        ]
+      ],
+      "tasks": [
+        {
+          "id": "burndown-triage",
+          "lane": "burn-down",
+          "files": [
+            "scripts/burndown-triage.mjs",
+            "tests/burndown-triage.test.js"
+          ],
+          "dirs": []
+        },
+        {
+          "id": "payload-encrypt",
+          "lane": "payloads",
+          "files": [
+            "server/payload-encrypt.mjs",
+            "tests/payload-encrypt.test.js"
+          ],
+          "dirs": []
+        },
+        {
+          "id": "replay-docs",
+          "lane": "replay",
+          "files": [
+            "docs/REPLAY-HARNESS.md"
+          ],
+          "dirs": []
+        },
+        {
+          "id": "telemetry-alerts",
+          "lane": "telemetry",
+          "files": [
+            "server/telemetry-alerts.mjs",
+            "tests/telemetry-alerts.test.js"
+          ],
+          "dirs": []
+        }
+      ],
+      "pathCount": 7
+    },
+    {
+      "index": 7,
+      "claimNamespace": "wave300-p7",
+      "taskIds": [
+        "dp-fastpath-batch",
+        "payload-gc",
+        "replay-harness",
+        "telemetry-coord"
+      ],
+      "waves": [
+        [
+          "dp-fastpath-batch",
+          "payload-gc",
+          "replay-harness",
+          "telemetry-coord"
+        ]
+      ],
+      "tasks": [
+        {
+          "id": "dp-fastpath-batch",
+          "lane": "data-plane",
+          "files": [
+            "server/data-plane-batch.mjs",
+            "tests/data-plane-batch.test.js"
+          ],
+          "dirs": []
+        },
+        {
+          "id": "payload-gc",
+          "lane": "payloads",
+          "files": [
+            "server/payload-gc.mjs",
+            "tests/payload-gc.test.js"
+          ],
+          "dirs": []
+        },
+        {
+          "id": "replay-harness",
+          "lane": "replay",
+          "files": [
+            "scripts/replay-harness.mjs",
+            "tests/replay-harness.test.js"
+          ],
+          "dirs": []
+        },
+        {
+          "id": "telemetry-coord",
+          "lane": "telemetry",
+          "files": [],
+          "dirs": []
+        }
+      ],
+      "pathCount": 6
+    },
+    {
+      "index": 8,
+      "claimNamespace": "wave300-p8",
+      "taskIds": [
+        "dp-fastpath-bench",
+        "payload-store",
+        "shard-board",
+        "telemetry-core"
+      ],
+      "waves": [
+        [
+          "dp-fastpath-bench",
+          "payload-store",
+          "shard-board",
+          "telemetry-core"
+        ]
+      ],
+      "tasks": [
+        {
+          "id": "dp-fastpath-bench",
+          "lane": "data-plane",
+          "files": [
+            "scripts/dp-bench.mjs",
+            "docs/DATA-PLANE-PERF.md"
+          ],
+          "dirs": []
+        },
+        {
+          "id": "payload-store",
+          "lane": "payloads",
+          "files": [
+            "server/payload-store.mjs",
+            "tests/payload-store.test.js"
+          ],
+          "dirs": []
+        },
+        {
+          "id": "shard-board",
+          "lane": "shards",
+          "files": [
+            "server/shard-board.mjs",
+            "tests/shard-board.test.js"
+          ],
+          "dirs": []
+        },
+        {
+          "id": "telemetry-core",
+          "lane": "telemetry",
+          "files": [
+            "server/telemetry.mjs",
+            "tests/telemetry.test.js"
+          ],
+          "dirs": []
+        }
+      ],
+      "pathCount": 8
+    },
+    {
+      "index": 9,
+      "claimNamespace": "wave300-p9",
+      "taskIds": [
+        "dp-fastpath-cache",
+        "ranked-fixes",
+        "shard-claims",
+        "telemetry-dash"
+      ],
+      "waves": [
+        [
+          "dp-fastpath-cache",
+          "ranked-fixes",
+          "shard-claims",
+          "telemetry-dash"
+        ]
+      ],
+      "tasks": [
+        {
+          "id": "dp-fastpath-cache",
+          "lane": "data-plane",
+          "files": [
+            "server/data-plane-cache.mjs",
+            "tests/data-plane-cache.test.js"
+          ],
+          "dirs": []
+        },
+        {
+          "id": "ranked-fixes",
+          "lane": "burn-down",
+          "files": [
+            "scripts/ranked-fixes.mjs",
+            "tests/ranked-fixes.test.js"
+          ],
+          "dirs": []
+        },
+        {
+          "id": "shard-claims",
+          "lane": "shards",
+          "files": [
+            "server/shard-claims.mjs",
+            "tests/shard-claims.test.js"
+          ],
+          "dirs": []
+        },
+        {
+          "id": "telemetry-dash",
+          "lane": "telemetry",
+          "files": [
+            "scripts/telemetry-dash.mjs",
+            "docs/TELEMETRY.md"
+          ],
+          "dirs": []
+        }
+      ],
+      "pathCount": 8
+    }
+  ],
+  "verification": {
+    "crossPartitionOverlaps": [],
+    "internalConflicts": [],
+    "sizes": [
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4
+    ],
+    "balanced": true,
+    "namespacesUnique": true,
+    "mergedAtoms": [
+      {
+        "partition": "wave300-p0",
+        "atoms": [
+          [
+            "bp-admission"
+          ],
+          [
+            "dp-fastpath-index"
+          ],
+          [
+            "reaper-docs"
+          ],
+          [
+            "shard-migrate"
+          ]
+        ]
+      },
+      {
+        "partition": "wave300-p1",
+        "atoms": [
+          [
+            "bp-backpressure"
+          ],
+          [
+            "fanout-bench"
+          ],
+          [
+            "reaper-purity"
+          ],
+          [
+            "shard-router"
+          ]
+        ]
+      },
+      {
+        "partition": "wave300-p2",
+        "atoms": [
+          [
+            "bp-load-shed"
+          ],
+          [
+            "fanout-core"
+          ],
+          [
+            "reaper-scan"
+          ],
+          [
+            "stranger-2min"
+          ]
+        ]
+      },
+      {
+        "partition": "wave300-p3",
+        "atoms": [
+          [
+            "bp-policy"
+          ],
+          [
+            "fanout-retry"
+          ],
+          [
+            "reaper-sweep"
+          ],
+          [
+            "stranger-flow"
+          ]
+        ]
+      },
+      {
+        "partition": "wave300-p4",
+        "atoms": [
+          [
+            "burndown-board"
+          ],
+          [
+            "fanout-worker"
+          ],
+          [
+            "replay-capture"
+          ],
+          [
+            "stranger-mobile"
+          ]
+        ]
+      },
+      {
+        "partition": "wave300-p5",
+        "atoms": [
+          [
+            "burndown-report"
+          ],
+          [
+            "payload-docs"
+          ],
+          [
+            "replay-diff"
+          ],
+          [
+            "stranger-onboard"
+          ]
+        ]
+      },
+      {
+        "partition": "wave300-p6",
+        "atoms": [
+          [
+            "burndown-triage"
+          ],
+          [
+            "payload-encrypt"
+          ],
+          [
+            "replay-docs"
+          ],
+          [
+            "telemetry-alerts"
+          ]
+        ]
+      },
+      {
+        "partition": "wave300-p7",
+        "atoms": [
+          [
+            "dp-fastpath-batch"
+          ],
+          [
+            "payload-gc"
+          ],
+          [
+            "replay-harness"
+          ],
+          [
+            "telemetry-coord"
+          ]
+        ]
+      },
+      {
+        "partition": "wave300-p8",
+        "atoms": [
+          [
+            "dp-fastpath-bench"
+          ],
+          [
+            "payload-store"
+          ],
+          [
+            "shard-board"
+          ],
+          [
+            "telemetry-core"
+          ]
+        ]
+      },
+      {
+        "partition": "wave300-p9",
+        "atoms": [
+          [
+            "dp-fastpath-cache"
+          ],
+          [
+            "ranked-fixes"
+          ],
+          [
+            "shard-claims"
+          ],
+          [
+            "telemetry-dash"
+          ]
+        ]
+      }
+    ],
+    "overlapAllowed": false
+  },
+  "stats": {
+    "conflictEdges": 0,
+    "colorsUsed": 1,
+    "components": 40
+  }
+}

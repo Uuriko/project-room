@@ -1,0 +1,34 @@
+{
+ "partitions": [
+  {
+   "name": "qa2-signed-in-agent",
+   "worktree": "/home/hatch/workspace/pr-qa2-signed-in-agent",
+   "branches": [
+    "jill/qa2-recoverable-mint-500-fix"
+   ],
+   "claimIds": [
+    "qa2-signed-in-agent-01"
+   ],
+   "files": [
+    "server/agent-identities.mjs",
+    "tests/agent-identities.test.js"
+   ],
+   "_provenance": "PR #1436 merged 218205d5 (Sun Oct 4 11:17 PDT): real files from merge diff"
+  },
+  {
+   "name": "qa2-contract",
+   "worktree": "/home/hatch/workspace/pr-qa2-contract",
+   "branches": [
+    "qa2-contract/c-identity-retry-500"
+   ],
+   "claimIds": [
+    "qa2-contract-01"
+   ],
+   "files": [
+    "server/agent-identities.mjs",
+    "tests/agent-identity-recoverable-own-credential.test.js"
+   ],
+   "_provenance": "PR #1443 closed superseded; fix commit 34aac85d (Sun Oct 4 18:12 UTC) on origin/qa2-contract/c-identity-retry-500: real files from commit"
+  }
+ ]
+}

@@ -1,0 +1,2 @@
+FAIL — 1 overlap(s) across 8 partitions:
+  [file/dir] synth-reaper × synth-shards: "server/synth/shared-registry.mjs" ↔ "server/synth/shared-registry.mjs"

@@ -1,0 +1,189 @@
+{
+  "partitions": [
+    {
+      "name": "wave300-p0",
+      "worktree": "",
+      "branches": [],
+      "claimIds": [
+        "wave300-p0"
+      ],
+      "dirs": [],
+      "files": [
+        "server/admission.mjs",
+        "tests/admission.test.js",
+        "server/data-plane-index.mjs",
+        "tests/data-plane-index.test.js",
+        "docs/REAPER.md",
+        "docs/READ-PURITY.md",
+        "scripts/shard-migrate.mjs",
+        "docs/SHARD-BOARDS.md"
+      ]
+    },
+    {
+      "name": "wave300-p1",
+      "worktree": "",
+      "branches": [],
+      "claimIds": [
+        "wave300-p1"
+      ],
+      "dirs": [],
+      "files": [
+        "server/backpressure.mjs",
+        "tests/backpressure.test.js",
+        "scripts/fanout-bench.mjs",
+        "docs/FANOUT-PERF.md",
+        "server/read-purity.mjs",
+        "tests/read-purity.test.js",
+        "server/shard-router.mjs",
+        "tests/shard-router.test.js"
+      ]
+    },
+    {
+      "name": "wave300-p2",
+      "worktree": "",
+      "branches": [],
+      "claimIds": [
+        "wave300-p2"
+      ],
+      "dirs": [],
+      "files": [
+        "server/load-shed.mjs",
+        "tests/load-shed.test.js",
+        "server/fanout.mjs",
+        "tests/fanout.test.js",
+        "scripts/reaper-scan.mjs",
+        "tests/reaper-scan.test.js",
+        "tests/stranger-two-minute.test.js",
+        "docs/STRANGER-2MIN-RULE.md"
+      ]
+    },
+    {
+      "name": "wave300-p3",
+      "worktree": "",
+      "branches": [],
+      "claimIds": [
+        "wave300-p3"
+      ],
+      "dirs": [],
+      "files": [
+        "docs/BACKPRESSURE-POLICY.md",
+        "tests/backpressure-policy.test.js",
+        "server/fanout-retry.mjs",
+        "tests/fanout-retry.test.js",
+        "server/reaper.mjs",
+        "tests/reaper.test.js",
+        "tests/stranger-flow.test.js",
+        "scripts/stranger-probe.mjs"
+      ]
+    },
+    {
+      "name": "wave300-p4",
+      "worktree": "",
+      "branches": [],
+      "claimIds": [
+        "wave300-p4"
+      ],
+      "dirs": [],
+      "files": [
+        "scripts/burndown-board.mjs",
+        "tests/burndown-board.test.js",
+        "server/fanout-worker.mjs",
+        "tests/fanout-worker.test.js",
+        "server/replay-capture.mjs",
+        "tests/replay-capture.test.js",
+        "tests/stranger-mobile.test.js"
+      ]
+    },
+    {
+      "name": "wave300-p5",
+      "worktree": "",
+      "branches": [],
+      "claimIds": [
+        "wave300-p5"
+      ],
+      "dirs": [],
+      "files": [
+        "scripts/burndown-report.mjs",
+        "docs/RANKED-FIXES.md",
+        "docs/PAYLOAD-STORE.md",
+        "scripts/replay-diff.mjs",
+        "tests/replay-diff.test.js",
+        "scripts/stranger-onboard-check.mjs",
+        "docs/STRANGER-QA.md"
+      ]
+    },
+    {
+      "name": "wave300-p6",
+      "worktree": "",
+      "branches": [],
+      "claimIds": [
+        "wave300-p6"
+      ],
+      "dirs": [],
+      "files": [
+        "scripts/burndown-triage.mjs",
+        "tests/burndown-triage.test.js",
+        "server/payload-encrypt.mjs",
+        "tests/payload-encrypt.test.js",
+        "docs/REPLAY-HARNESS.md",
+        "server/telemetry-alerts.mjs",
+        "tests/telemetry-alerts.test.js"
+      ]
+    },
+    {
+      "name": "wave300-p7",
+      "worktree": "",
+      "branches": [],
+      "claimIds": [
+        "wave300-p7"
+      ],
+      "dirs": [],
+      "files": [
+        "server/data-plane-batch.mjs",
+        "tests/data-plane-batch.test.js",
+        "server/payload-gc.mjs",
+        "tests/payload-gc.test.js",
+        "scripts/replay-harness.mjs",
+        "tests/replay-harness.test.js"
+      ]
+    },
+    {
+      "name": "wave300-p8",
+      "worktree": "",
+      "branches": [],
+      "claimIds": [
+        "wave300-p8"
+      ],
+      "dirs": [],
+      "files": [
+        "scripts/dp-bench.mjs",
+        "docs/DATA-PLANE-PERF.md",
+        "server/payload-store.mjs",
+        "tests/payload-store.test.js",
+        "server/shard-board.mjs",
+        "tests/shard-board.test.js",
+        "server/telemetry.mjs",
+        "tests/telemetry.test.js"
+      ]
+    },
+    {
+      "name": "wave300-p9",
+      "worktree": "",
+      "branches": [],
+      "claimIds": [
+        "wave300-p9"
+      ],
+      "dirs": [],
+      "files": [
+        "server/data-plane-cache.mjs",
+        "tests/data-plane-cache.test.js",
+        "scripts/ranked-fixes.mjs",
+        "tests/ranked-fixes.test.js",
+        "server/shard-claims.mjs",
+        "tests/shard-claims.test.js",
+        "scripts/telemetry-dash.mjs",
+        "docs/TELEMETRY.md"
+      ]
+    }
+  ]
+}
