@@ -2055,6 +2055,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (url.pathname === "/api/account-session") {
         const slotToken = cookie(req, accountCookieName);
+        const mintSlot = () => {
+          rate(`account-slot:${remoteAddress}`, 20);
+          const created = store.createAccountSessionSlot();
+          setCookie(res, accountCookieName, created.token, Math.max(0, Math.floor((created.session.expiresAt - store.now()) / 1000)));
+          return created.session;
+        };
         if (req.method === "GET") {
           const binding = expectedBinding(req);
           if (binding !== null) {
@@ -2066,12 +2072,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             const confirmed = store.authenticateAccountSession(slotToken, null, binding);
             return json(res, 200, sessionAccountView(confirmed));
           }
-          if (!slotToken) {
-            rate(`account-slot:${remoteAddress}`, 20);
-            const created = store.createAccountSessionSlot();
-            setCookie(res, accountCookieName, created.token, Math.max(0, Math.floor((created.session.expiresAt - store.now()) / 1000)));
-            return json(res, 200, sessionAccountView(created.session));
-          }
+          if (!slotToken) return json(res, 200, sessionAccountView(mintSlot()));
           let slot;
           try { slot = store.authenticateAccountSession(slotToken); }
           catch (error) {
@@ -2079,10 +2080,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             try { slot = store.accountSessionSlot(slotToken); }
             catch (slotError) {
               if (slotError.status !== 401) throw slotError;
-              rate(`account-slot:${remoteAddress}`, 20);
-              const created = store.createAccountSessionSlot();
-              setCookie(res, accountCookieName, created.token, Math.max(0, Math.floor((created.session.expiresAt - store.now()) / 1000)));
-              slot = created.session;
+              slot = mintSlot();
             }
           }
           return json(res, 200, sessionAccountView(slot));
@@ -2203,6 +2201,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!session.account) reject(401, "account_session_required", "Sign in to manage your account");
         return { ...session, slotToken };
       };
+      // Account write funnel: CSRF check, per-account rate limit, session
+      // auth, then the ambient-write guard — the four-line preamble shared
+      // by every account-mutating route below.
+      const requireWritableAccount = (rateKey, rateLimit = 30) => {
+        checkOrigin(req, true);
+        rate(`${rateKey}:${remoteAddress}`, rateLimit);
+        const session = requireAccountSession();
+        protectWrite(req, session, false);
+        return session;
+      };
       const providerConfigured = probe => {
         try { return probe() !== null; } catch { return false; }
       };
@@ -2228,37 +2236,25 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       };
       if (url.pathname === "/api/auth/methods/disable") {
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
-        checkOrigin(req, true);
-        rate(`auth-methods:${remoteAddress}`, 30);
-        const session = requireAccountSession();
-        protectWrite(req, session, false);
+        const session = requireWritableAccount("auth-methods");
         const method = store.accountLogins.setMethodDisabled(session.account.id, methodIdFrom(await body(req)), true);
         return json(res, 200, { method });
       }
       if (url.pathname === "/api/auth/methods/enable") {
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
-        checkOrigin(req, true);
-        rate(`auth-methods:${remoteAddress}`, 30);
-        const session = requireAccountSession();
-        protectWrite(req, session, false);
+        const session = requireWritableAccount("auth-methods");
         const method = store.accountLogins.setMethodDisabled(session.account.id, methodIdFrom(await body(req)), false);
         return json(res, 200, { method });
       }
       if (url.pathname === "/api/auth/methods/remove") {
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
-        checkOrigin(req, true);
-        rate(`auth-methods:${remoteAddress}`, 30);
-        const session = requireAccountSession();
-        protectWrite(req, session, false);
+        const session = requireWritableAccount("auth-methods");
         const removed = store.accountLogins.removeMethod(session.account.id, methodIdFrom(await body(req)));
         return json(res, 200, removed);
       }
       if (url.pathname === "/api/auth/password/set") {
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
-        checkOrigin(req, true);
-        rate(`password-set:${remoteAddress}`, 20);
-        const session = requireAccountSession();
-        protectWrite(req, session, false);
+        const session = requireWritableAccount("password-set", 20);
         const data = await body(req);
         if (!exact(data, ["password"]) || typeof data.password !== "string") {
           reject(422, "invalid_password_set", "A new password is required");
@@ -2275,38 +2271,34 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         store.accountLogins.touchMethod(session.account.id, method.id);
         return json(res, 201, { status: "ok", method: { id: method.id, type: "password" } });
       }
-      if (url.pathname === "/api/auth/github/link/start") {
+      // OAuth provider link start: auth first (anonymous callers get 401
+      // without learning whether the provider is configured — slice 7
+      // hardening), then the per-provider redirect URL builder.
+      const beginOAuthLink = (getProvider, rateKey, unavailableBody, buildUrl) => {
         if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
-        // Auth first: anonymous callers get 401 without learning whether
-        // GitHub is configured (slice 7 hardening).
         const session = requireAccountSession();
-        const oauth = github();
-        if (!oauth) return json(res, 503, { status: "unavailable", reason: "github_not_configured",
-          error: { code: "github_not_configured", message: "GitHub sign-in is not configured" } });
-        rate(`github-link-start:${remoteAddress}`, 10);
-        const slotToken = session.slotToken;
-        const expectedRevision = store.accountSessionSlot(slotToken).sessionRevision;
-        const { state, codeVerifier } = oauth.pending.create({ sessionToken: slotToken, sessionRevision: expectedRevision, link: true });
-        const authorizationUrl = buildGitHubAuthUrl({ clientId: oauth.clientId, redirectUri: oauth.redirectUri,
-          state, codeChallenge: codeChallengeFor(codeVerifier) });
+        const provider = getProvider();
+        if (!provider) return json(res, 503, unavailableBody);
+        rate(`${rateKey}:${remoteAddress}`, 10);
+        const expectedRevision = store.accountSessionSlot(session.slotToken).sessionRevision;
         res.statusCode = 302;
-        res.setHeader("Location", authorizationUrl);
+        res.setHeader("Location", buildUrl(provider, session.slotToken, expectedRevision));
         return res.end();
+      };
+      if (url.pathname === "/api/auth/github/link/start") {
+        return beginOAuthLink(() => github(), "github-link-start",
+          { status: "unavailable", reason: "github_not_configured",
+            error: { code: "github_not_configured", message: "GitHub sign-in is not configured" } },
+          (oauth, slotToken, expectedRevision) => {
+            const { state, codeVerifier } = oauth.pending.create({ sessionToken: slotToken, sessionRevision: expectedRevision, link: true });
+            return buildGitHubAuthUrl({ clientId: oauth.clientId, redirectUri: oauth.redirectUri,
+              state, codeChallenge: codeChallengeFor(codeVerifier) });
+          });
       }
       if (url.pathname === "/api/auth/google/link/start") {
-        if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
-        // Auth first: anonymous callers get 401 without learning whether
-        // Google is configured.
-        const session = requireAccountSession();
-        const signIn = google();
-        if (!signIn) return json(res, 503, { status: "unavailable", reason: "google_not_configured" });
-        rate(`google-link-start:${remoteAddress}`, 10);
-        const slotToken = session.slotToken;
-        const expectedRevision = store.accountSessionSlot(slotToken).sessionRevision;
-        const started = signIn.begin({ slotToken, expectedRevision, link: true });
-        res.statusCode = 302;
-        res.setHeader("Location", started.authorizationUrl);
-        return res.end();
+        return beginOAuthLink(() => google(), "google-link-start",
+          { status: "unavailable", reason: "google_not_configured" },
+          (signIn, slotToken, expectedRevision) => signIn.begin({ slotToken, expectedRevision, link: true }).authorizationUrl);
       }
       // ---- Account management (RC-2026-09-19-078) ----
       // Account-level profile (display name / avatar), first-run onboarding
@@ -2320,10 +2312,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return json(res, 200, store.accountProfile(session.account.id));
         }
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
-        checkOrigin(req, true);
-        rate(`account-profile:${remoteAddress}`, 30);
-        const session = requireAccountSession();
-        protectWrite(req, session, false);
+        const session = requireWritableAccount("account-profile");
         return json(res, 200, store.updateAccountProfile(session.account.id, await body(req)));
       }
       if (url.pathname === "/api/account/onboarding") {
@@ -2333,10 +2322,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (url.pathname === "/api/account/onboarding/complete") {
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
-        checkOrigin(req, true);
-        rate(`account-onboarding:${remoteAddress}`, 30);
-        const session = requireAccountSession();
-        protectWrite(req, session, false);
+        const session = requireWritableAccount("account-onboarding");
         return json(res, 200, store.completeOnboarding(session.account.id));
       }
       if (url.pathname === "/api/account/retention") {
@@ -2358,10 +2344,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (url.pathname === "/api/account/delete") {
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
-        checkOrigin(req, true);
-        rate(`account-delete:${remoteAddress}`, 5);
-        const session = requireAccountSession();
-        protectWrite(req, session, false);
+        const session = requireWritableAccount("account-delete", 5);
         const data = await body(req);
         if (!exact(data, ["confirmationToken"]) || typeof data.confirmationToken !== "string" || data.confirmationToken.length === 0) {
           reject(422, "invalid_deletion", "A deletion confirmation token from GET /api/account/deletion/plan is required");
@@ -2764,27 +2747,26 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // keys and room sessions) carry their room_id, so no roomId appears in
       // the path. Identity secrets and API keys cannot resolve a room without
       // one and answer 401 here; use a room bearer credential instead.
-      // Documented in docs/openapi.yaml like every other route literal here.
-      if (url.pathname === "/api/web/fetch") {
+      // Room-side web routes (RC-2026-09-23-102 fetch, RC-2026-09-24-310
+      // research) share one auth posture: owner + full members, the #798
+      // guest gate (isWebFetchGuest covers ga1. guest-agents and human
+      // share-link guests with role === "guest"), and typed WebFetchError
+      // failures — quota-exceeded is a 429 with retry info, never a 500,
+      // and every typed failure carries its request_id for journal
+      // correlation.
+      const serveWebRoute = async run => {
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
         const isBearer = Boolean(req.headers.authorization);
         const token = bearer(req) ?? cookie(req, roomCookieName);
-        const webAuth = store.authenticate(token, undefined, expectedBinding(req), { allowAccountSession: false });
-        // Owner + full members only. The guest gate uses the #798 code and
-        // copy (isWebFetchGuest covers ga1. guest-agents and human
-        // share-link guests with role === "guest"). There is no drafts-only
-        // member tier in the room data model, so every other active member
-        // qualifies; the choice is documented in the PR.
-        if (!webAuth.member?.id) reject(401, "unauthenticated", "Member credential required");
-        if (isWebFetchGuest(webAuth.member)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
-        protectWrite(req, webAuth, isBearer);
-        rate(`write:${webAuth.credentialHash}`, 60);
+        const auth = store.authenticate(token, undefined, expectedBinding(req), { allowAccountSession: false });
+        if (!auth.member?.id) reject(401, "unauthenticated", "Member credential required");
+        if (isWebFetchGuest(auth.member)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
+        protectWrite(req, auth, isBearer);
+        rate(`write:${auth.credentialHash}`, 60);
         const data = await body(req);
         try {
-          return json(res, 200, await store.webFetch.fetch(webAuth.roomId, webAuth.member.id, data, { credentialHash: webAuth.credentialHash }));
+          return json(res, 200, await run(auth, data));
         } catch (error) {
-          // Quota-exceeded is a typed 429 with retry info, never a 500.
-          // Every typed failure carries its request_id for journal correlation.
           if (error instanceof WebFetchError) {
             const payload = { error: { code: error.code, message: error.message }, request_id: error.requestId ?? null };
             if (error.code === "rate_limited") {
@@ -2795,37 +2777,21 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           }
           throw error;
         }
+      };
+      // POST /api/web/fetch. The room comes from the credential itself —
+      // room Bearer <redacted> (access keys and room sessions) carry their room_id.
+      // Documented in docs/openapi.yaml like every other route literal here.
+      // `return await` (not bare `return`): the helper is async, and the
+      // auth rejects below must land in the listener's try/catch as
+      // ServiceError JSON, not as unhandled promise rejections.
+      if (url.pathname === "/api/web/fetch") {
+        return await serveWebRoute((auth, data) => store.webFetch.fetch(auth.roomId, auth.member.id, data, { credentialHash: auth.credentialHash }));
       }
-      // Room-side knowledge router (RC-2026-09-24-310): POST /api/web/research.
-      // An agent asks a question; the room plans which sources to consult (its own
-      // fetch memory, local docs corpus, explicit URLs, env-configured provider)
-      // and returns evidence with provenance receipts. Same auth posture as
-      // /api/web/fetch: owner + full members, #798 guest gate. Planning
-      // (planOnly) is free; execution bills research quota, and fetch-leg URLs
-      // additionally bill web-fetch quota (credit semantics, Alexandria-style).
+      // POST /api/web/research. Planning (planOnly) is free; execution
+      // bills research quota, and fetch-leg URLs additionally bill
+      // web-fetch quota (credit semantics, Alexandria-style).
       if (url.pathname === "/api/web/research") {
-        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
-        const researchIsBearer = Boolean(req.headers.authorization);
-        const researchToken = bearer(req) ?? cookie(req, roomCookieName);
-        const researchAuth = store.authenticate(researchToken, undefined, expectedBinding(req), { allowAccountSession: false });
-        if (!researchAuth.member?.id) reject(401, "unauthenticated", "Member credential required");
-        if (isWebFetchGuest(researchAuth.member)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
-        protectWrite(req, researchAuth, researchIsBearer);
-        rate(`write:${researchAuth.credentialHash}`, 60);
-        const researchData = await body(req);
-        try {
-          return json(res, 200, await store.webResearch.research(researchAuth.roomId, researchAuth.member.id, researchData, { credentialHash: researchAuth.credentialHash }));
-        } catch (error) {
-          if (error instanceof WebFetchError) {
-            const payload = { error: { code: error.code, message: error.message }, request_id: error.requestId ?? null };
-            if (error.code === "rate_limited") {
-              res.setHeader("Retry-After", String(Math.max(1, Math.ceil(error.retryAfterMs / 1000))));
-              return json(res, 429, { ...payload, retryAfterMs: error.retryAfterMs, resetAt: error.resetAt });
-            }
-            return json(res, error.status, payload);
-          }
-          throw error;
-        }
+        return await serveWebRoute((auth, data) => store.webResearch.research(auth.roomId, auth.member.id, data, { credentialHash: auth.credentialHash }));
       }
       // Synchronous claim-block validation (RC-2026-09-24-204):
       // POST /api/claims/validate. Agents validate the ```room-claim block
@@ -2897,6 +2863,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       // Agent invite codes: redemption is unauthenticated (the code is the
       // bearer credential); issuance is owner-only per room.
+      // Self-diagnosing 422s (missing/unexpected/invalid) port the MCP
+      // structured-argument shape down to HTTP so the error names the field.
+      const describeDiagnosis = diagnosis => {
+        const parts = [];
+        if (diagnosis.missing.length) parts.push(`missing required field${diagnosis.missing.length > 1 ? "s" : ""}: ${diagnosis.missing.join(", ")}`);
+        if (diagnosis.unexpected.length) parts.push(`unexpected field${diagnosis.unexpected.length > 1 ? "s" : ""}: ${diagnosis.unexpected.join(", ")}`);
+        for (const [field, reason] of Object.entries(diagnosis.invalid)) parts.push(`${field}: ${reason}`);
+        return parts.join("; ");
+      };
       if (url.pathname === "/api/agent-invites/redeem" && req.method === "POST") {
         rate(`invite-redeem:${remoteAddress}`, 20);
         const data = await body(req);
@@ -2910,11 +2885,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           additionalProperties: false,
         }, data);
         if (diagnosis) {
-          const parts = [];
-          if (diagnosis.missing.length) parts.push(`missing required field${diagnosis.missing.length > 1 ? "s" : ""}: ${diagnosis.missing.join(", ")}`);
-          if (diagnosis.unexpected.length) parts.push(`unexpected field${diagnosis.unexpected.length > 1 ? "s" : ""}: ${diagnosis.unexpected.join(", ")}`);
-          for (const [field, reason] of Object.entries(diagnosis.invalid)) parts.push(`${field}: ${reason}`);
-          reject(422, "invalid_invite", `Invalid invite redeem (${parts.join("; ")}). Send exactly {code, displayName}.`);
+          reject(422, "invalid_invite", `Invalid invite redeem (${describeDiagnosis(diagnosis)}). Send exactly {code, displayName}.`);
         }
         const redeemedInvite = store.invites.redeem(data.code, { displayName: data.displayName, identitySecret: bearer(req) });
         // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md):
@@ -3032,12 +3003,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           additionalProperties: false,
         }, data);
         if (diagnosis) {
-          const parts = [];
-          if (diagnosis.missing.length) parts.push(`missing required field${diagnosis.missing.length > 1 ? "s" : ""}: ${diagnosis.missing.join(", ")}`);
-          if (diagnosis.unexpected.length) parts.push(`unexpected field${diagnosis.unexpected.length > 1 ? "s" : ""}: ${diagnosis.unexpected.join(", ")}`);
-          for (const [field, reason] of Object.entries(diagnosis.invalid)) parts.push(`${field}: ${reason}`);
           reject(422, "invalid_request",
-            `Invalid access request (${parts.join("; ")}). Send {roomId, identityId, displayName, requestedPermissions} with optional {note, referredBy, requestId}; requestId is your idempotency key — reuse it when retrying.`);
+            `Invalid access request (${describeDiagnosis(diagnosis)}). Send {roomId, identityId, displayName, requestedPermissions} with optional {note, referredBy, requestId}; requestId is your idempotency key — reuse it when retrying.`);
         }
         // Burs-IA steal A1: filing an access request is a cold-start step — the
         // response teaches the status-poll path and the expected decision
@@ -3138,18 +3105,26 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 200, listAccountUpdates(store, token, accountBinding(req, url), updatesQuery()), req.method === "HEAD");
       }
       if (url.pathname === "/api/updates") reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
-      if (updatesListMatch || updatesMarkMatch) {
-        const roomId = pathId((updatesListMatch ?? updatesMarkMatch)[1]);
+      // Room funnel: credential selection, session fence, and credential
+      // checks shared by every /api/rooms/:roomId/* route below.
+      const authenticateRoomRoute = roomId => {
         const selected = roomCredentials(req, url);
         const fence = selected.mode === "account" ? accountBinding(req, null) : expectedBinding(req);
         const auth = roomAuth(selected, roomId, fence);
         if (selected.bearer && auth.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
         if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
-        if (auth.kind === "api-key") {
-          const requiredScope = updatesListMatch ? "rooms:read" : "rooms:write";
-          const granted = (auth.apiKeyScopes ?? []).some(scope => scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
-          if (!granted) reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
-        }
+        return { selected, fence, auth };
+      };
+      const requireApiScope = (auth, requiredScope) => {
+        if (auth.kind !== "api-key") return;
+        const granted = (auth.apiKeyScopes ?? []).some(scope =>
+          scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
+        if (!granted) reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
+      };
+      if (updatesListMatch || updatesMarkMatch) {
+        const roomId = pathId((updatesListMatch ?? updatesMarkMatch)[1]);
+        const { selected, fence, auth } = authenticateRoomRoute(roomId);
+        requireApiScope(auth, updatesListMatch ? "rooms:read" : "rooms:write");
         rate(`read:${auth.credentialHash}`, 600);
         if (updatesListMatch) {
           if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, HEAD" });
@@ -3210,17 +3185,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (landMatch) {
         const roomId = pathId(landMatch[1]);
         const action = landAdd ? "add_land_item" : landList ? "list_land_queue" : landRemove ? "remove_land_item" : "report_tip";
-        const selected = roomCredentials(req, url);
-        const fence = selected.mode === "account" ? accountBinding(req, null) : expectedBinding(req);
-        const auth = roomAuth(selected, roomId, fence);
-        if (selected.bearer && auth.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
-        if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
-        if (auth.kind === "api-key") {
-          const requiredScope = action === "list_land_queue" ? "rooms:read" : "rooms:write";
-          const granted = (auth.apiKeyScopes ?? []).some(scope =>
-            scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
-          if (!granted) reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
-        }
+        const { selected, auth } = authenticateRoomRoute(roomId);
+        requireApiScope(auth, action === "list_land_queue" ? "rooms:read" : "rooms:write");
         rate(`read:${auth.credentialHash}`, 600);
         if (action === "list_land_queue") {
           if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
@@ -3272,17 +3238,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const fileId = roomFileCommitMatch ? pathId(roomFileCommitMatch[2]) : null;
         const readFileId = roomFileGetMatch ? pathId(roomFileGetMatch[2]) : null;
         const writing = req.method === "POST";
-        const selected = roomCredentials(req, url);
-        const fence = selected.mode === "account" ? accountBinding(req, null) : expectedBinding(req);
-        const auth = roomAuth(selected, roomId, fence);
-        if (selected.bearer && auth.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
-        if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
-        if (auth.kind === "api-key") {
-          const requiredScope = writing ? "rooms:write" : "rooms:read";
-          const granted = (auth.apiKeyScopes ?? []).some(scope =>
-            scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
-          if (!granted) reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
-        }
+        const { selected, auth } = authenticateRoomRoute(roomId);
+        requireApiScope(auth, writing ? "rooms:write" : "rooms:read");
         if (readFileId) {
           if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
           rate(`read:${auth.credentialHash}`, 600);
