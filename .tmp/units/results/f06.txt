@@ -1,0 +1,6 @@
+unit=f06
+exit=0
+outcome=PASS
+done=2026-10-09T10:09:37Z
+run1: collected 1 new, skipped 1 dupes, rejected 0 invalid | run2: collected 0 new, skipped 2 dupes, rejected 0 invalid
+F06 PASS

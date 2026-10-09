@@ -1,0 +1,8 @@
+unit=u12
+file=telemetry/build-dashboard-data.mjs
+mutant=corrupt JSONL line: throw->skip
+suite=true
+outcome=SURVIVED
+suite_exit=0
+harness=DETECTED
+done=2026-10-09T08:53:17Z

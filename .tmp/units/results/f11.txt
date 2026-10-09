@@ -1,0 +1,6 @@
+unit=f11
+exit=0
+outcome=PASS
+done=2026-10-09T10:06:40Z
+throwing monitor survived; penalty kept at 1; event-loop gauge=0/ok
+F11 PASS

@@ -1,0 +1,7 @@
+unit=f13
+exit=0
+outcome=PASS
+done=2026-10-09T10:27:35Z
+projection-size-growth: value=0 threshold=0.9 status=ok
+commands-silent-timeout-rate: value=0 threshold=0.3 status=ok
+F13 PASS

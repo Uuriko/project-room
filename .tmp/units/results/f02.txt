@@ -1,0 +1,7 @@
+unit=f02
+exit=0
+outcome=PASS
+done=2026-10-09T09:24:14Z
+wrote 50.0MB
+f02: exit=1 elapsed=1499ms
+F02 PASS

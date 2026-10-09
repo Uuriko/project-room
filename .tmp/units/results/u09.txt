@@ -1,0 +1,8 @@
+unit=u09
+file=telemetry/gauges.mjs
+mutant=contract view threshold criticalAt->warnAt
+suite=node --test telemetry/tripwire-contract.test.mjs
+outcome=SURVIVED
+suite_exit=0
+harness=DETECTED
+done=2026-10-09T08:53:10Z

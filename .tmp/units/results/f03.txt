@@ -1,0 +1,7 @@
+unit=f03
+exit=0
+outcome=PASS
+done=2026-10-09T10:09:22Z
+
+Error: invalid JSON on line 2
+F03 PASS

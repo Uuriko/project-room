@@ -1,0 +1,8 @@
+unit=u05
+file=server/tripwires.mjs
+mutant=silentTimeoutRatio off-by-one denominator (+1)
+suite=node --test tests/tripwires.test.mjs
+outcome=KILLED
+suite_exit=1
+harness=none
+done=2026-10-09T08:49:02Z

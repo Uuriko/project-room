@@ -1,0 +1,7 @@
+unit=f14
+exit=0
+outcome=PASS
+done=2026-10-09T09:30:09Z
+ok: positional exit=1 wrote=false
+ok: giant-claim exit=99 wrote=false
+F14 PASS

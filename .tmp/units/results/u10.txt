@@ -1,0 +1,8 @@
+unit=u10
+file=telemetry/validate.mjs
+mutant=claim min-length 10->5
+suite=true
+outcome=SURVIVED
+suite_exit=0
+harness=DETECTED
+done=2026-10-09T08:53:13Z

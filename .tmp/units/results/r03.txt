@@ -1,0 +1,9 @@
+unit=r03
+exit=0
+outcome=PASS
+done=2026-10-09T10:58:17Z
+--- tail ---
+PASS  F: no component writes to production
+---
+VERIFY: 6/6 checks passed
+R03 PASS

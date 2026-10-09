@@ -1,0 +1,7 @@
+unit=r02
+exit=0
+outcome=PASS
+done=2026-10-09T10:58:27Z
+--- tail ---
+r02: ℹ tests 3 ℹ pass 3 ℹ fail 0
+R02 PASS

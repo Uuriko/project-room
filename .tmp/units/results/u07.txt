@@ -1,0 +1,8 @@
+unit=u07
+file=server/tripwires.mjs
+mutant=trackCommandOutcome flipped writableEnded conditional
+suite=node --test tests/tripwires.test.mjs
+outcome=KILLED
+suite_exit=1
+harness=none
+done=2026-10-09T08:47:53Z

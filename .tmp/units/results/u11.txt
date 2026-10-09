@@ -1,0 +1,8 @@
+unit=u11
+file=telemetry/collect.mjs
+mutant=extractFinding dropped FINDING prefix gate
+suite=true
+outcome=SURVIVED
+suite_exit=0
+harness=DETECTED
+done=2026-10-09T09:16:50Z

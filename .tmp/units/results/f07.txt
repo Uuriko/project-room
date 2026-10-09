@@ -1,0 +1,7 @@
+unit=f07
+exit=0
+outcome=PASS
+done=2026-10-09T10:27:25Z
+recordCommandOutcome scaling: {"1000":166,"5000":1041,"20000":29898}
+5x records -> 6.3x time (linear=5x, quadratic=25x)
+F07 PASS (characterized)

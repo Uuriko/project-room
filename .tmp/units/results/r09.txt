@@ -1,0 +1,11 @@
+unit=r09
+exit=1
+outcome=FAIL
+done=2026-10-09T10:58:47Z
+--- tail ---
+    at ModuleJob.link (node:internal/modules/esm/module_job:381:17) {
+  code: 'ERR_MODULE_NOT_FOUND',
+  url: 'file:///home/hatch/workspace/pr-wave1000-guild-11/.tmp/pristine/deploy/public-search.mjs'
+}
+
+Node.js v24.20.0

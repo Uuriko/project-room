@@ -1,0 +1,11 @@
+unit=r10
+exit=0
+outcome=PASS
+done=2026-10-09T10:58:26Z
+--- tail ---
+event-budget-low: 1 [ok]
+write-limiter-penalty-box: 0 [ok]
+sse-event-loop-saturation: 0 [ok]
+projection-size-growth: 0 [ok]
+commands-silent-timeout-rate: 0 [ok]
+R10 PASS

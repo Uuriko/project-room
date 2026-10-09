@@ -1,0 +1,6 @@
+unit=f10
+exit=0
+outcome=PASS
+done=2026-10-09T09:30:27Z
+collect survived throwing store+monitor; penalty gauge kept at 1
+F10+F11 PASS

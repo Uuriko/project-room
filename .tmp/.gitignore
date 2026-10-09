@@ -1,0 +1,7 @@
+# guild-11 scratch: never commit the pristine snapshot or raw test logs.
+pristine/
+*.testlog
+mutbak-*
+mut.lock
+scratch-rebase/
+slice.patch

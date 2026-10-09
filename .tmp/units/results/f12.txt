@@ -1,0 +1,7 @@
+unit=f12
+exit=0
+outcome=PASS
+done=2026-10-09T10:27:31Z
+same-signal x10: rows=1 results_flagged_duplicate=9
+distinct signals: total rows=6
+F12 PASS

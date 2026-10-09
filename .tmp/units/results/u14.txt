@@ -1,0 +1,8 @@
+unit=u14
+file=server/agent-plugin-store.mjs
+mutant=pruneWebhookDeliveries moreMayRemain === -> >
+suite=node --test tests/webhook-delivery-load.test.js
+outcome=KILLED
+suite_exit=1
+harness=none
+done=2026-10-09T08:52:57Z

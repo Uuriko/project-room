@@ -1,0 +1,11 @@
+unit=r08
+exit=0
+outcome=PASS
+done=2026-10-09T10:59:54Z
+--- tail ---
+ℹ pass 18
+ℹ fail 1
+ℹ tests 3
+ℹ pass 3
+ℹ fail 0
+R08 PASS: slice applies cleanly and affected suites run

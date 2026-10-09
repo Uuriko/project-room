@@ -1,0 +1,7 @@
+unit=f08
+exit=0
+outcome=PASS
+done=2026-10-09T09:24:38Z
+ok: undefined is unknown -> unknown
+ok: string is unknown, never coerced -> unknown
+F08 PASS

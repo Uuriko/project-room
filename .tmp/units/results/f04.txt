@@ -1,0 +1,6 @@
+unit=f04
+exit=0
+outcome=PASS
+done=2026-10-09T10:09:29Z
+f04: 100000 lines in 4742ms, findings.json 12.0MB
+F04 PASS

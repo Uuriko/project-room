@@ -1,0 +1,7 @@
+unit=f09
+exit=0
+outcome=PASS
+done=2026-10-09T09:30:28Z
+seeded 500k entries, gauge=500000
+f09: prune tick 135ms; gauge=0/ok
+F09 PASS
