@@ -3,6 +3,9 @@
 // swept on every request (releaseExpired returns a fresh copy of each item,
 // and the route compared object identity), telling agents their live claims
 // had been auto-released.
+// WAVE-300 FIX-18: a lapsed lease now auto-releases into the `expired` state
+// (owner/lease cleared, re-claimable, cap-excluded, never dropped) instead of
+// `unclaimed` (which still occupied an open-claim slot).
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createWorkClaimRegistry, handleWorkClaims } from "../server/work-claim-routes.mjs";
@@ -33,6 +36,6 @@ test("a live claim is not reported as swept; a lapsed one is", async () => {
   registry.set("room1", lapsed);
   const second = await call(registry, "list");
   assert.deepEqual(second.value.swept, ["old"]);
-  assert.equal(second.value.claims.find(c => c.id === "old").state, "unclaimed");
+  assert.equal(second.value.claims.find(c => c.id === "old").state, "expired");
   assert.equal(second.value.claims.find(c => c.id === "live").state, "claimed");
 });

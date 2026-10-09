@@ -80,7 +80,7 @@ paths:
       parameters:
         - { name: roomId, in: path, required: true, schema: { type: string } }
         - { name: queue, in: query, schema: { type: string, enum: [ready] }, description: Cannot be combined with state }
-        - { name: state, in: query, schema: { type: string, enum: [unclaimed, claimed, in_progress, blocked, done, closed] } }
+        - { name: state, in: query, schema: { type: string, enum: [unclaimed, claimed, in_progress, blocked, expired, done, closed] } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
         - { name: cursor, in: query, schema: { type: string, maxLength: 2048 }, description: Opaque nextCursor from the same filter }
         - { name: view, in: query, schema: { type: string, enum: [summary] } }
@@ -4905,7 +4905,9 @@ paths:
         matches [A-Za-z0-9_-]{1,128}. `reviewPolicy` overrides the room's
         default review policy for this item. Duplicate ids get 409
         `work_claim_exists`. A room already at its open-claim cap (default
-        200; done claims do not count) gets 409 `work_board_full`. Creating
+        200; done, closed and expired claims do not count) gets 409
+        `work_board_full`. Lapsed leases move items to `expired`, which
+        frees the slot while keeping the item re-claimable. Creating
         needs a contribute, review, or collaborate profile, the room owner,
         or a human with contribute rights; otherwise 403
         `work_claims_not_permitted`. API keys need `rooms:write`.
@@ -5003,6 +5005,7 @@ paths:
               required: [maxMemberOpenClaims]
               properties:
                 maxMemberOpenClaims: { type: integer, minimum: 1, maximum: 10000 }
+                staleClaimTtlMs: { type: [integer, 'null'], minimum: 3600000, description: Opt-in stale-claim auto-retirement TTL in ms (null disables, the default). Unclaimed/expired items with no history activity for this long are closed with a stale_retired stamp on the next board request — retired, never deleted. }
       responses:
         '200': { description: The saved caps }
         '403': { description: work_claims_not_permitted }
@@ -5235,7 +5238,9 @@ paths:
       summary: Claim work
       description: |
         Claims an unclaimed item for the calling member (the anti-collision
-        rule: an already-claimed item gets 409 `work_claim_conflict`).
+        rule: an already-claimed item gets 409 `work_claim_conflict`). An
+        `expired` item (lapsed lease) can be claimed again — the orphan is
+        revived, never dropped.
         `leaseHours` sets the claim lease in hours (default: the room's
         configured default, else 24h; max 168h). `null` opts out of leases
         and is only accepted from the room owner or a member with
@@ -5312,7 +5317,8 @@ paths:
         '404': { description: work_claim_not_found }
         '409':
           description: |
-            work_claim_conflict when the item is already claimed.
+            work_claim_conflict when the item is already claimed (an `expired`
+            item is claimable again — only held or non-claimable states conflict).
             file_lease_conflict when declared files overlap a live lease.
             The body names holder { claimId, owner }, files, and leaseExpiresAt.
         '422': { description: invalid_claim_input }
@@ -5625,8 +5631,8 @@ paths:
       summary: Close a work claim without delivery
       description: |
         The claim holder, the room owner, or a member with manage_claims
-        retires an open item (unclaimed, claimed, in_progress or blocked)
-        without delivering it. The item moves to the terminal `closed`
+        retires an open item (unclaimed, claimed, in_progress, blocked
+        or expired) without delivering it. The item moves to the terminal `closed`
         state with no owner and no lease, stops counting against the room's
         open-claim cap, and the history entry `closed` records the caller
         and `reason`. MCP: room_close_work_claim with verb close.
@@ -5663,7 +5669,7 @@ paths:
       x-room-permission: claim_owner|owner|manage_claims
       summary: Cancel a work claim
       description: |
-        Whoever created the item while it is still unclaimed, its holder,
+        Whoever created the item while it is still unclaimed or expired, its holder,
         the room owner, or a member with manage_claims withdraws an open
         item. Same terminal `closed` state as close; the history entry is
         `cancelled`. MCP: room_close_work_claim with verb cancel.
@@ -16914,7 +16920,7 @@ components:
       properties:
         id: { type: string }
         title: { type: string }
-        state: { type: string, enum: [unclaimed, claimed, in_progress, blocked, done, closed] }
+        state: { type: string, enum: [unclaimed, claimed, in_progress, blocked, expired, done, closed] }
         owner: { type: [string, 'null'] }
         claimedAt: { type: [string, 'null'], format: date-time }
         leaseStartAt: { type: [string, 'null'], format: date-time }

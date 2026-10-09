@@ -167,7 +167,10 @@ export class PublicWorkClaims {
         for (const item of releaseExpired(this.store.workClaims.list(row.namespace_key), this.store.now())) this.store.workClaims.set(row.namespace_key, item);
         let item = this.store.workClaims.get(row.namespace_key, offerId);
         if (action === 'claim') {
-          if (item.state !== 'unclaimed') {
+          // FIX-18: a lapsed lease auto-releases into `expired` (ownerless,
+          // cap-excluded), not `unclaimed` — the sweep above already ran, so
+          // an expired item is a reclaimable orphan, not a held task.
+          if (item.state !== 'unclaimed' && item.state !== 'expired') {
             // G4: name the holder and the lease expiry — a bare
             // "Task already claimed" teaches the raced agent nothing actionable.
             const holder = item.owner === identity.identityId ? 'you' : (item.owner ?? 'another agent');

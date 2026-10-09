@@ -39,7 +39,7 @@ node scripts/qa2/authz-matrix.mjs --origin http://127.0.0.1:4173 --json authz.js
 Outcome checks on a throwaway local server. Each one records the refusal and that the room state did not change. There is no `--known` list.
 
 - A share-link guest and a chat-profile agent are refused work-claim create with **403** `work_claims_not_permitted`. Renew and release of someone else's claim are **403** `work_not_owner`. A chat-profile holder is refused renew with **403** `work_claims_not_permitted`. Owner, state, and lease stay as they were (#1309).
-- The next open claim past 200 (anything not `done`) is **409** `work_board_full`. The next holding past 20 in `claimed`, `in_progress`, or `blocked` is **409** `too_many_open_claims` (#1309).
+- The next open claim past 200 (anything not `done`, `closed`, or `expired`) is **409** `work_board_full`. The next holding past 20 in `claimed`, `in_progress`, or `blocked` is **409** `too_many_open_claims` (#1309).
 - `leaseHours` above 168, and `null` from anyone except the room owner or a member with `manage_claims`, are **422** `invalid_claim_input`. The claim is not updated (#1309).
 - A new display name that is reserved, a duplicate, confusable with an active member, or contains control characters is **422** `display_name_unavailable` on invite redeem and share-link join. The roster is unchanged. A member who already joined keeps the stored name (#1317).
 - A webhook URL whose DNS answers include a non-public address is **422** `webhook_url_not_public` and is not stored. A public HTTPS URL can still be stored (#1307).

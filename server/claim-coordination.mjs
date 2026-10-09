@@ -306,10 +306,12 @@ export function fileLeaseConflictBody(claimed, conflicts) {
 
 // Unheld claims whose dependencies are all done. A missing dependency is not
 // done. An empty dependency list is ready: nobody is waiting on it.
+// FIX-18: `expired` (lapsed lease, ownerless) is ready too — the orphan is
+// re-claimable and must stay discoverable, not stranded out of the queue.
 export function readyClaims(items) {
   const byId = new Map((items ?? []).map(item => [item.id, item]));
   return (items ?? []).filter(item => {
-    if (!item || item.state !== "unclaimed" || item.owner) return false;
+    if (!item || (item.state !== "unclaimed" && item.state !== "expired") || item.owner) return false;
     const deps = Array.isArray(item.dependsOn) ? item.dependsOn : [];
     return deps.every(id => byId.get(id)?.state === "done");
   }).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));

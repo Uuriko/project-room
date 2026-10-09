@@ -37,6 +37,7 @@ import {
   retireStaleClaims, countsTowardBoardCap, roomWorkClaimConfig,
   isTerminalClaimState, ClaimError,
 } from "../server/work-claims.mjs";
+import { readyClaims } from "../server/claim-coordination.mjs";
 import { agentErrorAx } from "../src/agent-error.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
@@ -342,4 +343,21 @@ test("(a) HTTP: an expired claim is re-claimable over the claim route", { timeou
   assert.equal(reclaimed.status, 200, `re-claim failed: ${JSON.stringify(reclaimed.value).slice(0, 200)}`);
   assert.equal(reclaimed.value.state, "claimed");
   assert.equal(reclaimed.value.title, "revivable");
+});
+
+test("(a) readyClaims: an expired orphan stays discoverable in the ready queue", () => {
+  // An expired item is unheld by construction with no live lease — exactly
+  // what the ready queue is for. Excluding it would strand the orphan: out
+  // of the cap count but invisible to agents looking for work.
+  const unclaimed = createWork({ id: "u1", title: "u1" }, { now: Date.now(), agentId: "a" });
+  const held = claimWork(createWork({ id: "h1", title: "h1" }, { now: Date.now(), agentId: "a" }),
+    "a", { leaseHours: 1, now: Date.now() });
+  const [expired] = releaseExpired([held], Date.now() + 2 * 60 * 60 * 1000);
+  const done = { ...unclaimed, id: "d1", state: "done" };
+  const ready = readyClaims([expired, done, unclaimed]);
+  assert.deepEqual(ready.map(item => item.id).sort(), ["h1", "u1"],
+    "expired orphan + unclaimed item are ready; done item is not");
+  assert.ok(ready.some(item => item.id === "h1" && item.state === "expired"),
+    "expired orphan must appear in the ready queue");
+  assert.ok(!ready.some(item => item.state === "done"), "done items stay out of the ready queue");
 });

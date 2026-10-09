@@ -150,16 +150,19 @@ sequenceDiagram
 
 Details:
 
-- Claim states are `unclaimed`, `claimed`, `in_progress`, `blocked`, `done`,
-  `closed` (`server/work-claims.mjs` `STATES`; `done` is immutable and carries
-  `deliveryMode`, `reviewedBy`, `tags`, `blobs`). Moves are one explicit table,
-  `CLAIM_LIFECYCLE` (state × verb → state). `closed` is terminal: open work
-  retired without delivery by `close` (holder or claim manager) or `cancel`
-  (the creator of an unclaimed item, or its holder) via
-  `POST /api/rooms/{roomId}/work-claims/{claimId}/close`,
+- Claim states are `unclaimed`, `claimed`, `in_progress`, `blocked`, `expired`,
+  `done`, `closed` (`server/work-claims.mjs` `STATES`; `done` is immutable and
+  carries `deliveryMode`, `reviewedBy`, `tags`, `blobs`). Moves are one
+  explicit table, `CLAIM_LIFECYCLE` (state × verb → state). `closed` is
+  terminal: open work retired without delivery by `close` (holder or claim
+  manager) or `cancel` (the creator of an unclaimed or expired item, or its
+  holder) via `POST /api/rooms/{roomId}/work-claims/{claimId}/close`,
   `POST /api/rooms/{roomId}/work-claims/{claimId}/cancel` or MCP
-  `room_close_work_claim`. Only open (non-terminal) items count against the
-  room's open-claim cap.
+  `room_close_work_claim`. `expired` is not terminal: a lapsed lease
+  auto-releases the item into `expired` (owner/lease cleared, history kept) so
+  it leaves the open-claim count while staying re-claimable — the orphan is
+  never dropped. Only non-terminal, non-expired items count against the
+  room's open-claim cap (`countsTowardBoardCap`).
 - No inbound GitHub webhook is mounted: the per-minute cron and
   `POST /api/rooms/{roomId}/work-claims/sweep` poll instead; `applyPullRequestWebhook` in
   `server/claim-pr-sync.mjs` is the same settlement a `pull_request` webhook

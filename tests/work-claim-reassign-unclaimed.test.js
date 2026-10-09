@@ -34,7 +34,7 @@ test("an assigned item expires and returns to the pool like any claim", () => {
   assert.equal(isLeaseExpired(assigned, T0 + H), false);
   assert.equal(isLeaseExpired(assigned, T0 + 3 * H), true);
   const [released] = releaseExpired([assigned], T0 + 3 * H);
-  assert.equal(released.state, "unclaimed");
+  assert.equal(released.state, "expired");
   assert.equal(released.owner, null);
 });
 

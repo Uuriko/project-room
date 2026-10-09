@@ -131,7 +131,9 @@ export function claimUpdateText(event, members) {
     return bits.join(" · ");
   }
   if (data.action === "created") return `${name} opened ${title}`;
-  if (data.action === "released" || data.action === "lease_expired") return `${name} released ${title}`;
+  if (data.action === "released") return `${name} released ${title}`;
+  if (data.action === "lease_expired") return `The lease on ${title} lapsed — ${name}'s claim expired`;
+  if (data.action === "stale_retired") return `${title} was auto-retired after long inactivity`;
   if (data.action === "renewed") return `${name} renewed ${title}`;
   if (data.action === "reassigned") return `${name} reassigned ${title}`;
   if (data.action === "pr_merged") return `${name} merged ${title}`;
@@ -303,7 +305,7 @@ function cardHtml(item, viewer, members, now, workItems, byId) {
     const status = !target ? "Not loaded or unavailable; status unknown"
       : target.state === "done" ? "Completed"
       : target.state === "unclaimed" && !target.owner ? "Unclaimed; needs an owner"
-      : ({ claimed: "Claimed", in_progress: "In progress", blocked: "Blocked" }[target.state] ?? "Status unknown");
+      : ({ claimed: "Claimed", in_progress: "In progress", blocked: "Blocked", expired: "Expired; lease lapsed, can be claimed again" }[target.state] ?? "Status unknown");
     const reference = claimReference(id, byId, workItems, `claim-dependency:${item.id}:${index}`);
     return `<li>${target?.state === "done" ? "Prerequisite" : "Waiting for"} ${reference} · ${escapeHtml(status)}</li>`;
   }).join("");
@@ -312,7 +314,8 @@ function cardHtml(item, viewer, members, now, workItems, byId) {
   if (canLinkPullRequest(item, viewer, now)) {
     actions.push(`<form class="board-new" data-claim-link-pr="${escapeHtml(item.id)}"><label>Pull request URL <input name="pullRequest" type="url" size="1" maxlength="300" required autocomplete="off" placeholder="https://github.com/…/pull/…" aria-label="Pull request URL for ${escapeHtml(item.title || item.id)}" data-focus-key="link-pr:${escapeHtml(item.id)}"></label><button type="submit" class="button secondary">Link PR</button></form>`);
   }
-  if (item.state === "unclaimed" && !item.owner && !waiting) actions.push(button("claim", "Claim", "primary"));
+  // expired items are ownerless and re-claimable, like unclaimed ones.
+  if ((item.state === "unclaimed" || item.state === "expired") && !item.owner && !waiting) actions.push(button("claim", "Claim", "primary"));
   if (mine && ["claimed", "in_progress", "blocked"].includes(item.state)) actions.push(button("renew", "Renew", "secondary"));
   if (mine && (item.state === "claimed" || item.state === "blocked")) actions.push(button("progress", "Mark in progress", "secondary"));
   if (mine && item.state === "in_progress") actions.push(button("done", "Done", "primary"));
@@ -323,9 +326,10 @@ function cardHtml(item, viewer, members, now, workItems, byId) {
     if (options) actions.push(`<form data-claim-reassign="${escapeHtml(item.id)}"><label>Reassign <select name="newOwner" aria-label="Reassign ${escapeHtml(item.title)}">${options}</select></label><button type="submit" class="button secondary">Move</button></form>`);
   }
   // Claim lifecycle: close (holder or claim manager) and cancel (creator of
-  // an unclaimed item, or its holder) retire open work without delivery.
+  // an unclaimed or expired item, or its holder) retire open work without
+  // delivery.
   if (viewer.write && item.state !== "done" && item.state !== "closed") {
-    const opener = item.state === "unclaimed" && !item.owner && !item.historyOmitted
+    const opener = (item.state === "unclaimed" || item.state === "expired") && !item.owner && !item.historyOmitted
       && item.history?.[0]?.action === "created" && item.history[0].agentId === viewer.id;
     if (viewer.manage || mine) actions.push(button("close", "Close", "secondary"));
     else if (opener) actions.push(button("cancel", "Cancel", "secondary"));

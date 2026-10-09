@@ -74,7 +74,9 @@ test("releaseExpired: expired claims auto-release, everything else untouched", (
   const out = releaseExpired(input, T0 + 2 * H);
   assert.equal(out.length, 5);
   const [e, f, n, d, u] = out;
-  assert.equal(e.state, "unclaimed");
+  // FIX-18: a lapsed lease auto-releases into `expired` (re-claimable,
+  // cap-excluded), not `unclaimed` (which occupied a cap slot).
+  assert.equal(e.state, "expired");
   assert.equal(e.owner, null);
   assert.equal(e.leaseExpiresAt, null);
   assert.equal(e.history.at(-1).action, "lease_expired");
@@ -97,7 +99,7 @@ test("releaseExpired clears attestations like updateWork (L-P2-8)", () => {
   const reviewed = attestWork(claimed, "jill", { note: "looks good", now: T0 });
   assert.equal(reviewed.attestations.length, 1);
   const [released] = releaseExpired([reviewed], T0 + 2 * H);
-  assert.equal(released.state, "unclaimed");
+  assert.equal(released.state, "expired");
   assert.deepEqual(released.attestations, []);
   assert.ok(Object.isFrozen(released.attestations));
 });
@@ -177,10 +179,10 @@ test("attestWork: caller-bound attestations, one per member, cleared on handoff"
 test("roomWorkClaimConfig: the documented config hook", () => {
   assert.equal(DEFAULT_LEASE_HOURS, 24);
   assert.deepEqual(roomWorkClaimConfig({ workClaims: { defaultLeaseHours: 6, reviewPolicy: "distinct_member" } }),
-    { defaultLeaseHours: 6, reviewPolicy: "distinct_member", maxOpenClaims: 200, maxMemberOpenClaims: 20 });
+    { defaultLeaseHours: 6, reviewPolicy: "distinct_member", maxOpenClaims: 200, maxMemberOpenClaims: 20, staleClaimTtlMs: null });
   // invalid values fall back to defaults, never throw
   assert.deepEqual(roomWorkClaimConfig({ workClaims: { defaultLeaseHours: -2, reviewPolicy: "nope", maxOpenClaims: 0, maxMemberOpenClaims: 10001 } }),
-    { defaultLeaseHours: DEFAULT_LEASE_HOURS, reviewPolicy: "self_attested", maxOpenClaims: 200, maxMemberOpenClaims: 20 });
+    { defaultLeaseHours: DEFAULT_LEASE_HOURS, reviewPolicy: "self_attested", maxOpenClaims: 200, maxMemberOpenClaims: 20, staleClaimTtlMs: null });
   assert.ok(Object.isFrozen(roomWorkClaimConfig({})));
 });
 
@@ -355,7 +357,7 @@ test("handler: sweep releases expired claims", async () => {
   const { out: swept } = await runRoute({ route: "sweep", body: {}, registry });
   assert.deepEqual(swept.value.released, ["s1"]);
   const { out: read } = await runRoute({ route: "read", id: "s1", registry });
-  assert.equal(read.value.state, "unclaimed");
+  assert.equal(read.value.state, "expired");
   assert.equal(read.value.owner, null);
   assert.equal(read.value.history.at(-1).action, "lease_expired");
 });
@@ -370,7 +372,7 @@ test("releaseExpired clears the whole lease (leaseStartAt) like updateWork", () 
   const claimed = claimWork({ id: "e3" }, "quill", { leaseHours: 1, now: T0 });
   assert.ok(claimed.leaseStartAt, "precondition: the claim holds a lease");
   const [released] = releaseExpired([claimed], T0 + 2 * H);
-  assert.equal(released.state, "unclaimed");
+  assert.equal(released.state, "expired");
   assert.equal(released.owner, null);
   assert.equal(released.leaseExpiresAt, null);
   assert.equal(released.leaseStartAt, null,
@@ -415,7 +417,7 @@ test("releaseExpired clears fileBlocks alongside files, attestations and reviews
     { files: ["src/a.js"], fileBlocks: { "src/a.js": "owned" }, leaseHours: 1, now: T0 });
   assert.deepEqual(claimed.fileBlocks, { "src/a.js": "owned" }, "precondition: the claim holds file blocks");
   const [released] = releaseExpired([claimed], T0 + 2 * H);
-  assert.equal(released.state, "unclaimed");
+  assert.equal(released.state, "expired");
   assert.deepEqual(released.files, []);
   assert.deepEqual(released.fileBlocks, {},
     "sweep release must drop the lapsed owner's file blocks like the manual release path");

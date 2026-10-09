@@ -1179,7 +1179,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   if ((workClaimRoute === "close" || workClaimRoute === "cancel") && req.method === "POST") {
     // Claim lifecycle: retire open work without delivering it. close is for
     // the holder or claim managers; cancel is also open to whoever created
-    // the item while it is still unclaimed. Same pure path as MCP
+    // the item while it is still unclaimed or expired. Same pure path as MCP
     // room_close_work_claim (server/work-claims.mjs closeWork).
     const data = body(req);
     if (!shape(data, { optional: ["reason"] })) invalidInput(reject, "{reason?}");
@@ -1260,13 +1260,14 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (!shape(data, { optional: ["progressMessageId", "note", "leaseHours"] })) invalidInput(reject, "{progressMessageId?, note?, leaseHours?}");
     const item = load(claimIdOf(reject, workClaimId));
     // W4 (QA 2026-09-28): a lapsed lease auto-releases the claim (owner
-    // cleared), so the ownership check below would misdiagnose it as an
-    // access problem ("owned by nobody — ask the owner for a guest invite").
-    // Name the real recovery instead: the lease lapsed, claim it again.
-    if (item.state === "unclaimed") {
-      const lapsed = item.history.some(entry => entry.action === "lease_expired");
+    // cleared, state expired), so the ownership check below would misdiagnose
+    // it as an access problem ("owned by nobody — ask the owner for a guest
+    // invite"). Name the real recovery instead: the lease lapsed, claim it
+    // again.
+    if (item.state === "unclaimed" || item.state === "expired") {
+      const lapsed = item.state === "expired" || item.history.some(entry => entry.action === "lease_expired");
       reject(409, "claim_lease_lapsed", lapsed
-        ? `Work "${item.id}" is unclaimed: its lease lapsed and the claim auto-released — claim it again to continue the work`
+        ? `Work "${item.id}" is ${item.state}: its lease lapsed and the claim auto-released — claim it again to continue the work`
         : `Work "${item.id}" is not claimed — claim it first, then renew`);
     }
     if (item.owner !== caller) reject(403, "work_not_owner", `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);

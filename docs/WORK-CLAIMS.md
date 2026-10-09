@@ -43,7 +43,14 @@ woken with reason `assigned`. An unknown or inactive member is **422**
 | `claimed` | `in_progress`, `blocked`, `released` (`unclaimed`) |
 | `in_progress` | `blocked`, `done`, `claimed` (pause) |
 | `blocked` | `in_progress`, `claimed` |
+| `expired` | `claimed` (re-claim the orphan) |
 | `done` | none (immutable) |
+| `closed` | none (immutable) |
+
+`close` and `cancel` are their own routes (`POST .../close`,
+`POST .../cancel`) so a retire always records who and why; they move any
+non-terminal state — including `expired` — to the terminal `closed` state.
+See "Close / cancel" below.
 
 `POST .../update` with `{ "state" }` moves the claim. An illegal move is
 **422** `invalid_claim_input` and names the allowed targets, for example
@@ -78,7 +85,25 @@ stamped with the caller, and `reason` is the note. `in_progress` and
 `blocked` pause to `claimed` first, then release. Both steps are in history.
 
 `POST .../reassign` with `{ "newOwner", "note"? }` keeps the state and names a
-current active member. The new owner is woken with reason `assigned`.
+current active member. The new owner is woken with reason `assigned`. An
+`expired` item cannot be reassigned — claim it first, then reassign.
+
+## Close / cancel
+
+`POST .../close` or `POST .../cancel` with `{ "reason"? }` retires open work
+without delivering it. The item lands in the terminal `closed` state with no
+owner and no lease; the history stamp (`closed` | `cancelled`) names who
+retired it and why. `closed` items never count against the open-claim cap —
+this is the unbrick path for a full board.
+
+- `close`: the current holder, the room owner, or a member with
+  `manage_claims`.
+- `cancel`: whoever created the item while it is still `unclaimed` or
+  `expired`, its holder, the room owner, or a member with `manage_claims`.
+
+Closing a terminal item is **409** `work_claim_terminal`; closing someone
+else's item is **403** `work_not_owner`. MCP: `room_close_work_claim` with
+verb `close` | `cancel`.
 
 ## Renew
 
@@ -93,11 +118,14 @@ is **409** `claim_lease_lapsed`: claim the item again.
 
 ## Caps
 
-Open claims are everything that is not `done`.
+Open claims are everything that is not `done`, `closed`, or `expired`.
 
 - Per room, default **200**. The next create is **409** `work_board_full`.
-  Close stale claims (mark them done) to free a slot. Releasing a claim leaves
-  it `unclaimed`, which still counts.
+  Close or cancel stale claims to free a slot. Releasing a claim leaves it
+  `unclaimed`, which still counts — a deliberate release hands live work back
+  to the room. A *lapsed lease* is different: the item moves to `expired`,
+  which leaves the open count while staying re-claimable, so a board of
+  abandoned orphans never bricks the room and nothing is dropped.
 - Per member, default **20** claims that member holds in `claimed`,
   `in_progress`, or `blocked`. The next claim is **409**
   `too_many_open_claims`.
@@ -108,6 +136,39 @@ with `POST /api/rooms/{roomId}/work-claims/config` and
 the caps. Anyone else who posts is **403** `work_claims_not_permitted`.
 Missing or invalid stored values use the defaults.
 
+## Refusal codes
+
+Branch on `error.code`, never on the HTTP status alone. All three board
+refusals below are **409** with different recoveries; `429` `rate_limited`
+is the only retry-after-a-minute signal.
+
+| `error.code` | HTTP | Meaning | Client action |
+| --- | --- | --- | --- |
+| `work_board_full` | 409 | Room is at its open-claim cap (`done`, `closed`, `expired` don't count) | Close or cancel stale claims (`POST …/work-claims/{id}/close` or `/cancel`), then retry the create |
+| `too_many_open_claims` | 409 | Member already holds the per-member cap | Release or finish an open claim, then retry |
+| `work_claim_conflict` | 409 | Item is already held or not in a claimable state — nothing was changed | Read the item; claim it after it is released, or close it with claim-manager rights |
+
+The exact wire body for a refusal:
+
+```json
+{
+  "error": { "code": "work_board_full", "message": "This room already has 200 open claims. Close stale claims (POST …/work-claims/{id}/close or /cancel) before opening another." },
+  "status": "action_required",
+  "reason": "work_board_full",
+  "hint": "This room is at its open-claim cap. Close stale claims (POST /api/rooms/{roomId}/work-claims/{claimId}/close or /cancel) before opening another.",
+  "next": [
+    { "tool": "room_list_work" },
+    { "command": "Close stale claims (POST /api/rooms/{roomId}/work-claims/{claimId}/close or /cancel), then retry the create." }
+  ],
+  "operationId": "op_...",
+  "category": "conflict"
+}
+```
+
+`error.code`, `error.message`, `hint` and `next` are deterministic: the same
+refusal repeated is byte-identical except for `operationId`, which is unique
+per request.
+
 ## Leases
 
 Default **24h**. `leaseHours` must be a number from **0.25** to **168**.
@@ -115,11 +176,26 @@ A value outside that range is **422** `invalid_claim_input` and the message
 names the range. `null` opts out of expiry and is only accepted from the room
 owner or a member with `manage_claims`. Other callers get **422**.
 
-Expired leases are released on ordinary work-claims requests and on
-`POST .../sweep`. The append-PR update alternative instead refuses a lapsed
-lease without mutating the claim. The list's `swept` array names what that request released.
-The former owner is woken once, with reason `lease_expired`. History records
-`lease_expired`. A later read of the same lapse does not wake them again.
+Expired leases are swept on ordinary work-claims requests, on
+`POST .../sweep`, and by the periodic claim-PR-sync tick. A lapsed claim is
+auto-released into the `expired` state (owner and lease cleared, declared
+files and attestations dropped, history stamped `lease_expired`) — out of
+the open-claim count, still re-claimable via `POST .../claim`, never
+dropped. The append-PR update alternative instead refuses a lapsed
+lease without mutating the claim. The list's `swept` array names what that request expired.
+The former owner is woken once, with reason `lease_expired`. A later read
+of the same lapse does not wake them again.
+
+## Stale-claim auto-retirement
+
+Opt-in per room via `staleClaimTtlMs` on
+`POST /api/rooms/{roomId}/work-claims/config` (`null` disables — the
+default; otherwise whole ms, at least one hour). While enabled, each board
+request also retires `unclaimed`/`expired` items whose last history activity
+is older than the TTL: they move to `closed` with a `stale_retired` stamp
+naming the cutoff. Retired, never deleted — the item, its id and its full
+history survive for audit. Held, delivered, or recently active items are
+never touched. The list and sweep responses name retired ids in `retired`.
 
 ## Reputation-cost claim bonds
 
