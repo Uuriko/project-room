@@ -102,13 +102,26 @@ export function* exportNdjsonLines(db) {
 // rule cannot cause a false mismatch. Rooms need no trailer: a room created
 // mid-stream fails the events foreign key, and any other room tear moves the
 // event count.
+const TRAILER_PAGE_ROWS = 2000;
 export function exportTrailer(db) {
-  const rows = db.prepare("SELECT room_id, sequence, id FROM events ORDER BY room_id, sequence").all();
+  // Keyset pages, not one .all(): a room with many events would otherwise hold
+  // every row in memory at the end of each export. Pages use .all() because the
+  // Durable Object database adapter has no iterate().
+  const page = db.prepare("SELECT room_id, sequence, id FROM events WHERE room_id > ? OR (room_id = ? AND sequence > ?) ORDER BY room_id, sequence LIMIT ?");
   const hash = createHash("sha256");
-  for (const row of rows) {
-    hash.update(`${sanitizeCell("room_id", row.room_id)}\t${sanitizeCell("sequence", row.sequence)}\t${sanitizeCell("id", row.id)}\n`);
+  let count = 0;
+  let roomId = "";
+  let sequence = -1;
+  for (;;) {
+    const rows = page.all(roomId, roomId, sequence, TRAILER_PAGE_ROWS);
+    for (const row of rows) {
+      hash.update(`${sanitizeCell("room_id", row.room_id)}\t${sanitizeCell("sequence", row.sequence)}\t${sanitizeCell("id", row.id)}\n`);
+    }
+    count += rows.length;
+    if (rows.length < TRAILER_PAGE_ROWS) break;
+    ({ room_id: roomId, sequence } = rows.at(-1));
   }
-  return { kind: "trailer", version: 1, events: rows.length, eventsHash: hash.digest("hex") };
+  return { kind: "trailer", version: 1, events: count, eventsHash: hash.digest("hex") };
 }
 
 // Refuses a torn export: the parsed event rows must be exactly the event log
