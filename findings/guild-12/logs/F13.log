@@ -1,0 +1,3 @@
+{"event":"room.cold_start","durationMs":1321,"integrity":"eager","phases":{"schema":{"ms":222,"rowsRead":0},"plugin":{"ms":492,"rowsRead":0},"fence":{"ms":48,"rowsRead":0},"verifies":{"ms":17,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":162,"heapBytes":36137192,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+PASS F13 50 streams x 60 events all delivered in 855ms

@@ -26,3 +26,25 @@ F11 exit=1 :: FAIL F11 F11: expected 100 accepted, got 56 (rejected 244)
 F11 exit=2 :: TIMEOUT F11: hung past 90000ms
 F11 exit=0 :: PASS F11 300 attempts: 100 accepted/200 rejected in 19813ms, event-loop lag max=8743ms p99=1695ms, cpu=2744ms
 F12 exit=0 :: PASS F12 500 attempts: 100 accepted/400 rejected in 36953ms, event-loop lag max=15808ms p99=1509ms, cpu=6256ms
+F13 exit=2 :: TIMEOUT F13: hung past 90000ms
+F13 exit=2 :: TIMEOUT F13: hung past 90000ms
+F13 exit=2 :: TIMEOUT F13: hung past 90000ms
+F13 exit=2 :: TIMEOUT F13: hung past 90000ms
+F13 exit=0 :: PASS F13 50 streams x 60 events all delivered in 855ms
+F14 exit=1 :: FAIL F14 5/5 readers stalled after lagging-drop
+F14 exit=1 :: 
+F14 exit=1 :: FAIL F14 stalled consumer never lagged
+F14 exit=1 :: FAIL F14 5/5 readers stalled after lagging-drop
+F14 exit=1 :: FAIL F14 5/5 readers stalled after lagging-drop
+F14 exit=2 :: TIMEOUT F14: hung past 90000ms
+F14 exit=1 :: FAIL F14 stalled consumer never lagged
+F14 exit=1 :: FAIL F14 5/5 readers stalled after lagging-drop
+F14 exit=1 :: FAIL F14 5/5 readers stalled after lagging-drop [#0:got=29/mark=29 lagging=true done=true #1:got=29/mark=29 lagging=true done=true #2:got=29/mark=29 lagging=true done=true #3:got=29/mark=29 lagging=true done=true #4:got=29/mark=29 lagging=true done=true]
+F14 exit=2 :: TIMEOUT F14: hung past 90000ms
+F14 exit=1 :: FAIL F14 stalled consumer never lagged
+F14 exit=1 :: FAIL F14 5/5 readers stalled after lagging-drop [#0:got=29/mark=29 lagging=true done=true #1:got=29/mark=29 lagging=true done=true #2:got=29/mark=29 lagging=true done=true #3:got=29/mark=29 lagging=true done=true #4:got=29/mark=29 lagging=true done=true]
+F14 exit=2 :: TIMEOUT F14: hung past 90000ms
+F14 exit=0 :: PASS F14 all 5 readers got 100 events each with a stalled peer accumulating
+F15 exit=1 :: 
+F15 exit=1 :: 
+F15 exit=0 :: PASS F15 chaos done in 51137ms, room healthy, probe got 1 events

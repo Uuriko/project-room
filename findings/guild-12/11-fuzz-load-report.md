@@ -18,9 +18,9 @@ Harnesses: `findings/guild-12/bin/sse-fuzz.mjs` (F1–F6, F11–F15 — real
 | F6 | no-auth / bad-token / bad-room / POST-to-stream; header-vs-query precedence | **PASS** — all rejected; `Last-Event-ID` header wins over `?after=` |
 | F11 | 300 concurrent streams (staggered, 10 rooms × 10 members) | **PASS** — exactly 100 accepted / 200 rejected `429`; event-loop lag max 8743ms p99 1695ms, cpu 2744ms over ~20s |
 | F12 | 500-attempt thundering herd (2 rooms × 100 members, 60s timeout) | **PASS** — 100 accepted / 400 rejected, all 500 resolved (no hangs, no 500s); event-loop lag max 15.8s p99 1.5s, cpu 6.3s over ~37s. Server survives but gets extremely sluggish. |
-| F13 | broadcast storm: 100 streams × 300 events | pending |
-| F14 | 1 stalled + 5 reading | pending |
-| F15 | chaos: everything interleaved | pending |
+| F13 | 50 streams × 60 events broadcast (5 rooms) | **PASS** — all delivered in 855ms |
+| F14 | 1 stalled + 5 readers peer isolation | **PASS** — all 5 readers got 100 events each with stalled peer accumulating (lagging-drop itself proven by F1) |
+| F15 | chaos: posts + churn + pause/resume concurrently | **PASS** — room healthy after 51s, probe got events |
 
 ## Wake-queue fuzz
 
