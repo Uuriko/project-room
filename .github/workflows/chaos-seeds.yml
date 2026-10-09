@@ -1,0 +1,67 @@
+# PRODUCT-200 reliability — chaos seed corpus CI.
+#
+# Additive workflow: it does not touch test.yml or any shard workflow.
+# Two jobs:
+#   smoke   — every PR + main push: the deterministic seed corpus only
+#             (tests/chaos-seeds/chaos-seeds.test.js). Seconds, not minutes.
+#   nightly — nightly cron + manual dispatch: the full chaos-seeds directory,
+#             i.e. seeds plus the model-based differential tester with
+#             extended random sequences (WAVE-400's fuzzing front owns
+#             one-off exploratory fuzz runs; this is the permanent gate).
+name: chaos-seeds
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # Nightly ~00:17 PDT — full differential run while the room is quiet.
+    - cron: "17 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-pr-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  smoke:
+    name: deterministic seeds
+    runs-on: ubuntu-latest
+    timeout-minutes: 10 # the seeds themselves run in seconds; headroom is for npm ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - name: Run the deterministic chaos seed corpus
+        run: node --test tests/chaos-seeds/chaos-seeds.test.js
+
+  nightly:
+    name: full differential run
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - name: Seeds + model-based differential tester (extended sequences)
+        # NOTE: node --test does not accept a bare directory in this repo's
+        # pinned Node (MODULE_NOT_FOUND); list the test files explicitly.
+        env:
+          CHAOS_MODEL_SEQUENCES: "2000"
+          CHAOS_MODEL_OPS: "40"
+        run: node --test tests/chaos-seeds/chaos-seeds.test.js tests/chaos-seeds/claim-lifecycle-model.test.js
+      - name: Upload divergence evidence on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chaos-seeds-divergence
+          path: tests/chaos-seeds/
+          if-no-files-found: ignore
