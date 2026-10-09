@@ -2055,6 +2055,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (url.pathname === "/api/account-session") {
         const slotToken = cookie(req, accountCookieName);
+        const mintSlot = () => {
+          rate(`account-slot:${remoteAddress}`, 20);
+          const created = store.createAccountSessionSlot();
+          setCookie(res, accountCookieName, created.token, Math.max(0, Math.floor((created.session.expiresAt - store.now()) / 1000)));
+          return created.session;
+        };
         if (req.method === "GET") {
           const binding = expectedBinding(req);
           if (binding !== null) {
@@ -2066,12 +2072,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             const confirmed = store.authenticateAccountSession(slotToken, null, binding);
             return json(res, 200, sessionAccountView(confirmed));
           }
-          if (!slotToken) {
-            rate(`account-slot:${remoteAddress}`, 20);
-            const created = store.createAccountSessionSlot();
-            setCookie(res, accountCookieName, created.token, Math.max(0, Math.floor((created.session.expiresAt - store.now()) / 1000)));
-            return json(res, 200, sessionAccountView(created.session));
-          }
+          if (!slotToken) return json(res, 200, sessionAccountView(mintSlot()));
           let slot;
           try { slot = store.authenticateAccountSession(slotToken); }
           catch (error) {
@@ -2079,10 +2080,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             try { slot = store.accountSessionSlot(slotToken); }
             catch (slotError) {
               if (slotError.status !== 401) throw slotError;
-              rate(`account-slot:${remoteAddress}`, 20);
-              const created = store.createAccountSessionSlot();
-              setCookie(res, accountCookieName, created.token, Math.max(0, Math.floor((created.session.expiresAt - store.now()) / 1000)));
-              slot = created.session;
+              slot = mintSlot();
             }
           }
           return json(res, 200, sessionAccountView(slot));
@@ -2203,6 +2201,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!session.account) reject(401, "account_session_required", "Sign in to manage your account");
         return { ...session, slotToken };
       };
+      // Account write funnel: CSRF check, per-account rate limit, session
+      // auth, then the ambient-write guard — the four-line preamble shared
+      // by every account-mutating route below.
+      const requireWritableAccount = (rateKey, rateLimit = 30) => {
+        checkOrigin(req, true);
+        rate(`${rateKey}:${remoteAddress}`, rateLimit);
+        const session = requireAccountSession();
+        protectWrite(req, session, false);
+        return session;
+      };
       const providerConfigured = probe => {
         try { return probe() !== null; } catch { return false; }
       };
@@ -2228,37 +2236,25 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       };
       if (url.pathname === "/api/auth/methods/disable") {
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
-        checkOrigin(req, true);
-        rate(`auth-methods:${remoteAddress}`, 30);
-        const session = requireAccountSession();
-        protectWrite(req, session, false);
+        const session = requireWritableAccount("auth-methods");
         const method = store.accountLogins.setMethodDisabled(session.account.id, methodIdFrom(await body(req)), true);
         return json(res, 200, { method });
       }
       if (url.pathname === "/api/auth/methods/enable") {
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
-        checkOrigin(req, true);
-        rate(`auth-methods:${remoteAddress}`, 30);
-        const session = requireAccountSession();
-        protectWrite(req, session, false);
+        const session = requireWritableAccount("auth-methods");
         const method = store.accountLogins.setMethodDisabled(session.account.id, methodIdFrom(await body(req)), false);
         return json(res, 200, { method });
       }
       if (url.pathname === "/api/auth/methods/remove") {
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
-        checkOrigin(req, true);
-        rate(`auth-methods:${remoteAddress}`, 30);
-        const session = requireAccountSession();
-        protectWrite(req, session, false);
+        const session = requireWritableAccount("auth-methods");
         const removed = store.accountLogins.removeMethod(session.account.id, methodIdFrom(await body(req)));
         return json(res, 200, removed);
       }
       if (url.pathname === "/api/auth/password/set") {
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
-        checkOrigin(req, true);
-        rate(`password-set:${remoteAddress}`, 20);
-        const session = requireAccountSession();
-        protectWrite(req, session, false);
+        const session = requireWritableAccount("password-set", 20);
         const data = await body(req);
         if (!exact(data, ["password"]) || typeof data.password !== "string") {
           reject(422, "invalid_password_set", "A new password is required");
@@ -2320,10 +2316,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return json(res, 200, store.accountProfile(session.account.id));
         }
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
-        checkOrigin(req, true);
-        rate(`account-profile:${remoteAddress}`, 30);
-        const session = requireAccountSession();
-        protectWrite(req, session, false);
+        const session = requireWritableAccount("account-profile");
         return json(res, 200, store.updateAccountProfile(session.account.id, await body(req)));
       }
       if (url.pathname === "/api/account/onboarding") {
@@ -2333,10 +2326,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (url.pathname === "/api/account/onboarding/complete") {
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
-        checkOrigin(req, true);
-        rate(`account-onboarding:${remoteAddress}`, 30);
-        const session = requireAccountSession();
-        protectWrite(req, session, false);
+        const session = requireWritableAccount("account-onboarding");
         return json(res, 200, store.completeOnboarding(session.account.id));
       }
       if (url.pathname === "/api/account/retention") {
@@ -2358,10 +2348,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (url.pathname === "/api/account/delete") {
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
-        checkOrigin(req, true);
-        rate(`account-delete:${remoteAddress}`, 5);
-        const session = requireAccountSession();
-        protectWrite(req, session, false);
+        const session = requireWritableAccount("account-delete", 5);
         const data = await body(req);
         if (!exact(data, ["confirmationToken"]) || typeof data.confirmationToken !== "string" || data.confirmationToken.length === 0) {
           reject(422, "invalid_deletion", "A deletion confirmation token from GET /api/account/deletion/plan is required");
