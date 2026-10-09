@@ -12,7 +12,15 @@ const helpers = {
   reject: (status, code, message) => { const error = new Error(message); error.status = status; error.code = code; throw error; },
   body: async req => req.body,
 };
-const call = (registry, route, id, body) => handleWorkClaims({
+const call = (registry, route, id, reqBody) => {
+  // FIX-45: files is required on claim creation — tests that do not
+  // exercise file declarations declare [] explicitly ("touches no files").
+  const body = (route === "create" || route === "claim") && !(reqBody && "files" in Object(reqBody))
+    && (route === "create" || (registry.get("room1", id)?.files ?? []).length === 0)
+    ? { files: [], ...reqBody } : reqBody;
+  // The claim route inherits the item's files when the test omits them,
+  // so [] is only injected when the item declares no files either.
+  return handleWorkClaims({
   req: { method: route === "list" ? "GET" : "POST", body }, res: {},
   url: new URL("https://room.example/api/rooms/room1/work-claims"),
   store: { roomAuthority: () => ({ members: {
@@ -20,6 +28,7 @@ const call = (registry, route, id, body) => handleWorkClaims({
   } }) }, roomId: "room1", auth: { member: { id: "agent1", kind: "agent", permissions: [] } },
   workClaimRoute: route, workClaimId: id, helpers, registry,
 });
+};
 
 test("a live claim is not reported as swept; a lapsed one is", async () => {
   const registry = createWorkClaimRegistry();

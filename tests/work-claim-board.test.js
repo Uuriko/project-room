@@ -86,7 +86,7 @@ async function fixture(t, { phase = { failure: false }, databasePath = ":memory:
   const call = async (token, path, body) => {
     // FIX-45: files is required on claim creation — claim-creation paths get
     // an explicit [] ("touches no files") when the test body omits files.
-    const sent = body !== undefined && (path === "/work-claims" || path.endsWith("/claim"))
+    const sent = body !== undefined && path === "/work-claims"
       && !("files" in Object(body)) ? { files: [], ...body } : body;
     const response = await fetch(`${origin}/api/rooms/commons${path}`, {
       method: body === undefined ? "GET" : "POST",
@@ -157,7 +157,7 @@ test("the room owner sets the per-member claim cap and a second claim is refused
   await coord.workClaimCreate({ id: "cap-1", title: "First", files: [] }); // FIX-45
   await coord.claimWorkItem("cap-1", { files: [] }); // FIX-45
   await coord.workClaimCreate({ id: "cap-2", title: "Second", files: [] }); // FIX-45
-  const second = await call(coordKey, "/work-claims/cap-2/claim", {});
+  const second = await call(coordKey, "/work-claims/cap-2/claim", { files: [] }); // FIX-45
   assert.equal(second.status, 409);
   assert.equal(second.value.error.code, "too_many_open_claims");
   const read = await call(ownerKey, "/work-claims/config");

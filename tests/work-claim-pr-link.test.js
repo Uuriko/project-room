@@ -33,7 +33,15 @@ async function room(t) {
     reject: (status, code, message) => { const error = new Error(message); error.status = status; error.code = code; throw error; },
     body: async req => req.body,
   };
-  const call = (route, id, body, extra = {}) => handleWorkClaims({
+  const call = (route, id, reqBody, extra = {}) => {
+    // FIX-45: files is required on claim creation — tests that do not
+    // exercise file declarations declare [] explicitly ("touches no files").
+    const body = (route === "create" || route === "claim") && !(reqBody && "files" in Object(reqBody))
+      && (route === "create" || (store.workClaims.get("commons", id)?.files ?? []).length === 0)
+      ? { files: [], ...reqBody } : reqBody;
+    // The claim route inherits the item's files when the test omits them,
+    // so [] is only injected when the item declares no files either.
+    return handleWorkClaims({
     req: { method: route === "list" || route === "read" ? "GET" : "POST", body },
     res: {},
     url: new URL("https://room.example/api/rooms/commons/work-claims"),
@@ -45,6 +53,7 @@ async function room(t) {
     fetchPullRequest: extra.fetchImpl,
     githubToken: null,
   });
+  };
   return { store, call };
 }
 
@@ -523,14 +532,22 @@ test("same-ms ties in two rooms reset independently", async t => {
     reject: (status, code, message) => { const error = new Error(message); error.status = status; error.code = code; throw error; },
     body: async req => req.body,
   };
-  const forRoom = roomId => (route, id, body) => handleWorkClaims({
+  const forRoom = roomId => (route, id, reqBody) => {
+    // FIX-45: files is required on claim creation — declare [] explicitly
+    // when the test omits files; the claim route inherits the item's files
+    // when the item declares any.
+    const body = (route === "create" || route === "claim") && !(reqBody && "files" in Object(reqBody))
+      && (route === "create" || (store.workClaims.get(roomId, id)?.files ?? []).length === 0)
+      ? { files: [], ...reqBody } : reqBody;
+    return handleWorkClaims({
     req: { method: "POST", body }, res: {},
     url: new URL(`https://room.example/api/rooms/${roomId}/work-claims`),
     store, roomId,
     auth: { member: { id: "owner", kind: "human", permissions: [] } },
     workClaimRoute: route, workClaimId: id, helpers,
     registry: store.workClaims, githubToken: null,
-  });
+    });
+  };
   const callA = forRoom("commons"), callB = forRoom("second");
   const link = item => ({ appendPullRequest: URL_A, expectedClaimedAt: item.claimedAt, expectedHistoryLength: item.history.length });
   await callA("create", null, { id: "relink-xroom", title: "relink" });

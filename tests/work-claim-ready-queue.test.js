@@ -19,7 +19,10 @@ const call = (registry, route, id, body, queue = null) => {
   // FIX-45: files is required on claim creation — tests that do not exercise
   // file declarations declare [] explicitly ("touches no files").
   const declared = (route === "create" || route === "claim") && body && !("files" in Object(body))
+    && (route === "create" || (registry.get("room1", id)?.files ?? []).length === 0)
     ? { files: [], ...body } : body;
+  // The claim route inherits the item's files when the test omits them,
+  // so [] is only injected when the item declares no files either.
   return handleWorkClaims({
   req: { method: route === "list" || route === "read" ? "GET" : "POST", body: declared },
   res: {},

@@ -41,7 +41,7 @@ test('SDK retains declared files, overlap warnings, and completion receipt metad
   assert.deepEqual(created.files, ['src/shared.js']);
   assert.deepEqual(created.tags, ['migration']);
   await client.claimWorkItem('holder');
-  await client.workClaimCreate({ id: 'candidate' });
+  await client.workClaimCreate({ id: 'candidate', files: [] }); // FIX-45: files required on creation
   await assert.rejects(client.claimWorkItem('candidate', { files: ['src/shared.js', 'docs/claims.md'] }), error => {
     assert.equal(error.status, 409);
     assert.equal(error.code, 'file_lease_conflict');
@@ -85,7 +85,7 @@ test('SDK convenience claim and completion preserve creation metadata and explic
 
 test('SDK sends invalid declarations for server rejection instead of silently dropping them', async t => {
   const { owner: client, peer } = await fixture(t, { reviewerPermissions: ['verify'] });
-  for (const [id, fields] of [['invalid-path', { files: ['../outside'] }], ['invalid-tag', { tags: ['not a tag'] }]]) {
+  for (const [id, fields] of [['invalid-path', { files: ['../outside'] }], ['invalid-tag', { files: [], tags: ['not a tag'] }]]) { // FIX-45: files declared so tag validation is what fires
     await assert.rejects(client.workClaimCreate({ id, ...fields }), invalid);
     await assert.rejects(client.workClaimGet(id), error => error.status === 404);
   }
@@ -215,7 +215,7 @@ test('SDK state filters retrieve older done claims through explicit and automati
     item = updateWork(item, 'owner', { state: 'done', now: old });
     store.workClaims.set('commons', item);
   }
-  await owner.workClaimCreate({ id: 'still-open' });
+  await owner.workClaimCreate({ id: 'still-open', files: [] }); // FIX-45: files required on creation
   const normal = await owner.workClaims();
   assert.deepEqual(normal.claims.map(item => item.id), ['still-open']);
   assert.equal(normal.olderDone, 51);

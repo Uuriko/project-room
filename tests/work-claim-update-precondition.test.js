@@ -22,7 +22,15 @@ const helpers = {
   body: async req => req.body,
 };
 
-const call = (registry, memberId, route, id, body, query = "") => handleWorkClaims({
+const call = (registry, memberId, route, id, reqBody, query = "") => {
+  // FIX-45: files is required on claim creation — tests that do not
+  // exercise file declarations declare [] explicitly ("touches no files").
+  const body = (route === "create" || route === "claim") && !(reqBody && "files" in Object(reqBody))
+    && (route === "create" || (registry.get("room1", id)?.files ?? []).length === 0)
+    ? { files: [], ...reqBody } : reqBody;
+  // The claim route inherits the item's files when the test omits them,
+  // so [] is only injected when the item declares no files either.
+  return handleWorkClaims({
   req: { method: route === "list" || route === "read" ? "GET" : "POST", body },
   res: {},
   url: new URL(`https://room.example/api/rooms/room1/work-claims${query}`),
@@ -34,6 +42,7 @@ const call = (registry, memberId, route, id, body, query = "") => handleWorkClai
   helpers,
   registry,
 });
+};
 
 const claimFresh = async registry => {
   await call(registry, "owner", "create", null, { id: "task" });

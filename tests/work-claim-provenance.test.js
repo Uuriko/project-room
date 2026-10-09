@@ -166,7 +166,7 @@ async function httpFixture(t) {
   const call = async (token, path, body, method) => {
   // FIX-45: files is required on claim creation — tests that do not
   // exercise file declarations declare [] explicitly ("touches no files").
-    const sent = body !== undefined && (path === "/work-claims" || path.endsWith("/claim"))
+    const sent = body !== undefined && path === "/work-claims"
       && !("files" in Object(body)) ? { files: [], ...body } : body;
     const response = await fetch(`${origin}/api/rooms/commons${path}`, {
       method: method ?? (body === undefined ? "GET" : "POST"),
@@ -188,7 +188,7 @@ test("HTTP create/claim/update accept provenance fields; provenance walks the gr
   assert.equal(created.status, 201);
   assert.equal(created.value.parentClaimId, "root");
   assert.deepEqual(created.value.evidenceRefs, [SHA_REF, URL_REF]);
-  assert.equal((await call(keys.worker, "/work-claims/child/claim", { parentClaimId: "root" })).status, 200);
+  assert.equal((await call(keys.worker, "/work-claims/child/claim", { parentClaimId: "root", files: [] })).status, 200); // FIX-45
   assert.equal((await call(keys.coord, "/work-claims", { id: "grandchild", parentClaimId: "child" })).status, 201);
   // Unknown body keys are still refused (strict shapes).
   assert.equal((await call(keys.coord, "/work-claims", { id: "bad", parent_claim_id: "root" })).status, 422);

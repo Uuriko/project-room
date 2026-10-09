@@ -42,7 +42,10 @@ function roomFixture(t) {
   // FIX-45: files is required on claim creation — tests that do not
   // exercise file declarations declare [] explicitly ("touches no files").
     const declared = (route === "create" || route === "claim") && body !== undefined && !("files" in Object(body))
+      && (route === "create" || (store.workClaims.get("commons", id)?.files ?? []).length === 0)
       ? { files: [], ...body } : body;
+  // The claim route inherits the item's files when the test omits them,
+  // so [] is only injected when the item declares no files either.
     try {
       const out = await handleWorkClaims({
         req: { method, body: declared },
@@ -433,7 +436,7 @@ test("over real HTTP a guest's review note and sweep are refused and the list is
   const call = async (token, path, body) => {
   // FIX-45: files is required on claim creation — tests that do not
   // exercise file declarations declare [] explicitly ("touches no files").
-    const sent = body !== undefined && (path === "/work-claims" || path.endsWith("/claim"))
+    const sent = body !== undefined && path === "/work-claims"
       && !("files" in Object(body)) ? { files: [], ...body } : body;
     const response = await fetch(`${origin}/api/rooms/commons${path}`, {
       method: body === undefined ? "GET" : "POST",
@@ -443,7 +446,7 @@ test("over real HTTP a guest's review note and sweep are refused and the list is
     return { status: response.status, value: await response.json() };
   };
   assert.equal((await call(ownerKey, "/work-claims", { id: "http-claim", title: "HTTP claim" })).status, 201);
-  assert.equal((await call(ownerKey, "/work-claims/http-claim/claim", { leaseHours: 1 })).status, 200);
+  assert.equal((await call(ownerKey, "/work-claims/http-claim/claim", { leaseHours: 1, files: [] })).status, 200); // FIX-45
   const note = await call(guestKey, "/work-claims/http-claim/review", { note: "guest note" });
   assert.equal(note.status, 403);
   assert.equal(note.value.error.code, "work_claims_not_permitted");

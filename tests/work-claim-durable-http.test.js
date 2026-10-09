@@ -56,7 +56,7 @@ test('a failed claim transaction sends no success and rolls back the claim write
  const store=new RoomStore(':memory:');t.after(()=>store.close());store.initialize(initialRoom('commons'));
  const registry=store.workClaims;let sent=false;
  const failing={...registry,transaction:fn=>store.transaction(()=>{fn();throw new Error('synthetic commit refusal');})};
- await assert.rejects(handleWorkClaims({req:{method:'POST'},res:{},url:new URL('http://localhost'),store,roomId:'commons',auth:{member:{id:'owner',kind:'human'}},workClaimRoute:'create',registry:failing,helpers:{body:async()=>({id:'rollback'}),json:()=>{sent=true;},reject:(_status,_code,message)=>{throw new Error(message);}}}),/synthetic commit refusal/);
+ await assert.rejects(handleWorkClaims({req:{method:'POST'},res:{},url:new URL('http://localhost'),store,roomId:'commons',auth:{member:{id:'owner',kind:'human'}},workClaimRoute:'create',registry:failing,helpers:{body:async()=>({id:'rollback',files:[]}),json:()=>{sent=true;},reject:(_status,_code,message)=>{throw new Error(message);}}}),/synthetic commit refusal/); // FIX-45: files declared so the rollback path is what fails
  assert.equal(sent,false);assert.equal(registry.get('commons','rollback'),null);
  const other=new RoomStore(':memory:');t.after(()=>other.close());other.initialize(initialRoom('commons'));
  registry.set('commons',{id:'only-first'});assert.deepEqual(other.workClaims.list('commons'),[]);

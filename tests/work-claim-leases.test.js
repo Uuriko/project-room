@@ -229,8 +229,11 @@ const runRoute = async ({ route, id = null, body: reqBody = {}, memberId = "quil
   // FIX-45: files is required on claim creation. Tests that do not
   // exercise file declarations declare [] explicitly ("touches no files");
   // a files key the test passed is preserved untouched.
-  const body = (route === "create" || route === "claim") && !("files" in Object(reqBody))
+  const body = (route === "create" || route === "claim") && !(reqBody && "files" in Object(reqBody))
+    && (route === "create" || (registry.get("room1", id)?.files ?? []).length === 0)
     ? { files: [], ...reqBody } : reqBody;
+  // The claim route inherits the item's files when the test omits them,
+  // so [] is only injected when the item declares no files either.
   const helpers = fakeHelpers();
   const store = {
     roomAuthority: roomId => ({ members: {

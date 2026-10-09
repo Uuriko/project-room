@@ -865,12 +865,14 @@ export class RoomAgentClient {
   // Convenience: claim, creating the item first when it does not exist yet.
   // title, reviewPolicy and tags apply only to creation; files apply to every
   // claim. Omitted files retain the declaration, while [] explicitly clears it.
+  // FIX-45: when the item is new, omitted files declare [] on creation
+  // ("touches no files") — the create route requires a files declaration.
   async workClaim(id, { title, reviewPolicy, note, tags, files, leaseHours, advisory, dependsOn, parentClaimId, evidenceRefs, pullRequest, signal } = {}) {
     try { return await this.claimWorkItem(id, { note, leaseHours, files, advisory, dependsOn, parentClaimId, evidenceRefs, pullRequest, signal }); }
     catch (error) {
       if (!(error instanceof RoomClientError) || error.status !== 404) throw error;
-      await this.workClaimCreate({ id, title, reviewPolicy, note, tags, files, dependsOn, parentClaimId, evidenceRefs, pullRequest }, { signal });
-      return this.claimWorkItem(id, { note, leaseHours, files, advisory, pullRequest, signal });
+      await this.workClaimCreate({ id, title, reviewPolicy, note, tags, files: files ?? [], dependsOn, parentClaimId, evidenceRefs, pullRequest }, { signal });
+      return this.claimWorkItem(id, { note, leaseHours, files: files ?? [], advisory, pullRequest, signal });
     }
   }
   async workComplete(id, { deliveryMode, note, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, signal } = {}) {
