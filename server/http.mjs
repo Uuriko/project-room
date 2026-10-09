@@ -3121,18 +3121,26 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 200, listAccountUpdates(store, token, accountBinding(req, url), updatesQuery()), req.method === "HEAD");
       }
       if (url.pathname === "/api/updates") reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
-      if (updatesListMatch || updatesMarkMatch) {
-        const roomId = pathId((updatesListMatch ?? updatesMarkMatch)[1]);
+      // Room funnel: credential selection, session fence, and credential
+      // checks shared by every /api/rooms/:roomId/* route below.
+      const authenticateRoomRoute = roomId => {
         const selected = roomCredentials(req, url);
         const fence = selected.mode === "account" ? accountBinding(req, null) : expectedBinding(req);
         const auth = roomAuth(selected, roomId, fence);
         if (selected.bearer && auth.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
         if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
-        if (auth.kind === "api-key") {
-          const requiredScope = updatesListMatch ? "rooms:read" : "rooms:write";
-          const granted = (auth.apiKeyScopes ?? []).some(scope => scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
-          if (!granted) reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
-        }
+        return { selected, fence, auth };
+      };
+      const requireApiScope = (auth, requiredScope) => {
+        if (auth.kind !== "api-key") return;
+        const granted = (auth.apiKeyScopes ?? []).some(scope =>
+          scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
+        if (!granted) reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
+      };
+      if (updatesListMatch || updatesMarkMatch) {
+        const roomId = pathId((updatesListMatch ?? updatesMarkMatch)[1]);
+        const { selected, fence, auth } = authenticateRoomRoute(roomId);
+        requireApiScope(auth, updatesListMatch ? "rooms:read" : "rooms:write");
         rate(`read:${auth.credentialHash}`, 600);
         if (updatesListMatch) {
           if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, HEAD" });
@@ -3193,17 +3201,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (landMatch) {
         const roomId = pathId(landMatch[1]);
         const action = landAdd ? "add_land_item" : landList ? "list_land_queue" : landRemove ? "remove_land_item" : "report_tip";
-        const selected = roomCredentials(req, url);
-        const fence = selected.mode === "account" ? accountBinding(req, null) : expectedBinding(req);
-        const auth = roomAuth(selected, roomId, fence);
-        if (selected.bearer && auth.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
-        if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
-        if (auth.kind === "api-key") {
-          const requiredScope = action === "list_land_queue" ? "rooms:read" : "rooms:write";
-          const granted = (auth.apiKeyScopes ?? []).some(scope =>
-            scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
-          if (!granted) reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
-        }
+        const { selected, auth } = authenticateRoomRoute(roomId);
+        requireApiScope(auth, action === "list_land_queue" ? "rooms:read" : "rooms:write");
         rate(`read:${auth.credentialHash}`, 600);
         if (action === "list_land_queue") {
           if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
@@ -3255,17 +3254,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const fileId = roomFileCommitMatch ? pathId(roomFileCommitMatch[2]) : null;
         const readFileId = roomFileGetMatch ? pathId(roomFileGetMatch[2]) : null;
         const writing = req.method === "POST";
-        const selected = roomCredentials(req, url);
-        const fence = selected.mode === "account" ? accountBinding(req, null) : expectedBinding(req);
-        const auth = roomAuth(selected, roomId, fence);
-        if (selected.bearer && auth.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
-        if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
-        if (auth.kind === "api-key") {
-          const requiredScope = writing ? "rooms:write" : "rooms:read";
-          const granted = (auth.apiKeyScopes ?? []).some(scope =>
-            scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
-          if (!granted) reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
-        }
+        const { selected, auth } = authenticateRoomRoute(roomId);
+        requireApiScope(auth, writing ? "rooms:write" : "rooms:read");
         if (readFileId) {
           if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
           rate(`read:${auth.credentialHash}`, 600);
