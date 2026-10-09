@@ -233,13 +233,18 @@ function maySweepWorkClaims(access) {
   return mayWriteWorkClaims(access) || mayManageAnyClaim(access);
 }
 
-function refuseBoardAction(message, hint) {
+// One builder for every board-shaped refusal: the 403 not-permitted and
+// the 409 capacity refusals share the same error shape — only status and
+// code differ.
+function refuseWith(status, code, message, hint) {
   const error = new Error(message);
-  error.status = 403;
-  error.code = "work_claims_not_permitted";
-  error.body = { error: { code: "work_claims_not_permitted", message }, hint, next: [{ command: hint }] };
+  error.status = status;
+  error.code = code;
+  error.body = { error: { code, message }, hint, next: [{ command: hint }] };
   throw error;
 }
+
+const refuseBoardAction = (message, hint) => refuseWith(403, "work_claims_not_permitted", message, hint);
 
 const refuseAttest = () => refuseBoardAction(
   "Review notes on a claim come from the room owner, a member with the review profile, or a claim manager.",
@@ -248,27 +253,11 @@ const refuseSweep = () => refuseBoardAction(
   "Sweeping the Board needs a contribute, review, or collaborate profile, claim management, or the room owner.",
   "Ask the room owner or a claim manager to sweep the Board.");
 
-function refuseWorkClaims() {
-  const message = "Creating, claiming, renewing, or updating work claims needs a contribute, review, or collaborate profile.";
-  const hint = "Ask the room owner for a contribute invite.";
-  const error = new Error(message);
-  error.status = 403;
-  error.code = "work_claims_not_permitted";
-  error.body = {
-    error: { code: "work_claims_not_permitted", message },
-    hint,
-    next: [{ command: hint }],
-  };
-  throw error;
-}
+const refuseWorkClaims = () => refuseBoardAction(
+  "Creating, claiming, renewing, or updating work claims needs a contribute, review, or collaborate profile.",
+  "Ask the room owner for a contribute invite.");
 
-function refuseCap(code, message, hint) {
-  const error = new Error(message);
-  error.status = 409;
-  error.code = code;
-  error.body = { error: { code, message }, hint, next: [{ command: hint }] };
-  throw error;
-}
+const refuseCap = (code, message, hint) => refuseWith(409, code, message, hint);
 
 const boardLimitOf = (reject, raw) => {
   if (raw === null || raw === undefined) return BOARD_LIMIT_DEFAULT;
@@ -299,6 +288,19 @@ function compareBoard(a, b) {
   return 0;
 }
 
+// Shared tail of the two page helpers: slice the window off the list and
+// stamp the opaque cursor for the next page (null when nothing follows).
+const finishPage = (list, start, limit, cursorOf) => {
+  const claims = list.slice(start, start + limit);
+  const hasMore = start + limit < list.length;
+  const last = claims[claims.length - 1];
+  return {
+    claims,
+    hasMore,
+    nextCursor: hasMore && last ? boardCursorEncode(cursorOf(last)) : null,
+  };
+};
+
 function pageBoard(items, limit, cursor, state = null) {
   const sorted = [...items].sort(compareBoard);
   let start = 0;
@@ -309,14 +311,7 @@ function pageBoard(items, limit, cursor, state = null) {
     });
     if (start < 0) start = sorted.length;
   }
-  const claims = sorted.slice(start, start + limit);
-  const hasMore = start + limit < sorted.length;
-  const last = claims[claims.length - 1];
-  return {
-    claims,
-    hasMore,
-    nextCursor: hasMore && last ? boardCursorEncode({ u: claimUpdatedAt(last), i: last.id, s: state }) : null,
-  };
+  return finishPage(sorted, start, limit, last => ({ u: claimUpdatedAt(last), i: last.id, s: state }));
 }
 
 function pageReady(items, limit, cursor) {
@@ -325,21 +320,14 @@ function pageReady(items, limit, cursor) {
     start = items.findIndex(item => item.id > cursor.i);
     if (start < 0) start = items.length;
   }
-  const claims = items.slice(start, start + limit);
-  const hasMore = start + limit < items.length;
-  const last = claims[claims.length - 1];
-  return {
-    claims,
-    hasMore,
-    nextCursor: hasMore && last ? boardCursorEncode({ q: "ready", i: last.id }) : null,
-  };
+  return finishPage(items, start, limit, last => ({ q: "ready", i: last.id }));
 }
 
 // Shared stored-state projection. No registry/store access or lifecycle effects:
 // ordinary GET calls this after housekeeping; derived reads call it directly.
 // Pages are live, not a snapshot fenced by the legacy room event sequence.
 export function buildWorkClaimPage(items, roomId, viewerId, query = new URLSearchParams(), nowMs = Date.now()) {
-  const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
+  const reject = serviceReject;
   const params = query ?? new URLSearchParams();
   for (const key of params.keys()) {
     if (!BOARD_QUERY.has(key) || params.getAll(key).length !== 1) {
@@ -483,6 +471,51 @@ const cursorDecode = (reject, value) => {
   reject(400, "bad_cursor", "cursor must be the opaque nextCursor from a prior receipts response");
 };
 
+const serviceReject = (status, code, message) => { throw new ServiceError(status, code, message); };
+
+// MCP mutations re-verify the caller inside the registry transaction. The
+// unauthenticated / identity-changed / API-key scope / guest checks are
+// identical for closeWorkClaim and linkWorkClaimPullRequest.
+const callerOf = (reject, auth, reauthorize) => {
+  const current = reauthorize ? reauthorize() : auth;
+  if (!current?.member?.id) reject(401, "unauthenticated", "Room authentication is required");
+  if (current.member.id !== auth?.member?.id) reject(403, "access_denied", "The acting identity changed");
+  if (current.kind === "api-key" && !(current.apiKeyScopes ?? []).some(scope =>
+    scope === "rooms:write" || scope.endsWith(":*") && "rooms:write".startsWith(scope.slice(0, -1)))) {
+    reject(403, "insufficient_scope", "API key lacks the rooms:write scope");
+  }
+  if (isGuestAgentMemberId(current.member.id)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
+  return current;
+};
+
+const transact = (registry, run) => registry.transaction ? registry.transaction(run) : run();
+
+// The fixture store's clock hook; production uses Date.now().
+const nowOf = store => typeof store.now === "function" ? store.now() : Date.now();
+
+// 404 lookup shared by the MCP mutations and the REST core's load helper.
+const loadClaim = (reject, registry, roomId, id) => {
+  const item = registry.get(roomId, id);
+  if (!item) reject(404, "work_claim_not_found", `No work claim "${id}" in this room`);
+  return item;
+};
+
+// Shared prologue for the MCP close/link mutations (after callerOf): access
+// check, autonomy tier, archive guard, event budget, claim-id shape and the
+// Room Guide guard — in the original order. Returns the resolved access; the
+// caller loads the claim next (link validates the PR payload in between).
+const mutationPrelude = (reject, { store, roomId, current, registry, claimId, action, archivedMessage }) => {
+  const access = resolveWorkClaimAccess(store, roomId, current);
+  if (!mayWriteWorkClaims(access)) refuseWorkClaims();
+  enforceAutonomyTierForAction({ db: store.db, roomId, state: { room: { ownerId: access.ownerId } },
+    actor: access.member, action, fail: reject });
+  if (isRoomArchived(store.room(roomId).state)) reject(409, "room_archived", archivedMessage);
+  assertBoardEventBudget(access.authority?.sequence, { privileged: mayManageAnyClaim(access) });
+  claimIdOf(reject, claimId);
+  refuseRoomGuideOffStarter(registry, roomId, current, claimId, "POST", reject);
+  return access;
+};
+
 // REST and hosted MCP share this owner-only mutation, including a fresh
 // authorization and claim read inside the registry transaction. This does not
 // sweep or settle other work, renew the lease, or synchronously contact GitHub.
@@ -500,63 +533,35 @@ function retire(reject, item, caller, verb, reason, authority, nowMs) {
 // MCP room_close_work_claim: the same close/cancel as the REST routes, in one
 // transaction, with the same access checks as room_link_work_claim_pr.
 export function closeWorkClaim({ store, roomId, auth, claimId, verb = "close", reason, registry = store.workClaims, reauthorize }) {
-  const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
+  const reject = serviceReject;
   const run = () => {
-    const current = reauthorize ? reauthorize() : auth;
-    if (!current?.member?.id) reject(401, "unauthenticated", "Room authentication is required");
-    if (current.member.id !== auth?.member?.id) reject(403, "access_denied", "The acting identity changed");
-    if (current.kind === "api-key" && !(current.apiKeyScopes ?? []).some(scope =>
-      scope === "rooms:write" || scope.endsWith(":*") && "rooms:write".startsWith(scope.slice(0, -1)))) {
-      reject(403, "insufficient_scope", "API key lacks the rooms:write scope");
-    }
-    if (isGuestAgentMemberId(current.member.id)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
+    const current = callerOf(reject, auth, reauthorize);
     if (verb !== "close" && verb !== "cancel") reject(422, "invalid_claim_input", "verb must be close or cancel");
-    const access = resolveWorkClaimAccess(store, roomId, current);
-    if (!mayWriteWorkClaims(access)) refuseWorkClaims();
-    enforceAutonomyTierForAction({ db: store.db, roomId, state: { room: { ownerId: access.ownerId } },
-      actor: access.member, action: `POST work-claim ${verb}`, fail: reject });
-    if (isRoomArchived(store.room(roomId).state)) reject(409, "room_archived", "This room is archived; nothing was closed");
-    assertBoardEventBudget(access.authority?.sequence, { privileged: mayManageAnyClaim(access) });
-    claimIdOf(reject, claimId);
-    refuseRoomGuideOffStarter(registry, roomId, current, claimId, "POST", reject);
+    const access = mutationPrelude(reject, { store, roomId, current, registry, claimId,
+      action: `POST work-claim ${verb}`, archivedMessage: "This room is archived; nothing was closed" });
     const clean = boardText(reject, "reason", reason, { multiline: true });
-    const item = registry.get(roomId, claimId);
-    if (!item) reject(404, "work_claim_not_found", `No work claim "${claimId}" in this room`);
-    const now = typeof store.now === "function" ? store.now() : Date.now();
+    const item = loadClaim(reject, registry, roomId, claimId);
+    const now = nowOf(store);
     const closed = retire(reject, item, current.member.id, verb, clean, mayManageAnyClaim(access), now);
     registry.set(roomId, closed);
     emitWorkClaimEvent(store, roomId, { actorId: current.member.id, item: closed, action: "closed",
       reason: verb === "cancel" ? "cancelled" : "closed", atMs: now });
     return closed;
   };
-  return registry.transaction ? registry.transaction(run) : run();
+  return transact(registry, run);
 }
 
 export function linkWorkClaimPullRequest({ store, roomId, auth, claimId, data, registry = store.workClaims, reauthorize }) {
-  const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
+  const reject = serviceReject;
   const run = () => {
-    const current = reauthorize ? reauthorize() : auth;
-    if (!current?.member?.id) reject(401, "unauthenticated", "Room authentication is required");
-    if (current.member.id !== auth?.member?.id) reject(403, "access_denied", "The acting identity changed");
-    if (current.kind === "api-key" && !(current.apiKeyScopes ?? []).some(scope =>
-      scope === "rooms:write" || scope.endsWith(":*") && "rooms:write".startsWith(scope.slice(0, -1)))) {
-      reject(403, "insufficient_scope", "API key lacks the rooms:write scope");
-    }
-    if (isGuestAgentMemberId(current.member.id)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
-    const access = resolveWorkClaimAccess(store, roomId, current);
-    if (!mayWriteWorkClaims(access)) refuseWorkClaims();
-    enforceAutonomyTierForAction({ db: store.db, roomId, state: { room: { ownerId: access.ownerId } },
-      actor: access.member, action: "POST work-claim update", fail: reject });
-    if (isRoomArchived(store.room(roomId).state)) reject(409, "room_archived", "This room is archived; no PR link was recorded");
-    assertBoardEventBudget(access.authority?.sequence, { privileged: mayManageAnyClaim(access) });
-    claimIdOf(reject, claimId);
-    refuseRoomGuideOffStarter(registry, roomId, current, claimId, "POST", reject);
+    const current = callerOf(reject, auth, reauthorize);
+    const access = mutationPrelude(reject, { store, roomId, current, registry, claimId,
+      action: "POST work-claim update", archivedMessage: "This room is archived; no PR link was recorded" });
     if (!shape(data, { required: ["appendPullRequest", "expectedClaimedAt", "expectedHistoryLength"] })) {
       invalidInput(reject, "{appendPullRequest, expectedClaimedAt, expectedHistoryLength} without other update fields");
     }
-    const item = registry.get(roomId, claimId);
-    if (!item) reject(404, "work_claim_not_found", `No work claim "${claimId}" in this room`);
-    const now = typeof store.now === "function" ? store.now() : Date.now();
+    const item = loadClaim(reject, registry, roomId, claimId);
+    const now = nowOf(store);
     let linked;
     try {
       linked = appendWorkPullRequest(item, current.member.id, { pullRequest: data.appendPullRequest,
@@ -578,7 +583,7 @@ export function linkWorkClaimPullRequest({ store, roomId, auth, claimId, data, r
     emitWorkClaimEvent(store, roomId, { actorId: current.member.id, item: linked, action: "state_changed", atMs: now });
     return linked;
   };
-  return registry.transaction ? registry.transaction(run) : run();
+  return transact(registry, run);
 }
 
 // Consume the body before opening SQLite's synchronous transaction. The read,
@@ -606,17 +611,17 @@ export async function handleWorkClaims(options) {
   // lookup. An empty room, or a sweep with nothing due, does not call fetch.
   let pullBatch = { results: [], rateLimitedUntil: null, skipped: false };
   let deployStatus = null;
+  const githubTokenOf = () => options.githubToken !== undefined
+    ? options.githubToken
+    : (process.env.GITHUB_TOKEN || process.env.GH_TOKEN || null);
   if (options.workClaimRoute === "status" && req.method === "GET") {
-    const credential = options.githubToken !== undefined
-      ? options.githubToken
-      : (process.env.GITHUB_TOKEN || process.env.GH_TOKEN || null);
     // SEC-2 / Q3-A: every member reads the shared cached status; only a
     // Board writer's ?refresh=1 skips the 60 s cache.
     const access = resolveWorkClaimAccess(options.store, options.roomId, options.auth);
     const force = options.url?.searchParams?.get("refresh") === "1" && maySweepWorkClaims(access);
     deployStatus = await readBoardDeployStatus(options.store, {
       fetchImpl: options.fetchPullRequest ?? fetch,
-      token: credential || null,
+      token: githubTokenOf() || null,
       nowMs: Date.now(),
       force,
     });
@@ -629,25 +634,20 @@ export async function handleWorkClaims(options) {
   if (options.workClaimRoute === "sweep") {
     const nowMs = Date.now();
     const budget = readClaimPullBudget(options.store);
-    if (budget > nowMs) {
-      pullBatch = { results: [], rateLimitedUntil: budget, skipped: true };
-    } else {
-      const credential = options.githubToken !== undefined
-        ? options.githubToken
-        : (process.env.GITHUB_TOKEN || process.env.GH_TOKEN || null);
-      pullBatch = await collectPullRequestLookups(registry.list(options.roomId), {
-        fetchImpl: options.fetchPullRequest ?? fetch,
-        token: credential || null,
-        nowMs
-      });
-    }
+    pullBatch = budget > nowMs
+      ? { results: [], rateLimitedUntil: budget, skipped: true }
+      : await collectPullRequestLookups(registry.list(options.roomId), {
+          fetchImpl: options.fetchPullRequest ?? fetch,
+          token: githubTokenOf() || null,
+          nowMs,
+        });
   }
   const run = () => handleWorkClaimsCore({ ...options, registry, pullBatch, deployStatus,
     auth: reauthorize ? reauthorize() : options.auth,
     helpers: { ...helpers, body: () => requestData, json: (_res, status, value) => ({ status, value }) },
   });
   try {
-    const result = registry.transaction ? registry.transaction(run) : run();
+    const result = transact(registry, run);
     return helpers.json(res, result.status, result.value);
   } catch (error) {
     if (error?.code === "file_lease_conflict" && error.body) return helpers.json(res, 409, error.body);
@@ -691,7 +691,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     db: store.db, roomId, state: { room: { ownerId: store.roomAuthority?.(roomId)?.ownerId } },
     actor: auth.member, action: `${req.method} work-claim ${workClaimRoute}`, fail: reject });
   refuseRoomGuideOffStarter(registry, roomId, auth, workClaimId, req.method, reject);
-  const nowMs = typeof store.now === "function" ? store.now() : Date.now();
+  const nowMs = nowOf(store);
   const caller = auth.member.id;
   // Every committed claim change appends one work_claim.updated room event
   // inside this transaction (server/work-claim-events.mjs).
@@ -764,11 +764,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     invalidInput(reject, `leaseHours greater than 0 and at most ${MAX_LEASE_HOURS}; null is only for the room owner or manage_claims`);
   };
 
-  const load = id => {
-    const item = registry.get(roomId, id);
-    if (!item) reject(404, "work_claim_not_found", `No work claim "${id}" in this room`);
-    return item;
-  };
+  const load = id => loadClaim(reject, registry, roomId, id);
   const loadClaim = () => load(claimIdOf(reject, workClaimId));
   // Returns true when the caller is the room owner or holds manage_claims
   // and is acting on someone else's claim. The claim holder takes the
