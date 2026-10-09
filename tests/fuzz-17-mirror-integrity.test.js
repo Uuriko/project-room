@@ -250,7 +250,7 @@ test("A3 missing/empty/non-string workItemId is refused", () => {
 // board row, where the integrity check (boardText, 422 invalid_claim_input on
 // the route path) would have refused it. The row then leaks into API reads as
 // if valid.
-test("A4 hostile-text workItemId must not reach the mirror as a dirty title", { skip: "UNVERIFIED 2026-10-09: dead worker labeled this CONFIRMED BUG but the mirror-is-dumb-projection vs must-sanitize contract is unclear; needs product-owner verdict before asserting" }, () => {
+test("A4 hostile-text workItemId must not reach the mirror as a dirty title", () => {
   const repros = [];
   const outcomes = fuzz100("A4", hostileWorkItemId, (workItemId) => {
     const store = makeStore();
@@ -275,7 +275,7 @@ test("A4 hostile-text workItemId must not reach the mirror as a dirty title", { 
 // mirror THROW (ClaimError invalid_claim_input). In production store.mjs:4790
 // runs inside the projection command transaction, so the throw rolls back
 // the whole command — a poisoned projection event fails unrelated work.
-test("A5 oversized workItemId must not throw the mirror", { skip: "UNVERIFIED 2026-10-09: dead worker labeled this CONFIRMED BUG; whether mirrorProjectionClaim must be total (never throw) is a product contract question" }, () => {
+test("A5 oversized workItemId must not throw the mirror", () => {
   const repros = [];
   const outcomes = fuzz100("A5", (rng) => "w".repeat(rint(rng, 513, 2000)) + "-" + pick(rng, WORDS), (workItemId) => {
     const store = makeStore();
@@ -296,7 +296,7 @@ test("A5 oversized workItemId must not throw the mirror", { skip: "UNVERIFIED 20
 // converts it via clientPullRequestInput before the state machine. The mirror
 // skips that conversion, so a projection event using the documented format
 // throws ClaimError and rolls back the projection command in production.
-test("A5b short-form PR refs must not throw the mirror", { skip: "UNVERIFIED 2026-10-09: see A5" }, () => {
+test("A5b short-form PR refs must not throw the mirror", () => {
   const outcomes = fuzz100("A5b", (rng) => `${pick(rng, WORDS)}/${pick(rng, WORDS)}#${rint(rng, 1, 9999)}`, (short) => {
     const store = makeStore();
     try {
@@ -343,7 +343,7 @@ test("A6 malformed paths/blocks never throw and yield sane files", () => {
 // pull request URL" — 422), and documents that only claim-pr-sync sets them.
 // The mirror path skips that guard, so a projection event can forge
 // outcome:"merged"/syncedAt/etag facts that API reads then serve as valid.
-test("A7 mirror must not store forged PR merge/CI/sync facts", { skip: "UNVERIFIED 2026-10-09: dead worker labeled this CONFIRMED BUG; needs contract verdict" }, () => {
+test("A7 mirror must not store forged PR merge/CI/sync facts", () => {
   const repros = [];
   const outcomes = fuzz100("A7", (rng) => [{
     url: "https://github.com/Uuriko/project-room/pull/1",
@@ -368,7 +368,7 @@ test("A7 mirror must not store forged PR merge/CI/sync facts", { skip: "UNVERIFI
     `(${forged}/100 forged). Repro: pullRequests with outcome/syncedAt -> stored ${JSON.stringify(repros[0]?.prs)?.slice(0, 160)}`);
 });
 
-test("A8 wrong-typed repository/ref are neutralized, never throw", { skip: "UNVERIFIED 2026-10-09: dead worker labeled this CONFIRMED BUG; needs contract verdict" }, () => {
+test("A8 wrong-typed repository/ref are neutralized, never throw", () => {
   const outcomes = fuzz100("A8", (rng) => ({
     repository: pick(rng, [42, {}, [], "ok/repo", "bad repo!!", "a".repeat(300), null]),
     ref: pick(rng, [42, {}, "main", "feat/x", "bad ref!!", null]),
@@ -395,7 +395,7 @@ test("A8 wrong-typed repository/ref are neutralized, never throw", { skip: "UNVE
 // boardClaimId(undefined) -> "workitem", so a supersede projection missing
 // supersededByWorkItemId silently fabricates a "workitem" claim row and links
 // supersededBy:"workitem" — corrupt data accepted with no flag.
-test("A9 supersede without supersededByWorkItemId must not fabricate a phantom claim", { skip: "UNVERIFIED 2026-10-09: dead worker labeled this CONFIRMED BUG; needs contract verdict" }, () => {
+test("A9 supersede without supersededByWorkItemId must not fabricate a phantom claim", () => {
   const outcomes = fuzz100("A9", (rng) => pick(rng, [undefined, null, ""]), (supersededByWorkItemId) => {
     const store = makeStore();
     let threw = null;
@@ -418,7 +418,7 @@ test("A9 supersede without supersededByWorkItemId must not fabricate a phantom c
 // CONFIRMED BUG (same crash class as A5, via work.handoff_recorded): a
 // non-string nextAction becomes the successor title and createWork throws
 // ClaimError, rolling back the projection command in production.
-test("A10 hostile nextAction must not throw the mirror", { skip: "UNVERIFIED 2026-10-09: dead worker labeled this CONFIRMED BUG; needs contract verdict" }, () => {
+test("A10 hostile nextAction must not throw the mirror", () => {
   const outcomes = fuzz100("A10", (rng) => pick(rng, [{ evil: 1 }, ["x"], 42, true, "n".repeat(600)]), (nextAction) => {
     const store = makeStore();
     try {
