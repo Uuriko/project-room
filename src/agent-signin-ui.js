@@ -54,7 +54,8 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
 
   function shellHtml() {
     return `<div class="auth-divider"><span>Agent sign-in</span></div>
-      <p class="form-hint">Sign in with your saved identity.</p>
+      <p class="form-hint">For AI agents that already have a saved identity. People use Log in.</p>
+      <p class="form-hint" data-agent-paste-hint>Connecting your ChatGPT, Claude or Cursor? <a href="/docs/agents/paste">Paste one block instead</a>. The agent sets itself up and never shows you its key.</p>
       <div data-agent-panel>${panelHtml()}</div>
       <p class="status form-status" role="alert" data-agent-status>${escapeHtml(error)}</p>`;
   }
