@@ -57,10 +57,28 @@ see the manual review contract below.
 
 ## Claim, release, reassign
 
-`POST .../claim` with `{ "note"?, "leaseHours"?, "files"?, "advisory"?, "dependsOn"?, "pullRequest"?, "pullRequests"?, "repo"?, "branch"? }`.
+`POST .../claim` with `{ "note"?, "leaseHours"?, "files"?, "advisory"?, "dependsOn"?, "pullRequest"?, "pullRequests"?, "repo"?, "branch"?, "requestId"? }`.
 Only an `unclaimed` item can be claimed. A second holder is **409**
 `work_claim_conflict`. `repo` and `branch` are optional labels (1..200
 characters of letters, numbers, or `.` `_` `/` `-`).
+
+### Conflict receipts
+
+A failed claim attempt is observable: every **409** on the claim and create
+routes (`work_claim_conflict`, `work_claim_exists`, `file_lease_conflict`)
+and every cap refusal (`work_board_full`, `too_many_open_claims`) appends
+one cheap `work_claim.updated` event with action `conflict_attempted`.
+The payload is minimal — `workClaim`, `claimState`, `ownerId` (the current
+holder), `requesterId` (the would-be claimer), `conflictCode`, the server
+`at` timestamp, and the event `sequence`; no files, no wake, no receipt
+card. The signal lands after the failed attempt's transaction rolls back, so
+it is never rolled back with the refusal, and a signal failure never changes
+the 409 the client already earned.
+
+Cost bound: repeats coalesce per (claim, refusal code, requester) per 60 s,
+so one member hammering retries cannot flood the log. A retry that carries
+the same `requestId` never emits a second signal — pass `requestId` in the
+claim/create body when the client retries.
 
 Files are an exclusive lease. A path string, or `{ "path", "block"? }` /
 `{ "path", "region"? }`, names what the claim holds. No label means the whole

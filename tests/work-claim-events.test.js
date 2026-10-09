@@ -2,7 +2,9 @@
 // work_claims table, so the room, the event tail and agents' wake feeds never
 // saw a claim, a renewal, a handoff or a release, and agents re-announced every
 // claim in chat. Each committed change now appends one work_claim.updated event
-// attributed to the member who made it, and a refused change appends nothing.
+// attributed to the member who made it, and a refused change appends nothing —
+// except a failed claim attempt, which appends one cheap conflict_attempted
+// receipt (FIX-34) so contention is observable in the event tail.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { RoomAgentClient } from '../client/room-agent.mjs';
@@ -71,14 +73,25 @@ test('each claim change appends one event naming the member, the action, the own
   assert.ok(events.every((e, i) => i === 0 || e.seq > events[i - 1].seq), 'events land in commit order');
 });
 
-test('a refused claim change appends no event', async t => {
+test('a refused claim change appends no event — except a 409 claim attempt, which leaves one conflict receipt', async t => {
   const { owner, peer } = await fixture(t);
   await owner.workClaim('held', { files: ['docs/x.md'] });
   const before = (await claimEvents(owner)).length;
   await assert.rejects(peer.claimWorkItem('held'), error => error.status === 409);
+  // FIX-34: the failed claim attempt is the one refusal that IS observable —
+  // one cheap conflict_attempted event naming the task, the would-be claimer
+  // and the current holder.
+  const afterConflict = await claimEvents(owner);
+  assert.equal(afterConflict.length, before + 1);
+  const conflict = afterConflict[afterConflict.length - 1];
+  assert.equal(conflict.action, 'conflict_attempted');
+  assert.equal(conflict.workClaim, 'held');
+  assert.equal(conflict.requesterId, 'reviewer');
+  assert.equal(conflict.ownerId, 'owner');
+  assert.equal(conflict.conflictCode, 'work_claim_conflict');
   await assert.rejects(peer.releaseWorkItem('held'), error => error.status === 403);
   await assert.rejects(owner.reassignWorkItem('held', { newOwner: 'nobody-here' }), error => error.status === 422);
-  assert.equal((await claimEvents(owner)).length, before);
+  assert.equal((await claimEvents(owner)).length, before + 1, 'the 403 and 422 refusals still append nothing');
 });
 
 test('a lapsed lease is swept once, naming the previous owner and the files that were freed', async t => {

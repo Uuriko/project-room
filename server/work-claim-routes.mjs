@@ -43,7 +43,7 @@ import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { evaluateReceipt } from "./jev-receipts.mjs";
 import { findClaimCollisions } from "./claim-collisions.mjs";
-import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
+import { emitWorkClaimEvent, emitClaimConflictEvent, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
 import { noteReadyWork } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { getActiveSquad } from "./squads.mjs"; // plan-squads: work offers target squads
 import { isFirstContribution, retentionAck } from "./retention-response.mjs";
@@ -118,6 +118,14 @@ const invalidInput = (reject, expected) => reject(422, "invalid_claim_input", `E
 const claimIdOf = (reject, id) => {
   if (typeof id !== "string" || !CLAIM_ID_PATTERN.test(id)) invalidInput(reject, "a work id matching [A-Za-z0-9_-]{1,128}");
   return id;
+};
+
+// FIX-34: an optional client retry token. A retried claim attempt that
+// carries the same requestId never emits a second conflict signal.
+const requestIdOf = (reject, value) => {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || value.length === 0 || value.length > 128) invalidInput(reject, "a requestId string of 1..128 characters");
+  return value;
 };
 
 // W1 (QA 2026-09-28): `data.leaseHours ?? undefined` converts an explicit
@@ -262,11 +270,14 @@ function refuseWorkClaims() {
   throw error;
 }
 
-function refuseCap(code, message, hint) {
+function refuseCap(code, message, hint, conflict = null) {
   const error = new Error(message);
   error.status = 409;
   error.code = code;
   error.body = { error: { code, message }, hint, next: [{ command: hint }] };
+  // FIX-34: a cap refusal carries the conflict signal; the outer handler
+  // emits it after the failed transaction rolls back.
+  if (conflict) error.conflictSignal = conflict;
   throw error;
 }
 
@@ -650,6 +661,41 @@ export async function handleWorkClaims(options) {
     const result = registry.transaction ? registry.transaction(run) : run();
     return helpers.json(res, result.status, result.value);
   } catch (error) {
+    // FIX-34: the attempt's transaction rolled back above, so the conflict
+    // signal attached by the 409/cap refusal sites lands here, after the
+    // rollback, where its event write survives. A signal failure never
+    // changes the refusal the client already earned.
+    // refuseCap sites cannot reach the core-scope helper, so the
+    // signal is normalized here: requesterId falls back to the authenticated
+    // member, and an explicit holderId (cap target, lease holder) wins over
+    // the item's owner.
+    const rawSignal = error?.conflictSignal;
+    if (rawSignal && options.store) {
+      const rawItem = rawSignal.item ?? {};
+      const signal = {
+        requesterId: typeof rawSignal.requesterId === "string" ? rawSignal.requesterId : options.auth?.member?.id,
+        item: {
+          id: rawItem.id,
+          state: typeof rawItem.state === "string" ? rawItem.state : "unclaimed",
+          owner: rawSignal.holderId ?? rawItem.owner ?? null,
+          title: typeof rawItem.title === "string" && rawItem.title.trim() ? rawItem.title : rawItem.id,
+          files: []
+        },
+        conflictCode: rawSignal.conflictCode,
+        requestId: rawSignal.requestId ?? null,
+        atMs: Number.isFinite(rawSignal.atMs) ? rawSignal.atMs
+          : (typeof options.store.now === "function" ? options.store.now() : Date.now())
+      };
+      try {
+        // Called as a method: transaction reads this.db.
+        const transact = typeof options.store.transaction === "function"
+          ? fn => options.store.transaction(fn)
+          : fn => fn();
+        transact(() => emitClaimConflictEvent(options.store, options.roomId, signal));
+      } catch (emitError) {
+        console.error("claim conflict event failed:", emitError?.message ?? emitError);
+      }
+    }
     if (error?.code === "file_lease_conflict" && error.body) return helpers.json(res, 409, error.body);
     if (Number.isInteger(error?.status) && error.body && error.code) return helpers.json(res, error.status, error.body);
     throw error;
@@ -693,6 +739,23 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   refuseRoomGuideOffStarter(registry, roomId, auth, workClaimId, req.method, reject);
   const nowMs = typeof store.now === "function" ? store.now() : Date.now();
   const caller = auth.member.id;
+  // FIX-34: a 409/cap refusal attaches its conflict signal to the thrown
+  // error instead of emitting inline: the whole route runs inside the claim
+  // transaction, and emitting first would roll the signal back with the
+  // refusal. The outer handleWorkClaims normalizes and emits the signal
+  // after the rollback. Emission is cheap and never fails the refusal
+  // (see emitClaimConflictEvent).
+  const attachConflictSignal = (error, { item, conflictCode, holderId = null, requestId = null }) => {
+    error.conflictSignal = {
+      requesterId: caller,
+      item: { id: item.id, state: item.state, owner: item.owner ?? null, title: item.title },
+      conflictCode,
+      holderId,
+      requestId,
+      atMs: nowMs
+    };
+    return error;
+  };
   // Every committed claim change appends one work_claim.updated room event
   // inside this transaction (server/work-claim-events.mjs).
   const commit = (item, action, extra = {}) => {
@@ -901,18 +964,24 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "create" && req.method === "POST") {
     const raw = body(req);
-    if (!shape(raw, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch", "kind", "revision", "assignee", "squadId"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?, kind?, revision?, assignee?, squadId?}");
+    if (!shape(raw, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch", "kind", "revision", "assignee", "squadId", "requestId"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?, kind?, revision?, assignee?, squadId?, requestId?}");
     requireWriter();
     requireEventBudget();
     const id = claimIdOf(reject, raw.id);
+    const createRequestId = requestIdOf(reject, raw.requestId);
     const data = clientPullRequestInput(reject, boardTextFields(reject, raw, { title: {}, note: { multiline: true } }));
     assertDependsOnKnown(reject, data, { selfId: id, has: other => registry.has(roomId, other) });
-    if (registry.has(roomId, id)) reject(409, "work_claim_exists", `Work claim "${id}" already exists in this room`);
+    if (registry.has(roomId, id)) {
+      const existing = registry.get(roomId, id);
+      throw attachConflictSignal(new ServiceError(409, "work_claim_exists", `Work claim "${id}" already exists in this room`),
+        { item: existing ?? { id }, conflictCode: "work_claim_exists", holderId: existing?.owner ?? null, requestId: createRequestId });
+    }
     const open = registry.list(roomId).filter(item => !isTerminalClaimState(item.state)).length;
     if (open >= config.maxOpenClaims) {
       refuseCap("work_board_full",
         `This room already has ${config.maxOpenClaims} open claims. Close stale claims (POST …/work-claims/{id}/close or /cancel) before opening another.`,
-        "Close stale claims (POST /api/rooms/{roomId}/work-claims/{claimId}/close or /cancel) before opening another.");
+        "Close stale claims (POST /api/rooms/{roomId}/work-claims/{claimId}/close or /cancel) before opening another.",
+        { item: { id }, conflictCode: "work_board_full", requestId: createRequestId });
     }
     if (data.reviewPolicy !== undefined && !REVIEW_POLICIES.includes(data.reviewPolicy)) invalidInput(reject, `reviewPolicy one of ${REVIEW_POLICIES.join(", ")}`);
     if (data.kind !== undefined && !CLAIM_KINDS.includes(data.kind)) invalidInput(reject, `kind one of ${CLAIM_KINDS.join(", ")}`);
@@ -938,7 +1007,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       if (held >= config.maxMemberOpenClaims) {
         refuseCap("too_many_open_claims",
           `${assignee} already holds ${config.maxMemberOpenClaims} open claims. Release or finish one before assigning another.`,
-          "Release or finish an open claim before assigning another.");
+          "Release or finish an open claim before assigning another.",
+          { item, conflictCode: "too_many_open_claims", holderId: assignee, requestId: createRequestId });
       }
       item = runPure(reject, () => claimWork(item, assignee, {
         note: data.note ?? `assigned by ${caller}`, room: roomLike, now: nowMs
@@ -970,20 +1040,28 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "claim" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { optional: ["note", "leaseHours", "files", "advisory", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch"] })) invalidInput(reject, "{note?, leaseHours?, files?, advisory?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?}");
+    if (!shape(data, { optional: ["note", "leaseHours", "files", "advisory", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch", "requestId"] })) invalidInput(reject, "{note?, leaseHours?, files?, advisory?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?, requestId?}");
     if ("advisory" in data && typeof data.advisory !== "boolean") invalidInput(reject, "advisory true or false");
+    const claimRequestId = requestIdOf(reject, data.requestId);
+    // FIX-34: every conflict below lands a cheap conflict_attempted receipt
+    // naming the would-be claimer and the current holder (post-rollback, via
+    // the outer catch), so contention is observable in the event tail.
+    const rejectConflict = (conflictItem, conflictCode, message, extra = {}) => {
+      throw attachConflictSignal(new ServiceError(409, conflictCode, message),
+        { item: conflictItem, conflictCode, holderId: conflictItem.owner ?? null, requestId: claimRequestId, ...extra });
+    };
     const item = load(claimIdOf(reject, workClaimId));
     // H4 (QA-200 2026-10-08): a failed claim's 409 must name the real recovery.
     // The old "release it first" advice destroyed your own claim on self
     // re-claim and was unactionable for a foreign holder (non-owners cannot
     // release it) — it also never named the holder.
     if (item.state !== "unclaimed") {
-      if (item.state !== "claimed") reject(409, "work_claim_conflict", `Work "${item.id}" is already ${item.state}`);
+      if (item.state !== "claimed") rejectConflict(item, "work_claim_conflict", `Work "${item.id}" is already ${item.state}`);
       if (item.owner === caller) {
-        reject(409, "work_claim_conflict",
+        rejectConflict(item, "work_claim_conflict",
           `You already hold work "${item.id}" — no new claim was saved; read the item to confirm`);
       }
-      reject(409, "work_claim_conflict",
+      rejectConflict(item, "work_claim_conflict",
         `Work "${item.id}" is held by ${item.owner ?? "someone else"} — ask them to reassign or release it`);
     }
     requireWriter();
@@ -996,7 +1074,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (held >= config.maxMemberOpenClaims) {
       refuseCap("too_many_open_claims",
         `You already hold ${config.maxMemberOpenClaims} open claims. Release or finish one before claiming another.`,
-        "Release or finish an open claim before claiming another.");
+        "Release or finish an open claim before claiming another.",
+        { item, conflictCode: "too_many_open_claims", holderId: caller, requestId: claimRequestId });
     }
     const claimed = runPure(reject, () => claimWork(item, caller, {
       note: data.note, leaseHours: leaseHoursOfBody(data), files: data.files,
@@ -1017,6 +1096,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       const error = new Error(body.error.message);
       error.code = "file_lease_conflict";
       error.body = body;
+      attachConflictSignal(error, { item: claimed, conflictCode: "file_lease_conflict",
+        holderId: conflicts[0]?.holder?.owner ?? null, requestId: claimRequestId });
       throw error;
     }
     // Retention ack (research brief 2026-09-28, mechanic #2): every claim gets

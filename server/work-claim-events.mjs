@@ -25,7 +25,7 @@ const eventTitle = item => {
   return title.trim() ? title : item.id;
 };
 
-export function workClaimEventData(item, action, { previousOwnerId = null, paths = undefined, pullRequest = undefined, reason = undefined, ciState = undefined, verdict = undefined, attention = undefined, attentionMemberId = undefined } = {}) {
+export function workClaimEventData(item, action, { previousOwnerId = null, paths = undefined, pullRequest = undefined, reason = undefined, ciState = undefined, verdict = undefined, attention = undefined, attentionMemberId = undefined, conflictCode = undefined, requesterId = undefined, requestId = undefined } = {}) {
   if (!WORK_CLAIM_ACTIONS.includes(action)) throw new Error(`Unknown work claim action: ${action}`);
   // Release and lease expiry clear files on the item. Callers pass the paths
   // that were held so the receipt still says which lane opened up.
@@ -41,6 +41,11 @@ export function workClaimEventData(item, action, { previousOwnerId = null, paths
     title: eventTitle(item),
     paths: [...listed]
   };
+  // conflict_attempted receipts name the refusal code, the member whose claim
+  // attempt failed, and the client's requestId when one rode the attempt.
+  if (conflictCode !== undefined) data.conflictCode = conflictCode;
+  if (requesterId !== undefined) data.requesterId = requesterId;
+  if (requestId !== undefined) data.requestId = requestId;
   if (action === "pr_merged" || action === "pr_closed") {
     const pull = pullRequest ?? item.pullRequest;
     data.pullRequest = {
@@ -156,17 +161,18 @@ function noteClaimEvent(store, key, atMs) {
 
 const coalesceKey = (roomId, claimId, action) => `${roomId}\u0000${claimId}\u0000${action}`;
 
-export function claimEventCoalesced(store, roomId, claimId, action, atMs) {
-  const at = store && typeof store === "object" ? lastClaimEvent.get(store)?.get(coalesceKey(roomId, claimId, action)) : undefined;
+export function claimEventCoalesced(store, roomId, claimId, action, atMs, keyOverride = null) {
+  const at = store && typeof store === "object" ? lastClaimEvent.get(store)?.get(keyOverride ?? coalesceKey(roomId, claimId, action)) : undefined;
   return Number.isFinite(at) && atMs - at >= 0 && atMs - at < CLAIM_EVENT_COALESCE_MS;
 }
 
 // Handler unit tests drive the routes with a registry-only store; events need
 // the real event log, so a store without one records nothing here.
-export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previousOwnerId = null, atMs = null, paths = undefined, pullRequest = undefined, reason = undefined, ciState = undefined, verdict = undefined, attention = undefined, attentionMemberId = undefined, coalesce = false }) {
+export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previousOwnerId = null, atMs = null, paths = undefined, pullRequest = undefined, reason = undefined, ciState = undefined, verdict = undefined, attention = undefined, attentionMemberId = undefined, coalesce = false, coalesceKey: coalesceKeyOverride = null, conflictCode = undefined, requesterId = undefined, requestId = undefined }) {
   if (!store?.db || typeof store.room !== "function") return null;
   const stamp = Number.isFinite(atMs) ? atMs : (typeof store.now === "function" ? store.now() : Date.now());
-  if (coalesce && claimEventCoalesced(store, roomId, item.id, action, stamp)) return null;
+  const coalesceKeyInUse = coalesceKeyOverride ?? coalesceKey(roomId, item.id, action);
+  if (coalesce && claimEventCoalesced(store, roomId, item.id, action, stamp, coalesceKeyInUse)) return null;
   const room = store.room(roomId);
   // The event log refuses anything after archive (applyEvent throws). Skip
   // the receipt so the claim write still commits; an archived room has no
@@ -180,7 +186,7 @@ export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previ
     actorId: actor && actor.active !== false ? actorId : room.state.room.ownerId,
     roomId,
     at: new Date(stamp).toISOString(),
-    data: workClaimEventData(item, action, { previousOwnerId, paths, pullRequest, reason, ciState, verdict, attention, attentionMemberId })
+    data: workClaimEventData(item, action, { previousOwnerId, paths, pullRequest, reason, ciState, verdict, attention, attentionMemberId, conflictCode, requesterId, requestId })
   });
   if (actor?.system === true) incoming.data.actorKind = "system";
   const state = applyEvent(room.state, incoming);
@@ -188,7 +194,7 @@ export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previ
   store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
   const compact = { ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
   store.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, store.storedProjection(roomId, compact), roomId);
-  if (coalesce) noteClaimEvent(store, coalesceKey(roomId, item.id, action), stamp);
+  if (coalesce) noteClaimEvent(store, coalesceKeyInUse, stamp);
   try {
     if (store.agentPlugin) store.agentPlugin.fanoutRoomEvent({ roomId, event: incoming });
   } catch (error) {
@@ -202,4 +208,58 @@ export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previ
     catch (error) { console.error("work claim receipt card failed:", error?.message ?? error); }
   }
   return { sequence, event: incoming };
+}
+
+// FIX-34: a failed claim attempt used to emit no event, so cross-guild
+// contention over the same work was unobservable by construction. A
+// `conflict_attempted` receipt carries the task id, the would-be claimer
+// (requesterId), the current holder (ownerId), and the refusal code, with the
+// server sequence as the timestamp. The payload is deliberately minimal: no
+// title copy, no file list, no wake, no receipt card — this is an
+// observability signal, not a claim change.
+//
+// Cost bound: repeats coalesce per (claim, refusal code, requester) per
+// CLAIM_EVENT_COALESCE_MS, and a retry that carries the same requestId never
+// emits twice (per-store memory, same restart bound as the note-event
+// coalescing above). Two guilds fighting over one task each get their own
+// signal; one guild hammering retries does not.
+const CONFLICT_REQUEST_DEDUP_MEMORY = 10_000;
+const seenConflictRequests = new WeakMap();
+
+export function emitClaimConflictEvent(store, roomId, { requesterId, item, conflictCode, requestId = null, atMs = null }) {
+  if (!store?.db || typeof store.room !== "function") return null;
+  if (typeof requesterId !== "string" || typeof item?.id !== "string" || typeof conflictCode !== "string") return null;
+  if (requestId) {
+    let seen = seenConflictRequests.get(store);
+    if (!seen) { seen = new Set(); seenConflictRequests.set(store, seen); }
+    const requestKey = `${roomId}\u0000${item.id}\u0000${conflictCode}\u0000${requestId}`;
+    if (seen.has(requestKey)) return null;
+    seen.add(requestKey);
+    if (seen.size > CONFLICT_REQUEST_DEDUP_MEMORY) seen.delete(seen.values().next().value);
+  }
+  const conflictItem = {
+    id: item.id,
+    state: typeof item.state === "string" ? item.state : "unclaimed",
+    owner: item.owner ?? null,
+    title: typeof item.title === "string" && item.title.trim() ? item.title : item.id,
+    files: []
+  };
+  // One signal per (claim, code, requester) per window: a second guild's
+  // attempt is its own signal, a hammered retry is not. The requestId is
+  // deliberately NOT part of this key: the dedup set above already makes a
+  // repeated requestId idempotent forever, while distinct attempts from the
+  // same requester coalesce inside the window.
+  const key = [roomId, item.id, `conflict_attempted:${conflictCode}`, requesterId].join("\u0000");
+  return emitWorkClaimEvent(store, roomId, {
+    actorId: requesterId,
+    item: conflictItem,
+    action: "conflict_attempted",
+    atMs,
+    paths: [],
+    conflictCode,
+    requesterId,
+    requestId: requestId ?? undefined,
+    coalesce: true,
+    coalesceKey: key
+  });
 }
