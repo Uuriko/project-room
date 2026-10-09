@@ -68,7 +68,7 @@ info:
     docs/INVITE-ONLY-CHECKLIST.md to list each of them. Account-session
     (browser cookie) routes declare `accountSession`.
 servers:
-  - url: https://room.example.com
+  - url: https://room.trydemigod.com
 security:
   - queryAuth: []
   - bearerAuth: []
@@ -16897,6 +16897,11 @@ components:
         next:
           type: array
           items: { type: object }
+    # Aliases kept for older spec text: the live error convention is ErrorBody.
+    Error:
+      $ref: '#/components/schemas/ErrorBody'
+    ErrorEnvelope:
+      $ref: '#/components/schemas/ErrorBody'
     WorkClaim:
       description: |
         A work-claim registry item. Claims carry a lease (`claimedAt` +
@@ -17273,6 +17278,30 @@ components:
             $ref: '#/components/schemas/ErrorBody'
     NotFound:
       description: No such room, work item, or invitation
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorBody'
+    BadRequest:
+      description: Malformed request — fix the request shape and retry
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorBody'
+    Unauthorized:
+      description: Missing or invalid credentials — authenticate and retry
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorBody'
+    Forbidden:
+      description: Authenticated but not allowed — check permissions or role
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorBody'
+    TooManyRequests:
+      description: Rate limited — back off and honor Retry-After
       content:
         application/json:
           schema:
