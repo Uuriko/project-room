@@ -21,6 +21,10 @@ const CSI_RE = /\x1b\[[0-9;?]*[ -/]*[@-~]/g;
 const STRAY_ESC_RE = /\x1b/g;
 const C1_RE = /[\x80-\x9f]/g;
 // C0 controls except \n (\x0a) and \t (\x09):
+// Bidi overrides/isolates/marks and zero-width characters can reorder or hide
+// text in a renderer (same spoof class as isolate characters in room messages).
+// ZWJ/ZWNJ are kept so emoji sequences and Indic scripts survive.
+const SPOOF_RE = /[\u061c\u200b\u200e\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/g;
 const C0_RE = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g;
 
 export function sanitizePaneText(text) {
@@ -31,6 +35,7 @@ export function sanitizePaneText(text) {
   out = out.replace(STRAY_ESC_RE, '␛'); // surviving ESC rendered visible
   out = out.replace(C1_RE, '');
   out = out.replace(C0_RE, '');
+  out = out.replace(SPOOF_RE, '');
   out = out.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   return out;
 }
