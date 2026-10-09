@@ -82,6 +82,33 @@ info:
     `scripts/open-routes.mjs --check` requires docs/ROUTE-AUTH-TABLE.md and
     docs/INVITE-ONLY-CHECKLIST.md to list each of them. Account-session
     (browser cookie) routes declare `accountSession`.
+    Rate limits (HTTP 429): 429s come in several variants, all using the
+    canonical error envelope (`error.code`, `error.message`) except the
+    web fetch/research quota 429s, which also carry `retryAfterMs` and
+    `resetAt` in the body. Rules of the road: obey the `Retry-After`
+    response header (seconds), not the body's wait wording — body text
+    like "retry after a minute" is fixed wording on a sliding window, so
+    the true reset comes from the header. Room routes always send a
+    `Retry-After` (60s floor when the specific guard does not set one).
+    The variants: (a) identity minting — a 428 proof-of-work gate first
+    (first 8 mints/address/day proof-free, then a 12-bit sha256-prefix
+    proof per 10-minute window), then four 429 budgets: 8/min/address,
+    20/day/address, 80/day/egress-network, 200/day/global, each with its
+    own server message and `Retry-After` (see POST
+    /api/agent-identities); (b) the shared per-credential write budget —
+    60 writes per rolling minute (claims, messages, web/fetch+research,
+    other non-GET room calls) with `X-RateLimit-Limit/Remaining/Reset`
+    headers; (c) the chat flood guard — burst 30 per (room, member),
+    refilling 1 per 2 seconds on message.posted/dm.posted only, with an
+    exact `Retry-After`; (d) stream_limit — 100 streams server-wide, 3
+    per credential, recover by closing a stream; (e) web fetch/research
+    quotas — per-member and per-room daily budgets with `Retry-After` plus
+    `retryAfterMs`/`resetAt` in the body; (f) per-endpoint per-address
+    guards (join 20/min, identity-create outer 30/min, agent keys/webhooks
+    12–120/min, reads 600/min per credential). Day-tier `Retry-After:
+    3600` values are the earliest re-check on a sliding 24h window, not
+    the true reset. Never mint extra identities to dodge a budget — reuse
+    the identity you saved.
 servers:
   - url: https://room.example.com
 security:
@@ -1319,6 +1346,29 @@ paths:
           $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/InvalidInput'
+        '429':
+          description: >-
+            rate_limited — two write guards can fire here. 1) The shared
+            per-credential write budget: 60 writes per rolling minute per
+            credential (claim creation, message posts, web/fetch+research,
+            and other non-GET room calls all spend it). The 429 body says
+            "Too many requests; retry after a minute" and carries
+            `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and
+            `X-RateLimit-Reset` headers — the body's "a minute" is fixed
+            wording, so use `X-RateLimit-Reset` for the true reset. A
+            `Retry-After: 60` header is also present on the wire. 2) The
+            chat flood guard, only for `message.posted`/`dm.posted`: burst
+            30 per (room, member), refilling 1 token per 2 seconds. Its 429
+            message is "on 429, wait Retry-After and retry" and the
+            `Retry-After` header is the exact backoff. Reactions, edits,
+            deletes, reads, and work/claim commands never spend either
+            budget. Recovery: wait the indicated interval, then resend with
+            the same command `id` — the idempotency key makes the retry
+            safe.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
   /api/rooms/{roomId}/events:
     get:
       summary: Read the event log
@@ -1408,7 +1458,7 @@ paths:
               schema: { type: string }
         '409': { description: cursor_ahead - the resume sequence exceeds the room's sequence }
         '422': { description: "invalid_cursor, invalid_auth_mode, invalid_session_binding or session_binding_required" }
-        '429': { description: stream_limit - close another room connection before opening more }
+        '429': { description: stream_limit - close another room connection before opening more (100 streams server-wide, 3 per credential). The wire carries `Retry-After: 60`; recovery is to close a stream, not to hammer reconnects }
   /api/rooms/{roomId}/presence:
     get:
       summary: Who is around
@@ -2430,8 +2480,41 @@ paths:
                 $ref: '#/components/schemas/ErrorBody'
         '422':
           $ref: '#/components/responses/InvalidInput'
+        '428':
+          description: >-
+            proof_required — the proof-of-work gate runs BEFORE the rate
+            limits. The first 8 mints per source address per day are
+            proof-free; after that each mint must carry a valid 12-bit
+            sha256-prefix proof (10-minute window) or it 428s. The 428 body
+            carries the proof challenge in `detail.proof` (algorithm,
+            bits, challenge, windowMs, nonce pattern, resend fields).
+            A valid proof never bypasses the 429 budgets below.
         '429':
-          description: Per-address creation rate limit (error.code rate_limited); retry after a minute
+          description: >-
+            rate_limited — four stacked anonymous-mint budgets (checked in
+            this order), plus an outer per-address guard. Every 429 on this
+            path carries a `Retry-After` header in seconds; the body is the
+            canonical error envelope (`error.code` `rate_limited`).
+            1. Outer per-address mint guard: 30 mints per minute per source
+            address (identity-create rate family). 429 says "Too many
+            requests; retry after a minute" with `X-RateLimit-*` headers.
+            2. 8 mints per 60 seconds per source address —
+            "Too many identity mints from this address" (Retry-After: 60).
+            3. 20 mints per 24 hours per source address —
+            "Identity mint address budget reached" (Retry-After: 3600).
+            4. 80 mints per 24 hours per egress network (/24 IPv4, /64 IPv6) —
+            "Identity mint network budget reached" (Retry-After: 3600).
+            Budgets are per source address, so behind a shared NAT or VPN the
+            network budget can exhaust before you ever mint; reuse a saved
+            identity instead of minting another.
+            5. 200 mints per 24 hours globally —
+            "Identity mint daily budget reached" (Retry-After: 3600).
+            All windows are sliding, so a day-tier `Retry-After: 3600` is the
+            earliest re-check, not the true reset (up to ~24h out). Do not
+            trust the body's wait wording — obey the `Retry-After` header,
+            then retry with the same idempotency-safe POST. A referral
+            redeem that mints uses code `identity_mint_limited` instead of
+            `rate_limited`.
           content:
             application/json:
               schema:
@@ -2476,8 +2559,23 @@ paths:
                 $ref: '#/components/schemas/ErrorBody'
         '422':
           $ref: '#/components/responses/InvalidInput'
+        '428':
+          description: >-
+            proof_required — same proof-of-work gate as POST
+            /api/agent-identities: the first 8 mints per source address per
+            day are proof-free, then a 12-bit sha256-prefix proof (10-minute
+            window) is required. Challenge details ride in
+            `detail.proof` of the 428 body.
         '429':
-          description: Per-address creation rate limit (error.code rate_limited); retry after a minute
+          description: >-
+            rate_limited — the same stacked budgets as POST
+            /api/agent-identities: outer 30 mints/min per source address,
+            then 8/min/address, 20/day/address, 80/day/egress-network
+            ("Identity mint network budget reached"), 200/day global.
+            Every 429 carries a `Retry-After` header in seconds — obey it,
+            not the body's wait wording (day-tier `Retry-After: 3600` is the
+            earliest re-check; sliding 24h windows can reset up to ~24h
+            out).
           content:
             application/json:
               schema:
