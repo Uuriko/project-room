@@ -4244,8 +4244,38 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 200, store.importEvents(selected.token, roomId, lines, fence));
       }
       if (route === "presence" && req.method === "GET") {
+        // FIX-59 fast modes (all opt-in; default response shape unchanged):
+        // ?count=1 -> { memberCount }; ?fields=a,b -> member field subset;
+        // ?limit=&?offset= -> paginate the roster (adds `total`).
+        const params = url.searchParams;
+        if ([...params.keys()].some(key => !["fields", "count", "limit", "offset", "auth"].includes(key)
+          || params.getAll(key).length !== 1))
+          reject(422, "invalid_presence_params", "Unsupported presence query parameters");
+        let countOnly = false;
+        if (params.has("count")) {
+          const value = params.get("count");
+          if (value === "1" || value === "true") countOnly = true;
+          else if (value === "0" || value === "false") countOnly = false;
+          else reject(422, "invalid_presence_count", "count must be 1 (or true) for count-only mode");
+        }
+        const fields = params.has("fields")
+          ? params.get("fields").split(",").map(name => name.trim()).filter(Boolean)
+          : null; // store.presence validates unknown/empty -> 422 invalid_presence_fields
+        let limit = null;
+        if (params.has("limit")) {
+          limit = Number(params.get("limit"));
+          if (!Number.isInteger(limit) || limit < 1 || limit > 1000)
+            reject(422, "invalid_presence_pagination", "limit must be an integer 1..1000");
+        }
+        let offset = 0;
+        if (params.has("offset")) {
+          offset = Number(params.get("offset"));
+          if (!Number.isInteger(offset) || offset < 0)
+            reject(422, "invalid_presence_pagination", "offset must be an integer >= 0");
+        }
         const watchers = [...streams].filter(entry => entry.roomId === roomId).map(entry => entry.memberId);
-        return json(res, 200, store.presence(selected.token, roomId, watchers, fence));
+        return json(res, 200, store.presence(selected.token, roomId, watchers, fence,
+          { fields, countOnly, limit, offset }));
       }
       if (route === "work-sessions" && req.method === "GET") {
         const params = url.searchParams;

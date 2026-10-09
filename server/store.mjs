@@ -938,6 +938,18 @@ const inboxNext = (roomId, directMessages, assignments, mentions, directMentions
   return steps.sort((a, b) => Number(b.required === true) - Number(a.required === true));
 };
 
+// FIX-59: selectable per-member fields for presence() (?fields=). The order
+// below is the canonical serialization order of the default response; the
+// store keeps it so field-subset responses stay a strict projection.
+const PRESENCE_MEMBER_FIELDS = Object.freeze([
+  "memberId", "displayName", "kind", "watching", "workingOn", "lastSeenAt",
+  "statusMessage", "presence", "state", "isOwner", "scopes",
+  "ownerIdentityId", "cardAgentId",
+]);
+// FIX-59: upper bound for ?limit= on the presence roster page (the roster
+// itself is pilot-capped far below this; the bound only rejects nonsense).
+const PRESENCE_PAGE_LIMIT_MAX = 1000;
+
 // RC-2026-09-18-054: presence guidance — who is around and how to reach
 // them (DM via the message.posted command with toMemberId).
 const presenceNext = (roomId, memberIds) => {
@@ -3934,40 +3946,99 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // Who is around: the active roster, plus live SSE watchers and fresh
   // executing sessions. Legacy lastSeenAt also retains enrollment time.
   // Derived from existing data — no new tables, no people-data store.
-  presence(token, roomId, watcherMemberIds, expectedSessionBinding = null) {
+  //
+  // FIX-59 fast modes (all opt-in; the default response shape is unchanged):
+  // - { countOnly: true } (?count=1): returns { memberCount } — skips every
+  //   enrichment scan. Takes precedence over fields/limit/offset.
+  // - { fields: [...] } (?fields=a,b): per-member field selection. Expensive
+  //   inputs are computed lazily — lastSeenAt needs the event-table scans
+  //   plus the work-item heartbeat pass, state needs those plus host
+  //   lookups, workingOn needs the work-item pass, and presence/
+  //   ownerIdentityId/cardAgentId need host lookups.
+  // - { limit, offset } (?limit=&?offset=): paginate the member list after the
+  //   memberId sort; the response gains an additive `total` (full roster size).
+  // In fields mode without `state`, next[] keys off live SSE watchers only.
+  presence(token, roomId, watcherMemberIds, bindingOrOptions = null, options = {}) {
+    // 4th arg may be the legacy session binding (string|null) or an options
+    // object (which may itself carry expectedSessionBinding).
+    const opts = (bindingOrOptions && typeof bindingOrOptions === "object") ? bindingOrOptions : options;
+    const expectedSessionBinding = (bindingOrOptions && typeof bindingOrOptions === "object")
+      ? (bindingOrOptions.expectedSessionBinding ?? null)
+      : bindingOrOptions;
+    let fields = opts.fields ?? null;
+    if (fields !== null && fields !== undefined) {
+      const list = (Array.isArray(fields) ? fields : String(fields).split(","))
+        .map(name => String(name).trim()).filter(Boolean);
+      const unknown = list.filter(name => !PRESENCE_MEMBER_FIELDS.includes(name));
+      if (!list.length || unknown.length)
+        fail(422, "invalid_presence_fields",
+          unknown.length ? `Unknown presence field(s): ${unknown.join(", ")}`
+            : "Select at least one presence field");
+      fields = list;
+    } else {
+      fields = null;
+    }
+    const countOnly = opts.countOnly ?? false;
+    const limit = opts.limit ?? null;
+    const offset = opts.offset ?? 0;
+    if (limit !== null && (!Number.isInteger(limit) || limit < 1 || limit > PRESENCE_PAGE_LIMIT_MAX))
+      fail(422, "invalid_presence_pagination", `limit must be an integer 1..${PRESENCE_PAGE_LIMIT_MAX}`);
+    if (!Number.isInteger(offset) || offset < 0)
+      fail(422, "invalid_presence_pagination", "offset must be an integer >= 0");
     return this.readTransaction(() => {
       this.authenticate(token, roomId, expectedSessionBinding);
       const { members, ownerId } = this.roomAuthority(roomId);
-      const room = this.room(roomId);
+      const active = Object.values(members).filter(m => m && m.active !== false);
+      if (countOnly) return { memberCount: active.length };
+      const want = fields ? new Set(fields) : null; // null = every field
+      const wantField = name => !want || want.has(name);
+      const needWorkItems = wantField("workingOn") || wantField("state");
+      // Legacy lastSeenAt folds in session heartbeats, which come from the
+      // work-item pass even when workingOn/state are not requested.
+      const needWorkItemPass = needWorkItems || wantField("lastSeenAt");
+      const needEventScans = wantField("lastSeenAt") || wantField("state");
+      const needHostLookups = wantField("presence") || wantField("state")
+        || wantField("ownerIdentityId") || wantField("cardAgentId");
+      const room = needWorkItemPass ? this.room(roomId) : null;
       const now = this.now();
       const timestamp = value => typeof value === "number" ? value : typeof value === "string" ? Date.parse(value) : NaN;
-      const working = new Map();
-      const heartbeats = new Map();
-      for (const item of Object.values(room.state.workItems ?? {})) {
-        const session = sessionRecord(item);
-        if (session.worker_member_id && session.heartbeat_at) {
-          const prev = heartbeats.get(session.worker_member_id);
-          if (!prev || session.heartbeat_at > prev) heartbeats.set(session.worker_member_id, session.heartbeat_at);
+      let working = null;
+      let heartbeats = null;
+      if (needWorkItemPass) {
+        working = new Map();
+        heartbeats = new Map();
+        for (const item of Object.values(room.state.workItems ?? {})) {
+          const session = sessionRecord(item);
+          if (session.worker_member_id && session.heartbeat_at) {
+            const prev = heartbeats.get(session.worker_member_id);
+            if (!prev || session.heartbeat_at > prev) heartbeats.set(session.worker_member_id, session.heartbeat_at);
+          }
+          const worker = sessionWorker(item, now);
+          const heartbeatAt = timestamp(session.heartbeat_at);
+          if (!worker || !["processing", "active"].includes(session.status)
+            || !Number.isFinite(heartbeatAt) || heartbeatAt > now
+            || now - heartbeatAt > SESSION_HEARTBEAT_STALE_MS) continue;
+          if (!working.has(worker)) working.set(worker, []);
+          working.get(worker).push({ workItemId: item.id, title: item.title, heartbeat_at: item.heartbeat_at });
         }
-        const worker = sessionWorker(item, now);
-        const heartbeatAt = timestamp(session.heartbeat_at);
-        if (!worker || !["processing", "active"].includes(session.status)
-          || !Number.isFinite(heartbeatAt) || heartbeatAt > now
-          || now - heartbeatAt > SESSION_HEARTBEAT_STALE_MS) continue;
-        if (!working.has(worker)) working.set(worker, []);
-        working.get(worker).push({ workItemId: item.id, title: item.title, heartbeat_at: item.heartbeat_at });
       }
-      const lastCommandAt = new Map(this.db.prepare(
-        `SELECT json_extract(body,'$.actorId') AS actor, max(json_extract(body,'$.at')) AS at
-         FROM events WHERE room_id=? GROUP BY actor`
-      ).all(roomId).filter(row => row.actor).map(row => [row.actor, row.at]));
-      const addedAt = new Map(this.db.prepare(
-        `SELECT json_extract(body,'$.data.memberId') AS member, MIN(json_extract(body,'$.at')) AS at
-         FROM events WHERE room_id=? AND json_extract(body,'$.type')='member.added' GROUP BY member`
-      ).all(roomId).filter(row => row.member).map(row => [row.member, row.at]));
+      let lastCommandAt = null;
+      let addedAt = null;
+      if (needEventScans) {
+        lastCommandAt = new Map(this.db.prepare(
+          `SELECT json_extract(body,'$.actorId') AS actor, max(json_extract(body,'$.at')) AS at
+           FROM events WHERE room_id=? GROUP BY actor`
+        ).all(roomId).filter(row => row.actor).map(row => [row.actor, row.at]));
+        addedAt = new Map(this.db.prepare(
+          `SELECT json_extract(body,'$.data.memberId') AS member, MIN(json_extract(body,'$.at')) AS at
+           FROM events WHERE room_id=? AND json_extract(body,'$.type')='member.added' GROUP BY member`
+        ).all(roomId).filter(row => row.member).map(row => [row.member, row.at]));
+      }
       const watching = new Set((watcherMemberIds ?? []).filter(memberId => members[memberId]?.active !== false));
       // RC-2026-09-18-051: additive host presence for agent members.
-      const identityLinkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
+      const identityLinkOf = needHostLookups
+        ? this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?")
+        : null;
       // #660: raw host status per member. status is "online"|"offline"|null
       // (null = no registered host); identityId is the linked agent identity.
       const hostStatusOf = memberId => {
@@ -3981,25 +4052,30 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (status.status === "unregistered") return { identityId: link.identityId, status: null, lastSeenAt: null };
         return { identityId: link.identityId, status: status.status, lastSeenAt: status.lastSeenAt };
       };
-      const agentPresence = memberId => {
-        const host = hostStatusOf(memberId);
-        if (host.status === null) return null;
-        return { status: host.status, lastSeenAt: host.lastSeenAt };
-      };
-      const listed = Object.values(members)
-        .filter(m => m && m.active !== false)
+      const listed = active
         .map(m => {
-          const lastSeenAt = [lastCommandAt.get(m.id), heartbeats.get(m.id), addedAt.get(m.id)].filter(Boolean).sort().at(-1) ?? null;
-          const host = hostStatusOf(m.id);
-          const workingOn = working.get(m.id) ?? [];
           const isWatching = watching.has(m.id);
-          return {
-            memberId: m.id, displayName: m.displayName, kind: m.kind,
-            watching: isWatching, workingOn,
-            lastSeenAt, statusMessage: m.statusMessage ?? null,
-            presence: agentPresence(m.id),
+          const entry = {};
+          if (wantField("memberId")) entry.memberId = m.id;
+          if (wantField("displayName")) entry.displayName = m.displayName;
+          if (wantField("kind")) entry.kind = m.kind;
+          if (wantField("watching")) entry.watching = isWatching;
+          const workingOn = (wantField("workingOn") || wantField("state")) ? working.get(m.id) ?? [] : null;
+          if (wantField("workingOn")) entry.workingOn = workingOn;
+          const lastSeenAt = (wantField("lastSeenAt") || wantField("state"))
+            ? [lastCommandAt.get(m.id), heartbeats.get(m.id), addedAt.get(m.id)].filter(Boolean).sort().at(-1) ?? null
+            : null;
+          if (wantField("lastSeenAt")) entry.lastSeenAt = lastSeenAt;
+          if (wantField("statusMessage")) entry.statusMessage = m.statusMessage ?? null;
+          // Computed once per member (the old code ran hostStatusOf twice per
+          // agent member via agentPresence()).
+          const host = needHostLookups ? hostStatusOf(m.id) : null;
+          if (wantField("presence")) {
+            entry.presence = host.status === null ? null : { status: host.status, lastSeenAt: host.lastSeenAt };
+          }
+          if (wantField("state")) {
             // #660: derived working state + owner/scope projection (additive).
-            state: presenceState({
+            entry.state = presenceState({
               kind: m.kind,
               hasActiveSession: workingOn.length > 0,
               watching: isWatching,
@@ -4010,27 +4086,34 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
               lastSeenAt: Math.max(timestamp(lastCommandAt.get(m.id)) || 0,
                 timestamp(heartbeats.get(m.id)) <= now ? timestamp(heartbeats.get(m.id)) || 0 : 0) || null,
               now,
-            }),
-            isOwner: m.id === ownerId,
-            scopes: Array.isArray(m.permissions) ? [...m.permissions] : [],
-            ownerIdentityId: m.kind === "agent" ? host.identityId : null,
+            });
+          }
+          if (wantField("isOwner")) entry.isOwner = m.id === ownerId;
+          if (wantField("scopes")) entry.scopes = Array.isArray(m.permissions) ? [...m.permissions] : [];
+          if (wantField("ownerIdentityId")) entry.ownerIdentityId = m.kind === "agent" ? host.identityId : null;
+          if (wantField("cardAgentId")) {
             // plan-dir-card: the member's linked directory card id (the
             // member chip lazy-loads the card from
             // /api/rooms/{roomId}/members/{memberId}/card). Null when the
             // member has no visible card.
-            cardAgentId: m.kind === "agent" && host.identityId
+            entry.cardAgentId = m.kind === "agent" && host.identityId
               ? this.agentPlugin.cardAgentIdForIdentity(host.identityId)
-              : null,
-          };
+              : null;
+          }
+          return entry;
         })
         .sort((a, b) => a.memberId < b.memberId ? -1 : 1);
-      // Suggested DM targets require current connection/execution observations.
-      const onlineIds = listed.filter(m => m.watching
-        || m.state === "listening" || m.state === "working").map(m => m.memberId);
-      return {
-        members: listed,
-        next: Object.freeze(presenceNext(roomId, onlineIds)),
-      };
+      const total = listed.length;
+      const page = limit == null ? listed.slice(offset) : listed.slice(offset, offset + limit);
+      // Suggested DM targets require current connection/execution
+      // observations. In fields mode without `state` they key off live SSE
+      // watchers only (computing `state` would rerun the skipped scans).
+      const onlineIds = wantField("state")
+        ? listed.filter(m => m.watching || m.state === "listening" || m.state === "working").map(m => m.memberId)
+        : [...watching];
+      const result = { members: page, next: Object.freeze(presenceNext(roomId, onlineIds)) };
+      if (limit != null || offset !== 0) result.total = total;
+      return result;
     });
   }
   capabilities(token, roomId, bindingOrOptions = null, options = {}) {

@@ -1429,15 +1429,64 @@ paths:
         Humans retain their idle fallback. Enrollment alone is not agent activity.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - name: fields
+          in: query
+          description: >-
+            FIX-59 fast mode: comma-separated per-member field subset
+            (memberId, displayName, kind, watching, workingOn, lastSeenAt,
+            statusMessage, presence, state, isOwner, scopes, ownerIdentityId,
+            cardAgentId). Expensive inputs are skipped when unrequested:
+            lastSeenAt/state skip the event-table scans, workingOn/state skip
+            the work-item pass, presence/state/ownerIdentityId/cardAgentId
+            skip host lookups. Unknown or empty field list is 422
+            invalid_presence_fields. In fields mode without `state`, next[]
+            keys off live SSE watchers only.
+          schema: { type: string }
+        - name: count
+          in: query
+          description: >-
+            FIX-59 fast mode: `?count=1` returns only
+            `{ "memberCount": <active roster size> }`, skipping every
+            enrichment scan. Takes precedence over fields/limit/offset.
+            Any other value is 422 invalid_presence_count.
+          schema: { type: string, enum: ["1", "true", "0", "false"] }
+        - name: limit
+          in: query
+          description: >-
+            FIX-59 fast mode: page size for the member list (members stay
+            sorted by memberId). The response gains an additive `total`
+            (full active roster size). 1..1000, else 422
+            invalid_presence_pagination.
+          schema: { type: integer, minimum: 1, maximum: 1000 }
+        - name: offset
+          in: query
+          description: >-
+            FIX-59 fast mode: members to skip before the page (default 0).
+            Negative or fractional values are 422 invalid_presence_pagination.
+          schema: { type: integer, minimum: 0, default: 0 }
       responses:
         '401': { description: unauthenticated }
+        '422':
+          description: >-
+            invalid_presence_params (unsupported query parameter),
+            invalid_presence_fields, invalid_presence_count, or
+            invalid_presence_pagination.
         '200':
-          description: Presence roster
+          description: >-
+            Presence roster. Default: `{ members, next }` with the full
+            per-member field set. `?count=1` returns `{ memberCount }`
+            instead. `?limit=`/`?offset=` paginate members and add `total`.
           content:
             application/json:
               schema:
                 type: object
                 properties:
+                  memberCount:
+                    type: integer
+                    description: Count-only mode (`?count=1`): active roster size. Present instead of members/next.
+                  total:
+                    type: integer
+                    description: Pagination (`?limit=`/`?offset=`): full active roster size before slicing.
                   members:
                     type: array
                     items:
