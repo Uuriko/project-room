@@ -66,9 +66,10 @@ test("native evidence rejects wrong IDs, work, hash, parent and mixed formats wi
   const unlinked = f.send(T.MESSAGE_POSTED, { messageId: "unlinked", body: "Only a reply", replyToId: "test-request" });
   assert.throws(() => f.send(T.WORK_COMPLETED, f.input(unlinked)), { code: "command_rejected" });
   await assert.rejects(f.client.workResult(f.workItemId, { draftMessageId: "unlinked" }), { code: "result_unavailable" });
-  const malformed = f.post("legacy \uD800");
-  assert.throws(() => textVersion(malformed.event.data.body));
-  assert.throws(() => f.mutate(T.WORK_COMPLETED, { ...original, evidenceMessageId: malformed.event.data.messageId, evidenceMessageEventId: malformed.event.id }), { code: "command_rejected" });
+  // Unpaired surrogates are refused at live admission (#2106), so a malformed
+  // body can no longer become evidence; legacy bodies still fail textVersion.
+  assert.throws(() => f.post("legacy \uD800"), { code: "invalid_command" });
+  assert.throws(() => textVersion("legacy \uD800"));
   assert.notEqual(textVersion("é"), textVersion("e\u0301")); assert.doesNotThrow(() => auditRecovery(f.store));
 });
 
@@ -152,4 +153,17 @@ test("CLI reads native draft and result with mutually exclusive selectors", asyn
     const reply = await call(args); assert.equal(reply.code, 0, reply.err); assert.equal(JSON.parse(reply.out).result.text.body, "CLI artifact");
   }
   const refused = await call(["--completion", saved.event.id, "--draft", posted.event.data.messageId]); assert.equal(refused.code, 1); assert.equal(refused.out, "");
+});
+
+
+test("an already-stored lone-surrogate body cannot become completion evidence", async t => {
+  // #2106 refuses these at admission, so seed one the way a pre-#2106 store holds it.
+  const f = await setup(t), legacy = f.post("legacy MARK"), clean = f.post("A clean result");
+  assert.equal(f.store.db.prepare("UPDATE events SET body=replace(body, 'legacy MARK', 'legacy \\ud800') WHERE id=?").run(legacy.event.id).changes, 1);
+  assert.equal(JSON.parse(f.store.db.prepare("SELECT body FROM events WHERE id=?").get(legacy.event.id).body).data.body, "legacy \uD800", "the stored body really is malformed");
+  let rejection;
+  try { f.mutate(T.WORK_COMPLETED, { ...f.input(legacy), evidenceVersion: textVersion("legacy MARK") }); } catch (error) { rejection = error; }
+  assert.equal(rejection?.code, "command_rejected", "malformed stored text is refused as evidence");
+  // The same store still accepts a clean body, so the refusal is about the body.
+  assert.doesNotThrow(() => f.mutate(T.WORK_COMPLETED, f.input(clean)));
 });

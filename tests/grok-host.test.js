@@ -802,6 +802,11 @@ test("a playbook HANDOFF line reassigns on the claim route, resolving a display 
     if (path.endsWith("/presence")) {
       return new Response(JSON.stringify({ members: [{ id: "ai_holder", displayName: "Jill - Dot", active: true }] }), { status: 200 });
     }
+    // The reassign binds the claim round it just read.
+    if (!init?.body) {
+      return new Response(JSON.stringify({ claim: { id: "plan-pr-autolink", state: "claimed", owner: "ai_other",
+        claimedAt: "2026-10-09T10:00:00.000Z", history: [{ action: "claimed" }, { action: "updated" }], historyOmitted: 1 } }), { status: 200 });
+    }
     posts.push({ url: path, body: JSON.parse(init.body) });
     return new Response(JSON.stringify({ id: "plan-pr-autolink", state: "claimed", owner: "ai_holder" }), { status: 200 });
   };
@@ -816,6 +821,8 @@ test("a playbook HANDOFF line reassigns on the claim route, resolving a display 
   assert.ok(posts[0].url.endsWith("/api/rooms/muse-room/work-claims/plan-pr-autolink/reassign"));
   assert.equal(posts[0].body.newOwner, "ai_holder");
   assert.equal(posts[0].body.note, "take the two-line splice");
+  assert.equal(posts[0].body.expectedClaimedAt, "2026-10-09T10:00:00.000Z");
+  assert.equal(posts[0].body.expectedHistoryLength, 3);
   assert.equal(JSON.stringify(result).includes(secret), false);
 });
 

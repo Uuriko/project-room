@@ -6,7 +6,7 @@ import { EVENT_TYPES as T, MAX_MESSAGE_BODY_CHARS, WORK_STATES as S, roomPolicy,
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
-import { conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, messageBodyHtml, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
+import { conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
 import { canonicalReaction, clipGraphemes, emojiCatalog, emojiMatches, emojiName, emojiQuery, foldedReactionMap, frequentEmoji, insertEmoji, renderEmojiShortcodes } from "./emoji.js";
 import { nextWorkStep, workStatus, workActions, renderWorkActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, diffResultLines, diffResultSummary, workRecipeOptions } from "./workflow.js";
 import { coordinationLoops } from "./work-loops.js";
@@ -15,7 +15,7 @@ import { attemptReceipts, attemptLedger, cancellationState, workContinuity, spen
 import { consumeJoinFragment, installShareLinks, canRetryInvitation, requestFailureMessage } from "./share-links.js";
 import { FIRST_ROOM_SETUP_FAILURE } from "./first-room-copy.js";
 import { dmConsentPeerSummary, incomingDmRequests, dmConsentPairDescription, dmConsentActionsForPeer, fetchDmConsents, requestDmConsent, decideDmConsent, revokeDmConsent, blockDmMember, unblockDmMember, dmConsentFailureMessage, DM_CONSENT_REFUSAL_CODES } from "./dm-consents.js";
-import { identityIdOf, mergeFriendBonds, bondWithPeer, friendChrome, friendBondCommand, friendFailureMessage, friendFocusTarget } from "./friend-bond.js";
+import { identityIdOf, mergeFriendBonds, bondWithPeer, friendChrome, friendBondCommand, friendFailureMessage, friendFocusTarget, friendMessageHtml } from "./friend-bond.js";
 import { installAgentConnections } from "./agent-connections.js";
 import { catalogById } from "./room-roster.js";
 import { installRoomInstructions } from "./room-instructions.js";
@@ -29,6 +29,7 @@ import { replyDraftKey, replyDraftData, validReplyDraft, replyFollowUp, creditQu
 import { workHelpContext, validateHelpData } from "./work-help.js";
 import { workOffersContext, validateHelpOfferData } from "./help-offers.js";
 import { installInbox } from "./inbox-ui.js";
+import { nameBeforeFirstRoom } from "./account-setup-ui.js";
 import { createAccountSettingsUI, applyStoredTheme, organizeRoomSettings, ACCOUNT_DELETED_MESSAGE } from "./account-settings-ui.js";
 import { createAuthSigninUI, classifyAuthLink } from "./auth-signin-ui.js";
 import { createAgentSigninUI } from "./agent-signin-ui.js";
@@ -36,7 +37,7 @@ import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendin
 import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, authPanelTitle, roomIdFromNext, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
 import { rememberLastRoom, rememberAccountHint, readLastRoom, readLastRoomTitle, readAccountHint, hasSessionHint, clearBrowserSessionHints, rememberMemberRoom, readMemberRoom, clearStoredPasswords, signInRoomTarget } from "./browser-session.js";
-import { attachmentFromBytes, composerAudienceNote, COMPOSER_FILE_BYTES, fileChipLabel } from "./composer-files.js";
+import { attachmentFromBytes, composerAudienceNote, composerAudiencePickerVisible, COMPOSER_FILE_BYTES, fileChipLabel } from "./composer-files.js";
 import { formatSessionExpiry } from "./session-expiry.js";
 import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui.js";
 import { installHumanPush } from "./human-push.js";
@@ -44,6 +45,7 @@ import { chatSuggestions, ASK_AGENT_AFTER_MS } from "./chat-suggestions.js";
 import { paintClaimChat } from "./board-ui.js";
 import { installHumanExperience } from "./human-experience.js";
 import { createSpendPricingKillSwitch } from "./spend-pricing-ui.js";
+const bodyHtmlCache = createBodyHtmlCache();
 
 // Keep a connector/native consent journey through password or provider login.
 // Only our exact consent path is a return target; never follow arbitrary URLs.
@@ -1028,7 +1030,7 @@ async function loadAccountRooms(more = false) {
     // fresh account with no rooms and no pending invitation gets its default
     // room created and opened.
     if (!more && !$("#account-rooms-list").children.length && !roomListCursor
-      && !startRoomIntent && !startRoomFlight) ensureDefaultRoom();
+      && !startRoomIntent && !startRoomFlight) nameThenEnsureDefaultRoom();
   } catch (error) {
     if (version !== roomListVersion || (accountClient.session && accountClient.session !== owned)) return;
     if ([401, 403].includes(error.status) || !accountClient.session) endAccountAccess();
@@ -1039,6 +1041,8 @@ async function loadAccountRooms(more = false) {
 // invitation is being redeemed — the invite flow owns the landing. Idempotent
 // server-side; a second call returns the existing room.
 let defaultRoomFlight = null;
+const nameThenEnsureDefaultRoom = nameBeforeFirstRoom({
+  askName: () => inboxUI.askSetupName?.(), ensure: () => ensureDefaultRoom(), session: () => accountClient.session });
 async function ensureDefaultRoom() {
   if (defaultRoomFlight) return defaultRoomFlight;
   // Never create a default room when entering through an invitation or a
@@ -1420,7 +1424,15 @@ $("#guest-upgrade-link")?.addEventListener("click", () => {
 function syncComposerChrome() {
   const to = $("#message-to-select")?.value;
   const bar = $("#composer-toolbar");
-  if (bar) bar.hidden = !to && !requestMode;
+  // bu-09: the audience picker is the broadcast-vs-DM control and stays
+  // visible whenever there is someone to address. Hiding it until a
+  // recipient was already chosen made room-chat DMs undiscoverable — the
+  // hidden control was the only way to start one.
+  if (bar) bar.hidden = !composerAudiencePickerVisible({
+    members: state?.members ? Object.values(state.members) : [],
+    selfId: session?.member?.id,
+    requestMode: Boolean(requestMode),
+  });
   const note = $("#audience-note");
   if (note) {
     // RC-2026-09-19-070: a message addressed to one member is private to the
@@ -2254,6 +2266,7 @@ function renderMessages() {
   const nearBottom = pageScroll ? list.getBoundingClientRect().bottom <= innerHeight + 80
     : list.scrollHeight - list.scrollTop - list.clientHeight < 80;
   const anchor = [...list.children].find(e => {
+    if (e.hasAttribute("data-claim-update")) return false; // removed and repainted below
     const bounds = e.getBoundingClientRect();
     return bounds.bottom > listTop && (!pageScroll || bounds.top < innerHeight);
   });
@@ -2293,9 +2306,15 @@ function renderMessages() {
   const savedSelection = captureTimelineSelection(list);
   // Message IDs are caller-controlled and may themselves begin with "work:".
   const keep = new Set(messages.map(m => `message:${m.id}`));
+  // Board claim lines carry no data-key, so the map above holds only the last
+  // one; any left in the list made the reorder below move every message row
+  // after them on every arrival. They are repainted after each render.
+  list.querySelectorAll(":scope > [data-claim-update]").forEach(node => node.remove());
   for (const [id, node] of previous) if (!keep.has(id) && !node.hasAttribute("data-work-timeline")) node.remove();
   const workEntries = currentThreadId || !state ? [] : timelineWorkEntries().filter(e => e.channelId === activeChannelId);
   const ordered = [];
+  // One members array per pass keeps the body HTML cache keyed (see createBodyHtmlCache).
+  const mentionable = state ? Object.values(state.members) : [];
   messages.forEach((message, index) => {
     const key = `message:${message.id}`;
     const node = previous.get(key) || document.createElement("li");
@@ -2308,7 +2327,7 @@ function renderMessages() {
     const className = `message${cluster.grouped ? " grouped" : ""}${muted ? " muted" : ""}${session && !muted && messageMentionsMember(message.body, session.member) ? " mentioned" : ""}`;
     if (node.className !== className) node.className = className;
     if (node.getAttribute("tabindex") !== "-1") node.tabIndex = -1;
-    const html = messageContent(message, cluster, message.id === unreadAnchorId || message.id === horizonAnchorId);
+    const html = messageContent(message, cluster, message.id === unreadAnchorId || message.id === horizonAnchorId, mentionable);
     if (node._content !== html) {
       if (!node._content || !node.querySelector(".message-body")) node.innerHTML = html;
       else {
@@ -2596,7 +2615,7 @@ async function commitComposerFiles(messageId) {
   renderComposerFiles();
   await refreshRoomFiles();
 }
-function messageContent(m, cluster = {}, unreadStart = false) {
+function messageContent(m, cluster = {}, unreadStart = false, members = Object.values(state.members)) {
   const author = state.members[m.authorId];
   const authorLabel = displayName(m.authorId);
   // E4 moderation: a muted author's message collapses for the muter alone; Report goes to the owner only.
@@ -2613,7 +2632,7 @@ function messageContent(m, cluster = {}, unreadStart = false) {
   const groupedTime = cluster.grouped
     ? `<time class="grouped-time" datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time>`
     : "";
-  return `${divider}${groupedTime}<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong>${isPinned(state, m.id) ? `<span class="pinned-chip">Pinned</span>` : ""}<a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · private</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${parent.deletedAt ? "Message deleted" : esc(clipGraphemes(renderEmojiShortcodes(parent.body ?? ""), 90))}</a>` : ""}</div>${muted ? `<p class="message-body message-muted">Hidden: you muted ${esc(authorLabel)}.</p>` : m.deletedAt ? `<p class="message-body message-tombstone">Message deleted</p>` : `<div class="message-body">${messageBodyHtml(m.body, Object.values(state.members), esc, m.id)}</div>${messageFileChips(m.id)}`}<div class="draft-feedback">${muted ? "" : draftFeedbackHTML(m)}</div><div class="reactions" role="group" aria-label="Reactions to message by ${esc(authorLabel)}">${muted || m.deletedAt ? "" : reactionButtons}</div>${messageLinksHTML(m, { linked, moderation, count, muted, canReact: !muted && !m.deletedAt })}</div>`;
+  return `${divider}${groupedTime}<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong>${isPinned(state, m.id) ? `<span class="pinned-chip">Pinned</span>` : ""}<a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · private</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${parent.deletedAt ? "Message deleted" : esc(clipGraphemes(renderEmojiShortcodes(parent.body ?? ""), 90))}</a>` : ""}</div>${muted ? `<p class="message-body message-muted">Hidden: you muted ${esc(authorLabel)}.</p>` : m.deletedAt ? `<p class="message-body message-tombstone">Message deleted</p>` : `<div class="message-body">${bodyHtmlCache.html(m.body, members, esc, m.id)}</div>${messageFileChips(m.id)}`}<div class="draft-feedback">${muted ? "" : draftFeedbackHTML(m)}</div><div class="reactions" role="group" aria-label="Reactions to message by ${esc(authorLabel)}">${muted || m.deletedAt ? "" : reactionButtons}</div>${messageLinksHTML(m, { linked, moderation, count, muted, canReact: !muted && !m.deletedAt })}</div>`;
 }
 function mentionsFilterOn() {
   return $("#search-mentions")?.getAttribute("aria-pressed") === "true";
@@ -4133,14 +4152,16 @@ function updateReply() {
   $("#reply-bar").hidden = Boolean(requestMode) || !target || replyToId === currentThreadId;
   const author = target ? replyAuthorToAddress(session?.member?.id, state.members[target.authorId]) : null;
   const addressing = Boolean(author && messageMentionsMember($("#message-input").value, author));
-  $("#reply-context").textContent = target
+  // Runs on every keystroke: write text only when it changes. Replacing an
+  // unchanged text node still forces a layout of the whole timeline.
+  setText("#reply-context", target
     ? `Replying to ${name(target.authorId)}${addressing ? ` · addressing ${author.displayName}` : ""}: ${target.deletedAt ? "Message deleted" : target.body.slice(0, 100)}`
-    : "";
+    : "");
   const mention = $("#reply-mention");
   mention.hidden = !author;
   mention.disabled = busy;
   mention.setAttribute("aria-pressed", addressing ? "true" : "false");
-  mention.textContent = author ? `Also @ ${author.displayName}` : "Also @";
+  setText("#reply-mention", author ? `Also @ ${author.displayName}` : "Also @");
 }
 function clearReply() { replyToId = currentThreadId; updateReply(); }
 $("#cancel-reply").addEventListener("click", () => { clearReply(); $("#message-input").focus({ preventScroll: true }); });
@@ -7017,14 +7038,9 @@ async function runFriendAction(action, peerMemberId, bondId, button) {
     }
   }
 }
-function friendMessageHtml(messages, peerMemberId) {
-  if (!messages?.length) return `<li class="friend-dm-empty">No messages yet.</li>`;
+function friendThreadHtml(messages, peerMemberId) {
   const selfId = identityIdOf(state.members[session.member.id] ?? session.member, presenceStates.get(session.member.id));
-  return messages.map(message => {
-    const mine = message.fromIdentityId === selfId;
-    const who = mine ? "You" : displayName(peerMemberId);
-    return `<li class="friend-dm-message${mine ? " mine" : ""}"><span class="friend-dm-meta">${esc(who)}</span><p>${esc(message.body)}</p></li>`;
-  }).join("");
+  return friendMessageHtml(messages, { selfId, peerName: displayName(peerMemberId), esc, time });
 }
 async function loadFriendThread(peerMemberId) {
   if (!state || !session || friendDmPeerId !== peerMemberId) return;
@@ -7035,13 +7051,21 @@ async function loadFriendThread(peerMemberId) {
     const listed = await client.request(client.path("/peer-dms"));
     if (generation !== client.generation || friendDmPeerId !== peerMemberId || !state) return;
     const thread = (listed?.threads ?? []).find(row => row.peerIdentityId === peerIdentity);
-    if (!thread) { renderContent("#friend-dm-list", `<li class="friend-dm-empty">No messages yet.</li>`); return; }
+    if (!thread) { renderContent("#friend-dm-list", friendThreadHtml(null, peerMemberId)); return; }
     const history = await client.request(client.path(`/peer-dms/${encodeURIComponent(thread.threadId)}`));
     if (generation !== client.generation || friendDmPeerId !== peerMemberId || !state) return;
-    renderContent("#friend-dm-list", friendMessageHtml(history?.messages, peerMemberId));
+    renderContent("#friend-dm-list", friendThreadHtml(history?.messages, peerMemberId));
+    // The thread window is short on a phone: land on the newest message, the
+    // same way the room chat list does, instead of leaving the reader at the
+    // oldest message of the thread.
+    scrollFriendDmToLatest();
   } catch (error) {
     if (generation === client.generation && friendDmPeerId === peerMemberId) dialogNotice("#friend-dm-status", friendFailureMessage(error), true);
   }
+}
+function scrollFriendDmToLatest() {
+  const list = $("#friend-dm-list");
+  if (list) list.scrollTop = list.scrollHeight;
 }
 function openFriendThread(peerMemberId) {
   if (!state || !session) return;
@@ -7051,7 +7075,7 @@ function openFriendThread(peerMemberId) {
   $("#friend-dm-title").textContent = `Friends with ${peer.displayName}`;
   $("#friend-dm-input").value = "";
   setFormStatus($("#friend-dm-status"), "");
-  renderContent("#friend-dm-list", `<li class="friend-dm-empty">No messages yet.</li>`);
+  renderContent("#friend-dm-list", friendThreadHtml(null, peerMemberId));
   if (!$("#friend-dm-dialog").open) $("#friend-dm-dialog").showModal();
   void loadFriendThread(peerMemberId);
   $("#friend-dm-input").focus();
@@ -7084,6 +7108,27 @@ $("#friend-dm-form").addEventListener("submit", async event => {
     const submit = $("#friend-dm-form")?.querySelector("button[type=submit]");
     if (submit) submit.disabled = false;
     if (generation === client.generation && state) await refreshFriendBonds();
+  }
+});
+// The DM compose mirrors the room composer: Enter sends on desktop keyboards
+// (Shift+Enter for a new line), while touch keyboards keep Return as a new
+// line and get a "send" return key plus the matching hint.
+function syncFriendDmHint() {
+  const input = $("#friend-dm-input"), caption = $("#friend-dm-hint");
+  const hint = touchKeyboard.matches ? "Return for a new line · ↑ to send" : "Enter to send · Shift + Enter for a new line";
+  input.title = hint;
+  input.setAttribute("aria-description", hint);
+  if (caption) caption.textContent = hint;
+  input.enterKeyHint = touchKeyboard.matches ? "enter" : "send";
+}
+touchKeyboard.addEventListener("change", syncFriendDmHint);
+syncFriendDmHint();
+$("#friend-dm-input").addEventListener("keydown", e => {
+  // Composition, key repeat, and touch Return must never accidentally submit —
+  // the shared sendsOnEnter gate carries the same rules as the room composer.
+  if (sendsOnEnter(e, touchKeyboard.matches)) {
+    e.preventDefault();
+    if (!friendBusy && $("#friend-dm-input").value.trim()) $("#friend-dm-form").requestSubmit();
   }
 });
 $("#notification-read-button").addEventListener("click", async () => {
@@ -7653,6 +7698,11 @@ if (initialInvitationFragment && !initialPasswordReset) openInvitation(initialIn
     // JDOT-COH-NAV begin
     install: module => {
       const controller = module.installWorkBoard({ client, getState: () => state, getSession: () => session });
+      // BU-14: power-user keyboard navigation (j/k moves between claim cards).
+      // Separate dynamic import so board-keyboard.mjs is its own registered
+      // runtime asset; attach is idempotent and survives board repaints.
+      import("./board-keyboard.mjs").then(keynav => keynav.attachBoardKeyboard(document.querySelector("#work-board")))
+        .catch(() => { /* keyboard nav is progressive enhancement; the board works without it */ });
       navigationBoardReady = () => controller.whenReady();
       return controller;
     },

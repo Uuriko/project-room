@@ -153,7 +153,8 @@ function validRoomArgs(name, args) {
     const roomOk = args.roomId === undefined || validId(args.roomId) && args.roomId.length <= 64;
     const kindOk = args.kind === undefined || ROOM_KINDS.includes(args.kind);
     const nameOk = args.displayName === undefined || typeof args.displayName === "string" && args.displayName.trim().length > 0 && args.displayName.length <= 80;
-    return titleOk && purposeOk && roomOk && kindOk && nameOk;
+    const requestOk = args.requestId === undefined || validId(args.requestId) && args.requestId.length <= 64;
+    return titleOk && purposeOk && roomOk && kindOk && nameOk && requestOk;
   }
   if (name === "room_join") {
     const link = args.linkToken !== undefined;
@@ -228,16 +229,24 @@ function validRoomArgs(name, args) {
   if (name === "room_commit_file") return validId(args.id) && validId(args.messageId);
   if (name === "add_land_item") {
     const claimantOk = args.claimantMemberId === undefined || validId(args.claimantMemberId);
+    const requestIdOk = args.requestId === undefined
+      || (typeof args.requestId === "string" && args.requestId.length >= 1 && args.requestId.length <= 64);
     return typeof args.repo === "string" && args.repo.length >= 3 && args.repo.length <= 200
       && Number.isSafeInteger(args.prNumber) && args.prNumber >= 1 && args.prNumber <= 100000000
-      && claimantOk;
+      && claimantOk && requestIdOk;
   }
   if (name === "list_land_queue") return true;
-  if (name === "remove_land_item") return validId(args.itemId);
+  if (name === "remove_land_item") {
+    const requestIdOk = args.requestId === undefined
+      || (typeof args.requestId === "string" && args.requestId.length >= 1 && args.requestId.length <= 64);
+    return validId(args.itemId) && requestIdOk;
+  }
   if (name === "report_tip") {
     const sourceOk = args.sourceRevision === undefined || typeof args.sourceRevision === "string" && args.sourceRevision.length >= 1 && args.sourceRevision.length <= 200;
     const buildOk = args.buildId === undefined || typeof args.buildId === "string" && args.buildId.length >= 1 && args.buildId.length <= 200;
-    return validId(args.itemId) && sourceOk && buildOk && (args.sourceRevision !== undefined || args.buildId !== undefined);
+    const requestIdOk = args.requestId === undefined
+      || (typeof args.requestId === "string" && args.requestId.length >= 1 && args.requestId.length <= 64);
+    return validId(args.itemId) && sourceOk && buildOk && requestIdOk && (args.sourceRevision !== undefined || args.buildId !== undefined);
   }
   return false;
 }
@@ -420,12 +429,16 @@ async function callLandTool(store, secret, name, args) {
   if (name === "list_land_queue") return store.landQueue.list(args.roomId, memberId);
   if (name === "add_land_item") {
     return store.landQueue.add(args.roomId, memberId, {
-      repo: args.repo, prNumber: args.prNumber, claimantMemberId: args.claimantMemberId ?? null
+      repo: args.repo, prNumber: args.prNumber, claimantMemberId: args.claimantMemberId ?? null,
+      requestId: args.requestId ?? null
     });
   }
-  if (name === "remove_land_item") return store.landQueue.remove(args.roomId, memberId, { itemId: args.itemId });
+  if (name === "remove_land_item") {
+    return store.landQueue.remove(args.roomId, memberId, { itemId: args.itemId, requestId: args.requestId ?? null });
+  }
   return store.landQueue.reportTip(args.roomId, memberId, {
-    itemId: args.itemId, sourceRevision: args.sourceRevision, buildId: args.buildId
+    itemId: args.itemId, sourceRevision: args.sourceRevision, buildId: args.buildId,
+    requestId: args.requestId ?? null
   });
 }
 
@@ -457,7 +470,7 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
   if (name === "room_needs_me") return collectNeedsMe(store, secret, { since: args.since });
   if (name === "room_create") {
     const request = {};
-    for (const key of ["title", "purpose", "roomId", "kind", "displayName"]) {
+    for (const key of ["title", "purpose", "roomId", "kind", "displayName", "requestId"]) {
       if (args[key] !== undefined) request[key] = args[key];
     }
     return agentRooms.create(secret, request);

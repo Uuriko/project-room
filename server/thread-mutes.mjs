@@ -111,8 +111,15 @@ export class ThreadMutes {
     const auth = this._auth(token, roomId, binding);
     const memberId = auth.member.id;
     return this.store.transaction(() => {
-      const rootId = threadRootOf(this._roomState(roomId).messages, data.threadId);
-      if (!rootId) fail(404, "message_not_found", "No such thread in this room");
+      const messages = this._roomState(roomId).messages;
+      const rootId = threadRootOf(messages, data.threadId);
+      // A DM thread exists only for its parties: answering a bystander would
+      // confirm (and resolve) a private message id.
+      const hidden = id => {
+        const message = messages.find(m => m.id === id);
+        return Boolean(message?.toMemberId && message.authorId !== memberId && message.toMemberId !== memberId);
+      };
+      if (!rootId || hidden(data.threadId) || hidden(rootId)) fail(404, "message_not_found", "No such thread in this room");
       const now = this.store.now();
       if (data.muted) {
         this.db.prepare("INSERT OR IGNORE INTO thread_mutes (room_id,member_id,thread_id,created_at) VALUES(?,?,?,?)")

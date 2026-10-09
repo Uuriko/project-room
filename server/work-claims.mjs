@@ -396,6 +396,29 @@ const readingAcksOf = value => {
   }
   return Object.freeze(out);
 };
+// PRODUCT-200 A4 (QA-200 AQ-HI-06): opt-in idempotency keys for updates. A
+// requestId that already landed on the claim replays the stored outcome
+// instead of appending another history entry — retry must not duplicate.
+// The map rides on the work item so it survives the durable registry
+// round-trip (restart/deploy); it is capped at MAX_REQUEST_OUTCOMES
+// entries, oldest first.
+export const MAX_REQUEST_OUTCOMES = 256;
+const REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+export const requestIdOf = value => {
+  check(typeof value === "string" && REQUEST_ID_PATTERN.test(value),
+    "requestId must be 1..128 characters [A-Za-z0-9_-]");
+  return value;
+};
+const requestOutcomesOf = value => {
+  if (value === undefined || value === null) return null;
+  check(typeof value === "object" && !Array.isArray(value), "requestOutcomes must be an object");
+  const kept = Object.entries(value)
+    .filter(([key, at]) => REQUEST_ID_PATTERN.test(key)
+      && typeof at === "string" && Number.isFinite(Date.parse(at)));
+  // String-key insertion order is oldest-first: drop the oldest beyond the cap.
+  return Object.freeze(Object.fromEntries(kept.slice(Math.max(0, kept.length - MAX_REQUEST_OUTCOMES))));
+};
+const recordRequestOutcome = (current, key, at) => requestOutcomesOf({ ...(current ?? {}), [key]: at });
 const workOf = value => {
   check(value !== null && typeof value === "object" && !Array.isArray(value), "work must be an object");
   check(typeof value.id === "string" && value.id.length > 0 && value.id.length <= 256, "work id must be 1..256 characters");
@@ -428,9 +451,11 @@ const workOf = value => {
   if (kind === "deploy") check(revision, "a deploy claim needs a revision");
   const historyOmitted = historyOmittedOf(value.historyOmitted);
   const readingAcks = readingAcksOf(value.readingAcks);
+  const requestOutcomes = requestOutcomesOf(value.requestOutcomes);
   return { id: value.id, title: value.title ?? value.id, state: value.state ?? "unclaimed",
     owner: value.owner ?? null, history: Array.isArray(value.history) ? value.history : [],
     readingAcks,
+    ...(requestOutcomes !== null ? { requestOutcomes } : {}),
     ...(historyOmitted > 0 ? { historyOmitted } : {}),
     claimedAt: value.claimedAt ?? null, leaseStartAt: value.leaseStartAt ?? null, leaseExpiresAt: value.leaseExpiresAt ?? null,
     deliveryMode: value.deliveryMode ?? null, reviewPolicy: value.reviewPolicy ?? null,
@@ -562,7 +587,15 @@ export function createWork({ id, title, reviewPolicy, note, tags, files, depends
 // defaultLeaseHours, else 24h); null opts out — the claim never expires.
 export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, parentClaimId, evidenceRefs, pullRequest, pullRequests, repo, branch, fileBlocks, room, now } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
-  check(item.state === "unclaimed", `work "${item.id}" is already ${item.state} — release it first`);
+  // H4 (QA-200 2026-10-08): distinguish self re-claim from a foreign holder in
+  // the message — "release it first" was destructive for the holder and
+  // unactionable for anyone else, and it never named the holder. The code
+  // stays invalid_claim_input (internal callers pin it).
+  check(item.state === "unclaimed", item.state !== "claimed"
+    ? `work "${item.id}" is already ${item.state}`
+    : item.owner === agent
+      ? `work "${item.id}" is already claimed by you — no new claim was saved; read the item to confirm`
+      : `work "${item.id}" is held by ${item.owner ?? "someone else"} — ask them to reassign or release it`);
   // QA D-1: the 4000-char bound applies to every note stored on a history
   // stamp, not just create — an unbounded claim note is the same
   // storage/amplification vector the SEC2 create cap closed.
@@ -695,8 +728,13 @@ export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClai
 // four are recorded on the item and then frozen with the done state. tags
 // and blobs are only meaningful on the done transition and are refused
 // anywhere else.
-export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, now, authority = false } = {}) {
+export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, requestId, now, authority = false } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  // PRODUCT-200 A4 (QA-200 AQ-HI-06): idempotent retry. A requestId that
+  // already landed on this claim replays the stored outcome — the update
+  // applied exactly once, so the identical retry appends nothing.
+  const key = requestId === undefined ? undefined : requestIdOf(requestId);
+  if (key !== undefined && Object.hasOwn(item.requestOutcomes ?? {}, key)) return item;
   check(authority === true || item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can update it`);
   check(!isTerminalClaimState(item.state), `work "${item.id}" is ${item.state} and immutable`);
   if (state !== undefined) {
@@ -749,7 +787,31 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     tags: state === "done" && tags != null ? tagsOf(tags) : item.tags,
     blobs: state === "done" && blobs != null ? blobsOf(blobs) : item.blobs,
     ...withProvenance };
-  return withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note);
+  return key === undefined ? withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note)
+    : Object.freeze({ ...withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note),
+      requestOutcomes: recordRequestOutcome(item.requestOutcomes, key, isoOf(atMs)) });
+}
+// Release a claim, bound to the claim round the caller read (E5/D4, QA-200
+// 2026-10-08): expectedClaimedAt + expectedHistoryLength must match the
+// current item, so a stale replay (timed-out retry) or a delayed duplicate
+// landing after an intervening release + re-claim is refused instead of
+// silently destroying the fresh claim. Mirrors appendWorkPullRequest's
+// round check — the history length also discriminates same-millisecond
+// re-claims, which keep the previous round's claimedAt. Claims held
+// in_progress/blocked are routed through the internal pause transition
+// first (W2); both steps are stamped in history.
+export function releaseWork(work, agentId, { expectedClaimedAt, expectedHistoryLength, note, now, authority = false } = {}) {
+  const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  check(typeof expectedClaimedAt === "string" && expectedClaimedAt.length <= 100 && Number.isFinite(Date.parse(expectedClaimedAt)), "expectedClaimedAt must be the current claim timestamp");
+  check(Number.isSafeInteger(expectedHistoryLength) && expectedHistoryLength >= 0, "expectedHistoryLength must be a non-negative integer");
+  if (item.claimedAt !== expectedClaimedAt || claimHistoryLength(item) !== expectedHistoryLength) {
+    fail("work_claim_conflict", "The claim changed since it was read");
+  }
+  let current = item;
+  if (current.state === "in_progress" || current.state === "blocked") {
+    current = updateWork(current, agent, { state: "claimed", note: "paused for release", now: atMs, authority });
+  }
+  return updateWork(current, agent, { state: "unclaimed", note, now: atMs, authority });
 }
 // Retire open work without delivering it. close: the room's claim managers
 // (authority) or the current holder. cancel: whoever opened the item while
@@ -876,10 +938,21 @@ export function notePullMerged(work, mergedSha, now) {
 }
 // Reassign: the owner hands work to another agent (stays in the same state).
 // Attestations are cleared — reviews belong to the previous owner's round.
-export function reassignWork(work, agentId, newOwner, { note, now, authority = false, room } = {}) {
+export function reassignWork(work, agentId, newOwner, { expectedClaimedAt, expectedHistoryLength, note, now, authority = false, room } = {}) {
   const item = workOf(work), agent = agentOf(agentId), target = agentOf(newOwner), atMs = nowMsOf(now);
   check(authority === true || item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can reassign it`);
   check(!isTerminalClaimState(item.state), `work "${item.id}" is ${item.state} and immutable`);
+  // E5/D4 follow-up: the HTTP route requires the claim round the client read
+  // (claimedAt + history length), like release. In-process callers may omit
+  // both; when either is given both are validated and compared. An unclaimed
+  // item has claimedAt null, so null is its valid round token.
+  if (expectedClaimedAt !== undefined || expectedHistoryLength !== undefined) {
+    check(expectedClaimedAt === null || typeof expectedClaimedAt === "string" && expectedClaimedAt.length <= 100 && Number.isFinite(Date.parse(expectedClaimedAt)), "expectedClaimedAt must be the current claim time (ISO string) or null for an unclaimed item");
+    check(Number.isSafeInteger(expectedHistoryLength) && expectedHistoryLength >= 0, "expectedHistoryLength must be a non-negative integer");
+    if (item.claimedAt !== expectedClaimedAt || claimHistoryLength(item) !== expectedHistoryLength) {
+      fail("work_claim_conflict", "The claim changed since it was read");
+    }
+  }
   // Assigning an unclaimed item hands it over as a claim: state claimed with
   // a fresh lease (room default), the same shape create-with-assignee gives.
   // Before this, the owner was set but the state stayed "unclaimed" with no

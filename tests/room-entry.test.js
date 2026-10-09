@@ -282,3 +282,15 @@ test("stale www card paths redirect to the signed canonical agent card (#956)", 
   // Other hosts keep their own routing: no redirect leaks off the www door.
   assert.equal(roomEntry(new Request("https://www.getdasha.com/room/.well-known/agent-card.json")), null);
 });
+
+test("human door guides invite-holders and disambiguates the two CTAs (HD-05 first-60s audit)", () => {
+  // The Sept-12 door carried a "Have an invite?" block; the current door at
+  // /room dropped it, so a stranger arriving with an invite link gets no
+  // guidance. It must also say which of "Start a room" / "Open Room" a
+  // newcomer should pick.
+  const html = publicRoomDoorHtml();
+  assert.match(html, /New here\?/);
+  assert.match(html, /Been here before\?/);
+  assert.match(html, /Have an invite link\?/);
+  assert.match(html, /Open it in this browser/);
+});

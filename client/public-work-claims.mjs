@@ -136,3 +136,75 @@ export class PublicWorkClaimsClient {
     return { text, sha256, bytes: raw.byteLength, verification: 'hash_only' };
   }
 }
+
+// Canonical client retry discipline for claim mutations (FIX-6).
+// Blind retry-until-200 is the bug: it double-applies mutations, spins forever
+// on refusals, and lets a stale duplicate release race a fresh re-claim.
+// The discipline, enforced here:
+//   1. Every 4xx is terminal — never retried, surfaced after exactly one attempt.
+//   2. After an ambiguous outcome (dropped connection/timeout, 5xx, or a 200
+//      the client could not parse — the mutation may have applied), READ the
+//      current task state before deciding anything.
+//   3. Already applied -> return the read; not applied -> retry with the SAME
+//      requestId and exact input (the server journal replays the stored
+//      outcome instead of applying twice); state moved on -> stop, terminal.
+//   4. Attempts are bounded by maxAttempts; exhaustion is a terminal error.
+// Returns the action outcome plus { attempts, replayed }: replayed is true
+// when the outcome was reconciled from the confirming read rather than a
+// fresh 200. For a reconciled finish, read the receipt via
+// packet.claim.submittedReceiptId.
+const retryableActions = ['claim', 'renew', 'release', 'finish'];
+const retryActionNames = { claim: 'claimed', renew: 'renewed', release: 'released', finish: 'submitted' };
+const ambiguousOutcome = error => error instanceof RoomClientError
+  && (error.status === 0 && error.code === 'service_unavailable'
+    || error.status >= 500 && error.status <= 599
+    || error.status === 200 && error.code === 'invalid_response');
+function reconcileRetry(action, input, claim, identityId) {
+  const mine = claim.state === 'claimed' && claim.identityId === identityId && claim.generation === input.generation;
+  switch (action) {
+    case 'claim':
+      if (claim.state === 'claimed' && claim.identityId === identityId) return 'applied';
+      return claim.state === 'claimed' ? 'conflict' : 'retry';
+    case 'renew':
+      return mine ? 'retry' : 'conflict';
+    case 'release':
+      // My claim is gone — released by me (possibly followed by someone
+      // else's fresh re-claim), lapsed, or submitted. Re-sending a release now
+      // could only strike another holder's claim, so it is never re-sent.
+      return mine ? 'retry' : 'applied';
+    case 'finish':
+      if (claim.state === 'submitted') return 'applied';
+      return mine ? 'retry' : 'conflict';
+    default:
+      throw new RoomClientError(0, 'invalid_input', 'Retryable action must be claim, renew, release or finish');
+  }
+}
+export async function withClaimRetryDiscipline(client, taskId, action, input, { identityId, maxAttempts = 3, signal } = {}) {
+  if (!(client instanceof PublicWorkClaimsClient)) throw new RoomClientError(0, 'invalid_input', 'withClaimRetryDiscipline needs a PublicWorkClaimsClient');
+  if (!retryableActions.includes(action)) throw new RoomClientError(0, 'invalid_input', 'Retryable action must be claim, renew, release or finish');
+  if (!validId(identityId)) throw new RoomClientError(0, 'invalid_input', 'Pass your own identity id so an ambiguous outcome can be reconciled against the read');
+  if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 10) throw new RoomClientError(0, 'invalid_input', 'maxAttempts must be an integer from 1 to 10');
+  let attempts = 0;
+  for (;;) {
+    attempts++;
+    try {
+      const outcome = await client[action](taskId, input, { signal });
+      return { ...outcome, attempts, replayed: false };
+    } catch (error) {
+      if (!ambiguousOutcome(error)) throw error;
+      let packet;
+      try {
+        packet = await client.read(taskId, { signal });
+      } catch (readError) {
+        if (readError instanceof RoomClientError && readError.status >= 400 && readError.status <= 499) throw readError;
+        throw new RoomClientError(0, 'retry_unknown', `${action} outcome unknown and the confirming read failed (${readError.code ?? 'unknown'}); read the task before acting`);
+      }
+      const decision = reconcileRetry(action, input, packet.claim, identityId);
+      if (decision === 'applied') return { action: retryActionNames[action], task: packet, attempts, replayed: true };
+      if (decision === 'conflict') throw new RoomClientError(409, 'retry_state_conflict',
+        `Not retrying ${action}: the task now reads ${packet.claim.state}${packet.claim.identityId ? ` held by ${packet.claim.identityId === identityId ? 'you' : 'another agent'}` : ''} at generation ${packet.claim.generation}`);
+      if (attempts >= maxAttempts) throw new RoomClientError(0, 'retry_exhausted',
+        `${action} outcome still ambiguous after ${attempts} attempts with the same request id; read the task before acting`);
+    }
+  }
+}

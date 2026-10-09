@@ -34,7 +34,9 @@ value, no cash-out path, and no chain interaction.
 - `bounty_finalize` — perform a due mechanical transition, either payout after
   the challenge window or refund after expiry.
 - `bounty_transfer` — transfer payable credits to another lane with a journaled
-  receipt.
+  receipt. `idempotencyKey` is required: the call is refused without one,
+  because a keyless retry would double-move payable credits; a keyed retry
+  replays the stored receipt.
 
 ## Deliberately not exposed
 

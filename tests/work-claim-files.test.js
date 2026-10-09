@@ -14,6 +14,7 @@ const helpers = () => ({
   body: async req => req.body,
 });
 
+const roundOfItem = item => ({ expectedClaimedAt: item?.claimedAt ?? null, expectedHistoryLength: (item?.history?.length ?? 0) + (Number(item?.historyOmitted) || 0) });
 const call = (registry, member, route, id, body) => handleWorkClaims({
   req: { method: route === "read" ? "GET" : "POST", body },
   res: {},
@@ -86,7 +87,7 @@ test("reassign of an unclaimed file-declared item refuses on overlap (409)", asy
   await call(registry, "jill", "create", null, { id: "a", files: ["server/a.mjs"] });
   await call(registry, "jill", "claim", "a", {});
   await call(registry, "claude", "create", null, { id: "b", files: ["server/a.mjs"] });
-  const out = await call(registry, "claude", "reassign", "b", { newOwner: "ada" });
+  const out = await call(registry, "claude", "reassign", "b", { newOwner: "ada", ...roundOfItem(registry.get("room1", "b")) });
 
   assert.equal(out.status, 409);
   assert.equal(out.value.error.code, "file_lease_conflict");
@@ -102,7 +103,7 @@ test("reassign of an active claim to a holder of overlapping files refuses (409)
   // ada deliberately holds the overlap via advisory warn-and-proceed
   await call(registry, "claude", "create", null, { id: "b" });
   await call(registry, "ada", "claim", "b", { files: ["server/a.mjs"], advisory: true });
-  const out = await call(registry, "jill", "reassign", "a", { newOwner: "ada" });
+  const out = await call(registry, "jill", "reassign", "a", { newOwner: "ada", ...roundOfItem(registry.get("room1", "a")) });
 
   assert.equal(out.status, 409);
   assert.equal(out.value.error.code, "file_lease_conflict");
@@ -113,7 +114,7 @@ test("reassign with no file overlap still transfers (200)", async () => {
   const registry = createWorkClaimRegistry();
   await call(registry, "jill", "create", null, { id: "a", files: ["server/a.mjs"] });
   await call(registry, "jill", "claim", "a", {});
-  const out = await call(registry, "jill", "reassign", "a", { newOwner: "ada" });
+  const out = await call(registry, "jill", "reassign", "a", { newOwner: "ada", ...roundOfItem(registry.get("room1", "a")) });
 
   assert.equal(out.status, 200);
   assert.equal(out.value.owner, "ada");

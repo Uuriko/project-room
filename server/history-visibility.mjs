@@ -11,7 +11,23 @@
 // no extra work.
 
 import { randomUUID } from "node:crypto";
-import { EVENT_TYPES as T, memberHistoryVisibility, isRoomArchived } from "../src/events.js";
+import { EVENT_TYPES as T, historyVisibility, memberHistoryVisibility, isRoomArchived } from "../src/events.js";
+
+
+// Invite copy for link guests and guest-agent members. A v1 room hides
+// earlier messages from those guests until the owner chooses otherwise.
+// "since_join" hides them for every non-owner member. "all", and a legacy
+// room with no recorded default, still include earlier messages.
+export function guestReadsHistoryFromJoin(room) {
+  const setting = historyVisibility({ room });
+  return setting.value === "since_join" || (setting.value === null && setting.guestsSinceJoin);
+}
+
+export function guestHistoryAccessLead(room) {
+  return guestReadsHistoryFromJoin(room)
+    ? "Read messages posted after you join"
+    : "Read the room and its history";
+}
 
 const JOIN_TYPES = [T.MEMBER_ADDED, T.MEMBER_JOINED_VIA_INVITATION];
 
@@ -84,9 +100,12 @@ export function messageVisibleToViewer(message, viewerId, floor) {
 // The floor for a summary read. Fails closed: if the floor cannot be read,
 // the viewer sees no message text rather than all of it.
 export function summaryHistoryFloor(store, roomId, viewerId, headSequence = null) {
-  if (typeof store?.historyFloor !== "function") return null;
+  // A store that cannot report a floor (a mock, a custom adapter) is the same
+  // "cannot be read" case as a floor that throws: deny all message text.
+  const denyAll = () => ({ sequence: Number.MAX_SAFE_INTEGER, at: "9999-12-31T23:59:59.999Z", sameInstant: new Set() });
+  if (typeof store?.historyFloor !== "function") return denyAll();
   try { return store.historyFloor(roomId, viewerId, headSequence); }
-  catch { return { sequence: Number.MAX_SAFE_INTEGER, at: "9999-12-31T23:59:59.999Z", sameInstant: new Set() }; }
+  catch { return denyAll(); }
 }
 
 // Later events can carry an earlier message's text or reference it (edits,

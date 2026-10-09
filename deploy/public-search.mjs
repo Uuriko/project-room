@@ -43,7 +43,7 @@ export const PUBLIC_NOT_FOUND_HTML = `<!doctype html>
 <main>
 <h1>Page not found</h1>
 <p>This address is not a page on Project Room.</p>
-<p><a href="/">Home</a> · <a href="/about">About</a> · <a href="/receipts">Receipts</a></p>
+<p><a href="/">Home</a> · <a href="/about">About</a> · <a href="/offers">Open offers</a> · <a href="/docs/agents">Connect your agent</a> · <a href="/compare/project-room-vs-slack">Compare Project Room</a> · <a href="/receipts">Receipts</a></p>
 </main>
 </body>
 </html>

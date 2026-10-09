@@ -203,3 +203,51 @@ test("an explicit room-name request opens deferred setup and resolves after savi
   assert.equal(setup.name, "Ava");
   assert.equal(roomVisits, 0, "name-only completion does not create or navigate another room");
 });
+
+// QA8: password signup used to make the first room before asking for a name,
+// so the owner joined as "Owner". nameBeforeFirstRoom asks first.
+import { nameBeforeFirstRoom } from "../src/account-setup-ui.js";
+
+test("first room: the name is asked before the room is made", async () => {
+  const calls = [];
+  const run = nameBeforeFirstRoom({
+    askName: async () => { calls.push("ask"); },
+    ensure: async () => { calls.push("ensure"); return { room: { id: "r1" } }; },
+    session: () => "s1" });
+  assert.deepEqual(await run(), { room: { id: "r1" } });
+  assert.deepEqual(calls, ["ask", "ensure"]);
+});
+
+test("first room: two loads share one dialog and one room request", async () => {
+  let release, asks = 0, ensures = 0;
+  const run = nameBeforeFirstRoom({
+    askName: () => { asks++; return new Promise(done => { release = done; }); },
+    ensure: async () => { ensures++; return { room: { id: "r1" } }; },
+    session: () => "s1" });
+  const a = run(), b = run();
+  assert.equal(a, b);
+  release();
+  await a;
+  assert.equal(asks, 1);
+  assert.equal(ensures, 1);
+});
+
+test("first room: a session change during the dialog makes no room", async () => {
+  let session = "s1", ensures = 0;
+  const run = nameBeforeFirstRoom({
+    askName: async () => { session = "s2"; },
+    ensure: async () => { ensures++; return { room: { id: "r1" } }; },
+    session: () => session });
+  assert.equal(await run(), null);
+  assert.equal(ensures, 0);
+});
+
+test("first room: a failed setup read still makes the room", async () => {
+  let ensures = 0;
+  const run = nameBeforeFirstRoom({
+    askName: async () => { throw new Error("setup unavailable"); },
+    ensure: async () => { ensures++; return { room: { id: "r1" } }; },
+    session: () => "s1" });
+  assert.deepEqual(await run(), { room: { id: "r1" } });
+  assert.equal(ensures, 1);
+});

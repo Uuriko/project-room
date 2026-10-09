@@ -44,12 +44,21 @@ const shape = (fields, { required = [], optional = [] } = {}) => {
 const invalidInput = (reject, expected) => reject(422, "invalid_bounty_input", `Expected ${expected}.`);
 
 // Owner-only gate for the sybil resolver routes. Fails closed: no store
-// authority, no member, or any mismatch is "not the owner".
+// authority, no member, or any mismatch is "not the owner". Compares
+// canonical lane forms: member ids may be the legacy colon form
+// (id:agent:jill) or the canonical lane form (id:agent/jill) — both name
+// the same account (canonicalLane in server/bounty-escrow.mjs). A raw
+// comparison locked the real room owner out with 403 owner_required
+// whenever auth.member.id (from the credential/member record) and
+// roomAuthority().ownerId (from the room projection) were the same
+// identity in different forms — the route-layer half of the lockout that
+// PR #2043 fixed at the store layer.
 export const isRoomOwner = (store, roomId, auth) => {
   const memberId = auth?.member?.id;
   if (typeof memberId !== "string" || !memberId || typeof store?.roomAuthority !== "function") return false;
   const { ownerId } = store.roomAuthority(roomId);
-  return typeof ownerId === "string" && ownerId === memberId;
+  if (typeof ownerId !== "string" || !ownerId) return false;
+  return canonicalLane(ownerId) === canonicalLane(memberId);
 };
 
 const runPure = (reject, fn) => {
@@ -354,6 +363,14 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
     const payload = await readPayload(reject, body, req);
     if (!shape(payload, { required: ["to", "amount"], optional: ["idempotencyKey"] }))
       invalidInput(reject, "{to, amount, idempotencyKey?}");
+    // B4 audit: credit.transfer is the only money-moving op whose keyless
+    // fallback is silent double-spend — a lost-response client retry re-moves
+    // payable credits. Require the key (Idempotency-Key header or the
+    // idempotencyKey body field) so a client can never accidentally
+    // double-transfer; a keyed retry replays the stored receipt instead.
+    if (key(payload) === null)
+      reject(422, "idempotency_key_required",
+        "credit.transfer requires an idempotency key (Idempotency-Key header or idempotencyKey body field): a keyless retry would double-move payable credits");
     return idem(payload, "credit.transfer", 200, () => {
       const result = escrow.transfer(roomId, { from: caller, to: payload.to, amount: payload.amount, actor });
       return { roomId, ...result };

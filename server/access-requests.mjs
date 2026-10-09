@@ -77,6 +77,9 @@ export const accessRequestSchema = `
   );
   CREATE INDEX IF NOT EXISTS access_requests_room ON access_requests(room_id, status);
   CREATE INDEX IF NOT EXISTS access_requests_identity ON access_requests(identity_id);
+  -- PRODUCT-200 B10: covering index for the room-scoped idempotency replay
+  -- lookup (WHERE request_id=? AND room_id=?).
+  CREATE INDEX IF NOT EXISTS access_requests_room_request ON access_requests(room_id, request_id);
   -- Self-serve admission (RC-2026-09-29-3603): a room's standing auto-approve
   -- rule. When set, incoming requests whose permissions are a non-empty subset
   -- of this list are approved and linked inline, with no human in the loop.
@@ -199,7 +202,13 @@ export class AccessRequests {
     if (!REQUEST_ID_PATTERN.test(rid)) fail(422, "invalid_request", "requestId must match [A-Za-z0-9][A-Za-z0-9_-]{0,63}");
 
     return this.store.transaction(() => {
-      const existing = this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(rid);
+      // PRODUCT-200 B10: scope the idempotency replay to the room. The old
+      // unscoped lookup (WHERE request_id=?) let a client-supplied key minted
+      // in room A replay room A's request when retried in room B — a
+      // cross-room replay of another room's request (QA200-MUT-14 design
+      // question; bounty-escrow fixed the same class in #1000 by scoping).
+      const existing = this.db.prepare(
+        "SELECT * FROM access_requests WHERE request_id=? AND room_id=?").get(rid, roomId);
       if (existing) {
         // Idempotent retry: only the original identity may observe it.
         if (existing.identity_id !== identityId) fail(409, "request_conflict", "requestId is already in use");
@@ -219,6 +228,13 @@ export class AccessRequests {
         }
         return retryLive;
       }
+      // The key exists but belongs to a different room. request_id is a
+      // global PRIMARY KEY, so this key can never be re-created here; fail
+      // honestly with the same 409 the cross-identity collision uses
+      // instead of leaking or shadowing the other room's request.
+      const elsewhere = this.db.prepare(
+        "SELECT 1 FROM access_requests WHERE request_id=?").get(rid);
+      if (elsewhere) fail(409, "request_conflict", "requestId is already in use");
       // The identity must exist (minted via identity-create). We do not
       // reveal anything else: a missing identity and a bad room look the
       // same to the caller.

@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { validId, event, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES, PERMISSIONS, canInviteMembers } from "../src/events.js";
+import { validId, event, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES, PERMISSIONS, canInviteMembers, historyVisibility } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { invitationJoinedEvent } from "./invitation-evidence.mjs";
 import { canonicalInvitationData } from "./invitation-journal.mjs";
@@ -96,6 +96,18 @@ const ACCESS_TEXT = Object.freeze({
   member: "Read and post, take work, complete it and verify others' work. No membership administration.",
   co_admin: "Every room permission: invite and remove members, change access, decide and approve work. Room settings such as instructions, history visibility, export, publishing, archive and ownership stay with the room creator."
 });
+// QA8 (2026-10-08, live prod): a link guest in a room on the default
+// history policy (PRIV-2: guests see only messages from after they join)
+// was told "Read the room and its history", then landed on "No messages
+// yet" in a room with history. Say what the guest will actually see.
+const GUEST_SINCE_JOIN_TEXT = "Read messages posted after you join, post messages, and react. No membership administration or work approvals.";
+export function previewAccessText(access, roomState) {
+  const setting = historyVisibility(roomState);
+  const sinceJoin = setting.value === "since_join" || (setting.value === null && setting.guestsSinceJoin && access === "guest");
+  if (access === "guest" && sinceJoin) return GUEST_SINCE_JOIN_TEXT;
+  if (access === "member" && setting.value === "since_join") return "Read messages posted after you join and post, take work, complete it and verify others' work. No membership administration.";
+  return ACCESS_TEXT[access];
+}
 
 // Reusable links delegate only the existing, immutable guest invitation policy.
 // Each redemption creates an ordinary audited account-bound invitation and its
@@ -203,8 +215,9 @@ export class ShareLinks {
       const members = this.store.room(row.room_id).state.members;
       const issuer = members && Object.hasOwn(members, row.issuer_member_id) ? members[row.issuer_member_id] : null;
       const inviterDisplayName = typeof issuer?.displayName === "string" && issuer.displayName.trim() ? issuer.displayName.trim() : "A member";
-      return { link, room: { id: row.room_id, title: this.store.room(row.room_id).state.room.title },
-        access: ACCESS_TEXT[link.access],
+      const roomState = this.store.room(row.room_id).state;
+      return { link, room: { id: row.room_id, title: roomState.room.title },
+        access: previewAccessText(link.access, roomState),
         identity: "Names are self-chosen, not verified. New guest sessions last up to 8 hours in this browser.",
         inviterDisplayName };
     });

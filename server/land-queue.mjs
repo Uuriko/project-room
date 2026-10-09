@@ -19,10 +19,14 @@
 // reset header and the tick skips until then. A missing token does not fail
 // the tick. No new secret is added.
 
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomBytes, randomUUID, createHash } from "node:crypto";
 import { ServiceError } from "./service-error.mjs";
 import { event, EVENT_TYPES, applyEvent, isRoomArchived, validId } from "../src/events.js";
 import { claimWork, createWork, ACTIVE_CLAIM_STATES, roomWorkClaimConfig } from "./work-claims.mjs";
+
+// Caller-supplied idempotency key, same shape as access-requests'
+// REQUEST_ID_PATTERN: retries with the same key replay the stored response.
+const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
 export const LAND_CHECKS = Object.freeze(["pending", "green", "red"]);
 export const LAND_MERGEABLE = Object.freeze(["mergeable", "behind", "conflict", "unknown", "merged"]);
@@ -71,6 +75,21 @@ export const landQueueSchema = `
     UNIQUE (room_id, repo, pr_number)
   );
   CREATE INDEX IF NOT EXISTS land_queue_due ON land_queue(updated_at);
+  -- B6 idempotency audit: caller-supplied requestId ledger for the mutating
+  -- land-queue calls. Keyed on (room_id, request_id); a replay returns the
+  -- stored 2xx response byte-identical. status 0 = first call still running.
+  CREATE TABLE IF NOT EXISTS land_queue_idempotency (
+    room_id TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    op TEXT NOT NULL,
+    actor_member_id TEXT NOT NULL,
+    input_hash TEXT NOT NULL,
+    status INTEGER NOT NULL DEFAULT 0,
+    response TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (room_id, request_id)
+  );
 `;
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
@@ -579,6 +598,55 @@ export class LandQueue {
     return this.db.prepare("SELECT * FROM land_queue WHERE room_id=? AND repo=? AND pr_number=?").get(roomId, repo, prNumber);
   }
 
+  // Caller-supplied idempotency for the mutating land-queue calls. The key
+  // is (room_id, request_id): a retry with the same key, op, actor, and
+  // input replays the stored response instead of re-executing. Reuse for a
+  // different op, actor, or input is 409 idempotency_conflict (the
+  // store.command / access-requests / bounty-escrow convention), as is a
+  // key whose first call is still in flight. Only 2xx outcomes are recorded:
+  // a failure deletes the placeholder so the retry re-executes fresh rather
+  // than replaying a stale error (e.g. a transient 503 github_unconfigured).
+  // Without a requestId the returned gate is a no-op and behavior is
+  // unchanged.
+  #requestKey(roomId, memberId, op, requestId, invalidCode, input) {
+    const noop = { replay: false, commit() {}, abort() {} };
+    if (requestId === undefined || requestId === null) return noop;
+    if (typeof requestId !== "string" || !REQUEST_ID_PATTERN.test(requestId)) {
+      fail(422, invalidCode, "requestId must match [A-Za-z0-9][A-Za-z0-9_-]{0,63}");
+    }
+    const inputHash = createHash("sha256").update(JSON.stringify(input)).digest("hex");
+    const now = this.store.now();
+    const claimed = this.db.prepare(`INSERT OR IGNORE INTO land_queue_idempotency
+      (room_id, request_id, op, actor_member_id, input_hash, status, response, created_at, updated_at)
+      VALUES (?,?,?,?,?,0,NULL,?,?)`)
+      .run(roomId, requestId, op, memberId, inputHash, now, now);
+    if (claimed.changes === 0) {
+      const prior = this.db.prepare(`SELECT op, actor_member_id AS actor, input_hash AS inputHash,
+        status, response FROM land_queue_idempotency WHERE room_id=? AND request_id=?`)
+        .get(roomId, requestId);
+      if (!prior || prior.op !== op || prior.actor !== memberId || prior.inputHash !== inputHash) {
+        fail(409, "idempotency_conflict", "requestId was already used for a different land queue operation");
+      }
+      if (prior.status !== 1 || prior.response == null) {
+        fail(409, "idempotency_conflict", "requestId is already in flight for this room");
+      }
+      return { replay: true, body: JSON.parse(prior.response), commit() {}, abort() {} };
+    }
+    const db = this.db;
+    const store = this.store;
+    return {
+      replay: false,
+      commit(body) {
+        db.prepare(`UPDATE land_queue_idempotency SET status=1, response=?, updated_at=?
+          WHERE room_id=? AND request_id=?`)
+          .run(JSON.stringify(body), store.now(), roomId, requestId);
+      },
+      abort() {
+        db.prepare("DELETE FROM land_queue_idempotency WHERE room_id=? AND request_id=?").run(roomId, requestId);
+      }
+    };
+  }
+
   list(roomId, memberId) {
     this.#member(roomId, memberId);
     migrateLandQueueClaims(this.store);
@@ -590,19 +658,37 @@ export class LandQueue {
     return { roomId, items };
   }
 
-  async add(roomId, memberId, { repo, prNumber, claimantMemberId = null } = {}) {
+  async add(roomId, memberId, { repo, prNumber, claimantMemberId = null, requestId = null } = {}) {
     this.#member(roomId, memberId);
     const parsedRepo = parseRepo(repo);
     const parsedPr = parsePrNumber(prNumber);
     const claimant = claimantMemberId ?? memberId;
     if (!validId(claimant)) fail(422, "invalid_land_item", "claimant must be a member id");
     this.#member(roomId, claimant);
+    // requestId is the caller's idempotency key: a retry with the same key
+    // replays the stored response instead of re-executing.
+    const key = this.#requestKey(roomId, memberId, "add_land_item", requestId, "invalid_land_item",
+      { repo: parsedRepo, prNumber: parsedPr, claimantMemberId: claimant });
+    if (key.replay) return key.body;
+    let out;
+    try {
+      out = await this.#addExecute(roomId, memberId, parsedRepo, parsedPr, claimant);
+    } catch (error) { key.abort(); throw error; }
+    key.commit(out);
+    return out;
+  }
+
+  async #addExecute(roomId, memberId, parsedRepo, parsedPr, claimant) {
     const existing = this.#byPr(roomId, parsedRepo, parsedPr);
     if (existing) {
       if (claimant !== existing.claimant_member_id) {
         this.store.transaction(() => {
           this.db.prepare("UPDATE land_queue SET claimant_member_id=?, updated_at=? WHERE room_id=? AND item_id=?")
             .run(claimant, this.store.now(), roomId, existing.item_id);
+          // The claimant reassignment is a board write: it commits its
+          // land.updated receipt (changed ["reassigned"]) in the same
+          // transaction as the row, so the handoff is observable.
+          this.#emitBoardReceipt(roomId, viewFromRow(this.#row(roomId, existing.item_id)), ["reassigned"]);
         });
       }
       mirrorLandClaim(this.store, this.#row(roomId, existing.item_id));
@@ -621,22 +707,43 @@ export class LandQueue {
         VALUES (?,?,?,?,?,?,NULL,NULL,'unknown',0,'pending',NULL,NULL,NULL,NULL,0,?,?)`)
         .run(roomId, itemId, parsedRepo, parsedPr, claimant, memberId, now, now);
       mirrorLandClaim(this.store, this.#row(roomId, itemId));
+      // Every board write is observable: the add commits its land.updated
+      // receipt (changed ["added"]) in the same transaction as the row, so
+      // event-replay can reconstruct the board. The GitHub refresh below may
+      // still 503 on an unreachable forge, but the write already happened.
+      this.#emitBoardReceipt(roomId, viewFromRow(this.#row(roomId, itemId)), ["added"]);
     });
     const item = viewFromRow(this.#row(roomId, itemId));
     return this.#refreshRow(item, { duplicate: false });
   }
 
-  remove(roomId, memberId, { itemId } = {}) {
+  remove(roomId, memberId, { itemId, requestId = null } = {}) {
     this.#member(roomId, memberId);
     if (!validId(itemId)) fail(422, "invalid_land_item", "itemId is required");
+    const key = this.#requestKey(roomId, memberId, "remove_land_item", requestId, "invalid_land_item", { itemId });
+    if (key.replay) return key.body;
+    let out;
+    try {
+      out = this.#removeExecute(roomId, memberId, itemId);
+    } catch (error) { key.abort(); throw error; }
+    key.commit(out);
+    return out;
+  }
+
+  #removeExecute(roomId, memberId, itemId) {
     const row = this.#row(roomId, itemId);
     if (!row) fail(404, "land_item_not_found", "Land queue item was not found");
+    const removed = viewFromRow(row);
     this.store.transaction(() => {
       const claim = typeof this.store.workClaims?.get === "function"
         ? this.store.workClaims.get(roomId, itemId)
         : null;
       const dependents = claim ? this.#dependentsOf(roomId, itemId) : [];
       this.db.prepare("DELETE FROM land_queue WHERE room_id=? AND item_id=?").run(roomId, itemId);
+      // Every board write is observable: the delete commits its land.updated
+      // receipt (changed ["removed"]) in the same transaction as the row, so
+      // a removal never lands silently in the event log.
+      this.#emitBoardReceipt(roomId, removed, ["removed"]);
       if (typeof this.store.workClaims.delete === "function") {
         this.store.workClaims.delete(roomId, itemId);
         // Issue #1527: the mirrored claim is gone, so any claim that depended
@@ -648,7 +755,7 @@ export class LandQueue {
     return { roomId, itemId, removed: true };
   }
 
-  reportTip(roomId, memberId, { itemId, sourceRevision, buildId } = {}) {
+  reportTip(roomId, memberId, { itemId, sourceRevision, buildId, requestId = null } = {}) {
     this.#member(roomId, memberId);
     if (!validId(itemId)) fail(422, "invalid_land_item", "itemId is required");
     const source = parseTipField(sourceRevision, "sourceRevision");
@@ -656,6 +763,18 @@ export class LandQueue {
     if (source === undefined && build === undefined) {
       fail(422, "invalid_land_tip", "sourceRevision or buildId is required");
     }
+    const key = this.#requestKey(roomId, memberId, "report_tip", requestId, "invalid_land_tip",
+      { itemId, sourceRevision: source, buildId: build });
+    if (key.replay) return key.body;
+    let out;
+    try {
+      out = this.#reportTipExecute(roomId, memberId, itemId, source, build);
+    } catch (error) { key.abort(); throw error; }
+    key.commit(out);
+    return out;
+  }
+
+  #reportTipExecute(roomId, memberId, itemId, source, build) {
     const row = this.#row(roomId, itemId);
     if (!row) fail(404, "land_item_not_found", "Land queue item was not found");
     const previous = observedFromRow(row);
@@ -772,6 +891,9 @@ export class LandQueue {
             : null;
           const dependents = claim ? this.#dependentsOf(item.roomId, item.itemId) : [];
           this.db.prepare("DELETE FROM land_queue WHERE room_id=? AND item_id=?").run(item.roomId, item.itemId);
+          // Same board-write receipt as remove(): the auto-delete is a board
+          // mutation and commits its land.updated (changed ["removed"]) here.
+          this.#emitBoardReceipt(item.roomId, item, ["removed"]);
           if (typeof this.store.workClaims?.delete === "function") {
             this.store.workClaims.delete(item.roomId, item.itemId);
             // Issue #1527: same stranded-dependent receipt as remove().
@@ -917,6 +1039,32 @@ export class LandQueue {
     try { this.wakeClaimant(roomId, item.claimantMemberId, incoming, payload); }
     catch (error) { console.error("land queue wake failed:", error?.message ?? error); }
     return incoming;
+  }
+
+  // Board-write receipts: a board write that records without waking anyone.
+  // Adding is the caller's own action and a removal needs no doorbell, so
+  // there is nobody to wake; the receipt exists so the write is observable
+  // in the event log. Runs inside the caller's board transaction so the row
+  // write and its event commit together.
+  #emitBoardReceipt(roomId, item, changed) {
+    const room = this.store.room(roomId);
+    if (isRoomArchived(room.state)) return null;
+    const claimant = room.state.members?.[item.claimantMemberId];
+    const incoming = event({
+      id: randomUUID(),
+      idempotencyKey: randomUUID(),
+      type: EVENT_TYPES.LAND_UPDATED,
+      actorId: claimant && claimant.active !== false ? item.claimantMemberId : room.state.room.ownerId,
+      roomId,
+      at: new Date(this.store.now()).toISOString(),
+      data: {
+        itemId: item.itemId,
+        repo: item.repo,
+        claimantMemberId: item.claimantMemberId,
+        ...landWakePayload(item, changed)
+      }
+    });
+    return this.#appendRoomEvent(roomId, incoming);
   }
 
   // Push the thin payload through the existing wake path: a pointer doorbell

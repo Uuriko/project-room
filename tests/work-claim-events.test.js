@@ -36,6 +36,7 @@ const claimEvents = async client => (await client.changes(0, 100)).events
   .filter(row => row.event.type === 'work_claim.updated')
   .map(row => ({ seq: row.sequence, actor: row.event.actorId, at: row.event.at, ...row.event.data }));
 
+const roundOf = c => ({ expectedClaimedAt: c.claimedAt ?? c.claim?.claimedAt, expectedHistoryLength: (c.history?.length ?? c.claim?.history?.length ?? 0) + (c.historyOmitted ?? c.claim?.historyOmitted ?? 0) });
 test('each claim change appends one event naming the member, the action, the owner and the files', async t => {
   const { owner, peer } = await fixture(t);
   const created = await owner.workClaimCreate({ id: 'lane-a', title: 'Lane A', files: ['server/a.mjs'] });
@@ -47,8 +48,8 @@ test('each claim change appends one event naming the member, the action, the own
   await new Promise(resolve => setTimeout(resolve, 2));
   const progress = (await owner.say('Lane A is moving')).event.data.messageId;
   await owner.renewWorkItem('lane-a', { progressMessageId: progress, leaseHours: 3 });
-  await owner.reassignWorkItem('lane-a', { newOwner: 'reviewer', note: 'handoff' });
-  await peer.releaseWorkItem('lane-a', { note: 'parked' });
+  await owner.reassignWorkItem('lane-a', { newOwner: 'reviewer', note: 'handoff', ...roundOf(await owner.workClaimGet('lane-a')) });
+  await peer.releaseWorkItem('lane-a', { note: 'parked', ...roundOf(await peer.workClaimGet('lane-a')) });
 
   const events = await claimEvents(owner);
   assert.deepEqual(events.map(e => [e.actor, e.action, e.claimState, e.ownerId]), [
@@ -76,7 +77,7 @@ test('a refused claim change appends no event', async t => {
   const before = (await claimEvents(owner)).length;
   await assert.rejects(peer.claimWorkItem('held'), error => error.status === 409);
   await assert.rejects(peer.releaseWorkItem('held'), error => error.status === 403);
-  await assert.rejects(owner.reassignWorkItem('held', { newOwner: 'nobody-here' }), error => error.status === 422);
+  await assert.rejects(owner.reassignWorkItem('held', { newOwner: 'nobody-here', ...roundOf(await owner.workClaimGet('held')) }), error => error.status === 422);
   assert.equal((await claimEvents(owner)).length, before);
 });
 
@@ -97,7 +98,7 @@ test('a lapsed lease is swept once, naming the previous owner and the files that
 test('the full event log, claim events included, replays from an empty room', async t => {
   const { store, owner } = await fixture(t);
   await owner.workClaim('replayed', { files: ['src/r.js'], leaseHours: 1 });
-  await owner.releaseWorkItem('replayed', { note: 'parked' });
+  await owner.releaseWorkItem('replayed', { note: 'parked', ...roundOf(await owner.workClaimGet('replayed')) });
   const rows = store.db.prepare('SELECT body FROM events WHERE room_id=? ORDER BY sequence').all('commons');
   let state = emptyRoomState();
   for (const { body } of rows) state = applyEvent(state, JSON.parse(body));

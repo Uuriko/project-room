@@ -22,6 +22,45 @@ async function setup(t) {
   return { f, api, message, origin };
 }
 
+test('unfinished assistant work stays discoverable after more than 100 newer terminal requests', async t => {
+  const { f, api, message } = await setup(t);
+  const assistant = new RoomAssistant(f.store);
+  let clock = f.store.now();
+  f.store.now = () => clock;
+  // Exercise production transitions to create history without exhausting the
+  // HTTP write limiter; the externally observable read uses the actual route.
+  const apply = (actor, input) => assistant.apply('commons', { requestId: randomUUID(), ...input }, () => f.store.authenticate(f.keys[actor], 'commons')).result;
+  apply('owner', { action: 'configure', expectedRevision: 0, name: 'Room', coordinatorMemberId: 'producer' });
+  for (const id of ['queued', 'working', 'paused', 'needs-input', 'stopping']) {
+    message('owner', `prompt-${id}`);
+    apply('owner', { action: 'invoke', runId: id, sourceMessageId: `prompt-${id}` });
+    if (id === 'paused') apply('owner', { action: 'pause', runId: id, expectedRevision: 0 });
+    else if (id !== 'queued') {
+      apply('producer', { action: 'claim', runId: id, attemptId: `host-${id}`, expectedRevision: 0 });
+      if (id === 'needs-input') apply('producer', { action: 'report', runId: id, attemptId: `host-${id}`, expectedRevision: 1, state: 'needs_input', summary: 'Choose a direction.' });
+      if (id === 'stopping') apply('owner', { action: 'cancel', runId: id, expectedRevision: 1 });
+    }
+  }
+  for (let n = 0; n < 105; n++) {
+    clock += 2000; // Historical requests respect the normal chat refill budget.
+    message('owner', `terminal-prompt-${n}`);
+    apply('owner', { action: 'invoke', runId: `terminal-${n}`, sourceMessageId: `terminal-prompt-${n}` });
+    apply('owner', { action: 'cancel', runId: `terminal-${n}`, expectedRevision: 0 });
+  }
+  apply('producer', { action: 'report', runId: 'working', attemptId: 'host-working', expectedRevision: 1, state: 'working', summary: 'Still processing the original request.' });
+  const context = await api('owner');
+  const statuses = new Map(context.runs.map(run => [run.id, run.status]));
+  for (const [id, status] of [['queued', 'queued'], ['working', 'working'], ['paused', 'paused'], ['needs-input', 'needs_input'], ['stopping', 'cancel_requested']])
+    assert.equal(statuses.get(id), status, `older ${id} remains visible and actionable`);
+  assert.equal(context.runs.length, 100, 'history remains bounded');
+  assert.equal(statuses.get('terminal-104'), 'cancelled', 'recent outcomes remain available');
+  assert.equal(statuses.has('terminal-0'), false, 'older terminal history yields to unfinished work');
+  assert.equal(context.assistant.availability, 'connected', 'recent active host is not hidden by terminal history');
+  const pending = context.runs.find(run => run.id === 'queued');
+  const claimed = await api('producer', { action: 'claim', runId: pending.id, attemptId: 'recovered-host', expectedRevision: pending.revision });
+  assert.equal(claimed.result.status, 'working');
+});
+
 test('two humans share one durable run, host claims and publishes a real public result', async t => {
   const { f, api, message } = await setup(t);
   assert.equal((await api('guest')).assistant.availability, 'not_connected');
@@ -82,6 +121,45 @@ test('completion accounts for late group contributions and refuses partial compl
   assert.deepEqual(done.result.inputs.map(i=>i.status),['applied','applied']);
   assert.deepEqual(await api('producer',corrected),done);
   assert.equal((await api('guest')).runs[0].activity.length,2);
+});
+
+test('shared assistant inputs and results stay in the originating channel and thread', async t => {
+  for (const scenario of [
+    { name: 'another channel', threaded: false, foreign: { channelId: 'design' } },
+    { name: 'another thread in the same channel', threaded: false, foreign: { replyToId: 'foreign-root' } },
+    { name: 'outside the originating thread', threaded: true, foreign: {} },
+    { name: 'another thread from a threaded request', threaded: true, foreign: { replyToId: 'foreign-root' } }
+  ]) await t.test(scenario.name, async t => {
+    const { f, api, message } = await setup(t);
+    await api('owner', { action: 'configure', expectedRevision: 0, name: 'Room', coordinatorMemberId: 'producer' });
+    f.store.command(f.keys.owner, 'commons', { id: randomUUID(), type: 'channel.created', data: { channelId: 'design', name: 'design' } });
+    message('owner', 'root'); message('owner', 'foreign-root');
+    message('owner', 'question', 'Help with this conversation', scenario.threaded ? { replyToId: 'root' } : {});
+    await api('owner', { action: 'invoke', runId: 'bound-run', sourceMessageId: 'question' });
+    message('guest', 'foreign-input', 'An unrelated conversation', scenario.foreign);
+    const refusal = await api('guest', { action: 'contribute', runId: 'bound-run', sourceMessageId: 'foreign-input', expectedRevision: 0 }, 409);
+    assert.equal(refusal.error.code, 'assistant_conversation_mismatch');
+    assert.equal((await api('owner')).runs[0].revision, 0);
+    assert.deepEqual((await api('owner')).runs[0].inputs.map(input => input.sourceMessageId), ['question']);
+    const replyToId = scenario.threaded ? 'root' : 'question';
+    message('guest', 'context', 'Relevant context', { replyToId: 'question' });
+    await api('guest', { action: 'contribute', runId: 'bound-run', sourceMessageId: 'context', expectedRevision: 0 });
+    await api('producer', { action: 'claim', runId: 'bound-run', attemptId: 'host', expectedRevision: 1 });
+    message('producer', 'foreign-result', 'Unrelated result', scenario.foreign);
+    const completion = { action: 'report', requestId: 'complete-bound-run', runId: 'bound-run', attemptId: 'host', expectedRevision: 2, state: 'done', summary: 'Result ready', resultMessageId: 'foreign-result', appliedInputMessageIds: ['question', 'context'] };
+    const rejected = await api('producer', completion, 409);
+    assert.equal(rejected.error.code, 'assistant_conversation_mismatch');
+    const unchanged = (await api('owner')).runs[0];
+    assert.equal(unchanged.status, 'working'); assert.equal(unchanged.revision, 2);
+    assert.equal(unchanged.resultMessageId, undefined);
+    assert.deepEqual(unchanged.inputs.map(input => input.status), ['pending', 'pending']);
+    message('producer', 'result', 'The actual answer', { replyToId });
+    // A refused completion never consumes the retry ID or changes the run.
+    const corrected = { ...completion, resultMessageId: 'result' };
+    const done = await api('producer', corrected);
+    assert.equal(done.result.status, 'done'); assert.equal(done.result.resultMessageId, 'result');
+    assert.deepEqual(await api('producer', corrected), done);
+  });
 });
 
 test('conflict is explicit, decision is authorized, and cancellation awaits host confirmation', async t => {

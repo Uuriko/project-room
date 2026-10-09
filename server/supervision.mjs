@@ -384,7 +384,7 @@ export function decideSuggestions(card, live = {}) {
           // {newOwner, note?}.
           body: { newOwner: confidentHint.lane, note: "handing review — affinity pick" },
         },
-        apiNote: "verify the lane is a live room member before firing",
+        apiNote: "verify the lane is a live room member before firing; add expectedClaimedAt and expectedHistoryLength from a fresh claim read (reassign binds the claim round)",
         ref: { claimId, lane: confidentHint.lane },
       });
     }
@@ -422,7 +422,7 @@ export function decideSuggestions(card, live = {}) {
           path: `/api/rooms/${roomId}/work-claims/${claimId}/reassign`,
           body: { newOwner: confidentHint.lane, note: "reassigning blocked claim — affinity pick" },
         },
-        apiNote: "verify the lane is a live room member before firing",
+        apiNote: "verify the lane is a live room member before firing; add expectedClaimedAt and expectedHistoryLength from a fresh claim read (reassign binds the claim round)",
         ref: { claimId, lane: confidentHint.lane },
       });
     } else {

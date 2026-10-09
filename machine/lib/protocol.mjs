@@ -85,3 +85,13 @@ export function errorResult(id, code, message) {
 export function okResult(id, result) {
   return { type: "result", id, ok: true, result };
 }
+
+// A pause holds only for a real duration. Missing, zero, negative, and
+// non-finite values are ignored so guests are not suspended for a pause
+// that expires immediately.
+export function pauseUntilFromMinutes(minutes, now = Date.now()) {
+  const value = Number(minutes);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  const until = now + value * 60 * 1000;
+  return Number.isFinite(until) ? until : null;
+}

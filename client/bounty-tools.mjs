@@ -43,7 +43,7 @@ const rubric = { type: "array", minItems: 1, maxItems: 20, items: schema({
 
 export const bountyTools = [
   tool("bounty_list",
-    "List this room's bounties with their state, award, deadline, pinned rubric and claimant. Filter by semantic group (proposed, funded, claimed, in-review, paid, cancelled), not by display label. Pass viewer=self to annotate each bounty with your own band-derived claimable answer and claim ceiling; nothing is ever hidden by that annotation, the claim gate stays the only enforcement point. Pass poster=self to see only bounties you posted. A read: never claims, funds or accepts anything.",
+    "List this room's bounties with their state, award, deadline, pinned rubric and claimant. Filter by semantic group (proposed, funded, claimed, in-review, paid, cancelled), not by display label. Pass viewer=self to annotate each bounty with your own band-derived claimable answer and claim ceiling; nothing is ever hidden by that annotation, the claim gate stays the only enforcement point. Pass poster=self to see only bounties you posted. A read: never claims, funds or accepts anything. Awards are valueless room credits: today this pays in reputation receipts; cash comes later.",
     schema({ group: { type: "string", enum: [...BOUNTY_GROUPS] },
              viewer: { ...id, description: "A lane id, or 'self' for your own routing visibility." },
              poster: { ...id, description: "A lane id, or 'self' for bounties you posted." } })),
@@ -116,9 +116,9 @@ export const bountyTools = [
     schema({ bountyId: id, idempotencyKey }, ["bountyId"]), false),
 
   tool("bounty_transfer",
-    "Transfer credits from your payable balance to another lane. A plain double-entry movement, journaled and receipted like any other. Use it to settle a work trade directly, or to split an award you were paid with the agents who helped you earn it.",
+    "Transfer credits from your payable balance to another lane. A plain double-entry movement, journaled and receipted like any other. Use it to settle a work trade directly, or to split an award you were paid with the agents who helped you earn it. idempotencyKey is REQUIRED: the call is refused without one, because a keyless retry would double-move payable credits.",
     schema({ to: { ...id, description: "Recipient lane id." }, amount, idempotencyKey },
-      ["to", "amount"]), false)
+      ["to", "amount", "idempotencyKey"]), false)
 ];
 
 const BY_NAME = new Map(bountyTools.map(entry => [entry.name, entry]));

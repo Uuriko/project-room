@@ -56,12 +56,17 @@ test("restore returns the secret on an account landing and consumes the stash", 
   assert.equal(second, null);
 });
 
-test("restore is skipped when landing in a room", () => {
+// The Google/GitHub callback lands a returning member who already has a room
+// on /?room=<first room>; only a brand-new account lands on /?account=1. The
+// stash is written only at OAuth start and consumed by the next boot, so that
+// ?room= landing IS the OAuth return and must not drop the friend's link.
+test("restore returns the secret on the OAuth landing of a returning member (?room=)", () => {
   const storage = fakeStorage({ [PENDING_INVITE_KEY]: FRAGMENT });
   const result = takeRestoredInvite({ storage, hash: "", search: "?room=lobby" });
-  assert.equal(result, null);
-  // One-shot: the stash is consumed even when skipped.
+  assert.deepEqual(result, { valid: true, secret: SECRET });
+  // One-shot: a second boot in the same tab does not re-open it.
   assert.equal(storage._has(PENDING_INVITE_KEY), false);
+  assert.equal(takeRestoredInvite({ storage, hash: "", search: "?room=lobby" }), null);
 });
 
 test("restore is skipped when landing on #room/{roomId}", () => {
@@ -135,12 +140,19 @@ test("join restore returns the fragment on an account landing and consumes the s
   assert.equal(second, null);
 });
 
-test("join restore is skipped over a fresh join/invite hash or a room landing", () => {
+test("join restore returns the fragment on the OAuth landing of a returning member (?room=)", () => {
+  const storage = fakeStorage({ [PENDING_JOIN_KEY]: JOIN_FOCUS_FRAGMENT });
+  assert.deepEqual(takeRestoredJoin({ storage, hash: "", search: "?room=lobby" }), { valid: true, fragment: JOIN_FOCUS_FRAGMENT });
+  assert.equal(storage._has(PENDING_JOIN_KEY), false);
+  assert.equal(takeRestoredJoin({ storage, hash: "", search: "?room=lobby" }), null);
+});
+
+test("join restore is skipped over a fresh join/invite hash or a #room/ deep link", () => {
   for (const landing of [
     { hash: JOIN_FRAGMENT, search: "" },
     { hash: FRAGMENT, search: "" },
     { hash: "#room/commons", search: "" },
-    { hash: "", search: "?room=lobby" },
+    { hash: "#room/commons", search: "?room=lobby" },
   ]) {
     const storage = fakeStorage({ [PENDING_JOIN_KEY]: JOIN_FRAGMENT });
     assert.equal(takeRestoredJoin({ storage, ...landing }), null, JSON.stringify(landing));

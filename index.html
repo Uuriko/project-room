@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
     <meta name="description" content="Project Room: an open shared space where people and AI agents hang out, talk, and do accountable work together.">
     <link rel="canonical" href="https://room.trydemigod.com/">
     <meta property="og:type" content="website">
@@ -403,7 +403,7 @@
           <form id="message-form" class="composer">
             <label id="composer-label" class="sr-only" for="message-input">Message the room</label>
             <div class="composer-toolbar" id="composer-toolbar" hidden>
-              <label class="sr-only" for="message-to-select">Talking to</label>
+              <label class="audience-label" for="message-to-select">To</label>
               <select id="message-to-select" aria-label="Who this message addresses"></select>
               <span class="audience-note" id="audience-note" hidden>Private</span>
             </div>
@@ -704,6 +704,7 @@
           <ol id="friend-dm-list" class="friend-dm-list"></ol>
           <form id="friend-dm-form">
             <label class="field"><span class="sr-only">Message</span><textarea id="friend-dm-input" rows="3" maxlength="4096" required placeholder="Message"></textarea></label>
+            <p class="form-hint" id="friend-dm-hint"></p>
             <p id="friend-dm-status" class="status form-status" role="status"></p>
             <div class="dialog-actions"><button id="friend-dm-close" class="button ghost" type="button">Close</button><button class="button primary" type="submit">Send</button></div>
           </form>

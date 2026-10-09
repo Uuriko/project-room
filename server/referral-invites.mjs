@@ -231,7 +231,7 @@ export class ReferralInvites {
   }
 
   // --- mint --------------------------------------------------------------
-  mint(token, roomId, { maxDepth: requestedMaxDepth } = {}) {
+  mint(token, roomId, { maxDepth: requestedMaxDepth, requestId } = {}) {
     const auth = this.store.authenticate(token, roomId);
     if (!auth.member || auth.member.active === false) fail(403, "access_denied", "Join the room before sending referral invites");
     if (typeof auth.member.id !== "string" || !MEMBER_ID_PATTERN.test(auth.member.id)) fail(403, "access_denied", "Join the room before sending referral invites");
@@ -249,6 +249,33 @@ export class ReferralInvites {
     }
     refuseArchivedWrite(room.state);
     if (room.state.members[auth.member.id]?.active === false) fail(403, "access_denied", "Join the room before sending referral invites");
+
+    // PRODUCT-200 B3/B11: opt-in client-kept requestId. The jti is derived from
+    // (room, inviter, requestId), so a lost-response retry finds the same
+    // ledger row and re-signs the SAME token (deterministic Ed25519) instead
+    // of minting a second live token. Keyless calls keep the old behavior.
+    let keyedJti = null;
+    if (requestId !== undefined) {
+      if (typeof requestId !== "string" || !/^[A-Za-z0-9_.:-]{8,128}$/.test(requestId))
+        fail(422, "invalid_invite", "requestId must be 8-128 characters: letters, digits, _ . : -");
+      const hex = createHash("sha256").update(`referral-mint\0${roomId}\0${auth.member.id}\0${requestId}`).digest("hex");
+      keyedJti = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+      const prior = this.store.db.prepare(
+        "SELECT chain_id, depth, max_depth, created_at, expires_at FROM referral_invites WHERE jti = ? AND room_id = ? AND inviter_member_id = ?"
+      ).get(keyedJti, roomId, auth.member.id);
+      if (prior) {
+        if (requestedMaxDepth !== undefined && requestedMaxDepth !== prior.max_depth)
+          fail(409, "referral_mint_idempotency_conflict", "That requestId was already used with a different maxDepth");
+        const keys = this.roomKeys(roomId);
+        const signed = this.signToken({ v: TOKEN_VERSION, jti: keyedJti, chainId: prior.chain_id, roomId, depth: prior.depth, maxDepth: prior.max_depth,
+          issuedAt: prior.created_at, expiresAt: prior.expires_at, tier: REFERRAL_TIER }, keys.privateSeed);
+        return {
+          token: signed, jti: keyedJti, chainId: prior.chain_id, roomId, depth: prior.depth, maxDepth: prior.max_depth,
+          issuedAt: prior.created_at, expiresAt: prior.expires_at, tier: REFERRAL_TIER, duplicate: true,
+          grantedPermissions: grantedPermissions(), publicKey: keys.publicKey.toString("base64"), next: mintNext(signed),
+        };
+      }
+    }
 
     // The depth-cap refusal is journaled in its own committed transaction
     // before failing: a throw inside the mint transaction below would roll
@@ -280,7 +307,7 @@ export class ReferralInvites {
     return this.store.transaction(() => {
       const chainId = chain?.chain_id ?? randomUUID();
       const depth = minterDepth + 1;
-      const jti = randomUUID();
+      const jti = keyedJti ?? randomUUID();
       const issuedAt = this.now();
       const expiresAt = issuedAt + INVITE_TTL_MS;
       const keys = this.roomKeys(roomId);

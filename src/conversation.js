@@ -212,6 +212,33 @@ export function messageBodyHtml(body, members, esc, messageId) {
   return `<details class="message-expansion"><summary data-focus-key="message-expand:${esc(messageId)}"><span class="message-preview" aria-hidden="true">${esc(preview)}…</span><span class="message-show-more">Show more · ${lines.length} ${lines.length === 1 ? "line" : "lines"}</span><span class="message-show-less">Show less</span></summary><div class="message-full">${full}</div></details>`;
 }
 
+// Chat renders run on every arrival and used to rebuild every body's HTML
+// (emoji, @mention chips, markdown): about 200 ms of each render at 3,000
+// messages. The output is pure in (body, message id, mentionable members), so
+// one entry per message id is kept and the whole cache resets when the members
+// change. Callers pass a fresh members array per render pass (state.members is
+// mutated in place), and the members key is recomputed only when that array
+// or esc changes.
+export function createBodyHtmlCache(render = messageBodyHtml, limit = 20000) {
+  const entries = new Map();
+  let lastMembers = null, lastEsc = null, membersKey = null;
+  return {
+    html(body, members, esc, messageId) {
+      if (members !== lastMembers || esc !== lastEsc) {
+        const key = [...(members || [])].map(m => [m?.id, m?.displayName ?? "", m?.kind ?? ""].join("\u0001")).join("\u0002");
+        if (key !== membersKey || esc !== lastEsc) entries.clear();
+        lastMembers = members; lastEsc = esc; membersKey = key;
+      }
+      const text = String(body ?? ""), hit = entries.get(messageId);
+      if (hit && hit.body === text) return hit.html;
+      if (entries.size >= limit) entries.clear();
+      const html = render(text, members, esc, messageId);
+      entries.set(messageId, { body: text, html });
+      return html;
+    }
+  };
+}
+
 export function mentionHtml(body, members, esc) {
   const text = renderEmojiShortcodes(body);
   const names = [...(members || [])].filter(m => m?.displayName).sort((a, b) => b.displayName.length - a.displayName.length);
@@ -266,9 +293,37 @@ export function markdownHtml(escaped) {
     const tail = url.slice(clean.length);
     return `${pre}<a href="${clean}" target="_blank" rel="noopener noreferrer">${clean}</a>${tail}`;
   });
+  // Simple lists, after inline marks so **bold** inside an item still works,
+  // and before code is restored so a fence that contains "- item" stays literal.
+  text = renderMarkdownLists(text);
   // Restore stashed code (placeholders carry no markdown-significant characters).
   for (let i = 0; i < saved.length; i++) text = text.split(`${mdSlot}${i}${mdSlot}`).join(saved[i]);
   return text;
+}
+
+
+// One level only. A marker is "- ", "* ", or "1. " at the start of a line,
+// so "*italic*" and mid-line dashes stay as they are. Runs of the same
+// marker kind become one list; a blank line or a different marker ends it.
+function renderMarkdownLists(text) {
+  const lines = text.split("\n");
+  const bullet = /^[-*] (.+)$/;
+  const ordered = /^\d+\. (.+)$/;
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    const kind = bullet.test(lines[i]) ? "ul" : ordered.test(lines[i]) ? "ol" : "";
+    if (!kind) { out.push(lines[i]); i += 1; continue; }
+    const pattern = kind === "ul" ? bullet : ordered;
+    const items = [];
+    while (i < lines.length && pattern.test(lines[i])) {
+      items.push(pattern.exec(lines[i])[1]);
+      i += 1;
+    }
+    const lis = items.map(item => ["<li>", item, "</li>"].join("")).join("");
+    out.push(["<", kind, " class=\"md-list\">", lis, "</", kind, ">"].join(""));
+  }
+  return out.join("\n");
 }
 
 export function composerPlaceholder({ workKind = null, inThread = false, channelName = "general" } = {}) {

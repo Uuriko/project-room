@@ -38,3 +38,14 @@ export function composerAudienceNote(members, to) {
   if (!recipient) return null;
   return `Private — only you and ${recipient.displayName} can see this message.`;
 }
+
+// The "Talking to" picker is the broadcast-vs-DM control: "Everyone" sends to
+// the room, a member makes it a private DM. It stays visible whenever there
+// is someone to address — hiding it until a recipient was already chosen
+// made room-chat DMs undiscoverable, because the hidden control was the only
+// way to start one. Request mode always shows it (the request needs a
+// recipient). A solo room hides it (the only option would be "Everyone").
+export function composerAudiencePickerVisible({ members, selfId, requestMode } = {}) {
+  if (requestMode) return true;
+  return (members || []).some(member => member && member.active !== false && member.id !== selfId);
+}

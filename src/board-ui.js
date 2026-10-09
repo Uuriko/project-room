@@ -160,11 +160,12 @@ export function paintClaimChat(state, list) {
   list.querySelectorAll("[data-claim-update]").forEach(node => node.remove());
   if (!state) return;
   const groups = collapseClaimUpdates(state.eventLog);
-  const stamps = [...list.querySelectorAll(":scope > .message")].map(node => {
-    const id = node.dataset.messageRecordId;
-    const message = (state.messages ?? []).find(item => item.id === id);
-    return { node, at: message?.createdAt ?? "" };
-  });
+  if (!groups.length) return;
+  // One pass over the room's messages: a find() per rendered message was
+  // quadratic and ran on every chat render.
+  const createdAt = new Map();
+  for (const message of state.messages ?? []) createdAt.set(message.id, message.createdAt);
+  const stamps = [...list.querySelectorAll(":scope > .message")].map(node => ({ node, at: createdAt.get(node.dataset.messageRecordId) ?? "" }));
   for (const group of groups) {
     const line = document.createElement("li");
     line.className = "claim-update";
@@ -240,6 +241,51 @@ function viewerOf(state, session) {
   return { id, manage, owner: Boolean(id && state?.room?.ownerId === id), write: canWriteClaims(state, session) };
 }
 
+// VERIFY step: who may record a verdict review from the board. Mirrors the
+// server's mayReviewWorkClaims (an active member with write rights or the
+// verify permission); the owner can never review their own claim, and only
+// owned, active claims are reviewable. The
+// review route re-checks on POST; this only decides whether the form renders.
+export function canReviewClaim(item, viewer, members) {
+  if (!item || !viewer?.id) return false;
+  const member = members?.[viewer.id];
+  if (!member || member.active === false) return false;
+  if (!item.owner || item.owner === viewer.id) return false;
+  // recordReview refuses anything but an active claim ("only active claims can
+  // be reviewed"), so a done/closed claim with a still-open PR must not render
+  // a form the server will always reject.
+  if (!["claimed", "in_progress", "blocked"].includes(item.state)) return false;
+  const permissions = new Set(member.permissions ?? []);
+  return viewer.write || permissions.has("verify");
+}
+
+// Review controls for a claim card. Every label comes from the strings
+// catalog via uiText, and each literal holds only complete HTML tags, so the
+// i18n harness sees no new hardcoded copy. The form posts to
+// POST /work-claims/:id/review through the board's submit handler.
+export function claimReviewForm(item) {
+  const id = escapeHtml(item.id);
+  return [
+    `<form class="board-new" data-claim-review="${id}">`,
+    "<span class=\"form-hint\">", uiText("board.review.legend"), "</span>",
+    "<label>",
+    uiText("board.review.verdict.label"),
+    " <select name=\"verdict\" required>",
+    "<option value=\"approve\">", uiText("board.review.verdict.approve"), "</option>",
+    "<option value=\"changes_requested\">", uiText("board.review.verdict.changes_requested"), "</option>",
+    "<option value=\"comment\">", uiText("board.review.verdict.comment"), "</option>",
+    "</select>",
+    "</label>",
+    "<label>",
+    uiText("board.review.summary.label"),
+    " <input name=\"summary\" required maxlength=\"2000\" autocomplete=\"off\">",
+    "</label>",
+    "<span class=\"form-hint\">", uiText("board.review.summary.placeholder"), "</span>",
+    "<button type=\"submit\" class=\"button secondary\">", uiText("board.review.submit"), "</button>",
+    "</form>"
+  ].join("");
+}
+
 function workLink(item, workItems, key, label) {
   const linked = typeof item?.workItemId === "string" && Object.hasOwn(workItems ?? {}, item.workItemId) && workItems[item.workItemId]?.id === item.workItemId;
   return linked ? `<a href="#pr-record/work/${encodeURIComponent(item.workItemId)}" data-open-work="${escapeHtml(item.workItemId)}" data-focus-key="${escapeHtml(key)}">${escapeHtml(label)}</a>` : escapeHtml(label);
@@ -312,6 +358,10 @@ function cardHtml(item, viewer, members, now, workItems, byId) {
   if (canLinkPullRequest(item, viewer, now)) {
     actions.push(`<form class="board-new" data-claim-link-pr="${escapeHtml(item.id)}"><label>Pull request URL <input name="pullRequest" type="url" size="1" maxlength="300" required autocomplete="off" placeholder="https://github.com/…/pull/…" aria-label="Pull request URL for ${escapeHtml(item.title || item.id)}" data-focus-key="link-pr:${escapeHtml(item.id)}"></label><button type="submit" class="button secondary">Link PR</button></form>`);
   }
+  // VERIFY step: the board used to render no review control at all — "What
+  // needs me › Review" only scrolled to the card (dead end). Eligible
+  // reviewers now get the verdict form right on the card.
+  if (canReviewClaim(item, viewer, members)) actions.push(claimReviewForm(item));
   if (item.state === "unclaimed" && !item.owner && !waiting) actions.push(button("claim", "Claim", "primary"));
   if (mine && ["claimed", "in_progress", "blocked"].includes(item.state)) actions.push(button("renew", "Renew", "secondary"));
   if (mine && (item.state === "claimed" || item.state === "blocked")) actions.push(button("progress", "Mark in progress", "secondary"));
@@ -351,7 +401,36 @@ export function newItemCreateBody(data) {
   return body;
 }
 
-function boardHtml(items, status, viewer, members, now, { older = false, canWrite = false, capabilities = [], cap = 20, workItems = {} } = {}) {
+// Loading states (BU-02): the board never shows the empty-board copy while a
+// read is in flight. With no items yet it renders skeleton columns; with
+// items it keeps the stale board and says it is refreshing; a failed load
+// gets an honest error with a retry button instead of a silent empty board.
+export function boardSkeletonHtml() {
+  const card = `<div class="sk-card"><span class="sk-line"></span><span class="sk-line short"></span><span class="sk-line shorter"></span></div>`;
+  return `<div class="board-skeleton" aria-hidden="true">${COLUMNS.map(([, label]) => `<section><h3>${escapeHtml(label)}</h3>${card}${card}</section>`).join("")}</div>`;
+}
+
+const PENDING_OUTCOME_KEYS = {
+  claim: "board.action.pending.claim",
+  renew: "board.action.pending.renew",
+  progress: "board.action.pending.progress",
+  done: "board.action.pending.done",
+  release: "board.action.pending.release",
+  close: "board.action.pending.close",
+  cancel: "board.action.pending.cancel",
+  reassign: "board.action.pending.reassign",
+  create: "board.action.pending.create",
+};
+
+// In-flight narration for every board action, so the board never looks frozen
+// mid-request. Pure: the installWorkBoard handlers pass titleOf(id).
+export function pendingOutcome(action, title) {
+  if (action === "sweep") return uiText("board.action.pending.sweep");
+  const key = PENDING_OUTCOME_KEYS[action];
+  return key ? uiText(key, { title }) : "";
+}
+
+export function boardHtml(items, status, viewer, members, now, { older = false, canWrite = false, capabilities = [], cap = 20, workItems = {}, loading = false, loadError = false } = {}) {
   const columns = placeClaims(items, now);
   const byId = new Map(items.map(item => [item.id, item]));
   const waitingCount = columns.blocked.filter(item => item.state === "unclaimed" && !item.owner).length;
@@ -361,9 +440,14 @@ function boardHtml(items, status, viewer, members, now, { older = false, canWrit
   const hint = older ? `<p class="form-hint board-older">Older landed work is in the API</p>` : "";
   const body = items.length
     ? `${hint}<div class="board-columns">${COLUMNS.map(([id, label]) => `<section aria-labelledby="board-col-${id}"><h3 id="board-col-${id}">${label}${id === "blocked" && waitingCount ? ` · ${waitingCount} waiting` : ""}</h3>${columns[id].map(item => cardHtml(item, viewer, members, now, workItems, byId)).join("") || `<p class="form-hint">Nothing here.</p>`}</section>`).join("")}</div>`
+    : loading ? boardSkeletonHtml()
+    : loadError ? ""
     : `<p class="board-empty">${escapeHtml(emptyBoardCopy(capabilities, { canWrite, signedIn: Boolean(viewer?.id) }))}</p>${hint}`;
   const needsMe = items.length ? needsMeHtml(items, viewer, members, now) : "";
-  return `${needsMe}${form}<div class="board-head"><p class="live-chip">${escapeHtml(liveLabel(status))}</p>${sweep}${capForm}</div><p id="board-status" class="form-hint" role="status"></p>${body}`;
+  // A failed refresh keeps the stale board but must still say so, with retry.
+  const loadFailure = loadError && !loading ? uiText("board.loading.error") : "";
+  const loadingNote = loading ? uiText(items.length ? "board.loading.002" : "board.loading.001") : "";
+  return `${needsMe}${form}<div class="board-head"><p class="live-chip">${escapeHtml(liveLabel(status))}</p>${sweep}${capForm}</div><p id="board-status" class="form-hint" role="status">${escapeHtml(loadingNote)}</p>${loadFailure}${body}`;
 }
 
 function staleDonePage(claims, now) {
@@ -417,6 +501,7 @@ export function installWorkBoard({ client, getState, getSession }) {
   let seen = null;
   let loadedRoom = null;
   let loadedContext = null, operation = 0, readFlight = null, actionFlight = null;
+  let boardLoading = false, boardLoadError = false;
   const context = () => {
     const current = getSession(), member = current?.member?.id;
     return current?.roomId && member && getState()?.members?.[member]?.id === member && getState().members[member].active !== false
@@ -440,7 +525,8 @@ export function installWorkBoard({ client, getState, getSession }) {
     pendingFocus = null;
     pendingStatus = "";
     root.innerHTML = boardHtml(items, status, viewerOf(state, session), state?.members ?? {}, Date.now(), {
-      older, canWrite: canWriteClaims(state, session), capabilities: advertisedCapabilities(state), cap, workItems: state?.workItems ?? {}
+      older, canWrite: canWriteClaims(state, session), capabilities: advertisedCapabilities(state), cap, workItems: state?.workItems ?? {},
+      loading: boardLoading, loadError: boardLoadError
     });
     if (stick?.status) {
       const line = root.querySelector("#board-status");
@@ -487,6 +573,7 @@ export function installWorkBoard({ client, getState, getSession }) {
     const mark = events.length ? events[events.length - 1].id : "";
     if (!force && loadedRoom === session.roomId && seen === mark) return;
     const mine = ++operation;
+    boardLoading = true; boardLoadError = false; paint();
     let pending = null;
     try {
       pending = Promise.all([
@@ -503,12 +590,20 @@ export function installWorkBoard({ client, getState, getSession }) {
       cap = config?.maxMemberOpenClaims ?? cap;
       loadedRoom = session.roomId;
       seen = mark;
+      boardLoading = false;
       paint();
       return true;
     } catch {
-      if (mine === operation && context() === owned) note("Could not load the board.");
+      if (mine !== operation || context() !== owned) return false;
+      // Honest failure: the error block (with retry) replaces the board
+      // instead of a silent empty board plus a status whisper.
+      boardLoading = false;
+      boardLoadError = true;
+      stick = null;
+      paint();
       return false;
     } finally {
+      if (mine === operation) boardLoading = false;
       if (readFlight === pending) readFlight = null;
     }
   }
@@ -551,7 +646,21 @@ export function installWorkBoard({ client, getState, getSession }) {
     }
   }
 
+  // In-flight button feedback (BU-02): the clicked control disables with
+  // aria-busy so the board never looks frozen mid-request. paint() removes
+  // the node on success; if it survives (failed action, no repaint) it is
+  // re-enabled here.
+  function flyButton(button, run, focus) {
+    button.disabled = true;
+    button.setAttribute("aria-busy", "true");
+    act(run, focus).finally(() => {
+      if (root.contains(button)) { button.disabled = false; button.removeAttribute("aria-busy"); }
+    });
+  }
+
   root.addEventListener("click", event => {
+    const retry = event.target.closest("[data-board-retry]");
+    if (retry && root.contains(retry)) { retry.disabled = true; void load({ force: true }); return; }
     const jump = event.target.closest("[data-needs-me-open]");
     if (jump && root.contains(jump)) {
       const card = root.querySelector(`article[data-claim-id="${CSS.escape(jump.dataset.needsMeOpen)}"]`);
@@ -563,21 +672,40 @@ export function installWorkBoard({ client, getState, getSession }) {
     if (!button || !root.contains(button)) return;
     const id = button.dataset.claimId;
     const action = button.dataset.claimAction;
-    const focus = { key: button.dataset.focusKey ?? null, id: id ?? null, status: outcome(action, id) };
+    const focus = { key: button.dataset.focusKey ?? null, id: id ?? null, status: outcome(action, id), pending: pendingOutcome(action, titleOf(id)) };
     if (action === "sweep") {
-      void act(() => client.request(client.path("/work-claims/sweep"), { method: "POST", data: {} }), focus);
+      flyButton(button, () => client.request(client.path("/work-claims/sweep"), { method: "POST", data: {} }), focus);
       return;
     }
     const path = client.path(`/work-claims/${encodeURIComponent(id)}`);
-    if (action === "claim") void act(() => client.request(`${path}/claim`, { method: "POST", data: {} }), focus);
-    else if (action === "release") void act(() => client.request(`${path}/release`, { method: "POST", data: {} }), focus);
-    else if (action === "close" || action === "cancel") void act(() => client.request([path, action].join("/"), { method: "POST", data: {} }), focus);
-    else if (action === "progress") void act(() => client.request(`${path}/update`, { method: "POST", data: { state: "in_progress" } }), focus);
-    else if (action === "done") void act(() => client.request(`${path}/update`, { method: "POST", data: { state: "done" } }), focus);
+    if (action === "claim") flyButton(button, () => client.request(`${path}/claim`, { method: "POST", data: {} }), focus);
+    else if (action === "release") {
+      // E5/D4 (QA-200 2026-10-08): the release binds the claim round the
+      // board read (claimedAt + lifetime history length), so a stale card
+      // cannot destroy a newer claim generation. A conflict surfaces the
+      // server's "The claim changed since it was read" message.
+      const item = items.find(entry => entry.id === id);
+      const data = item ? { expectedClaimedAt: item.claimedAt,
+        expectedHistoryLength: (item.history?.length ?? 0) + (Number(item.historyOmitted) || 0) } : {};
+      flyButton(button, () => client.request(`${path}/release`, { method: "POST", data }), focus);
+    }
+    else if (action === "close" || action === "cancel") flyButton(button, () => client.request([path, action].join("/"), { method: "POST", data: {} }), focus);
+    else if (action === "progress") flyButton(button, () => client.request(`${path}/update`, { method: "POST", data: { state: "in_progress" } }), focus);
+    else if (action === "done") flyButton(button, () => client.request(`${path}/update`, { method: "POST", data: { state: "done" } }), focus);
     else if (action === "renew") {
-      void act(() => client.request(`${path}/renew`, { method: "POST", data: {} }), focus);
+      flyButton(button, () => client.request(`${path}/renew`, { method: "POST", data: {} }), focus);
     }
   });
+  // Same in-flight treatment for form submits (BU-02): disable the submit
+  // button with aria-busy; restore it only if the node survives the repaint.
+  function flySubmit(form, run, focus) {
+    const submit = form.querySelector("button[type=submit]");
+    if (submit) { submit.disabled = true; submit.setAttribute("aria-busy", "true"); }
+    act(run, focus).finally(() => {
+      if (submit && root.contains(submit)) { submit.disabled = false; submit.removeAttribute("aria-busy"); }
+    });
+  }
+
   root.addEventListener("submit", event => {
     const linkForm = event.target.closest("[data-claim-link-pr]");
     if (linkForm && root.contains(linkForm)) {
@@ -623,6 +751,27 @@ export function installWorkBoard({ client, getState, getSession }) {
       });
       return;
     }
+    const review = event.target.closest("[data-claim-review]");
+    if (review && root.contains(review)) {
+      event.preventDefault();
+      if (mutating) return;
+      const id = review.dataset.claimReview;
+      const state = getState();
+      const item = items.find(entry => entry.id === id);
+      if (!item || !canReviewClaim(item, viewerOf(state, getSession()), state?.members ?? {})) return;
+      const fields = new FormData(review);
+      const verdict = String(fields.get("verdict") ?? "");
+      const summary = String(fields.get("summary") ?? "").trim();
+      if (!["approve", "changes_requested", "comment"].includes(verdict) || !summary) {
+        note(uiText("board.review.invalid"));
+        return;
+      }
+      const title = item.title || id;
+      flySubmit(review,
+        () => client.request(client.path(`/work-claims/${encodeURIComponent(id)}/review`), { method: "POST", data: { verdict, summary } }),
+        { id, key: `review:${id}`, status: uiText("board.review.done", { title }), pending: uiText("board.review.pending") });
+      return;
+    }
     const created = event.target.closest("#board-new-item");
     if (created && root.contains(created)) {
       event.preventDefault();
@@ -630,7 +779,7 @@ export function installWorkBoard({ client, getState, getSession }) {
       const body = newItemCreateBody(data);
       if (!body) return;
       const title = body.title;
-      void act(() => client.request(client.path("/work-claims"), { method: "POST", data: body }), { id: body.id, status: `Opened '${title}'` });
+      flySubmit(created, () => client.request(client.path("/work-claims"), { method: "POST", data: body }), { id: body.id, status: `Opened '${title}'`, pending: pendingOutcome("create", title) });
       return;
     }
     const form = event.target.closest("[data-claim-reassign]");
@@ -639,7 +788,12 @@ export function installWorkBoard({ client, getState, getSession }) {
     const id = form.dataset.claimReassign;
     const newOwner = new FormData(form).get("newOwner");
     if (typeof newOwner !== "string" || !newOwner) return;
-    void act(() => client.request(client.path(`/work-claims/${encodeURIComponent(id)}/reassign`), { method: "POST", data: { newOwner } }), { id, status: outcome("reassign", id) });
+    // The reassign binds the claim round the board read, like release, so a
+    // stale card cannot move a newer claim generation.
+    const round = items.find(entry => entry.id === id);
+    const data = { newOwner, ...(round ? { expectedClaimedAt: round.claimedAt ?? null,
+      expectedHistoryLength: (round.history?.length ?? 0) + (Number(round.historyOmitted) || 0) } : {}) };
+    flySubmit(form, () => client.request(client.path(`/work-claims/${encodeURIComponent(id)}/reassign`), { method: "POST", data }), { id, status: outcome("reassign", id), pending: pendingOutcome("reassign", titleOf(id)) });
   });
   root.addEventListener("submit", event => {
     const form = event.target.closest("[data-claim-cap]");
@@ -647,10 +801,10 @@ export function installWorkBoard({ client, getState, getSession }) {
     event.preventDefault();
     const raw = Number(new FormData(form).get("maxMemberOpenClaims"));
     if (!Number.isSafeInteger(raw)) return;
-    void act(async () => {
+    flySubmit(form, async () => {
       const saved = await client.request(client.path("/work-claims/config"), { method: "POST", data: { maxMemberOpenClaims: raw } });
       cap = saved.maxMemberOpenClaims ?? raw;
-    });
+    }, { pending: uiText("board.loading.005") });
   });
 
   return {
@@ -666,6 +820,6 @@ export function installWorkBoard({ client, getState, getSession }) {
       } catch { return false; }
       return context() === owned && loadedContext === owned && loadedRoom === getSession()?.roomId;
     },
-    reset() { operation++; mutating = false; readFlight = null; actionFlight = null; loadedContext = null; items = []; status = null; cap = 20; older = false; seen = null; loadedRoom = null; pendingFocus = null; pendingStatus = ""; stick = null; if (root.isConnected) root.replaceChildren(); }
+    reset() { operation++; mutating = false; readFlight = null; actionFlight = null; boardLoading = false; boardLoadError = false; loadedContext = null; items = []; status = null; cap = 20; older = false; seen = null; loadedRoom = null; pendingFocus = null; pendingStatus = ""; stick = null; if (root.isConnected) root.replaceChildren(); }
   };
 }

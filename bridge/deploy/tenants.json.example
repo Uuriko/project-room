@@ -1,0 +1,1 @@
+{"tenants":{"lane-claude":{"socketPath":"/run/herdr/lane-claude/herdr.sock","tmpDir":"/var/lib/herdr/lane-claude/tmp","uid":3002,"workspaceRoot":"/var/lib/herdr/lane-claude/workspace"},"lane-grokbot":{"socketPath":"/run/herdr/lane-grokbot/herdr.sock","tmpDir":"/var/lib/herdr/lane-grokbot/tmp","uid":3001,"workspaceRoot":"/var/lib/herdr/lane-grokbot/workspace"}}}

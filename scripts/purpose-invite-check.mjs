@@ -67,7 +67,7 @@ test("invite for a purpose: link opens the invited work item after join", { time
   await guest.goto(url);
   await guest.locator("#join-link-name").waitFor();
   assert.equal(await guest.locator("#join-link-scope").isVisible(), true);
-  assert.match(await guest.locator("#join-link-scope").innerText(), /Read history and join the conversation/);
+  assert.match(await guest.locator("#join-link-scope").innerText(), /Join the conversation/);
   await guest.locator("#join-link-name").fill("Purposeful guest");
   await guest.locator("#join-link-submit").click();
   await guest.locator("#main").waitFor({ state: "visible" });

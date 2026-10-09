@@ -167,6 +167,32 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
         : "Claim the work item first (POST …/work-claims/{id}/claim).")]
     };
   }
+  // H4 (QA-200 2026-10-08): work_claim_conflict is a claim conflict, not an
+  // access or input problem — the old generic fallthrough told the agent to
+  // "check access", and the route message told the HOLDER to "release it
+  // first" (destructive) while never naming a foreign holder. The message
+  // now distinguishes the two cases; this branch turns each into the right
+  // recovery, mirroring the work_not_owner pattern.
+  if (reasonCode === "work_claim_conflict") {
+    const text = String(message || "");
+    const self = /you already hold|already claimed by you/i.test(text);
+    const holder = /held by (.+?) —/.exec(text)?.[1];
+    const named = holder && holder !== "someone else" ? holder : null;
+    const claimPath = roomId && workItemId ? `/api/rooms/${roomId}/work-claims/${workItemId}` : listPath;
+    return {
+      status: "action_required", reason: "work_claim_conflict",
+      hint: self
+        ? "You already hold this work — no new claim was saved. Read the current item to confirm its state; do not release it to 're-claim'."
+        : named
+          ? `This work is held by ${named}. Ask them to reassign or release it, or claim it after their lease lapses.`
+          : "This work is already claimed. Read the current item to see who holds it and whether you should wait.",
+      next: [path(claimPath), readWork, command(self
+        ? `Read the current item (GET ${claimPath}) to confirm what you hold.`
+        : named
+          ? `Ask ${named} to reassign or release the claim, then claim it.`
+          : "Read the current item, identify the holder, then ask them to reassign or release the claim.")]
+    };
+  }
   // Recovery requires an actual current review, never an implied approval
   // from a note or a suggested automatic verdict.
   if (reasonCode === "work_review_rejected") {
@@ -549,28 +575,12 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [path(boardPath), command("Re-read the board; to continue this work, create a new item instead of reopening the closed one")]
     };
   }
-  if (reasonCode === "work_claim_conflict") {
-    const boardPath = roomId ? `/api/rooms/${roomId}/work-claims` : listPath;
-    return {
-      status: "action_required", reason: "work_claim_conflict",
-      hint: "Someone already holds or changed this item. Do not retry the same claim; re-read it, wait for release or lease expiry, or pick other work.",
-      next: [path(boardPath), command("Re-read the item's state and owner; claim it only after it returns to unclaimed, or pick another item")]
-    };
-  }
-  if (["invite_already_used", "invite_unavailable", "invite_expired", "invite_revoked"].includes(reasonCode)) {
+  if (["invite_already_used", "invite_expired", "invite_revoked"].includes(reasonCode)) {
     return {
       status: "action_required", reason: reasonCode,
-      hint: "This invite cannot be used (already used, expired, revoked or unknown). Ask the inviter for a fresh invite. Never paste the old code into chat.",
+      hint: "This invite cannot be used (already used, expired or revoked). Ask the inviter for a fresh invite. Never paste the old code into chat.",
       next: [command("If you already joined with this invite, keep your saved connection and run room_check_access"),
         command("Otherwise ask the room member who invited you for a new one-time invite; do not share the old code")]
-    };
-  }
-  if (reasonCode === "not_found" && httpStatus === 404) {
-    return {
-      status: "action_required", reason: "not_found",
-      hint: "Nothing exists at this path for this method, or the id is unknown. Nothing was changed. Check the exact path and HTTP method in /openapi.json and /llms.txt.",
-      next: [path("/openapi.json"), path("/llms.txt"), command("Re-read ids from their list route instead of guessing; check the HTTP method (some reads are GET with query params)"),
-        tool("room_check_access")]
     };
   }
   if (httpStatus === 429 || reasonCode === "rate_limited") {
@@ -638,6 +648,22 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       status: "action_required", reason: "method_not_allowed",
       hint: "This route does not accept that HTTP method — nothing was changed. Resend with an allowed method (Allow header or route docs); do not retry the same method.",
       next: [command("Read the 405 response's Allow header when present — otherwise the route docs — for the accepted methods, then resend with an allowed method; do not retry the same method")]
+    };
+  }
+  // 2026-10-08 QA-200 stranger test AO-04 (live): a 404 with code not_found
+  // (stale or mistyped task id on the onboarding surface) fell through to
+  // the unmapped-code branch — "Unknown error 'not_found'... report to the
+  // room owner" strands a caller who simply used a wrong id. A 404 names the
+  // fix itself: re-list, use a current id, never guess one. Branch on the
+  // sanitized reasonCode (not raw httpStatus) so malformed codes still map
+  // to request_failed, and keep the specific work_not_found /
+  // work_claim_not_found branches above untouched.
+  if (reasonCode === "not_found") {
+    return {
+      status: "action_required", reason: "not_found",
+      hint: "That path or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.",
+      next: [command("Re-list the resource (e.g. GET /api/public-work/tasks) and retry with a current id; do not guess ids"),
+        tool("room_check_access")]
     };
   }
   // Unmapped code: name the code and the recovery (report code + message

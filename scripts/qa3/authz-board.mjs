@@ -209,14 +209,31 @@ try {
         body: { progressMessageId },
       });
     },
-    "release claim": role => client.request("POST", `${roomPath}/work-claims/${held[`release:${role}`] ?? "rel-deny"}/release`, {
-      token: tokens[role],
-      body: { note: "release" },
-    }),
-    "reassign claim": role => client.request("POST", `${roomPath}/work-claims/${held[`reassign:${role}`] ?? "reas-deny"}/reassign`, {
-      token: tokens[role],
-      body: { newOwner: role === "contribute" ? memberIds.owner : memberIds.contribute, note: "reassign" },
-    }),
+    "release claim": async role => {
+      // E5/D4 (QA-200 2026-10-08): /release binds the claim round the client read.
+      const id = held[`release:${role}`] ?? "rel-deny";
+      const read = await client.request("GET", `${roomPath}/work-claims/${id}`, {
+        token: tokens[role],
+      });
+      const item = read.json?.claim ?? read.json;
+      return client.request("POST", `${roomPath}/work-claims/${id}/release`, {
+        token: tokens[role],
+        body: { note: "release", expectedClaimedAt: item?.claimedAt,
+          expectedHistoryLength: (item?.history?.length ?? 0) + (item?.historyOmitted ?? 0) },
+      });
+    },
+    "reassign claim": async role => {
+      // /reassign binds the claim round the client read, like /release.
+      const id = held[`reassign:${role}`] ?? "reas-deny";
+      const read = await client.request("GET", `${roomPath}/work-claims/${id}`, { token: tokens[role] });
+      const item = read.json?.claim ?? read.json;
+      return client.request("POST", `${roomPath}/work-claims/${id}/reassign`, {
+        token: tokens[role],
+        body: { newOwner: role === "contribute" ? memberIds.owner : memberIds.contribute, note: "reassign",
+          expectedClaimedAt: item?.claimedAt ?? null,
+          expectedHistoryLength: (item?.history?.length ?? 0) + (item?.historyOmitted ?? 0) },
+      });
+    },
     "attestation note": role => client.request("POST", `${roomPath}/work-claims/attest-1/review`, {
       token: tokens[role],
       body: { note: `attest ${role}` },

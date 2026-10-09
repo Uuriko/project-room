@@ -2,11 +2,11 @@
 
 **Proposed internal program — not activated or funded.** The amounts, cadence and service targets below are planning records only. An owner must explicitly activate a dated program and record its funding and payout terms before anyone is promised a reward. This release creates no payout, custody operation or payment obligation.
 
-Part of the Project Room Zero-Bug System (Phase 3). Invite-only for now: room lanes and invited security researchers.
+Part of the Project Room Zero-Bug System (Phase 3). Invite-only when activated: room lanes and invited security researchers.
 
 ## Why this exists
 
-We ship fast and we ship publicly. The fastest way to harden a room that anyone can join is to pay the people who find the holes before they become incidents. This program pays in **$DASHA, at the spot-price equivalent of the USD amounts below**, so every payout is also distribution into the agent economy.
+We ship fast and we ship publicly. The fastest way to harden a room that anyone can join is to pay the people who find the holes before they become incidents. Once activated and funded, this program is planned to pay in **$DASHA, at the spot-price equivalent of the USD amounts below**, so every payout is also distribution into the agent economy. Until activation: today this pays in reputation receipts, not $DASHA.
 
 ## Severity tiers (defined by IMPACT, not bug type)
 
@@ -24,7 +24,7 @@ We ship fast and we ship publicly. The fastest way to harden a room that anyone 
 
 ## Program cap and payout source
 
-Quarterly cap: **$500 total**, subject to a separately approved funding source and payout terms; no pilot pot availability is asserted here. Payouts are processed only after the fix merges; if the pot is exhausted in a quarter, accepted findings are queued to the next quarter in order of acceptance.
+Quarterly cap: **$500 total**, subject to a separately approved funding source and payout terms; no pilot pot availability is asserted here. Payouts are processed only after the fix merges **and only under an activated, funded program (see Rollout)**; if the pot is exhausted in a quarter, accepted findings are queued to the next quarter in order of acceptance.
 
 ## Rules of engagement
 
@@ -56,11 +56,11 @@ The **merge lane** runs triage. The first triage rota is the merge lane; the rot
 2. **Reproduce** the PoC on production or a matching build.
 3. **Assign severity** per the impact tiers above.
 4. **Fix claim** — the finding becomes a claimed fix in the room's normal workflow.
-5. **Payout** — $DASHA at the spot-price equivalent of the tier, after the fix merges.
+5. **Payout** — $DASHA at the spot-price equivalent of the tier, after the fix merges — but only once the program is explicitly activated with recorded funding; until then this step produces a reputation receipt.
 6. **Public thanks** — the reporter is credited by name (or handle) once the fix ships.
 
 **Disagreements:** if you disagree with a triage decision, you may appeal once to the room owner. Their call is final.
 
 ## Rollout
 
-The program starts on merge of this document. It begins invite-only — room lanes and invited researchers. If the invite-only round proves the intake, triage, and payout rails work, we open it to the public with a standing intake page.
+The program does **not** start on merge of this document. It starts only when an owner explicitly activates a dated program and records its funding and payout terms. Until then: file findings anyway — they earn **reputation receipts**, not $DASHA. Cash comes later. Once activated, the program begins invite-only — room lanes and invited researchers. If the invite-only round proves the intake, triage, and payout rails work, we open it to the public with a standing intake page.

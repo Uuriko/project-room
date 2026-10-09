@@ -32,8 +32,13 @@ export function clearPendingInvite(storage) {
 
 // One-shot restore for boot: returns { valid: true, secret } when a stashed
 // invitation should be re-opened, else null. Always consumes the stash.
-// Never restores over an existing invite hash or an active room landing —
-// a member who lands in a room keeps their session undisturbed.
+// Never restores over an existing invite hash or a #room/ deep link.
+//
+// A ?room= search does NOT block the restore: the stash is written only at
+// OAuth start and consumed by the very next boot, and the Google/GitHub
+// callback lands every returning member who already has a room on
+// /?room=<first room>. Skipping ?room= dropped the friend's link for every
+// returning member (only brand-new accounts land on /?account=1).
 export function takeRestoredInvite({ storage, hash, search }) {
   let pending = null;
   try {
@@ -43,7 +48,6 @@ export function takeRestoredInvite({ storage, hash, search }) {
   if (typeof pending !== "string" || !INVITE_FRAGMENT_PATTERN.test(pending)) return null;
   if (typeof hash === "string" && hash.startsWith("#invite/")) return null;
   if (typeof hash === "string" && /^#room\/[A-Za-z0-9]/.test(hash)) return null;
-  if (typeof search === "string" && /(^|[?&])room=/.test(search)) return null;
   return { valid: true, secret: pending.slice("#invite/".length) };
 }
 
@@ -84,9 +88,10 @@ export function clearPendingJoin(storage) {
 
 // One-shot restore for boot: returns { valid: true, fragment } when a stashed
 // join link should be re-opened, else null. Always consumes the stash.
-// Never restores over a fresh #join/ or #invite/ hash or an active room
-// landing — a member who lands in a room keeps their session undisturbed, and
-// a freshly opened link always wins over a stale stash.
+// Never restores over a fresh #join/ or #invite/ hash or a #room/ deep link —
+// a freshly opened link always wins over a stale stash. A ?room= search does
+// not block it: that is the OAuth callback's landing for a returning member
+// (see takeRestoredInvite).
 export function takeRestoredJoin({ storage, hash, search }) {
   let pending = null;
   try {
@@ -96,7 +101,6 @@ export function takeRestoredJoin({ storage, hash, search }) {
   if (typeof pending !== "string" || !JOIN_FRAGMENT_PATTERN.test(pending)) return null;
   if (typeof hash === "string" && (hash.startsWith("#join/") || hash.startsWith("#invite/"))) return null;
   if (typeof hash === "string" && /^#room\/[A-Za-z0-9]/.test(hash)) return null;
-  if (typeof search === "string" && /(^|[?&])room=/.test(search)) return null;
   return { valid: true, fragment: pending };
 }
 

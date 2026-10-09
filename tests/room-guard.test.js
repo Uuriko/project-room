@@ -40,6 +40,7 @@ const strictDouble = methods => new Proxy(methods, {
   }
 });
 
+const roundOf = c => ({ expectedClaimedAt: (c.claim ?? c).claimedAt, expectedHistoryLength: ((c.claim ?? c).history?.length ?? 0) + ((c.claim ?? c).historyOmitted ?? 0) });
 test('a change under another member\'s live claim fails the guard; the holder and released files pass', async t => {
   const { owner, peer } = await fixture(t);
   await owner.workClaim('held', { files: ['server/locked'], leaseHours: 2 });
@@ -54,7 +55,7 @@ test('a change under another member\'s live claim fails the guard; the holder an
   assert.deepEqual([warned.code, warned.conflicts.length], [0, 1]);
   assert.equal((await runGuard({ files, client: owner, memberId: 'owner' })).code, 0);
 
-  await owner.releaseWorkItem('held');
+  await owner.releaseWorkItem('held', roundOf(await owner.workClaimGet('held')));
   assert.equal((await runGuard({ files, client: peer, memberId: 'reviewer' })).code, 0);
 });
 

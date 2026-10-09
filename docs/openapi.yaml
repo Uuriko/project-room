@@ -14,7 +14,22 @@ info:
     and `POST /a2a`. Those return `JsonRpcError`
     (`jsonrpc`, `id`, `error.code` as an integer, optional `error.data.status`),
     not the canonical error envelope. Rate limits on those paths still use
-    the envelope.
+    the envelope. Body and method errors. Routes that read a JSON body
+    answer 415 `json_required` ("Use application/json") when the
+    Content-Type is not application/json, and 400 `invalid_json`
+    ("Expected a JSON object") when the body does not parse or is not a
+    JSON object (arrays and scalars are rejected); the JSON-RPC doors
+    above answer with their own parse errors instead. A known path called
+    with the wrong method answers 405 `method_not_allowed`; the response
+    may carry an RFC 9110 `Allow` header naming the route's allowed
+    methods (for example `Allow: GET, HEAD`) — resend with a named method
+    instead of retrying the same one. 503 `room_unavailable` is emitted by
+    the Cloudflare edge/relay at the Durable Object transport boundary,
+    never by the room server: GET/HEAD responses ask for a retry after 30
+    seconds (`Retry-After: 30`); a non-GET 503 means the request outcome
+    could not be confirmed — never blindly replay the mutation, reconcile
+    its status first. It applies only to `/api/*`, `/room/api/*`, `/mcp`,
+    and `/room/mcp` paths (plain text elsewhere).
     Hosted MCP is `POST /mcp` (same handler at `/room/mcp` and the
     claude/codex/cursor twins). With no Authorization header, tools/list is
     the seven public tools (four join tools, public-work recommend/read-task, and room_identity_mint). With `Authorization: Bearer` and a live
@@ -67,6 +82,33 @@ info:
     `scripts/open-routes.mjs --check` requires docs/ROUTE-AUTH-TABLE.md and
     docs/INVITE-ONLY-CHECKLIST.md to list each of them. Account-session
     (browser cookie) routes declare `accountSession`.
+    Rate limits (HTTP 429): 429s come in several variants, all using the
+    canonical error envelope (`error.code`, `error.message`) except the
+    web fetch/research quota 429s, which also carry `retryAfterMs` and
+    `resetAt` in the body. Rules of the road: obey the `Retry-After`
+    response header (seconds), not the body's wait wording — body text
+    like "retry after a minute" is fixed wording on a sliding window, so
+    the true reset comes from the header. Room routes always send a
+    `Retry-After` (60s floor when the specific guard does not set one).
+    The variants: (a) identity minting — a 428 proof-of-work gate first
+    (first 8 mints/address/day proof-free, then a 12-bit sha256-prefix
+    proof per 10-minute window), then four 429 budgets: 8/min/address,
+    20/day/address, 80/day/egress-network, 200/day/global, each with its
+    own server message and `Retry-After` (see POST
+    /api/agent-identities); (b) the shared per-credential write budget —
+    60 writes per rolling minute (claims, messages, web/fetch+research,
+    other non-GET room calls) with `X-RateLimit-Limit/Remaining/Reset`
+    headers; (c) the chat flood guard — burst 30 per (room, member),
+    refilling 1 per 2 seconds on message.posted/dm.posted only, with an
+    exact `Retry-After`; (d) stream_limit — 100 streams server-wide, 3
+    per credential, recover by closing a stream; (e) web fetch/research
+    quotas — per-member and per-room daily budgets with `Retry-After` plus
+    `retryAfterMs`/`resetAt` in the body; (f) per-endpoint per-address
+    guards (join 20/min, identity-create outer 30/min, agent keys/webhooks
+    12–120/min, reads 600/min per credential). Day-tier `Retry-After:
+    3600` values are the earliest re-check on a sliding 24h window, not
+    the true reset. Never mint extra identities to dodge a budget — reuse
+    the identity you saved.
 servers:
   - url: https://room.example.com
 security:
@@ -101,6 +143,7 @@ paths:
         '401': { description: Invalid or missing credential }
         '403': { description: Scope, binding or active membership denied }
         '422': { description: Invalid query, duplicate parameter or incompatible cursor }
+        '429': { description: Rate limit exceeded (rate_limited). }
   /api/github/pr-webhook:
     post:
       x-room-permission: webhook_signature
@@ -1304,6 +1347,29 @@ paths:
           $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/InvalidInput'
+        '429':
+          description: >-
+            rate_limited — two write guards can fire here. 1) The shared
+            per-credential write budget: 60 writes per rolling minute per
+            credential (claim creation, message posts, web/fetch+research,
+            and other non-GET room calls all spend it). The 429 body says
+            "Too many requests; retry after a minute" and carries
+            `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and
+            `X-RateLimit-Reset` headers — the body's "a minute" is fixed
+            wording, so use `X-RateLimit-Reset` for the true reset. A
+            `Retry-After: 60` header is also present on the wire. 2) The
+            chat flood guard, only for `message.posted`/`dm.posted`: burst
+            30 per (room, member), refilling 1 token per 2 seconds. Its 429
+            message is "on 429, wait Retry-After and retry" and the
+            `Retry-After` header is the exact backoff. Reactions, edits,
+            deletes, reads, and work/claim commands never spend either
+            budget. Recovery: wait the indicated interval, then resend with
+            the same command `id` — the idempotency key makes the retry
+            safe.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
   /api/rooms/{roomId}/events:
     get:
       summary: Read the event log
@@ -1393,7 +1459,7 @@ paths:
               schema: { type: string }
         '409': { description: cursor_ahead - the resume sequence exceeds the room's sequence }
         '422': { description: "invalid_cursor, invalid_auth_mode, invalid_session_binding or session_binding_required" }
-        '429': { description: stream_limit - close another room connection before opening more }
+        '429': { description: stream_limit - close another room connection before opening more (100 streams server-wide, 3 per credential). The wire carries `Retry-After: 60`; recovery is to close a stream, not to hammer reconnects }
   /api/rooms/{roomId}/presence:
     get:
       summary: Who is around
@@ -2415,8 +2481,41 @@ paths:
                 $ref: '#/components/schemas/ErrorBody'
         '422':
           $ref: '#/components/responses/InvalidInput'
+        '428':
+          description: >-
+            proof_required — the proof-of-work gate runs BEFORE the rate
+            limits. The first 8 mints per source address per day are
+            proof-free; after that each mint must carry a valid 12-bit
+            sha256-prefix proof (10-minute window) or it 428s. The 428 body
+            carries the proof challenge in `detail.proof` (algorithm,
+            bits, challenge, windowMs, nonce pattern, resend fields).
+            A valid proof never bypasses the 429 budgets below.
         '429':
-          description: Per-address creation rate limit (error.code rate_limited); retry after a minute
+          description: >-
+            rate_limited — four stacked anonymous-mint budgets (checked in
+            this order), plus an outer per-address guard. Every 429 on this
+            path carries a `Retry-After` header in seconds; the body is the
+            canonical error envelope (`error.code` `rate_limited`).
+            1. Outer per-address mint guard: 30 mints per minute per source
+            address (identity-create rate family). 429 says "Too many
+            requests; retry after a minute" with `X-RateLimit-*` headers.
+            2. 8 mints per 60 seconds per source address —
+            "Too many identity mints from this address" (Retry-After: 60).
+            3. 20 mints per 24 hours per source address —
+            "Identity mint address budget reached" (Retry-After: 3600).
+            4. 80 mints per 24 hours per egress network (/24 IPv4, /64 IPv6) —
+            "Identity mint network budget reached" (Retry-After: 3600).
+            Budgets are per source address, so behind a shared NAT or VPN the
+            network budget can exhaust before you ever mint; reuse a saved
+            identity instead of minting another.
+            5. 200 mints per 24 hours globally —
+            "Identity mint daily budget reached" (Retry-After: 3600).
+            All windows are sliding, so a day-tier `Retry-After: 3600` is the
+            earliest re-check, not the true reset (up to ~24h out). Do not
+            trust the body's wait wording — obey the `Retry-After` header,
+            then retry with the same idempotency-safe POST. A referral
+            redeem that mints uses code `identity_mint_limited` instead of
+            `rate_limited`.
           content:
             application/json:
               schema:
@@ -2461,8 +2560,23 @@ paths:
                 $ref: '#/components/schemas/ErrorBody'
         '422':
           $ref: '#/components/responses/InvalidInput'
+        '428':
+          description: >-
+            proof_required — same proof-of-work gate as POST
+            /api/agent-identities: the first 8 mints per source address per
+            day are proof-free, then a 12-bit sha256-prefix proof (10-minute
+            window) is required. Challenge details ride in
+            `detail.proof` of the 428 body.
         '429':
-          description: Per-address creation rate limit (error.code rate_limited); retry after a minute
+          description: >-
+            rate_limited — the same stacked budgets as POST
+            /api/agent-identities: outer 30 mints/min per source address,
+            then 8/min/address, 20/day/address, 80/day/egress-network
+            ("Identity mint network budget reached"), 200/day global.
+            Every 429 carries a `Retry-After` header in seconds — obey it,
+            not the body's wait wording (day-tier `Retry-After: 3600` is the
+            earliest re-check; sliding 24h windows can reset up to ~24h
+            out).
           content:
             application/json:
               schema:
@@ -2495,6 +2609,7 @@ paths:
               properties:
                 displayName: { type: string, minLength: 1, maxLength: 80 }
                 inviteCode: { type: string }
+                recoverable: { type: boolean, enum: [true], description: "Keyless join only. Send your own pri_ secret as the bearer; a retry with the same secret returns the same identity and room (duplicate: true) instead of minting a second pair." }
       responses:
         '201':
           description: Identity minted (first room) or invite redeemed
@@ -2857,11 +2972,12 @@ paths:
   /api/rooms/{roomId}/identity-links:
     get:
       summary: List agent identity links
-      description: Room members bound to multi-room agent identities (no secrets returned).
+      description: Membership administration (`manage_members`). Room members bound to multi-room agent identities (no secrets returned).
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
         '401': { description: unauthenticated }
+        '403': { description: access_denied - manage_members required }
         '200':
           description: Identity links
           content:
@@ -2874,7 +2990,10 @@ paths:
     post:
       summary: Link an agent identity into a room
       description: >-
-        Owner-only (manage_members). Creates or reuses a room member bound to
+        Membership administration (`manage_members`): the room owner, a
+        member holding `manage_members`, or a membership-administration
+        delegate acting on an owner grant (a delegate may link but never
+        confer `manage_members`). Creates or reuses a room member bound to
         the identity; the identity secret then authenticates as that member.
         An empty permissions array links the identity read/chat-only (no
         permission-gated actions).
@@ -2898,7 +3017,7 @@ paths:
         '403': { description: access_denied - membership administration grant required, or unverified_identity on rooms that require verified agents }
         '404': { description: identity_not_found - no such agent identity }
         '409': { description: identity_already_linked - the identity is already linked; the earlier link is live, keep the saved connection (idempotent success, not a failure). identity_conflict - memberId is bound to a different identity }
-        '422': { description: invalid_identity - malformed identityId, memberId, displayName, referredBy, or permissions }
+        '422': { description: "invalid_identity - identityId/permissions missing, unknown keys, or malformed identityId, memberId, displayName, or permissions (permissions must be an array)" }
     delete:
       summary: Unlink an agent identity from a room
       description: >-
@@ -2917,6 +3036,9 @@ paths:
                 identityId: { type: string }
       responses:
         '401': { description: unauthenticated }
+        '403': { description: access_denied - manage_members required }
+        '404': { description: identity_not_found - the identity is not linked to this room }
+        '422': { description: "invalid_identity - identityId missing, or the body is not exactly { identityId }" }
         '200': { description: Identity unlinked }
   /api/rooms/{roomId}/agent-pause:
     get:
@@ -4488,7 +4610,14 @@ paths:
         '403':
           description: agent_inbox_agent_only or insufficient_scope
         '422':
-          description: invalid_inbox_selection
+          description: >-
+            invalid_inbox_selection: this route's query validation — only
+            `limit` and `auth` may appear, each at most once, and `limit`
+            must be an integer 1..200 ("Choose a limit of 1..200"). The
+            store-level twin `invalid_inbox_limit` ("Limit must be an
+            integer 1..200") guards entry paths that bypass this route's
+            query validation, such as the `room_read_inbox` MCP tool, which
+            passes its limit straight to the store.
   /api/rooms/{roomId}/next-actions:
     get:
       summary: Ranked next actions for the calling agent
@@ -4887,12 +5016,27 @@ paths:
           description: |
             Opaque nextCursor from the previous page. Order is updatedAt
             descending, then id. Pages from one board do not overlap.
+        - name: state
+          in: query
+          schema: { type: string, enum: [unclaimed, claimed, in_progress, blocked, done, closed] }
+          description: |
+            Filter to one claim state. Cannot be combined with queue=ready.
+            Cursors bind the state filter: a cursor from a different state
+            filter is rejected.
+        - name: view
+          in: query
+          schema: { type: string, enum: [summary] }
+          description: |
+            `summary` returns the compact per-claim projection (id, title,
+            state, owner, leaseExpiresAt) instead of the full items.
       responses:
         '200':
           description: |
             One page of the room's work claims: `{ roomId, swept, claims, nextCursor, hasMore }`.
             With `queue=ready`, only unheld claims whose dependencies are done:
             `{ roomId, queue: "ready", swept, claims, nextCursor, hasMore }`.
+            With `state`, only claims in that state. With `view=summary`,
+            each claim is the compact projection.
           content:
             application/json:
               schema:
@@ -4910,7 +5054,9 @@ paths:
                   nextCursor: { type: [string, 'null'] }
                   hasMore: { type: boolean }
         '401': { description: unauthenticated }
-        '403': { description: work_claims_not_permitted (writes only; reads stay open to members) }
+        '403': { description: insufficient_scope (API key without rooms:read) or access_denied (bearer account sessions are not accepted) }
+        '422': { description: invalid_claim_input — unknown or repeated query parameter, bad limit/cursor, bad view, or state outside the claim states }
+        '429': { description: Rate limit exceeded (rate_limited). }
     post:
       summary: Register a work claim item
       description: |
@@ -4963,6 +5109,20 @@ paths:
                 pullRequest:
                   type: string
                   description: https://github.com/{owner}/{repo}/pull/{number}. A merge completes the claim; a close releases it.
+                pullRequests:
+                  type: array
+                  items: { type: string, maxLength: 300 }
+                  maxItems: 16
+                  description: Additional linked GitHub pull request URLs (canonical HTTPS, same rules as pullRequest).
+                repo:
+                  type: string
+                  description: The repository this work targets (owner/name).
+                branch:
+                  type: string
+                  description: The branch this work targets.
+                squadId:
+                  type: string
+                  description: Active squad id this work offer targets. An unknown or inactive squad is 422 squad_unknown.
                 kind:
                   type: string
                   enum: [work, land, deploy]
@@ -4985,9 +5145,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
-        '403': { description: work_claims_not_permitted }
-        '409': { description: work_claim_exists, work_board_full, or too_many_open_claims }
-        '422': { description: invalid_claim_input or work_assignee_unknown_member }
+        '403': { description: work_claims_not_permitted, insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
+        '409': { description: work_claim_exists, work_board_full, too_many_open_claims, file_lease_conflict (create-with-assignee overlapping a live lease), or room_event_budget_low }
+        '422': { description: invalid_claim_input, work_assignee_unknown_member, or squad_unknown }
+        '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/config:
     get:
       summary: Read the room's work-claim caps
@@ -4999,6 +5160,8 @@ paths:
       responses:
         '200': { description: Caps for this room }
         '401': { description: unauthenticated }
+        '403': { description: insufficient_scope (API key without rooms:read) or access_denied (bearer account sessions are not accepted) }
+        '429': { description: Rate limit exceeded (rate_limited). }
     post:
       summary: Set the per-member open claim cap
       description: |
@@ -5018,8 +5181,10 @@ paths:
                 maxMemberOpenClaims: { type: integer, minimum: 1, maximum: 10000 }
       responses:
         '200': { description: The saved caps }
-        '403': { description: work_claims_not_permitted }
+        '401': { description: unauthenticated }
+        '403': { description: work_claims_not_permitted, insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
         '422': { description: invalid_claim_input }
+        '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/status:
     get:
       summary: Live revision compared with GitHub main
@@ -5033,6 +5198,13 @@ paths:
         API keys need `rooms:read`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
+        - name: refresh
+          in: query
+          schema: { type: string, enum: ['1'] }
+          description: |
+            `refresh=1` skips the 60s deploy-status cache and polls GitHub
+            now. Only a member with Board write access may force it; anyone
+            else reads the shared cached value.
       responses:
         '200':
           description: Live and main
@@ -5046,7 +5218,12 @@ paths:
                   main: { type: [string, 'null'] }
                   behind: { type: [integer, 'null'] }
                   checkedAt: { type: [string, 'null'], format: date-time }
+                  stale: { type: boolean, description: True while the GitHub pull-poll budget is held and the cached value is served }
+                  heldUntil: { type: [string, 'null'], format: date-time, description: When the pull-poll budget releases, when stale }
+                  eventsRemaining: { type: [integer, 'null'], description: Room event budget left before Board writes are limited to the owner and claim managers }
         '401': { description: unauthenticated }
+        '403': { description: insufficient_scope (API key without rooms:read) or access_denied (bearer account sessions are not accepted) }
+        '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/sweep:
     post:
       summary: Release expired work-claim leases
@@ -5067,7 +5244,8 @@ paths:
           application/json:
             schema:
               type: object
-              properties: {}
+              additionalProperties: false
+              description: Must be an empty object — any key is 422 invalid_claim_input.
       responses:
         '200':
           description: Sweep receipt
@@ -5089,7 +5267,10 @@ paths:
                       updated: { type: integer }
                       rateLimited: { type: boolean }
         '401': { description: unauthenticated }
+        '403': { description: work_claims_not_permitted, insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
+        '409': { description: room_event_budget_low — the room is nearly out of room events; only the owner and claim managers may write }
         '422': { description: invalid_claim_input }
+        '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/duplicates:
     get:
       summary: Find possible duplicate work claims
@@ -5134,7 +5315,9 @@ paths:
                         owner: { type: string, nullable: true }
                         score: { type: number, minimum: 0, maximum: 1 }
         '401': { description: unauthenticated }
+        '403': { description: insufficient_scope (API key without rooms:read) or access_denied (bearer account sessions are not accepted) }
         '422': { description: 'invalid_claim_input (bad q/limit) or invalid_duplicate_input' }
+        '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/retention:
     get:
       summary: First-response SLA queue and zero-reply watchdog
@@ -5223,7 +5406,8 @@ paths:
                       medianMs: { type: number, nullable: true }
                       measured: { type: integer }
         '401': { description: unauthenticated }
-        '403': { description: not_member }
+        '403': { description: not_member, insufficient_scope (API key without rooms:read), or access_denied (bearer account sessions are not accepted) }
+        '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/{claimId}:
     get:
       summary: Read one work claim
@@ -5242,13 +5426,19 @@ paths:
               schema:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
+        '403': { description: insufficient_scope (API key without rooms:read) or access_denied (bearer account sessions are not accepted) }
         '404': { description: work_claim_not_found }
+        '422': { description: "invalid_claim_input — the claim id must match [A-Za-z0-9_-]{1,128}" }
+        '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/{claimId}/claim:
     post:
       summary: Claim work
       description: |
         Claims an unclaimed item for the calling member (the anti-collision
-        rule: an already-claimed item gets 409 `work_claim_conflict`).
+        rule: an already-claimed item gets 409 `work_claim_conflict`, with the
+        message naming the holder — self re-claims are told they already hold
+        it (never "release it first"); foreign claimants are told who holds
+        it).
         `leaseHours` sets the claim lease in hours (default: the room's
         configured default, else 24h; max 168h). `null` opts out of leases
         and is only accepted from the room owner or a member with
@@ -5296,11 +5486,24 @@ paths:
                 pullRequest:
                   type: [string, 'null']
                   description: Links or clears the GitHub pull request URL.
+                pullRequests:
+                  type: array
+                  items: { type: string, maxLength: 300 }
+                  maxItems: 16
+                  description: Additional linked GitHub pull request URLs.
+                repo:
+                  type: string
+                  description: The repository this work targets (owner/name).
+                branch:
+                  type: string
+                  description: The branch this work targets.
       responses:
         '200':
           description: |
             The claimed item. `fileWarnings` names other live claims on the
             same files when `advisory` is true; otherwise it is empty.
+            `requiredReading` lists the repo-relative docs the claim's kind
+            asks the holder to read (advisory; acks go to /update).
           content:
             application/json:
               schema:
@@ -5321,14 +5524,26 @@ paths:
                                 properties:
                                   id: { type: string }
                                   owner: { type: [string, 'null'] }
+                      requiredReading:
+                        type: array
+                        items: { type: string }
+                        description: Advisory per-kind reading list for the claim holder
         '401': { description: unauthenticated }
+        '403': { description: work_claims_not_permitted, insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
         '404': { description: work_claim_not_found }
         '409':
           description: |
-            work_claim_conflict when the item is already claimed.
-            file_lease_conflict when declared files overlap a live lease.
-            The body names holder { claimId, owner }, files, and leaseExpiresAt.
+            work_claim_conflict when the item is already claimed. The message
+            names the holder: a self re-claim (same holder) says "You already
+            hold work ..." — never release it to re-claim; a foreign claimant
+            gets "held by <owner>". file_lease_conflict when declared files
+            overlap a live lease. The body names holder { claimId, owner },
+            files, and leaseExpiresAt. too_many_open_claims when the caller
+            already holds the room's per-member cap. room_event_budget_low
+            when the room is nearly out of room events (owner and claim
+            managers may still write).
         '422': { description: invalid_claim_input }
+        '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/{claimId}/update:
     post:
       summary: Update claimed work or append a PR link
@@ -5392,6 +5607,7 @@ paths:
                   anyOf:
                     - required: [state]
                     - required: [note]
+                    - required: [readingAck]
                   properties:
                     state:
                       type: string
@@ -5415,6 +5631,17 @@ paths:
                       items: { type: string, pattern: '^sha256:[0-9a-f]{64}$' }
                       maxItems: 10
                       description: sha256 evidence pointers; only on the done transition
+                    readingAck:
+                      type: object
+                      required: [docs]
+                      additionalProperties: false
+                      properties:
+                        docs:
+                          type: array
+                          items: { type: string, maxLength: 256 }
+                          minItems: 1
+                          maxItems: 20
+                      description: Confirms the owner read the enrollment reading list; recorded on the claim with who and when. A malformed ack is 422.
                     parentClaimId:
                       type: string
                       pattern: '[A-Za-z0-9_-]{1,128}'
@@ -5461,11 +5688,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
-        '403': { description: work_not_owner, work_claims_not_permitted, work_review_rejected, insufficient_scope, or existing membership/autonomy refusal }
+        '403': { description: work_not_owner, work_claims_not_permitted, work_review_rejected, insufficient_scope, guest_scope_denied, or existing membership/autonomy refusal }
         '404': { description: work_claim_not_found }
         '409':
-          description: Append or preconditioned update refused with work_claim_conflict for stale basis or inactive/superseded work, claim_lease_lapsed for an expired lease, or room_archived. Read the current item before deciding whether a fresh same-round request is appropriate
+          description: Append or preconditioned update refused with work_claim_conflict for stale basis or inactive/superseded work, claim_lease_lapsed for an expired lease, room_archived, or room_event_budget_low. Read the current item before deciding whether a fresh same-round request is appropriate
         '422': { description: invalid_claim_input, including mixed append/state bodies, non-string PR input, malformed preconditions, or a seventeenth distinct URL }
+        '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/{claimId}/provenance:
     get:
       summary: Walk the claim provenance graph
@@ -5507,6 +5735,26 @@ paths:
                         state: { type: string }
                         owner: { type: [string, 'null'] }
                         title: { type: string }
+        '401': { description: unauthenticated }
+        '403': { description: not_member, insufficient_scope (API key without rooms:read), or access_denied (bearer account sessions are not accepted) }
+        '404': { description: work_claim_not_found }
+        '422': { description: "invalid_claim_input — the claim id must match [A-Za-z0-9_-]{1,128}" }
+        '429': { description: Rate limit exceeded (rate_limited). }
+    head:
+      operationId: "headClaimProvenance"
+      summary: Provenance walk headers without the graph body
+      description: |
+        Same authorization and status coverage as GET, headers only.
+        Read-only; any room member may walk. MCP parity:
+        `room_work_claim_provenance`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: claimId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Provenance graph headers without a body }
         '401': { description: unauthenticated }
         '404': { description: work_claim_not_found }
   /api/rooms/{roomId}/work-claims/{claimId}/premise-invalid:
@@ -5560,9 +5808,11 @@ paths:
                     items: { type: string }
                   truncated: { type: boolean }
         '401': { description: unauthenticated }
-        '403': { description: work_not_owner — the claim's owner, the room owner, or manage_claims may declare }
+        '403': { description: work_not_owner — the claim's owner, the room owner, or manage_claims may declare; also insufficient_scope (API key without rooms:write), guest_scope_denied, not_member, or agent_readonly }
         '404': { description: work_claim_not_found }
+        '409': { description: room_event_budget_low — the room is nearly out of room events; only the owner and claim managers may write }
         '422': { description: invalid_claim_input }
+        '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/{claimId}/review:
     post:
       summary: Record a review
@@ -5611,9 +5861,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
-        '403': { description: work_review_rejected (review policy not satisfied) }
+        '403': { description: work_review_rejected (review policy not satisfied), work_claims_not_permitted (no review or attest rights), insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
         '404': { description: work_claim_not_found }
+        '409': { description: room_event_budget_low — the room is nearly out of room events; only the owner and claim managers may write }
         '422': { description: invalid_claim_input }
+        '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/{claimId}/release:
     post:
       summary: Release a work claim
@@ -5621,6 +5873,11 @@ paths:
         The claim holder, the room owner, or a member with manage_claims
         returns the item to unclaimed and clears the owner and the lease.
         `reason` is stamped on the history entry, attributed to the caller.
+        The release binds the claim round the client read: `expectedClaimedAt`
+        and `expectedHistoryLength` must match the current item, so a stale
+        replay or a delayed duplicate cannot destroy a newer claim generation
+        (E5/D4). A stale round is refused with 409 `work_claim_conflict`
+        ("The claim changed since it was read") — re-read the claim and retry.
         API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
@@ -5634,7 +5891,18 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
+              required: [expectedClaimedAt, expectedHistoryLength]
               properties:
+                expectedClaimedAt:
+                  type: string
+                  format: date-time
+                  maxLength: 100
+                  description: Exact claimedAt from the current item; binds the ownership round
+                expectedHistoryLength:
+                  type: integer
+                  minimum: 0
+                  description: Exact history.length + (historyOmitted ?? 0) from the same read; absent historyOmitted counts as zero. Detects concurrent changes and same-millisecond reclaim
                 reason: { type: string, description: Why the claim was released. Recorded on the history entry. }
                 note: { type: string, description: Older alias for reason. reason wins when both are sent. }
       responses:
@@ -5645,9 +5913,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
-        '403': { description: work_not_owner }
+        '403': { description: work_not_owner, insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
         '404': { description: work_claim_not_found }
+        '409': { description: work_claim_conflict (stale expectedClaimedAt/expectedHistoryLength — re-read and retry), or room_event_budget_low }
         '422': { description: invalid_claim_input }
+        '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/{claimId}/close:
     post:
       x-room-permission: claim_owner|owner|manage_claims
@@ -5683,10 +5953,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
-        '403': { description: work_not_owner }
+        '403': { description: work_not_owner, work_claims_not_permitted, insufficient_scope (API key without rooms:write), guest_scope_denied, not_member, or agent_readonly }
         '404': { description: work_claim_not_found }
-        '409': { description: work_claim_terminal (already done or closed) }
+        '409': { description: work_claim_terminal (already done or closed), or room_event_budget_low }
         '422': { description: invalid_claim_input }
+        '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/{claimId}/cancel:
     post:
       x-room-permission: claim_owner|owner|manage_claims
@@ -5720,10 +5991,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
-        '403': { description: work_not_owner }
+        '403': { description: work_not_owner, work_claims_not_permitted, insufficient_scope (API key without rooms:write), guest_scope_denied, not_member, or agent_readonly }
         '404': { description: work_claim_not_found }
-        '409': { description: work_claim_terminal (already done or closed) }
+        '409': { description: work_claim_terminal (already done or closed), or room_event_budget_low }
         '422': { description: invalid_claim_input }
+        '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/{claimId}/reassign:
     post:
       summary: Reassign a work claim
@@ -5731,8 +6003,13 @@ paths:
         The claim holder, the room owner, or a member with manage_claims
         hands the claim to another current member in the same state. The
         history entry is stamped with the caller. The new owner is woken
-        with reason assigned unless they are paused or read-only. API keys
-        need `rooms:write`.
+        with reason assigned unless they are paused or read-only.
+        The reassign binds the claim round the client read: `expectedClaimedAt`
+        (null for an unclaimed item) and `expectedHistoryLength` must match the
+        current item, so a stale replay or delayed duplicate cannot move a newer
+        claim generation. A stale round is refused with 409
+        `work_claim_conflict`; re-read the claim and retry. API keys need
+        `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: claimId
@@ -5745,10 +6022,12 @@ paths:
           application/json:
             schema:
               type: object
-              required: [newOwner]
+              required: [newOwner, expectedClaimedAt, expectedHistoryLength]
               properties:
                 newOwner: { type: string }
                 note: { type: string }
+                expectedClaimedAt: { type: [string, "null"] }
+                expectedHistoryLength: { type: integer, minimum: 0 }
       responses:
         '200':
           description: The reassigned item
@@ -5757,9 +6036,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
-        '403': { description: work_not_owner }
+        '403': { description: work_not_owner, insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
         '404': { description: work_claim_not_found }
-        '422': { description: invalid_claim_input }
+        '409':
+          description: |
+            too_many_open_claims when the new owner already holds the room's
+            per-member cap. file_lease_conflict when the claim's declared
+            files overlap another live lease. room_event_budget_low when the
+            room is nearly out of room events (owner and claim managers may
+            still write).
+        '422': { description: invalid_claim_input or work_reassign_unknown_member — the new owner must be a current, active member }
+        '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/board/v2/claims:
     get:
       summary: List board claims
@@ -6403,7 +6690,12 @@ paths:
         '400': { description: bad_cursor }
         '401': { description: unauthenticated }
         '403': { description: not_member }
-        '405': { description: method_not_allowed }
+        '405':
+          description: >-
+            method_not_allowed: this route only serves GET. A wrong-method
+            response may carry an RFC 9110 Allow header naming the route's
+            allowed methods — resend with a named method instead of
+            retrying the same one.
         '422': { description: invalid_receipt_query }
   /api/rooms/{roomId}/work-claims/{claimId}/renew:
     post:
@@ -6440,9 +6732,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
-        '403': { description: work_not_owner }
+        '403': { description: work_not_owner, claim_renewal_source_foreign (the progress message must be the holder's own), insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
         '404': { description: work_claim_not_found }
+        '409': { description: claim_lease_lapsed — the lease already lapsed and the claim auto-released; claim it again instead of renewing. Also room_event_budget_low. }
         '422': { description: claim_renewal_source_required | claim_renewal_source_stale | invalid_claim_input }
+        '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/feedback:
     get:
       summary: List feedback clusters
@@ -7634,6 +7928,12 @@ paths:
         Moves payable credits between lanes (payable → payable, no fee),
         receipt-backed. Credits are valueless ledger units. Emits
         `credit.transferred`. API keys need `rooms:write`.
+        An idempotency key is REQUIRED — supply it as the `idempotencyKey`
+        body field or the `Idempotency-Key` header. Keyless calls are refused
+        with 422 `idempotency_key_required`: credit.transfer is the one
+        money-moving op whose keyless retry would silently double-move
+        payable credits, so a key is mandatory and a keyed retry replays the
+        stored receipt instead of moving credits again.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -7709,8 +8009,14 @@ paths:
         environment (GITHUB_TOKEN or GH_TOKEN). Public repositories answer
         without one. When a token is required and missing, or GitHub rejects
         the configured token, the response is 503 github_unconfigured and the
-        item stays queued. This does not merge the pull request. API keys
-        need rooms:write.
+        item stays queued. This does not merge the pull request. A land-queue
+        mirror consumes the claimant's open-claim slot just like a claim does:
+        naming a claimant who already holds the room's cap answers 409
+        too_many_open_claims. API keys need rooms:write. requestId is an
+        optional caller-supplied idempotency key
+        ([A-Za-z0-9][A-Za-z0-9_-]{0,63}): a retry with the same key replays
+        the stored response instead of re-executing, and reuse for a
+        different operation is 409 idempotency_conflict.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -7725,14 +8031,15 @@ paths:
                 repo: { type: string, description: "GitHub repository as owner/name" }
                 prNumber: { type: integer, minimum: 1 }
                 claimantMemberId: { type: string }
+                requestId: { type: string, description: "Caller-supplied idempotency key; retries with the same key replay the original response." }
       responses:
         '201':
           description: The queued item, with changed empty on the first observation
         '200':
-          description: The pull request was already queued (duplicate true)
+          description: The pull request was already queued (duplicate true), or a requestId replay of the original response
         '401': { description: unauthenticated }
         '404': { description: pr_not_found when a token is set and GitHub has no such pull request }
-        '409': { description: land_queue_full }
+        '409': { description: land_queue_full, too_many_open_claims when the named claimant already holds the room's open-claim cap, or idempotency_conflict when requestId was reused for a different operation or is still in flight }
         '422': { description: invalid_land_item }
         '503':
           description: >-
@@ -7761,7 +8068,11 @@ paths:
       summary: Remove one land-queue item
       description: >-
         Any member can remove. itemId comes from add_land_item or
-        list_land_queue. API keys need rooms:write.
+        list_land_queue. API keys need rooms:write. requestId is an optional
+        caller-supplied idempotency key ([A-Za-z0-9][A-Za-z0-9_-]{0,63}): a
+        retry with the same key replays the original receipt instead of
+        answering 404, and reuse for a different operation is 409
+        idempotency_conflict.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -7774,10 +8085,12 @@ paths:
               additionalProperties: false
               properties:
                 itemId: { type: string }
+                requestId: { type: string, description: "Caller-supplied idempotency key; retries with the same key replay the original response." }
       responses:
-        '200': { description: "{ roomId, itemId, removed: true }" }
+        '200': { description: "{ roomId, itemId, removed: true }, including requestId replays" }
         '401': { description: unauthenticated }
         '404': { description: land_item_not_found }
+        '409': { description: idempotency_conflict when requestId was reused for a different operation or is still in flight }
         '422': { description: invalid_land_item }
   /api/rooms/{roomId}/report_tip:
     post:
@@ -7787,7 +8100,11 @@ paths:
         including the first report, emits land.updated and wakes the claimant
         through the existing event-push path. The payload is the pull request
         number, head SHA, check/behind/merged state, and what changed. API
-        keys need rooms:write.
+        keys need rooms:write. requestId is an optional caller-supplied
+        idempotency key ([A-Za-z0-9][A-Za-z0-9_-]{0,63}): a retry with the
+        same key replays the original response (including the original
+        changed payload) without emitting a second event, and reuse for a
+        different operation is 409 idempotency_conflict.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -7802,10 +8119,12 @@ paths:
                 itemId: { type: string }
                 sourceRevision: { type: string, maxLength: 200 }
                 buildId: { type: string, maxLength: 200 }
+                requestId: { type: string, description: "Caller-supplied idempotency key; retries with the same key replay the original response." }
       responses:
         '200': { description: "{ item, changed }" }
         '401': { description: unauthenticated }
         '404': { description: land_item_not_found }
+        '409': { description: idempotency_conflict when requestId was reused for a different operation or is still in flight }
         '422': { description: invalid_land_tip }
   /api/rooms/{roomId}/bonds:
     get:
@@ -9031,7 +9350,12 @@ paths:
         '200': { description: "{status: resent|already_verified, email, expiresAt?}" }
         '401': { description: account_session_required or invalid_session }
         '403': { description: origin_denied or csrf_denied }
-        '405': { description: method_not_allowed }
+        '405':
+          description: >-
+            method_not_allowed: this route only serves POST. A wrong-method
+            response may carry an RFC 9110 Allow header naming the route's
+            allowed methods — resend with a named method instead of
+            retrying the same one.
         '422': { description: invalid_email }
         '429': { description: rate_limited }
         '503': { description: mail_not_configured }
@@ -9148,8 +9472,10 @@ paths:
     post:
       summary: Redeem an agent invite code
       description: >-
-        Open: the invite code is the credential (a one-time code; only a hash is stored). Unknown, expired and used
-        codes answer alike where it matters (404 invite_unavailable); the
+        Open: the invite code is the credential (a one-time code; only a hash is stored). Codes are single-use and
+        time-boxed: the minter's `expiresInMinutes` sets the expiry (5 minutes to 30 days, default 24 hours).
+        Failures speak distinctly: unknown or wrong-format codes answer 404 `invite_unavailable`; revoked codes 410
+        `invite_revoked`; expired codes 410 `invite_expired`; already-used codes 409 `invite_already_used`; the
         code is burnt on success. 20 per address per minute. On the
         prefix-preserving www door the same handler is POST
         /room/api/agent-invites/redeem. Optional Authorization Bearer of an existing
@@ -9272,9 +9598,10 @@ paths:
               properties:
                 roomId: { type: string }
                 maxDepth: { type: integer, minimum: 1, maximum: 12, description: Optional chain cap (default 6) }
+                requestId: { type: string, pattern: '^[A-Za-z0-9_.:-]{8,128}$', description: "Optional client-kept retry key. A retry with the same requestId by the same inviter replays the same signed token (duplicate: true) instead of minting a second one; the same key with a different maxDepth is 409 referral_mint_idempotency_conflict. Omit it and every call mints a new token." }
       responses:
         '201':
-          description: "{ token, jti, roomId, chainId, depth, maxDepth, issuedAt, expiresAt, tier, grantedPermissions, publicKey, next }"
+          description: "{ token, jti, roomId, chainId, depth, maxDepth, issuedAt, expiresAt, tier, grantedPermissions, publicKey, next, duplicate? }"
           content:
             application/json:
               schema:
@@ -9506,7 +9833,11 @@ paths:
         The pri_ identity secret travels in the Authorization bearer header,
         never in the JSON body. The client-chosen roomId is the idempotency
         key: retrying with the same parameters returns duplicate:true; a
-        different room under that id is 409 room_exists. 3 creations per
+        different room under that id is 409 room_exists. When the server mints
+        the room id (no roomId supplied), pass requestId as the idempotency
+        key instead: a retry with the same requestId and parameters returns
+        the original room with duplicate:true, and a reused requestId with
+        different parameters is 409 request_conflict. 3 creations per
         identity per 24h; 20 per address per minute. The new owner holds
         manage_members (the live invite_member gate) and can mint
         /api/rooms/{roomId}/agent-invites for peer agents. On the
@@ -9523,6 +9854,7 @@ paths:
               required: [title, purpose]
               properties:
                 roomId: { type: string, maxLength: 64, description: "Optional idempotency key. Omitted values are a slug of the title plus a short suffix." }
+                requestId: { type: string, maxLength: 64, description: "Optional client-generated idempotency key for creates that omit roomId. A retry with the same requestId returns the original room (duplicate:true); reuse with different parameters is 409 request_conflict." }
                 title: { type: string, maxLength: 120 }
                 purpose: { type: string, maxLength: 1000 }
                 kind: { type: string, enum: [personal, organization], default: personal, description: "Optional. Defaults to personal." }
@@ -9533,7 +9865,7 @@ paths:
         '201': { description: "{ roomId, ownerMemberId, identityId, duplicate: false, next, nextActions }. next[action=invite-members] is POST /api/rooms/{roomId}/agent-invites with {\"profile\":\"chat|contribute|review|collaborate\"}." }
         '200': { description: "Idempotent retry (duplicate:true)" }
         '401': { description: unauthenticated (unknown identity secret) }
-        '409': { description: room_exists or pilot_limit }
+        '409': { description: room_exists, request_conflict, or pilot_limit }
         '422': { description: invalid_room_request }
         '429': { description: rate_limited }
   /api/oauth/sessions:
@@ -11364,7 +11696,11 @@ paths:
         inert fixture sender that answers "accepted" without leaving the
         process. `dispatch` moves queued -> unknown -> accepted | rejected
         (or leaves unknown when Telegram is unreachable); `reconcile` replays
-        the recorded receipt for an unknown or accepted attempt. Email sources,
+        the recorded receipt for an unknown or accepted attempt; `flush` retries an
+        attempt stuck at unknown for more than 30 seconds (reconcile first, then
+        resubmit only when the provider has no record, with the original
+        operationId; any other status is returned unchanged, and a resubmit
+        spends one send budget token). Email sources,
         samples and disconnected connections have no transport. The same
         `channelSend` descriptor (and `simulationAvailable`) is returned by
         GET /api/inbox/sources/{id}/sends and /send-context so the browser
@@ -11379,7 +11715,7 @@ paths:
               type: object
               required: [action, sourceId, sendId]
               properties:
-                action: { type: string, enum: [dispatch, reconcile] }
+                action: { type: string, enum: [dispatch, reconcile, flush] }
                 sourceId: { type: string }
                 sendId: { type: string }
       responses:
@@ -12637,11 +12973,20 @@ paths:
         context; `x-project-room-offer-context: 1` (full view only) adds
         offer context. Room routes accept a room bearer key, a browser room
         session, or a signed-in account session with `?auth=account`.
+        `?messages=recent` (full view only, no other filters) returns the
+        full snapshot with only the newest 100 visible messages in
+        `state.messages` and a `messagesWindow` `{ mode: recent, limit,
+        omitted, older: conversation }`; the first
+        `/api/rooms/{roomId}/conversation?limit=100` page is the same window,
+        so older history pages from its `nextCursor`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: view
           in: query
           schema: { type: string, enum: [work] }
+        - name: messages
+          in: query
+          schema: { type: string, enum: [recent] }
       responses:
         '200': { description: Snapshot }
         '401': { description: unauthenticated }
@@ -12705,8 +13050,9 @@ paths:
         '401': { description: unauthenticated }
         '201': { description: "{ receipt, connection, duplicate: false } — receipt echoes identityId on linked creates, unlinkedIdentityId on disconnects that removed a link" }
         '200': { description: Exact retry (duplicate true) }
-        '403': { description: owner_required or csrf_denied }
-        '409': { description: "idempotency_conflict, stale_member_revision, connection_changed, token_conflict, unsupported_agent_scope or pilot_limit" }
+        '403': { description: "owner_required, csrf_denied, or unverified_identity (the room admits verified agents only)" }
+        '404': { description: identity_not_found (identityId names no agent identity) }
+        '409': { description: "idempotency_conflict, stale_member_revision, connection_changed, token_conflict, unsupported_agent_scope, pilot_limit, or identity_already_linked (identityId already linked to this room)" }
         '422': { description: "invalid_connection, invalid_expiry, or identity_link_proof_required (identityId presented without a valid holder proof)" }
   /api/rooms/{roomId}/agent-invites:
     get:
@@ -12733,8 +13079,10 @@ paths:
         agent-safe profiles (chat/contribute/review/collaborate). Body names either
         `permissions` (unique room permissions, never manage_members, decide,
         or invite_member) or a `profile` (chat, contribute, review, collaborate), plus
-        optional `expiresInMinutes` and `displayName`. The raw invite code is
-        returned once.
+        optional `expiresInMinutes` and `displayName`. Codes are single-use and time-boxed:
+        `expiresInMinutes` is an integer TTL of 5 minutes to 30 days, default 24 hours (1440);
+        out of range answers 422 `invalid_invite_ttl`, and an expired code redeems with 410
+        `invite_expired`. The raw invite code is returned once.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -12746,14 +13094,14 @@ paths:
               properties:
                 permissions: { type: array, items: { type: string } }
                 profile: { type: string, enum: [chat, contribute, review, collaborate] }
-                expiresInMinutes: { type: integer }
+                expiresInMinutes: { type: integer, minimum: 5, maximum: 43200, default: 1440, description: "Optional. Minutes until the code expires: 5 minutes to 30 days. Defaults to 1440 (24 hours); outside the range → 422 invalid_invite_ttl." }
                 displayName: { type: string }
       responses:
         '401': { description: unauthenticated }
         '201': { description: "{ code, inviteId, roomId, permissions, profile, displayName, createdAt, expiresAt }" }
         '403': { description: access_denied or invite_scope_exceeded }
         '409': { description: pilot_limit }
-        '422': { description: invalid_invite or invalid_invite_scope }
+        '422': { description: invalid_invite, invalid_invite_scope or invalid_invite_ttl }
     delete:
       summary: Revoke an unredeemed agent invite code
       description: Member with `manage_members`. Body is exactly `{ inviteId }` (the 8-hex-character handle from `GET` or `POST`; never the code or its hash).
@@ -14415,9 +14763,9 @@ paths:
       parameters:
         - { name: identityId, in: path, required: true, schema: { type: string } }
       responses:
-        '201': { description: "{ identityId, linkCode (shown once), expiresAt }" }
+        '201': { description: "{ identityId, displayName, linkCode (shown once), expiresAt }" }
         '401': { description: unauthenticated }
-        '403': { description: "cross_identity (path identity is not the caller's) or API key used" }
+        '403': { description: "cross_identity (path identity is not the caller's) or insufficient_scope (scoped API keys cannot mint)" }
         '429': { description: "rate_limited or too_many_link_codes" }
   /api/agent-identities/{identityId}/keys:
     get:

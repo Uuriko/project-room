@@ -156,7 +156,8 @@ for (const broken of ["legacy", "malformed"]) test("human offers do not infer su
   const f = await setup(t), guest = await f.open("guest");
   await f.agentOffer(); f.update("agent-offer", "selected");
   if (broken === "legacy") f.help("withdrawn");
-  await guest.page.route("**/api/rooms/commons", async route => {
+  // Match the path: the stream-open re-read asks for ?messages=recent.
+  await guest.page.route(url => url.pathname === "/api/rooms/commons", async route => {
     const response = await route.fetch(), body = await response.json();
     if (broken === "legacy") delete body.offerContextVersion; else body.state.helpOffers = [];
     return route.fulfill({ response, json: body });
