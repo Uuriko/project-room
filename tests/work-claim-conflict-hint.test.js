@@ -76,3 +76,14 @@ test("H4: agentErrorBody for work_claim_conflict carries an actionable hint + ne
   assert.match(other.hint, /held by quill/i);
   assert.ok(other.next.some(step => step.path === "/api/rooms/room1/work-claims/h4"));
 });
+
+test("H4: a done item is reported as already done, not as held", () => {
+  const conflictOf = fn => { try { fn(); } catch (e) { return e; } return null; };
+  const done = { ...claimWork({ id: "h4d" }, "quill", { now: T0 }), state: "done" };
+  for (const who of ["quill", "grok"]) {
+    const err = conflictOf(() => claimWork(done, who, { now: T0 }));
+    assert.ok(err instanceof ClaimError && err.code === "invalid_claim_input");
+    assert.match(err.message, /already done/i);
+    assert.doesNotMatch(err.message, /held by|reassign or release/i);
+  }
+});
