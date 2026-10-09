@@ -57,10 +57,26 @@ see the manual review contract below.
 
 ## Claim, release, reassign
 
-`POST .../claim` with `{ "note"?, "leaseHours"?, "files"?, "advisory"?, "dependsOn"?, "pullRequest"?, "pullRequests"?, "repo"?, "branch"? }`.
+`POST .../claim` with `{ "note"?, "leaseHours"?, "files"?, "advisory"?, "dependsOn"?, "pullRequest"?, "pullRequests"?, "repo"?, "branch"?, "expectedClaimedAt"?, "expectedHistoryLength"? }`.
 Only an `unclaimed` item can be claimed. A second holder is **409**
 `work_claim_conflict`. `repo` and `branch` are optional labels (1..200
 characters of letters, numbers, or `.` `_` `/` `-`).
+
+A claim may carry the optional round preconditions `expectedClaimedAt` +
+`expectedHistoryLength` (same names and meaning as the update and release
+paths): when either is present they must describe the item exactly as the
+client last read it, otherwise the claim is refused with **409**
+`work_claim_conflict` — a stale client re-reads instead of silently
+claiming a round that already turned over. An unclaimed item carries
+`claimedAt: null`, so `null` is an acceptable `expectedClaimedAt` here
+(the update/release paths require a string because the claim is always
+active there). Malformed preconditions are **422**. Absent preconditions
+keep the legacy behavior.
+
+`dependsOn` entries must be claims that can still deliver: claiming with a
+dependency that was released, whose lease expired, or that was closed is
+**422** `invalid_claim_input` naming the dead dependency. Active, `done`,
+and never-claimed dependencies are accepted.
 
 Files are an exclusive lease. A path string, or `{ "path", "block"? }` /
 `{ "path", "region"? }`, names what the claim holds. No label means the whole
@@ -421,8 +437,10 @@ These rules hold on every Board write and read.
   invisible characters are removed get **422** `invalid_claim_input` naming
   the field.
 - **Inputs.** Every `dependsOn` id must name a claim in this room, other than
-  the claim itself. `leaseHours` is a number from 0.25 to 168 (`null` stays
-  limited to the room owner and `manage_claims`).
+  the claim itself. Claiming with a dependency that was released, whose
+  lease expired, or that was closed is **422** `invalid_claim_input`
+  naming the dead dependency. `leaseHours` is a number from 0.25 to 168
+  (`null` stays limited to the room owner and `manage_claims`).
 - **Event budget.** A note-only update, a review note and a renewal add at
   most one room event per claim per 60 seconds; the claim records every
   write. When fewer than 10% of the room's 10,000 lifetime events remain,

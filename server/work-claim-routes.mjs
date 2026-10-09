@@ -52,7 +52,7 @@ import { ROOM_GUIDE_ID } from "./room-guide.mjs";
 import { fileLeaseConflictBody, fileLeaseConflicts, holdForRateLimit, readyClaims } from "./claim-coordination.mjs";
 import { collectPullRequestLookups, commitPullRequestLookup, readClaimPullBudget, writeClaimPullBudget } from "./claim-pr-sync.mjs";
 import {
-  assertBoardEventBudget, assertBoardLeaseHours, assertDependsOnKnown, boardText, boardTextFields, clientPullRequestInput,
+  assertBoardEventBudget, assertBoardLeaseHours, assertDependsOnKnown, assertDependsOnLive, boardText, boardTextFields, clientPullRequestInput,
   readBoardDeployStatus, roomEventsRemaining, DONE_WINDOW_MS, LIST_HISTORY_ENTRIES,
 } from "./work-claim-integrity.mjs";
 import { stampClaim, stampClaimPage, stampReceipts, withContentTrust } from "./content-trust.mjs";
@@ -970,9 +970,36 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "claim" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { optional: ["note", "leaseHours", "files", "advisory", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch"] })) invalidInput(reject, "{note?, leaseHours?, files?, advisory?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?}");
+    if (!shape(data, { optional: ["note", "leaseHours", "files", "advisory", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch", "expectedClaimedAt", "expectedHistoryLength"] })) invalidInput(reject, "{note?, leaseHours?, files?, advisory?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?, expectedClaimedAt?, expectedHistoryLength?}");
     if ("advisory" in data && typeof data.advisory !== "boolean") invalidInput(reject, "advisory true or false");
     const item = load(claimIdOf(reject, workClaimId));
+    // FIX-72 (WAVE-300, 2026-10-09): opt-in round precondition on claim,
+    // mirroring the update route's OCC (and the FIX-5 release binding). When
+    // either precondition is present it must describe the item exactly as the
+    // client last read it, otherwise the claim is refused with 409
+    // work_claim_conflict — a stale client re-reads instead of silently
+    // claiming a round that already turned over. An unclaimed item carries
+    // claimedAt: null, so null is an acceptable expectedClaimedAt here (it
+    // echoes the read basis); the update/release paths require a string
+    // because the claim is always active there. Absent preconditions keep
+    // the legacy behavior unchanged.
+    if (Object.hasOwn(data, "expectedClaimedAt") || Object.hasOwn(data, "expectedHistoryLength")) {
+      if (!(data.expectedClaimedAt === null
+        || (typeof data.expectedClaimedAt === "string" && data.expectedClaimedAt.length <= 100
+          && Number.isFinite(Date.parse(data.expectedClaimedAt)))))
+        invalidInput(reject, "expectedClaimedAt must be the claim timestamp from the read (null for unclaimed work)");
+      if (!(Number.isSafeInteger(data.expectedHistoryLength) && data.expectedHistoryLength >= 0))
+        invalidInput(reject, "expectedHistoryLength must be the current history length");
+      if (item.claimedAt !== data.expectedClaimedAt || claimHistoryLength(item) !== data.expectedHistoryLength) {
+        const href = `/api/rooms/${encodeURIComponent(roomId)}/work-claims/${encodeURIComponent(workClaimId)}`;
+        const hint = "Read the current claim and check its owner and round before retrying. Do not release or reacquire it.";
+        const refusal = new ServiceError(409, "work_claim_conflict",
+          `Stale claim basis for "${item.id}": the claim changed since this request was prepared.`);
+        refusal.body = { ...agentErrorBody({ httpStatus: 409, code: "work_claim_conflict", message: refusal.message, roomId, workItemId: workClaimId }),
+          hint, next: [{ path: href }, { command: hint }] };
+        throw refusal;
+      }
+    }
     // H4 (QA-200 2026-10-08): a failed claim's 409 must name the real recovery.
     // The old "release it first" advice destroyed your own claim on self
     // re-claim and was unactionable for a foreign holder (non-owners cannot
@@ -991,6 +1018,11 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     assertLeaseChoice(data);
     assertBoardLeaseHours(reject, data);
     assertDependsOnKnown(reject, data, { selfId: item.id, has: other => registry.has(roomId, other) });
+    // FIX-72 (WAVE-300, 2026-10-09): a dependency that can never deliver
+    // (released, lease-expired, or closed) is refused with 422 naming it —
+    // claiming against a dead dependency used to accept 200 silently
+    // (COLLIDE-5 E2b). Done, active, and never-claimed dependencies stay 200.
+    assertDependsOnLive(reject, data, { selfId: item.id, get: other => registry.get(roomId, other), nowMs });
     Object.assign(data, clientPullRequestInput(reject, boardTextFields(reject, data, { note: { multiline: true } })));
     const held = registry.list(roomId).filter(entry => entry.owner === caller && ACTIVE_CLAIM_STATES.includes(entry.state)).length;
     if (held >= config.maxMemberOpenClaims) {

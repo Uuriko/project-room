@@ -15,6 +15,7 @@
 //   the stale cached value while the GitHub budget is held.
 import { TEXT_CHARACTER_CLASSES } from "./display-name-guard.mjs";
 import { PILOT_LIMITS } from "./store.mjs";
+import { isLeaseExpired } from "./work-claims.mjs";
 import { readCachedDeployStatus, readClaimPullBudget, readRoomDeployStatus } from "./claim-pr-sync.mjs";
 
 const INVISIBLE = new RegExp(TEXT_CHARACTER_CLASSES.invisible.source, "gu");
@@ -73,6 +74,38 @@ export function assertDependsOnKnown(reject, data, { selfId, has }) {
     if (typeof id !== "string") continue; // the state machine reports the shape
     if (id === selfId) invalid(reject, "dependsOn", "a claim cannot depend on itself");
     if (!has(id)) invalid(reject, "dependsOn", `no claim "${id.slice(0, 128)}" in this room`);
+  }
+}
+
+// FIX-72 (WAVE-300, 2026-10-09): a dependency that can never deliver is
+// refused at claim time with 422 invalid_claim_input naming it. Dead means:
+// - "closed": retired without delivery (closeWork clears owner and lease);
+// - "released": unclaimed after a claim round — the round timestamp survives
+//   the release (claimedAt is never cleared), which is what distinguishes a
+//   released item from one that was never claimed (future work, healthy);
+// - "expired": still held but the lease already lapsed (the sweep stamps
+//   lease_expired on its next pass; isLeaseExpired catches it before then).
+// Healthy means active with a live lease, done (delivered — the dependency
+// is satisfied), or never-claimed. Unknown ids, self-dependence, and
+// non-string entries stay assertDependsOnKnown's (and the state machine's)
+// job — this guard skips them.
+export function assertDependsOnLive(reject, data, { selfId, get, nowMs }) {
+  if (!data || !Array.isArray(data.dependsOn)) return;
+  for (const id of data.dependsOn) {
+    if (typeof id !== "string") continue; // the state machine reports the shape
+    if (id === selfId) continue; // assertDependsOnKnown reports self-dependence
+    const dep = get(id);
+    if (!dep) continue; // assertDependsOnKnown reports unknown ids
+    const name = `"${id.slice(0, 128)}"`;
+    if (dep.state === "closed") {
+      invalid(reject, "dependsOn", `dependency ${name} is closed — it was retired without delivery`);
+    }
+    if (dep.state === "unclaimed" && dep.claimedAt != null) {
+      invalid(reject, "dependsOn", `dependency ${name} was released — its claim round ended without delivery`);
+    }
+    if (isLeaseExpired(dep, nowMs)) {
+      invalid(reject, "dependsOn", `dependency ${name} is expired — its claim lease already lapsed`);
+    }
   }
 }
 

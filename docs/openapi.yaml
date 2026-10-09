@@ -5260,6 +5260,11 @@ paths:
         claim is 409 `file_lease_conflict`, naming the holder, the files,
         and `leaseExpiresAt`. `advisory: true` records the claim anyway and
         returns `fileWarnings`. API keys need `rooms:write`.
+        The optional round preconditions `expectedClaimedAt` +
+        `expectedHistoryLength` bind the claim to the item as last read (same
+        names and meaning as the update and release paths); a stale basis is
+        409 `work_claim_conflict` with a read-back hint, and malformed
+        preconditions are 422.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: claimId
@@ -5286,7 +5291,14 @@ paths:
                 dependsOn:
                   type: array
                   items: { type: string }
-                  description: Replaces the claim's dependencies when given.
+                  description: Replaces the claim's dependencies when given. Dependencies that were released, lease-expired, or closed are refused with 422 invalid_claim_input naming the dead dependency.
+                expectedClaimedAt:
+                  type: [string, 'null']
+                  description: "Optional round precondition (opt-in): the item's claimedAt exactly as last read — null for an unclaimed item. When present with expectedHistoryLength, a mismatch is 409 work_claim_conflict."
+                expectedHistoryLength:
+                  type: integer
+                  minimum: 0
+                  description: "Optional round precondition (opt-in): history.length + (historyOmitted ?? 0) from the same read. Detects changes since the read; a mismatch is 409 work_claim_conflict."
                 parentClaimId:
                   type: string
                   pattern: '[A-Za-z0-9_-]{1,128}'
@@ -5331,7 +5343,9 @@ paths:
             work_claim_conflict when the item is already claimed. The message
             names the holder: a self re-claim (same holder) says "You already
             hold work ..." — never release it to re-claim; a foreign claimant
-            gets "held by <owner>". file_lease_conflict when declared files
+            gets "held by <owner>". A stale expectedClaimedAt /
+            expectedHistoryLength basis is also work_claim_conflict, with a
+            read-back hint. file_lease_conflict when declared files
             overlap a live lease. The body names holder { claimId, owner },
             files, and leaseExpiresAt.
         '422': { description: invalid_claim_input }
