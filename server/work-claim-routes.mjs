@@ -764,7 +764,11 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     invalidInput(reject, `leaseHours greater than 0 and at most ${MAX_LEASE_HOURS}; null is only for the room owner or manage_claims`);
   };
 
-  const load = id => loadClaim(reject, registry, roomId, id);
+  const load = id => {
+    const item = registry.get(roomId, id);
+    if (!item) reject(404, "work_claim_not_found", `No work claim "${id}" in this room`);
+    return item;
+  };
   const loadClaim = () => load(claimIdOf(reject, workClaimId));
   // Returns true when the caller is the room owner or holds manage_claims
   // and is acting on someone else's claim. The claim holder takes the
