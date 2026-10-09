@@ -1,0 +1,155 @@
+// Server coverage report (backlog TST-10).
+//
+// Lists every server/ module with its test status:
+// - "direct":     a test file imports or path-references the module
+//                 (same rule as scripts/untested-modules-lint.mjs).
+// - "transitive": no test references it, but a directly tested module
+//                 imports it (static relative imports), so tests load it.
+// - "unreached":  no test references it and no tested module imports it.
+//                 Tests never load this code.
+// With --coverage-dir <dir> (V8 data from `node scripts/coverage-thresholds.mjs
+// --collect-only`, or any NODE_V8_COVERAGE run), each file also gets its line
+// coverage, computed the same way as the coverage-thresholds gate.
+//
+// Usage:
+//   node scripts/server-coverage-report.mjs                 # print the summary
+//   node scripts/server-coverage-report.mjs --json          # machine-readable
+//   node scripts/server-coverage-report.mjs --write docs/SERVER-COVERAGE.md
+//   node scripts/server-coverage-report.mjs --coverage-dir coverage --write docs/SERVER-COVERAGE.md
+// Exit code is always 0 for a report. The gate stays in untested-modules-lint.
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { dirname, join, relative, resolve, sep } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { findUntested } from "./untested-modules-lint.mjs";
+import {
+  readCoveragePayloads,
+  groupFunctionsByUrl,
+  coveredLinesForPayload,
+  coverableLines,
+} from "./coverage-thresholds.mjs";
+
+const ROOT = resolve(join(fileURLToPath(new URL(".", import.meta.url)), ".."));
+const toPosix = p => p.split(sep).join("/");
+
+/** Static relative imports of each module, as server-relative posix paths. */
+export function buildImportGraph(serverDir, modules) {
+  const known = new Set(modules);
+  const graph = new Map();
+  for (const mod of modules) {
+    const src = readFileSync(join(serverDir, mod), "utf8");
+    const deps = new Set();
+    const specs = [
+      ...src.matchAll(/(?:^|[\s;])(?:import|export)\s[^'";]*?from\s*['"]([^'"]+)['"]/g),
+      ...src.matchAll(/(?:^|[\s;])import\s*['"]([^'"]+)['"]/g),
+      ...src.matchAll(/(?<![\w$.])import\s*\(\s*['"]([^'"]+)['"]\s*\)/g),
+    ].map(m => m[1]);
+    for (const spec of specs) {
+      if (!spec.startsWith(".")) continue;
+      const rel = toPosix(relative(serverDir, resolve(dirname(join(serverDir, mod)), spec)));
+      if (known.has(rel)) deps.add(rel);
+    }
+    graph.set(mod, [...deps].sort());
+  }
+  return graph;
+}
+
+/** Per-file line coverage, unioned across test processes (any process covers = covered). */
+export function fileCoverage(root, serverDir, modules, coverageDir) {
+  const grouped = groupFunctionsByUrl(readCoveragePayloads(coverageDir), root);
+  const out = new Map();
+  for (const mod of modules) {
+    const abs = join(serverDir, mod);
+    const text = readFileSync(abs, "utf8");
+    const coverable = coverableLines(text).filter(Boolean).length;
+    const covered = new Set();
+    for (const functions of grouped.get(pathToFileURL(abs).href) || []) {
+      for (const line of coveredLinesForPayload(text, functions)) covered.add(line);
+    }
+    const pct = coverable === 0 ? 100 : (100 * covered.size) / coverable;
+    out.set(mod, { covered: covered.size, coverable, pct: Math.round(pct * 10) / 10 });
+  }
+  return out;
+}
+
+export function buildReport({ root = ROOT, serverDir, testDir, coverageDir } = {}) {
+  serverDir = serverDir || join(root, "server");
+  testDir = testDir || join(root, "tests");
+  const { modules, untested } = findUntested(serverDir, testDir);
+  const untestedSet = new Set(untested);
+  const graph = buildImportGraph(serverDir, modules);
+  const reached = new Set(modules.filter(m => !untestedSet.has(m)));
+  const queue = [...reached];
+  while (queue.length) {
+    for (const dep of graph.get(queue.pop()) || []) {
+      if (!reached.has(dep)) { reached.add(dep); queue.push(dep); }
+    }
+  }
+  const importedBy = new Map(modules.map(m => [m, []]));
+  for (const [mod, deps] of graph) for (const d of deps) importedBy.get(d).push(mod);
+  const cov = coverageDir && existsSync(coverageDir) ? fileCoverage(root, serverDir, modules, coverageDir) : null;
+  const rows = modules.sort().map(mod => ({
+    module: mod,
+    status: !untestedSet.has(mod) ? "direct" : reached.has(mod) ? "transitive" : "unreached",
+    importedBy: importedBy.get(mod).sort(),
+    ...(cov ? { coverage: cov.get(mod) } : {}),
+  }));
+  const count = s => rows.filter(r => r.status === s).length;
+  return {
+    totals: { modules: rows.length, direct: count("direct"), transitive: count("transitive"), unreached: count("unreached") },
+    coverageDir: cov ? toPosix(relative(root, coverageDir)) : null,
+    rows,
+  };
+}
+
+export function formatMarkdown(report, { revision = "" } = {}) {
+  const t = report.totals;
+  const lines = [
+    "# Server test coverage report",
+    "",
+    "Generated by `node scripts/server-coverage-report.mjs --write docs/SERVER-COVERAGE.md`. Do not edit by hand.",
+    revision ? `Revision: ${revision}.` : "",
+    "",
+    `Summary: ${t.modules} server modules. ${t.direct} have a direct test reference. ${t.transitive} are loaded only through a tested module. ${t.unreached} are never loaded by any test.`,
+    "",
+    "Status rules: \"direct\" means a test file imports or path-references the module. \"transitive\" means only a directly tested module imports it. \"unreached\" means neither.",
+    "",
+  ].filter((l, i, a) => l !== "" || a[i - 1] !== "");
+  const section = (title, status) => {
+    const rs = report.rows.filter(r => r.status === status);
+    lines.push(`## ${title} (${rs.length})`, "");
+    if (!rs.length) { lines.push("None.", ""); return; }
+    const withCov = rs.some(r => r.coverage);
+    lines.push(withCov ? "| Module | Imported by | Line coverage |" : "| Module | Imported by |", withCov ? "|---|---|---|" : "|---|---|");
+    for (const r of rs) {
+      const by = r.importedBy.length ? r.importedBy.slice(0, 3).join(", ") + (r.importedBy.length > 3 ? `, +${r.importedBy.length - 3}` : "") : "-";
+      lines.push(withCov ? `| ${r.module} | ${by} | ${r.coverage ? r.coverage.pct + "%" : "-"} |` : `| ${r.module} | ${by} |`);
+    }
+    lines.push("");
+  };
+  section("Unreached: no test loads these modules", "unreached");
+  section("Transitive only: no direct test", "transitive");
+  if (report.coverageDir) {
+    const low = report.rows.filter(r => r.status === "direct" && r.coverage && r.coverage.pct < 50).sort((a, b) => a.coverage.pct - b.coverage.pct);
+    lines.push(`## Directly tested but under 50% line coverage (${low.length})`, "");
+    for (const r of low) lines.push(`- ${r.module}: ${r.coverage.pct}% (${r.coverage.covered}/${r.coverage.coverable} lines)`);
+    lines.push("");
+  }
+  return lines.join("\n");
+}
+
+const isMain = !!process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
+if (isMain) {
+  const argv = process.argv.slice(2);
+  const opt = name => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : undefined; };
+  const coverageDir = opt("--coverage-dir") ? resolve(opt("--coverage-dir")) : undefined;
+  const report = buildReport({ coverageDir });
+  if (argv.includes("--json")) {
+    console.log(JSON.stringify(report, null, 2));
+  } else {
+    const md = formatMarkdown(report, { revision: opt("--revision") || "" });
+    if (opt("--write")) { writeFileSync(resolve(opt("--write")), md + "\n"); }
+    const t = report.totals;
+    console.log(`server modules ${t.modules}: direct ${t.direct}, transitive ${t.transitive}, unreached ${t.unreached}`);
+    for (const r of report.rows.filter(r => r.status === "unreached")) console.log(`unreached ${r.module}`);
+  }
+}
