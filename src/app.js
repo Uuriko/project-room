@@ -41,6 +41,7 @@ import { attachmentFromBytes, composerAudienceNote, COMPOSER_FILE_BYTES, fileChi
 import { formatSessionExpiry } from "./session-expiry.js";
 import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui.js";
 import { installHumanPush } from "./human-push.js";
+import { registerPwaWorker } from "./pwa-register.js";
 import { chatSuggestions, ASK_AGENT_AFTER_MS } from "./chat-suggestions.js";
 import { paintClaimChat } from "./board-ui.js";
 import { installHumanExperience } from "./human-experience.js";
@@ -100,6 +101,11 @@ if (accountSettingsSummary) accountSettingsSummary.textContent = "Account";
 // 2026-10-03 P1-1). It comes down the moment the app boots so it never
 // double-renders with the live UI. Module top level: runs before any render.
 $("#static-hero")?.remove();
+// M-06 (PWA behavior): register the service worker for every visitor so the
+// offline navigation fallback works whether or not push is enabled. Push
+// opt-in (src/human-push.js) registers the same script; re-registration is a
+// no-op, and a failed registration never rejects into boot.
+void registerPwaWorker();
 $("#skip-link").addEventListener("click", event => {
   event.preventDefault();
   const target = !$("#inbox-panel").hidden ? "#inbox-heading"

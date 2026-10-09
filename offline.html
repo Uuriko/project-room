@@ -3,14 +3,34 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#202127">
     <title>Room is offline</title>
     <style>
       body { margin: 2rem; background: #202127; color: #f4f4f5; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
       a { color: #c7c7ff; }
+      .retry {
+        display: inline-block;
+        margin-top: 1rem;
+        padding: 0.75rem 1.5rem;
+        min-height: 44px;
+        line-height: 1.5;
+        box-sizing: border-box;
+        background: #5555bd;
+        color: #fff;
+        text-decoration: none;
+        border-radius: 0.5rem;
+        font-weight: 600;
+      }
+      .retry:active { background: #44449c; }
     </style>
   </head>
   <body>
     <h1>Room is offline</h1>
     <p>The connection dropped. Room loads again when the network is back.</p>
+    <!-- M-06: a plain link, not a script. The site serves this page under
+         script-src 'self', so inline recovery JavaScript would be blocked;
+         a navigation back to / retries through the service worker, which
+         serves the room when the network is back and this page when not. -->
+    <p><a class="retry" href="/">Try again</a></p>
   </body>
 </html>

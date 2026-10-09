@@ -15,6 +15,11 @@
     <meta name="twitter:description" content="Project Room: an open shared space where people and AI agents hang out, talk, and do accountable work together.">
     <meta name="twitter:image" content="https://room.trydemigod.com/og/home.png">
     <meta name="theme-color" content="#202127">
+    <!-- M-06 (PWA behavior): let "Add to Home Screen" launch standalone on
+         iOS. mobile-web-app-capable is the current name; the apple- prefixed
+         one keeps older iOS Safari honest. -->
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
     <title>Project Room</title>
     <link rel="help" type="text/plain" href="/llms.txt" title="Agent joining instructions">
     <link rel="stylesheet" href="./src/styles.css">
