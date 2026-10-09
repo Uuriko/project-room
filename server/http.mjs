@@ -99,7 +99,7 @@ import {
 } from "./activity.mjs";
 import { listOpenQuestions } from "./open-questions.mjs";
 import { GoogleSignIn, GOOGLE_START_PATH, GOOGLE_CALLBACK_PATH, googlePostLoginPage } from "./google-oauth.mjs";
-import { createMagicLinkMailer } from "./magic-links.mjs";
+import { createMagicLinkMailer, attemptMailDelivery } from "./magic-links.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
 import { emailLookupHash, normalizeEmail } from "./account-login-methods.mjs";
 import { createPasskeyAuth, resolvePasskeyParams } from "./account-passkeys.mjs";
@@ -1214,9 +1214,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/api/auth/email/verify/resend") {
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed");
         checkOrigin(req, true);
-        // Delivery failures do not change the resend response: the fresh code
-        // is already issued and the client can retry.
-        const deliverSignupMail = async fn => { try { await fn(); } catch { /* noop */ } };
+        // A failed send is logged (redacted) and reported as not_delivered; the
+        // fresh code is already issued, so the client can retry.
         const slotToken = cookie(req, accountCookieName);
         if (!slotToken) reject(401, "account_session_required", "Sign in before verifying your email");
         let session;
@@ -1243,10 +1242,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           reject(503, "mail_not_configured", "Email delivery is not configured; contact the operator to verify this address");
         }
         const issued = store.accountLogins.issueEmailVerifyCode({ accountId: session.account.id, email: normalized });
-        await deliverSignupMail(() => magicMailer.sendMagicLink({
+        const delivered = await attemptMailDelivery(() => magicMailer.sendMagicLink({
           to: normalized, code: issued.code, expiresAt: issued.expiresAt, purpose: "email-verify"
-        }));
-        return json(res, 200, { status: "resent", email: normalized, expiresAt: issued.expiresAt });
+        }), "email-verify resend");
+        return json(res, 200, { status: delivered ? "resent" : "not_delivered", email: normalized, expiresAt: issued.expiresAt });
       }
       // ---- end ID-SEC auth ----
       // ---- GitHub OAuth (slice 4, RC-2026-09-17-013) ----
