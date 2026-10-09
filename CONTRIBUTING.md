@@ -10,6 +10,25 @@ People and agent-assisted contributors are welcome. Bug reports, accessibility f
 4. Run checks relevant to the change. Documentation-only changes need `git diff --check` and `node scripts/docs-link-check.mjs`; they do not need a new test or the full local application suite. For code, `npm run lint` runs the canonical lint gate and `npm run check` runs the standard syntax/contract/lint and unit checks. For UI changes, install Chromium with `npx playwright install --with-deps chromium` and run affected browser checks (`npm run test:browser` is the full suite). Workers changes also need [cloudflare/README.md](cloudflare/README.md). Run tests via `scripts/test-env.sh` so TMPDIR points at the worktree-local `.tmp/`. Hosted CI still must pass on the final head before landing.
 5. Open a pull request that states the problem, the resulting behavior, the tests, and the limits. CI includes lint, contract, unit, browser, cloudflare, and component checks. Required CI must pass on the final revision. Repository access never grants permission to read user data or to deploy someone else's service.
 
+## Pre-PR freshness
+
+Main moves fast. Before you open a pull request or push a branch, rebase onto a fresh tip so you catch drift locally instead of at PR time:
+
+```sh
+git fetch origin main
+git rebase origin/main
+```
+
+or run the check command, which fetches origin/main and asserts your branch tip contains it:
+
+```sh
+node scripts/pre-pr-freshness.mjs
+# fresh: HEAD is <n> commits ahead of origin/main <sha>     -> exit 0, good to go
+# rebase needed: origin/main moved to <sha>; run git fetch && git rebase origin/main -> exit 1
+```
+
+Pass `--no-fetch` to check against the last fetched remote-tracking ref instead of fetching (offline flows). The check is read-only apart from the fetch; it never rewrites history, opens PRs, or pushes.
+
 ## Replay and release
 
 For changes to event admission, reducers, projections, or journals, explain three cases: old history on new code, newly accepted events on older code, and the supported recovery path. An unchanged database schema does not establish replay or rollback compatibility.
