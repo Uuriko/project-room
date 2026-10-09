@@ -121,7 +121,15 @@ export const ensureDirectSendTable = db => {
   // A room stamped before this change never gets the column from the CREATE
   // alone — the schema stamp hashes directSendSchema, so warm wakes converge
   // through this migration (the priced-tool-500 class of bug).
-  if (!columns.has("dispatch_started_at")) db.exec("ALTER TABLE direct_channel_sends ADD COLUMN dispatch_started_at INTEGER");
+  if (!columns.has("dispatch_started_at")) {
+    db.exec("ALTER TABLE direct_channel_sends ADD COLUMN dispatch_started_at INTEGER");
+    // A pending row that predates this column may already have reached the
+    // provider (the old code had no marker), so its outcome is unknown, not
+    // "never dispatched". Mark it started so a retry replays it instead of
+    // re-driving it and double-delivering. Only rows created after this
+    // migration can ever be resumed.
+    db.exec("UPDATE direct_channel_sends SET dispatch_started_at = updated_at WHERE status = 'pending' AND dispatch_started_at IS NULL");
+  }
   db.exec(DIRECT_SEND_REQUEST_INDEX);
 };
 const emailTo = v => typeof v === "string" && v.length >= 3 && v.length <= 320 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
