@@ -3,6 +3,7 @@
 // allowed. Globals are scoped per runtime so a Node-only name used in the
 // browser bundle (or vice versa) is an error, not noise.
 import globals from "globals";
+import roomRules from "./scripts/eslint-rules/no-raw-transaction.mjs";
 
 const rules = {
   "no-undef": "error",
@@ -19,6 +20,7 @@ const rules = {
   // churn for a lint PR. Promote to "error" once the warnings are gone.
   "prefer-const": ["warn", { destructuring: "all" }],
 };
+export const RAW_TRANSACTION_EXEMPT = ["server/store.mjs", "server/spend-grants.mjs", "server/analytics/tail.mjs"];
 const languageOptions = { ecmaVersion: "latest", sourceType: "module" };
 
 export default [
@@ -53,5 +55,16 @@ export default [
   {
     files: ["scripts/*-check.mjs", "scripts/*-exercise.mjs", "scripts/*-journey.mjs", "scripts/qa2/public-pages.mjs", "scripts/build-og-atlas.mjs"],
     languageOptions: { ...languageOptions, globals: { ...globals.node, ...globals.browser } },
+  },
+  // TST-07: server code opens transactions only through store.transaction(fn).
+  // store.mjs implements that helper. The other two files predate the rule:
+  // spend-grants.mjs is shelved credits code; analytics/tail.mjs writes the
+  // separate analytics database. Remove an entry when its file moves to the
+  // helper; tests/no-raw-transaction-lint.test.js fails on a stale entry.
+  {
+    files: ["server.mjs", "server/**/*.mjs"],
+    ignores: RAW_TRANSACTION_EXEMPT,
+    plugins: { room: roomRules },
+    rules: { "room/no-raw-transaction": "error" },
   },
 ];
