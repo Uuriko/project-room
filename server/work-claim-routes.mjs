@@ -978,6 +978,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // re-claim and was unactionable for a foreign holder (non-owners cannot
     // release it) — it also never named the holder.
     if (item.state !== "unclaimed") {
+      if (item.state !== "claimed") reject(409, "work_claim_conflict", `Work "${item.id}" is already ${item.state}`);
       if (item.owner === caller) {
         reject(409, "work_claim_conflict",
           `You already hold work "${item.id}" — no new claim was saved; read the item to confirm`);

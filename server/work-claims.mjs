@@ -566,9 +566,11 @@ export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, p
   // the message — "release it first" was destructive for the holder and
   // unactionable for anyone else, and it never named the holder. The code
   // stays invalid_claim_input (internal callers pin it).
-  check(item.state === "unclaimed", item.owner === agent
-    ? `work "${item.id}" is already claimed by you — no new claim was saved; read the item to confirm`
-    : `work "${item.id}" is held by ${item.owner ?? "someone else"} — ask them to reassign or release it`);
+  check(item.state === "unclaimed", item.state !== "claimed"
+    ? `work "${item.id}" is already ${item.state}`
+    : item.owner === agent
+      ? `work "${item.id}" is already claimed by you — no new claim was saved; read the item to confirm`
+      : `work "${item.id}" is held by ${item.owner ?? "someone else"} — ask them to reassign or release it`);
   // QA D-1: the 4000-char bound applies to every note stored on a history
   // stamp, not just create — an unbounded claim note is the same
   // storage/amplification vector the SEC2 create cap closed.
