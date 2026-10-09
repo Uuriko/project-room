@@ -353,3 +353,23 @@ test("People rail derives presence, one-line status, and Done chips from room wo
   assert.equal(memberDoneChip(potter, ctx), null);
   assert.equal(memberDoneChip(revoked, { workItems }), null);
 });
+
+test("timeline window renders the newest messages and widens a page at a time", async () => {
+  const { windowTimeline, windowToInclude, TIMELINE_WINDOW } = await import("../src/conversation.js");
+  const rows = Array.from({ length: 5691 }, (_, index) => ({ id: `m${index}` }));
+  const first = windowTimeline(rows);
+  assert.equal(first.messages.length, TIMELINE_WINDOW);
+  assert.equal(first.hidden, 5691 - TIMELINE_WINDOW);
+  assert.equal(first.messages.at(-1).id, "m5690", "the newest message is always shown");
+  assert.equal(first.messages[0].id, `m${5691 - TIMELINE_WINDOW}`);
+  const small = windowTimeline(rows.slice(0, 50));
+  assert.equal(small.hidden, 0);
+  assert.equal(small.messages.length, 50);
+  assert.equal(windowToInclude(rows, "m5690"), TIMELINE_WINDOW, "a visible message needs no widening");
+  assert.equal(windowToInclude(rows, "nope"), TIMELINE_WINDOW, "an unknown id changes nothing");
+  const widened = windowToInclude(rows, "m0");
+  assert.ok(widened >= 5691 && widened % TIMELINE_WINDOW === 0, `window ${widened} must include the oldest message`);
+  assert.equal(windowTimeline(rows, widened).hidden, 0);
+  const mid = windowToInclude(rows, "m5000");
+  assert.ok(windowTimeline(rows, mid).messages.some(row => row.id === "m5000"));
+});
