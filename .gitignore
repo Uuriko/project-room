@@ -30,3 +30,4 @@ tests/chaos/.weak/
 
 # Invariant harness CI results (per-run JSONL, INVARIANTS telemetry contract)
 results/
+.tmp/

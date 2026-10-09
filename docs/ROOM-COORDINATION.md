@@ -26,6 +26,33 @@ Use the live claim's member ID and lease. For takeover, use the authorized
 handoff/reassignment flow in [WORK-CLAIMS.md](WORK-CLAIMS.md), or acquire an
 expired lease after a fresh conflict check. Never force-push a peer's branch.
 
+## Partition file scopes at brief time
+
+Every brief declares the exact file scopes its lane will touch, and no two
+concurrently active lanes hold overlapping scopes. This is the static fix for
+the duplicate-collision surface (convergent byte-identical fixes, duplicate
+PRs): the server enforces a `409 file_lease_conflict` at claim time, but lanes
+that discover the overlap only at PR time have already burned the work. Settle
+the partition when the brief is written, not when the PR opens.
+
+Norm:
+
+1. The coordinator assigns each lane a disjoint file scope in the brief.
+2. The lane claims those exact paths (`POST .../work-claims/<id>/claim`
+   with `files`), reads back the owner, files and live lease, and never edits
+   outside the claimed scope.
+3. Before opening a PR, the lane (or coordinator) verifies the whole board is
+   still disjoint with `node scripts/scope-partition.mjs`. A claim with
+   missing or empty `files` is flagged `UNPARTITIONABLE` — partition it or
+   stand down; do not treat it as a pass.
+
+The checker reads the live `muse-room` board by default (or a fixture JSON:
+`node scripts/scope-partition.mjs fixture.json`; `--json` for machine output).
+Exit codes: `0` disjoint, `1` unpartitionable claim(s) but no overlap, `2`
+overlap found with a named claim-pair report, `3` the claims could not be
+loaded. Wire it into pre-PR checklists so a collision surfaces as a failed
+check, not a duplicate PR.
+
 Push useful checkpoints and open a PR when it helps review or handoff. No
 blanket 30-minute deadline, mandatory partner or additional acceptance message
 applies to work already authorized by John. Ask only when scope/authority is
