@@ -76,6 +76,7 @@ It never creates a second claim, a second dispatch, or a second charge.
 | Work-claim CREATE (`POST /work-claims`) | duplicate id → `409 work_claim_exists`; over-cap → `409 too_many_open_claims` | enforced |
 | Inbox send lifecycle (`send.reserve` / `send.dispatch` / `send.observe`) | `requestId` identity, `expectedRevision` round checks, second dispatch refused | enforced |
 | Direct-send idempotency | [#2085](https://github.com/Uuriko/project-room/pull/2085) | enforced (merged) |
+| Direct-send crash resume | pending + never-dispatched send resumes on same-key retry (atomic dispatch claim); dispatch-started send never re-driven (unknown outcome) — `tests/inbox-send.test.js` | enforced |
 | Access requests | `requestId` is the idempotency key ("reuse it when retrying") | enforced |
 | Room message POST across REST and MCP | REL-15 test-only proof | **open** — [#1994](https://github.com/Uuriko/project-room/pull/1994) not merged |
 
