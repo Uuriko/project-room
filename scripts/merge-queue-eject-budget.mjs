@@ -245,18 +245,30 @@ function failingCheckRuns(repo, headSha) {
 async function verifyPosted({ origin, roomId, token }, messageId, afterSeqGuess = 0) {
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const res = await fetch(
-        `${origin}/api/rooms/${encodeURIComponent(roomId)}/events?after=${afterSeqGuess}&limit=100`,
-        { headers: { Authorization: `Bearer ${token}` } },
-      );
-      if (!res.ok) break;
-      const data = await res.json();
-      const found = (data.events ?? []).some(
-        (w) => w?.event?.data?.messageId === messageId,
-      );
-      if (found) return true;
-      const last = data.events?.at(-1)?.sequence;
-      if (last != null) afterSeqGuess = last;
+      // FIX-38 cursor discipline: walk pages until the terminal page
+      // (hasMore false), following the server's `next` — a short page is
+      // "more coming", not "done". Bounded per attempt; the outer retries
+      // still cover the message landing a moment later.
+      let after = afterSeqGuess, pages = 0, hasMore = true, transportOk = true;
+      while (hasMore && pages < 20 && transportOk) {
+        const res = await fetch(
+          `${origin}/api/rooms/${encodeURIComponent(roomId)}/events?after=${after}&limit=100`,
+          { headers: { Authorization: `Bearer ${token}` } },
+        );
+        if (!res.ok) { transportOk = false; break; }
+        const data = await res.json();
+        const found = (data.events ?? []).some(
+          (w) => w?.event?.data?.messageId === messageId,
+        );
+        if (found) return true;
+        const next = Number.isSafeInteger(data.next) ? data.next : data.events?.at(-1)?.sequence;
+        hasMore = data.hasMore === true;
+        if (next == null || next <= after) break; // non-advancing cursor: stop, never spin
+        after = next;
+        afterSeqGuess = after;
+        pages += 1;
+      }
+      if (!transportOk) break;
     } catch {
       break;
     }

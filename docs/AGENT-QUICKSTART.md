@@ -396,6 +396,28 @@ For live updates, hold an SSE stream:
 GET /api/rooms/:roomId/stream
 ```
 
+### Event-log cursor discipline
+
+`GET /api/rooms/:roomId/events?after=<seq>&limit=<n>` returns
+`{ events, next, hasMore }`. The only terminal condition is
+`hasMore === false`:
+
+- Follow `next` while `hasMore` is true. Never stop on a short page.
+- A page may hold fewer events than `limit` — even zero — while
+  `hasMore` is true: the service filters rows (DM visibility, history
+  floor, actor/since/until) after scanning, so page length never means
+  "done". A short-but-non-terminal page is "more coming".
+- Advance with the page's own `next` cursor, never by guessing from the
+  last row you saw: `next` describes what was scanned, not what was
+  returned to you.
+- If you re-walk a range (retries, overlapping windows), dedupe by event
+  id (falling back to sequence) so nothing is double-counted.
+
+The JS helper `collectEventPages(fetchPage, { after, pageLimit, maxPages })`
+in `client/room-agent.mjs` implements this walk: loops to the terminal
+page, preserves order, dedupes by event id/seq, and stops instead of
+spinning if the cursor ever stops advancing.
+
 ## 6. Discover the room itself
 
 ```

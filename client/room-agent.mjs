@@ -125,6 +125,52 @@ export async function paginateRoomMessages(fetchPage, { after = 0, limit = 50, l
   }
   return { messages: selected.map(map), next: scanCursor, hasMore: !reachedEnd || capped };
 }
+
+// Event-log cursor discipline (FIX-38). Collects every page of the room event
+// log until the terminal page. Follow `next` while `hasMore` is true; a page
+// may be short — even empty — while hasMore is true, because the service
+// filters rows (DM visibility, history floor, actor/since/until) AFTER
+// scanning. Page length never signals the terminal page: a short page is
+// "more coming", not "done".
+//
+// The cursor always advances with the page's own `next` value (never guessed
+// from the last row: `next` describes what was scanned, not what was
+// returned). Rows are deduped by event id (falling back to sequence) so a
+// retried or overlapping page cannot double-count, and page order is
+// preserved. A non-advancing cursor with hasMore still true stops the walk
+// (fail-safe against a spinning loop); maxPages bounds the walk and reports
+// capped:true.
+//
+// fetchPage(after, pageLimit) resolves { events:[{sequence, event}], next, hasMore }.
+export async function collectEventPages(fetchPage, { after = 0, pageLimit = 100, maxPages = 100 } = {}) {
+  const events = [];
+  const seen = new Set();
+  let cursor = after, pages = 0, next = after, hasMore = true, capped = false;
+  while (hasMore && pages < maxPages) {
+    const page = await fetchPage(cursor, pageLimit);
+    pages += 1;
+    for (const row of page?.events ?? []) {
+      const event = row?.event ?? row;
+      const id = event?.id;
+      const key = typeof id === "string" && id ? `id:${id}` : `seq:${row?.sequence}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      events.push(row);
+    }
+    const pageNext = Number.isSafeInteger(page?.next) ? page.next : null;
+    hasMore = page?.hasMore === true;
+    if (pageNext === null || pageNext <= cursor) {
+      // No usable forward cursor: stopping is the only non-spinning choice.
+      if (hasMore) capped = true;
+      if (pageNext !== null) next = pageNext;
+      break;
+    }
+    cursor = pageNext;
+    next = pageNext;
+  }
+  if (pages >= maxPages && hasMore) capped = true;
+  return { events, next, hasMore: false, pages, capped };
+}
 function checkedCharter(value, horizon) {
   try {
     const result = validateCharterContext(value);
@@ -883,6 +929,11 @@ export class RoomAgentClient {
   async workPacket(workItemId, options = {}) {
     return workPacket((await this.snapshot()).state, workItemId, options);
   }
+  // One page only, by design: the event log is paged, not dumped. Callers that
+  // need the whole log from a checkpoint must follow `next` while `hasMore`
+  // is true (see collectEventPages) — a short page, even an empty one, is
+  // "more coming", never "done". Single-event anchor reads (e.g. the
+  // assignment watcher's history anchor) are the intended use of one page.
   changes(after = 0, limit = 50, { signal } = {}) {
     if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error("Use a nonnegative checkpoint and a page size from 1 to 100");
     return this.#request(`/events?after=${after}&limit=${limit}`, undefined, signal);

@@ -409,7 +409,6 @@ async function fetchRoomEvents(room, sinceMs, startAfter) {
       token,
     });
     const evs = data.events ?? [];
-    if (!evs.length) break;
     for (const e of evs) {
       const seq = Number(e.sequence) || 0;
       if (seq > head) head = seq;
@@ -420,8 +419,14 @@ async function fetchRoomEvents(room, sinceMs, startAfter) {
       const body = ev.data?.body;
       if (body) events.push({ sequence: seq, body: String(body) });
     }
-    after = head;
+    // FIX-38 cursor discipline: follow the server's `next` while `hasMore`
+    // is true. A page may be short (even empty) with hasMore=true — the
+    // service filters rows after scanning — so page length never ends the
+    // walk. `next` describes what was scanned, not what was returned.
+    const next = Number.isSafeInteger(data.next) ? data.next : head;
     if (!data.hasMore) break;
+    if (next <= after) break; // non-advancing cursor: stop, never spin
+    after = next;
     if (page === EVENT_PAGE_LIMIT - 1) truncated = true;
   }
   return { events, head, truncated };
