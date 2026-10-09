@@ -1063,7 +1063,7 @@ test("first board open requests at most two list pages when most claims are old"
   await page.locator(".board-older").waitFor();
   await page.locator("article[data-claim-id='open-0']").waitFor();
   assert.equal(lists <= 2, true, `list requests: ${lists}`);
-  assert.equal(await page.locator(".board-older").innerText(), "Older landed work is in the API");
+  assert.equal(await page.locator(".board-older").innerText(), "Work finished more than a week ago isn't shown here.");
 });
 
 test("a read-only member does not see the new item form", { timeout: 60000 }, async t => {

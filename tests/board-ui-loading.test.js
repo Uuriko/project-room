@@ -16,7 +16,7 @@ test("boardSkeletonHtml marks itself decorative and mirrors the five columns", (
   const html = boardSkeletonHtml();
   assert.ok(html.includes("board-skeleton"), "skeleton root class");
   assert.ok(html.includes('aria-hidden="true"'), "decorative for screen readers");
-  for (const label of ["Ready", "Claimed / In progress", "Blocked", "In review", "Landed"]) {
+  for (const label of ["Ready", "Claimed / In progress", "Blocked", "In review", "Done"]) {
     assert.ok(html.includes(label), `column label ${label}`);
   }
 });

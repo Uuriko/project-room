@@ -12,7 +12,7 @@ const COLUMNS = Object.freeze([
   ["claimed", "Claimed / In progress"],
   ["blocked", "Blocked"],
   ["review", "In review"],
-  ["landed", "Landed"]
+  ["landed", "Done"]
 ]);
 
 export function escapeHtml(text) {
@@ -385,7 +385,7 @@ function cardHtml(item, viewer, members, now, workItems, byId) {
 }
 
 function newItemForm() {
-  return `<form id="board-new-item" class="board-new"><h3>New item</h3><label>Title <input name="title" maxlength="200" required autocomplete="off"></label><label>Note <input name="note" maxlength="4000" autocomplete="off" placeholder="Optional, context for whoever picks this up"></label><label>Files <input name="files" maxlength="4000" autocomplete="off" placeholder="Optional, comma-separated"></label><button type="submit" class="button primary">Add item</button></form>`;
+  return `<form id="board-new-item" class="board-new"><h3>New claim</h3><label>Title <input name="title" maxlength="200" required autocomplete="off"></label><label>Note <input name="note" maxlength="4000" autocomplete="off" placeholder="Optional, context for whoever picks this up"></label><label>Files <input name="files" maxlength="4000" autocomplete="off" placeholder="Optional, comma-separated"></label><button type="submit" class="button primary">Add claim</button></form>`;
 }
 
 // S3: the create API accepts a note, but the form never sent one (F-parity-1).
@@ -437,9 +437,9 @@ export function boardHtml(items, status, viewer, members, now, { older = false, 
   const sweep = viewer.manage ? `<button type="button" class="button secondary" id="board-close-stale" data-claim-action="sweep">Close stale</button>` : "";
   const capForm = viewer.owner ? `<form data-claim-cap><label>Claims per member <input name="maxMemberOpenClaims" type="number" min="1" max="10000" value="${escapeHtml(String(cap ?? 20))}" aria-label="Open claims per member"></label><button type="submit">Save cap</button></form>` : "";
   const form = canWrite ? newItemForm() : "";
-  const hint = older ? `<p class="form-hint board-older">Older landed work is in the API</p>` : "";
+  const hint = older ? `<p class="form-hint board-older">Work finished more than a week ago isn't shown here.</p>` : "";
   const body = items.length
-    ? `${hint}<div class="board-columns">${COLUMNS.map(([id, label]) => `<section aria-labelledby="board-col-${id}"><h3 id="board-col-${id}">${label}${id === "blocked" && waitingCount ? ` · ${waitingCount} waiting` : ""}</h3>${columns[id].map(item => cardHtml(item, viewer, members, now, workItems, byId)).join("") || `<p class="form-hint">Nothing here.</p>`}</section>`).join("")}</div>`
+    ? `${hint}<div class="board-columns">${COLUMNS.map(([id, label]) => `<section aria-labelledby="board-col-${id}"><h3 id="board-col-${id}">${label}${id === "blocked" && waitingCount ? ` · ${waitingCount} waiting on prerequisites` : ""}</h3>${id === "review" ? `<p class="form-hint">Claims with a linked pull request appear here.</p>` : ""}${columns[id].map(item => cardHtml(item, viewer, members, now, workItems, byId)).join("") || `<p class="form-hint">Nothing here.</p>`}</section>`).join("")}</div>`
     : loading ? boardSkeletonHtml()
     : loadError ? ""
     : `<p class="board-empty">${escapeHtml(emptyBoardCopy(capabilities, { canWrite, signedIn: Boolean(viewer?.id) }))}</p>${hint}`;
