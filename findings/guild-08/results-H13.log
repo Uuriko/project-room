@@ -1,0 +1,179 @@
+=== H13 baseline 2026-10-09T09:26:06Z ===
+✔ the four P1 signal types are registered with the spec's weights (16.600482ms)
+✔ HOARDING_CAP is the spec-frozen 5 (40.517485ms)
+✔ done posts claim_completed to the owner and closes the position (46.3843ms)
+✔ clean release posts claim_released and closes the position (1.902665ms)
+✔ lease expiry posts claim_flaked to the previous owner (11.498526ms)
+✔ lease expiry on an unobserved claim still emits the flake (0.285618ms)
+✔ reviewed changes_requested posts claim_judged_bad and keeps the position open (20.965934ms)
+✔ other review verdicts are not judged bad (0.421913ms)
+✔ the surcharge fires when opening while >= HOARDING_CAP claims are open (33.72396ms)
+✔ no surcharge when opening below the cap (39.242962ms)
+✔ a lane that works through its queue pays nothing extra (22.683341ms)
+✔ null-lease open claims count toward the hoarding cap (0.441142ms)
+✔ renewal keeps the position open with no signal (0.171257ms)
+✔ reassignment moves the open position to the new lane (0.170135ms)
+✔ a re-claim after done opens a fresh position and prices both lifecycles (44.91848ms)
+✔ a re-claim after release opens a fresh position (42.614402ms)
+✔ a re-claim after lease expiry opens a fresh position (0.325128ms)
+✔ reassignment of a settled claim opens a fresh position (0.131697ms)
+✔ duplicate terminals after a close stay silent (settled is not a re-open) (0.121953ms)
+✔ done seen before the first claim does not block the later claim (0.188963ms)
+✔ released seen before the first claim does not block the later claim (0.109855ms)
+✔ duplicate terminals after a mid-history terminal stay silent (0.077627ms)
+✔ replaying the same events yields byte-identical signals (40.369813ms)
+✔ out-of-order signals never regress the reputation timeline (4.455717ms)
+✔ projectClaimReputation folds signals into scores (0.311147ms)
+✔ projectClaimReputation reports end-of-fold open counts per lane (48.442458ms)
+✔ laneClaimBondVisibility returns the read-side listing annotation (0.620972ms)
+✔ laneClaimBondVisibility reports the band and score decayed to now (0.286159ms)
+✔ ensureClaimReputationSchema creates the journal table (50.232655ms)
+✔ syncClaimReputationJournal writes signal rows and is idempotent (75.274264ms)
+✔ syncClaimReputationJournal scopes by room and ignores other event types (59.341695ms)
+✔ syncClaimReputationJournal keeps the same claimId in two rooms separate (all-room sync) (30.261503ms)
+✔ syncClaimReputationJournal rebuilds legacy-format rows, including misattributed ones (44.84541ms)
+✔ scoped sync with any legacy row (even one stamped to a different room) forces a full rebuild (74.301244ms)
+✔ all-room sync: one lane spanning two rooms gets no false hoarded signal and per-room rows (48.625292ms)
+{"event":"room.cold_start","durationMs":2504,"integrity":"eager","phases":{"schema":{"ms":114,"rowsRead":0},"plugin":{"ms":1261,"rowsRead":0},"fence":{"ms":894,"rowsRead":0},"verifies":{"ms":178,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":159,"heapBytes":36889720,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ seeded journey: fresh identity claims, works, finishes, receipt goes public (7397.068351ms)
+✔ no skew: returns the operator clock with no warning (443.388335ms)
+✔ no reference: falls back to the operator clock (168.04767ms)
+✔ operator clock 2h ahead: warns and uses board time (never strikes early) (210.129102ms)
+✔ operator clock 2h behind: warns and uses board time (never silently delays) (199.534943ms)
+✔ skew within 5 minutes: no correction, no warning (1068.552883ms)
+✔ skew just over 5 minutes: corrects (505.316371ms)
+✔ --date parses a valid HTTP Date header into the reference (447.194737ms)
+✔ --date accepts a bare value and a lowercase header name (883.376959ms)
+✔ --date with a garbage header fails loudly (452.854221ms)
+✔ --date with an impossible month fails loudly (231.858482ms)
+✔ policyKey maps the stored booleans to the four select states (3.432962ms)
+✔ policyCommand emits a room.policy_set command with the matching field data (6.94298ms)
+✔ policyCommand mints a fresh command id on every call (0.525188ms)
+✔ policyCommand rejects an unknown policy key (0.704467ms)
+✔ policy key round-trips through the command it generates (6.508498ms)
+✔ posting verbs accept post-verb dry-run and never call GitHub POST (10645.265358ms)
+node:internal/modules/esm/get_format:243
+  throw new ERR_UNKNOWN_FILE_EXTENSION(ext, filepath);
+        ^
+
+TypeError [ERR_UNKNOWN_FILE_EXTENSION]: Unknown file extension ".sh" for /home/hatch/workspace/pr-wave1000-guild-08/tests/room-watch-enforcer.test.sh
+    at Object.getFileProtocolModuleFormat [as file:] (node:internal/modules/esm/get_format:243:9)
+    at defaultGetFormat (node:internal/modules/esm/get_format:283:36)
+    at defaultLoadSync (node:internal/modules/esm/load:161:16)
+    at #loadAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:806:12)
+    at #loadSync (node:internal/modules/esm/loader:838:53)
+    at ModuleLoader.load (node:internal/modules/esm/loader:787:26)
+    at ModuleLoader.loadAndTranslate (node:internal/modules/esm/loader:498:31)
+    at #getOrCreateModuleJobAfterResolve (node:internal/modules/esm/loader:564:36)
+    at afterResolve (node:internal/modules/esm/loader:611:52)
+    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:617:12) {
+  code: 'ERR_UNKNOWN_FILE_EXTENSION'
+}
+
+Node.js v24.20.0
+✖ tests/room-watch-enforcer.test.sh (2048.29003ms)
+{"event":"room.cold_start","durationMs":2177,"integrity":"eager","phases":{"schema":{"ms":1140,"rowsRead":0},"plugin":{"ms":691,"rowsRead":0},"fence":{"ms":218,"rowsRead":0},"verifies":{"ms":57,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":180,"heapBytes":22367048,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":506,"integrity":"eager","phases":{"schema":{"ms":78,"rowsRead":0},"plugin":{"ms":89,"rowsRead":0},"fence":{"ms":64,"rowsRead":0},"verifies":{"ms":183,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":122,"heapBytes":27426424,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2805,"integrity":"eager","phases":{"schema":{"ms":695,"rowsRead":0},"plugin":{"ms":1816,"rowsRead":0},"fence":{"ms":281,"rowsRead":0},"verifies":{"ms":5,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":145,"heapBytes":31738592,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1779,"integrity":"eager","phases":{"schema":{"ms":200,"rowsRead":0},"plugin":{"ms":832,"rowsRead":0},"fence":{"ms":732,"rowsRead":0},"verifies":{"ms":9,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":139,"heapBytes":36092192,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1165,"integrity":"eager","phases":{"schema":{"ms":485,"rowsRead":0},"plugin":{"ms":517,"rowsRead":0},"fence":{"ms":106,"rowsRead":0},"verifies":{"ms":6,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":143,"heapBytes":26307456,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1953,"integrity":"eager","phases":{"schema":{"ms":559,"rowsRead":0},"plugin":{"ms":959,"rowsRead":0},"fence":{"ms":411,"rowsRead":0},"verifies":{"ms":5,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":137,"heapBytes":30481792,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":615,"integrity":"eager","phases":{"schema":{"ms":216,"rowsRead":0},"plugin":{"ms":318,"rowsRead":0},"fence":{"ms":35,"rowsRead":0},"verifies":{"ms":4,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":119,"heapBytes":34763496,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":618,"integrity":"eager","phases":{"schema":{"ms":24,"rowsRead":0},"plugin":{"ms":55,"rowsRead":0},"fence":{"ms":492,"rowsRead":0},"verifies":{"ms":46,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":113,"heapBytes":38948624,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2071,"integrity":"eager","phases":{"schema":{"ms":531,"rowsRead":0},"plugin":{"ms":762,"rowsRead":0},"fence":{"ms":761,"rowsRead":0},"verifies":{"ms":10,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":154,"heapBytes":27688504,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1584,"integrity":"eager","phases":{"schema":{"ms":50,"rowsRead":0},"plugin":{"ms":595,"rowsRead":0},"fence":{"ms":878,"rowsRead":0},"verifies":{"ms":59,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":131,"heapBytes":32153048,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ linking a draft after claiming preserves the lease and reconciles exact duplicates (3283.874328ms)
+✔ a webhook close and a polled pull reduce to the same outcomes (1.448183ms)
+✔ polling a merged pull completes the claim and the room event says so (806.338737ms)
+✔ a closing webhook releases the claim, and a second delivery does not settle it again (2829.911143ms)
+✔ a batch stays claimed until every linked pull is merged or closed (1849.091211ms)
+✔ an explicit release settles a batch while a linked pull is still open (1219.975023ms)
+✔ an open pull is not settled, and the next sweep waits instead of polling again (2297.969836ms)
+✔ the cron poll completes a linked claim the same way a sweep does (657.143138ms)
+✔ a GitHub 403 backs off every open pull until the reset, and the next tick does not call again (902.260127ms)
+✔ an open pull sends If-None-Match, and a 304 keeps the claim (2138.319537ms)
+{"event":"room.cold_start","durationMs":676,"integrity":"eager","phases":{"schema":{"ms":219,"rowsRead":0},"plugin":{"ms":62,"rowsRead":0},"fence":{"ms":324,"rowsRead":0},"verifies":{"ms":53,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":116,"heapBytes":26737560,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1398,"integrity":"eager","phases":{"schema":{"ms":510,"rowsRead":0},"plugin":{"ms":367,"rowsRead":0},"fence":{"ms":375,"rowsRead":0},"verifies":{"ms":143,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":138,"heapBytes":31061080,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1101,"integrity":"eager","phases":{"schema":{"ms":506,"rowsRead":0},"plugin":{"ms":225,"rowsRead":0},"fence":{"ms":259,"rowsRead":0},"verifies":{"ms":65,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":128,"heapBytes":35453960,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1165,"integrity":"eager","phases":{"schema":{"ms":75,"rowsRead":0},"plugin":{"ms":517,"rowsRead":0},"fence":{"ms":516,"rowsRead":0},"verifies":{"ms":32,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":127,"heapBytes":39847760,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2398,"integrity":"eager","phases":{"schema":{"ms":353,"rowsRead":0},"plugin":{"ms":1570,"rowsRead":0},"fence":{"ms":471,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":142,"heapBytes":27522120,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":583,"integrity":"eager","phases":{"schema":{"ms":22,"rowsRead":0},"plugin":{"ms":508,"rowsRead":0},"fence":{"ms":50,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":124,"heapBytes":31858104,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1052,"integrity":"eager","phases":{"schema":{"ms":24,"rowsRead":0},"plugin":{"ms":663,"rowsRead":0},"fence":{"ms":302,"rowsRead":0},"verifies":{"ms":63,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":154,"heapBytes":36215928,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1750,"integrity":"eager","phases":{"schema":{"ms":333,"rowsRead":0},"plugin":{"ms":728,"rowsRead":0},"fence":{"ms":617,"rowsRead":0},"verifies":{"ms":26,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":138,"heapBytes":30453904,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1951,"integrity":"eager","phases":{"schema":{"ms":468,"rowsRead":0},"plugin":{"ms":1426,"rowsRead":0},"fence":{"ms":33,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":138,"heapBytes":35067808,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a cron deadline does not call GitHub and does not start a second lookup (2546.504063ms)
+✔ close and cancel append a validated closed event on the real store, REST and MCP alike (901.595719ms)
+✔ concurrent PR attachments serialize and invalid update alternatives cannot write (1951.132786ms)
+✔ PR link and event roll back together, and expiry or archived rooms cannot mutate (1421.325941ms)
+✔ re-linking a settled PR URL in a new round resets the link for re-polling (1563.782287ms)
+✔ re-linking resets a settled PR even when syncedAt equals claimedAt (2434.381109ms)
+✔ re-linking resets a same-ms tie when the first round began via reassign (605.658194ms)
+✔ re-linking resets a same-ms tie even when early claimed stamps were trimmed (3537.773005ms)
+✔ re-linking resets same-ms ties across three claim rounds (2054.905679ms)
+✔ same-ms ties in two rooms reset independently (2061.87029ms)
+{"event":"room.cold_start","durationMs":1655,"integrity":"eager","phases":{"schema":{"ms":50,"rowsRead":0},"plugin":{"ms":701,"rowsRead":0},"fence":{"ms":540,"rowsRead":0},"verifies":{"ms":90,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":174,"heapBytes":38433544,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ work-claims-read is registered exactly once with the documented row (60.34488ms)
+✔ work-claims-read is mounted in the app route table (0.809175ms)
+✔ the dispatcher binds {roomId} and 405s non-GET methods before any handler runs (30.302435ms)
+room diagnostic op_ltYbqmAo 401 unauthenticated access /api/rooms/:roomId/work-claims-read
+{"event":"room.cold_start","durationMs":1566,"integrity":"eager","phases":{"schema":{"ms":263,"rowsRead":0},"plugin":{"ms":554,"rowsRead":0},"fence":{"ms":517,"rowsRead":0},"verifies":{"ms":50,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":201,"heapBytes":33766112,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ unauthenticated reads are rejected with 401 (5599.585048ms)
+room diagnostic op_fsRdGppO 401 unauthenticated access /api/rooms/:roomId/work-claims-read
+{"event":"room.cold_start","durationMs":2247,"integrity":"eager","phases":{"schema":{"ms":372,"rowsRead":0},"plugin":{"ms":915,"rowsRead":0},"fence":{"ms":713,"rowsRead":0},"verifies":{"ms":44,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":167,"heapBytes":40444864,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ an unknown Bearer <redacted> is rejected with 401 (2771.173825ms)
+room diagnostic op_op7rC6DD 403 insufficient_scope access /api/rooms/:roomId/work-claims-read
+{"event":"room.cold_start","durationMs":2512,"integrity":"eager","phases":{"schema":{"ms":445,"rowsRead":0},"plugin":{"ms":622,"rowsRead":0},"fence":{"ms":662,"rowsRead":0},"verifies":{"ms":353,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":171,"heapBytes":47947096,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ an API key without the rooms:read scope is rejected with 403 (4149.001178ms)
+{"event":"room.cold_start","durationMs":2402,"integrity":"eager","phases":{"schema":{"ms":335,"rowsRead":0},"plugin":{"ms":1138,"rowsRead":0},"fence":{"ms":689,"rowsRead":0},"verifies":{"ms":96,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":187,"heapBytes":37605768,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a member read returns the documented page shape (4296.795273ms)
+{"event":"room.cold_start","durationMs":1281,"integrity":"eager","phases":{"schema":{"ms":105,"rowsRead":0},"plugin":{"ms":674,"rowsRead":0},"fence":{"ms":349,"rowsRead":0},"verifies":{"ms":6,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":158,"heapBytes":43754256,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ list history tails are compacted with the remainder counted (3762.269358ms)
+{"event":"room.cold_start","durationMs":1595,"integrity":"eager","phases":{"schema":{"ms":102,"rowsRead":0},"plugin":{"ms":627,"rowsRead":0},"fence":{"ms":570,"rowsRead":0},"verifies":{"ms":105,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":166,"heapBytes":33883288,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ limit is honored and echoed, up to the 200 cap (2237.061391ms)
+{"event":"room.cold_start","durationMs":1095,"integrity":"eager","phases":{"schema":{"ms":144,"rowsRead":0},"plugin":{"ms":414,"rowsRead":0},"fence":{"ms":232,"rowsRead":0},"verifies":{"ms":95,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":151,"heapBytes":39841264,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ state filters scope the page and stamp it (3377.460934ms)
+{"event":"room.cold_start","durationMs":635,"integrity":"eager","phases":{"schema":{"ms":125,"rowsRead":0},"plugin":{"ms":237,"rowsRead":0},"fence":{"ms":76,"rowsRead":0},"verifies":{"ms":8,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":136,"heapBytes":45840160,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ queue=ready lists unclaimed ownerless claims (2522.949925ms)
+room diagnostic op_TTT7KeyQ 422 invalid_claim_input input /api/rooms/:roomId/work-claims-read
+room diagnostic op_KCBoKkPd 422 invalid_claim_input input /api/rooms/:roomId/work-claims-read
+room diagnostic op_KnUDHmHD 422 invalid_claim_input input /api/rooms/:roomId/work-claims-read
+room diagnostic op_BtBy1pia 422 invalid_claim_input input /api/rooms/:roomId/work-claims-read
+{"event":"room.cold_start","durationMs":934,"integrity":"eager","phases":{"schema":{"ms":70,"rowsRead":0},"plugin":{"ms":527,"rowsRead":0},"fence":{"ms":112,"rowsRead":0},"verifies":{"ms":21,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":148,"heapBytes":40187200,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ bad limits are rejected with 422 invalid_claim_input (2617.987378ms)
+room diagnostic op_8J4INc-j 422 invalid_claim_input input /api/rooms/:roomId/work-claims-read
+room diagnostic op_oOw-Kfqz 422 invalid_claim_input input /api/rooms/:roomId/work-claims-read
+room diagnostic op_7BYAcCdO 422 invalid_claim_input input /api/rooms/:roomId/work-claims-read
+room diagnostic op_NmN16skk 422 invalid_claim_input input /api/rooms/:roomId/work-claims-read
+{"event":"room.cold_start","durationMs":2287,"integrity":"eager","phases":{"schema":{"ms":135,"rowsRead":0},"plugin":{"ms":1142,"rowsRead":0},"fence":{"ms":527,"rowsRead":0},"verifies":{"ms":61,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":165,"heapBytes":46540784,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ bad state and queue combinations are rejected with 422 (2201.879883ms)
+room diagnostic op_zOpzSgRD 422 invalid_claim_input input /api/rooms/:roomId/work-claims-read
+{"event":"room.cold_start","durationMs":6072,"integrity":"eager","phases":{"schema":{"ms":443,"rowsRead":0},"plugin":{"ms":3372,"rowsRead":0},"fence":{"ms":1079,"rowsRead":0},"verifies":{"ms":117,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":199,"heapBytes":52423976,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a malformed cursor is rejected with 422 (3717.03226ms)
+room diagnostic op_zhVcMh3B 422 invalid_claim_input input /api/rooms/:roomId/work-claims-read
+room diagnostic op_scr-gSIP 422 invalid_claim_input input /api/rooms/:roomId/work-claims-read
+{"event":"room.cold_start","durationMs":1294,"integrity":"eager","phases":{"schema":{"ms":145,"rowsRead":0},"plugin":{"ms":727,"rowsRead":0},"fence":{"ms":177,"rowsRead":0},"verifies":{"ms":15,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":146,"heapBytes":39697704,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ queue cursors and page cursors do not cross (8071.938813ms)
+room diagnostic op_plsGspi- 422 invalid_claim_input input /api/rooms/:roomId/work-claims-read
+{"event":"room.cold_start","durationMs":1649,"integrity":"eager","phases":{"schema":{"ms":281,"rowsRead":0},"plugin":{"ms":677,"rowsRead":0},"fence":{"ms":496,"rowsRead":0},"verifies":{"ms":17,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":158,"heapBytes":39402824,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ cursors bind the state filter they were issued under (5563.066985ms)
+{"event":"room.cold_start","durationMs":2103,"integrity":"eager","phases":{"schema":{"ms":241,"rowsRead":0},"plugin":{"ms":948,"rowsRead":0},"fence":{"ms":473,"rowsRead":0},"verifies":{"ms":40,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":161,"heapBytes":41704336,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ pagination walks the board with opaque cursors (2930.147508ms)
+{"event":"room.cold_start","durationMs":1904,"integrity":"eager","phases":{"schema":{"ms":431,"rowsRead":0},"plugin":{"ms":842,"rowsRead":0},"fence":{"ms":338,"rowsRead":0},"verifies":{"ms":34,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":161,"heapBytes":43363152,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ an expired lease is still listed as claimed: this route sweeps nothing (3314.460379ms)
+✔ the default page keeps recent done claims and counts older ones (4179.34779ms)
+ℹ tests 92
+ℹ suites 0
+ℹ pass 91
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 157433.276741
+
+✖ failing tests:
+
+test at tests/room-watch-enforcer.test.sh:1:1
+✖ tests/room-watch-enforcer.test.sh (2048.29003ms)
+  'test failed'

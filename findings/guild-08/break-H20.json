@@ -1,0 +1,56 @@
+[
+{
+ "unit": "H20",
+ "suite": "room-mcp-auth.test.js",
+ "target": "server/mcp-http.mjs",
+ "desc": "join tool renamed",
+ "result": "red",
+ "pass": 1,
+ "fail": 2,
+ "note": "cancelled=0"
+}
+,
+{
+ "unit": "H20",
+ "suite": "room-lifecycle.test.js",
+ "target": "src/events.js",
+ "desc": "anyone may archive",
+ "result": "red",
+ "pass": 5,
+ "fail": 2,
+ "note": "cancelled=0"
+}
+,
+{
+ "unit": "H20",
+ "suite": "room-creation.test.js",
+ "target": "server/room-lifecycle.mjs",
+ "desc": "nobody administers membership",
+ "result": "red",
+ "pass": 3,
+ "fail": 1,
+ "note": "cancelled=0"
+}
+,
+{
+ "unit": "H20",
+ "suite": "room-coord.test.js",
+ "target": "scripts/room-coord.mjs",
+ "desc": "malformed input accepted",
+ "result": "red",
+ "pass": 9,
+ "fail": 1,
+ "note": "cancelled=0"
+}
+,
+{
+ "unit": "H20",
+ "suite": "room-results.test.js",
+ "target": "src/work-selectors.js",
+ "desc": "nothing ever completed",
+ "result": "red",
+ "pass": 1,
+ "fail": 3,
+ "note": "cancelled=0"
+}
+]

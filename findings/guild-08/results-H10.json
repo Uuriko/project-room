@@ -1,0 +1,1 @@
+{"unit":"H10","baseline_exit":0,"interrupted":0,"pass":50,"fail":0,"cancelled":0,"tests_scanned":47,"weak_flagged":1,"files":["claim-map.test.js","peer-dm-room-scope.test.js","room-charter.test.js","room-first-pr.test.js","room-missing-flag-values.test.js","room-templates.test.js","work-claim-integrity.test.js","work-claim-summary-view.test.js"]}

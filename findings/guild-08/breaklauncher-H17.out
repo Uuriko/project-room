@@ -1,0 +1,66 @@
+[eval]:1
+const d=process.argv[1];console.log(JSON.stringify({unit:process.argv[2],suite:process.argv[3],target:process.argv[4],desc:d,result:process.argv[5],pass:process.argv[6]==="null"?null:+process.argv[6],fail:process.argv[7]==="null"?null:+process.argv[7],note:process.argv[8]},null,1)))
+                                                                                                                                                                                                                                                                                          ^
+Expected ';', '}' or <eof>
+
+SyntaxError: Unexpected token ')'
+    at makeContextifyScript (node:internal/vm:194:14)
+    at compileScript (node:internal/process/execution:388:10)
+    at evalTypeScript (node:internal/process/execution:260:22)
+    at node:internal/main/eval_string:71:3
+
+Node.js v24.20.0
+H17 [1/5] work-claims.test.js -> green (pass=6 fail=0) :: cap open claims at 1
+[eval]:1
+const d=process.argv[1];console.log(JSON.stringify({unit:process.argv[2],suite:process.argv[3],target:process.argv[4],desc:d,result:process.argv[5],pass:process.argv[6]==="null"?null:+process.argv[6],fail:process.argv[7]==="null"?null:+process.argv[7],note:process.argv[8]},null,1)))
+                                                                                                                                                                                                                                                                                          ^
+Expected ';', '}' or <eof>
+
+SyntaxError: Unexpected token ')'
+    at makeContextifyScript (node:internal/vm:194:14)
+    at compileScript (node:internal/process/execution:388:10)
+    at evalTypeScript (node:internal/process/execution:260:22)
+    at node:internal/main/eval_string:71:3
+
+Node.js v24.20.0
+H17 [2/5] work-claim-board.test.js -> green (pass=26 fail=0) :: manage_claims check always false
+[eval]:1
+const d=process.argv[1];console.log(JSON.stringify({unit:process.argv[2],suite:process.argv[3],target:process.argv[4],desc:d,result:process.argv[5],pass:process.argv[6]==="null"?null:+process.argv[6],fail:process.argv[7]==="null"?null:+process.argv[7],note:process.argv[8]},null,1)))
+                                                                                                                                                                                                                                                                                          ^
+Expected ';', '}' or <eof>
+
+SyntaxError: Unexpected token ')'
+    at makeContextifyScript (node:internal/vm:194:14)
+    at compileScript (node:internal/process/execution:388:10)
+    at evalTypeScript (node:internal/process/execution:260:22)
+    at node:internal/main/eval_string:71:3
+
+Node.js v24.20.0
+H17 [3/5] work-claim-guards.test.js -> red (pass=11 fail=1) :: humans lose accept/complete_work
+[eval]:1
+const d=process.argv[1];console.log(JSON.stringify({unit:process.argv[2],suite:process.argv[3],target:process.argv[4],desc:d,result:process.argv[5],pass:process.argv[6]==="null"?null:+process.argv[6],fail:process.argv[7]==="null"?null:+process.argv[7],note:process.argv[8]},null,1)))
+                                                                                                                                                                                                                                                                                          ^
+Expected ';', '}' or <eof>
+
+SyntaxError: Unexpected token ')'
+    at makeContextifyScript (node:internal/vm:194:14)
+    at compileScript (node:internal/process/execution:388:10)
+    at evalTypeScript (node:internal/process/execution:260:22)
+    at node:internal/main/eval_string:71:3
+
+Node.js v24.20.0
+H17 [4/5] work-claim-leases.test.js -> red (pass=10 fail=9) :: clock frozen at epoch
+[eval]:1
+const d=process.argv[1];console.log(JSON.stringify({unit:process.argv[2],suite:process.argv[3],target:process.argv[4],desc:d,result:process.argv[5],pass:process.argv[6]==="null"?null:+process.argv[6],fail:process.argv[7]==="null"?null:+process.argv[7],note:process.argv[8]},null,1)))
+                                                                                                                                                                                                                                                                                          ^
+Expected ';', '}' or <eof>
+
+SyntaxError: Unexpected token ')'
+    at makeContextifyScript (node:internal/vm:194:14)
+    at compileScript (node:internal/process/execution:388:10)
+    at evalTypeScript (node:internal/process/execution:260:22)
+    at node:internal/main/eval_string:71:3
+
+Node.js v24.20.0
+H17 [5/5] work-claim-integrity.test.js -> red (pass=5 fail=10) :: max lease 3 minutes
+H17 break-checks complete

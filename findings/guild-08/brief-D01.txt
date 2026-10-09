@@ -1,0 +1,52 @@
+### tests/account-deletion-rooms.test.js
+header: // QA2 finding P2-11: account deletion must not leave an ownerless room | // full of the deleted account's content. The HTTP confirm-then-delete | // routes are the contract: personal rooms are archived and purged, a | // shared room with another owner transfers, and a sole owner of a shared | // room with other members is refused with the room list.
+tests(4): a solely owned personal room is archived and its messages and files are purged ~ a shared room with another owner transfers and the account is deleted ~ the sole owner of a shared room with other members is refused and listed ~ the confirmation token covers room contents, so a later message requires a fresh plan
+
+### tests/account-rooms.test.js
+header: (none)
+tests(4): account room discovery uses bounded advancing pages ~ account room discovery returns only currently authorized memberships without room content ~ an account creates a room over HTTP with CSRF, opens it through the same session, and archived rooms stay listed read-on ~ account room discovery is a read: it answers while another writer holds the database and on a read-only store
+
+### tests/agent-rooms-idempotent-budget.test.js
+header: (none)
+tests(5): an identical retry does not spend creation budget ~ the budget still counts rooms that were actually created ~ a replay is free even when the budget is already exhausted ~ claiming a room id that belongs to someone else is refused and costs nothing ~ an unknown secret is rejected before any budget is considered
+
+### tests/agent-rooms.test.js
+header: (none)
+tests(31): an identity creates a room self-serve and becomes its owner ~ same identity retrying with the same parameters gets duplicate:true ~ room id collision with different parameters is 409 ~ a different identity cannot claim the same room id ~ creation budget is enforced per identity ~ unknown or malformed identity secrets are 401 ~ owner transfers ownership to an agent member; the chain is auditable ~ transfer by a non-owner is 403 ~ transfer to an unknown or inactive member is a bare 404 ~ an agent owner may set room policy and the room-wide spend allowance ~ an agent owner may archive its own room ~ transfer through the generic command path is auditable too
+
+### tests/analytics-claim-bond-shadow.test.js
+header: // Tests for the claim-bonds P0 shadow observer. | // | // What these protect (test-audit authoring gate): | // 1. Contract: the shadow journal faithfully implements the spec §2 bond | //    lifecycle over work_claim.updated events — lock at claim, release on | //    done / clean release, forfeit + flake strike on lease expiry / | //    judged-bad, carry on reassign, nothing on renew. Would-have e
+tests(17): claimed locks a shadow bond at the nominal amount ~ done releases the open bond ~ clean owner release returns the bond with no flake ~ lease expiry forfeits and attributes the flake to the previous owner ~ judged-bad review forfeits the bond and records a flake ~ a note review leaves the bond locked ~ renew keeps the bond locked; the later done still releases ~ reassign carries the bond; a later flake hits the new owner ~ done with no observed claim writes no phantom entries ~ lease expiry with no open bond still records the flake, marked bond_posted=0 ~ unrelated actions write nothing ~ syncShadowJournal is idempotent across re-runs
+
+### tests/claim-autolink-http.test.js
+header: (none)
+tests(1): real PR receiver is mounted, disabled by default and rejects unauthenticated deliveries
+
+### tests/claim-autolink.test.js
+header: // plan-pr-autolink: off-room PRs and deploys link back to their board item. | // | // New behavior under test (nothing here existed before this change): | //  1. parseClaimId / findClaimForPull — claim ids are read out of a branch | //     name, an explicit `claim:` marker, the PR title, or the PR body, with a | //     fixed priority (marker > branch > title > body) and an ambiguity guard. | //  
+tests(18): parseClaimId: explicit claim marker outranks branch, title and body ~ parseClaimId: branch segments match exactly, partial tokens do not ~ parseClaimId: ignores garbage; tokens are capped at 80 chars ~ findClaimForPull: branch match links the claim, repo mismatch excludes ~ findClaimForPull: two live claims on one token is ambiguous, never a guess ~ findClaimForPull: done and unclaimed items are not link targets ~ autoLinkPullRequest: links the PR and emits one receipt ~ autoLinkPullRequest: duplicate and settled links are refused ~ autoLinkPullRequest: refuses settled and unclaimed items ~ handlePrWebhookPayload: closed+merged on an unlinked PR auto-links and settles ~ handlePrWebhookPayload: opened only links, unknown ids and garbage never write ~ discoverUnlinkedPulls: open PRs link claims that carry no PR yet
+
+### tests/claim-bond-shadow-attacks.test.js
+header: // QA slice D-2 attack tests: claim-bond shadow mode (PRs #1466/#1469). | // | // Contracts owned here (nothing else covers them): | // - write confinement: syncShadowJournal never touches any table but its own | //   claim_bond_shadow journal (a future edit adding a ledger/balance write | //   here would silently move real value under the "shadow" banner) | // - hypothetical clarity: every journa
+tests(3): syncShadowJournal writes only its own journal table, never real state ~ every shadow journal row is unambiguously marked hypothetical ~ shadowReport performs no writes
+
+### tests/claim-collisions.test.js
+header: // RC-2026-09-18-045: claim file-collision detector — open claims whose | // file lists overlap are flagged before work starts.
+tests(7): detects a file claimed by two open claims ~ reports every shared file, sorted; lanes deduplicated and sorted ~ closed claims release their files and never collide ~ duplicate entries inside one claim do not self-collide ~ path normalization catches ./ and // variants of the same file ~ empty input and disjoint claims are collision-free ~ malformed inputs throw coded errors
+
+### tests/claim-map.test.js
+header: // S1 live file/region claim registry (software-factory brief 2026-09-26). | // | // Contracts under test: | // 1. `scripts/room rebuild` renders `## file-claims` — an inverted index | //    (file -> lane -> task-id -> state) over live claims only. | // 2. `scripts/room rebuild` renders `## overlap-warnings` — every file | //    held by 2+ live claims, `(none)` when clean. | // 3. `scripts/room ov
+tests(8): file-claims renders one row per file per live claim, sorted ~ overlap-warnings flags files held by 2+ live claims ~ overlap-warnings renders (none) when no live overlaps ~ closed claims release their files from the registry ~ signals line carries files_claimed and overlap_files ~ overlaps --files reports live holders and (unclaimed) files ~ overlaps without --files reports all live overlaps ~ overlaps ignores closed claims
+
+### tests/claim-overlaps.test.js
+header: // tests/claim-overlaps.test.js — Work Item claims record path overlaps. | // Contract guarded: a claim on paths that another active claim in the same | // repository already holds still succeeds (warn, never block) and records the | // other work item, its holder and the shared paths. Directory claims overlap | // the files inside them. Other repositories, released and expired claims do | // not 
+tests(3): an overlapping claim succeeds and records who else holds the paths ~ other repositories and released claims do not overlap ~ overlaps are deterministic on replay
+
+### tests/claim-pr-sync-room-scoping.test.js
+header: // PR-settlement cron resolves lookup results to rooms. | // Authoring gate: this protects the (roomId, claimId) scoping contract — | // claim ids are room-scoped, so the same claimId can be due in two rooms in | // one cron tick. A roomOf map keyed by bare claimId settles one room's | // lookup result against the wrong room's claim, where the PR URL matches no | // open link, so commitPullRequest
+tests(1): cron settles the same claimId in two rooms against its own room
+
+### tests/claim-reputation.test.js
+header: // Tests for the claim-bonds P1 reputation projector. | // | // What these protect (test-audit authoring gate): | // 1. Contract: the P1 signal derivation faithfully implements | //    CLAIMBONDS-P1-SPEC-2026-10-05.md over work_claim.updated events — | //    claim_completed (+3) on done, claim_released (+1) on clean release, | //    claim_flaked (-6, existing weight) on lease expiry attributed to 
+tests(35): the four P1 signal types are registered with the spec ~ HOARDING_CAP is the spec-frozen 5 ~ done posts claim_completed to the owner and closes the position ~ clean release posts claim_released and closes the position ~ lease expiry posts claim_flaked to the previous owner ~ lease expiry on an unobserved claim still emits the flake ~ reviewed changes_requested posts claim_judged_bad and keeps the position open ~ other review verdicts are not judged bad ~ the surcharge fires when opening while >= HOARDING_CAP claims are open ~ no surcharge when opening below the cap ~ a lane that works through its queue pays nothing extra ~ null-lease open claims count toward the hoarding cap
+

@@ -1,0 +1,153 @@
+=== H01 baseline 2026-10-09T09:26:04Z ===
+{"event":"room.cold_start","durationMs":3634,"integrity":"eager","phases":{"schema":{"ms":209,"rowsRead":0},"plugin":{"ms":1513,"rowsRead":0},"fence":{"ms":1103,"rowsRead":0},"verifies":{"ms":306,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":180,"heapBytes":37820448,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":2703,"integrity":"eager","phases":{"schema":{"ms":552,"rowsRead":0},"plugin":{"ms":823,"rowsRead":0},"fence":{"ms":778,"rowsRead":0},"verifies":{"ms":82,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":154,"heapBytes":35565224,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a solely owned personal room is archived and its messages and files are purged (13001.872521ms)
+{"event":"room.cold_start","durationMs":3964,"integrity":"eager","phases":{"schema":{"ms":757,"rowsRead":0},"plugin":{"ms":1984,"rowsRead":0},"fence":{"ms":615,"rowsRead":0},"verifies":{"ms":139,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":175,"heapBytes":43320632,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a shared room with another owner transfers and the account is deleted (5988.837541ms)
+{"event":"room.cold_start","durationMs":4732,"integrity":"eager","phases":{"schema":{"ms":130,"rowsRead":0},"plugin":{"ms":2229,"rowsRead":0},"fence":{"ms":1847,"rowsRead":0},"verifies":{"ms":163,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":193,"heapBytes":34804512,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ the sole owner of a shared room with other members is refused and listed (8389.810814ms)
+✔ the confirmation token covers room contents, so a later message requires a fresh plan (10588.49989ms)
+✔ valid claim registers with correct lease expiry (3899.962064ms)
+✔ duplicate task-id is refused, not double-registered (2872.712645ms)
+✔ bare `lease: 6h` is unregistered with the exact enforcer error (2557.386925ms)
+✔ spaced and swapped [lane][claim] headers are recognized (2471.331491ms)
+✔ prose CLAIM: and unfenced [claim] are unregistered, never crash (2191.053416ms)
+✔ lease out of range is unregistered (1237.498441ms)
+✔ expired lease with no receipt -> expired status (2339.444297ms)
+✔ heartbeat renews the lease from the heartbeat comment (1890.468977ms)
+✔ DONE: completes the claim and attaches the receipt (1886.666781ms)
+✔ receipt for an unknown task becomes an orphan receipt (1477.790398ms)
+✔ null body is recorded as unregistered, path-only comments ignored, no crash (1975.758862ms)
+✔ STATUS: releasing transitions the claim to cancelled (2558.322558ms)
+✔ watermark and stats are consistent (1288.583184ms)
+✔ M-49: cross-lane STATUS:/DONE:/[receipt] transitions are ignored, same-lane apply (783.190078ms)
+✔ membership-administration methods deliver a real AbortSignal to the transport (38.039516ms)
+✔ membership-administration calls work without a caller signal too (27.947641ms)
+{"event":"room.cold_start","durationMs":1389,"integrity":"eager","phases":{"schema":{"ms":116,"rowsRead":0},"plugin":{"ms":397,"rowsRead":0},"fence":{"ms":644,"rowsRead":0},"verifies":{"ms":202,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":162,"heapBytes":36181072,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ a directory claim covers the files beneath it and nothing beside it (15.742224ms)
+room diagnostic op_7s7c8Aic 404 work_claim_not_found not_found /api/rooms/:roomId/work-claims/lane-a/claim
+room diagnostic op_DOdlmKZ- 404 work_claim_not_found not_found /api/rooms/:roomId/work-claims/lane-b
+room diagnostic op_8mw6sxbV 404 work_claim_not_found not_found /api/rooms/:roomId/work-claims/lane-b/claim
+{"event":"room.cold_start","durationMs":1395,"integrity":"eager","phases":{"schema":{"ms":540,"rowsRead":0},"plugin":{"ms":344,"rowsRead":0},"fence":{"ms":377,"rowsRead":0},"verifies":{"ms":132,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":159,"heapBytes":38537952,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ claims are confirmed by reading the room record back, and held files refuse a second member (3673.517788ms)
+room diagnostic op_QMazRHPt 404 work_claim_not_found not_found /api/rooms/:roomId/work-claims/intruder/claim
+room diagnostic op_7q7a-VF4 404 work_claim_not_found not_found /api/rooms/:roomId/work-claims/racer/claim
+room diagnostic op_JqmQKC6o 404 work_claim_not_found not_found /api/rooms/:roomId/work-claims/keepsake/claim
+{"event":"room.cold_start","durationMs":592,"integrity":"eager","phases":{"schema":{"ms":289,"rowsRead":0},"plugin":{"ms":247,"rowsRead":0},"fence":{"ms":40,"rowsRead":0},"verifies":{"ms":4,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":129,"heapBytes":48113928,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a claim that loses the race is released, and omitted files still refuse an overlap (3997.032207ms)
+room diagnostic op_Pmiv0Vna 404 work_claim_not_found not_found /api/rooms/:roomId/work-claims/missing-claim
+{"event":"room.cold_start","durationMs":431,"integrity":"eager","phases":{"schema":{"ms":112,"rowsRead":0},"plugin":{"ms":271,"rowsRead":0},"fence":{"ms":37,"rowsRead":0},"verifies":{"ms":10,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":124,"heapBytes":38456688,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ renewal of a missing claim fails before a progress line is posted (651.215853ms)
+room diagnostic op_9Cjj0IqT 404 work_claim_not_found not_found /api/rooms/:roomId/work-claims/finish-claimed
+room diagnostic op_wzk6YIgm 404 work_claim_not_found not_found /api/rooms/:roomId/work-claims/finish-claimed/claim
+room diagnostic op_7M-rFSum 404 work_claim_not_found not_found /api/rooms/:roomId/work-claims/finish-blocked
+room diagnostic op_thY2d55M 404 work_claim_not_found not_found /api/rooms/:roomId/work-claims/finish-blocked/claim
+room diagnostic op_K7-Otz0z 404 work_claim_not_found not_found /api/rooms/:roomId/work-claims/finish-started
+room diagnostic op_KFII1ayd 404 work_claim_not_found not_found /api/rooms/:roomId/work-claims/finish-started/claim
+room diagnostic op_BWGgH2UV 403 work_review_rejected access /api/rooms/:roomId/work-claims/needs-review/update
+{"event":"room.cold_start","durationMs":394,"integrity":"eager","phases":{"schema":{"ms":184,"rowsRead":0},"plugin":{"ms":172,"rowsRead":0},"fence":{"ms":35,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":119,"heapBytes":39797368,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ done closes a claimed or blocked item by moving it through in progress (3302.847601ms)
+✔ a record that is not a live lease held by the caller is never treated as a claim (6.085352ms)
+room diagnostic op_AHCMUL7f 404 work_claim_not_found not_found /api/rooms/:roomId/work-claims/renew-me
+room diagnostic op_XXmXJvc1 404 work_claim_not_found not_found /api/rooms/:roomId/work-claims/renew-me/claim
+{"event":"room.cold_start","durationMs":754,"integrity":"eager","phases":{"schema":{"ms":129,"rowsRead":0},"plugin":{"ms":411,"rowsRead":0},"fence":{"ms":200,"rowsRead":0},"verifies":{"ms":13,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":134,"heapBytes":46386248,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ renewal posts a public progress line and extends the lease against that message (934.445668ms)
+room diagnostic op_4Q-YpPRW 404 work_claim_not_found not_found /api/rooms/:roomId/work-claims/baton/claim
+{"event":"room.cold_start","durationMs":621,"integrity":"eager","phases":{"schema":{"ms":52,"rowsRead":0},"plugin":{"ms":312,"rowsRead":0},"fence":{"ms":244,"rowsRead":0},"verifies":{"ms":13,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":126,"heapBytes":41564080,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ handoff moves the lease to the receiver and leaves an actionable handoff post (1012.835217ms)
+room diagnostic op__0LUxUPK 404 work_claim_not_found not_found /api/rooms/:roomId/work-claims/short/claim
+room diagnostic op_ky-GDDPo 404 work_claim_not_found not_found /api/rooms/:roomId/work-claims/long/claim
+{"event":"room.cold_start","durationMs":419,"integrity":"eager","phases":{"schema":{"ms":235,"rowsRead":0},"plugin":{"ms":141,"rowsRead":0},"fence":{"ms":38,"rowsRead":0},"verifies":{"ms":4,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":130,"heapBytes":49338968,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+room diagnostic op_hOJQ57di 404 work_claim_not_found not_found /api/rooms/:roomId/work-claims/cli-lane/claim
+✔ status shows live, mine, expiring and overlapping claims plus the land queue, and the digest cites each (1504.937327ms)
+✔ the room-coord CLI drives the same verbs and refuses malformed input before any write (1486.280259ms)
+{"event":"room.cold_start","durationMs":1786,"integrity":"eager","phases":{"schema":{"ms":326,"rowsRead":0},"plugin":{"ms":581,"rowsRead":0},"fence":{"ms":598,"rowsRead":0},"verifies":{"ms":133,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":169,"heapBytes":35807544,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":565,"integrity":"eager","phases":{"schema":{"ms":160,"rowsRead":0},"plugin":{"ms":159,"rowsRead":0},"fence":{"ms":151,"rowsRead":0},"verifies":{"ms":56,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":128,"heapBytes":38208776,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ poll prints one pointer and leaves the wake pending; webhook prints the subscribe call and does not connect (17046.525564ms)
+{"event":"room.cold_start","durationMs":708,"integrity":"eager","phases":{"schema":{"ms":22,"rowsRead":0},"plugin":{"ms":95,"rowsRead":0},"fence":{"ms":566,"rowsRead":0},"verifies":{"ms":24,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":124,"heapBytes":42603488,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ webhook refuses a url that contains the saved credential without echoing it (6640.986875ms)
+✔ usage and plugin directory prompt stay free of the credential (10773.36648ms)
+✔ qualification child records the reply and returns reachability evidence (17200.665151ms)
+✔ prose-claims-needing-fence lists prose comments, not file-claims rows (1833.860054ms)
+{"event":"room.cold_start","durationMs":380,"integrity":"eager","phases":{"schema":{"ms":64,"rowsRead":0},"plugin":{"ms":85,"rowsRead":0},"fence":{"ms":123,"rowsRead":0},"verifies":{"ms":84,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":148,"heapBytes":38260752,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":339,"integrity":"eager","phases":{"schema":{"ms":115,"rowsRead":0},"plugin":{"ms":178,"rowsRead":0},"fence":{"ms":42,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":121,"heapBytes":37811376,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ SDK retains declared files, overlap warnings, and completion receipt metadata over HTTP (4225.995855ms)
+room diagnostic op_hjAObtnX 404 work_claim_not_found not_found /api/rooms/:roomId/work-claims/convenience/claim
+room diagnostic op_Uvd8UIcG 404 work_claim_not_found not_found /api/rooms/:roomId/work-claims/receipt/claim
+{"event":"room.cold_start","durationMs":423,"integrity":"eager","phases":{"schema":{"ms":152,"rowsRead":0},"plugin":{"ms":175,"rowsRead":0},"fence":{"ms":84,"rowsRead":0},"verifies":{"ms":8,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":128,"heapBytes":46791520,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ SDK convenience claim and completion preserve creation metadata and explicit file replacement (1117.343503ms)
+room diagnostic op_L1_zq8J3 422 invalid_claim_input input /api/rooms/:roomId/work-claims
+room diagnostic op_t1E7CjPh 404 work_claim_not_found not_found /api/rooms/:roomId/work-claims/invalid-path
+room diagnostic op_AwYvp-9y 422 invalid_claim_input input /api/rooms/:roomId/work-claims
+room diagnostic op_mJdAx2wX 404 work_claim_not_found not_found /api/rooms/:roomId/work-claims/invalid-tag
+room diagnostic op_R4KSlGWK 422 invalid_claim_input input /api/rooms/:roomId/work-claims/pending/claim
+room diagnostic op_rdFY-Uqv 422 invalid_claim_input input /api/rooms/:roomId/work-claims/pending/update
+room diagnostic op_L9gJ4eDA 422 invalid_claim_input input /api/rooms/:roomId/work-claims/pending/update
+room diagnostic op_RArk9Mch 422 invalid_claim_input input /api/rooms/:roomId/work-claims/pending/review
+room diagnostic op_4QnudAjD 422 invalid_claim_input input /api/rooms/:roomId/work-claims/pending/review
+room diagnostic op_od5Y5I4Y 422 invalid_claim_input input /api/rooms/:roomId/work-claims/pending/review
+room diagnostic op_P43I84Al 422 invalid_claim_input input /api/rooms/:roomId/work-claims/pending/review
+room diagnostic op_lFbhK_r9 422 invalid_claim_input input /api/rooms/:roomId/work-claims/pending/review
+{"event":"room.cold_start","durationMs":680,"integrity":"eager","phases":{"schema":{"ms":71,"rowsRead":0},"plugin":{"ms":357,"rowsRead":0},"fence":{"ms":179,"rowsRead":0},"verifies":{"ms":70,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":135,"heapBytes":44121696,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ SDK sends invalid declarations for server rejection instead of silently dropping them (2702.081258ms)
+room diagnostic op_XOL2fdMR 404 work_claim_not_found not_found /api/rooms/:roomId/work-claims/reviewed/claim
+room diagnostic op_QiKPPVOe 403 work_review_rejected access /api/rooms/:roomId/work-claims/reviewed/update
+room diagnostic op_N30WyzU2 403 work_review_rejected access /api/rooms/:roomId/work-claims/reviewed/update
+room diagnostic op_tZezug2w 403 work_not_owner access /api/rooms/:roomId/work-claims/reviewed/update
+room diagnostic op_88wb-Lre 403 work_review_rejected access /api/rooms/:roomId/work-claims/reviewed/update
+room diagnostic op_6a9v9EZC 403 work_review_rejected access /api/rooms/:roomId/work-claims/reviewed/update
+room diagnostic op_ZhJxWyqY 422 invalid_claim_input input /api/rooms/:roomId/work-claims/reviewed/review
+{"event":"room.cold_start","durationMs":316,"integrity":"eager","phases":{"schema":{"ms":77,"rowsRead":0},"plugin":{"ms":111,"rowsRead":0},"fence":{"ms":120,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":133,"heapBytes":41916424,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ SDK preserves legacy notes and requires an explicit approval for reviewed completion (2104.478262ms)
+room diagnostic op_StumuKzs 404 work_claim_not_found not_found /api/rooms/:roomId/work-claims/renewed/claim
+room diagnostic op_ZoNurZxy 403 work_not_owner access /api/rooms/:roomId/work-claims/renewed/renew
+room diagnostic op_44WyxPzl 403 claim_renewal_source_foreign access /api/rooms/:roomId/work-claims/renewed/renew
+room diagnostic op_l0JAFjG5 422 claim_renewal_source_required input /api/rooms/:roomId/work-claims/renewed/renew
+room diagnostic op_gaG6oFsr 422 claim_renewal_source_required input /api/rooms/:roomId/work-claims/renewed/renew
+room diagnostic op_YcYioGxL 422 claim_renewal_source_stale input /api/rooms/:roomId/work-claims/renewed/renew
+{"event":"room.cold_start","durationMs":1299,"integrity":"eager","phases":{"schema":{"ms":404,"rowsRead":0},"plugin":{"ms":542,"rowsRead":0},"fence":{"ms":287,"rowsRead":0},"verifies":{"ms":46,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":146,"heapBytes":50368736,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ SDK lease renewal needs the owner and a fresh public progress message (1053.810529ms)
+room diagnostic op_cFMhicxB 404 work_claim_not_found not_found /api/rooms/:roomId/work-claims/later-sdk-pr/claim
+room diagnostic op_ACVjcm3e 422 invalid_claim_input input /api/rooms/:roomId/work-claims/later-sdk-pr/update
+room diagnostic op_jr6I7UFC 422 invalid_claim_input input /api/rooms/:roomId/work-claims/later-sdk-pr/update
+room diagnostic op_ey_O2oDK 422 invalid_claim_input input /api/rooms/:roomId/work-claims/later-sdk-pr/update
+{"event":"room.cold_start","durationMs":982,"integrity":"eager","phases":{"schema":{"ms":175,"rowsRead":0},"plugin":{"ms":736,"rowsRead":0},"fence":{"ms":60,"rowsRead":0},"verifies":{"ms":4,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":142,"heapBytes":44342856,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ SDK links a later PR with both preconditions and preserves HTTP refusals (2153.969624ms)
+room diagnostic op_LcfABucY 422 invalid_claim_input input /api/rooms/:roomId/work-claims
+room diagnostic op_38g2mY1w 422 invalid_claim_input input /api/rooms/:roomId/work-claims
+room diagnostic op_HC0irgOH 422 invalid_claim_input input /api/rooms/:roomId/work-claims
+{"event":"room.cold_start","durationMs":934,"integrity":"eager","phases":{"schema":{"ms":115,"rowsRead":0},"plugin":{"ms":660,"rowsRead":0},"fence":{"ms":141,"rowsRead":0},"verifies":{"ms":11,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":130,"heapBytes":90843312,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ SDK state filters retrieve older done claims through explicit and automatic pages (1256.266516ms)
+{"event":"room.cold_start","durationMs":847,"integrity":"eager","phases":{"schema":{"ms":151,"rowsRead":0},"plugin":{"ms":344,"rowsRead":0},"fence":{"ms":331,"rowsRead":0},"verifies":{"ms":13,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":132,"heapBytes":99219768,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ the documented capped-history PR basis succeeds through the SDK (6962.765299ms)
+{"event":"room.cold_start","durationMs":954,"integrity":"eager","phases":{"schema":{"ms":441,"rowsRead":0},"plugin":{"ms":191,"rowsRead":0},"fence":{"ms":230,"rowsRead":0},"verifies":{"ms":62,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":146,"heapBytes":87704256,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ SDK auto-pagination signals truncation honestly past the 20-hop cap (8363.285868ms)
+{"event":"room.cold_start","durationMs":1390,"integrity":"eager","phases":{"schema":{"ms":222,"rowsRead":0},"plugin":{"ms":846,"rowsRead":0},"fence":{"ms":233,"rowsRead":0},"verifies":{"ms":65,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":140,"heapBytes":97480432,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ SDK board reads exactly one canonical claim page and forwards explicit continuations and filters (1967.979768ms)
+room diagnostic op_2cZixo3Y 422 invalid_claim_input input /api/rooms/:roomId/work-claims-read
+room diagnostic op_Gkoh6aoz 422 invalid_claim_input input /api/rooms/:roomId/work-claims-read
+room diagnostic op_Dm9loBpD 422 invalid_claim_input input /api/rooms/:roomId/work-claims-read
+room diagnostic op_VOcpDCwn 422 invalid_claim_input input /api/rooms/:roomId/work-claims-read
+room diagnostic op_BTCG5zW0 422 invalid_claim_input input /api/rooms/:roomId/work-claims-read
+room diagnostic op_FFh9AD9w 422 invalid_claim_input input /api/rooms/:roomId/work-claims-read
+room diagnostic op_r34x4mVq 422 invalid_claim_input input /api/rooms/:roomId/work-claims-read
+room diagnostic op_dSEXWC_E 422 invalid_claim_input input /api/rooms/:roomId/work-claims-read
+{"event":"room.cold_start","durationMs":1748,"integrity":"eager","phases":{"schema":{"ms":307,"rowsRead":0},"plugin":{"ms":1391,"rowsRead":0},"fence":{"ms":36,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":146,"heapBytes":51257856,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ SDK board propagates canonical query refusals without returning a legacy-only success (2921.720682ms)
+✔ SDK board cancellation aborts an in-flight canonical claim response (1793.896199ms)
+✔ reassigning an unclaimed item makes it a claim with the room default lease (38.998966ms)
+✔ the room's configured default lease is used (0.57324ms)
+✔ an assigned item expires and returns to the pool like any claim (11.027409ms)
+✔ reassigning a held claim keeps its state and current lease (0.772629ms)
+ℹ tests 51
+ℹ suites 0
+ℹ pass 51
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 220817.372207

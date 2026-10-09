@@ -1,0 +1,1 @@
+tests/room-directory.test.js tests/room-enforcer-freshness.test.js tests/room-entry.test.js tests/room-export.test.js tests/room-file-upload.test.js tests/room-first-pr.test.js tests/room-flood-guard.test.js tests/room-guard.test.js tests/room-instructions.test.js tests/room-key-heartbeat.test.js tests/room-key-pull.test.js tests/room-lifecycle.test.js tests/room-listen.test.js 

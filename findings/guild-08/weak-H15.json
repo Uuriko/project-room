@@ -1,0 +1,68 @@
+[
+ {
+  "file": "tests/claim-settle-1526.test.js",
+  "tests": 5,
+  "weak": []
+ },
+ {
+  "file": "tests/public-work-claims.test.js",
+  "tests": 13,
+  "weak": []
+ },
+ {
+  "file": "tests/room-context.test.js",
+  "tests": 2,
+  "weak": []
+ },
+ {
+  "file": "tests/room-key-pull.test.js",
+  "tests": 1,
+  "weak": []
+ },
+ {
+  "file": "tests/room-protocol-mutation.test.js",
+  "tests": 14,
+  "weak": [
+   {
+    "name": "W2: sweep plans nothing when now is exactly the lease expiry instant",
+    "assertions": 0,
+    "lines": 5,
+    "weak": true
+   },
+   {
+    "name": "W5: sweep plans nothing at exactly 14400s after strike-one",
+    "assertions": 0,
+    "lines": 10,
+    "weak": true
+   },
+   {
+    "name": "W6: sweep plans nothing when a heartbeat followed the strike-one nudge",
+    "assertions": 0,
+    "lines": 8,
+    "weak": true
+   },
+   {
+    "name": "W8: sweep ignores terminal (completed) claims",
+    "assertions": 0,
+    "lines": 8,
+    "weak": true
+   },
+   {
+    "name": "W9: sweep does not re-nudge a claim that already has strike-one recorded",
+    "assertions": 0,
+    "lines": 7,
+    "weak": true
+   }
+  ]
+ },
+ {
+  "file": "tests/work-claim-batch-outcome.test.js",
+  "tests": 5,
+  "weak": []
+ },
+ {
+  "file": "tests/work-claim-qa-fixes.test.js",
+  "tests": 17,
+  "weak": []
+ }
+]

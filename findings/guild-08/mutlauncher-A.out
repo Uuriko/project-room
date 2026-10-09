@@ -1,0 +1,6 @@
+MUT M01 claim-settle-1526.test.js -> SURVIVED (pass=5 fail=0) :: lapsed-lease boundary off-by-one [APPLIED 1]
+MUT M02 work-claims.test.js -> SURVIVED (pass=6 fail=0) :: note bound off-by-one [APPLIED 4]
+MUT M03 work-claim-guards.test.js -> SURVIVED (pass=12 fail=0) :: human needs both perms [APPLIED 1]
+MUT M04 claim-collisions.test.js -> killed (pass=2 fail=5) :: single holder collides [APPLIED 1]
+MUT M05 claim-overlaps.test.js -> SURVIVED (pass=3 fail=0) :: expiry instant still active [APPLIED 1]
+mut batch wt-MUT-A done

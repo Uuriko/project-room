@@ -1,0 +1,6 @@
+MUT M06 claim-validate.test.js -> killed (pass=15 fail=1) :: 72h lease rejected [APPLIED 1]
+MUT M07 room-protocol-mutation.test.js -> killed (pass=12 fail=1) :: grace boundary off-by-one [APPLIED 1]
+MUT M08 work-claim-integrity.test.js -> killed (pass=14 fail=1) :: zero lease allowed [APPLIED 1]
+MUT M09 room-mcp-auth.test.js -> SURVIVED (pass=3 fail=0) :: 128-char request id rejected [APPLIED 2]
+MUT M10 work-claim-integrity.test.js -> killed (pass=14 fail=1) :: min lease rejected [APPLIED 1]
+mut batch wt-MUT-B done

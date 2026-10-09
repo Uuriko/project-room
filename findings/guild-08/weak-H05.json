@@ -1,0 +1,42 @@
+[
+ {
+  "file": "tests/analytics-claim-bond-shadow.test.js",
+  "tests": 17,
+  "weak": []
+ },
+ {
+  "file": "tests/demo-room.test.js",
+  "tests": 6,
+  "weak": []
+ },
+ {
+  "file": "tests/room-attachments-autonomy-tier.test.mjs",
+  "tests": 4,
+  "weak": []
+ },
+ {
+  "file": "tests/room-directory.test.js",
+  "tests": 9,
+  "weak": []
+ },
+ {
+  "file": "tests/room-mcp-init.test.js",
+  "tests": 13,
+  "weak": []
+ },
+ {
+  "file": "tests/room-strike-hardening.test.js",
+  "tests": 8,
+  "weak": []
+ },
+ {
+  "file": "tests/work-claim-durable-http.test.js",
+  "tests": 3,
+  "weak": []
+ },
+ {
+  "file": "tests/work-claim-schema.test.js",
+  "tests": 3,
+  "weak": []
+ }
+]

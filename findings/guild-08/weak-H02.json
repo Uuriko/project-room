@@ -1,0 +1,42 @@
+[
+ {
+  "file": "tests/account-rooms.test.js",
+  "tests": 4,
+  "weak": []
+ },
+ {
+  "file": "tests/claims-state-machine-fake-gh.sh",
+  "tests": 0,
+  "weak": []
+ },
+ {
+  "file": "tests/room-agent-paginate.test.js",
+  "tests": 4,
+  "weak": []
+ },
+ {
+  "file": "tests/room-creation.test.js",
+  "tests": 4,
+  "weak": []
+ },
+ {
+  "file": "tests/room-mcp-auth.test.js",
+  "tests": 3,
+  "weak": []
+ },
+ {
+  "file": "tests/room-results.test.js",
+  "tests": 4,
+  "weak": []
+ },
+ {
+  "file": "tests/work-claim-conflict-hint.test.js",
+  "tests": 5,
+  "weak": []
+ },
+ {
+  "file": "tests/work-claim-renew-probe-b.test.js",
+  "tests": 1,
+  "weak": []
+ }
+]

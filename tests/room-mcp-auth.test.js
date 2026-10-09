@@ -445,3 +445,17 @@ test("bond accept decline revoke and peer DM require the identity bearer and cal
   assert.doesNotMatch(page, /wake, heartbeats, and webhook delivery/);
   assert.doesNotMatch(page, /Bond beyond/);
 });
+
+test("MCP request ids of exactly 128 chars are accepted", async t => {
+  const { origin } = await serve(t);
+  const id128 = "x".repeat(128);
+  const ok = await fetch(`${origin}/room/mcp`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: id128, method: "tools/list" })
+  });
+  assert.equal(ok.status, 200);
+  const body = await ok.json();
+  assert.ok(Array.isArray(body.result?.tools), "tools/list answered for a 128-char id");
+  assert.equal(body.id, id128, "id echoed back");
+});

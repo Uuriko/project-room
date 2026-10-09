@@ -1,0 +1,84 @@
+[
+ {
+  "id": "M01",
+  "target": "server/claim-coordination.mjs",
+  "pattern": "Date\\.parse\\(item\\.leaseExpiresAt\\) <= nowMs",
+  "replacement": "Date.parse(item.leaseExpiresAt) < nowMs",
+  "suite": "claim-settle-1526.test.js",
+  "desc": "lapsed-lease boundary off-by-one"
+ },
+ {
+  "id": "M02",
+  "target": "server/work-claims.mjs",
+  "pattern": "note\\.length <= 4000",
+  "replacement": "note.length < 4000",
+  "suite": "work-claims.test.js",
+  "desc": "note bound off-by-one",
+  "global": true
+ },
+ {
+  "id": "M03",
+  "target": "server/work-claim-routes.mjs",
+  "pattern": "permissions\\.has\\(\"accept_work\"\\) \\|\\| permissions\\.has\\(\"complete_work\"\\)",
+  "replacement": "permissions.has(\"accept_work\") && permissions.has(\"complete_work\")",
+  "suite": "work-claim-guards.test.js",
+  "desc": "human needs both perms"
+ },
+ {
+  "id": "M04",
+  "target": "server/claim-collisions.mjs",
+  "pattern": "holders\\.length > 1",
+  "replacement": "holders.length >= 1",
+  "suite": "claim-collisions.test.js",
+  "desc": "single holder collides"
+ },
+ {
+  "id": "M05",
+  "target": "src/events.js",
+  "pattern": "Date\\.parse\\(claim\\.expiresAt\\) > Date\\.parse\\(at\\)",
+  "replacement": "Date.parse(claim.expiresAt) >= Date.parse(at)",
+  "suite": "claim-overlaps.test.js",
+  "desc": "expiry instant still active"
+ },
+ {
+  "id": "M06",
+  "target": "server/claim-validate.mjs",
+  "pattern": "hours > 72",
+  "replacement": "hours >= 72",
+  "suite": "claim-validate.test.js",
+  "desc": "72h lease rejected"
+ },
+ {
+  "id": "M07",
+  "target": "scripts/room",
+  "pattern": "epoch\\(\\$at\\) - epoch\\(\\$t\\.strike_one_at\\) <= 14400",
+  "replacement": "epoch($at) - epoch($t.strike_one_at) < 14400",
+  "suite": "room-protocol-mutation.test.js",
+  "desc": "grace boundary off-by-one"
+ },
+ {
+  "id": "M08",
+  "target": "server/work-claim-integrity.mjs",
+  "pattern": "BOARD_LEASE_HOURS_MIN = 0\\.25",
+  "replacement": "BOARD_LEASE_HOURS_MIN = 0",
+  "suite": "work-claim-integrity.test.js",
+  "desc": "zero lease allowed"
+ },
+ {
+  "id": "M09",
+  "target": "server/mcp-http.mjs",
+  "pattern": "requestId\\.length <= 128",
+  "replacement": "requestId.length < 128",
+  "suite": "room-mcp-auth.test.js",
+  "desc": "128-char request id rejected",
+  "global": true
+ },
+ {
+  "id": "M10",
+  "target": "server/work-claim-integrity.mjs",
+  "pattern": "value < BOARD_LEASE_HOURS_MIN",
+  "replacement": "value <= BOARD_LEASE_HOURS_MIN",
+  "suite": "work-claim-integrity.test.js",
+  "desc": "min lease rejected"
+ }
+]

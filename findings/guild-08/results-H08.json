@@ -1,0 +1,1 @@
+{"unit":"H08","baseline_exit":0,"interrupted":0,"pass":60,"fail":0,"cancelled":0,"tests_scanned":60,"weak_flagged":0,"files":["claim-bond-shadow-attacks.test.js","mixed-room-arrival.test.js","room-board-grammar.test.js","room-export.test.js","room-mcp-wake.test.js","room-sweep-evidence.test.js","work-claim-guards.test.js","work-claim-settle-retry.test.js"]}

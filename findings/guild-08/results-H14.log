@@ -1,0 +1,119 @@
+=== H14 baseline 2026-10-09T11:39:18Z ===
+{"event":"room.cold_start","durationMs":2604,"integrity":"eager","phases":{"schema":{"ms":522,"rowsRead":0},"plugin":{"ms":1134,"rowsRead":0},"fence":{"ms":543,"rowsRead":0},"verifies":{"ms":123,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":200,"heapBytes":26138944,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1158,"integrity":"eager","phases":{"schema":{"ms":257,"rowsRead":0},"plugin":{"ms":360,"rowsRead":0},"fence":{"ms":322,"rowsRead":0},"verifies":{"ms":36,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":144,"heapBytes":27955480,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":416,"integrity":"eager","phases":{"schema":{"ms":31,"rowsRead":0},"plugin":{"ms":15,"rowsRead":0},"fence":{"ms":188,"rowsRead":0},"verifies":{"ms":16,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":55,"heapBytes":35285792,"rooms":1,"sequences":9,"projectionBytes":2490,"events":9}
+{"event":"room.cold_start","durationMs":1690,"integrity":"eager","phases":{"schema":{"ms":212,"rowsRead":0},"plugin":{"ms":735,"rowsRead":0},"fence":{"ms":303,"rowsRead":0},"verifies":{"ms":50,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":169,"heapBytes":25454704,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":810,"integrity":"eager","phases":{"schema":{"ms":160,"rowsRead":0},"plugin":{"ms":351,"rowsRead":0},"fence":{"ms":157,"rowsRead":0},"verifies":{"ms":9,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":138,"heapBytes":31487040,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2166,"integrity":"eager","phases":{"schema":{"ms":500,"rowsRead":0},"plugin":{"ms":906,"rowsRead":0},"fence":{"ms":526,"rowsRead":0},"verifies":{"ms":31,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":160,"heapBytes":36306096,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1856,"integrity":"eager","phases":{"schema":{"ms":205,"rowsRead":0},"plugin":{"ms":892,"rowsRead":0},"fence":{"ms":378,"rowsRead":0},"verifies":{"ms":111,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":165,"heapBytes":27130952,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1859,"integrity":"eager","phases":{"schema":{"ms":579,"rowsRead":0},"plugin":{"ms":719,"rowsRead":0},"fence":{"ms":355,"rowsRead":0},"verifies":{"ms":64,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":151,"heapBytes":32076576,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2144,"integrity":"eager","phases":{"schema":{"ms":102,"rowsRead":0},"plugin":{"ms":628,"rowsRead":0},"fence":{"ms":335,"rowsRead":0},"verifies":{"ms":9,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":156,"heapBytes":37577976,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2420,"integrity":"eager","phases":{"schema":{"ms":472,"rowsRead":0},"plugin":{"ms":1067,"rowsRead":0},"fence":{"ms":660,"rowsRead":0},"verifies":{"ms":22,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":175,"heapBytes":25502832,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2025,"integrity":"eager","phases":{"schema":{"ms":358,"rowsRead":0},"plugin":{"ms":1182,"rowsRead":0},"fence":{"ms":286,"rowsRead":0},"verifies":{"ms":22,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":156,"heapBytes":30259384,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1803,"integrity":"eager","phases":{"schema":{"ms":190,"rowsRead":0},"plugin":{"ms":828,"rowsRead":0},"fence":{"ms":487,"rowsRead":0},"verifies":{"ms":54,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":146,"heapBytes":35260248,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":425,"integrity":"eager","phases":{"schema":{"ms":25,"rowsRead":0},"plugin":{"ms":28,"rowsRead":0},"fence":{"ms":240,"rowsRead":0},"verifies":{"ms":84,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":50,"heapBytes":26043072,"rooms":2,"sequences":13,"projectionBytes":3631,"events":13}
+✔ projection claims follow the board writer profile and do not grant write_external (5590.14447ms)
+✔ separate work claims serialize across database connections with no rejected event or receipt (2736.519299ms)
+✔ same holder conflicts too; unrelated targets, refs and rooms remain independent (3984.643977ms)
+✔ path matching is segment-aware and only supports explicit paths or trailing subtrees (4.688476ms)
+✔ release is revision-checked; only the holder or manager can free a reservation (1435.750599ms)
+✔ blocked and completed work retains scope until release; expiry and supersession free it (4133.485033ms)
+✔ an identical claim retry returns its original committed result after release and reassignment (2981.70472ms)
+✔ projection acquire, heartbeat, handoff, and supersede show up on the work-claims board (2881.560754ms)
+✔ a handoff from a member without the board profile is refused and writes no board cards (3172.004144ms)
+✔ a supersede from a member without the board profile is refused and writes no board cards (3507.841957ms)
+✔ an ownerless room refuses a handoff without a claim profile but admits a board writer (3341.447288ms)
+✔ historical overlapping reservations still initialize, replay and reopen unchanged (2912.691942ms)
+{"event":"room.cold_start","durationMs":1011,"integrity":"eager","phases":{"schema":{"ms":96,"rowsRead":0},"plugin":{"ms":442,"rowsRead":0},"fence":{"ms":443,"rowsRead":0},"verifies":{"ms":10,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":166,"heapBytes":36941424,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":490,"integrity":"eager","phases":{"schema":{"ms":207,"rowsRead":0},"plugin":{"ms":224,"rowsRead":0},"fence":{"ms":50,"rowsRead":0},"verifies":{"ms":7,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":132,"heapBytes":55301264,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ cold public task to leased outside claim, reclaim and independently fetched hash-only artifact (4032.096119ms)
+✔ explicit release returns task to another outside identity without granting room membership (1506.82462ms)
+{"event":"room.cold_start","durationMs":1496,"integrity":"eager","phases":{"schema":{"ms":323,"rowsRead":0},"plugin":{"ms":930,"rowsRead":0},"fence":{"ms":231,"rowsRead":0},"verifies":{"ms":11,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":151,"heapBytes":36433320,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a claim response redirect cannot forward credentials or invoke a second path (140.497345ms)
+{"event":"room.cold_start","durationMs":833,"integrity":"eager","phases":{"schema":{"ms":138,"rowsRead":0},"plugin":{"ms":483,"rowsRead":0},"fence":{"ms":170,"rowsRead":0},"verifies":{"ms":41,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":132,"heapBytes":46517272,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ anonymous recommendations and explicitly atomic find-and-claim preserve server replay choice (2236.19519ms)
+{"event":"room.cold_start","durationMs":2346,"integrity":"eager","phases":{"schema":{"ms":295,"rowsRead":0},"plugin":{"ms":1497,"rowsRead":0},"fence":{"ms":489,"rowsRead":0},"verifies":{"ms":56,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":158,"heapBytes":39418536,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ maximum legal matching packets remain readable within a bounded response (2149.091122ms)
+✔ saved-identity feedback rejects malformed or private follow-up pointers from an HTTP intermediary (4279.110134ms)
+{"event":"room.cold_start","durationMs":1283,"integrity":"eager","phases":{"schema":{"ms":285,"rowsRead":0},"plugin":{"ms":492,"rowsRead":0},"fence":{"ms":301,"rowsRead":0},"verifies":{"ms":69,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":167,"heapBytes":25812976,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ compact context accepts legacy identities without making a read write auth state (1583.760397ms)
+{"event":"room.cold_start","durationMs":2816,"integrity":"eager","phases":{"schema":{"ms":225,"rowsRead":0},"plugin":{"ms":833,"rowsRead":0},"fence":{"ms":1299,"rowsRead":0},"verifies":{"ms":41,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":188,"heapBytes":37866048,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":1224,"integrity":"eager","phases":{"schema":{"ms":109,"rowsRead":0},"plugin":{"ms":553,"rowsRead":0},"fence":{"ms":365,"rowsRead":0},"verifies":{"ms":36,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":150,"heapBytes":35655712,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ room access key registers pull-only presence and a stale mention queues a wake (9329.913182ms)
+{"event":"room.cold_start","durationMs":2362,"integrity":"eager","phases":{"schema":{"ms":540,"rowsRead":0},"plugin":{"ms":1243,"rowsRead":0},"fence":{"ms":355,"rowsRead":0},"verifies":{"ms":22,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":167,"heapBytes":43542360,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ room access key cannot install a wake URL or replace a wakeable host (6203.100156ms)
+{"event":"room.cold_start","durationMs":1565,"integrity":"eager","phases":{"schema":{"ms":138,"rowsRead":0},"plugin":{"ms":674,"rowsRead":0},"fence":{"ms":470,"rowsRead":0},"verifies":{"ms":5,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":141,"heapBytes":37212592,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ room key cannot read or acknowledge another room's historical wake, or expose identity hosts (5416.042134ms)
+{"event":"room.cold_start","durationMs":1381,"integrity":"eager","phases":{"schema":{"ms":263,"rowsRead":0},"plugin":{"ms":593,"rowsRead":0},"fence":{"ms":385,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":146,"heapBytes":44204392,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ room key refuses revoked or ambiguous linked identity (3600.059769ms)
+{"event":"room.cold_start","durationMs":2217,"integrity":"eager","phases":{"schema":{"ms":298,"rowsRead":0},"plugin":{"ms":1028,"rowsRead":0},"fence":{"ms":590,"rowsRead":0},"verifies":{"ms":42,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":162,"heapBytes":50246272,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ room key revocation during upload refuses /api/agent-heartbeats (3639.562862ms)
+{"event":"room.cold_start","durationMs":1568,"integrity":"eager","phases":{"schema":{"ms":195,"rowsRead":0},"plugin":{"ms":792,"rowsRead":0},"fence":{"ms":302,"rowsRead":0},"verifies":{"ms":82,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":152,"heapBytes":40434080,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ room key revocation during upload refuses /api/agent-heartbeats/ack (3855.598187ms)
+{"event":"room.cold_start","durationMs":2151,"integrity":"eager","phases":{"schema":{"ms":339,"rowsRead":0},"plugin":{"ms":371,"rowsRead":0},"fence":{"ms":1217,"rowsRead":0},"verifies":{"ms":36,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":151,"heapBytes":46615504,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ room key host names cannot modify identity-owned pull-only host configuration (4109.006308ms)
+✔ room key refuses multi-room identity and an unlinked member (3837.328219ms)
+✔ spaced and reordered [lane][claim] headers are parsed (721.075271ms)
+✔ prose claim with backtick files becomes a lease-bearing event (601.682949ms)
+✔ prose claim via a files: line is parsed too (268.860009ms)
+✔ prose claim without files becomes visible as needing fencing, never silent (1506.837399ms)
+✔ duplicate prose claim on the same task-id is refused (guard fires) (1525.578284ms)
+✔ prose claim cannot steal a fenced claim's task-id (851.754643ms)
+✔ existing fenced claim grammar is byte-identical in behavior (2608.371828ms)
+✔ non-path backticks and parent-dir escapes are not claimed as files (312.901883ms)
+✔ bare lease value is rejected with a concrete correction (1988.760564ms)
+✔ a spaced lane tag is a visible warning, never a registered claim (1295.53724ms)
+✔ ordinary display-name prose is not mistaken for a malformed claim (416.688526ms)
+✔ bare lease value is rejected with a concrete correction (1045.093187ms)
+{"event":"room.cold_start","durationMs":1796,"integrity":"eager","phases":{"schema":{"ms":259,"rowsRead":0},"plugin":{"ms":792,"rowsRead":0},"fence":{"ms":501,"rowsRead":0},"verifies":{"ms":88,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":175,"heapBytes":37861112,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":1992,"integrity":"eager","phases":{"schema":{"ms":417,"rowsRead":0},"plugin":{"ms":744,"rowsRead":0},"fence":{"ms":393,"rowsRead":0},"verifies":{"ms":77,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":206,"heapBytes":34954976,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ intent seeds one guide and one starter set, and a retry does not add another (5602.49901ms)
+{"event":"room.cold_start","durationMs":1683,"integrity":"eager","phases":{"schema":{"ms":233,"rowsRead":0},"plugin":{"ms":792,"rowsRead":0},"fence":{"ms":443,"rowsRead":0},"verifies":{"ms":29,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":156,"heapBytes":41837296,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a room without intent or start has no guide (3481.574858ms)
+room diagnostic op_6pSeAMfl 403 guide_starter_only access /api/rooms/:roomId/work-claims/other/claim
+room diagnostic op_8VVrh6n9 403 guide_starter_only access /api/rooms/:roomId/work-claims/other/update
+{"event":"room.cold_start","durationMs":1040,"integrity":"eager","phases":{"schema":{"ms":315,"rowsRead":0},"plugin":{"ms":477,"rowsRead":0},"fence":{"ms":74,"rowsRead":0},"verifies":{"ms":7,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":140,"heapBytes":38214176,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ guide claims and closes only starter-tagged claims (5143.277805ms)
+{"event":"room.cold_start","durationMs":1730,"integrity":"eager","phases":{"schema":{"ms":148,"rowsRead":0},"plugin":{"ms":832,"rowsRead":0},"fence":{"ms":566,"rowsRead":0},"verifies":{"ms":35,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":157,"heapBytes":46069320,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a choice closes the starter with a result card, then the first agent is assigned and woken (3289.598108ms)
+{"event":"room.cold_start","durationMs":1947,"integrity":"eager","phases":{"schema":{"ms":318,"rowsRead":0},"plugin":{"ms":1181,"rowsRead":0},"fence":{"ms":175,"rowsRead":0},"verifies":{"ms":45,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":145,"heapBytes":42387672,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ done claims of every delivery mode get one in-room receipt card (4524.325119ms)
+work claim receipt card failed: receipt index rejected
+{"event":"room.cold_start","durationMs":2093,"integrity":"eager","phases":{"schema":{"ms":287,"rowsRead":0},"plugin":{"ms":1220,"rowsRead":0},"fence":{"ms":334,"rowsRead":0},"verifies":{"ms":70,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":174,"heapBytes":49796904,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a caught receipt index failure preserves the done claim without a partial receipt (4346.907247ms)
+✔ explicit receipt isolation preserves Node transaction guards and parent rollback (3188.867531ms)
+✔ createWork records parentClaimId and evidenceRefs (139.654971ms)
+✔ provenance fields default on legacy items (backward compatible) (2.113592ms)
+✔ createWork rejects a self parent and malformed refs (3.43164ms)
+✔ claimWork sets or replaces provenance; updateWork amends it on active claims (6.049018ms)
+✔ walkProvenance returns direct and transitive downstream with depth (3.45843ms)
+✔ walkProvenance is cycle-safe and caps runaway graphs (9.416351ms)
+✔ flagPremiseInvalid stamps the item without changing its work state (1.454673ms)
+✔ flagPremiseInvalid validates its inputs (1.52603ms)
+{"event":"room.cold_start","durationMs":3114,"integrity":"eager","phases":{"schema":{"ms":311,"rowsRead":0},"plugin":{"ms":1353,"rowsRead":0},"fence":{"ms":862,"rowsRead":0},"verifies":{"ms":140,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":194,"heapBytes":38242984,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+room diagnostic op_ZWCsCHoN 422 invalid_claim_input input /api/rooms/:roomId/work-claims
+room diagnostic op_gyJuL7R7 404 work_claim_not_found not_found /api/rooms/:roomId/work-claims/missing/provenance
+✔ HTTP create/claim/update accept provenance fields; provenance walks the graph (6105.158214ms)
+{"event":"room.cold_start","durationMs":1618,"integrity":"eager","phases":{"schema":{"ms":453,"rowsRead":0},"plugin":{"ms":352,"rowsRead":0},"fence":{"ms":491,"rowsRead":0},"verifies":{"ms":26,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":177,"heapBytes":36782352,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+room diagnostic op_XJVx1Ej8 403 work_not_owner access /api/rooms/:roomId/work-claims/premise/premise-invalid
+{"event":"room.cold_start","durationMs":2832,"integrity":"eager","phases":{"schema":{"ms":385,"rowsRead":0},"plugin":{"ms":663,"rowsRead":0},"fence":{"ms":647,"rowsRead":0},"verifies":{"ms":29,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":164,"heapBytes":45782376,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ HTTP premise-invalid flags the premise and all downstream claims (3605.395277ms)
+✔ MCP room_work_claim_provenance returns the same downstream graph (4767.609047ms)
+✔ claim → start → finish is the happy path (38.055961ms)
+✔ double-claim and foreign updates are refused (27.537385ms)
+✔ illegal transitions are refused; release and reassign work (14.494202ms)
+✔ query helpers filter a list (14.469355ms)
+✔ append PR keeps prior observations, invalidates approval, and needs a fresh explicit review (49.983881ms)
+✔ append PR refuses stale rounds, unsafe input and stopped ownership without changing work (208.656892ms)
+ℹ tests 63
+ℹ suites 0
+ℹ pass 63
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 187745.616865

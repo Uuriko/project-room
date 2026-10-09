@@ -1,0 +1,163 @@
+=== H03 baseline 2026-10-09T11:01:36Z ===
+{"event":"room.cold_start","durationMs":4166,"integrity":"eager","phases":{"schema":{"ms":70,"rowsRead":0},"plugin":{"ms":2625,"rowsRead":0},"fence":{"ms":615,"rowsRead":0},"verifies":{"ms":64,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":183,"heapBytes":25901928,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2848,"integrity":"eager","phases":{"schema":{"ms":885,"rowsRead":0},"plugin":{"ms":1245,"rowsRead":0},"fence":{"ms":326,"rowsRead":0},"verifies":{"ms":81,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":165,"heapBytes":26651928,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2253,"integrity":"eager","phases":{"schema":{"ms":338,"rowsRead":0},"plugin":{"ms":770,"rowsRead":0},"fence":{"ms":770,"rowsRead":0},"verifies":{"ms":53,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":161,"heapBytes":30921880,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2586,"integrity":"eager","phases":{"schema":{"ms":525,"rowsRead":0},"plugin":{"ms":1290,"rowsRead":0},"fence":{"ms":602,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":166,"heapBytes":35132144,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2770,"integrity":"eager","phases":{"schema":{"ms":280,"rowsRead":0},"plugin":{"ms":1243,"rowsRead":0},"fence":{"ms":926,"rowsRead":0},"verifies":{"ms":56,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":198,"heapBytes":25206840,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ an identical retry does not spend creation budget (5349.759833ms)
+✔ the budget still counts rooms that were actually created (3340.924794ms)
+✔ a replay is free even when the budget is already exhausted (2623.993922ms)
+✔ claiming a room id that belongs to someone else is refused and costs nothing (2980.240203ms)
+✔ an unknown secret is rejected before any budget is considered (3203.696876ms)
+✔ property P1: every reachable claim is terminal or has a legal move (no deadlock) (59661.745184ms)
+✔ property P2: illegal transitions change nothing and are recorded (66630.650969ms)
+✔ property P2b: strike stamps on a done claim are ignored (never resurrected) (49648.736969ms)
+✔ property P3: strike-two returns the claim to submitted — never a limbo state (76946.14026ms)
+✔ property P4: receipts are idempotent — replayed dones never double-count (66314.996755ms)
+✔ property P5a: heartbeats within the lease renew it; heartbeats after expiry without strike-one are void (71790.297829ms)
+✔ property P5b: a heartbeat after strike-one blocks strike-two (grace reset) (25186.243252ms)
+✔ property P5c: sweep strike plans follow the documented grace rules (22961.02185ms)
+✔ property P6: task-id reuse is always refused; invalid claim blocks never create tasks (80419.950726ms)
+✔ the table covers every stored state and only names known states (1.367923ms)
+✔ random verb traces follow the table exactly (holder acting; a manager retires) (1487.009723ms)
+✔ close and cancel permissions (3.193312ms)
+{"event":"room.cold_start","durationMs":3084,"integrity":"eager","phases":{"schema":{"ms":563,"rowsRead":0},"plugin":{"ms":1387,"rowsRead":0},"fence":{"ms":706,"rowsRead":0},"verifies":{"ms":172,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":209,"heapBytes":37894944,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":2660,"integrity":"eager","phases":{"schema":{"ms":766,"rowsRead":0},"plugin":{"ms":762,"rowsRead":0},"fence":{"ms":805,"rowsRead":0},"verifies":{"ms":16,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":159,"heapBytes":42861464,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ unfinished assistant work stays discoverable after more than 100 newer terminal requests (31258.652169ms)
+room diagnostic op_3ZFqS32e 409 assistant_retry_conflict conflict /api/rooms/:roomId/assistant
+room diagnostic op_Muma8LG- 409 assistant_revision_conflict conflict /api/rooms/:roomId/assistant
+room diagnostic op_LyPPUJA9 409 assistant_run_owned conflict /api/rooms/:roomId/assistant
+room diagnostic op_AXaUwIN4 422 assistant_result_missing input /api/rooms/:roomId/assistant
+{"event":"room.cold_start","durationMs":572,"integrity":"eager","phases":{"schema":{"ms":114,"rowsRead":0},"plugin":{"ms":196,"rowsRead":0},"fence":{"ms":159,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":58,"heapBytes":46639472,"rooms":1,"sequences":13,"projectionBytes":3465,"events":13}
+{"event":"room.cold_start","durationMs":1190,"integrity":"eager","phases":{"schema":{"ms":50,"rowsRead":0},"plugin":{"ms":788,"rowsRead":0},"fence":{"ms":208,"rowsRead":0},"verifies":{"ms":6,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":164,"heapBytes":50592624,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ two humans share one durable run, host claims and publishes a real public result (7983.683247ms)
+room diagnostic op_LJUQqJnI 409 assistant_inputs_pending conflict /api/rooms/:roomId/assistant
+{"event":"room.cold_start","durationMs":2311,"integrity":"eager","phases":{"schema":{"ms":344,"rowsRead":0},"plugin":{"ms":920,"rowsRead":0},"fence":{"ms":699,"rowsRead":0},"verifies":{"ms":28,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":226,"heapBytes":43593376,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ completion accounts for late group contributions and refuses partial completion atomically (4340.294864ms)
+room diagnostic op_y0AkY909 409 assistant_conversation_mismatch conflict /api/rooms/:roomId/assistant
+room diagnostic op_lMrczO59 409 assistant_conversation_mismatch conflict /api/rooms/:roomId/assistant
+{"event":"room.cold_start","durationMs":1660,"integrity":"eager","phases":{"schema":{"ms":170,"rowsRead":0},"plugin":{"ms":475,"rowsRead":0},"fence":{"ms":519,"rowsRead":0},"verifies":{"ms":6,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":175,"heapBytes":52135824,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+▶ shared assistant inputs and results stay in the originating channel and thread
+  ✔ another channel (8556.876481ms)
+room diagnostic op_P9ybEXun 409 assistant_conversation_mismatch conflict /api/rooms/:roomId/assistant
+room diagnostic op_RHxMIq31 409 assistant_conversation_mismatch conflict /api/rooms/:roomId/assistant
+{"event":"room.cold_start","durationMs":1026,"integrity":"eager","phases":{"schema":{"ms":113,"rowsRead":0},"plugin":{"ms":385,"rowsRead":0},"fence":{"ms":98,"rowsRead":0},"verifies":{"ms":11,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":181,"heapBytes":46584456,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+  ✔ another thread in the same channel (7926.143166ms)
+room diagnostic op_6qVJPZhU 409 assistant_conversation_mismatch conflict /api/rooms/:roomId/assistant
+room diagnostic op_4GcS7wOh 409 assistant_conversation_mismatch conflict /api/rooms/:roomId/assistant
+{"event":"room.cold_start","durationMs":1934,"integrity":"eager","phases":{"schema":{"ms":480,"rowsRead":0},"plugin":{"ms":992,"rowsRead":0},"fence":{"ms":74,"rowsRead":0},"verifies":{"ms":5,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":215,"heapBytes":55063856,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+  ✔ outside the originating thread (7490.601036ms)
+room diagnostic op_WINzOWtB 409 assistant_conversation_mismatch conflict /api/rooms/:roomId/assistant
+room diagnostic op_4QkQKuSk 409 assistant_conversation_mismatch conflict /api/rooms/:roomId/assistant
+{"event":"room.cold_start","durationMs":1494,"integrity":"eager","phases":{"schema":{"ms":163,"rowsRead":0},"plugin":{"ms":733,"rowsRead":0},"fence":{"ms":170,"rowsRead":0},"verifies":{"ms":5,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":162,"heapBytes":48304688,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+  ✔ another thread from a threaded request (5761.205863ms)
+✔ shared assistant inputs and results stay in the originating channel and thread (29763.009249ms)
+room diagnostic op_nQxIAXWU 409 assistant_not_queued conflict /api/rooms/:roomId/assistant
+room diagnostic op_lr1U8ZLa 403 assistant_denied access /api/rooms/:roomId/assistant
+room diagnostic op_3iNLK7zO 409 assistant_stop_pending conflict /api/rooms/:roomId/assistant
+{"event":"room.cold_start","durationMs":3734,"integrity":"eager","phases":{"schema":{"ms":470,"rowsRead":0},"plugin":{"ms":2764,"rowsRead":0},"fence":{"ms":107,"rowsRead":0},"verifies":{"ms":15,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":189,"heapBytes":56865816,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ conflict is explicit, decision is authorized, and cancellation awaits host confirmation (10043.540616ms)
+room diagnostic op_d9qt2eQl 403 assistant_denied access /api/rooms/:roomId/assistant
+room diagnostic op_wWMudZfD 403 assistant_source_denied access /api/rooms/:roomId/assistant
+room diagnostic op_qpt_hc3n 403 assistant_source_denied access /api/rooms/:roomId/assistant
+room diagnostic op_DsO_KUwP 403 assistant_denied access /api/rooms/:roomId/assistant
+room diagnostic op_JBxyp3Uo 403 assistant_denied access /api/rooms/:roomId/assistant
+room diagnostic op_clu5qyOU 403 assistant_denied access /api/rooms/:roomId/assistant
+room diagnostic op_Y7_ZYdlw 409 assistant_run_owned conflict /api/rooms/:roomId/assistant
+room diagnostic op_7g40DjIZ 403 assistant_source_denied access /api/rooms/:roomId/assistant
+room diagnostic op_EqPZhNHE 401 unauthenticated access /api/rooms/:roomId/assistant
+{"event":"room.cold_start","durationMs":819,"integrity":"eager","phases":{"schema":{"ms":196,"rowsRead":0},"plugin":{"ms":358,"rowsRead":0},"fence":{"ms":40,"rowsRead":0},"verifies":{"ms":75,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":137,"heapBytes":46510576,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ private context, other authors, unauthorized publishers and unauthenticated readers are refused (8713.483282ms)
+room diagnostic op_Z4PQgUQF 409 assistant_not_connected conflict /api/rooms/:roomId/assistant
+room diagnostic op_ouv2_m6v 401 unauthenticated access /api/rooms/:roomId/assistant
+{"event":"room.cold_start","durationMs":1266,"integrity":"eager","phases":{"schema":{"ms":43,"rowsRead":0},"plugin":{"ms":728,"rowsRead":0},"fence":{"ms":181,"rowsRead":0},"verifies":{"ms":15,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":161,"heapBytes":47288680,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a saved invocation does not imply execution, stale execution is unknown, membership revocation blocks host (4780.992301ms)
+room diagnostic op_W2NV-604 403 csrf_denied access /api/rooms/:roomId/assistant
+{"event":"room.cold_start","durationMs":551,"integrity":"eager","phases":{"schema":{"ms":77,"rowsRead":0},"plugin":{"ms":195,"rowsRead":0},"fence":{"ms":172,"rowsRead":0},"verifies":{"ms":14,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":146,"heapBytes":47579088,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ human browser sessions enforce same-origin CSRF and separate shared authorship (5735.624183ms)
+{"event":"room.cold_start","durationMs":1673,"integrity":"eager","phases":{"schema":{"ms":202,"rowsRead":0},"plugin":{"ms":873,"rowsRead":0},"fence":{"ms":361,"rowsRead":0},"verifies":{"ms":23,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":160,"heapBytes":50154552,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":630,"integrity":"eager","phases":{"schema":{"ms":128,"rowsRead":0},"plugin":{"ms":94,"rowsRead":0},"fence":{"ms":156,"rowsRead":0},"verifies":{"ms":22,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":58,"heapBytes":49778360,"rooms":1,"sequences":10,"projectionBytes":2920,"events":10}
+{"event":"room.cold_start","durationMs":1618,"integrity":"eager","phases":{"schema":{"ms":267,"rowsRead":0},"plugin":{"ms":875,"rowsRead":0},"fence":{"ms":229,"rowsRead":0},"verifies":{"ms":17,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":173,"heapBytes":46518696,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ operator backup roundtrip preserves run ownership and room purge inventory includes summaries and retries (5872.693934ms)
+room diagnostic op_YGvTVB0n 409 assistant_revision_conflict conflict /api/rooms/:roomId/assistant
+room diagnostic op_3Ux88Qi- 403 assistant_denied access /api/rooms/:roomId/assistant
+{"event":"room.cold_start","durationMs":725,"integrity":"eager","phases":{"schema":{"ms":125,"rowsRead":0},"plugin":{"ms":320,"rowsRead":0},"fence":{"ms":85,"rowsRead":0},"verifies":{"ms":18,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":148,"heapBytes":46622256,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ disconnect fences ongoing execution while its original host can acknowledge stopping (3954.514811ms)
+{"event":"room.cold_start","durationMs":909,"integrity":"eager","phases":{"schema":{"ms":148,"rowsRead":0},"plugin":{"ms":378,"rowsRead":0},"fence":{"ms":166,"rowsRead":0},"verifies":{"ms":6,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":157,"heapBytes":50545288,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ hosted MCP discovers scoped coordinator tools and executes the real public claim/report contract (5168.083531ms)
+{"event":"room.cold_start","durationMs":723,"integrity":"eager","phases":{"schema":{"ms":156,"rowsRead":0},"plugin":{"ms":274,"rowsRead":0},"fence":{"ms":125,"rowsRead":0},"verifies":{"ms":10,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":148,"heapBytes":52184832,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ human contributions never revive stale host status or availability (3530.614963ms)
+room diagnostic op_ihUCTwDV 403 assistant_denied access /api/rooms/:roomId/assistant
+room diagnostic op_LQGXUpqN 409 assistant_revision_conflict conflict /api/rooms/:roomId/assistant
+room diagnostic op_FTAANICg 409 assistant_not_paused conflict /api/rooms/:roomId/assistant
+room diagnostic op_vFCckOZo 409 assistant_stop_pending conflict /api/rooms/:roomId/assistant
+room diagnostic op_lwq2q_-N 409 assistant_run_owned conflict /api/rooms/:roomId/assistant
+{"event":"room.cold_start","durationMs":1018,"integrity":"eager","phases":{"schema":{"ms":196,"rowsRead":0},"plugin":{"ms":499,"rowsRead":0},"fence":{"ms":45,"rowsRead":0},"verifies":{"ms":8,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":158,"heapBytes":54841320,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ resume is requester/owner controlled, revision fenced and acknowledged by the same reserved host (3549.859002ms)
+room diagnostic op_tKo-0BS0 404 assistant_run_missing not_found /api/rooms/:roomId/assistant
+room diagnostic op_FHlM_4SS 404 assistant_run_missing not_found /api/rooms/:roomId/assistant
+room diagnostic op_LumI0DNK 404 assistant_run_missing not_found /api/rooms/:roomId/assistant
+room diagnostic op_JPSg_S42 404 assistant_run_missing not_found /api/rooms/:roomId/assistant
+room diagnostic op_20YDwCW2 409 assistant_run_owned conflict /api/rooms/:roomId/assistant
+room diagnostic op_Qxwz4O1J 401 unauthenticated access /api/rooms/:roomId/assistant
+{"event":"room.cold_start","durationMs":3240,"integrity":"eager","phases":{"schema":{"ms":639,"rowsRead":0},"plugin":{"ms":1223,"rowsRead":0},"fence":{"ms":496,"rowsRead":0},"verifies":{"ms":48,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":218,"heapBytes":39929264,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ deleted opening retains content-free authorized stop controls (stop before deletion: false) (5949.035379ms)
+room diagnostic op_1YCMpsdl 404 assistant_run_missing not_found /api/rooms/:roomId/assistant
+room diagnostic op_aZ3QyrH0 404 assistant_run_missing not_found /api/rooms/:roomId/assistant
+room diagnostic op_FiP5Bmqi 404 assistant_run_missing not_found /api/rooms/:roomId/assistant
+room diagnostic op_MnnWL4Jr 404 assistant_run_missing not_found /api/rooms/:roomId/assistant
+room diagnostic op_ixb0vIfS 401 unauthenticated access /api/rooms/:roomId/assistant
+{"event":"room.cold_start","durationMs":1029,"integrity":"eager","phases":{"schema":{"ms":75,"rowsRead":0},"plugin":{"ms":314,"rowsRead":0},"fence":{"ms":322,"rowsRead":0},"verifies":{"ms":9,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":150,"heapBytes":42420896,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ deleted opening retains content-free authorized stop controls (stop before deletion: true) (7742.132891ms)
+room diagnostic op_QoaQlK5U 404 assistant_run_missing not_found /api/rooms/:roomId/assistant
+room diagnostic op_a10TrNrz 404 assistant_run_missing not_found /api/rooms/:roomId/assistant
+{"event":"room.cold_start","durationMs":637,"integrity":"eager","phases":{"schema":{"ms":168,"rowsRead":0},"plugin":{"ms":203,"rowsRead":0},"fence":{"ms":49,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":141,"heapBytes":44288952,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ deleted stop handles and historical receipts remain behind the original history floor (7028.020158ms)
+room diagnostic op_NinSmZR2 404 assistant_run_missing not_found /api/rooms/:roomId/assistant
+room diagnostic op_59D6EvqQ 404 assistant_run_missing not_found /api/rooms/:roomId/assistant
+✔ completed historical report replay after deletion strips result links and activity without reviving execution (5442.262483ms)
+✔ minted-length room credentials are findings, including a trailing hyphen (73.211489ms)
+✔ a short prefix is not a room credential (0.389734ms)
+✔ the diff gate reports a room credential on an in-scope added line (8.438453ms)
+{"event":"room.cold_start","durationMs":1550,"integrity":"eager","phases":{"schema":{"ms":304,"rowsRead":0},"plugin":{"ms":610,"rowsRead":0},"fence":{"ms":233,"rowsRead":0},"verifies":{"ms":14,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":187,"heapBytes":37080224,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":1249,"integrity":"eager","phases":{"schema":{"ms":286,"rowsRead":0},"plugin":{"ms":528,"rowsRead":0},"fence":{"ms":293,"rowsRead":0},"verifies":{"ms":24,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":152,"heapBytes":34569760,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ room file tools stay behind a live identity secret (3066.954415ms)
+{"event":"room.cold_start","durationMs":1090,"integrity":"eager","phases":{"schema":{"ms":152,"rowsRead":0},"plugin":{"ms":534,"rowsRead":0},"fence":{"ms":300,"rowsRead":0},"verifies":{"ms":12,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":149,"heapBytes":44066280,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ enrolled members upload and download room_attachments through hosted MCP (3189.426329ms)
+{"event":"room.cold_start","durationMs":802,"integrity":"eager","phases":{"schema":{"ms":94,"rowsRead":0},"plugin":{"ms":232,"rowsRead":0},"fence":{"ms":262,"rowsRead":0},"verifies":{"ms":41,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":140,"heapBytes":41647408,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ an enrolled uploader commits a staged file onto a message they posted (5017.097846ms)
+{"event":"room.cold_start","durationMs":849,"integrity":"eager","phases":{"schema":{"ms":239,"rowsRead":0},"plugin":{"ms":251,"rowsRead":0},"fence":{"ms":104,"rowsRead":0},"verifies":{"ms":25,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":138,"heapBytes":48113944,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1633,"integrity":"eager","phases":{"schema":{"ms":332,"rowsRead":0},"plugin":{"ms":559,"rowsRead":0},"fence":{"ms":513,"rowsRead":0},"verifies":{"ms":37,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":167,"heapBytes":39064800,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a pri_ bearer can stage a file larger than the join body cap (1499.074229ms)
+✔ staged files expire and a member cannot exceed the staged-file cap (3447.296266ms)
+✔ staged files stay with the uploader; DM-committed files stay with the DM pair (#983) (3204.531217ms)
+✔ roster is exactly Instinct, Muse, Grok Build and Grok Bot with safe routes (23.337923ms)
+✔ an inherited connection member id is not a seat (0.487131ms)
+✔ MCP snippets require absolute private paths and never mention tokens (4.21802ms)
+✔ connect recipes name packet, MCP and Node routes without tokens (12.498786ms)
+✔ reconnect copy is secret-free and names the host snippets (8.68274ms)
+✔ CLI prints Muse packet route and refuses to write host config (6.873996ms)
+✔ script spawn matches the module and rejects write flags (1455.449151ms)
+✔ roster name collision is case-insensitive and ignores inactive or human members (0.500631ms)
+✔ Add agent markup lists the four roster names (104.142627ms)
+✔ createWork accepts a short string note and stores it on the created stamp (12.050344ms)
+✔ createWork accepts a missing or null note (0.350686ms)
+✔ createWork accepts a note at the 4000-char form bound (1.536386ms)
+✔ createWork rejects an over-long note (1.038148ms)
+✔ createWork rejects a non-string note (0.278909ms)
+✔ claimWork enforces the same note bound as create (30.741914ms)
+✔ updateWork enforces the same note bound as create (1.230848ms)
+✔ renewWork enforces the same note bound as create (6.238242ms)
+✔ updateWork measures the bound in UTF-16 units, like create (2.864759ms)
+﹣ MUT-04-A: heartbeat renew without progressMessageId keeps the original lease duration (18.042517ms) # SKIP
+﹣ MUT-04-B: renew extends from the old expiry, not from now (0.282254ms) # SKIP
+ℹ tests 67
+ℹ suites 0
+ℹ pass 65
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 2
+ℹ todo 0
+ℹ duration_ms 744280.317635

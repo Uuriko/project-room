@@ -1,0 +1,1 @@
+{"unit":"H01","baseline_exit":0,"pass":51,"fail":0,"skipped":0,"tests_scanned":51,"weak_flagged":0,"files":["account-deletion-rooms.test.js","claims-index.test.js","room-agent-delegation-client.test.js","room-coord.test.js","room-listen.test.js","room-render-prose-fence.test.js","work-claim-client.test.js","work-claim-reassign-unclaimed.test.js"]}

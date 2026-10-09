@@ -1,0 +1,1 @@
+{"unit":"H16","baseline_exit":0,"interrupted":0,"pass":68,"fail":0,"cancelled":0,"tests_scanned":60,"weak_flagged":0,"files":["claim-validate.test.js","room-activation-pack.test.js","room-coord-tail.test.js","room-lifecycle.test.js","room-rebuild.test.js","work-claim-board.test.js","work-claim-ready-queue.test.js"]}

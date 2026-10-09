@@ -1,0 +1,42 @@
+[
+ {
+  "file": "tests/claim-autolink-http.test.js",
+  "tests": 1,
+  "weak": []
+ },
+ {
+  "file": "tests/first-room-copy.test.js",
+  "tests": 3,
+  "weak": []
+ },
+ {
+  "file": "tests/room-authority.test.js",
+  "tests": 5,
+  "weak": []
+ },
+ {
+  "file": "tests/room-enforcer-freshness.test.js",
+  "tests": 5,
+  "weak": []
+ },
+ {
+  "file": "tests/room-mcp-join.test.js",
+  "tests": 5,
+  "weak": []
+ },
+ {
+  "file": "tests/room-submitted-rot.test.js",
+  "tests": 7,
+  "weak": []
+ },
+ {
+  "file": "tests/work-claim-events.test.js",
+  "tests": 8,
+  "weak": []
+ },
+ {
+  "file": "tests/work-claim-settle-double.test.js",
+  "tests": 2,
+  "weak": []
+ }
+]

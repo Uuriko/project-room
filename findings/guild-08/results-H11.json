@@ -1,0 +1,1 @@
+{"unit":"H11","baseline_exit":0,"interrupted":0,"pass":43,"fail":0,"cancelled":0,"tests_scanned":43,"weak_flagged":0,"files":["claim-overlaps.test.js","public-receipts-room-page-toggle.test.js","room-claim-status.test.js","room-flood-guard.test.js","room-orientation.test.js","room-trust.test.js","work-claim-leases.test.js","work-claim-sweep.test.js"]}

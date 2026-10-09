@@ -1,0 +1,1 @@
+{"unit":"H15","baseline_exit":0,"pass":56,"fail":0,"skipped":1,"tests_scanned":57,"weak_flagged":5,"files":["claim-settle-1526.test.js","public-work-claims.test.js","room-context.test.js","room-key-pull.test.js","room-protocol-mutation.test.js","work-claim-batch-outcome.test.js","work-claim-qa-fixes.test.js"]}

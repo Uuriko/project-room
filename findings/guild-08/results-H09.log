@@ -1,0 +1,61 @@
+=== H09 baseline 2026-10-09T10:35:22Z ===
+✔ detects a file claimed by two open claims (21.49636ms)
+✔ reports every shared file, sorted; lanes deduplicated and sorted (0.42661ms)
+✔ closed claims release their files and never collide (0.612048ms)
+✔ duplicate entries inside one claim do not self-collide (0.200952ms)
+✔ path normalization catches ./ and // variants of the same file (0.232769ms)
+✔ empty input and disjoint claims are collision-free (0.17317ms)
+✔ malformed inputs throw coded errors (24.322722ms)
+✔ served spec documents 200 (not 201) for POST /api/claims/validate (15.405269ms)
+✔ other POST creates keep their 201 (16.003587ms)
+{"event":"room.cold_start","durationMs":2616,"integrity":"eager","phases":{"schema":{"ms":355,"rowsRead":0},"plugin":{"ms":1183,"rowsRead":0},"fence":{"ms":398,"rowsRead":0},"verifies":{"ms":136,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":180,"heapBytes":34734200,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ room creation seeds the default main channel (272.082937ms)
+✔ messages without a channel land in the main channel (79.205584ms)
+✔ legacy rooms without channels backfill the main channel on replay (28.950626ms)
+✔ a member can create a channel; names normalize (69.176213ms)
+✔ channel ids default to the event id and must be unique (35.718713ms)
+✔ messages post into the addressed channel; unknown channels are rejected (20.274016ms)
+✔ only the room owner renames or archives channels (144.341063ms)
+✔ channelList puts the main channel first, then oldest first (122.033105ms)
+✔ the new command types are classified act and accepted by the command surface (34.802568ms)
+room diagnostic op_boWAZvU9 422 command_rejected conflict /api/rooms/:roomId/commands
+room diagnostic op_u6ZQcj9l 422 command_rejected conflict /api/rooms/:roomId/commands
+room diagnostic op_4g--6jzH 422 command_rejected conflict /api/rooms/:roomId/commands
+room diagnostic op_5ou5xXDU 422 command_rejected conflict /api/rooms/:roomId/commands
+room diagnostic op_rN37w706 422 command_rejected conflict /api/rooms/:roomId/commands
+{"event":"room.cold_start","durationMs":3081,"integrity":"eager","phases":{"schema":{"ms":476,"rowsRead":0},"plugin":{"ms":1152,"rowsRead":0},"fence":{"ms":1072,"rowsRead":0},"verifies":{"ms":35,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":166,"heapBytes":39711400,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ http: channel lifecycle through /commands and per-channel posting (7880.996665ms)
+✔ replies pin to their thread root's channel and can't drift across channels (118.597039ms)
+✔ upgrade repair backfills #general into legacy stored projections (3531.556496ms)
+{"event":"room.cold_start","durationMs":2805,"integrity":"eager","phases":{"schema":{"ms":607,"rowsRead":0},"plugin":{"ms":957,"rowsRead":0},"fence":{"ms":682,"rowsRead":0},"verifies":{"ms":278,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":179,"heapBytes":36792712,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ attachmentFromBytes encodes a composer file and refuses anything over 1 MB (9.291554ms)
+room diagnostic op_dy97P9pL 401 unauthenticated access /api/rooms/:roomId/files
+room diagnostic op_nzLgvqIl 404 attachment_not_found not_found /api/rooms/:roomId/files/:item
+room diagnostic op_xwcYqlJl 401 unauthenticated access /api/rooms/:roomId/files/:item
+room diagnostic op_t8B_TVnK 405 method_not_allowed input /api/rooms/:roomId/files/:item
+room diagnostic op_x-QsTkaQ 401 unauthenticated access /api/rooms/:roomId/files/:item
+✔ room file routes stage a composer upload and commit it onto a message (5357.122483ms)
+✔ metrics --since with invalid timestamp exits 1 and validates before fetch_comments (1925.235261ms)
+✔ metrics --since with timezone offset produces identical results to equivalent Z time (14029.076001ms)
+✔ terminal-by-receipt claim is completed and skipped by sweep (1175.61374ms)
+✔ MERGED/DEPLOYED/DONE prose completions close claims terminally (5760.261907ms)
+✔ prose-terminal MERGED from submitted state also completes (1104.88704ms)
+✔ active working claim with expired lease is still sweepable (2158.680974ms)
+✔ strike-one/strike-two stamps on a terminal claim are ignored (1831.93866ms)
+✔ legitimate strike flow still works: expired working claim strikes through (2990.60672ms)
+✔ prose MERGED without a task-id stays prose and changes nothing (1719.968336ms)
+✔ duplicate CREATE returns 409 work_claim_exists and leaves the claim unchanged (144.526682ms)
+✔ CREATE with assignee refuses 409 too_many_open_claims when the assignee is at cap (70.768362ms)
+✔ claim route still refuses 409 too_many_open_claims at the default cap (61.173643ms)
+✔ a claim survives a restart on the durable registry and is lost on the in-memory one (1018.00136ms)
+✔ room work-claim config persists across restarts (561.70884ms)
+ℹ tests 37
+ℹ suites 0
+ℹ pass 37
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 85581.641553

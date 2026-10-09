@@ -1,0 +1,1 @@
+{"unit":"H05","baseline_exit":0,"pass":68,"fail":0,"skipped":0,"tests_scanned":63,"weak_flagged":0,"files":["analytics-claim-bond-shadow.test.js","demo-room.test.js","room-attachments-autonomy-tier.test.mjs","room-directory.test.js","room-mcp-init.test.js","room-strike-hardening.test.js","work-claim-durable-http.test.js","work-claim-schema.test.js"]}

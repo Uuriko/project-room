@@ -1,0 +1,90 @@
+=== H06 baseline 2026-10-09T09:28:51Z ===
+{"event":"room.cold_start","durationMs":1476,"integrity":"eager","phases":{"schema":{"ms":245,"rowsRead":0},"plugin":{"ms":836,"rowsRead":0},"fence":{"ms":90,"rowsRead":0},"verifies":{"ms":20,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":180,"heapBytes":36756176,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+service diagnostic op_vQ0klgAK 503 webhook_unconfigured unavailable /api/github/pr-webhook
+error-trace eid_HswaBn3epowd fp=96ba9c2365834afe status=503 code=webhook_unconfigured
+✔ real PR receiver is mounted, disabled by default and rejects unauthenticated deliveries (3129.055911ms)
+✔ first-room setup failure names the failure and the retry (5.634566ms)
+✔ first-room setup failure is not the false empty state (1.886391ms)
+✔ ensureDefaultRoom wires the failure copy and keeps the genuine empty state (19.848747ms)
+{"event":"room.cold_start","durationMs":1966,"integrity":"eager","phases":{"schema":{"ms":488,"rowsRead":0},"plugin":{"ms":624,"rowsRead":0},"fence":{"ms":333,"rowsRead":0},"verifies":{"ms":151,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":192,"heapBytes":37898128,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1453,"integrity":"eager","phases":{"schema":{"ms":185,"rowsRead":0},"plugin":{"ms":686,"rowsRead":0},"fence":{"ms":314,"rowsRead":0},"verifies":{"ms":54,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":170,"heapBytes":37988632,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1273,"integrity":"eager","phases":{"schema":{"ms":25,"rowsRead":0},"plugin":{"ms":892,"rowsRead":0},"fence":{"ms":93,"rowsRead":0},"verifies":{"ms":22,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":145,"heapBytes":39134784,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1923,"integrity":"eager","phases":{"schema":{"ms":121,"rowsRead":0},"plugin":{"ms":938,"rowsRead":0},"fence":{"ms":472,"rowsRead":0},"verifies":{"ms":118,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":157,"heapBytes":40128056,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1759,"integrity":"eager","phases":{"schema":{"ms":133,"rowsRead":0},"plugin":{"ms":106,"rowsRead":0},"fence":{"ms":690,"rowsRead":0},"verifies":{"ms":59,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":67,"heapBytes":33609200,"rooms":1,"sequences":10,"projectionBytes":2920,"events":10}
+{"event":"room.cold_start","durationMs":2090,"integrity":"eager","phases":{"schema":{"ms":269,"rowsRead":0},"plugin":{"ms":1020,"rowsRead":0},"fence":{"ms":600,"rowsRead":0},"verifies":{"ms":27,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":159,"heapBytes":37569088,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ narrow authority preserves exact members, provenance and sequence without exposing other room data or sharing objects (5071.298445ms)
+✔ legacy, managed, human-room and account-session authentication no longer require a full room decode (8205.006859ms)
+✔ narrow authority follows the transaction snapshot and refreshes after commit (5348.053473ms)
+room diagnostic op_VJeH-7Kr 401 unauthenticated access /api/rooms/:roomId
+{"event":"room.cold_start","durationMs":2093,"integrity":"eager","phases":{"schema":{"ms":198,"rowsRead":0},"plugin":{"ms":954,"rowsRead":0},"fence":{"ms":659,"rowsRead":0},"verifies":{"ms":53,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":166,"heapBytes":38887280,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ managed discovery rechecks member changes after-identity (5410.830953ms)
+room diagnostic op_ww9sAe-c 401 unauthenticated access /api/rooms/:roomId
+{"event":"room.cold_start","durationMs":1557,"integrity":"eager","phases":{"schema":{"ms":274,"rowsRead":0},"plugin":{"ms":643,"rowsRead":0},"fence":{"ms":356,"rowsRead":0},"verifies":{"ms":36,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":144,"heapBytes":38956256,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ managed discovery rechecks sponsor changes after-identity (4283.166291ms)
+room diagnostic op_Q7snOFWf 401 unauthenticated access /api/rooms/:roomId
+{"event":"room.cold_start","durationMs":2726,"integrity":"eager","phases":{"schema":{"ms":710,"rowsRead":0},"plugin":{"ms":964,"rowsRead":0},"fence":{"ms":692,"rowsRead":0},"verifies":{"ms":34,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":194,"heapBytes":38268712,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ managed discovery rechecks credential changes after-identity (3659.665059ms)
+room diagnostic op_SFwSBaWd 401 unauthenticated access /api/rooms/:roomId
+{"event":"room.cold_start","durationMs":3166,"integrity":"eager","phases":{"schema":{"ms":276,"rowsRead":0},"plugin":{"ms":2009,"rowsRead":0},"fence":{"ms":465,"rowsRead":0},"verifies":{"ms":62,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":179,"heapBytes":38486232,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ managed discovery rechecks member changes before-committed-read (5114.731385ms)
+room diagnostic op_1eZeH9xC 401 unauthenticated access /api/rooms/:roomId
+{"event":"room.cold_start","durationMs":2427,"integrity":"eager","phases":{"schema":{"ms":608,"rowsRead":0},"plugin":{"ms":1148,"rowsRead":0},"fence":{"ms":315,"rowsRead":0},"verifies":{"ms":130,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":175,"heapBytes":39404648,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ managed discovery rechecks sponsor changes before-committed-read (7003.83307ms)
+room diagnostic op_UAoPksis 401 unauthenticated access /api/rooms/:roomId
+{"event":"room.cold_start","durationMs":830,"integrity":"eager","phases":{"schema":{"ms":77,"rowsRead":0},"plugin":{"ms":289,"rowsRead":0},"fence":{"ms":112,"rowsRead":0},"verifies":{"ms":12,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":156,"heapBytes":40581368,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ managed discovery rechecks credential changes before-committed-read (4951.483578ms)
+✔ roomAuthority on a room with malformed projection fails 500 projection_corrupt, not an uncaught TypeError (2485.392151ms)
+✔ enforcer freshness guard: canonical copy passes (3955.164417ms)
+✔ enforcer freshness guard: stale copy fails closed (3068.9368ms)
+✔ enforcer freshness guard: missing origin/main ref fails closed (602.778944ms)
+✔ enforcer freshness guard: ROOM_ENFORCER_ALLOW_STALE=1 bypasses (1829.032629ms)
+✔ enforcer freshness guard: full dispatch refuses a stale copy before any network (2528.595196ms)
+{"event":"room.cold_start","durationMs":2764,"integrity":"eager","phases":{"schema":{"ms":479,"rowsRead":0},"plugin":{"ms":964,"rowsRead":0},"fence":{"ms":853,"rowsRead":0},"verifies":{"ms":94,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":187,"heapBytes":37255328,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ hosted MCP join URL is host-exact and secret-free (2.520984ms)
+✔ MCP join RPC serves packets without initialize session state (2.45172ms)
+✔ Room Worker serves /mcp and /room/mcp as a live join endpoint (5247.295705ms)
+✔ Demigod door GET /room/mcp is the pasteable join surface (65.564723ms)
+✔ public join tool descriptions say read-only and disclaim the join (37.320226ms)
+✔ S1: strike-one stamp on a submitted held claim is recorded, not ignored (1680.770131ms)
+✔ S2: strike-two releases an expired submitted claim with no heartbeat (2323.385648ms)
+✔ S3: strike-two after a post-nudge STATUS heartbeat on a submitted claim is ignored (1427.327579ms)
+✔ S4: strike-one on a terminal (completed) claim is still ignored (2057.37906ms)
+✔ S5: strike-one on a suspended claim is still ignored (688.864663ms)
+✔ S6: strike-one on an already-released submitted claim is ignored (2366.138176ms)
+✔ S7: strike-one is recorded on an expired lease-bearing prose claim (2216.17141ms)
+{"event":"room.cold_start","durationMs":3253,"integrity":"eager","phases":{"schema":{"ms":1294,"rowsRead":0},"plugin":{"ms":1156,"rowsRead":0},"fence":{"ms":106,"rowsRead":0},"verifies":{"ms":17,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":204,"heapBytes":35682640,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":1472,"integrity":"eager","phases":{"schema":{"ms":196,"rowsRead":0},"plugin":{"ms":396,"rowsRead":0},"fence":{"ms":857,"rowsRead":0},"verifies":{"ms":11,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":133,"heapBytes":37226872,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ each claim change appends one event naming the member, the action, the owner and the files (8389.771075ms)
+room diagnostic op_3YpZncH9 404 work_claim_not_found not_found /api/rooms/:roomId/work-claims/held/claim
+room diagnostic op_xbZSOnht 409 work_claim_conflict conflict /api/rooms/:roomId/work-claims/held/claim
+room diagnostic op_9G_HCihH 403 work_not_owner access /api/rooms/:roomId/work-claims/held/release
+room diagnostic op__3XW1YVY 422 work_reassign_unknown_member input /api/rooms/:roomId/work-claims/held/reassign
+{"event":"room.cold_start","durationMs":1975,"integrity":"eager","phases":{"schema":{"ms":58,"rowsRead":0},"plugin":{"ms":695,"rowsRead":0},"fence":{"ms":1217,"rowsRead":0},"verifies":{"ms":4,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":150,"heapBytes":44875344,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a refused claim change appends no event (2210.434912ms)
+room diagnostic op_ORHxv5xC 404 work_claim_not_found not_found /api/rooms/:roomId/work-claims/short/claim
+{"event":"room.cold_start","durationMs":2495,"integrity":"eager","phases":{"schema":{"ms":761,"rowsRead":0},"plugin":{"ms":1662,"rowsRead":0},"fence":{"ms":40,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":156,"heapBytes":37968192,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a lapsed lease is swept once, naming the previous owner and the files that were freed (3606.151662ms)
+room diagnostic op__tQgKdib 404 work_claim_not_found not_found /api/rooms/:roomId/work-claims/replayed/claim
+{"event":"room.cold_start","durationMs":1047,"integrity":"eager","phases":{"schema":{"ms":201,"rowsRead":0},"plugin":{"ms":228,"rowsRead":0},"fence":{"ms":476,"rowsRead":0},"verifies":{"ms":118,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":128,"heapBytes":43418776,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ the full event log, claim events included, replays from an empty room (3030.390013ms)
+room diagnostic op_bg7oL6WU 422 invalid_claim_input input /api/rooms/:roomId/work-claims
+{"event":"room.cold_start","durationMs":715,"integrity":"eager","phases":{"schema":{"ms":118,"rowsRead":0},"plugin":{"ms":447,"rowsRead":0},"fence":{"ms":138,"rowsRead":0},"verifies":{"ms":9,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":134,"heapBytes":48206536,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a blank title is refused before any claim or event is recorded (1643.519729ms)
+{"event":"room.cold_start","durationMs":232,"integrity":"eager","phases":{"schema":{"ms":76,"rowsRead":0},"plugin":{"ms":99,"rowsRead":0},"fence":{"ms":34,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":108,"heapBytes":39847744,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ an archived room still records a claim and appends no event (949.703405ms)
+✔ a member cannot forge a claim event through the command path (260.259302ms)
+✔ the event payload refuses an action the reducer does not know (0.845539ms)
+✔ probe A (merged): a second settle of a done claim returns null, not a new settlement (5.024771ms)
+✔ probe A (closed): a second settle of a released claim returns null, not a new settlement (0.560521ms)
+ℹ tests 41
+ℹ suites 0
+ℹ pass 41
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 139376.464826

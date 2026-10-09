@@ -1,0 +1,6 @@
+H20 [1/5] room-mcp-auth.test.js -> red (pass=1 fail=2) :: join tool renamed
+H20 [2/5] room-lifecycle.test.js -> red (pass=5 fail=2) :: anyone may archive
+H20 [3/5] room-creation.test.js -> red (pass=3 fail=1) :: nobody administers membership
+H20 [4/5] room-coord.test.js -> red (pass=9 fail=1) :: malformed input accepted
+H20 [5/5] room-results.test.js -> red (pass=1 fail=3) :: nothing ever completed
+H20 break-checks complete

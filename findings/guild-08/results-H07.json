@@ -1,0 +1,1 @@
+{"unit":"H07","baseline_exit":0,"pass":86,"fail":0,"skipped":0,"tests_scanned":84,"weak_flagged":1,"files":["claim-autolink.test.js","mcp-room-messages-paging.test.js","room-backup-export.test.js","room-entry.test.js","room-mcp-membership-admin.test.js","room-sweep-dry-run.test.js","work-claim-files.test.js","work-claim-settle-missing-link.test.js"]}

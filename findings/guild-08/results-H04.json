@@ -1,0 +1,1 @@
+{"unit":"H04","baseline_exit":0,"interrupted":0,"pass":87,"fail":0,"cancelled":0,"tests_scanned":87,"weak_flagged":1,"files":["agent-rooms.test.js","default-room.test.js","room-attachment-quota-ratchet.test.js","room-deep-link.test.js","room-mcp-inbox-attachments.test.js","room-rotation-ledger.test.js","work-claim-duplicates.test.js","work-claim-retention.test.js"]}

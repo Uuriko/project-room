@@ -1,0 +1,42 @@
+[
+ {
+  "file": "tests/claim-overlaps.test.js",
+  "tests": 3,
+  "weak": []
+ },
+ {
+  "file": "tests/public-receipts-room-page-toggle.test.js",
+  "tests": 1,
+  "weak": []
+ },
+ {
+  "file": "tests/room-claim-status.test.js",
+  "tests": 5,
+  "weak": []
+ },
+ {
+  "file": "tests/room-flood-guard.test.js",
+  "tests": 7,
+  "weak": []
+ },
+ {
+  "file": "tests/room-orientation.test.js",
+  "tests": 2,
+  "weak": []
+ },
+ {
+  "file": "tests/room-trust.test.js",
+  "tests": 5,
+  "weak": []
+ },
+ {
+  "file": "tests/work-claim-leases.test.js",
+  "tests": 19,
+  "weak": []
+ },
+ {
+  "file": "tests/work-claim-sweep.test.js",
+  "tests": 1,
+  "weak": []
+ }
+]

@@ -1,0 +1,91 @@
+=== H15 baseline 2026-10-09T09:26:03Z ===
+{"event":"room.cold_start","durationMs":1637,"integrity":"eager","phases":{"schema":{"ms":78,"rowsRead":0},"plugin":{"ms":187,"rowsRead":0},"fence":{"ms":1207,"rowsRead":0},"verifies":{"ms":150,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":176,"heapBytes":24353024,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ B1 (#1526): round-2 merged PR settles pr_merged despite a stale round-1 closed link (6.295217ms)
+✔ B1 (#1526): stale settled links do not make a claim with only open current links ready (1.568965ms)
+✔ B2 (#1526): settlePullRequest refuses a claim whose lease has lapsed (2.294954ms)
+✔ B2 (#1526): a live lease still settles (0.640901ms)
+✔ B2 (#1526): the cron tick sweeps lapsed leases before polling, matching the HTTP path (2328.581175ms)
+{"event":"room.cold_start","durationMs":4529,"integrity":"eager","phases":{"schema":{"ms":742,"rowsRead":0},"plugin":{"ms":1459,"rowsRead":0},"fence":{"ms":1698,"rowsRead":0},"verifies":{"ms":278,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":196,"heapBytes":26139744,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2963,"integrity":"eager","phases":{"schema":{"ms":664,"rowsRead":0},"plugin":{"ms":1412,"rowsRead":0},"fence":{"ms":247,"rowsRead":0},"verifies":{"ms":63,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":160,"heapBytes":27367184,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1255,"integrity":"eager","phases":{"schema":{"ms":394,"rowsRead":0},"plugin":{"ms":86,"rowsRead":0},"fence":{"ms":535,"rowsRead":0},"verifies":{"ms":52,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":63,"heapBytes":34718176,"rooms":1,"sequences":2,"projectionBytes":719,"events":2}
+{"event":"room.cold_start","durationMs":2995,"integrity":"eager","phases":{"schema":{"ms":405,"rowsRead":0},"plugin":{"ms":1259,"rowsRead":0},"fence":{"ms":873,"rowsRead":0},"verifies":{"ms":152,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":165,"heapBytes":38687440,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":659,"integrity":"eager","phases":{"schema":{"ms":229,"rowsRead":0},"plugin":{"ms":61,"rowsRead":0},"fence":{"ms":106,"rowsRead":0},"verifies":{"ms":73,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":52,"heapBytes":29847424,"rooms":1,"sequences":2,"projectionBytes":719,"events":2}
+{"event":"room.cold_start","durationMs":2452,"integrity":"eager","phases":{"schema":{"ms":794,"rowsRead":0},"plugin":{"ms":1313,"rowsRead":0},"fence":{"ms":126,"rowsRead":0},"verifies":{"ms":12,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":158,"heapBytes":33753440,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":4075,"integrity":"eager","phases":{"schema":{"ms":919,"rowsRead":0},"plugin":{"ms":1404,"rowsRead":0},"fence":{"ms":784,"rowsRead":0},"verifies":{"ms":32,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":175,"heapBytes":38467056,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1526,"integrity":"eager","phases":{"schema":{"ms":641,"rowsRead":0},"plugin":{"ms":156,"rowsRead":0},"fence":{"ms":491,"rowsRead":0},"verifies":{"ms":6,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":67,"heapBytes":29909520,"rooms":1,"sequences":2,"projectionBytes":719,"events":2}
+{"event":"room.cold_start","durationMs":3789,"integrity":"eager","phases":{"schema":{"ms":246,"rowsRead":0},"plugin":{"ms":2007,"rowsRead":0},"fence":{"ms":1070,"rowsRead":0},"verifies":{"ms":85,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":175,"heapBytes":34322792,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":3684,"integrity":"eager","phases":{"schema":{"ms":64,"rowsRead":0},"plugin":{"ms":2333,"rowsRead":0},"fence":{"ms":1025,"rowsRead":0},"verifies":{"ms":40,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":166,"heapBytes":39275072,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":5159,"integrity":"eager","phases":{"schema":{"ms":838,"rowsRead":0},"plugin":{"ms":3502,"rowsRead":0},"fence":{"ms":493,"rowsRead":0},"verifies":{"ms":36,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":179,"heapBytes":27978168,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":870,"integrity":"eager","phases":{"schema":{"ms":169,"rowsRead":0},"plugin":{"ms":88,"rowsRead":0},"fence":{"ms":404,"rowsRead":0},"verifies":{"ms":6,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":51,"heapBytes":36092648,"rooms":1,"sequences":2,"projectionBytes":719,"events":2}
+{"event":"room.cold_start","durationMs":1807,"integrity":"eager","phases":{"schema":{"ms":394,"rowsRead":0},"plugin":{"ms":1015,"rowsRead":0},"fence":{"ms":58,"rowsRead":0},"verifies":{"ms":4,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":157,"heapBytes":39944720,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2771,"integrity":"eager","phases":{"schema":{"ms":524,"rowsRead":0},"plugin":{"ms":1183,"rowsRead":0},"fence":{"ms":743,"rowsRead":0},"verifies":{"ms":99,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":179,"heapBytes":38363496,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1837,"integrity":"eager","phases":{"schema":{"ms":66,"rowsRead":0},"plugin":{"ms":873,"rowsRead":0},"fence":{"ms":619,"rowsRead":0},"verifies":{"ms":75,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":159,"heapBytes":42829184,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1318,"integrity":"eager","phases":{"schema":{"ms":51,"rowsRead":0},"plugin":{"ms":695,"rowsRead":0},"fence":{"ms":381,"rowsRead":0},"verifies":{"ms":26,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":153,"heapBytes":30408440,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2261,"integrity":"eager","phases":{"schema":{"ms":317,"rowsRead":0},"plugin":{"ms":651,"rowsRead":0},"fence":{"ms":773,"rowsRead":0},"verifies":{"ms":38,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":162,"heapBytes":34627264,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ cold public index and strict shared repository path locks work without private membership (7039.464142ms)
+✔ lease expiry/reclaim rejects prior generations and exact retries survive withdrawal and restart (5593.773356ms)
+✔ submitted immutable receipt hashes exact UTF-8 bytes and reports checks without asserting acceptance (5229.581281ms)
+✔ a reused identity cannot submit an earlier generation after release and reclaim (3970.435734ms)
+✔ submission survives lease expiry and releases paths without reopening the completed task (7575.724992ms)
+✔ explicit opt-in and strict terms/lease/artifact limits refuse without claim or permit changes (4663.976925ms)
+✔ anonymous recommendations are grounded, bounded, and leave the registry/journal unchanged (5588.664929ms)
+✔ explicit match claims exactly one task and retry retains chosen outcome through expiry/withdrawal/restart (8903.051808ms)
+✔ matching exposes continuation when the first hundred tasks are held and rejects invalid cursors (37187.412401ms)
+✔ direct claim journal cannot impersonate a later matchmaking lease (3526.172246ms)
+✔ equally relevant recommendations prefer oldest work within the scanned page (2550.61335ms)
+✔ claim conflict names the holder identity and lease expiry (1966.438825ms)
+✔ stale claim distinguishes changed generation from expired lease (3430.9535ms)
+{"event":"room.cold_start","durationMs":2243,"integrity":"eager","phases":{"schema":{"ms":160,"rowsRead":0},"plugin":{"ms":1087,"rowsRead":0},"fence":{"ms":816,"rowsRead":0},"verifies":{"ms":50,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":197,"heapBytes":37412360,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ the projection keeps refs and drops message, file, and result bodies (7.253465ms)
+room diagnostic op_-ZVn7SiT 401 unauthenticated access /api/rooms/:roomId/context
+room diagnostic op_2uKc_9EY 422 invalid_context_version input /api/rooms/:roomId/context
+room diagnostic op_Bc3W1G__ 422 invalid_context_version input /api/rooms/:roomId/context
+✔ get_room_context is not_modified when unchanged and never carries bodies (12469.328128ms)
+{"event":"room.cold_start","durationMs":6181,"integrity":"eager","phases":{"schema":{"ms":267,"rowsRead":0},"plugin":{"ms":4792,"rowsRead":0},"fence":{"ms":612,"rowsRead":0},"verifies":{"ms":58,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":224,"heapBytes":37804344,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ room-key pull registers presence, returns a mention wake, and acks only that signal (36233.708283ms)
+✔ L4: heartbeat exactly at lease expiry is accepted, not void (687.723501ms)
+✔ S3: future-dated strike-one stamp is clamped to the comment time (1067.49826ms)
+﹣ S4: unparseable strike-one stamp is refused, never recorded (0.294041ms) # BUG-2026-09-26: unparseable stamp crashes _state (jq exit 5) instead of refusing; owner must make epoch() total
+✔ S7: strike-two at exactly strike_one_at + 14400s is rejected (grace boundary is <=) (1647.61133ms)
+✔ S9: heartbeat exactly at strike_one_at does not block strike-two (1696.532105ms)
+✔ W1: sweep plans strike-one for a working claim past its lease (1965.72908ms)
+✔ W2: sweep plans nothing when now is exactly the lease expiry instant (2223.323003ms)
+✔ W3: sweep plans strike-one for submitted claims past their lease (2496.917438ms)
+✔ W4: sweep plans strike-two when the 4h grace elapsed with no heartbeat (2144.541064ms)
+✔ W5: sweep plans nothing at exactly 14400s after strike-one (1333.538058ms)
+✔ W6: sweep plans nothing when a heartbeat followed the strike-one nudge (1337.812092ms)
+✔ W7: sweep still releases when the heartbeat is exactly at the strike instant (1832.278019ms)
+✔ W8: sweep ignores terminal (completed) claims (636.038346ms)
+✔ W9: sweep does not re-nudge a claim that already has strike-one recorded (1926.931837ms)
+✔ batchPullOutcome: a stale closed link cannot veto a merged link (30.334853ms)
+✔ batchPullOutcome: all links closed still settles as closed (0.395503ms)
+✔ batchPullOutcome: all links merged still settles as merged (0.57967ms)
+✔ round-2 merged PR settles as pr_merged even with a stale round-1 closed PR (61.449437ms)
+✔ settlePullRequest: the settled record names the PR that actually merged (merged-first, closed-last) (0.734122ms)
+✔ W1: an explicit null leaseHours opts out — no lease is applied (32.49809ms)
+✔ W1: an omitted leaseHours still applies the room default (24h) (3.434404ms)
+✔ W1: junk leaseHours is refused loudly, never silently defaulted (8.093336ms)
+✔ W1: renew with null leaseHours removes the lease (explicit opt-out, like claimWork) (13.072087ms)
+✔ W2: release from in_progress pauses internally and returns the item to the pool (9.845065ms)
+✔ W2: release from blocked also routes through the pause transition (4.312232ms)
+✔ W2: release from claimed still works as before (19.208005ms)
+✔ W3: reassign to a nonexistent member is refused with 422 (2.54514ms)
+✔ W3: reassign to an inactive member is refused (3.855756ms)
+✔ W3: reassign to a real active member still works (14.087241ms)
+✔ W4: renew after the lease lapsed is a 409 that says claim it again (19.251801ms)
+✔ W4: renew on a never-claimed item says claim it first, not an access error (5.871541ms)
+✔ W5: work_not_owner names the holding owner and a real recovery, never a guest invite (8.308008ms)
+✔ W5: work_not_owner on unclaimed work says claim it first (2.547032ms)
+✔ W6: review recovery points to an explicit current approval without inferring a verdict (0.471107ms)
+✔ W4: claim_lease_lapsed recovery is claim-again, not an access debug (2.736877ms)
+✔ B8: owner-decision proposal rejection points at the missing decision-maker, not phantom work (0.364257ms)
+ℹ tests 57
+ℹ suites 0
+ℹ pass 56
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 1
+ℹ todo 0
+ℹ duration_ms 203103.463138

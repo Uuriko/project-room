@@ -1,0 +1,52 @@
+[
+ {
+  "unit": "H17",
+  "suite": "work-claims.test.js",
+  "target": "server/work-claims.mjs",
+  "desc": "cap open claims at 1",
+  "result": "green",
+  "pass": 6,
+  "fail": 0,
+  "note": "rebuilt from launcher log"
+ },
+ {
+  "unit": "H17",
+  "suite": "work-claim-board.test.js",
+  "target": "server/work-claim-routes.mjs",
+  "desc": "manage_claims check always false",
+  "result": "green",
+  "pass": 26,
+  "fail": 0,
+  "note": "rebuilt from launcher log"
+ },
+ {
+  "unit": "H17",
+  "suite": "work-claim-guards.test.js",
+  "target": "server/work-claim-routes.mjs",
+  "desc": "humans lose accept/complete_work",
+  "result": "red",
+  "pass": 11,
+  "fail": 1,
+  "note": "rebuilt from launcher log"
+ },
+ {
+  "unit": "H17",
+  "suite": "work-claim-leases.test.js",
+  "target": "server/work-claims.mjs",
+  "desc": "clock frozen at epoch",
+  "result": "red",
+  "pass": 10,
+  "fail": 9,
+  "note": "rebuilt from launcher log"
+ },
+ {
+  "unit": "H17",
+  "suite": "work-claim-integrity.test.js",
+  "target": "server/work-claim-integrity.mjs",
+  "desc": "max lease 3 minutes",
+  "result": "red",
+  "pass": 5,
+  "fail": 10,
+  "note": "rebuilt from launcher log"
+ }
+]

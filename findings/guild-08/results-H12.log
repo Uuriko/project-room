@@ -1,0 +1,57 @@
+=== H12 baseline 2026-10-09T10:46:03Z ===
+✔ cron settles the same claimId in two rooms against its own room (91.474456ms)
+{"event":"room.cold_start","durationMs":2533,"integrity":"eager","phases":{"schema":{"ms":236,"rowsRead":0},"plugin":{"ms":1371,"rowsRead":0},"fence":{"ms":403,"rowsRead":0},"verifies":{"ms":260,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":190,"heapBytes":25961192,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2494,"integrity":"eager","phases":{"schema":{"ms":422,"rowsRead":0},"plugin":{"ms":1172,"rowsRead":0},"fence":{"ms":291,"rowsRead":0},"verifies":{"ms":24,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":159,"heapBytes":25736592,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":674,"integrity":"eager","phases":{"schema":{"ms":76,"rowsRead":0},"plugin":{"ms":48,"rowsRead":0},"fence":{"ms":417,"rowsRead":0},"verifies":{"ms":27,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":67,"heapBytes":32668176,"rooms":1,"sequences":2,"projectionBytes":719,"events":2}
+{"event":"room.cold_start","durationMs":2033,"integrity":"eager","phases":{"schema":{"ms":387,"rowsRead":0},"plugin":{"ms":1036,"rowsRead":0},"fence":{"ms":446,"rowsRead":0},"verifies":{"ms":8,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":153,"heapBytes":36581984,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":206,"failed":true,"error":"Public claim writer permit must be closed at rest","integrity":"eager","phases":{"schema":{"ms":146,"rowsRead":0}},"cpuMs":30,"heapBytes":25166184,"rooms":1,"sequences":2,"projectionBytes":719,"events":2}
+{"event":"room.cold_start","durationMs":310,"failed":true,"error":"Public claim writer fence requires operator reconciliation","integrity":"eager","phases":{"schema":{"ms":209,"rowsRead":0}},"cpuMs":21,"heapBytes":28251656,"rooms":1,"sequences":2,"projectionBytes":719,"events":2}
+{"event":"room.cold_start","durationMs":111,"failed":true,"error":"Public claim writer fence requires operator reconciliation","integrity":"eager","phases":{"schema":{"ms":57,"rowsRead":0}},"cpuMs":21,"heapBytes":31274464,"rooms":1,"sequences":2,"projectionBytes":719,"events":2}
+{"event":"room.cold_start","durationMs":2523,"integrity":"eager","phases":{"schema":{"ms":333,"rowsRead":0},"plugin":{"ms":1227,"rowsRead":0},"fence":{"ms":640,"rowsRead":0},"verifies":{"ms":81,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":158,"heapBytes":35116064,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":406,"integrity":"eager","phases":{"schema":{"ms":84,"rowsRead":0},"plugin":{"ms":66,"rowsRead":0},"fence":{"ms":181,"rowsRead":0},"verifies":{"ms":16,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":58,"heapBytes":26079208,"rooms":1,"sequences":2,"projectionBytes":719,"events":2}
+✔ cached registry writes keep private behavior but cannot insert, rewrite, move or delete public namespace rows (3332.620332ms)
+✔ synchronous failure and thenable rejection roll back permit and public writes before reopen (3679.258273ms)
+✔ tampered guard or a permit left open is refused without silently repairing storage (3224.454286ms)
+✔ process death inside a public writer transaction recovers original rows and a closed permit (9314.607963ms)
+{"event":"room.cold_start","durationMs":1502,"integrity":"eager","phases":{"schema":{"ms":285,"rowsRead":0},"plugin":{"ms":771,"rowsRead":0},"fence":{"ms":316,"rowsRead":0},"verifies":{"ms":58,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":164,"heapBytes":40214888,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ Node 24.19 is the minimum the doctor accepts (9.015209ms)
+✔ setup writes each tool config once, dry-run writes nothing, and no config contains the secret (918.384364ms)
+✔ setup keeps an existing tool config and only replaces its own block (100.855435ms)
+✔ claude on PATH is registered with the env header and a second run does not register again (137.809571ms)
+✔ token prints the saved secret on stdout only (15.078829ms)
+✔ doctor exit codes follow ready, access, and the tool config (117.060063ms)
+✔ login stores the connection as a private file and the printed result has no secret (6247.714358ms)
+✔ saved connections accept a canonical home alias and reject symlinks escaping its root (41.162433ms)
+{"event":"room.cold_start","durationMs":615,"integrity":"eager","phases":{"schema":{"ms":78,"rowsRead":0},"plugin":{"ms":257,"rowsRead":0},"fence":{"ms":203,"rowsRead":0},"verifies":{"ms":35,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":148,"heapBytes":36078104,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+room diagnostic op_5j7Ptkp3 404 work_claim_not_found not_found /api/rooms/:roomId/work-claims/held/claim
+✔ a change under another member's live claim fails the guard; the holder and released files pass (4058.292552ms)
+✔ an unreachable or unconfigured Room passes with a notice unless --strict (6.671242ms)
+✔ changed files come from the staged index, or from the branch range against --base (689.514669ms)
+✔ guard arguments reject unknown options and options missing their value (4.682367ms)
+✔ a lease a few minutes past its stamp still blocks, and a bad path does not crash the guard (18.792612ms)
+✔ fenced claim overlapping another lane's live claim is refused, not registered (857.377741ms)
+✔ non-overlapping claims from different lanes both register (506.633047ms)
+✔ same-lane overlap registers (same lane never collides with itself) (746.240607ms)
+✔ unscoped cross-lane claim over a scoped entry is refused (469.643136ms)
+✔ scoped cross-lane claim over an unscoped entry is refused (348.425073ms)
+✔ same-scope cross-lane claim is refused; different-scope cross-lane claim registers (1214.978234ms)
+✔ prose claim overlapping another lane's live claim is refused too (1016.338605ms)
+✔ terminal and released claims free their files (996.927063ms)
+✔ unknown task IDs fail closed without heartbeat, release, handoff or receipt posts (5477.927255ms)
+✔ multi-process claim race: exactly one winner, clean 409s, consistent board (7230.721653ms)
+✔ stale note payload replayed with its v1-era basis is refused, not applied (124.743303ms)
+✔ a fresh basis is accepted and the update lands (3.010277ms)
+✔ stale history length alone conflicts even when claimedAt matches (3.721675ms)
+✔ a claimedAt from a different round conflicts even when history length matches (4.307724ms)
+✔ malformed preconditions are 422, not silently accepted (7.488398ms)
+✔ updates without preconditions behave exactly as before (2.999811ms)
+ℹ tests 34
+ℹ suites 0
+ℹ pass 34
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 76573.023612

@@ -1,0 +1,56 @@
+[
+{
+ "unit": "H19",
+ "suite": "room-sweep-evidence.test.js",
+ "target": "scripts/room",
+ "desc": "sweep plan strike-one text mutated",
+ "result": "red",
+ "pass": 7,
+ "fail": 5,
+ "note": "cancelled=0"
+}
+,
+{
+ "unit": "H19",
+ "suite": "room-sweep-terminal.test.js",
+ "target": "scripts/room",
+ "desc": "strike-two text mutated",
+ "result": "green",
+ "pass": 7,
+ "fail": 0,
+ "note": "cancelled=0"
+}
+,
+{
+ "unit": "H19",
+ "suite": "room-sweep-dry-run.test.js",
+ "target": "scripts/room",
+ "desc": "_sweep-plan --now flag renamed",
+ "result": "green",
+ "pass": 8,
+ "fail": 0,
+ "note": "cancelled=0"
+}
+,
+{
+ "unit": "H19",
+ "suite": "room-guard.test.js",
+ "target": "scripts/room-guard.mjs",
+ "desc": "guard never fails",
+ "result": "green",
+ "pass": 5,
+ "fail": 0,
+ "note": "cancelled=0"
+}
+,
+{
+ "unit": "H19",
+ "suite": "room-entry.test.js",
+ "target": "server/http.mjs",
+ "desc": "room create status codes swapped",
+ "result": "green",
+ "pass": 13,
+ "fail": 0,
+ "note": "cancelled=0"
+}
+]

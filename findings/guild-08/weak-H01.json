@@ -1,0 +1,42 @@
+[
+ {
+  "file": "tests/account-deletion-rooms.test.js",
+  "tests": 4,
+  "weak": []
+ },
+ {
+  "file": "tests/claims-index.test.js",
+  "tests": 14,
+  "weak": []
+ },
+ {
+  "file": "tests/room-agent-delegation-client.test.js",
+  "tests": 2,
+  "weak": []
+ },
+ {
+  "file": "tests/room-coord.test.js",
+  "tests": 10,
+  "weak": []
+ },
+ {
+  "file": "tests/room-listen.test.js",
+  "tests": 4,
+  "weak": []
+ },
+ {
+  "file": "tests/room-render-prose-fence.test.js",
+  "tests": 1,
+  "weak": []
+ },
+ {
+  "file": "tests/work-claim-client.test.js",
+  "tests": 12,
+  "weak": []
+ },
+ {
+  "file": "tests/work-claim-reassign-unclaimed.test.js",
+  "tests": 4,
+  "weak": []
+ }
+]

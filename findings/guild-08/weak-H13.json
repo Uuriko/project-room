@@ -1,0 +1,42 @@
+[
+ {
+  "file": "tests/claim-reputation.test.js",
+  "tests": 35,
+  "weak": []
+ },
+ {
+  "file": "tests/public-work-claim-finish-journey.test.js",
+  "tests": 1,
+  "weak": []
+ },
+ {
+  "file": "tests/room-clock-skew.test.js",
+  "tests": 10,
+  "weak": []
+ },
+ {
+  "file": "tests/room-instructions.test.js",
+  "tests": 5,
+  "weak": []
+ },
+ {
+  "file": "tests/room-post-verb-dry-run.test.js",
+  "tests": 1,
+  "weak": []
+ },
+ {
+  "file": "tests/room-watch-enforcer.test.sh",
+  "tests": 0,
+  "weak": []
+ },
+ {
+  "file": "tests/work-claim-pr-link.test.js",
+  "tests": 20,
+  "weak": []
+ },
+ {
+  "file": "tests/work-claims-read.test.js",
+  "tests": 19,
+  "weak": []
+ }
+]

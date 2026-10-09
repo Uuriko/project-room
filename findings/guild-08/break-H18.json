@@ -1,0 +1,52 @@
+[
+ {
+  "unit": "H18",
+  "suite": "claim-collisions.test.js",
+  "target": "server/claim-collisions.mjs",
+  "desc": "closed claims collide",
+  "result": "red",
+  "pass": 6,
+  "fail": 1,
+  "note": "rebuilt from launcher log"
+ },
+ {
+  "unit": "H18",
+  "suite": "claim-map.test.js",
+  "target": "scripts/room",
+  "desc": "board drops file-claims section",
+  "result": "red",
+  "pass": 6,
+  "fail": 2,
+  "note": "rebuilt from launcher log"
+ },
+ {
+  "unit": "H18",
+  "suite": "claim-overlaps.test.js",
+  "target": "src/events.js",
+  "desc": "no claim ever active for overlap",
+  "result": "red",
+  "pass": 0,
+  "fail": 3,
+  "note": "rebuilt from launcher log"
+ },
+ {
+  "unit": "H18",
+  "suite": "claim-validate.test.js",
+  "target": "server/claim-validate.mjs",
+  "desc": "lease range shrinks to 1h",
+  "result": "red",
+  "pass": 8,
+  "fail": 8,
+  "note": "rebuilt from launcher log"
+ },
+ {
+  "unit": "H18",
+  "suite": "claim-reputation.test.js",
+  "target": "server/claim-reputation.mjs",
+  "desc": "reputation signals dropped",
+  "result": "red",
+  "pass": 32,
+  "fail": 3,
+  "note": "rebuilt from launcher log"
+ }
+]

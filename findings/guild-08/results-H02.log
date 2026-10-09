@@ -1,0 +1,55 @@
+=== H02 baseline 2026-10-09T10:35:22Z ===
+{"event":"room.cold_start","durationMs":2443,"integrity":"eager","phases":{"schema":{"ms":416,"rowsRead":0},"plugin":{"ms":796,"rowsRead":0},"fence":{"ms":665,"rowsRead":0},"verifies":{"ms":120,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":175,"heapBytes":37724336,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":3090,"integrity":"eager","phases":{"schema":{"ms":467,"rowsRead":0},"plugin":{"ms":1322,"rowsRead":0},"fence":{"ms":806,"rowsRead":0},"verifies":{"ms":137,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":169,"heapBytes":34874760,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ account room discovery uses bounded advancing pages (10324.904891ms)
+{"event":"room.cold_start","durationMs":2093,"integrity":"eager","phases":{"schema":{"ms":294,"rowsRead":0},"plugin":{"ms":857,"rowsRead":0},"fence":{"ms":783,"rowsRead":0},"verifies":{"ms":12,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":166,"heapBytes":34714296,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ account room discovery returns only currently authorized memberships without room content (8925.033687ms)
+room diagnostic op__6Fju5LM 409 room_archived conflict /api/rooms/:roomId/commands
+{"event":"room.cold_start","durationMs":1482,"integrity":"eager","phases":{"schema":{"ms":116,"rowsRead":0},"plugin":{"ms":694,"rowsRead":0},"fence":{"ms":479,"rowsRead":0},"verifies":{"ms":27,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":150,"heapBytes":45508192,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ an account creates a room over HTTP with CSRF, opens it through the same session, and archived rooms stay listed read-only (6265.909605ms)
+{"event":"room.cold_start","durationMs":556,"cpuMs":35,"heapBytes":49686768,"rooms":1,"sequences":2,"projectionBytes":719,"events":2}
+✔ account room discovery is a read: it answers while another writer holds the database and on a read-only store (2811.405512ms)
+✔ latest:true returns every message across 100-event boundaries with no seam skips (9.734668ms)
+✔ latest:true keeps the end bound exclusive while tiling seams inclusively (1.75273ms)
+✔ latest:true second page across a seam continues with no gap or duplicate (0.615984ms)
+✔ latest:true with a non-message event mix still tiles seams exactly once (6.446544ms)
+{"event":"room.cold_start","durationMs":1923,"integrity":"eager","phases":{"schema":{"ms":399,"rowsRead":0},"plugin":{"ms":843,"rowsRead":0},"fence":{"ms":224,"rowsRead":0},"verifies":{"ms":102,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":167,"heapBytes":38099200,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1879,"integrity":"eager","phases":{"schema":{"ms":315,"rowsRead":0},"plugin":{"ms":949,"rowsRead":0},"fence":{"ms":383,"rowsRead":0},"verifies":{"ms":19,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":164,"heapBytes":33414232,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":3085,"integrity":"eager","phases":{"schema":{"ms":188,"rowsRead":0},"plugin":{"ms":326,"rowsRead":0},"fence":{"ms":689,"rowsRead":0},"verifies":{"ms":60,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":143,"heapBytes":39516376,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1482,"integrity":"eager","phases":{"schema":{"ms":314,"rowsRead":0},"plugin":{"ms":955,"rowsRead":0},"fence":{"ms":83,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":144,"heapBytes":44959072,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ a fresh account with zero memberships creates its first room and becomes owner (4150.139437ms)
+✔ further rooms still follow the membership-administration policy (4719.516524ms)
+✔ provisional room-key accounts are still denied even when the policy widens (4547.277514ms)
+✔ HTTP: a fresh account POSTs its first room (201), the same id replays as 200, a guest is denied (403) (5256.771215ms)
+{"event":"room.cold_start","durationMs":2762,"integrity":"eager","phases":{"schema":{"ms":333,"rowsRead":0},"plugin":{"ms":1150,"rowsRead":0},"fence":{"ms":878,"rowsRead":0},"verifies":{"ms":55,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":182,"heapBytes":37061280,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":1572,"integrity":"eager","phases":{"schema":{"ms":343,"rowsRead":0},"plugin":{"ms":794,"rowsRead":0},"fence":{"ms":202,"rowsRead":0},"verifies":{"ms":31,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":146,"heapBytes":34049872,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ unauthenticated hosted MCP keeps four join documents, adds two public-work reads and the identity mint (4020.61566ms)
+{"event":"room.cold_start","durationMs":980,"integrity":"eager","phases":{"schema":{"ms":56,"rowsRead":0},"plugin":{"ms":398,"rowsRead":0},"fence":{"ms":97,"rowsRead":0},"verifies":{"ms":17,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":148,"heapBytes":38580256,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ Bearer pri_ exposes room tools and keeps command receipts (9808.841412ms)
+✔ bond accept decline revoke and peer DM require the identity bearer and call through (6199.596198ms)
+{"event":"room.cold_start","durationMs":2515,"integrity":"eager","phases":{"schema":{"ms":465,"rowsRead":0},"plugin":{"ms":894,"rowsRead":0},"fence":{"ms":647,"rowsRead":0},"verifies":{"ms":147,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":209,"heapBytes":36836608,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2002,"integrity":"eager","phases":{"schema":{"ms":64,"rowsRead":0},"plugin":{"ms":1138,"rowsRead":0},"fence":{"ms":507,"rowsRead":0},"verifies":{"ms":65,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":160,"heapBytes":33444584,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1757,"integrity":"eager","phases":{"schema":{"ms":197,"rowsRead":0},"plugin":{"ms":1400,"rowsRead":0},"fence":{"ms":55,"rowsRead":0},"verifies":{"ms":4,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":156,"heapBytes":41125584,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1625,"integrity":"eager","phases":{"schema":{"ms":402,"rowsRead":0},"plugin":{"ms":759,"rowsRead":0},"fence":{"ms":244,"rowsRead":0},"verifies":{"ms":69,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":174,"heapBytes":32638376,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ results distinguish current completed work, approval and pending gates without mutating records (5964.662261ms)
+✔ historical or mismatched approvals, superseded work and missing evidence cannot appear as current results (4563.412308ms)
+✔ result ordering has stable ID ties and keeps only current room projections (5181.414958ms)
+✔ real API and MCP clients share Results, read pinned text, recheck reopening and make no room writes (16861.914016ms)
+✔ H4: self re-claim 409 is machine-readable and never says 'release it first' (38.970744ms)
+✔ H4: foreign re-claim 409 names the holder instead of unactionable advice (6.31717ms)
+✔ H4: pure claimWork distinguishes self from other on an already-claimed item (2.655315ms)
+✔ H4: agentErrorBody for work_claim_conflict carries an actionable hint + next (4.733023ms)
+✔ H4: a done item is reported as already done, not as held (2.779682ms)
+✔ MUT-04B: renew starts a fresh window from now — a smaller renewal duration shortens an unexpired lease (documented behavior) (26.485017ms)
+ℹ tests 25
+ℹ suites 0
+ℹ pass 25
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 144324.52765

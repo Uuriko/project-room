@@ -1,0 +1,67 @@
+=== H11 baseline 2026-10-09T11:01:35Z ===
+✔ an overlapping claim succeeds and records who else holds the paths (18.187284ms)
+✔ other repositories and released claims do not overlap (98.862504ms)
+✔ overlaps are deterministic on replay (330.031811ms)
+{"event":"room.cold_start","durationMs":2842,"integrity":"eager","phases":{"schema":{"ms":165,"rowsRead":0},"plugin":{"ms":1207,"rowsRead":0},"fence":{"ms":734,"rowsRead":0},"verifies":{"ms":183,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":179,"heapBytes":36893424,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ room page hides receipts after the owner flips the toggle (5080.15801ms)
+✔ claim-status prints the claim's live state fields (1368.660086ms)
+✔ claim-status reflects a heartbeat: last_heartbeat and extended expiry (1168.288767ms)
+✔ claim-status reports an open strike-one (1969.614431ms)
+✔ claim-status exits 1 on an unknown task-id (1408.131781ms)
+✔ claim-status exits 1 when --task-id is missing (284.832329ms)
+{"event":"room.cold_start","durationMs":2398,"integrity":"eager","phases":{"schema":{"ms":224,"rowsRead":0},"plugin":{"ms":1217,"rowsRead":0},"fence":{"ms":583,"rowsRead":0},"verifies":{"ms":182,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":195,"heapBytes":28457136,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1725,"integrity":"eager","phases":{"schema":{"ms":343,"rowsRead":0},"plugin":{"ms":968,"rowsRead":0},"fence":{"ms":174,"rowsRead":0},"verifies":{"ms":12,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":168,"heapBytes":36153544,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1380,"integrity":"eager","phases":{"schema":{"ms":103,"rowsRead":0},"plugin":{"ms":603,"rowsRead":0},"fence":{"ms":398,"rowsRead":0},"verifies":{"ms":59,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":160,"heapBytes":28813320,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1874,"integrity":"eager","phases":{"schema":{"ms":694,"rowsRead":0},"plugin":{"ms":390,"rowsRead":0},"fence":{"ms":387,"rowsRead":0},"verifies":{"ms":49,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":160,"heapBytes":35627656,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2287,"integrity":"eager","phases":{"schema":{"ms":386,"rowsRead":0},"plugin":{"ms":1053,"rowsRead":0},"fence":{"ms":402,"rowsRead":0},"verifies":{"ms":82,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":171,"heapBytes":28799392,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2644,"integrity":"eager","phases":{"schema":{"ms":635,"rowsRead":0},"plugin":{"ms":909,"rowsRead":0},"fence":{"ms":465,"rowsRead":0},"verifies":{"ms":40,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":159,"heapBytes":39025200,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ 30 posts pass, the 31st is 429, and a refilled bucket posts again (6096.496555ms)
+✔ members and rooms have separate budgets (4578.373339ms)
+✔ replaying a command id does not count, including while limited (5413.60089ms)
+✔ only chat posts and replies count; reactions, edits, deletes, reads, work, and claims do not (6422.523987ms)
+✔ importing chat history does not spend the live budget (4910.380975ms)
+✔ room_post_message surfaces 429 rate_limited and a replay does not (6445.430142ms)
+✔ dm.posted spends from the same budget as message.posted (guard unit level) (9.929372ms)
+✔ orientation follows current instructions and clearing restores the room purpose (62.553354ms)
+✔ orientation bounds current work, excludes history and retains source identities without mutating state (46.489467ms)
+{"event":"room.cold_start","durationMs":1949,"integrity":"eager","phases":{"schema":{"ms":195,"rowsRead":0},"plugin":{"ms":898,"rowsRead":0},"fence":{"ms":409,"rowsRead":0},"verifies":{"ms":27,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":178,"heapBytes":37867944,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2732,"integrity":"eager","phases":{"schema":{"ms":969,"rowsRead":0},"plugin":{"ms":1102,"rowsRead":0},"fence":{"ms":433,"rowsRead":0},"verifies":{"ms":22,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":175,"heapBytes":33815472,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":3394,"integrity":"eager","phases":{"schema":{"ms":574,"rowsRead":0},"plugin":{"ms":1258,"rowsRead":0},"fence":{"ms":1116,"rowsRead":0},"verifies":{"ms":147,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":173,"heapBytes":40594984,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2334,"integrity":"eager","phases":{"schema":{"ms":267,"rowsRead":0},"plugin":{"ms":971,"rowsRead":0},"fence":{"ms":764,"rowsRead":0},"verifies":{"ms":64,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":224,"heapBytes":31430072,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2813,"integrity":"eager","phases":{"schema":{"ms":549,"rowsRead":0},"plugin":{"ms":1364,"rowsRead":0},"fence":{"ms":607,"rowsRead":0},"verifies":{"ms":9,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":167,"heapBytes":38281920,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ Room Trust defaults open and only the owner can flip it (4296.664979ms)
+✔ Trust off blocks cross-owner assign and leaves same-owner assign open (5442.350815ms)
+✔ Trust off posts a cross-owner wake and skips the wake (6447.752157ms)
+✔ Trust off does not enqueue a cross-owner wake; Trust on does (4934.667202ms)
+room diagnostic op__tri4UFn 403 trust_off access /api/rooms/:roomId/commands
+✔ trust_off HTTP body names the kill-switch and keeps the hint (8027.923939ms)
+✔ leases: claimWork stamps claimedAt + leaseExpiresAt, default 24h (33.720755ms)
+✔ leases: explicit leaseHours and room config override the default (2.396727ms)
+✔ leases: leaseHours null opts out — claims without lease behave as before (33.519322ms)
+✔ isLeaseExpired: only active claims with a lapsed lease expire (15.313922ms)
+✔ releaseExpired: expired claims auto-release, everything else untouched (10.433327ms)
+✔ releaseExpired clears attestations like updateWork (L-P2-8) (31.455375ms)
+✔ delivery modes: done transition persists the mode, others reject it (9.863632ms)
+✔ review policies: all three enforced by canCloseWork (33.386813ms)
+✔ attestWork: caller-bound attestations, one per member, cleared on handoff (17.856668ms)
+✔ roomWorkClaimConfig: the documented config hook (0.518819ms)
+✔ createWork: items enter the registry unclaimed (13.329273ms)
+✔ query helpers still filter a list (backward compat) (0.816535ms)
+✔ handler: create → claim → complete with delivery mode → release cycle (172.066251ms)
+✔ handler: review policies enforced on the done transition (167.452707ms)
+✔ handler: review attestations are caller-bound and cleared on handoff (38.017322ms)
+✔ handler: sweep releases expired claims (23.340367ms)
+✔ releaseExpired clears the whole lease (leaseStartAt) like updateWork (12.781441ms)
+✔ renewWork: a lease-less claim refuses renewal (nothing to renew) (0.993652ms)
+✔ releaseExpired clears fileBlocks alongside files, attestations and reviews (25.86072ms)
+✔ a live claim is not reported as swept; a lapsed one is (81.060017ms)
+ℹ tests 43
+ℹ suites 0
+ℹ pass 43
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 122372.682317

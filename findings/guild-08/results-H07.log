@@ -1,0 +1,146 @@
+=== H07 baseline 2026-10-09T08:55:24Z ===
+{"event":"room.cold_start","durationMs":2454,"integrity":"eager","phases":{"schema":{"ms":235,"rowsRead":0},"plugin":{"ms":1185,"rowsRead":0},"fence":{"ms":836,"rowsRead":0},"verifies":{"ms":191,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":183,"heapBytes":24563584,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2197,"integrity":"eager","phases":{"schema":{"ms":488,"rowsRead":0},"plugin":{"ms":1544,"rowsRead":0},"fence":{"ms":148,"rowsRead":0},"verifies":{"ms":16,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":146,"heapBytes":29156760,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":144,"integrity":"eager","phases":{"schema":{"ms":40,"rowsRead":0},"plugin":{"ms":67,"rowsRead":0},"fence":{"ms":33,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":111,"heapBytes":33439568,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1015,"integrity":"eager","phases":{"schema":{"ms":19,"rowsRead":0},"plugin":{"ms":654,"rowsRead":0},"fence":{"ms":274,"rowsRead":0},"verifies":{"ms":68,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":121,"heapBytes":37859032,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1940,"integrity":"eager","phases":{"schema":{"ms":525,"rowsRead":0},"plugin":{"ms":879,"rowsRead":0},"fence":{"ms":409,"rowsRead":0},"verifies":{"ms":81,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":142,"heapBytes":26536712,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2102,"integrity":"eager","phases":{"schema":{"ms":323,"rowsRead":0},"plugin":{"ms":1202,"rowsRead":0},"fence":{"ms":573,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":137,"heapBytes":30703960,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":3392,"integrity":"eager","phases":{"schema":{"ms":1062,"rowsRead":0},"plugin":{"ms":1180,"rowsRead":0},"fence":{"ms":930,"rowsRead":0},"verifies":{"ms":190,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":149,"heapBytes":35127824,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1765,"integrity":"eager","phases":{"schema":{"ms":428,"rowsRead":0},"plugin":{"ms":763,"rowsRead":0},"fence":{"ms":434,"rowsRead":0},"verifies":{"ms":139,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":136,"heapBytes":39143592,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1559,"integrity":"eager","phases":{"schema":{"ms":344,"rowsRead":0},"plugin":{"ms":985,"rowsRead":0},"fence":{"ms":178,"rowsRead":0},"verifies":{"ms":34,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":142,"heapBytes":27279920,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2203,"integrity":"eager","phases":{"schema":{"ms":527,"rowsRead":0},"plugin":{"ms":1107,"rowsRead":0},"fence":{"ms":513,"rowsRead":0},"verifies":{"ms":43,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":141,"heapBytes":31695328,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2320,"integrity":"eager","phases":{"schema":{"ms":445,"rowsRead":0},"plugin":{"ms":1113,"rowsRead":0},"fence":{"ms":711,"rowsRead":0},"verifies":{"ms":30,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":135,"heapBytes":35724200,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ parseClaimId: explicit claim marker outranks branch, title and body (30.056697ms)
+✔ parseClaimId: branch segments match exactly, partial tokens do not (0.691508ms)
+✔ parseClaimId: ignores garbage; tokens are capped at 80 chars (1.929546ms)
+✔ findClaimForPull: branch match links the claim, repo mismatch excludes (0.694502ms)
+✔ findClaimForPull: two live claims on one token is ambiguous, never a guess (0.265349ms)
+✔ findClaimForPull: done and unclaimed items are not link targets (0.184987ms)
+✔ autoLinkPullRequest: links the PR and emits one receipt (3215.922872ms)
+✔ autoLinkPullRequest: duplicate and settled links are refused (2235.196331ms)
+✔ autoLinkPullRequest: refuses settled and unclaimed items (156.126069ms)
+✔ handlePrWebhookPayload: closed+merged on an unlinked PR auto-links and settles (1272.896984ms)
+✔ handlePrWebhookPayload: opened only links, unknown ids and garbage never write (2143.659001ms)
+✔ discoverUnlinkedPulls: open PRs link claims that carry no PR yet (2872.786436ms)
+✔ discoverUnlinkedPulls: fresh webhook delivery skips the repo; a held budget stops the poll (3608.011552ms)
+✔ linkDeployToSettledClaims: stamped revision links back to the items it shipped (2146.346824ms)
+✔ linkDeployToSettledClaims: land-kind items with a matching revision get the deploy link (1757.0341ms)
+✔ prWebhookEnabled: off by default, on only with an explicit value (41.591286ms)
+✔ POST /api/github/pr-webhook: 404 when the flag is off, 503 when enabled without a secret (2356.606272ms)
+✔ POST /api/github/pr-webhook: a signed delivery auto-links; a bad signature is refused (2997.945283ms)
+{"event":"room.cold_start","durationMs":1829,"integrity":"eager","phases":{"schema":{"ms":654,"rowsRead":0},"plugin":{"ms":623,"rowsRead":0},"fence":{"ms":416,"rowsRead":0},"verifies":{"ms":22,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":164,"heapBytes":36911512,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":1229,"integrity":"eager","phases":{"schema":{"ms":185,"rowsRead":0},"plugin":{"ms":626,"rowsRead":0},"fence":{"ms":395,"rowsRead":0},"verifies":{"ms":14,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":182,"heapBytes":34098288,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ m4: first page contains the message even when it sits past the first limit scanned events (4227.550447ms)
+{"event":"room.cold_start","durationMs":3137,"integrity":"eager","phases":{"schema":{"ms":520,"rowsRead":0},"plugin":{"ms":1469,"rowsRead":0},"fence":{"ms":1094,"rowsRead":0},"verifies":{"ms":34,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":151,"heapBytes":42173368,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ limit counts messages across sparse pages; after/next still walks everything in order (2470.397599ms)
+{"event":"room.cold_start","durationMs":1354,"integrity":"eager","phases":{"schema":{"ms":151,"rowsRead":0},"plugin":{"ms":696,"rowsRead":0},"fence":{"ms":424,"rowsRead":0},"verifies":{"ms":71,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":138,"heapBytes":36318024,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ latest:true returns the latest N messages in chronological order, matching GET /conversation (4199.242586ms)
+{"event":"room.cold_start","durationMs":2965,"integrity":"eager","phases":{"schema":{"ms":575,"rowsRead":0},"plugin":{"ms":1633,"rowsRead":0},"fence":{"ms":695,"rowsRead":0},"verifies":{"ms":50,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":157,"heapBytes":43603288,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ latest:true includes the head event when the head itself is a message (1994.754449ms)
+{"event":"room.cold_start","durationMs":2327,"integrity":"eager","phases":{"schema":{"ms":562,"rowsRead":0},"plugin":{"ms":1057,"rowsRead":0},"fence":{"ms":649,"rowsRead":0},"verifies":{"ms":54,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":136,"heapBytes":38418528,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ default mode still pages dense history oldest-first with after/next (4556.076959ms)
+✔ latest:true backward windows tile with no boundary gaps (unit, dense 301) (72.557698ms)
+✔ latest:true over several scan windows returns the newest N with none skipped (hosted) (10842.314159ms)
+{"event":"room.cold_start","durationMs":4555,"integrity":"eager","phases":{"schema":{"ms":473,"rowsRead":0},"plugin":{"ms":1308,"rowsRead":0},"fence":{"ms":846,"rowsRead":0},"verifies":{"ms":245,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":191,"heapBytes":21908992,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2026,"integrity":"eager","phases":{"schema":{"ms":458,"rowsRead":0},"plugin":{"ms":587,"rowsRead":0},"fence":{"ms":305,"rowsRead":0},"verifies":{"ms":92,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":169,"heapBytes":25119128,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":870,"cpuMs":33,"heapBytes":27841800,"rooms":1,"sequences":3,"projectionBytes":924,"events":3}
+Replay failed verification. The destination was not promoted. Inspect the private export before retrying.
+{"event":"room.cold_start","durationMs":2113,"integrity":"eager","phases":{"schema":{"ms":639,"rowsRead":0},"plugin":{"ms":820,"rowsRead":0},"fence":{"ms":416,"rowsRead":0},"verifies":{"ms":27,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":154,"heapBytes":32057400,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":3943,"integrity":"eager","phases":{"schema":{"ms":580,"rowsRead":0},"plugin":{"ms":1840,"rowsRead":0},"fence":{"ms":943,"rowsRead":0},"verifies":{"ms":115,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":166,"heapBytes":38118576,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":3252,"integrity":"eager","phases":{"schema":{"ms":599,"rowsRead":0},"plugin":{"ms":1167,"rowsRead":0},"fence":{"ms":1186,"rowsRead":0},"verifies":{"ms":22,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":161,"heapBytes":25915552,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":3570,"integrity":"eager","phases":{"schema":{"ms":325,"rowsRead":0},"plugin":{"ms":1628,"rowsRead":0},"fence":{"ms":1197,"rowsRead":0},"verifies":{"ms":51,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":163,"heapBytes":28739792,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":4523,"integrity":"eager","phases":{"schema":{"ms":250,"rowsRead":0},"plugin":{"ms":1412,"rowsRead":0},"fence":{"ms":1864,"rowsRead":0},"verifies":{"ms":468,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":187,"heapBytes":25570184,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2902,"integrity":"eager","phases":{"schema":{"ms":626,"rowsRead":0},"plugin":{"ms":1245,"rowsRead":0},"fence":{"ms":659,"rowsRead":0},"verifies":{"ms":141,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":154,"heapBytes":28666608,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":707,"integrity":"eager","phases":{"schema":{"ms":164,"rowsRead":0},"plugin":{"ms":153,"rowsRead":0},"fence":{"ms":54,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":124,"heapBytes":23051008,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1410,"integrity":"eager","phases":{"schema":{"ms":224,"rowsRead":0},"plugin":{"ms":412,"rowsRead":0},"fence":{"ms":513,"rowsRead":0},"verifies":{"ms":38,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":145,"heapBytes":25994664,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":4414,"integrity":"eager","phases":{"schema":{"ms":983,"rowsRead":0},"plugin":{"ms":2160,"rowsRead":0},"fence":{"ms":823,"rowsRead":0},"verifies":{"ms":11,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":175,"heapBytes":24212600,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2998,"integrity":"eager","phases":{"schema":{"ms":597,"rowsRead":0},"plugin":{"ms":1552,"rowsRead":0},"fence":{"ms":458,"rowsRead":0},"verifies":{"ms":33,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":159,"heapBytes":25411208,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2040,"integrity":"eager","phases":{"schema":{"ms":192,"rowsRead":0},"plugin":{"ms":860,"rowsRead":0},"fence":{"ms":556,"rowsRead":0},"verifies":{"ms":90,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":153,"heapBytes":28416136,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1920,"integrity":"eager","phases":{"schema":{"ms":233,"rowsRead":0},"plugin":{"ms":952,"rowsRead":0},"fence":{"ms":386,"rowsRead":0},"verifies":{"ms":130,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":149,"heapBytes":28646824,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1732,"integrity":"eager","phases":{"schema":{"ms":206,"rowsRead":0},"plugin":{"ms":938,"rowsRead":0},"fence":{"ms":168,"rowsRead":0},"verifies":{"ms":47,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":154,"heapBytes":28809392,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2095,"integrity":"eager","phases":{"schema":{"ms":175,"rowsRead":0},"plugin":{"ms":1279,"rowsRead":0},"fence":{"ms":279,"rowsRead":0},"verifies":{"ms":27,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":150,"heapBytes":30313552,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1765,"integrity":"eager","phases":{"schema":{"ms":188,"rowsRead":0},"plugin":{"ms":807,"rowsRead":0},"fence":{"ms":365,"rowsRead":0},"verifies":{"ms":123,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":141,"heapBytes":29573776,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2652,"integrity":"eager","phases":{"schema":{"ms":424,"rowsRead":0},"plugin":{"ms":1388,"rowsRead":0},"fence":{"ms":515,"rowsRead":0},"verifies":{"ms":10,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":166,"heapBytes":26797920,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2646,"integrity":"eager","phases":{"schema":{"ms":371,"rowsRead":0},"plugin":{"ms":1200,"rowsRead":0},"fence":{"ms":689,"rowsRead":0},"verifies":{"ms":41,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":157,"heapBytes":29695136,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2835,"integrity":"eager","phases":{"schema":{"ms":230,"rowsRead":0},"plugin":{"ms":1347,"rowsRead":0},"fence":{"ms":767,"rowsRead":0},"verifies":{"ms":139,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":163,"heapBytes":35420696,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1775,"integrity":"eager","phases":{"schema":{"ms":440,"rowsRead":0},"plugin":{"ms":802,"rowsRead":0},"fence":{"ms":127,"rowsRead":0},"verifies":{"ms":22,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":140,"heapBytes":32839032,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2800,"integrity":"eager","phases":{"schema":{"ms":585,"rowsRead":0},"plugin":{"ms":1447,"rowsRead":0},"fence":{"ms":565,"rowsRead":0},"verifies":{"ms":11,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":162,"heapBytes":32316456,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":3252,"integrity":"eager","phases":{"schema":{"ms":579,"rowsRead":0},"plugin":{"ms":1404,"rowsRead":0},"fence":{"ms":817,"rowsRead":0},"verifies":{"ms":39,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":161,"heapBytes":33970432,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2757,"integrity":"eager","phases":{"schema":{"ms":366,"rowsRead":0},"plugin":{"ms":893,"rowsRead":0},"fence":{"ms":1110,"rowsRead":0},"verifies":{"ms":40,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":148,"heapBytes":34964536,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ an export hashes secrets and replays the room into a fresh store (23810.993818ms)
+✔ the operator export route stays closed until the backup token is set (3331.216604ms)
+✔ the daily backup writes one object when R2 is bound and skips otherwise (5500.751087ms)
+✔ the KV target is used only when R2 is absent (34.488718ms)
+✔ the daily KV backup writes parts then a manifest, once a day, with a TTL (5377.389427ms)
+✔ a KV backup split into many parts reassembles byte-equal, replays, and catches tampering (27733.116909ms)
+✔ Durable Object BLOB cells (ArrayBuffer) export as base64, not {} (0.694682ms)
+✔ a version 1 KV manifest for today is rewritten; a current one is kept (4444.404262ms)
+✔ replay skips Durable Object runtime and retired tables and reports them (9125.231314ms)
+✔ audit report restores a store whose stored projection drifted from the reducer, strict refuses it (14407.612923ms)
+✔ a backup torn by a mid-stream write fails replay loudly instead of verifying (2676.840469ms)
+✔ a same-count tear (delete plus insert mid-stream) fails on the trailer hash (3629.624187ms)
+✔ writeKvBackup refuses a manifest for a torn export (3502.326821ms)
+✔ an untorn export carries a verified trailer; older trailer-less exports still replay (10555.347157ms)
+✔ Durable Object BLOB cells (bare SharedArrayBuffer) export as base64, not {} (0.436635ms)
+✔ exportTrailer pages the event log and hashes exactly what one full read would (614.160594ms)
+✔ a paged export is byte-identical to a single-page export, whatever the page size (9188.401093ms)
+✔ export pages never read a whole large table at once (4160.095137ms)
+{"event":"room.cold_start","durationMs":3052,"integrity":"eager","phases":{"schema":{"ms":419,"rowsRead":0},"plugin":{"ms":1194,"rowsRead":0},"fence":{"ms":994,"rowsRead":0},"verifies":{"ms":76,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":178,"heapBytes":32679408,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ Demigod HTML entry redirects to the canonical app with query preserved (160.593984ms)
+✔ entry handler leaves other Demigod pages and hosts to existing routing (82.68813ms)
+✔ entry supports HEAD and rejects mutations (26.051646ms)
+✔ getdasha public door is a quiet Join + Connect page, not the llms packet (35.706836ms)
+✔ www /room #join/<token> writes the token onto Join and leaves the wrapper (22.313356ms)
+✔ www /room #join/<token>/work/<id> keeps the purpose path on the forwarded join (17.247844ms)
+✔ www /room legacy #code/ links forward for app redemption (16.695395ms)
+✔ www /room #join/ stub does not auto-leave the wrapper (18.127374ms)
+✔ www /room short #join/ does not leave the wrapper (63.727797ms)
+✔ www /room #room/{id} still rewrites Open/People and does not follow Join (42.863005ms)
+✔ public door pages have skip links and /room is indexable (QA4 polish) (51.564273ms)
+✔ HTTP public doors redirect HTML, preserve query, and retain plain packets and discovery (6873.915292ms)
+✔ stale www card paths redirect to the signed canonical agent card (#956) (15.697177ms)
+{"event":"room.cold_start","durationMs":1987,"integrity":"eager","phases":{"schema":{"ms":609,"rowsRead":0},"plugin":{"ms":586,"rowsRead":0},"fence":{"ms":309,"rowsRead":0},"verifies":{"ms":102,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":184,"heapBytes":36962864,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":1345,"integrity":"eager","phases":{"schema":{"ms":138,"rowsRead":0},"plugin":{"ms":566,"rowsRead":0},"fence":{"ms":337,"rowsRead":0},"verifies":{"ms":26,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":150,"heapBytes":35090400,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ owner mints, lists, and revokes agent invites over MCP (5462.959193ms)
+{"event":"room.cold_start","durationMs":2659,"integrity":"eager","phases":{"schema":{"ms":213,"rowsRead":0},"plugin":{"ms":914,"rowsRead":0},"fence":{"ms":449,"rowsRead":0},"verifies":{"ms":20,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":151,"heapBytes":40758456,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ non-owner member cannot mint invites or list access requests over MCP (4679.236215ms)
+{"event":"room.cold_start","durationMs":2879,"integrity":"eager","phases":{"schema":{"ms":552,"rowsRead":0},"plugin":{"ms":1551,"rowsRead":0},"fence":{"ms":602,"rowsRead":0},"verifies":{"ms":5,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":169,"heapBytes":47096848,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ owner lists and decides access requests over MCP (4037.973428ms)
+✔ membership admin tools are in the hosted catalog with schemas (3643.398498ms)
+✔ sweep --dry-run prints the plan and does not post (3827.116385ms)
+✔ sweep without --dry-run posts the strike (7549.62991ms)
+✔ sweep --bogus-flag dies before any board call (137.166717ms)
+✔ claim --dry-run prints the comment and does not post (919.435521ms)
+✔ claim --bogus still names the unknown flag (417.18405ms)
+✔ claim --lane with a space dies before any board read (447.011743ms)
+✔ dry-run PLAN labels exactly match the live run's posted actions (11544.249087ms)
+✔ claim --lane quill-s2 still passes the charset check (2465.909143ms)
+✔ claiming a file another active claim holds is refused with the holder, the files, and the lease expiry (338.104906ms)
+✔ create with assignee refuses overlapping file leases (409 file_lease_conflict) (24.713968ms)
+✔ create with assignee and disjoint files still claims (201) (18.222657ms)
+✔ reassign of an unclaimed file-declared item refuses on overlap (409) (87.791719ms)
+✔ reassign of an active claim to a holder of overlapping files refuses (409) (60.773103ms)
+✔ reassign with no file overlap still transfers (200) (12.846068ms)
+✔ advisory true still claims and names the other holder in fileWarnings (16.866882ms)
+✔ a lapsed lease frees the files, and a lease that never expires still blocks (50.88285ms)
+✔ the same owner cannot take a second live lease on the same file (42.490887ms)
+✔ done claims and claims without files never produce warnings (23.60916ms)
+✔ different block labels on one file do not conflict, and a whole-file claim still does (71.85994ms)
+✔ update cannot change the declared files after claim (files are immutable) (21.872093ms)
+✔ paths are normalized and paths that escape the repo are refused (26.522573ms)
+✔ settlePullRequest settles (never throws) when the singular pull link is null: merged (32.758962ms)
+✔ settlePullRequest settles (never throws) when the singular pull link is undefined: merged (0.456074ms)
+✔ settlePullRequest settles (never throws) when the singular pull link is null: closed (14.404988ms)
+✔ settlePullRequest settles (never throws) when the singular pull link is undefined: closed (0.23349ms)
+✔ settlePullRequest still prefers the live singular link when it is set (10.022972ms)
+ℹ tests 86
+ℹ suites 0
+ℹ pass 86
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 286278.483802

@@ -1,0 +1,49 @@
+[
+ {
+  "file": "tests/claim-scopes.test.js",
+  "tests": 12,
+  "weak": []
+ },
+ {
+  "file": "tests/public-work-claims-client.test.js",
+  "tests": 6,
+  "weak": []
+ },
+ {
+  "file": "tests/room-context-legacy-identity.test.js",
+  "tests": 1,
+  "weak": []
+ },
+ {
+  "file": "tests/room-key-heartbeat.test.js",
+  "tests": 6,
+  "weak": []
+ },
+ {
+  "file": "tests/room-prose-claims.test.js",
+  "tests": 12,
+  "weak": []
+ },
+ {
+  "file": "tests/starter-room.test.js",
+  "tests": 7,
+  "weak": []
+ },
+ {
+  "file": "tests/work-claim-provenance.test.js",
+  "tests": 11,
+  "weak": []
+ },
+ {
+  "file": "tests/work-claims.test.js",
+  "tests": 6,
+  "weak": [
+   {
+    "name": "double-claim and foreign updates are refused",
+    "assertions": 0,
+    "lines": 8,
+    "weak": true
+   }
+  ]
+ }
+]

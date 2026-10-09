@@ -1,0 +1,49 @@
+[
+ {
+  "file": "tests/agent-rooms-idempotent-budget.test.js",
+  "tests": 5,
+  "weak": []
+ },
+ {
+  "file": "tests/claims-state-machine.property.test.js",
+  "tests": 12,
+  "weak": []
+ },
+ {
+  "file": "tests/room-assistant.test.js",
+  "tests": 15,
+  "weak": []
+ },
+ {
+  "file": "tests/room-credential-scan.test.js",
+  "tests": 3,
+  "weak": []
+ },
+ {
+  "file": "tests/room-mcp-files.test.js",
+  "tests": 6,
+  "weak": []
+ },
+ {
+  "file": "tests/room-roster.test.js",
+  "tests": 9,
+  "weak": [
+   {
+    "name": "Add agent markup lists the four roster names",
+    "assertions": 0,
+    "lines": 1,
+    "weak": true
+   }
+  ]
+ },
+ {
+  "file": "tests/work-claim-create-note.test.js",
+  "tests": 9,
+  "weak": []
+ },
+ {
+  "file": "tests/work-claim-renew-probes.test.js",
+  "tests": 2,
+  "weak": []
+ }
+]

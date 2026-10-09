@@ -1,0 +1,1 @@
+{"unit":"H03","baseline_exit":0,"interrupted":0,"pass":65,"fail":0,"cancelled":0,"tests_scanned":61,"weak_flagged":1,"files":["agent-rooms-idempotent-budget.test.js","claims-state-machine.property.test.js","room-assistant.test.js","room-credential-scan.test.js","room-mcp-files.test.js","room-roster.test.js","work-claim-create-note.test.js","work-claim-renew-probes.test.js"]}

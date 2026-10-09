@@ -17,6 +17,7 @@ const MEMBERS = {
   contribute: { id: "contribute", kind: "agent", active: true, permissions: ["accept_work", "complete_work"] },
   review: { id: "review", kind: "agent", active: true, permissions: ["verify"] },
   human: { id: "human", kind: "human", active: true, permissions: ["accept_work", "complete_work", "verify"] },
+  humanaccept: { id: "humanaccept", kind: "human", active: true, permissions: ["accept_work"] },
   holder: { id: "holder", kind: "agent", active: true, permissions: ["accept_work", "complete_work"] },
 };
 
@@ -342,4 +343,13 @@ test("close/cancel permission matrix over HTTP: the holder retires their own cla
   assert.deepEqual(await outcome(call(registry, "contribute", "close", "held", {})), { status: 403, code: "work_not_owner" });
   assert.equal(registry.get("room1", "held").state, "claimed");
   assert.equal(registry.get("room1", "held").owner, "holder");
+});
+
+test("a human with only accept_work may write work claims (either perm suffices)", async () => {
+  const registry = createWorkClaimRegistry();
+  const created = await call(registry, "humanaccept", "create", null, { id: "ha-item" });
+  assert.equal(created.status, 201);
+  const claimed = await call(registry, "humanaccept", "claim", "ha-item", {});
+  assert.equal(claimed.status, 200);
+  assert.equal(claimed.value.owner, "humanaccept");
 });

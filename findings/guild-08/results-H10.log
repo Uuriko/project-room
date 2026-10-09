@@ -1,0 +1,112 @@
+=== H10 baseline 2026-10-09T11:01:36Z ===
+✔ file-claims renders one row per file per live claim, sorted (404.746966ms)
+✔ overlap-warnings flags files held by 2+ live claims (804.369021ms)
+✔ overlap-warnings renders (none) when no live overlaps (650.702302ms)
+✔ closed claims release their files from the registry (677.205916ms)
+✔ signals line carries files_claimed and overlap_files (376.314347ms)
+✔ overlaps --files reports live holders and (unclaimed) files (873.333406ms)
+✔ overlaps without --files reports all live overlaps (1067.730489ms)
+✔ overlaps ignores closed claims (431.004481ms)
+{"event":"room.cold_start","durationMs":696,"integrity":"eager","phases":{"schema":{"ms":48,"rowsRead":0},"plugin":{"ms":318,"rowsRead":0},"fence":{"ms":216,"rowsRead":0},"verifies":{"ms":50,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":145,"heapBytes":37877952,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1836,"integrity":"eager","phases":{"schema":{"ms":294,"rowsRead":0},"plugin":{"ms":885,"rowsRead":0},"fence":{"ms":604,"rowsRead":0},"verifies":{"ms":50,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":140,"heapBytes":42339680,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":860,"integrity":"eager","phases":{"schema":{"ms":255,"rowsRead":0},"plugin":{"ms":484,"rowsRead":0},"fence":{"ms":92,"rowsRead":0},"verifies":{"ms":25,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":131,"heapBytes":34007312,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":904,"integrity":"eager","phases":{"schema":{"ms":376,"rowsRead":0},"plugin":{"ms":474,"rowsRead":0},"fence":{"ms":37,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":125,"heapBytes":38069432,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2269,"integrity":"eager","phases":{"schema":{"ms":277,"rowsRead":0},"plugin":{"ms":1115,"rowsRead":0},"fence":{"ms":687,"rowsRead":0},"verifies":{"ms":12,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":165,"heapBytes":42539328,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ readThread returns only messages posted in the requesting room (1495.570181ms)
+✔ recentMessagesFor is room-scoped: the inbox never shows another room's DMs (1949.76313ms)
+✔ listThreads still returns global thread metadata (no bodies) (940.0581ms)
+✔ agentInbox peerMessages are scoped to the requesting room (930.00922ms)
+{"event":"room.cold_start","durationMs":1935,"integrity":"eager","phases":{"schema":{"ms":753,"rowsRead":0},"plugin":{"ms":814,"rowsRead":0},"fence":{"ms":330,"rowsRead":0},"verifies":{"ms":37,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":178,"heapBytes":40400808,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ end-to-end: a DM posted in room A is invisible when the thread is read in room B (7458.98548ms)
+✔ readThread honors limit/before: newest page first, cursor pages backwards, bad cursors teach (2034.332594ms)
+{"event":"room.cold_start","durationMs":2835,"integrity":"eager","phases":{"schema":{"ms":826,"rowsRead":0},"plugin":{"ms":992,"rowsRead":0},"fence":{"ms":316,"rowsRead":0},"verifies":{"ms":377,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":209,"heapBytes":38101488,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+room diagnostic op_60uGS9QG 404 charter_not_found not_found /api/rooms/:roomId/charter
+{"event":"room.cold_start","durationMs":619,"integrity":"eager","phases":{"schema":{"ms":117,"rowsRead":0},"plugin":{"ms":28,"rowsRead":0},"fence":{"ms":315,"rowsRead":0},"verifies":{"ms":95,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":61,"heapBytes":41848408,"rooms":1,"sequences":13,"projectionBytes":3121,"events":13}
+{"event":"room.cold_start","durationMs":3065,"integrity":"eager","phases":{"schema":{"ms":312,"rowsRead":0},"plugin":{"ms":1076,"rowsRead":0},"fence":{"ms":848,"rowsRead":0},"verifies":{"ms":34,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":178,"heapBytes":35757528,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ charter preserves exact versions, clearing and old receipt retries without changing work or cursors (8570.158353ms)
+{"event":"room.cold_start","durationMs":1658,"integrity":"eager","phases":{"schema":{"ms":229,"rowsRead":0},"plugin":{"ms":431,"rowsRead":0},"fence":{"ms":615,"rowsRead":0},"verifies":{"ms":42,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":151,"heapBytes":46747736,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ only active human owner updates; invalid and stale instructions leave no writes (8293.200351ms)
+room diagnostic op_MW7KDY6I 422 invalid_charter_revision input /api/rooms/:roomId/charter
+room diagnostic op_CCBL9f-Y 422 invalid_charter_revision input /api/rooms/:roomId/charter
+room diagnostic op_N_h8osM8 422 invalid_charter_revision input /api/rooms/:roomId/charter
+room diagnostic op_e9KJeGTs 422 invalid_charter_revision input /api/rooms/:roomId/charter
+room diagnostic op_rICnPr-W 422 invalid_charter_revision input /api/rooms/:roomId/charter
+room diagnostic op_4doobgN- 422 invalid_charter_revision input /api/rooms/:roomId/charter
+{"event":"room.cold_start","durationMs":1496,"integrity":"eager","phases":{"schema":{"ms":169,"rowsRead":0},"plugin":{"ms":770,"rowsRead":0},"fence":{"ms":376,"rowsRead":0},"verifies":{"ms":17,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":151,"heapBytes":43084376,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ charter reads bind identity, selectors, exact version and containing horizon (4896.461366ms)
+{"event":"room.cold_start","durationMs":1232,"integrity":"eager","phases":{"schema":{"ms":79,"rowsRead":0},"plugin":{"ms":395,"rowsRead":0},"fence":{"ms":534,"rowsRead":0},"verifies":{"ms":12,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":140,"heapBytes":49612464,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ older service without charter metadata is unavailable, distinct from a confirmed unset charter (3352.646324ms)
+{"event":"room.cold_start","durationMs":1110,"integrity":"eager","phases":{"schema":{"ms":201,"rowsRead":0},"plugin":{"ms":609,"rowsRead":0},"fence":{"ms":59,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":140,"heapBytes":52310808,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ historical charter reads remain bounded beyond the recent event tail and legacy checkpoints stay absent (14453.013656ms)
+{"event":"room.cold_start","durationMs":1664,"integrity":"eager","phases":{"schema":{"ms":539,"rowsRead":0},"plugin":{"ms":653,"rowsRead":0},"fence":{"ms":235,"rowsRead":0},"verifies":{"ms":15,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":159,"heapBytes":48650512,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1987,"integrity":"eager","phases":{"schema":{"ms":530,"rowsRead":0},"plugin":{"ms":802,"rowsRead":0},"fence":{"ms":277,"rowsRead":0},"verifies":{"ms":101,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":155,"heapBytes":44824832,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ charter recovery checks projection hidden behind a checkpoint (3979.451304ms)
+{"event":"room.cold_start","durationMs":2274,"integrity":"eager","phases":{"schema":{"ms":83,"rowsRead":0},"plugin":{"ms":1461,"rowsRead":0},"fence":{"ms":358,"rowsRead":0},"verifies":{"ms":51,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":181,"heapBytes":41287056,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2021,"integrity":"eager","phases":{"schema":{"ms":335,"rowsRead":0},"plugin":{"ms":832,"rowsRead":0},"fence":{"ms":173,"rowsRead":0},"verifies":{"ms":186,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":150,"heapBytes":54346528,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ charter recovery checks payload hidden behind a checkpoint (3253.990632ms)
+✔ charter recovery checks bootstrap hidden behind a checkpoint (4548.709844ms)
+✔ charter recovery checks duplicate-bootstrap hidden behind a checkpoint (5044.386048ms)
+✔ MCP orientation follows charter changes across reconnect without adding authority or marking read (19477.431126ms)
+✔ a prose receipt named pull request keeps the PR number (266.312667ms)
+✔ PR #392 still parses, and a bare #5 does not become a pull request (956.522829ms)
+✔ value flags fail clearly before a board read or post (1458.741962ms)
+{"event":"room.cold_start","durationMs":2629,"integrity":"eager","phases":{"schema":{"ms":802,"rowsRead":0},"plugin":{"ms":1098,"rowsRead":0},"fence":{"ms":444,"rowsRead":0},"verifies":{"ms":33,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":200,"heapBytes":36910496,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ room templates catalog (round-2 #115) (6.517431ms)
+✔ applyRoomTemplate seeds charter and work items (5590.589518ms)
+{"event":"room.cold_start","durationMs":954,"integrity":"eager","phases":{"schema":{"ms":320,"rowsRead":0},"plugin":{"ms":72,"rowsRead":0},"fence":{"ms":290,"rowsRead":0},"verifies":{"ms":101,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":160,"heapBytes":37066280,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":668,"integrity":"eager","phases":{"schema":{"ms":38,"rowsRead":0},"plugin":{"ms":317,"rowsRead":0},"fence":{"ms":301,"rowsRead":0},"verifies":{"ms":9,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":128,"heapBytes":42751928,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1449,"integrity":"eager","phases":{"schema":{"ms":157,"rowsRead":0},"plugin":{"ms":772,"rowsRead":0},"fence":{"ms":441,"rowsRead":0},"verifies":{"ms":77,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":143,"heapBytes":40177928,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1109,"integrity":"eager","phases":{"schema":{"ms":260,"rowsRead":0},"plugin":{"ms":138,"rowsRead":0},"fence":{"ms":695,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":177,"heapBytes":31415984,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ review notes come from reviewers, the owner, or claim managers (1475.840282ms)
+✔ 100 notes from one reviewer on one claim revision produce one room event (1142.700266ms)
+✔ 50 rapid note updates on one claim produce at most 2 room events (2538.484227ms)
+{"event":"room.cold_start","durationMs":466,"integrity":"eager","phases":{"schema":{"ms":126,"rowsRead":0},"plugin":{"ms":258,"rowsRead":0},"fence":{"ms":70,"rowsRead":0},"verifies":{"ms":9,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":175,"heapBytes":37784784,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1111,"integrity":"eager","phases":{"schema":{"ms":171,"rowsRead":0},"plugin":{"ms":480,"rowsRead":0},"fence":{"ms":431,"rowsRead":0},"verifies":{"ms":29,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":134,"heapBytes":42443080,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1338,"integrity":"eager","phases":{"schema":{"ms":37,"rowsRead":0},"plugin":{"ms":88,"rowsRead":0},"fence":{"ms":1099,"rowsRead":0},"verifies":{"ms":113,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":149,"heapBytes":32844408,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":877,"integrity":"eager","phases":{"schema":{"ms":159,"rowsRead":0},"plugin":{"ms":325,"rowsRead":0},"fence":{"ms":388,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":139,"heapBytes":54815152,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1249,"integrity":"eager","phases":{"schema":{"ms":212,"rowsRead":0},"plugin":{"ms":780,"rowsRead":0},"fence":{"ms":252,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":146,"heapBytes":59749584,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ sweep is for Board writers, claim managers and the owner, and refuses before any GitHub read (3227.510042ms)
+✔ pull request outcome, CI and head facts are refused from clients (530.413384ms)
+✔ claim history keeps 200 entries and the PR link precondition counts the dropped ones (1493.609417ms)
+✔ the Board list pages done claims by age and summarizes history (3872.647113ms)
+﹣ the Board list endpoint p95 stays under the 50 ms budget (0.149004ms) # SKIP
+✔ Board reads mark another member's claim text untrusted and never the reader's own (901.325314ms)
+{"event":"room.cold_start","durationMs":737,"integrity":"eager","phases":{"schema":{"ms":304,"rowsRead":0},"plugin":{"ms":295,"rowsRead":0},"fence":{"ms":132,"rowsRead":0},"verifies":{"ms":5,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":145,"heapBytes":36685304,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":614,"integrity":"eager","phases":{"schema":{"ms":30,"rowsRead":0},"plugin":{"ms":85,"rowsRead":0},"fence":{"ms":451,"rowsRead":0},"verifies":{"ms":47,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":127,"heapBytes":39230032,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":455,"integrity":"eager","phases":{"schema":{"ms":84,"rowsRead":0},"plugin":{"ms":171,"rowsRead":0},"fence":{"ms":185,"rowsRead":0},"verifies":{"ms":9,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":137,"heapBytes":39592616,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":827,"integrity":"eager","phases":{"schema":{"ms":229,"rowsRead":0},"plugin":{"ms":255,"rowsRead":0},"fence":{"ms":239,"rowsRead":0},"verifies":{"ms":100,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":148,"heapBytes":37118288,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":202,"integrity":"eager","phases":{"schema":{"ms":32,"rowsRead":0},"plugin":{"ms":73,"rowsRead":0},"fence":{"ms":92,"rowsRead":0},"verifies":{"ms":4,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":116,"heapBytes":37673800,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ with under 10% of the event budget left only the owner and claim managers write (3460.67916ms)
+✔ with under 10% of the event budget left a writer's sweep is refused and emits no events (790.296002ms)
+✔ deploy status is fetched at most once per 60 s, and only writers can refresh (1034.888533ms)
+✔ titles and notes are normalized and refuse control, bidi, unpaired and invisible-only text (643.521556ms)
+✔ dependsOn must name claims in this room and leaseHours is 0.25 to 168 (1101.391484ms)
+room diagnostic op_ANUFiv9o 422 invalid_claim_input input /api/rooms/:roomId/work-claims
+✔ over real HTTP a guest's review note and sweep are refused and the list is marked (3059.218927ms)
+✔ board input rules: text normalization, client PR facts, lease bounds, dependencies and the event budget (8.517482ms)
+{"event":"room.cold_start","durationMs":1172,"integrity":"eager","phases":{"schema":{"ms":228,"rowsRead":0},"plugin":{"ms":746,"rowsRead":0},"fence":{"ms":76,"rowsRead":0},"verifies":{"ms":64,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":154,"heapBytes":35641504,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":244,"integrity":"eager","phases":{"schema":{"ms":125,"rowsRead":0},"plugin":{"ms":64,"rowsRead":0},"fence":{"ms":40,"rowsRead":0},"verifies":{"ms":7,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":131,"heapBytes":35070336,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ ?view=summary returns compact per-claim projections without heavy fields (2417.219665ms)
+{"event":"room.cold_start","durationMs":868,"integrity":"eager","phases":{"schema":{"ms":135,"rowsRead":0},"plugin":{"ms":442,"rowsRead":0},"fence":{"ms":255,"rowsRead":0},"verifies":{"ms":27,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":132,"heapBytes":40564032,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ the default list view still returns full claims with history (523.182453ms)
+room diagnostic op_qrvyezyX 422 invalid_claim_input input /api/rooms/:roomId/work-claims
+{"event":"room.cold_start","durationMs":284,"integrity":"eager","phases":{"schema":{"ms":46,"rowsRead":0},"plugin":{"ms":127,"rowsRead":0},"fence":{"ms":99,"rowsRead":0},"verifies":{"ms":9,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":123,"heapBytes":45257440,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ an unknown view value is rejected (1085.431093ms)
+{"event":"room.cold_start","durationMs":409,"integrity":"eager","phases":{"schema":{"ms":170,"rowsRead":0},"plugin":{"ms":146,"rowsRead":0},"fence":{"ms":84,"rowsRead":0},"verifies":{"ms":5,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":117,"heapBytes":37166656,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ ?view=summary composes with the state filter (518.736931ms)
+{"event":"room.cold_start","durationMs":930,"integrity":"eager","phases":{"schema":{"ms":146,"rowsRead":0},"plugin":{"ms":628,"rowsRead":0},"fence":{"ms":153,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":127,"heapBytes":42573136,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ ?view=summary composes with the ready queue (629.958362ms)
+✔ ?view=summary preserves the untrusted marker on member-authored titles (1007.862575ms)
+ℹ tests 51
+ℹ suites 0
+ℹ pass 50
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 1
+ℹ todo 0
+ℹ duration_ms 172761.924165

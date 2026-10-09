@@ -155,3 +155,14 @@ test("B2 (#1526): the cron tick sweeps lapsed leases before polling, matching th
   assert.ok(!actions.includes("pr_merged"), "no settlement for the dead round");
   assert.equal(out.checked, 0);
 });
+
+test("B2-boundary (#1526): a lease expiring at exactly nowMs is lapsed — settlePullRequest refuses it", () => {
+  let item = claimWork(createWork({ id: "b2-edge" }, { now: NOW, agentId: "alice" }), "alice", { now: NOW, leaseHours: 1 });
+  item = linkPr(item, "alice", PR1, NOW);
+  const r = recordPullOutcome(item, PR1, "merged", NOW);
+  assert.equal(pullsReadyToSettle(r), true);
+  const expiry = Date.parse(r.leaseExpiresAt);
+  assert.equal(settlePullRequest(r, "merged", expiry), null, "exact-instant expiry counts as lapsed (<=)");
+  const settled = settlePullRequest(r, "merged", expiry - 1);
+  assert.equal(settled?.action, "pr_merged", "1ms before expiry settles normally");
+});

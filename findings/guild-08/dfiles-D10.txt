@@ -1,0 +1,1 @@
+tests/work-claim-settle-double.test.js tests/work-claim-settle-missing-link.test.js tests/work-claim-settle-retry.test.js tests/work-claim-sqlite.test.js tests/work-claim-summary-view.test.js tests/work-claim-sweep.test.js tests/work-claim-update-precondition.test.js tests/work-claims-read.test.js tests/work-claims.test.js 

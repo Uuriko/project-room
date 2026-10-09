@@ -1,0 +1,126 @@
+=== H08 baseline 2026-10-09T10:35:22Z ===
+✔ syncShadowJournal writes only its own journal table, never real state (328.809796ms)
+✔ every shadow journal row is unambiguously marked hypothetical (220.668198ms)
+✔ shadowReport performs no writes (227.769275ms)
+{"event":"room.cold_start","durationMs":2306,"integrity":"eager","phases":{"schema":{"ms":401,"rowsRead":0},"plugin":{"ms":802,"rowsRead":0},"fence":{"ms":662,"rowsRead":0},"verifies":{"ms":151,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":178,"heapBytes":36671520,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+room diagnostic op_PCF3oN5A 401 unauthenticated access /api/rooms/:roomId
+✔ two people and two enrolled agents share a persistent room without a task (10119.030063ms)
+✔ board parser recognizes the [lane][receipt] prose-receipt prefix (1013.102708ms)
+✔ prose receipts accumulate into state.prose_receipts (2438.955494ms)
+✔ render does not hardcode watcher=paused (23.962471ms)
+✔ prose-terminal DONE resolves the task-id from the marker line, not the whole body (278.451875ms)
+✔ [lane][receipt] with an RC-style task-id keeps the full id (no truncation) (402.841656ms)
+✔ [lane][done] without a fenced room-done block parses as done, not a crash (551.189433ms)
+✔ unmarked CLAIM prose is logged without registering a claim (2418.739375ms)
+{"event":"room.cold_start","durationMs":2209,"integrity":"eager","phases":{"schema":{"ms":42,"rowsRead":0},"plugin":{"ms":993,"rowsRead":0},"fence":{"ms":702,"rowsRead":0},"verifies":{"ms":244,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":188,"heapBytes":37146320,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+room diagnostic op_UBT0W945 401 unauthenticated access /api/rooms/:roomId/export
+room diagnostic op__ah5D31B 403 owner_required access /api/rooms/:roomId/export
+{"event":"room.cold_start","durationMs":3544,"integrity":"eager","phases":{"schema":{"ms":290,"rowsRead":0},"plugin":{"ms":2469,"rowsRead":0},"fence":{"ms":400,"rowsRead":0},"verifies":{"ms":135,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":156,"heapBytes":34507968,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ room export returns the full event log as JSONL, framed by Content-Length (5028.426397ms)
+room diagnostic op_UwT9Qak4 500 internal_error internal /api/rooms/:roomId/export
+error-trace eid_0j1tUgAoeuCk fp=f0137fedcefe147d status=500 code=internal_error
+room diagnostic op_7EUEDcni 503 storage_unavailable unavailable /api/rooms/:roomId/export
+error-trace eid_2PjIHBd0K5oU fp=15a4b4c3f20d6858 status=503 code=storage_unavailable
+{"event":"room.cold_start","durationMs":904,"integrity":"eager","phases":{"schema":{"ms":294,"rowsRead":0},"plugin":{"ms":349,"rowsRead":0},"fence":{"ms":93,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":128,"heapBytes":40438208,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ an export that fails part-way is a JSON error, never a clean-looking partial file (4635.26714ms)
+room diagnostic op_4BLwocDT 415 ndjson_required input /api/rooms/:roomId/import
+room diagnostic op_wUM5c-gL 422 invalid_import input /api/rooms/:roomId/import
+room diagnostic op_SoXfmxWW 403 owner_required access /api/rooms/:roomId/import
+{"event":"room.cold_start","durationMs":1097,"integrity":"eager","phases":{"schema":{"ms":286,"rowsRead":0},"plugin":{"ms":416,"rowsRead":0},"fence":{"ms":144,"rowsRead":0},"verifies":{"ms":30,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":140,"heapBytes":47400952,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ room import round-trips an export (round-2 #107) (2052.171655ms)
+{"event":"room.cold_start","durationMs":923,"integrity":"eager","phases":{"schema":{"ms":68,"rowsRead":0},"plugin":{"ms":393,"rowsRead":0},"fence":{"ms":279,"rowsRead":0},"verifies":{"ms":52,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":129,"heapBytes":38089512,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ room import resets cursors and refreshes the projection checkpoint (1951.552986ms)
+room diagnostic op_NkgeHHp- 422 invalid_import input /api/rooms/:roomId/import
+{"event":"room.cold_start","durationMs":1837,"integrity":"eager","phases":{"schema":{"ms":291,"rowsRead":0},"plugin":{"ms":857,"rowsRead":0},"fence":{"ms":481,"rowsRead":0},"verifies":{"ms":30,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":146,"heapBytes":42899024,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ room import rejects duplicate event ids cleanly (1343.207349ms)
+{"event":"room.cold_start","durationMs":1707,"integrity":"eager","phases":{"schema":{"ms":351,"rowsRead":0},"plugin":{"ms":801,"rowsRead":0},"fence":{"ms":335,"rowsRead":0},"verifies":{"ms":8,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":168,"heapBytes":40083544,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ room import round-trips a large (1500-event) export (283070.523519ms)
+room diagnostic op_NrxTG8p4 422 invalid_import input /api/rooms/:roomId/import
+room diagnostic op_Gg4Zzme8 422 invalid_import input /api/rooms/:roomId/import
+room diagnostic op_bdM3A-Fm 422 invalid_import input /api/rooms/:roomId/import
+{"event":"room.cold_start","durationMs":1642,"integrity":"eager","phases":{"schema":{"ms":281,"rowsRead":0},"plugin":{"ms":695,"rowsRead":0},"fence":{"ms":359,"rowsRead":0},"verifies":{"ms":105,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":159,"heapBytes":45204576,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ database failures during import surface as clean invalid_import, not raw errors (2368.801834ms)
+room diagnostic op_cG54NSxC 409 session_binding_changed conflict /api/rooms/:roomId/export
+room diagnostic op_VHDDmkTp 401 unauthenticated access /api/rooms/:roomId/export
+{"event":"room.cold_start","durationMs":1521,"integrity":"eager","phases":{"schema":{"ms":304,"rowsRead":0},"plugin":{"ms":355,"rowsRead":0},"fence":{"ms":349,"rowsRead":0},"verifies":{"ms":62,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":149,"heapBytes":49988848,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ export never answers a 200 with an empty body when the lazy authenticate fails (2277.816591ms)
+room diagnostic op_XzCOmDAJ 422 invalid_import input /api/rooms/:roomId/import
+✔ import reports the line number of a corrupt line as it appears in the file, blanks included (2207.345926ms)
+{"event":"room.cold_start","durationMs":1177,"integrity":"eager","phases":{"schema":{"ms":331,"rowsRead":0},"plugin":{"ms":446,"rowsRead":0},"fence":{"ms":253,"rowsRead":0},"verifies":{"ms":14,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":155,"heapBytes":55580280,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ client exportRoom/importRoom use the hardened fetch posture and keep the service error code (110.972137ms)
+{"event":"room.cold_start","durationMs":1701,"integrity":"eager","phases":{"schema":{"ms":400,"rowsRead":0},"plugin":{"ms":636,"rowsRead":0},"fence":{"ms":434,"rowsRead":0},"verifies":{"ms":27,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":159,"heapBytes":60191440,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ F8 semantics: export returns the deletion tombstone; projection and search hide the text (1661.194193ms)
+room diagnostic op_hCD44e1v 403 owner_required access /api/rooms/:roomId/export
+room diagnostic op_PJiizGNA 401 unauthenticated access /api/rooms/:roomId/export
+room diagnostic op_7nwjEbe_ 422 invalid_format input /api/rooms/:roomId/export
+room diagnostic op_Qamb1XqI 422 invalid_format input /api/rooms/:roomId/export
+{"event":"room.cold_start","durationMs":2666,"integrity":"eager","phases":{"schema":{"ms":195,"rowsRead":0},"plugin":{"ms":2054,"rowsRead":0},"fence":{"ms":259,"rowsRead":0},"verifies":{"ms":6,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":197,"heapBytes":66427856,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ HTML export renders the same event walk for people: escaped, tombstoned, framed and sandboxed (3134.956356ms)
+room diagnostic op_RJ3HQdN_ 403 owner_required access /api/rooms/:roomId/export
+room diagnostic op_WNSD4B6B 403 owner_required access /api/rooms/:roomId/export
+room diagnostic op_nT7xGPkv 401 unauthenticated access /api/rooms/:roomId/export
+room diagnostic op_-craW9Ww 401 unauthenticated access /api/rooms/:roomId/export
+{"event":"room.cold_start","durationMs":1926,"integrity":"eager","phases":{"schema":{"ms":268,"rowsRead":0},"plugin":{"ms":1042,"rowsRead":0},"fence":{"ms":413,"rowsRead":0},"verifies":{"ms":56,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":173,"heapBytes":72201352,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ HTML export respects current membership: a removed member gets nothing, the room shows access ended (4013.495545ms)
+room diagnostic op_X1NDRCbH 500 internal_error internal /api/rooms/:roomId/export
+error-trace eid_HWpL4xhEoTni fp=f0137fedcefe147d status=500 code=internal_error
+room diagnostic op_QsEd2a40 503 storage_unavailable unavailable /api/rooms/:roomId/export
+error-trace eid_N1Dr46zO_JCp fp=15a4b4c3f20d6858 status=503 code=storage_unavailable
+{"event":"room.cold_start","durationMs":1592,"integrity":"eager","phases":{"schema":{"ms":182,"rowsRead":0},"plugin":{"ms":751,"rowsRead":0},"fence":{"ms":412,"rowsRead":0},"verifies":{"ms":54,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":158,"heapBytes":78181440,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ JSONL format variants match and omit deleted message text (3255.330973ms)
+✔ HTML renderer never links anything but a credential-free https URL and never fails on unknown events (5.840304ms)
+✔ R1: an owner's export of a room with inter-member DMs renumbers densely and round-trips through import (2713.781727ms)
+{"event":"room.cold_start","durationMs":1974,"integrity":"eager","phases":{"schema":{"ms":311,"rowsRead":0},"plugin":{"ms":948,"rowsRead":0},"fence":{"ms":450,"rowsRead":0},"verifies":{"ms":34,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":192,"heapBytes":37008280,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":2163,"integrity":"eager","phases":{"schema":{"ms":550,"rowsRead":0},"plugin":{"ms":686,"rowsRead":0},"fence":{"ms":514,"rowsRead":0},"verifies":{"ms":92,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":169,"heapBytes":35935472,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ wake tools stay behind a live identity secret (6691.330866ms)
+{"event":"room.cold_start","durationMs":1628,"integrity":"eager","phases":{"schema":{"ms":351,"rowsRead":0},"plugin":{"ms":570,"rowsRead":0},"fence":{"ms":475,"rowsRead":0},"verifies":{"ms":44,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":173,"heapBytes":43622752,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ an enrolled identity registers, reads, and clears an HTTPS wakeUrl (4705.717686ms)
+{"event":"room.cold_start","durationMs":1324,"integrity":"eager","phases":{"schema":{"ms":345,"rowsRead":0},"plugin":{"ms":665,"rowsRead":0},"fence":{"ms":106,"rowsRead":0},"verifies":{"ms":9,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":155,"heapBytes":48300760,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ push registration reuses the subscribe-time public DNS check and does not echo credentials (2147.775959ms)
+{"event":"room.cold_start","durationMs":2982,"integrity":"eager","phases":{"schema":{"ms":68,"rowsRead":0},"plugin":{"ms":1241,"rowsRead":0},"fence":{"ms":223,"rowsRead":0},"verifies":{"ms":10,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":157,"heapBytes":38291240,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ webhook subscribe list and unsubscribe stay on this identity (2848.650114ms)
+{"event":"room.cold_start","durationMs":1705,"integrity":"eager","phases":{"schema":{"ms":83,"rowsRead":0},"plugin":{"ms":1199,"rowsRead":0},"fence":{"ms":195,"rowsRead":0},"verifies":{"ms":28,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":161,"heapBytes":44411656,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ wake.pause and wake.resume use the room wake-queue pause path (4581.712801ms)
+{"event":"room.cold_start","durationMs":826,"integrity":"eager","phases":{"schema":{"ms":333,"rowsRead":0},"plugin":{"ms":133,"rowsRead":0},"fence":{"ms":156,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":133,"heapBytes":50306936,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a session cookie without a bearer secret gets the anonymous MCP catalog (2214.173882ms)
+✔ wake.register and heartbeat.set reject cadenceSeconds above the 7-day bound (1525.138934ms)
+✔ merged PR touching the claim files suppresses strike-one (2785.737842ms)
+✔ merged PR touching unrelated files does not suppress strike-one (2360.780376ms)
+✔ a drive-by touch of one peripheral file among many is not a landing (1840.332617ms)
+✔ a post-claim touch of the core file among many is a landing (2049.661719ms)
+✔ a pre-claim merged PR touching the core file is not a landing (2654.787094ms)
+✔ prose receipt after expiry suppresses strike-one as human-format activity (1542.157604ms)
+✔ human activity before the window does not suppress strike-one (1618.593362ms)
+✔ prose STATUS after strike-one suppresses strike-two (675.659225ms)
+✔ prose STATUS exactly at the strike instant does not suppress strike-two (166.239897ms)
+✔ the production-format strike-one nudge does not self-suppress strike-two (1708.408718ms)
+✔ genuine silence after strike-one still releases (strike-two semantics unchanged) (786.345634ms)
+✔ genuine silence after expiry still nudges (strike-one semantics unchanged) (2422.785758ms)
+{"event":"room.cold_start","durationMs":651,"integrity":"eager","phases":{"schema":{"ms":70,"rowsRead":0},"plugin":{"ms":150,"rowsRead":0},"fence":{"ms":323,"rowsRead":0},"verifies":{"ms":57,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":157,"heapBytes":25844032,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ guests and chat-profile agents cannot create, claim, renew, or update; contribute can (190.614577ms)
+✔ the room refuses the create past the open-claim cap, and a done claim frees a slot (13.794191ms)
+✔ a member cannot hold more than their open-claim cap (44.315594ms)
+✔ 720h and a null lease are refused for a non-owner; the owner may opt out (11.547259ms)
+✔ work-claim pages are ordered, stable, and do not overlap (13.410015ms)
+✔ the room owner releasing another member's claim is recorded as the actor (2.877669ms)
+✔ a non-owner cannot release another member's claim (QA200-MUT-03A) (4.390138ms)
+✔ releasing an already-unclaimed claim is refused (QA200-MUT-03B) (8.268249ms)
+✔ an illegal transition names the states that are allowed (11.022211ms)
+✔ a durable claim keeps the updatedAt used for board order (760.762531ms)
+✔ close and cancel retire open items over HTTP and free open-claim slots (28.138888ms)
+✔ close/cancel permission matrix over HTTP: the holder retires their own claim, a manager may cancel an unclaimed item (29.638949ms)
+{"event":"room.cold_start","durationMs":705,"integrity":"eager","phases":{"schema":{"ms":107,"rowsRead":0},"plugin":{"ms":226,"rowsRead":0},"fence":{"ms":335,"rowsRead":0},"verifies":{"ms":26,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":160,"heapBytes":26222064,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":475,"integrity":"eager","phases":{"schema":{"ms":45,"rowsRead":0},"plugin":{"ms":145,"rowsRead":0},"fence":{"ms":258,"rowsRead":0},"verifies":{"ms":24,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":120,"heapBytes":25931280,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ retry-after-timeout: a stale-item retry of the same merged lookup settles exactly once (775.04879ms)
+✔ retry-after-timeout: a stale-item retry of the same closed lookup releases exactly once (486.282106ms)
+ℹ tests 60
+ℹ suites 0
+ℹ pass 60
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 420715.169795

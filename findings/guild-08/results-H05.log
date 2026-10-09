@@ -1,0 +1,110 @@
+=== H05 baseline 2026-10-09T09:26:05Z ===
+✔ claimed locks a shadow bond at the nominal amount (18.073122ms)
+✔ done releases the open bond (5.764992ms)
+✔ clean owner release returns the bond with no flake (0.351397ms)
+✔ lease expiry forfeits and attributes the flake to the previous owner (0.612139ms)
+✔ judged-bad review forfeits the bond and records a flake (0.519149ms)
+✔ a note review leaves the bond locked (0.310156ms)
+✔ renew keeps the bond locked; the later done still releases (0.496835ms)
+✔ reassign carries the bond; a later flake hits the new owner (0.27998ms)
+✔ done with no observed claim writes no phantom entries (0.637407ms)
+✔ lease expiry with no open bond still records the flake, marked bond_posted=0 (20.503489ms)
+✔ unrelated actions write nothing (0.423966ms)
+✔ syncShadowJournal is idempotent across re-runs (3.341014ms)
+✔ shadowReport computes flake rate and the concentration verdict (7.760456ms)
+✔ shadowReport says insufficient_data below the flake floor (0.754422ms)
+✔ shadowReport says dispersed when flakes are ambient (25.479267ms)
+✔ openBonds counts a claim that was released and re-claimed as open (6.962829ms)
+✔ openBonds is 0 when every bond closed and counts a carried bond as open (2.452911ms)
+{"event":"room.cold_start","durationMs":3882,"integrity":"eager","phases":{"schema":{"ms":531,"rowsRead":0},"plugin":{"ms":1700,"rowsRead":0},"fence":{"ms":1141,"rowsRead":0},"verifies":{"ms":89,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":188,"heapBytes":37023152,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":3178,"integrity":"eager","phases":{"schema":{"ms":693,"rowsRead":0},"plugin":{"ms":1148,"rowsRead":0},"fence":{"ms":997,"rowsRead":0},"verifies":{"ms":42,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":213,"heapBytes":32900568,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ GET /demo is a public, script-free demo room page (5811.135132ms)
+{"event":"room.cold_start","durationMs":2856,"integrity":"eager","phases":{"schema":{"ms":288,"rowsRead":0},"plugin":{"ms":1096,"rowsRead":0},"fence":{"ms":953,"rowsRead":0},"verifies":{"ms":91,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":159,"heapBytes":38072768,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ GET /demo is byte-identical across requests: no live data (3858.045761ms)
+{"event":"room.cold_start","durationMs":2945,"integrity":"eager","phases":{"schema":{"ms":479,"rowsRead":0},"plugin":{"ms":1386,"rowsRead":0},"fence":{"ms":619,"rowsRead":0},"verifies":{"ms":88,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":162,"heapBytes":42622696,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ GET /demo carries no PII, ids, or secrets (fail closed) (3401.894642ms)
+✔ demoRoomView renders without any store: privacy by construction (0.902635ms)
+✔ POST /demo is rejected; HEAD /demo works (3375.015454ms)
+✔ demo discovery routes remain public and read-only (3.627765ms)
+{"event":"room.cold_start","durationMs":3176,"integrity":"eager","phases":{"schema":{"ms":439,"rowsRead":0},"plugin":{"ms":1169,"rowsRead":0},"fence":{"ms":734,"rowsRead":0},"verifies":{"ms":254,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":210,"heapBytes":21705408,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":3310,"integrity":"eager","phases":{"schema":{"ms":211,"rowsRead":0},"plugin":{"ms":1515,"rowsRead":0},"fence":{"ms":1177,"rowsRead":0},"verifies":{"ms":18,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":168,"heapBytes":26473624,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1078,"integrity":"eager","phases":{"schema":{"ms":237,"rowsRead":0},"plugin":{"ms":499,"rowsRead":0},"fence":{"ms":48,"rowsRead":0},"verifies":{"ms":33,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":133,"heapBytes":30953840,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2877,"integrity":"eager","phases":{"schema":{"ms":126,"rowsRead":0},"plugin":{"ms":2289,"rowsRead":0},"fence":{"ms":90,"rowsRead":0},"verifies":{"ms":48,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":160,"heapBytes":35422216,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ t1_readonly agent cannot stage room files; humans and t2 agents are unaffected (5459.314253ms)
+✔ t1_readonly agent cannot discard or commit files it staged before demotion (issue #998 repro) (5190.520923ms)
+✔ room owner is exempt from the tier gate on attachments (2240.993932ms)
+✔ guest-agent members are denied staging, discarding and committing room files; reads stay open (4593.678438ms)
+{"event":"room.cold_start","durationMs":2136,"integrity":"eager","phases":{"schema":{"ms":235,"rowsRead":0},"plugin":{"ms":715,"rowsRead":0},"fence":{"ms":654,"rowsRead":0},"verifies":{"ms":61,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":182,"heapBytes":37493952,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ owner toggles discoverability; non-owner is refused (84.671677ms)
+✔ feed setting is owner-only, independent of directory listing, and survives re-listing (94.300197ms)
+✔ unknown room 404s on owner routes (30.023897ms)
+✔ public listing shows only discoverable, non-archived rooms, sanitized (45.698309ms)
+✔ listing skips rooms whose state is unusable instead of 500ing (21.822188ms)
+✔ pagination cursors and limit clamping (51.353527ms)
+room diagnostic op__nfFCHY_ 422 invalid_directory input /api/rooms/:roomId/directory
+room diagnostic op_gY9u72zi 401 unauthenticated access /api/rooms/:roomId/directory
+✔ HTTP: owner toggles directory; public listing serves it; unauthenticated toggle refused (5734.397982ms)
+✔ public receipts visibility defaults to public and is owner-only (41.507561ms)
+✔ public receipts column migrates onto pre-existing directory tables (47.252663ms)
+✔ detection honors environment markers without shelling out (118.203028ms)
+✔ detection probes well-known commands and config paths (47.948587ms)
+✔ cursor install writes the hosted entry idempotently and preserves neighbors (504.120357ms)
+✔ cursor install is a no-op when the entry already matches (95.696382ms)
+✔ dry-run reports without writing (106.464251ms)
+✔ codex toml install inserts the server table and keeps the rest (128.042594ms)
+✔ custom --url flows into every entry (165.797503ms)
+✔ claude falls back to json configs when the cli is absent (310.178437ms)
+✔ claude prefers the cli when it succeeds (1.425509ms)
+✔ vscode and copilot write their documented config shapes (193.969551ms)
+✔ parseArgs validates clients and flags (14.783616ms)
+✔ copilot install preserves a pre-existing 0600 config mode (51.827267ms)
+✔ copilot install creates a new config file as 0600 (36.597572ms)
+✔ F1: replayed strike-one with a fresher stamp does not move strike_one_at (1677.390008ms)
+✔ F2: replayed strike-one with an older stamp does not move strike_one_at backwards (2472.222768ms)
+✔ F3: forged strike-two with no prior strike-one is ignored (2220.788619ms)
+✔ F3: strike-two inside the 4h grace window is ignored (2114.234543ms)
+✔ F3: strike-two after a post-nudge heartbeat is ignored (870.904111ms)
+✔ F3 control: strike-one + 4h grace + no heartbeat still releases via strike-two (1395.272403ms)
+✔ F4: lease_expires_at extends from the last heartbeat, not claim_at (2316.706594ms)
+✔ F5: STATUS with no fenced block and no ACK produces a loud log entry (1766.202369ms)
+{"event":"room.cold_start","durationMs":1293,"integrity":"eager","phases":{"schema":{"ms":65,"rowsRead":0},"plugin":{"ms":577,"rowsRead":0},"fence":{"ms":282,"rowsRead":0},"verifies":{"ms":150,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":174,"heapBytes":24161968,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1316,"integrity":"eager","phases":{"schema":{"ms":513,"rowsRead":0},"plugin":{"ms":320,"rowsRead":0},"fence":{"ms":407,"rowsRead":0},"verifies":{"ms":62,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":141,"heapBytes":28401112,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1959,"integrity":"eager","phases":{"schema":{"ms":413,"rowsRead":0},"plugin":{"ms":991,"rowsRead":0},"fence":{"ms":533,"rowsRead":0},"verifies":{"ms":21,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":165,"heapBytes":25530672,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ HTTP claims and next-actions retain the same claim across a real process restart (22411.959349ms)
+✔ a failed claim transaction sends no success and rolls back the claim write (3014.142901ms)
+✔ 405s on work-claim routes carry the RFC 9110 Allow header (1979.767889ms)
+{"event":"room.cold_start","durationMs":1804,"integrity":"eager","phases":{"schema":{"ms":396,"rowsRead":0},"plugin":{"ms":517,"rowsRead":0},"fence":{"ms":498,"rowsRead":0},"verifies":{"ms":179,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":186,"heapBytes":26135136,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":157,"failed":true,"error":"Work-claim schema requires operator reconciliation","integrity":"eager","phases":{},"cpuMs":19,"heapBytes":25074560,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2490,"integrity":"eager","phases":{"schema":{"ms":400,"rowsRead":0},"plugin":{"ms":387,"rowsRead":0},"fence":{"ms":1196,"rowsRead":0},"verifies":{"ms":48,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":165,"heapBytes":30060656,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":525,"failed":true,"error":"Work-claim schema requires operator reconciliation","integrity":"eager","phases":{},"cpuMs":27,"heapBytes":33401440,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1467,"integrity":"eager","phases":{"schema":{"ms":71,"rowsRead":0},"plugin":{"ms":865,"rowsRead":0},"fence":{"ms":118,"rowsRead":0},"verifies":{"ms":21,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":158,"heapBytes":38179920,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":38,"failed":true,"error":"Work-claim schema requires operator reconciliation","integrity":"eager","phases":{},"cpuMs":17,"heapBytes":25675248,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1180,"integrity":"eager","phases":{"schema":{"ms":132,"rowsRead":0},"plugin":{"ms":750,"rowsRead":0},"fence":{"ms":142,"rowsRead":0},"verifies":{"ms":12,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":136,"heapBytes":30487320,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":289,"failed":true,"error":"Work-claim schema requires operator reconciliation","cpuMs":21,"heapBytes":33869632,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1222,"integrity":"eager","phases":{"schema":{"ms":192,"rowsRead":0},"plugin":{"ms":719,"rowsRead":0},"fence":{"ms":207,"rowsRead":0},"verifies":{"ms":4,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":155,"heapBytes":38748280,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":61,"failed":true,"error":"Work-claim schema requires operator reconciliation","cpuMs":18,"heapBytes":25873920,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1291,"integrity":"eager","phases":{"schema":{"ms":276,"rowsRead":0},"plugin":{"ms":607,"rowsRead":0},"fence":{"ms":197,"rowsRead":0},"verifies":{"ms":20,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":150,"heapBytes":30756504,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":50,"failed":true,"error":"Work-claim schema requires operator reconciliation","cpuMs":21,"heapBytes":34147360,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2003,"integrity":"eager","phases":{"schema":{"ms":99,"rowsRead":0},"plugin":{"ms":1090,"rowsRead":0},"fence":{"ms":574,"rowsRead":0},"verifies":{"ms":41,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":147,"heapBytes":39014408,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":47,"cpuMs":26,"heapBytes":27101992,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2017,"integrity":"eager","phases":{"schema":{"ms":255,"rowsRead":0},"plugin":{"ms":821,"rowsRead":0},"fence":{"ms":551,"rowsRead":0},"verifies":{"ms":48,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":150,"heapBytes":31899616,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":164,"failed":true,"error":"fixture refuses startup commit","integrity":"eager","phases":{"schema":{"ms":83,"rowsRead":0},"plugin":{"ms":19,"rowsRead":0},"fence":{"ms":27,"rowsRead":0},"verifies":{"ms":2,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":49,"heapBytes":39073152,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":515,"integrity":"eager","phases":{"schema":{"ms":105,"rowsRead":0},"plugin":{"ms":78,"rowsRead":0},"fence":{"ms":127,"rowsRead":0},"verifies":{"ms":14,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":55,"heapBytes":30933968,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ RoomStore refuses malformed claim schema on write startup without repair (2556.939603ms)
+✔ RoomStore refuses claims table absent claim schema on write startup without repair (7074.674262ms)
+✔ RoomStore refuses config table absent claim schema on write startup without repair (2113.594122ms)
+✔ RoomStore refuses malformed claim schema on read-only startup without repair (4781.124579ms)
+✔ RoomStore refuses claims table absent claim schema on read-only startup without repair (1634.361995ms)
+✔ RoomStore refuses config table absent claim schema on read-only startup without repair (1696.960127ms)
+✔ read-only startup permits both old claim tables absent and does not create them (2580.871227ms)
+✔ write startup creates both claim tables atomically and failed commit leaves neither (3505.760824ms)
+ℹ tests 68
+ℹ suites 0
+ℹ pass 68
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 157827.160024

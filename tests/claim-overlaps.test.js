@@ -55,3 +55,12 @@ test("overlaps are deterministic on replay", () => {
   assert.deepEqual(first.overlaps, [{ workItemId: "w-login", holderId: "codex", paths: ["docs/**"] }]);
   assert.deepEqual(second, first);
 });
+
+test("a claim whose lease expires at exactly the query instant is not active for overlap", () => {
+  const expiry = "2026-09-05T12:00:00.000Z";
+  const state = claim(twoAgents(), "w-login", "codex", ["src/app.js"], "Acme/Demo", expiry);
+  assert.deepEqual(claimOverlaps(state, "w-start", "Acme/Demo", ["src/app.js"], expiry), [],
+    "expired at the instant: no overlap");
+  assert.equal(claimOverlaps(state, "w-start", "Acme/Demo", ["src/app.js"], "2026-09-05T11:59:59.999Z").length, 1,
+    "1ms before expiry: still overlapping");
+});

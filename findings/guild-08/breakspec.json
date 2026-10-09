@@ -1,0 +1,194 @@
+[
+ {
+  "unit": "H17",
+  "suite": "work-claims.test.js",
+  "target": "server/work-claims.mjs",
+  "pattern": "check\\(item\\.state === \"unclaimed\", item\\.state !== \"claimed\"",
+  "replacement": "check(true, item.state !== \"claimed\"",
+  "desc": "anti-collision check disabled"
+ },
+ {
+  "unit": "H17",
+  "suite": "work-claim-board.test.js",
+  "target": "server/work-claim-routes.mjs",
+  "pattern": "error\\.body = \\{ error: \\{ code, message \\}, hint, next: \\[\\{ command: hint \\}\\] \\};\\n  throw error;",
+  "replacement": "error.body = { error: { code, message }, hint, next: [{ command: hint }] };\n  return;",
+  "desc": "refuseCap never throws"
+ },
+ {
+  "unit": "H17",
+  "suite": "work-claim-guards.test.js",
+  "target": "server/work-claim-routes.mjs",
+  "pattern": "if \\(member\\.kind === \"human\"\\) return permissions\\.has\\(\"accept_work\"\\) \\|\\| permissions\\.has\\(\"complete_work\"\\);",
+  "replacement": "if (member.kind === \"human\") return false;",
+  "desc": "humans lose accept/complete_work"
+ },
+ {
+  "unit": "H17",
+  "suite": "work-claim-leases.test.js",
+  "target": "server/work-claims.mjs",
+  "pattern": "const nowMsOf = value => value === undefined \\? Date\\.now\\(\\) : toMs\\(value\\);",
+  "replacement": "const nowMsOf = value => 0;",
+  "desc": "clock frozen at epoch"
+ },
+ {
+  "unit": "H17",
+  "suite": "work-claim-integrity.test.js",
+  "target": "server/work-claim-integrity.mjs",
+  "pattern": "export const BOARD_LEASE_HOURS_MAX = 168;",
+  "replacement": "export const BOARD_LEASE_HOURS_MAX = 0.05;",
+  "desc": "max lease 3 minutes"
+ },
+ {
+  "unit": "H18",
+  "suite": "claim-collisions.test.js",
+  "target": "server/claim-collisions.mjs",
+  "pattern": "\\.filter\\(c => !CLOSED_STATUSES\\.includes\\(c\\.status\\.toLowerCase\\(\\)\\)\\)",
+  "replacement": ".filter(c => true)",
+  "desc": "closed claims collide"
+ },
+ {
+  "unit": "H18",
+  "suite": "claim-map.test.js",
+  "target": "scripts/room",
+  "pattern": "\"## file-claims\",",
+  "replacement": "\"## file-claims-BROKEN\",",
+  "desc": "board drops file-claims section"
+ },
+ {
+  "unit": "H18",
+  "suite": "claim-overlaps.test.js",
+  "target": "src/events.js",
+  "pattern": "return claim\\.status === \"active\" && Date\\.parse\\(claim\\.expiresAt\\) > Date\\.parse\\(at\\);",
+  "replacement": "return false;",
+  "desc": "no claim ever active for overlap"
+ },
+ {
+  "unit": "H18",
+  "suite": "claim-validate.test.js",
+  "target": "server/claim-validate.mjs",
+  "pattern": "if \\(hours < 1 \\|\\| hours > 72\\) errors\\.push\\(\"lease out of range 1-72h\"\\);",
+  "replacement": "if (hours < 1 || hours > 1) errors.push(\"lease out of range 1-72h\");",
+  "desc": "lease range shrinks to 1h"
+ },
+ {
+  "unit": "H18",
+  "suite": "claim-reputation.test.js",
+  "target": "server/claim-reputation.mjs",
+  "pattern": "rep\\.signalTyped\\(s\\.agent, s\\.type, \\{ at: s\\.at \\}\\);",
+  "replacement": "// broken: signals dropped",
+  "desc": "reputation signals dropped"
+ },
+ {
+  "unit": "H19",
+  "suite": "room-sweep-evidence.test.js",
+  "target": "scripts/room",
+  "pattern": "strike-one nudge for \\$task_id",
+  "replacement": "strike-one BROKEN for $task_id",
+  "desc": "sweep plan strike-one text mutated"
+ },
+ {
+  "unit": "H19",
+  "suite": "room-sweep-terminal.test.js",
+  "target": "scripts/room",
+  "pattern": "RECLAIM \\(strike 2\\):",
+  "replacement": "RECLAIM BROKEN:",
+  "desc": "strike-two text mutated"
+ },
+ {
+  "unit": "H19",
+  "suite": "room-sweep-dry-run.test.js",
+  "target": "scripts/room",
+  "pattern": "--now\\) need_val \"_sweep-plan\"",
+  "replacement": "--now) need_val \"_sweep-plan-BROKEN\"",
+  "desc": "_sweep-plan --now flag renamed"
+ },
+ {
+  "unit": "H19",
+  "suite": "room-guard.test.js",
+  "target": "scripts/room-guard.mjs",
+  "pattern": "process\\.exitCode = result\\.code;",
+  "replacement": "process.exitCode = 0;",
+  "desc": "guard never fails"
+ },
+ {
+  "unit": "H19",
+  "suite": "room-entry.test.js",
+  "target": "server/http.mjs",
+  "pattern": "return json\\(res, created\\.duplicate \\? 200 : 201, \\{ room: \\{ id: roomId \\}, created: !created\\.duplicate \\}\\);",
+  "replacement": "return json(res, created.duplicate ? 201 : 200, { room: { id: roomId }, created: !created.duplicate });",
+  "desc": "room create status codes swapped"
+ },
+ {
+  "unit": "H20",
+  "suite": "room-mcp-auth.test.js",
+  "target": "server/mcp-http.mjs",
+  "pattern": "name: \"room_join_packet\",",
+  "replacement": "name: \"room_join_packet_BROKEN\",",
+  "desc": "join tool renamed"
+ },
+ {
+  "unit": "H20",
+  "suite": "room-lifecycle.test.js",
+  "target": "src/events.js",
+  "pattern": "if \\(actor\\.id !== state\\.room\\.ownerId\\) throw new Error\\(\"Only the Room owner may archive the room\"\\);",
+  "replacement": "if (false) throw new Error(\"unreachable\");",
+  "desc": "anyone may archive"
+ },
+ {
+  "unit": "H20",
+  "suite": "room-creation.test.js",
+  "target": "server/room-lifecycle.mjs",
+  "pattern": "return member\\.id === store\\.roomAuthority\\(room_id\\)\\.ownerId \\|\\| member\\.permissions\\.includes\\(\"manage_members\"\\);",
+  "replacement": "return false;",
+  "desc": "nobody administers membership"
+ },
+ {
+  "unit": "H20",
+  "suite": "room-coord.test.js",
+  "target": "scripts/room-coord.mjs",
+  "pattern": "throw new CoordError\\(\"usage_error\", `--\\$\\{key\\} needs a value`\\);",
+  "replacement": "options[key] = true;",
+  "desc": "malformed input accepted"
+ },
+ {
+  "unit": "H20",
+  "suite": "room-results.test.js",
+  "target": "src/work-selectors.js",
+  "pattern": "if \\(!item \\|\\| item\\.state !== \"completed\"",
+  "replacement": "if (!item || item.state !== \"completed-BROKEN\"",
+  "desc": "nothing ever completed"
+ },
+ {
+  "unit": "H19",
+  "suite": "room-sweep-terminal.test.js",
+  "target": "scripts/room",
+  "pattern": "\\(state_word\\(\\.tasks\\[\\$tid\\]\\.state\\) != \"working\"",
+  "replacement": "(state_word(.tasks[$tid].state) == \"working\"",
+  "desc": "rogue strikes no longer ignored"
+ },
+ {
+  "unit": "H19",
+  "suite": "room-sweep-dry-run.test.js",
+  "target": "scripts/room",
+  "pattern": "printf 'room: sweep done, %s action\\(s\\)\\\\n' \"\\$actions\"",
+  "replacement": "printf 'room: sweep done-BROKEN, %s action(s)\\\\n' \"$actions\"",
+  "desc": "dry-run summary text mutated"
+ },
+ {
+  "unit": "H19",
+  "suite": "room-guard.test.js",
+  "target": "scripts/room-guard.mjs",
+  "pattern": "return \\{ code: warn \\? 0 : 1, lines, conflicts \\};",
+  "replacement": "return { code: 0, lines, conflicts };",
+  "desc": "blocked guard returns 0"
+ },
+ {
+  "unit": "H19",
+  "suite": "room-entry.test.js",
+  "target": "deploy/room-entry.mjs",
+  "pattern": "return new Response\\(null, \\{ status: 302,",
+  "replacement": "return new Response(null, { status: 301,",
+  "desc": "entry redirect 301 not 302"
+ }
+]

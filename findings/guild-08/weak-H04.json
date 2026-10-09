@@ -1,0 +1,49 @@
+[
+ {
+  "file": "tests/agent-rooms.test.js",
+  "tests": 31,
+  "weak": []
+ },
+ {
+  "file": "tests/default-room.test.js",
+  "tests": 6,
+  "weak": []
+ },
+ {
+  "file": "tests/room-attachment-quota-ratchet.test.js",
+  "tests": 4,
+  "weak": []
+ },
+ {
+  "file": "tests/room-deep-link.test.js",
+  "tests": 8,
+  "weak": []
+ },
+ {
+  "file": "tests/room-mcp-inbox-attachments.test.js",
+  "tests": 4,
+  "weak": []
+ },
+ {
+  "file": "tests/room-rotation-ledger.test.js",
+  "tests": 6,
+  "weak": []
+ },
+ {
+  "file": "tests/work-claim-duplicates.test.js",
+  "tests": 10,
+  "weak": [
+   {
+    "name": "findDuplicates validates inputs",
+    "assertions": 0,
+    "lines": 9,
+    "weak": true
+   }
+  ]
+ },
+ {
+  "file": "tests/work-claim-retention.test.js",
+  "tests": 18,
+  "weak": []
+ }
+]

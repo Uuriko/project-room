@@ -1,0 +1,1 @@
+{"unit":"H09","baseline_exit":0,"interrupted":0,"pass":37,"fail":0,"cancelled":0,"tests_scanned":37,"weak_flagged":0,"files":["claim-collisions.test.js","openapi-claims-validate-status.test.js","room-channels.test.js","room-file-upload.test.js","room-metrics-since.test.js","room-sweep-terminal.test.js","work-claim-idempotency.test.js","work-claim-sqlite.test.js"]}

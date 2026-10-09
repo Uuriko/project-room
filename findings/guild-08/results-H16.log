@@ -1,0 +1,179 @@
+=== H16 baseline 2026-10-09T11:39:18Z ===
+{"event":"room.cold_start","durationMs":1701,"integrity":"eager","phases":{"schema":{"ms":395,"rowsRead":0},"plugin":{"ms":694,"rowsRead":0},"fence":{"ms":265,"rowsRead":0},"verifies":{"ms":107,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":181,"heapBytes":40057224,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ valid block -> valid:true with taskId and parsed fields (37.335029ms)
+✔ no fenced block -> the exact rebuild error (0.510006ms)
+✔ each missing field reports its exact rebuild error (11.935391ms)
+✔ malformed values report their exact rebuild errors (9.036992ms)
+✔ accepted value shapes stay valid (0.741042ms)
+✔ violations accumulate in field order (0.360702ms)
+✔ duplicate keys: last wins, first-insertion order kept (0.496405ms)
+✔ field parsing details mirror the jq (0.299539ms)
+✔ fence extraction details mirror the jq (0.185759ms)
+✔ validateClaimFields is callable on parsed fields directly (11.020718ms)
+✔ parity with scripts/room validate_claim on every vector (1526.66186ms)
+{"event":"room.cold_start","durationMs":1651,"integrity":"eager","phases":{"schema":{"ms":240,"rowsRead":0},"plugin":{"ms":795,"rowsRead":0},"fence":{"ms":354,"rowsRead":0},"verifies":{"ms":90,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":166,"heapBytes":33939248,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ POST /api/claims/validate answers 200 with the verdict, anonymously (3259.407801ms)
+{"event":"room.cold_start","durationMs":1483,"integrity":"eager","phases":{"schema":{"ms":226,"rowsRead":0},"plugin":{"ms":454,"rowsRead":0},"fence":{"ms":536,"rowsRead":0},"verifies":{"ms":144,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":163,"heapBytes":39625424,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ malformed request bodies are 422, non-POST is 405 (2118.080395ms)
+{"event":"room.cold_start","durationMs":1575,"integrity":"eager","phases":{"schema":{"ms":176,"rowsRead":0},"plugin":{"ms":691,"rowsRead":0},"fence":{"ms":466,"rowsRead":0},"verifies":{"ms":39,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":146,"heapBytes":44967880,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ text over 64KB is 422 (2528.390069ms)
+{"event":"room.cold_start","durationMs":1662,"integrity":"eager","phases":{"schema":{"ms":198,"rowsRead":0},"plugin":{"ms":850,"rowsRead":0},"fence":{"ms":354,"rowsRead":0},"verifies":{"ms":7,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":148,"heapBytes":37323024,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ secret-looking block content is never logged (2221.358665ms)
+✔ the route is bounded at 30 per address per minute (3006.670106ms)
+{"event":"room.cold_start","durationMs":3087,"integrity":"eager","phases":{"schema":{"ms":279,"rowsRead":0},"plugin":{"ms":2174,"rowsRead":0},"fence":{"ms":429,"rowsRead":0},"verifies":{"ms":17,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":180,"heapBytes":35875360,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":216,"integrity":"eager","phases":{"schema":{"ms":125,"rowsRead":0},"plugin":{"ms":53,"rowsRead":0},"fence":{"ms":33,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":160,"heapBytes":33933576,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2171,"integrity":"eager","phases":{"schema":{"ms":298,"rowsRead":0},"plugin":{"ms":1074,"rowsRead":0},"fence":{"ms":557,"rowsRead":0},"verifies":{"ms":39,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":159,"heapBytes":37920072,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ pack shape: every documented field is present (5606.315147ms)
+✔ unknown room answers 404 room_not_found (221.158885ms)
+{"event":"room.cold_start","durationMs":1592,"integrity":"eager","phases":{"schema":{"ms":186,"rowsRead":0},"plugin":{"ms":625,"rowsRead":0},"fence":{"ms":424,"rowsRead":0},"verifies":{"ms":88,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":145,"heapBytes":44133360,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ member roster carries identity, handle, kind and permissions (3467.004573ms)
+{"event":"room.cold_start","durationMs":1837,"integrity":"eager","phases":{"schema":{"ms":281,"rowsRead":0},"plugin":{"ms":805,"rowsRead":0},"fence":{"ms":437,"rowsRead":0},"verifies":{"ms":39,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":150,"heapBytes":35764040,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ open work lists claimants, claim statuses and lease expiries (2367.775533ms)
+{"event":"room.cold_start","durationMs":2221,"integrity":"eager","phases":{"schema":{"ms":388,"rowsRead":0},"plugin":{"ms":778,"rowsRead":0},"fence":{"ms":35,"rowsRead":0},"verifies":{"ms":4,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":138,"heapBytes":40859456,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ pinned resources and participation rules are real room data (2430.984933ms)
+{"event":"room.cold_start","durationMs":964,"integrity":"eager","phases":{"schema":{"ms":180,"rowsRead":0},"plugin":{"ms":428,"rowsRead":0},"fence":{"ms":106,"rowsRead":0},"verifies":{"ms":20,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":136,"heapBytes":46110264,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ coordination norms carry the standing defaults (3233.370527ms)
+room diagnostic op_2i1YJugz 401 unauthenticated access /api/rooms/:roomId/activation-pack
+{"event":"room.cold_start","durationMs":974,"integrity":"eager","phases":{"schema":{"ms":377,"rowsRead":0},"plugin":{"ms":252,"rowsRead":0},"fence":{"ms":116,"rowsRead":0},"verifies":{"ms":9,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":140,"heapBytes":36931432,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ the route rides the standard room credential funnel (1911.427209ms)
+✔ agent client orientation agrees with the browser projection and reads do not advance room state (2182.387241ms)
+{"event":"room.cold_start","durationMs":525,"integrity":"eager","phases":{"schema":{"ms":23,"rowsRead":0},"plugin":{"ms":65,"rowsRead":0},"fence":{"ms":253,"rowsRead":0},"verifies":{"ms":174,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":141,"heapBytes":35912576,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+room diagnostic op_DSXMVgyZ 404 work_claim_not_found not_found /api/rooms/:roomId/work-claims/relay/claim
+{"event":"room.cold_start","durationMs":228,"integrity":"eager","phases":{"schema":{"ms":82,"rowsRead":0},"plugin":{"ms":89,"rowsRead":0},"fence":{"ms":37,"rowsRead":0},"verifies":{"ms":4,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":114,"heapBytes":41341400,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ tail returns only the events that concern the caller and a checkpoint that never rereads (6440.827635ms)
+✔ claim and land events read as lane changes in the digest and count as the owner's business (41.268021ms)
+✔ tail wakes the claimant for a land update recorded in their name, and stops when the checkpoint stalls (10.64851ms)
+✔ the tail command refuses a bad checkpoint before reading (509.312228ms)
+{"event":"room.cold_start","durationMs":3005,"integrity":"eager","phases":{"schema":{"ms":1131,"rowsRead":0},"plugin":{"ms":1121,"rowsRead":0},"fence":{"ms":160,"rowsRead":0},"verifies":{"ms":9,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":208,"heapBytes":38831376,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+✔ reducer: kind is validated at creation, archive is owner-only and closes the log, leaving needs no administration (77.966375ms)
+room diagnostic op_PLohZkZu 422 command_rejected conflict /api/rooms/:roomId/commands
+room diagnostic op__LI2HIK5 422 invalid_command input /api/rooms/:roomId/commands
+room diagnostic op_5rwnHHs4 409 room_archived conflict /api/rooms/:roomId/commands
+room diagnostic op_fhE_5e9i 409 room_archived conflict /api/rooms/:roomId/commands
+room diagnostic op_RzWLMFUU 409 room_archived conflict /api/rooms/:roomId/commands
+room diagnostic op_yJfFK85b 409 room_archived conflict /api/rooms/:roomId/commands
+room diagnostic op_SPUy62n_ 409 room_archived conflict /api/rooms/:roomId/import
+room diagnostic op_sKu53jLx 403 owner_required access /api/rooms/:roomId/export
+{"event":"room.cold_start","durationMs":474,"failed":true,"error":"Room lifecycle requires operator reconciliation","integrity":"eager","phases":{"schema":{"ms":160,"rowsRead":0},"plugin":{"ms":9,"rowsRead":0},"fence":{"ms":82,"rowsRead":0}},"cpuMs":58,"heapBytes":48216184,"rooms":1,"sequences":11,"projectionBytes":3013,"events":11}
+{"event":"room.cold_start","durationMs":469,"failed":true,"error":"Room lifecycle requires operator reconciliation","cpuMs":38,"heapBytes":36748096,"rooms":1,"sequences":11,"projectionBytes":3013,"events":11}
+{"event":"room.cold_start","durationMs":359,"integrity":"eager","phases":{"schema":{"ms":115,"rowsRead":0},"plugin":{"ms":51,"rowsRead":0},"fence":{"ms":104,"rowsRead":0},"verifies":{"ms":7,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":56,"heapBytes":43736328,"rooms":1,"sequences":11,"projectionBytes":3013,"events":11}
+{"event":"room.cold_start","durationMs":309,"cpuMs":36,"heapBytes":47647432,"rooms":1,"sequences":11,"projectionBytes":3013,"events":11}
+{"event":"room.cold_start","durationMs":1622,"integrity":"eager","phases":{"schema":{"ms":168,"rowsRead":0},"plugin":{"ms":1052,"rowsRead":0},"fence":{"ms":230,"rowsRead":0},"verifies":{"ms":9,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":163,"heapBytes":36808776,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":16,"failed":true,"error":"Read-only invitation audit requires schema v38; migrate a backed-up database through the service first","cpuMs":1,"heapBytes":51139984,"rooms":2,"sequences":31,"projectionBytes":10260,"events":31}
+{"event":"room.cold_start","durationMs":1615,"integrity":"eager","phases":{"schema":{"ms":762,"rowsRead":0},"plugin":{"ms":322,"rowsRead":0},"fence":{"ms":220,"rowsRead":0},"verifies":{"ms":66,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":256,"heapBytes":44174680,"rooms":2,"sequences":31,"projectionBytes":10535,"events":31}
+{"event":"room.cold_start","durationMs":352,"cpuMs":48,"heapBytes":41667080,"rooms":2,"sequences":32,"projectionBytes":10952,"events":32}
+{"event":"room.cold_start","durationMs":1973,"integrity":"eager","phases":{"schema":{"ms":243,"rowsRead":0},"plugin":{"ms":889,"rowsRead":0},"fence":{"ms":512,"rowsRead":0},"verifies":{"ms":32,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":155,"heapBytes":45554560,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":2655,"integrity":"eager","phases":{"schema":{"ms":350,"rowsRead":0},"plugin":{"ms":797,"rowsRead":0},"fence":{"ms":808,"rowsRead":0},"verifies":{"ms":152,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":186,"heapBytes":42226544,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":1813,"integrity":"eager","phases":{"schema":{"ms":502,"rowsRead":0},"plugin":{"ms":792,"rowsRead":0},"fence":{"ms":269,"rowsRead":0},"verifies":{"ms":27,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":156,"heapBytes":53550488,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ store: archiving closes commands, import and every join path with 409 room_archived while reads and export continue (13941.732343ms)
+✔ store: a seeded history that ends archived stores the column, and one that continues past an archive does not replay (2946.282882ms)
+✔ migration: genuine v27 data gains rooms.archived_at exactly once, keeps every room, and the migration is idempotent (24779.370296ms)
+✔ account rooms: discovery carries kind and archive state; creation is bounded to accounts that administer membership (4881.737981ms)
+✔ account rooms: the membership cap bounds creation (13166.628881ms)
+✔ account rooms: someone who left their only room may create their first room (3257.5352ms)
+✔ rebuild --commit-push survives a dirty ROOM-STATE.md on main (2745.325014ms)
+✔ rebuild --commit-push is a no-op when the board is unchanged (2012.322813ms)
+✔ rebuild --commit-push creates room-state from main when the branch is new (1628.426359ms)
+{"event":"room.cold_start","durationMs":838,"integrity":"eager","phases":{"schema":{"ms":280,"rowsRead":0},"plugin":{"ms":366,"rowsRead":0},"fence":{"ms":61,"rowsRead":0},"verifies":{"ms":9,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":165,"heapBytes":35738392,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+ROOM_SECURITY_CONTACT is unset; /.well-known/security.txt returns 404
+{"event":"room.cold_start","durationMs":946,"integrity":"eager","phases":{"schema":{"ms":229,"rowsRead":0},"plugin":{"ms":283,"rowsRead":0},"fence":{"ms":400,"rowsRead":0},"verifies":{"ms":28,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":148,"heapBytes":36088944,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":976,"integrity":"eager","phases":{"schema":{"ms":200,"rowsRead":0},"plugin":{"ms":335,"rowsRead":0},"fence":{"ms":419,"rowsRead":0},"verifies":{"ms":8,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":136,"heapBytes":40970328,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a contribute-profile agent creates, renews, and releases a claim without write_external (3814.004017ms)
+room diagnostic op_bJFmIdfT 403 work_claims_not_permitted access /api/rooms/:roomId/work-claims/config
+{"event":"room.cold_start","durationMs":498,"integrity":"eager","phases":{"schema":{"ms":133,"rowsRead":0},"plugin":{"ms":204,"rowsRead":0},"fence":{"ms":139,"rowsRead":0},"verifies":{"ms":20,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":124,"heapBytes":48698176,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ the room owner sets the per-member claim cap and a second claim is refused (1584.913618ms)
+{"event":"room.cold_start","durationMs":589,"integrity":"eager","phases":{"schema":{"ms":50,"rowsRead":0},"plugin":{"ms":261,"rowsRead":0},"fence":{"ms":240,"rowsRead":0},"verifies":{"ms":10,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":125,"heapBytes":38031304,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ an ownerless room refuses a non-member and a member without a claim profile (802.139966ms)
+{"event":"room.cold_start","durationMs":1130,"integrity":"eager","phases":{"schema":{"ms":88,"rowsRead":0},"plugin":{"ms":479,"rowsRead":0},"fence":{"ms":536,"rowsRead":0},"verifies":{"ms":24,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":132,"heapBytes":43905072,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ CI state changes are stored, receipted, and wake the owner on failure (842.932624ms)
+room diagnostic op_0kPcihrU 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/review
+{"event":"room.cold_start","durationMs":652,"integrity":"eager","phases":{"schema":{"ms":124,"rowsRead":0},"plugin":{"ms":375,"rowsRead":0},"fence":{"ms":134,"rowsRead":0},"verifies":{"ms":19,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":139,"heapBytes":49829736,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ review records refuse the owner and a chat agent, and a changes request wakes the owner (1660.949255ms)
+room diagnostic op_5n43J04W 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
+room diagnostic op_ZrWIfvqj 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
+room diagnostic op_Bg5SICAT 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
+room diagnostic op_RyHOHbNc 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
+room diagnostic op_sG-OLCRI 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
+room diagnostic op_gBIlua97 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
+{"event":"room.cold_start","durationMs":1247,"integrity":"eager","phases":{"schema":{"ms":144,"rowsRead":0},"plugin":{"ms":1055,"rowsRead":0},"fence":{"ms":40,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":139,"heapBytes":47113520,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+▶ reviewed completion requires the named reviewer's latest explicit approval
+  ✔ distinct_member (1983.87384ms)
+room diagnostic op_FHmUuCvx 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
+room diagnostic op_AZ5osbxx 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
+room diagnostic op__ncz7gOV 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
+room diagnostic op_7jgnAkLf 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
+room diagnostic op_wvdLTmDK 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
+room diagnostic op_WNYno7A6 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
+room diagnostic op_tyDCIvyJ 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
+room diagnostic op_8p-IPjhQ 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
+room diagnostic op_JSqBSbHb 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
+{"event":"room.cold_start","durationMs":1326,"integrity":"eager","phases":{"schema":{"ms":377,"rowsRead":0},"plugin":{"ms":329,"rowsRead":0},"fence":{"ms":549,"rowsRead":0},"verifies":{"ms":54,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":142,"heapBytes":49871984,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+  ✔ independent_principal (2932.398426ms)
+✔ reviewed completion requires the named reviewer's latest explicit approval (4944.475732ms)
+room diagnostic op_OuU2r4cF 403 work_review_rejected access /api/rooms/:roomId/work-claims/named-reviewer/update
+{"event":"room.cold_start","durationMs":1068,"integrity":"eager","phases":{"schema":{"ms":177,"rowsRead":0},"plugin":{"ms":417,"rowsRead":0},"fence":{"ms":431,"rowsRead":0},"verifies":{"ms":37,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":143,"heapBytes":44360808,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ manual completion uses the named reviewer's approval, not another member's verdict (1809.284653ms)
+room diagnostic op_-v_UgtLt 403 work_review_rejected access /api/rooms/:roomId/work-claims/self-review/update
+{"event":"room.cold_start","durationMs":756,"integrity":"eager","phases":{"schema":{"ms":159,"rowsRead":0},"plugin":{"ms":263,"rowsRead":0},"fence":{"ms":302,"rowsRead":0},"verifies":{"ms":25,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":126,"heapBytes":52234272,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ human verify permits review without granting Board writes, and self-attested closure is unchanged (2089.046793ms)
+room diagnostic op_1TTUY3fY 403 work_review_rejected access /api/rooms/:roomId/work-claims/authority/update
+{"event":"room.cold_start","durationMs":1656,"integrity":"eager","phases":{"schema":{"ms":143,"rowsRead":0},"plugin":{"ms":892,"rowsRead":0},"fence":{"ms":587,"rowsRead":0},"verifies":{"ms":19,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":145,"heapBytes":45093168,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+▶ completion rechecks a reviewer's active membership and current review authority
+  ✔ distinct_member: permission revoked (1346.842544ms)
+room diagnostic op_DbhiQpdv 403 work_review_rejected access /api/rooms/:roomId/work-claims/authority/update
+{"event":"room.cold_start","durationMs":393,"integrity":"eager","phases":{"schema":{"ms":42,"rowsRead":0},"plugin":{"ms":135,"rowsRead":0},"fence":{"ms":171,"rowsRead":0},"verifies":{"ms":17,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":121,"heapBytes":50892344,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+  ✔ distinct_member: inactive (1771.377786ms)
+room diagnostic op_IzmpuFkA 403 work_review_rejected access /api/rooms/:roomId/work-claims/authority/update
+{"event":"room.cold_start","durationMs":476,"integrity":"eager","phases":{"schema":{"ms":20,"rowsRead":0},"plugin":{"ms":196,"rowsRead":0},"fence":{"ms":225,"rowsRead":0},"verifies":{"ms":31,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":127,"heapBytes":40981336,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+  ✔ independent_principal: permission revoked (751.776666ms)
+room diagnostic op_zJVQW_GV 403 work_review_rejected access /api/rooms/:roomId/work-claims/authority/update
+{"event":"room.cold_start","durationMs":583,"integrity":"eager","phases":{"schema":{"ms":54,"rowsRead":0},"plugin":{"ms":208,"rowsRead":0},"fence":{"ms":279,"rowsRead":0},"verifies":{"ms":40,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":126,"heapBytes":46773072,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+  ✔ independent_principal: inactive (609.627481ms)
+✔ completion rechecks a reviewer's active membership and current review authority (4492.917485ms)
+{"event":"room.cold_start","durationMs":955,"integrity":"eager","phases":{"schema":{"ms":342,"rowsRead":0},"plugin":{"ms":572,"rowsRead":0},"fence":{"ms":38,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":131,"heapBytes":52624184,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ an unchanged latest review retry preserves its timestamp, basis, events, and wakes (1186.25533ms)
+room diagnostic op_G3p5z_4b 403 work_review_rejected access /api/rooms/:roomId/work-claims/basis-revision/update
+room diagnostic op_9f2isV4P 403 work_review_rejected access /api/rooms/:roomId/work-claims/basis-revision/update
+{"event":"room.cold_start","durationMs":1353,"integrity":"eager","phases":{"schema":{"ms":678,"rowsRead":0},"plugin":{"ms":578,"rowsRead":0},"fence":{"ms":91,"rowsRead":0},"verifies":{"ms":4,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":141,"heapBytes":47425480,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+▶ approval remains bound to the reviewed revision and observed pull-request head
+  ✔ revision (1422.927936ms)
+room diagnostic op_zGlofwmH 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
+room diagnostic op_QrtIAfoN 403 work_review_rejected access /api/rooms/:roomId/work-claims/:item/update
+  ✔ headSha (1859.941895ms)
+✔ approval remains bound to the reviewed revision and observed pull-request head (3288.920701ms)
+{"event":"room.cold_start","durationMs":2046,"integrity":"eager","phases":{"schema":{"ms":428,"rowsRead":0},"plugin":{"ms":784,"rowsRead":0},"fence":{"ms":408,"rowsRead":0},"verifies":{"ms":15,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":162,"heapBytes":54985952,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":607,"integrity":"eager","phases":{"schema":{"ms":264,"rowsRead":0},"plugin":{"ms":55,"rowsRead":0},"fence":{"ms":36,"rowsRead":0},"verifies":{"ms":28,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":54,"heapBytes":50703984,"rooms":1,"sequences":9,"projectionBytes":1239,"events":9}
+room diagnostic op_rNhm16F0 403 work_review_rejected access /api/rooms/:roomId/work-claims/persisted-review/update
+{"event":"room.cold_start","durationMs":1833,"integrity":"eager","phases":{"schema":{"ms":503,"rowsRead":0},"plugin":{"ms":933,"rowsRead":0},"fence":{"ms":373,"rowsRead":0},"verifies":{"ms":23,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":163,"heapBytes":55750744,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ persisted approvals retain their basis while older unbound records need a fresh review (4767.028566ms)
+room diagnostic op_YnUUBJzN 403 work_review_rejected access /api/rooms/:roomId/work-claims/superseded-review/update
+{"event":"room.cold_start","durationMs":415,"integrity":"eager","phases":{"schema":{"ms":94,"rowsRead":0},"plugin":{"ms":94,"rowsRead":0},"fence":{"ms":214,"rowsRead":0},"verifies":{"ms":13,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":113,"heapBytes":48929744,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a superseded claim cannot be manually completed with an otherwise valid approval (2378.585126ms)
+{"event":"room.cold_start","durationMs":231,"integrity":"eager","phases":{"schema":{"ms":41,"rowsRead":0},"plugin":{"ms":95,"rowsRead":0},"fence":{"ms":89,"rowsRead":0},"verifies":{"ms":5,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":115,"heapBytes":54443000,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ a deploy claim closes when the live revision matches, and status reports main (550.940669ms)
+{"event":"room.cold_start","durationMs":168,"integrity":"eager","phases":{"schema":{"ms":38,"rowsRead":0},"plugin":{"ms":93,"rowsRead":0},"fence":{"ms":34,"rowsRead":0},"verifies":{"ms":3,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":120,"heapBytes":58880728,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ land queue rows copy into land claims once and the list stays the same shape (276.076239ms)
+{"event":"room.cold_start","durationMs":843,"integrity":"eager","phases":{"schema":{"ms":591,"rowsRead":0},"plugin":{"ms":76,"rowsRead":0},"fence":{"ms":153,"rowsRead":0},"verifies":{"ms":23,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":125,"heapBytes":48847920,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":899,"integrity":"eager","phases":{"schema":{"ms":187,"rowsRead":0},"plugin":{"ms":629,"rowsRead":0},"fence":{"ms":74,"rowsRead":0},"verifies":{"ms":5,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":138,"heapBytes":52999576,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ board v2 routes answer 410 and point at work claims (1281.404681ms)
+{"event":"room.cold_start","durationMs":1005,"integrity":"eager","phases":{"schema":{"ms":99,"rowsRead":0},"plugin":{"ms":495,"rowsRead":0},"fence":{"ms":393,"rowsRead":0},"verifies":{"ms":17,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":135,"heapBytes":58235976,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ hard work defaults to a distinct reviewer at create; an explicit policy still wins (1498.124854ms)
+✔ reassign honors the room's per-member open-claim cap (2835.29309ms)
+{"event":"room.cold_start","durationMs":1830,"integrity":"eager","phases":{"schema":{"ms":53,"rowsRead":0},"plugin":{"ms":665,"rowsRead":0},"fence":{"ms":964,"rowsRead":0},"verifies":{"ms":77,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":167,"heapBytes":22616200,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+{"event":"room.cold_start","durationMs":278,"integrity":"eager","phases":{"schema":{"ms":37,"rowsRead":0},"plugin":{"ms":66,"rowsRead":0},"fence":{"ms":114,"rowsRead":0},"verifies":{"ms":60,"rowsRead":0},"checksum":{"ms":0,"rowsRead":0}},"cpuMs":112,"heapBytes":26985120,"rooms":0,"sequences":0,"projectionBytes":0,"events":0}
+✔ the ready queue lists unheld claims whose dependencies are done (648.890103ms)
+✔ a claim cannot depend on itself, and an unknown queue is refused (47.027505ms)
+✔ dependencies survive the durable claim registry (1978.64892ms)
+✔ #1527: deleting a claim waives it from dependents' dependsOn so they can return to the ready queue (505.974438ms)
+ℹ tests 68
+ℹ suites 0
+ℹ pass 68
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 194189.400886

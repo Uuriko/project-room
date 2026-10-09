@@ -1,0 +1,49 @@
+[
+ {
+  "file": "tests/claim-autolink.test.js",
+  "tests": 18,
+  "weak": []
+ },
+ {
+  "file": "tests/mcp-room-messages-paging.test.js",
+  "tests": 7,
+  "weak": []
+ },
+ {
+  "file": "tests/room-backup-export.test.js",
+  "tests": 18,
+  "weak": [
+   {
+    "name": "a paged export is byte-identical to a single-page export, whatever the page size",
+    "assertions": 0,
+    "lines": 1,
+    "weak": true
+   }
+  ]
+ },
+ {
+  "file": "tests/room-entry.test.js",
+  "tests": 13,
+  "weak": []
+ },
+ {
+  "file": "tests/room-mcp-membership-admin.test.js",
+  "tests": 4,
+  "weak": []
+ },
+ {
+  "file": "tests/room-sweep-dry-run.test.js",
+  "tests": 8,
+  "weak": []
+ },
+ {
+  "file": "tests/work-claim-files.test.js",
+  "tests": 13,
+  "weak": []
+ },
+ {
+  "file": "tests/work-claim-settle-missing-link.test.js",
+  "tests": 3,
+  "weak": []
+ }
+]

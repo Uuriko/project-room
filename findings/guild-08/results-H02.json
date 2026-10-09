@@ -1,0 +1,1 @@
+{"unit":"H02","baseline_exit":0,"interrupted":0,"pass":25,"fail":0,"cancelled":0,"tests_scanned":25,"weak_flagged":0,"files":["account-rooms.test.js","claims-state-machine-fake-gh.sh","room-agent-paginate.test.js","room-creation.test.js","room-mcp-auth.test.js","room-results.test.js","work-claim-conflict-hint.test.js","work-claim-renew-probe-b.test.js"]}

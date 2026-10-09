@@ -1,0 +1,208 @@
+[
+ {
+  "id": "H01",
+  "files": [
+   "account-deletion-rooms.test.js",
+   "claims-index.test.js",
+   "room-agent-delegation-client.test.js",
+   "room-coord.test.js",
+   "room-listen.test.js",
+   "room-render-prose-fence.test.js",
+   "work-claim-client.test.js",
+   "work-claim-reassign-unclaimed.test.js"
+  ]
+ },
+ {
+  "id": "H02",
+  "files": [
+   "account-rooms.test.js",
+   "claims-state-machine-fake-gh.sh",
+   "room-agent-paginate.test.js",
+   "room-creation.test.js",
+   "room-mcp-auth.test.js",
+   "room-results.test.js",
+   "work-claim-conflict-hint.test.js",
+   "work-claim-renew-probe-b.test.js"
+  ]
+ },
+ {
+  "id": "H03",
+  "files": [
+   "agent-rooms-idempotent-budget.test.js",
+   "claims-state-machine.property.test.js",
+   "room-assistant.test.js",
+   "room-credential-scan.test.js",
+   "room-mcp-files.test.js",
+   "room-roster.test.js",
+   "work-claim-create-note.test.js",
+   "work-claim-renew-probes.test.js"
+  ]
+ },
+ {
+  "id": "H04",
+  "files": [
+   "agent-rooms.test.js",
+   "default-room.test.js",
+   "room-attachment-quota-ratchet.test.js",
+   "room-deep-link.test.js",
+   "room-mcp-inbox-attachments.test.js",
+   "room-rotation-ledger.test.js",
+   "work-claim-duplicates.test.js",
+   "work-claim-retention.test.js"
+  ]
+ },
+ {
+  "id": "H05",
+  "files": [
+   "analytics-claim-bond-shadow.test.js",
+   "demo-room.test.js",
+   "room-attachments-autonomy-tier.test.mjs",
+   "room-directory.test.js",
+   "room-mcp-init.test.js",
+   "room-strike-hardening.test.js",
+   "work-claim-durable-http.test.js",
+   "work-claim-schema.test.js"
+  ]
+ },
+ {
+  "id": "H06",
+  "files": [
+   "claim-autolink-http.test.js",
+   "first-room-copy.test.js",
+   "room-authority.test.js",
+   "room-enforcer-freshness.test.js",
+   "room-mcp-join.test.js",
+   "room-submitted-rot.test.js",
+   "work-claim-events.test.js",
+   "work-claim-settle-double.test.js"
+  ]
+ },
+ {
+  "id": "H07",
+  "files": [
+   "claim-autolink.test.js",
+   "mcp-room-messages-paging.test.js",
+   "room-backup-export.test.js",
+   "room-entry.test.js",
+   "room-mcp-membership-admin.test.js",
+   "room-sweep-dry-run.test.js",
+   "work-claim-files.test.js",
+   "work-claim-settle-missing-link.test.js"
+  ]
+ },
+ {
+  "id": "H08",
+  "files": [
+   "claim-bond-shadow-attacks.test.js",
+   "mixed-room-arrival.test.js",
+   "room-board-grammar.test.js",
+   "room-export.test.js",
+   "room-mcp-wake.test.js",
+   "room-sweep-evidence.test.js",
+   "work-claim-guards.test.js",
+   "work-claim-settle-retry.test.js"
+  ]
+ },
+ {
+  "id": "H09",
+  "files": [
+   "claim-collisions.test.js",
+   "openapi-claims-validate-status.test.js",
+   "room-channels.test.js",
+   "room-file-upload.test.js",
+   "room-metrics-since.test.js",
+   "room-sweep-terminal.test.js",
+   "work-claim-idempotency.test.js",
+   "work-claim-sqlite.test.js"
+  ]
+ },
+ {
+  "id": "H10",
+  "files": [
+   "claim-map.test.js",
+   "peer-dm-room-scope.test.js",
+   "room-charter.test.js",
+   "room-first-pr.test.js",
+   "room-missing-flag-values.test.js",
+   "room-templates.test.js",
+   "work-claim-integrity.test.js",
+   "work-claim-summary-view.test.js"
+  ]
+ },
+ {
+  "id": "H11",
+  "files": [
+   "claim-overlaps.test.js",
+   "public-receipts-room-page-toggle.test.js",
+   "room-claim-status.test.js",
+   "room-flood-guard.test.js",
+   "room-orientation.test.js",
+   "room-trust.test.js",
+   "work-claim-leases.test.js",
+   "work-claim-sweep.test.js"
+  ]
+ },
+ {
+  "id": "H12",
+  "files": [
+   "claim-pr-sync-room-scoping.test.js",
+   "public-work-claim-fence.test.js",
+   "room-cli-setup.test.js",
+   "room-guard.test.js",
+   "room-overlap-refusal.test.js",
+   "room-unknown-task-post.test.js",
+   "work-claim-multiprocess-race.test.js",
+   "work-claim-update-precondition.test.js"
+  ]
+ },
+ {
+  "id": "H13",
+  "files": [
+   "claim-reputation.test.js",
+   "public-work-claim-finish-journey.test.js",
+   "room-clock-skew.test.js",
+   "room-instructions.test.js",
+   "room-post-verb-dry-run.test.js",
+   "room-watch-enforcer.test.sh",
+   "work-claim-pr-link.test.js",
+   "work-claims-read.test.js"
+  ]
+ },
+ {
+  "id": "H14",
+  "files": [
+   "claim-scopes.test.js",
+   "public-work-claims-client.test.js",
+   "room-context-legacy-identity.test.js",
+   "room-key-heartbeat.test.js",
+   "room-prose-claims.test.js",
+   "starter-room.test.js",
+   "work-claim-provenance.test.js",
+   "work-claims.test.js"
+  ]
+ },
+ {
+  "id": "H15",
+  "files": [
+   "claim-settle-1526.test.js",
+   "public-work-claims.test.js",
+   "room-context.test.js",
+   "room-key-pull.test.js",
+   "room-protocol-mutation.test.js",
+   "work-claim-batch-outcome.test.js",
+   "work-claim-qa-fixes.test.js"
+  ]
+ },
+ {
+  "id": "H16",
+  "files": [
+   "claim-validate.test.js",
+   "room-activation-pack.test.js",
+   "room-coord-tail.test.js",
+   "room-lifecycle.test.js",
+   "room-rebuild.test.js",
+   "work-claim-board.test.js",
+   "work-claim-ready-queue.test.js"
+  ]
+ }
+]

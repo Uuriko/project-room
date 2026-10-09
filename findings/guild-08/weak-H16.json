@@ -1,0 +1,37 @@
+[
+ {
+  "file": "tests/claim-validate.test.js",
+  "tests": 16,
+  "weak": []
+ },
+ {
+  "file": "tests/room-activation-pack.test.js",
+  "tests": 8,
+  "weak": []
+ },
+ {
+  "file": "tests/room-coord-tail.test.js",
+  "tests": 4,
+  "weak": []
+ },
+ {
+  "file": "tests/room-lifecycle.test.js",
+  "tests": 7,
+  "weak": []
+ },
+ {
+  "file": "tests/room-rebuild.test.js",
+  "tests": 3,
+  "weak": []
+ },
+ {
+  "file": "tests/work-claim-board.test.js",
+  "tests": 18,
+  "weak": []
+ },
+ {
+  "file": "tests/work-claim-ready-queue.test.js",
+  "tests": 4,
+  "weak": []
+ }
+]

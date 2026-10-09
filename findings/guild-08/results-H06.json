@@ -1,0 +1,1 @@
+{"unit":"H06","baseline_exit":0,"pass":41,"fail":0,"skipped":0,"tests_scanned":36,"weak_flagged":0,"files":["claim-autolink-http.test.js","first-room-copy.test.js","room-authority.test.js","room-enforcer-freshness.test.js","room-mcp-join.test.js","room-submitted-rot.test.js","work-claim-events.test.js","work-claim-settle-double.test.js"]}

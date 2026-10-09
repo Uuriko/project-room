@@ -1,0 +1,6 @@
+H19 [1/5] room-sweep-evidence.test.js -> red (pass=7 fail=5) :: sweep plan strike-one text mutated
+H19 [2/5] room-sweep-terminal.test.js -> green (pass=7 fail=0) :: strike-two text mutated
+H19 [3/5] room-sweep-dry-run.test.js -> green (pass=8 fail=0) :: _sweep-plan --now flag renamed
+H19 [4/5] room-guard.test.js -> green (pass=5 fail=0) :: guard never fails
+H19 [5/5] room-entry.test.js -> green (pass=13 fail=0) :: room create status codes swapped
+H19 break-checks complete
