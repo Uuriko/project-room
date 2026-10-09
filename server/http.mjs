@@ -3538,15 +3538,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // NOTE: matchmakingMatch must stay in the roomId chain above — it was
       // added to the 404 guard but forgotten here, so every matchmaking
       // route 500'd on `undefined[1]` instead of reaching roomAuth's 401.
-      const invitationId = revokeMatch ? pathId(revokeMatch[2]) : null;
-      const threadMessageId = threadMatch ? pathId(threadMatch[2]) : null;
-      const accessRequestId = accessDecideMatch ? pathId(accessDecideMatch[2]) : null;
-      const dmRequesterId = dmConsentDecideMatch ? pathId(dmConsentDecideMatch[2]) : null;
-      const peerDmThreadId = peerDmThreadMatch ? pathId(peerDmThreadMatch[2]) : null;
-      const mentionEventId = mentionAckMatch ? pathId(mentionAckMatch[2]) : null;
-      const savedDeleteMessageId = savedDeleteMatch ? pathId(savedDeleteMatch[2]) : null;
-      const deactivateMemberId = memberDeactivateMatch ? pathId(memberDeactivateMatch[2]) : null;
-      const cardMemberId = memberCardMatch ? pathId(memberCardMatch[2]) : null;
+      // Path id captured by a route regex, or null when that regex did not match.
+      const matchId = match => match ? pathId(match[2]) : null;
+      const invitationId = matchId(revokeMatch);
+      const threadMessageId = matchId(threadMatch);
+      const accessRequestId = matchId(accessDecideMatch);
+      const dmRequesterId = matchId(dmConsentDecideMatch);
+      const peerDmThreadId = matchId(peerDmThreadMatch);
+      const mentionEventId = matchId(mentionAckMatch);
+      const savedDeleteMessageId = matchId(savedDeleteMatch);
+      const deactivateMemberId = matchId(memberDeactivateMatch);
+      const cardMemberId = matchId(memberCardMatch);
       const route = publicWorkRoomReviewMatch ? "public-work-review" : projectOfferActionMatch ? "project-offers" : match ? (match[2] ?? "") : revokeMatch ? "invitation-revoke" : threadMatch ? "thread" : accessDecideMatch ? "access-decide" : delegationGrantMatch ? "delegation-grant" : delegationRevokeMatch ? "delegation-revoke" : delegationListMatch ? "delegation-list" : ownerDelegateGrantMatch ? "owner-delegate-grant" : ownerDelegateRevokeMatch ? "owner-delegate-revoke" : ownerDelegateListMatch ? "owner-delegate-list"
         : dmConsentDecideMatch ? "dm-consent-decide" : dmConsentBlockMatch ? "dm-consent-block" : dmConsentRevokeMatch ? "dm-consent-revoke"
         : dmConsentUnblockMatch ? "dm-consent-unblock" : publicFaceRotateMatch ? "public-face-rotate"
@@ -3575,8 +3577,25 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
         if (!granted) reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
       }
+      // Read-route query guard: every key must be expected and single-valued.
+      const rejectBadQuery = (params, names, code, message) => {
+        if ([...params.keys()].some(key => !names.includes(key) || params.getAll(key).length !== 1)) reject(422, code, message);
+      };
+      // Positive-integer query parameter (limit, before, ...).
+      const rejectBadCount = (params, name, code, message) => {
+        if (params.has(name) && !/^[1-9]\d*$/.test(params.get(name))) reject(422, code, message);
+      };
+      // Idempotent create/upsert: 201 when the call wrote, 200 on replay.
+      const jsonCreated = value => json(res, value.duplicate ? 200 : 201, value);
+      // Single-field body shapes: exact fields, optionally a typed value.
+      const requireBodyField = (data, field, type, code, message) => {
+        if (!exact(data, [field]) || typeof data[field] !== type) reject(422, code, message);
+      };
+      const requireExactBody = (data, fields, code, message) => {
+        if (!exact(data, fields)) reject(422, code, message);
+      };
       if (route === "public-work-review") {
-        if ([...url.searchParams.keys()].some(key => (key !== "auth" && (!publicWorkResultsMatch || !["limit", "after"].includes(key))) || url.searchParams.getAll(key).length !== 1)) reject(422, "invalid_public_work_review", "Unsupported review query parameters");
+        rejectBadQuery(url.searchParams, publicWorkResultsMatch ? ["limit", "after", "auth"] : ["auth"], "invalid_public_work_review", "Unsupported review query parameters");
         // FO-DRIFT-1/2: the spec constrains auth to the room|account enum.
         // Validate the selector value on the results route even when bearer
         // or header auth is selected, where roomCredentials would otherwise
@@ -3667,6 +3686,28 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         && !["GET", "HEAD"].includes(req.method)) {
         reject(403, "guest_scope_denied", "Guest members cannot perform this action");
       }
+      // Room-funnel sub-handlers (collab, work claims, matchmaking,
+      // feedback, bounty escrow) re-verify the credential inside the
+      // transaction: a revocation or role change after the read checks
+      // above must not linger. The API-key and guest gates mirror the
+      // funnel's read-time gates.
+      const reauthorizeFunnel = ({ credentialChecks = false, writeScope = false, writeProtection = false, guestReadBan = false } = {}) => {
+        const current = selected.mode === "account"
+          ? store.authenticateAccountSession(selected.token, roomId, fence)
+          : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
+        if (credentialChecks) {
+          if (selected.bearer && current.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
+          if (!selected.bearer && current.kind !== "session") reject(401, "unauthenticated", "Browser session required");
+        }
+        if (writeProtection) protectWrite(req, current, selected.bearer);
+        const required = writeScope ? "rooms:write" : (["GET", "HEAD"].includes(req.method) ? "rooms:read" : "rooms:write");
+        if (current.kind === "api-key" && !(current.apiKeyScopes ?? []).some(scope =>
+          scope === required || (scope.endsWith(":*") && required.startsWith(scope.slice(0, -1)))))
+          reject(403, "insufficient_scope", `API key lacks the ${required} scope`);
+        if (isGuestAgentMemberId(current.member.id) && (guestReadBan || !["GET", "HEAD"].includes(req.method)))
+          reject(403, "guest_scope_denied", "Guest members cannot perform this action");
+        return current;
+      };
       // Lane C inbox collaboration (task RC-2026-09-18-011): room-scoped
       // collab routes share the credential, fence and rate-limit checks
       // above; the handler maps pure-module errors to stable 4xx codes.
@@ -3694,19 +3735,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const collabIdMatch = collabAssignmentReleaseMatch ?? collabApprovalDecideMatch ?? collabApprovalResubmitMatch
           ?? collabRoutingResolveMatch ?? collabHandoffTransitionMatch ?? collabEnvelopeTransitionMatch;
         return await handleInboxCollab({ req, res, url, store, roomId, auth, collabRoute,
-          collabId: collabIdMatch ? pathId(collabIdMatch[2]) : null,
-          reauthorize: () => {
-            const current = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
-              : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
-            if (selected.bearer && current.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
-            if (!selected.bearer && current.kind !== "session") reject(401, "unauthenticated", "Browser session required");
-            protectWrite(req, current, selected.bearer);
-            if (current.kind === "api-key" && !(current.apiKeyScopes ?? []).some(scope =>
-              scope === "rooms:write" || scope.endsWith(":*") && "rooms:write".startsWith(scope.slice(0, -1))))
-              reject(403, "insufficient_scope", "API key lacks the rooms:write scope");
-            if (isGuestAgentMemberId(current.member.id)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
-            return current;
-          }, helpers: { json, reject, body } });
+          collabId: matchId(collabIdMatch),
+          reauthorize: () => reauthorizeFunnel({ credentialChecks: true, writeScope: true, writeProtection: true, guestReadBan: true }),
+          helpers: { json, reject, body } });
       }
       // Work claims (task RC-2026-09-18-041): room-scoped claim registry
       // routes share the credential, fence and rate-limit checks above; the
@@ -3729,19 +3760,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch
          ;
         return await handleWorkClaims({ req, res, url, store, roomId, auth, workClaimRoute,
-          workClaimId: workClaimIdMatch ? pathId(workClaimIdMatch[2]) : null, registry: store.workClaims,
+          workClaimId: matchId(workClaimIdMatch), registry: store.workClaims,
           ...(fetchPullRequest ? { fetchPullRequest } : {}),
           ...(githubToken !== undefined ? { githubToken } : {}),
-          reauthorize: () => {
-            const current = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
-              : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
-            if (current.kind === "api-key") {
-              const required = ["GET", "HEAD"].includes(req.method) ? "rooms:read" : "rooms:write";
-              if (!(current.apiKeyScopes ?? []).some(scope => scope === required || (scope.endsWith(":*") && required.startsWith(scope.slice(0, -1))))) reject(403, "insufficient_scope", `API key lacks the ${required} scope`);
-            }
-            if (isGuestAgentMemberId(current.member.id) && !["GET", "HEAD"].includes(req.method)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
-            return current;
-          }, helpers: { json, reject, body } });
+          reauthorize: () => reauthorizeFunnel(), helpers: { json, reject, body } });
       }
       // Matchmaking (arrival surface): an agent declares what it is here for,
       // a room declares what an opening needs, and the pure matcher pairs
@@ -3766,18 +3788,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           // Fall through to the dispatch below.
         }
         return await handleMatchmaking({ req, res, url, store, roomId, auth, matchmakingRoute,
-          matchmakingId: matchmakingIdMatch ? pathId(matchmakingIdMatch[2]) : null,
+          matchmakingId: matchId(matchmakingIdMatch),
           registry: store.matchmaking,
-          reauthorize: () => {
-            const current = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
-              : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
-            if (current.kind === "api-key") {
-              const required = ["GET", "HEAD"].includes(req.method) ? "rooms:read" : "rooms:write";
-              if (!(current.apiKeyScopes ?? []).some(scope => scope === required || (scope.endsWith(":*") && required.startsWith(scope.slice(0, -1))))) reject(403, "insufficient_scope", `API key lacks the ${required} scope`);
-            }
-            if (isGuestAgentMemberId(current.member.id) && !["GET", "HEAD"].includes(req.method)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
-            return current;
-          }, helpers: { json, reject, body } });
+          reauthorize: () => reauthorizeFunnel(), helpers: { json, reject, body } });
       }
       // Agent /feedback endpoint (task RC-2026-09-27-2745): structured
       // bug/feature reports with a Mark-staked triage economy, feeding the
@@ -3800,17 +3813,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           : "read";
         const feedbackIdMatch = feedbackTriageMatch ?? feedbackAppealMatch ?? feedbackOutcomeMatch ?? feedbackItemMatch;
         return await handleFeedback({ req, res, url, store, roomId, auth, feedbackRoute,
-          feedbackId: feedbackIdMatch ? pathId(feedbackIdMatch[2]) : null,
-          reauthorize: () => {
-            const current = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
-              : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
-            if (current.kind === "api-key") {
-              const required = ["GET", "HEAD"].includes(req.method) ? "rooms:read" : "rooms:write";
-              if (!(current.apiKeyScopes ?? []).some(scope => scope === required || (scope.endsWith(":*") && required.startsWith(scope.slice(0, -1))))) reject(403, "insufficient_scope", `API key lacks the ${required} scope`);
-            }
-            if (isGuestAgentMemberId(current.member.id) && !["GET", "HEAD"].includes(req.method)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
-            return current;
-          }, helpers: { json, reject, body } });
+          feedbackId: matchId(feedbackIdMatch),
+          reauthorize: () => reauthorizeFunnel(), helpers: { json, reject, body } });
       }
       // Board v2 is retired. Authenticated callers get 410 and a pointer at
       // the work-claims board. The board_vtwo_* tables are not dropped.
@@ -3845,25 +3849,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const identityMatch = creditsBalancesMatch ?? creditsHistoryMatch;
         const sybilFlagIdMatch = bountySybilDismissMatch ?? bountySybilConfirmMatch;
         return await handleBountyEscrow({ req, res, url, store, roomId, auth, escrowRoute,
-          bountyId: bountyIdMatch ? pathId(bountyIdMatch[2]) : null,
-          sybilFlagId: sybilFlagIdMatch ? pathId(sybilFlagIdMatch[2]) : null,
+          bountyId: matchId(bountyIdMatch),
+          sybilFlagId: matchId(sybilFlagIdMatch),
           identity: identityMatch ? identityMatch[2] : null,
-          reauthorize: () => {
-            const current = selected.mode === "account" ? store.authenticateAccountSession(selected.token, roomId, fence)
-              : store.authenticate(selected.token, roomId, fence, { allowAccountSession: false });
-            if (selected.bearer && current.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
-            if (!selected.bearer && current.kind !== "session") reject(401, "unauthenticated", "Browser session required");
-            if (current.kind === "api-key" && !(current.apiKeyScopes ?? []).some(scope =>
-              scope === "rooms:write" || scope.endsWith(":*") && "rooms:write".startsWith(scope.slice(0, -1))))
-              reject(403, "insufficient_scope", "API key lacks the rooms:write scope");
-            if (isGuestAgentMemberId(current.member.id)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
-            return current;
-          }, helpers: { json, reject, body } });
+          reauthorize: () => reauthorizeFunnel({ credentialChecks: true, writeScope: true, guestReadBan: true }),
+          helpers: { json, reject, body } });
       }
       if (route === "conversation" && req.method === "GET") {
         const params = url.searchParams;
-        if ([...params.keys()].some(key => !["limit", "cursor", "since", "messageId", "channelId", "auth"].includes(key) || params.getAll(key).length !== 1)
-          || params.has("limit") && !/^[1-9]\d*$/.test(params.get("limit"))) reject(422, "invalid_conversation_selection", "Choose a bounded conversation page or one message");
+        rejectBadQuery(params, ["limit", "cursor", "since", "messageId", "channelId", "auth"], "invalid_conversation_selection", "Choose a bounded conversation page or one message");
+        rejectBadCount(params, "limit", "invalid_conversation_selection", "Choose a bounded conversation page or one message");
         return json(res, 200, readConversation(store, selected.token, roomId, {
           ...(params.has("limit") ? { limit: Number(params.get("limit")) } : {}),
           cursor: params.get("cursor"), since: params.get("since"), messageId: params.get("messageId"), channelId: params.get("channelId"), expectedSessionBinding: fence
@@ -3880,9 +3875,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (!route && req.method === "GET") {
         const params = url.searchParams;
-        if (params.has("view") && (params.getAll("view").length !== 1 || params.get("view") !== "work"
-          || [...params.keys()].some(key => !["view", "auth"].includes(key) || params.getAll(key).length !== 1))) {
-          reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
+        if (params.has("view")) {
+          rejectBadQuery(params, ["view", "auth"], "invalid_snapshot_view", "Choose a supported snapshot view");
+          if (params.get("view") !== "work") reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
         }
         const helpContext = req.headers["x-project-room-help-context"];
         if (helpContext !== undefined && (helpContext !== "1" || !params.has("view"))) reject(422, "invalid_help_context", "Choose version 1 with the current work view");
@@ -3911,7 +3906,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route === "outside-agents") {
         const network = new OutsideAgents(store);
         if (req.method === "GET") {
-          if ([...url.searchParams.keys()].some(key => key !== "auth")) reject(422, "invalid_outside_agent", "This read takes no query filters");
+          rejectBadQuery(url.searchParams, ["auth"], "invalid_outside_agent", "This read takes no query filters");
           return json(res, 200, network.list(selected.token, roomId, fence));
         }
         if (req.method === "POST") {
@@ -3932,8 +3927,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (["reply-requests", "reply-context", "reply-history"].includes(route) && req.method === "GET") {
         const params = url.searchParams, names = route === "reply-requests" ? ["direction", "status"]
           : route === "reply-context" ? ["requestMessageId", "cursor", "limit"] : ["direction", "cursor", "checkpoint", "limit"];
-        if ([...params.keys()].some(key => ![...names, "auth"].includes(key) || params.getAll(key).length !== 1)
-          || params.has("limit") && !/^[1-9]\d*$/.test(params.get("limit"))) reject(422, "invalid_reply_selection", "Invalid request selection");
+        rejectBadQuery(params, [...names, "auth"], "invalid_reply_selection", "Invalid request selection");
+        rejectBadCount(params, "limit", "invalid_reply_selection", "Invalid request selection");
         const options = Object.fromEntries(names.filter(key => key !== "requestMessageId" && params.has(key)).map(key => [key, key === "limit" ? Number(params.get(key)) : params.get(key)]));
         options.expectedSessionBinding = fence;
         const value = route === "reply-requests" ? store.replyRequests.list(selected.token, roomId, options)
@@ -3944,31 +3939,29 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route === "work-changes" && req.method === "GET") {
         // F3: derived read-time change list for one work item; never a write.
         const params = url.searchParams;
-        if ([...params.keys()].some(key => !["workItemId", "since", "auth"].includes(key) || params.getAll(key).length !== 1)
-          || !params.has("workItemId") || params.has("since") && !/^(0|[1-9]\d*)$/.test(params.get("since"))) reject(422, "invalid_history_selection", "Choose a work item and optional basis revision");
+        rejectBadQuery(params, ["workItemId", "since", "auth"], "invalid_history_selection", "Choose a work item and optional basis revision");
+        if (!params.has("workItemId") || params.has("since") && !/^(0|[1-9]\d*)$/.test(params.get("since"))) reject(422, "invalid_history_selection", "Choose a work item and optional basis revision");
         return json(res, 200, store.workItemHistory(selected.token, roomId, params.get("workItemId"), fence, params.has("since") ? Number(params.get("since")) : null));
       }
       if (route === "charter" && req.method === "GET") {
         const params = url.searchParams;
-        if ([...params.keys()].some(key => !["revision", "auth"].includes(key) || params.getAll(key).length !== 1)
-          || params.has("revision") && !/^(0|[1-9]\d*)$/.test(params.get("revision"))) reject(422, "invalid_charter_revision", "Choose an instructions version");
+        rejectBadQuery(params, ["revision", "auth"], "invalid_charter_revision", "Choose an instructions version");
+        if (params.has("revision") && !/^(0|[1-9]\d*)$/.test(params.get("revision"))) reject(422, "invalid_charter_revision", "Choose an instructions version");
         return json(res, 200, store.charter(selected.token, roomId, { ...(params.has("revision") ? { revision: Number(params.get("revision")) } : {}), expectedSessionBinding: fence }));
       }
       if (route === "work-context" && req.method === "GET") {
         const params = url.searchParams;
         const offerContext = req.headers["x-project-room-offer-context"];
         if (offerContext !== undefined && offerContext !== "1") reject(422, "invalid_offer_context", "Choose offer context version 1");
-        if ([...params.keys()].some(key => !["workItemId", "includeSource", "auth"].includes(key) || params.getAll(key).length !== 1)
-          || (params.has("includeSource") && !["true", "false"].includes(params.get("includeSource")))) {
-          reject(422, "invalid_work_context", "Choose one work ID and an optional source inclusion flag");
-        }
+        rejectBadQuery(params, ["workItemId", "includeSource", "auth"], "invalid_work_context", "Choose one work ID and an optional source inclusion flag");
+        if (params.has("includeSource") && !["true", "false"].includes(params.get("includeSource"))) reject(422, "invalid_work_context", "Choose one work ID and an optional source inclusion flag");
         return json(res, 200, store.workContext(selected.token, roomId, params.get("workItemId"), {
           includeSource: params.get("includeSource") === "true", includeOffers: offerContext === "1", expectedSessionBinding: fence
         }));
       }
       if (route === "work-result" && req.method === "GET") {
         const params = url.searchParams;
-        if ([...params.keys()].some(key => !["workItemId", "completionEventId", "draftMessageId", "auth"].includes(key) || params.getAll(key).length !== 1)) reject(422, "invalid_result_selection", "Invalid result selection");
+        rejectBadQuery(params, ["workItemId", "completionEventId", "draftMessageId", "auth"], "invalid_result_selection", "Invalid result selection");
         return json(res, 200, store.workResult(selected.token, roomId, params.get("workItemId"), {
           completionEventId: params.get("completionEventId"), draftMessageId: params.get("draftMessageId"), expectedSessionBinding: fence
         }));
@@ -3994,10 +3987,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // room_not_found from the store.
       if (route === "orient" && req.method === "GET") {
         const params = url.searchParams;
-        const allowed = new Set(["focus", "q", "maxTokens", "auth", "binding"]);
-        if ([...params.keys()].some(key => !allowed.has(key) || params.getAll(key).length !== 1)) {
-          reject(422, "invalid_orient", "focus, q, and maxTokens are the orient query parameters");
-        }
+        rejectBadQuery(params, ["focus", "q", "maxTokens", "auth", "binding"], "invalid_orient", "focus, q, and maxTokens are the orient query parameters");
         return json(res, 200, buildOrient(store, roomId, viewerId, {
           focus: params.get("focus"), q: params.get("q"), maxTokens: params.get("maxTokens"),
           token: selected.token, binding: fence
@@ -4013,9 +4003,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // manage_members like the rest of it: the owner, or an admin the owner
         // appointed (#643). Enforcement happens in AgentIdentities.link.
         const data = await body(req);
-        if (!exact(data, ["requireVerified"]) || typeof data.requireVerified !== "boolean") {
-          reject(422, "invalid_policy", "requireVerified (boolean) is the only accepted field");
-        }
+        requireBodyField(data, "requireVerified", "boolean", "invalid_policy", "requireVerified (boolean) is the only accepted field");
         const authority = store.roomAuthority(roomId);
         if (!auth.member?.id || !memberCan(authority, auth.member.id, "manage_members")) {
           reject(403, "access_denied", "Membership administration grant required");
@@ -4050,7 +4038,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // sibling dashboards: every figure derives from data a member can
         // already read (membership snapshot, work-session spend, events).
         const params = url.searchParams;
-        if ([...params.keys()].some(key => !["days", "auth"].includes(key) || params.getAll(key).length !== 1)) reject(422, "invalid_usage_period", "Choose an optional number of days only");
+        rejectBadQuery(params, ["days", "auth"], "invalid_usage_period", "Choose an optional number of days only");
         return json(res, 200, roomUsageSummary(store, selected.token, roomId, { days: parseUsageDays(params.get("days")), expectedSessionBinding: fence }));
       }
       if (route === "pins") {
@@ -4093,7 +4081,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return json(res, 201, store.identities.link(selected.token, roomId, data, fence));
         }
         if (req.method === "DELETE") {
-          if (!exact(data, ["identityId"]) || typeof data.identityId !== "string") reject(422, "invalid_identity", "identityId is required");
+          requireBodyField(data, "identityId", "string", "invalid_identity", "identityId is required");
           return json(res, 200, store.identities.unlink(selected.token, roomId, data.identityId, fence));
         }
         reject(405, "method_not_allowed", "Method not allowed");
@@ -4115,7 +4103,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             { emailVerificationUnachievable: !magicMailer.isConfigured() }));
         }
         if (req.method === "DELETE") {
-          if (!exact(data, ["inviteId"]) || typeof data.inviteId !== "string") reject(422, "invalid_invite", "inviteId is required");
+          requireBodyField(data, "inviteId", "string", "invalid_invite", "inviteId is required");
           return json(res, 200, store.invites.revoke(selected.token, roomId, data.inviteId, fence));
         }
         reject(405, "method_not_allowed", "Method not allowed");
@@ -4195,26 +4183,24 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "work-sessions" && req.method === "GET") {
         const params = url.searchParams;
-        if ([...params.keys()].some(key => !["status", "auth"].includes(key) || params.getAll(key).length !== 1)
-          || (params.has("status") && !isSessionStatus(params.get("status")))) {
-          reject(422, "invalid_session_status", "Choose one session status");
-        }
+        rejectBadQuery(params, ["status", "auth"], "invalid_session_status", "Choose one session status");
+        if (params.has("status") && !isSessionStatus(params.get("status"))) reject(422, "invalid_session_status", "Choose one session status");
         return json(res, 200, store.workSessions(selected.token, roomId, {
           status: params.get("status"), expectedSessionBinding: fence
         }));
       }
       if (route === "work-sessions" && req.method === "POST") {
         const result = store.mutateWorkSession(selected.token, roomId, await body(req), fence);
-        return json(res, result.duplicate ? 200 : 201, result);
+        return jsonCreated(result);
       }
       if (route === "spend-allowance" && req.method === "GET") {
         // C3: room spend allowance with spent, reserved and headroom. Member-readable: derived from work-session state members already see.
-        if ([...url.searchParams.keys()].some(key => key !== "auth")) reject(422, "invalid_spend_allowance", "This read takes no parameters");
+        rejectBadQuery(url.searchParams, ["auth"], "invalid_spend_allowance", "This read takes no parameters");
         return json(res, 200, readSpendAllowance(store, selected.token, roomId, fence));
       }
       if (route === "spend-allowance" && req.method === "POST") {
         const result = setSpendAllowance(store, selected.token, roomId, await body(req), fence); // owner-only (403 owner_required)
-        return json(res, result.duplicate ? 200 : 201, result);
+        return jsonCreated(result);
       }
       if (route === "operator-agent" && req.method === "GET") {
         // Graduated autonomy tiers read. Owner-only (403 owner_required for anyone else).
@@ -4248,8 +4234,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "work-discussion" && req.method === "GET") {
         const params = url.searchParams;
-        if ([...params.keys()].some(key => !["workItemId", "cursor", "since", "limit", "auth"].includes(key) || params.getAll(key).length !== 1)
-          || ["since", "limit"].some(key => params.has(key) && !/^(0|[1-9]\d*)$/.test(params.get(key)))) reject(422, "invalid_discussion", "Use workItemId (not taskId), optional limit from 1 to 50, and either cursor or since. Supply each parameter once; since must be a non-negative integer.");
+        rejectBadQuery(params, ["workItemId", "cursor", "since", "limit", "auth"], "invalid_discussion", "Use workItemId (not taskId), optional limit from 1 to 50, and either cursor or since. Supply each parameter once; since must be a non-negative integer.");
+        if (["since", "limit"].some(key => params.has(key) && !/^(0|[1-9]\d*)$/.test(params.get(key)))) reject(422, "invalid_discussion", "Use workItemId (not taskId), optional limit from 1 to 50, and either cursor or since. Supply each parameter once; since must be a non-negative integer.");
         const discussion = store.workDiscussion(selected.token, roomId, params.get("workItemId"), {
           cursor: params.get("cursor"), ...(params.has("since") ? { since: Number(params.get("since")) } : {}),
           ...(params.has("limit") ? { limit: Number(params.get("limit")) } : {}), expectedSessionBinding: fence
@@ -4265,9 +4251,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // B4: per-member feed derived from the event tail after the member's cursor. Read model only; the
         // store method re-authenticates membership, and the read rate limit above already covers it.
         const params = url.searchParams;
-        if ([...params.keys()].some(key => !["limit", "before", "auth"].includes(key) || params.getAll(key).length !== 1)) reject(422, "invalid_notification_selection", "Choose an optional limit and before sequence");
-        if (params.has("limit") && !/^[1-9]\d*$/.test(params.get("limit"))) reject(422, "invalid_notification_limit", "Choose a positive limit");
-        if (params.has("before") && !/^[1-9]\d*$/.test(params.get("before"))) reject(422, "invalid_notification_selection", "Choose a positive before sequence");
+        rejectBadQuery(params, ["limit", "before", "auth"], "invalid_notification_selection", "Choose an optional limit and before sequence");
+        rejectBadCount(params, "limit", "invalid_notification_limit", "Choose a positive limit");
+        rejectBadCount(params, "before", "invalid_notification_selection", "Choose a positive before sequence");
         return json(res, 200, store.notifications.list(selected.token, roomId, fence, {
           ...(params.has("limit") ? { limit: Number(params.get("limit")) } : {}),
           ...(params.has("before") ? { before: Number(params.get("before")) } : {})
@@ -4279,7 +4265,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // before (exclusive event id), limit (1..100), type (one of the four
         // activity types). Read model; the store function re-authenticates.
         const params = url.searchParams;
-        if ([...params.keys()].some(key => !["limit", "before", "type", "auth"].includes(key) || params.getAll(key).length !== 1)) reject(422, "invalid_activity_selection", "Choose an optional limit, before, and type");
+        rejectBadQuery(params, ["limit", "before", "type", "auth"], "invalid_activity_selection", "Choose an optional limit, before, and type");
         return json(res, 200, listActivity(store, selected.token, roomId, {
           ...(params.has("limit") ? { limit: params.get("limit") } : {}),
           ...(params.has("before") ? { before: params.get("before") } : {}),
@@ -4297,7 +4283,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "read-horizon" && req.method === "GET") {
         const params = url.searchParams;
-        if ([...params.keys()].some(key => !["threadId", "auth"].includes(key) || params.getAll(key).length !== 1)) reject(422, "invalid_horizon", "Choose an optional threadId");
+        rejectBadQuery(params, ["threadId", "auth"], "invalid_horizon", "Choose an optional threadId");
         return json(res, 200, getReadHorizon(store, selected.token, roomId, {
           ...(params.has("threadId") ? { threadId: params.get("threadId") } : {})
         }, fence));
@@ -4355,9 +4341,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // review. Shadow data is measurement, never membership — nothing here
         // mutates state.
         const params = url.searchParams;
-        if ([...params.keys()].some(key => !["gate", "escalate", "limit"].includes(key) || params.getAll(key).length !== 1)) {
-          reject(422, "invalid_jev_shadow_query", "gate, escalate and limit are the accepted query parameters");
-        }
+        rejectBadQuery(params, ["gate", "escalate", "limit"], "invalid_jev_shadow_query", "gate, escalate and limit are the accepted query parameters");
         const gate = params.get("gate");
         if (gate !== null && !["admission", "receipt"].includes(gate)) reject(422, "invalid_jev_shadow_query", "gate must be admission or receipt");
         const escalateParam = params.get("escalate");
@@ -4373,9 +4357,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // caller; an owner may query another member (feeds #662's card).
         // view=receipts is the sender's copy: delivered, then read/acked.
         const params = url.searchParams;
-        if ([...params.keys()].some(key => !["state", "after", "memberId", "auth", "view"].includes(key) || params.getAll(key).length !== 1)) {
-          reject(422, "invalid_mention_query", "state, after, memberId and view are the accepted query parameters");
-        }
+        rejectBadQuery(params, ["state", "after", "memberId", "auth", "view"], "invalid_mention_query", "state, after, memberId and view are the accepted query parameters");
         if (params.get("view") === "receipts") {
           if (params.has("state") || params.has("after") || params.has("memberId")) {
             reject(422, "invalid_mention_query", "view=receipts does not take state, after, or memberId");
@@ -4395,7 +4377,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route === "mention-settings" && req.method === "POST") {
         // #658: owner-only mention timeout override for the room.
         const data = await body(req);
-        if (!exact(data, ["timeoutMs"])) reject(422, "invalid_request", "timeoutMs is the accepted field");
+        requireExactBody(data, ["timeoutMs"], "invalid_request", "timeoutMs is the accepted field");
         return json(res, 200, store.setMentionTimeout(selected.token, roomId, data.timeoutMs, fence));
       }
       if (route === "member-card" && req.method === "GET") {
@@ -4446,7 +4428,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // F1: open-questions radar — unanswered "?" messages room-wide, DM-scoped
         // to the caller's parties. Read model; the store function re-authenticates.
         const params = url.searchParams;
-        if ([...params.keys()].some(key => !["limit", "auth"].includes(key) || params.getAll(key).length !== 1)) reject(422, "invalid_open_questions_selection", "Choose an optional limit");
+        rejectBadQuery(params, ["limit", "auth"], "invalid_open_questions_selection", "Choose an optional limit");
         return json(res, 200, listOpenQuestions(store, selected.token, roomId, {
           ...(params.has("limit") ? { limit: params.get("limit") } : {})
         }, fence));
@@ -4460,14 +4442,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "thread-mutes" && req.method === "POST") {
         const data = await body(req);
-        if (!exact(data, ["threadId", "muted"])) reject(422, "invalid_thread_mute", "threadId and muted are the accepted fields");
+        requireExactBody(data, ["threadId", "muted"], "invalid_thread_mute", "threadId and muted are the accepted fields");
         return json(res, 200, store.threadMutes.set(selected.token, roomId, data, fence));
       }
       if (route === "agent-pause" && req.method === "GET") {
         // C6: wake-pause state for the caller, or (signed-in owner) one named
         // member plus the room's paused roster. Authorization is store-level.
         const params = url.searchParams;
-        if ([...params.keys()].some(key => !["memberId", "auth"].includes(key) || params.getAll(key).length !== 1)) reject(422, "invalid_pause_selection", "Choose at most one member");
+        rejectBadQuery(params, ["memberId", "auth"], "invalid_pause_selection", "Choose at most one member");
         return json(res, 200, store.wakeQueue.inspect(selected.token, roomId, { memberId: params.get("memberId") }, fence));
       }
       if (route === "agent-pause" && req.method === "POST") {
@@ -4479,7 +4461,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const target = { memberId: data.memberId };
         const result = data.action === "pause" ? store.wakeQueue.pause(selected.token, roomId, { requestId: data.requestId, reason: data.reason }, fence, target)
           : store.wakeQueue.resume(selected.token, roomId, { requestId: data.requestId }, fence, target);
-        return json(res, result.duplicate ? 200 : 201, result);
+        return jsonCreated(result);
       }
       if (route === "access-review" && req.method === "GET") {
         // BUILD-01 D4: owner-only periodic access review; assembly lives in
@@ -4551,12 +4533,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "delegation-grant" && req.method === "POST") {
         const data = await body(req);
-        if (!exact(data, ["identityId"])) reject(422, "invalid_request", "identityId is the accepted field");
+        requireExactBody(data, ["identityId"], "invalid_request", "identityId is the accepted field");
         return json(res, 200, store.delegation.grant(selected.token, roomId, data, fence));
       }
       if (route === "delegation-revoke" && req.method === "POST") {
         const data = await body(req);
-        if (!exact(data, ["identityId"])) reject(422, "invalid_request", "identityId is the accepted field");
+        requireExactBody(data, ["identityId"], "invalid_request", "identityId is the accepted field");
         return json(res, 200, store.delegation.revokeEffective(selected.token, roomId, data, fence));
       }
       // Owner delegates (server/owner-delegates.mjs): per-room grants that
@@ -4567,12 +4549,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "owner-delegate-grant" && req.method === "POST") {
         const data = await body(req);
-        if (!exact(data, ["identityId"])) reject(422, "invalid_request", "identityId is the accepted field");
+        requireExactBody(data, ["identityId"], "invalid_request", "identityId is the accepted field");
         return json(res, 200, store.ownerDelegates.grant(selected.token, roomId, data, fence));
       }
       if (route === "owner-delegate-revoke" && req.method === "POST") {
         const data = await body(req);
-        if (!exact(data, ["identityId"])) reject(422, "invalid_request", "identityId is the accepted field");
+        requireExactBody(data, ["identityId"], "invalid_request", "identityId is the accepted field");
         return json(res, 200, store.ownerDelegates.revoke(selected.token, roomId, data, fence));
       }
       if (route === "ownership-transfer" && req.method === "POST") {
@@ -4588,12 +4570,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "agent-connections" && req.method === "POST") {
         const result = store.agentConnections.apply(selected.token, roomId, await body(req), fence);
-        return json(res, result.duplicate ? 200 : 201, result);
+        return jsonCreated(result);
       }
       if (route === "guest-agent-links" && req.method === "POST") {
         rate(`guest-agent-mint:${remoteAddress}`, 30);
         const result = store.guestAgentLinks.mint(selected.token, roomId, await body(req), fence);
-        return json(res, result.duplicate ? 200 : 201, result);
+        return jsonCreated(result);
       }
       // GX-… guest invites: owner-administered through the same room funnel
       // (store-level owner gate). Public preview/redeem/rotate live at the
@@ -4601,7 +4583,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route === "guest-invites" && req.method === "POST") {
         rate(`guest-invite-mint:${remoteAddress}`, 30);
         const result = store.guestInvites.mint(selected.token, roomId, await body(req), fence);
-        return json(res, result.duplicate ? 200 : 201, result);
+        return jsonCreated(result);
       }
       if (route === "guest-invites-list" && req.method === "POST") {
         rate(`guest-invite-admin:${remoteAddress}`, 30);
@@ -4610,13 +4592,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route === "guest-invites-revoke" && req.method === "POST") {
         rate(`guest-invite-admin:${remoteAddress}`, 30);
         const data = await body(req);
-        if (!exact(data, ["inviteId"]) || typeof data.inviteId !== "string") reject(422, "invalid_guest_invite", "Supply the invite id");
+        requireBodyField(data, "inviteId", "string", "invalid_guest_invite", "Supply the invite id");
         return json(res, 200, store.guestInvites.revoke(selected.token, roomId, data.inviteId, fence));
       }
       if (route === "guest-invites-disconnect" && req.method === "POST") {
         rate(`guest-invite-admin:${remoteAddress}`, 30);
         const data = await body(req);
-        if (!exact(data, ["memberId"]) || typeof data.memberId !== "string") reject(422, "invalid_guest_invite", "Supply the guest member id");
+        requireBodyField(data, "memberId", "string", "invalid_guest_invite", "Supply the guest member id");
         return json(res, 200, store.guestInvites.disconnect(selected.token, roomId, data.memberId, fence));
       }
       if (route === "guest-invites-revoke-all" && req.method === "POST") {
@@ -4630,13 +4612,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "reminders" && req.method === "POST") {
         const result = store.reminders.mutate(selected.token, roomId, await body(req), fence);
-        return json(res, result.duplicate ? 200 : 201, result);
+        return jsonCreated(result);
       }
       // E4 moderation: any member reports a message (own receipt only); the owner alone lists reports.
       if (route === "reports" && req.method === "GET") return json(res, 200, store.moderation.list(selected.token, roomId, fence));
       if (route === "reports" && req.method === "POST") {
         const result = store.moderation.report(selected.token, roomId, await body(req), fence);
-        return json(res, result.duplicate ? 200 : 201, result);
+        return jsonCreated(result);
       }
       // Invitation links are administered from a signed-in browser session
       // (room-key or account cookie), or an owner/owner-appointed admin on its
@@ -4652,11 +4634,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const linkFields = ["requestId", "linkToken", "expiresAt", "maxJoins", "expectedMemberRevision"];
         if (!exact(data, linkFields) && !exact(data, [...linkFields, "access"])) reject(422, "invalid_link", "Supply the exact invitation link settings");
         const result = store.shareLinks.create(selected.token, roomId, data, fence);
-        return json(res, result.duplicate ? 200 : 201, result);
+        return jsonCreated(result);
       }
       if (route === "share-links-cancel" && req.method === "POST") {
         const data = await body(req);
-        if (!exact(data, ["linkId"])) reject(422, "invalid_link", "Select one invitation link to cancel");
+        requireExactBody(data, ["linkId"], "invalid_link", "Select one invitation link to cancel");
         return json(res, 200, store.shareLinks.cancel(selected.token, roomId, data.linkId, fence));
       }
       // Consent-bound DMs: participants list/request their own directional
@@ -4685,22 +4667,22 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "dm-consent-decide" && req.method === "POST") {
         const data = await body(req);
-        if (!exact(data, ["decision"])) reject(422, "invalid_dm_decision", "decision is the accepted field");
+        requireExactBody(data, ["decision"], "invalid_dm_decision", "decision is the accepted field");
         return json(res, 200, store.dmConsents.decide(roomId, auth.member.id, dmRequesterId, data.decision));
       }
       if (route === "dm-consent-block" && req.method === "POST") {
         const data = await body(req);
-        if (!exact(data, ["peerId"])) reject(422, "invalid_dm_block", "peerId is the accepted field");
+        requireExactBody(data, ["peerId"], "invalid_dm_block", "peerId is the accepted field");
         return json(res, 200, store.dmConsents.block(roomId, auth.member.id, data.peerId));
       }
       if (route === "dm-consent-revoke" && req.method === "POST") {
         const data = await body(req);
-        if (!exact(data, ["peerId"])) reject(422, "invalid_dm_revoke", "peerId is the accepted field");
+        requireExactBody(data, ["peerId"], "invalid_dm_revoke", "peerId is the accepted field");
         return json(res, 200, store.dmConsents.revoke(roomId, auth.member.id, data.peerId));
       }
       if (route === "dm-consent-unblock" && req.method === "POST") {
         const data = await body(req);
-        if (!exact(data, ["peerId"])) reject(422, "invalid_dm_unblock", "peerId is the accepted field");
+        requireExactBody(data, ["peerId"], "invalid_dm_unblock", "peerId is the accepted field");
         return json(res, 200, store.dmConsents.unblock(roomId, auth.member.id, data.peerId));
       }
       // Public directory listing controls (#605): owner only (enforced in
@@ -4734,9 +4716,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "opportunities" && req.method === "POST") {
         const data = await body(req);
-        if (!exact(data, ["enabled"]) || typeof data.enabled !== "boolean") {
-          reject(422, "invalid_opportunities", "enabled (boolean) is the accepted field");
-        }
+        requireBodyField(data, "enabled", "boolean", "invalid_opportunities", "enabled (boolean) is the accepted field");
         return json(res, 200, store.roomDirectory.setOpportunities(roomId, auth.member.id, data.enabled));
       }
       // Public-face controls: owner only (enforced in the module). Status is
@@ -4746,9 +4726,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "public-face" && req.method === "POST") {
         const data = await body(req);
-        if (!exact(data, ["enabled"]) || typeof data.enabled !== "boolean") {
-          reject(422, "invalid_face", "enabled (boolean) is the accepted field");
-        }
+        requireBodyField(data, "enabled", "boolean", "invalid_face", "enabled (boolean) is the accepted field");
         return json(res, 200, data.enabled
           ? store.publicFace.enable(roomId, auth.member.id)
           : store.publicFace.disable(roomId, auth.member.id));
@@ -4758,9 +4736,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "context" && req.method === "GET") {
         const params = url.searchParams;
-        if ([...params.keys()].some(key => !["since_version", "auth"].includes(key) || params.getAll(key).length !== 1)) {
-          reject(422, "invalid_context_version", "since_version is the only context query parameter");
-        }
+        rejectBadQuery(params, ["since_version", "auth"], "invalid_context_version", "since_version is the only context query parameter");
         const context = store.roomContext(selected.token, roomId, {
           sinceVersion: params.has("since_version") ? params.get("since_version") : null, expectedSessionBinding: fence
         });
@@ -4786,9 +4762,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             "events uses the query parameter after (a sequence number), not afterSequence. Retry with after set to the last sequence you handled. A refused afterSequence is not a filter and does not mean you are caught up.");
         }
         if (params.has("tail")) {
-          if ([...params.keys()].some(key => !["tail", "auth"].includes(key) || params.getAll(key).length !== 1)) {
-            reject(422, "invalid_event_cursor", "tail is used alone, as an integer from 1 to 200");
-          }
+          rejectBadQuery(params, ["tail", "auth"], "invalid_event_cursor", "tail is used alone, as an integer from 1 to 200");
           const tail = Number(params.get("tail"));
           return json(res, 200, redactEventPage(readEventTail(store, selected.token, roomId, tail, fence), projectionMessages(roomId)));
         }
@@ -4807,8 +4781,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (!granted) reject(403, "insufficient_scope", "API key lacks the inbox:read scope");
         }
         const params = url.searchParams;
-        if ([...params.keys()].some(key => !["limit", "auth"].includes(key) || params.getAll(key).length !== 1)
-          || params.has("limit") && (!/^[1-9]\d*$/.test(params.get("limit")) || Number(params.get("limit")) > 200))
+        rejectBadQuery(params, ["limit", "auth"], "invalid_inbox_selection", "Choose a limit of 1..200");
+        if (params.has("limit") && (!/^[1-9]\d*$/.test(params.get("limit")) || Number(params.get("limit")) > 200))
           reject(422, "invalid_inbox_selection", "Choose a limit of 1..200");
         return json(res, 200, store.agentInbox(selected.token, roomId, {
           limit: params.has("limit") ? Number(params.get("limit")) : 50, expectedSessionBinding: fence }));
@@ -4836,7 +4810,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (typeof messageId === "string") inboundSpan.setAttribute(ATTR.MESSAGE_ID, messageId);
           inboundSpan.setAttribute(ATTR.OUTCOME, result?.duplicate ? "duplicate" : "ok");
           inboundSpan.setStatusOk();
-          return json(res, result.duplicate ? 200 : 201, result);
+          return jsonCreated(result);
         } catch (error) {
           inboundSpan.recordException(error);
           // G7 (#940): hand the refused command's type to the AX layer via a
@@ -4856,20 +4830,25 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "cursor" && req.method === "POST") {
         const data = await body(req);
-        if (!exact(data, ["sequence"])) reject(422, "invalid_cursor", "Supply sequence only");
+        requireExactBody(data, ["sequence"], "invalid_cursor", "Supply sequence only");
         return json(res, 200, store.markCaughtUp(selected.token, roomId, data.sequence, fence));
       }
       // #643: invitation administration admits the room owner by ID on any
       // credential (share-links-style owner-capability exemption, audited);
       // anyone else needs an account browser session, as before.
       const invitationOwnerActing = auth.member?.id === store.room(roomId).state.room.ownerId;
+      // Invitation administration admits the room owner by ID; anyone else
+      // needs an account browser session.
+      const requireInvitationAdmin = () => {
+        if (!invitationOwnerActing && (selected.mode !== "account" || selected.bearer)) reject(403, "account_session_required", "Invitation administration requires an account browser session");
+      };
       if (route === "invitations" && req.method === "GET") {
         // Round-2 #108: invite-link analytics.
-        if (!invitationOwnerActing && (selected.mode !== "account" || selected.bearer)) reject(403, "account_session_required", "Invitation administration requires an account browser session");
+        requireInvitationAdmin();
         return json(res, 200, store.invitationStats(selected.token, roomId, auth.sessionBinding));
       }
       if (route === "invitations" && req.method === "POST") {
-        if (!invitationOwnerActing && (selected.mode !== "account" || selected.bearer)) reject(403, "account_session_required", "Invitation administration requires an account browser session");
+        requireInvitationAdmin();
         const data = await body(req);
         const fields = ["requestId", "invitationToken", "intendedAccountId", "intendedMemberId", "displayName", "role", "expiresAt", "expectedIssuerMemberRevision"];
         if (!exact(data, fields)) {
@@ -4883,12 +4862,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           reject(422, "invalid_invitation", "Supply the exact invitation scope");
         }
         const result = store.issueInvitation(selected.token, roomId, { requestId: data.requestId, token: data.invitationToken, intendedAccountId: data.intendedAccountId, intendedMemberId: data.intendedMemberId, displayName: data.displayName, role: data.role, expiresAt: data.expiresAt, expectedIssuerMemberRevision: data.expectedIssuerMemberRevision, expectedSessionBinding: auth.sessionBinding });
-        return json(res, result.duplicate ? 200 : 201, result);
+        return jsonCreated(result);
       }
       if (route === "invitation-revoke" && req.method === "POST") {
-        if (!invitationOwnerActing && (selected.mode !== "account" || selected.bearer)) reject(403, "account_session_required", "Invitation administration requires an account browser session");
+        requireInvitationAdmin();
         const data = await body(req);
-        if (!exact(data, ["expectedRevision", "reason"])) reject(422, "invalid_invitation_change", "Invitation revision and reason required");
+        requireExactBody(data, ["expectedRevision", "reason"], "invalid_invitation_change", "Invitation revision and reason required");
         return json(res, 200, store.revokeInvitation(selected.token, invitationId, { expectedRevision: data.expectedRevision, reason: data.reason, expectedSessionBinding: auth.sessionBinding, expectedRoomId: roomId }));
       }
       reject(405, "method_not_allowed", "Method not allowed");
