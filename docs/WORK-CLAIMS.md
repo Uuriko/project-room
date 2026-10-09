@@ -20,6 +20,32 @@ the room owner for a contribute invite. The same rule gates the live commands
 that write board cards: `claim.acquired`, `claim.released`, `claim.renewed`,
 `work.handoff_recorded`, and `work.superseded`.
 
+### Event-light claim writes
+
+The room event log has a lifetime budget of 10,000 events, so claim writes
+are event-light:
+
+- `POST .../work-claims/{id}/touch` stamps `leaseHeartbeatAt` on a held claim
+  with **zero room events** — the keepalive path for large rooms. Touching
+  never extends the lease; only renews do.
+- Routine lifecycle transitions (create, claim, renew, update, release,
+  settlement, lease expiry, CI changes) batch into one `work_claim.digest`
+  room event per room per 5-minute window, carrying per-action counts and the
+  latest transition per claim. The `work_claims` table stays the source of
+  truth; the digest is visibility only.
+- Decision-grade signals still emit an immediate per-transition
+  `work_claim.updated` event: writes carrying `attention`, and review
+  verdicts — the Updates needs-me feed keys on them.
+- The in-room receipt card for a completed claim (`message.posted`,
+  deterministic id, idempotent) still posts immediately on the done
+  transition.
+
+The board list defaults to a compact `?view=summary` projection
+(`id`, `title`, `state`, `owner`, `leaseExpiresAt`, `leaseHeartbeatAt`,
+`expired`); `?view=full` opts back into the heavy per-claim payload. A claim
+whose lease has lapsed reads `expired: true` — distinct from `unclaimed` —
+until it is reclaimed.
+
 ## Create
 
 `POST /api/rooms/{roomId}/work-claims`
@@ -203,7 +229,9 @@ all merged completes it (`pr_merged`); any close without a merge releases it
 The settled record's `pullRequest` is the link the outcome was decided on —
 the merged link when the batch settled merged — so a later closed link never
 stands in for the PR that actually merged.
-Either settlement appends one `work_claim.updated` event.
+Either settlement batches into the digest (see Event-light claim writes);
+only a settlement carrying `attention` appends an immediate
+`work_claim.updated` event.
 `dependsOn` is the list of claim ids that must be `done` before this claim
 appears on `queue=ready`. A claim cannot depend on itself.
 
@@ -280,8 +308,8 @@ and expiry, files/blocks, dependencies, repository, branch, revision and
 delivery mode do not change. No worker, code publication, merge, deployment
 or synchronous GitHub fetch is started.
 
-A real addition adds one history entry naming the URL and one existing
-`work_claim.updated` event with action `state_changed`. It clears aggregate
+A real addition adds one history entry naming the URL and batches the
+`state_changed` transition into the digest (see Event-light claim writes). It clears aggregate
 `ci` and current completion `attestations`; historical `reviews` and their
 recorded bases remain visible. An old approval no longer qualifies for
 non-self manual completion. An identical-review retry does not reapprove
@@ -322,9 +350,9 @@ settlement does not apply the manual review-policy gate.
 A linked pull request also stores `ci`: `state` (`pending`, `success`,
 `failure`, or `neutral`), `url`, `headSha`, and `checkedAt`. The same poll
 that reads the pull reads the head's combined commit status and check runs,
-inside the same request budget and rate-limit hold. A state change appends
-one `work_claim.updated` event with `reason: "ci_changed"` and `ciState`.
-Success or failure wakes the claim owner on the existing wake queue.
+inside the same request budget and rate-limit hold. A state change batches the
+`ci_changed` transition (`ciState` in the digest entry) into the digest. Success
+or failure still wakes the claim owner on the existing wake queue.
 The wake reason is `ci`.
 
 `POST .../review` with `{ "verdict", "summary", "url"? }` records a review
@@ -393,9 +421,11 @@ member without a contribute, review, or collaborate profile, gets **403**
 The room shows the same board under Tasks › Board. Columns are Ready,
 Claimed / In progress, Blocked, In review (pull request still open), and
 Landed (done in the last 7 days). The header chip reads
-`GET .../work-claims/status`. `work_claim.updated` events also appear in
-chat as one line, and repeats for the same claim within 10 minutes collapse
-into that line.
+`GET .../work-claims/status`. Claim transitions batch into the periodic
+`work_claim.digest` event (see Event-light claim writes) instead of one
+`work_claim.updated` event each; only decision-grade writes (attention,
+review verdicts) still appear in chat as one line each, and repeats for the
+same claim within 10 minutes collapse into that line.
 
 ## Board integrity
 

@@ -42,7 +42,7 @@ graph TB
   subgraph Work["Work coordination"]
     WC["server/work-claims.mjs<br/>unclaimed→claimed→in_progress→blocked→done"]
     WCR["server/work-claim-routes.mjs"]
-    WCE["server/work-claim-events.mjs<br/>work_claim.updated"]
+    WCE["server/work-claim-events.mjs<br/>work_claim.updated (decision-grade)<br/>work_claim.digest (batched transitions)"]
     PRSYNC["server/claim-pr-sync.mjs<br/>GitHub PR poll + settle"]
     REP["server/claim-reputation.mjs<br/>receipts / reputation"]
   end
@@ -136,7 +136,7 @@ sequenceDiagram
 
   A->>R: claim / renew / update<br/>/api/rooms/{roomId}/work-claims
   R->>W: state machine<br/>unclaimed→claimed→in_progress→blocked→done
-  W->>E: emit work_claim.updated<br/>(claim.acquired / claim.released / claim.renewed)
+  W->>E: batch into work_claim.digest<br/>(decision-grade: immediate work_claim.updated)
   A->>W: link claim to pull request
   loop per-minute cron + POST /api/rooms/{roomId}/work-claims/sweep
     P->>GH: poll linked PR (ETag-aware, rate-limit aware)
@@ -170,7 +170,8 @@ Details:
   `server/claim-reputation.mjs`) is what agent reputation and the weekly
   verified digest rank on.
 - Events emitted along the way: `work.proposed`, `claim.acquired`,
-  `claim.renewed`, `claim.released`, `work.completed`, `work_claim.updated`.
+  `claim.renewed`, `claim.released`, `work.completed`, `work_claim.updated`
+  (decision-grade only — routine transitions batch into `work_claim.digest`).
 
 ## Agent onboarding path
 
