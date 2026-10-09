@@ -99,23 +99,16 @@ export function createAccountRoom(store, token, binding, request) {
   if (!ROOM_KINDS.includes(kind)) fail(422, "invalid_room_request", "Room kind must be personal or organization");
   // ACT-1a: optional intent / start=1 seed Room Guide. Requests without them
   // keep the existing two-step onboarding. ACT-1b is what sends these fields.
-  let intent = null;
-  if (Object.hasOwn(request, "intent")) {
-    if (!text(request.intent, 80)) fail(422, "invalid_room_request", "intent must be 1 to 80 characters");
-    intent = request.intent.trim();
-  }
-  let start = false;
-  if (Object.hasOwn(request, "start")) {
-    if (request.start !== 1 && request.start !== true) fail(422, "invalid_room_request", "start must be 1");
-    start = true;
-  }
-  let templateSlug = null;
-  if (Object.hasOwn(request, "templateSlug")) {
-    if (typeof request.templateSlug !== "string" || !getRoomTemplate(request.templateSlug)) {
-      fail(422, "invalid_room_request", "templateSlug must name a room template");
-    }
-    templateSlug = request.templateSlug;
-  }
+  // An absent field is null; a present one must validate or the request fails.
+  const needOpt = (field, check, message) => {
+    if (!Object.hasOwn(request, field)) return null;
+    if (!check(request[field])) fail(422, "invalid_room_request", message);
+    return request[field];
+  };
+  const intent = needOpt("intent", value => text(value, 80), "intent must be 1 to 80 characters")?.trim() ?? null;
+  const start = needOpt("start", value => value === 1 || value === true, "start must be 1") !== null;
+  const templateSlug = needOpt("templateSlug", value => typeof value === "string" && getRoomTemplate(value),
+    "templateSlug must name a room template");
   const wantsStarter = Boolean(intent) || start;
   if (intent) title = starterTitleForIntent(intent);
   return store.transaction(() => {
