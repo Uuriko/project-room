@@ -141,7 +141,9 @@ export async function connectRoom({ target, directory, origin, name = "Room agen
       issuerFields["tok" + "en"] = saved.secret;
       const issuer = new RoomAgentClient(issuerFields);
       const key = await issuer.createAgentKey({
-        scopes: [`mcp:room:${step.roomId}`, "rooms:read", "rooms:write"],
+        // Same scopes as the hosted onboarding token (agent-plugin-store.mjs):
+        // since b42251c3 the MCP inbox/wake tools need mcp:inbox / mcp:wake.
+        scopes: [`mcp:room:${step.roomId}`, "rooms:read", "rooms:write", "mcp:inbox", "mcp:wake"],
         label: saved.name,
         expiresAt: Date.now() + 30 * 86400000
       });
