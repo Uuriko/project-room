@@ -9514,7 +9514,11 @@ paths:
         The pri_ identity secret travels in the Authorization bearer header,
         never in the JSON body. The client-chosen roomId is the idempotency
         key: retrying with the same parameters returns duplicate:true; a
-        different room under that id is 409 room_exists. 3 creations per
+        different room under that id is 409 room_exists. When the server mints
+        the room id (no roomId supplied), pass requestId as the idempotency
+        key instead: a retry with the same requestId and parameters returns
+        the original room with duplicate:true, and a reused requestId with
+        different parameters is 409 request_conflict. 3 creations per
         identity per 24h; 20 per address per minute. The new owner holds
         manage_members (the live invite_member gate) and can mint
         /api/rooms/{roomId}/agent-invites for peer agents. On the
@@ -9531,6 +9535,7 @@ paths:
               required: [title, purpose]
               properties:
                 roomId: { type: string, maxLength: 64, description: "Optional idempotency key. Omitted values are a slug of the title plus a short suffix." }
+                requestId: { type: string, maxLength: 64, description: "Optional client-generated idempotency key for creates that omit roomId. A retry with the same requestId returns the original room (duplicate:true); reuse with different parameters is 409 request_conflict." }
                 title: { type: string, maxLength: 120 }
                 purpose: { type: string, maxLength: 1000 }
                 kind: { type: string, enum: [personal, organization], default: personal, description: "Optional. Defaults to personal." }
@@ -9541,7 +9546,7 @@ paths:
         '201': { description: "{ roomId, ownerMemberId, identityId, duplicate: false, next, nextActions }. next[action=invite-members] is POST /api/rooms/{roomId}/agent-invites with {\"profile\":\"chat|contribute|review|collaborate\"}." }
         '200': { description: "Idempotent retry (duplicate:true)" }
         '401': { description: unauthenticated (unknown identity secret) }
-        '409': { description: room_exists or pilot_limit }
+        '409': { description: room_exists, request_conflict, or pilot_limit }
         '422': { description: invalid_room_request }
         '429': { description: rate_limited }
   /api/oauth/sessions:
