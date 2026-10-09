@@ -1170,6 +1170,22 @@ class ProjectionCache {
   }
 }
 
+// Viewer identity stamped on read responses — one definition, identical shape everywhere.
+const viewerIdentity = auth => ({
+  viewerId: auth.member.id,
+  viewerAccountId: auth.account?.id ?? null,
+  viewerAuthEpoch: auth.account?.authEpoch ?? null,
+  viewerSessionBinding: auth.sessionBinding,
+  viewerSessionRevision: auth.sessionRevision ?? null,
+});
+
+// Reply-request read hint for inbox items (agentInbox, openDirectMentions).
+const replyRequestHint = (event, memberId) =>
+  event.data.requestKind === "reply" && event.data.requestPolicyVersion === 1
+    && [event.actorId, event.data.toMemberId].includes(memberId)
+    ? { requestKind: "reply", nextRead: { tool: "room_read_request", arguments: { requestMessageId: event.data.messageId ?? event.id } } }
+    : {};
+
 export class RoomStore {
   constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined, integrity = "eager",
     bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1" } = {}) {
@@ -3542,6 +3558,21 @@ export class RoomStore {
       return { token, session: this.authenticate(token) };
     });
   }
+  // RC-2026-09-23-106: sessions bind to the identity's current secret hash.
+  currentIdentitySecretHash(identityId) {
+    return this.db.prepare("SELECT secret_hash AS secretHash FROM agent_identities WHERE identity_id=?").get(identityId)?.secretHash ?? null;
+  }
+  // Linked agent identity for a room member, or undefined when unlinked.
+  identityLinkOf(roomId, memberId) {
+    return this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?").get(roomId, memberId);
+  }
+  // Authenticate the caller and load the room in one step. Almost every
+  // token-taking method starts with exactly these two calls — both pure
+  // reads, and authenticate throws before the room is loaded, as before.
+  authedRoom(token, roomId, expectedSessionBinding = null) {
+    const auth = this.authenticate(token, roomId, expectedSessionBinding);
+    return { auth, room: this.room(roomId) };
+  }
   // Join-flow browser session. After a successful self-serve join the new
   // agent member's browser needs a working session — the join page's "open
   // the room" link would otherwise strand them with a secret but no session.
@@ -3562,11 +3593,8 @@ export class RoomStore {
       // invalidates the session — the same binding createAgentSession uses
       // (RC-2026-09-23-106). Members with no identity link keep the legacy
       // null binding.
-      const linkRow = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?").get(roomId, memberId);
-      const secretRow = linkRow
-        ? this.db.prepare("SELECT secret_hash AS secretHash FROM agent_identities WHERE identity_id=?").get(linkRow.identityId)
-        : null;
-      const token = this.insertCredential(roomId, memberId, "session", null, expiresAt, secretRow?.secretHash ?? null);
+      const linkRow = this.identityLinkOf(roomId, memberId);
+      const token = this.insertCredential(roomId, memberId, "session", null, expiresAt, linkRow ? this.currentIdentitySecretHash(linkRow.identityId) : null);
       return { token, expiresAt };
     });
   }
@@ -3582,29 +3610,30 @@ export class RoomStore {
       // RC-2026-09-23-106: bind the session to the current secret hash.
       // If the secret is rotated or revoked, authenticate() rejects sessions
       // carrying the old hash.
-      const secretRow = this.db.prepare("SELECT secret_hash AS secretHash FROM agent_identities WHERE identity_id=?").get(identityId);
-      const token = this.insertCredential(roomId, link.member.id, "session", null, this.now() + 8 * 3600000, secretRow?.secretHash ?? null);
+      const token = this.insertCredential(roomId, link.member.id, "session", null, this.now() + 8 * 3600000, this.currentIdentitySecretHash(identityId));
       return { token, session: this.authenticate(token) };
     });
   }
   revoke(token) { this.db.prepare("UPDATE credentials SET revoked=1 WHERE hash=?").run(hash(token)); }
+  // Member's caught-up cursor (0 when never caught up).
+  caughtUpCursor(roomId, memberId) {
+    return this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, memberId)?.sequence ?? 0;
+  }
   snapshot(token, roomId, expectedSessionBinding = null, view = "full", helpContext = false, offerContext = false) {
     // One read transaction keeps sequence, projection, and audit tail at the same commit.
     return this.readTransaction(() => {
-      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      const { auth, room } = this.authedRoom(token, roomId, expectedSessionBinding);
       if (!["full", "work"].includes(view)) fail(422, "invalid_snapshot_view", "Choose a supported snapshot view");
       if (typeof helpContext !== "boolean" || helpContext && view !== "work") fail(422, "invalid_help_context", "Help discovery requires the current work view");
       if (typeof offerContext !== "boolean" || offerContext && view !== "full") fail(422, "invalid_offer_context", "Browser offers require the full room view");
-      const room = this.room(roomId);
       if (view === "work") return { snapshotView: "work", snapshotVersion: 1, roomId, sequence: room.sequence,
         ...(helpContext ? { helpContextVersion: 1, evaluatedAt: new Date(this.now()).toISOString() } : {}),
         state: { room: room.state.room, members: room.state.members,
           workItems: Object.fromEntries(Object.entries(room.state.workItems).map(([id, item]) => [id, currentWorkRecord(item)])) },
-        charter: charterContext(room.state.room), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null,
-        viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
+        charter: charterContext(room.state.room), ...viewerIdentity(auth) };
       const rows = this.db.prepare("SELECT body FROM events WHERE room_id=? ORDER BY sequence DESC LIMIT 100").all(roomId);
-      const cursor = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id)?.sequence ?? 0;
-      return { ...room, roomId, ...(offerContext ? { offerContextVersion: 1 } : {}), charter: charterContext(room.state.room), replyRequestContractVersion: REPLY_POLICY_VERSION, state: { ...room.state, eventLog: rows.reverse().map(r => JSON.parse(r.body)) }, cursor, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
+      const cursor = this.caughtUpCursor(roomId, auth.member.id);
+      return { ...room, roomId, ...(offerContext ? { offerContextVersion: 1 } : {}), charter: charterContext(room.state.room), replyRequestContractVersion: REPLY_POLICY_VERSION, state: { ...room.state, eventLog: rows.reverse().map(r => JSON.parse(r.body)) }, cursor, ...viewerIdentity(auth) };
     });
   }
 
@@ -3612,8 +3641,7 @@ export class RoomStore {
     // F3: derived, read-time change list for one work item from its own revision
     // events. Never a write; the event log stays the only record.
     return this.readTransaction(() => {
-      this.authenticate(token, roomId, expectedSessionBinding);
-      const room = this.room(roomId);
+      const { room } = this.authedRoom(token, roomId, expectedSessionBinding);
       const item = room.state.workItems[workItemId];
       if (!item) fail(404, "work_not_found", "Choose an existing work item");
       if (since !== null && (!Number.isSafeInteger(since) || since < 0 || since > item.revision)) fail(422, "invalid_history_basis", "Choose a revision this work item has reached");
@@ -3626,7 +3654,7 @@ export class RoomStore {
 
   charter(token, roomId, { revision, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => {
-      const auth = this.authenticate(token, roomId, expectedSessionBinding), room = this.room(roomId);
+      const { auth, room } = this.authedRoom(token, roomId, expectedSessionBinding);
       if (revision !== undefined && (!Number.isSafeInteger(revision) || revision < 0)) fail(422, "invalid_charter_revision", "Choose an instructions version");
       const current = charterContext(room.state.room);
       const selected = revision ?? current.revision;
@@ -3642,15 +3670,13 @@ export class RoomStore {
         charter = charterFromEvent(parsedEvent, { revision: selected - 1 });
       }
       return { contractVersion: 1, roomId, evaluatedThrough: room.sequence, currentRevision: current.revision, currentEventId: current.eventId,
-        ...charterContext({ charter }), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null,
-        viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
+        ...charterContext({ charter }), ...viewerIdentity(auth) };
     });
   }
   workSessions(token, roomId, { status = null, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => {
-      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      const { auth, room } = this.authedRoom(token, roomId, expectedSessionBinding);
       if (status != null && !isSessionStatus(status)) fail(422, "invalid_session_status", "Choose one session status");
-      const room = this.room(roomId);
       const sessions = listWorkItemSessions(room.state.workItems, status, { members: room.state.members, nowMs: this.now() });
       return {
         contractVersion: 1, roomId, evaluatedThrough: room.sequence, viewerId: auth.member.id,
@@ -3745,14 +3771,14 @@ export class RoomStore {
     if (tripped?.kind === "rounds") fail(409, "round_limit_exceeded", "Session paused: the round limit was exceeded. The next mention or post resumes it");
     if (tripped?.kind === "budget") fail(409, "budget_exceeded", `Session budget exceeded (${tripped.limit}); the session was stopped`);
     return this.transaction(() => {
-      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      const { auth, room } = this.authedRoom(token, roomId, expectedSessionBinding);
       const prior = this.db.prepare("SELECT e.sequence,e.body FROM commands c JOIN events e ON e.room_id=c.room_id AND e.sequence=c.sequence WHERE c.room_id=? AND c.actor_id=? AND c.id=?").get(roomId, auth.member.id, request.requestId);
       if (prior) {
         const parsedEvent = JSON.parse(prior.body);
         if (!sessionEventMatchesRequest(parsedEvent, request)) fail(409, "idempotency_conflict", "Command ID already used for different content");
         return { sequence: prior.sequence, event: parsedEvent, duplicate: true };
       }
-      const roomState = this.room(roomId).state;
+      const roomState = room.state;
       const item = roomState.workItems[request.workItemId];
       if (!item) fail(404, "work_not_found", "Work item not found in this Room");
       // RC-2026-09-19-063: a round-limit pause resumes only with owner (or
@@ -3827,14 +3853,24 @@ export class RoomStore {
       return this.command(token, roomId, { id: request.requestId, type, data }, expectedSessionBinding);
     });
   }
+  // Agent host presence for one member: null unless the member is an active
+  // agent with an identity link. The raw host status is returned as-is
+  // ("unregistered" included); callers map it onto their own contract.
+  agentHostPresence(roomId, members, memberId) {
+    const member = members[memberId];
+    if (!member || member.kind !== "agent" || member.active === false) return null;
+    const link = this.identityLinkOf(roomId, memberId);
+    if (!link) return null;
+    const status = this.agentHeartbeats.statusOf(link.identityId);
+    return { identityId: link.identityId, status: status.status, lastSeenAt: status.lastSeenAt };
+  }
   // Who is around: the active roster, plus live SSE watchers and fresh
   // executing sessions. Legacy lastSeenAt also retains enrollment time.
   // Derived from existing data — no new tables, no people-data store.
   presence(token, roomId, watcherMemberIds, expectedSessionBinding = null) {
     return this.readTransaction(() => {
-      this.authenticate(token, roomId, expectedSessionBinding);
+      const { room } = this.authedRoom(token, roomId, expectedSessionBinding);
       const { members, ownerId } = this.roomAuthority(roomId);
-      const room = this.room(roomId);
       const now = this.now();
       const timestamp = value => typeof value === "number" ? value : typeof value === "string" ? Date.parse(value) : NaN;
       const working = new Map();
@@ -3863,19 +3899,17 @@ export class RoomStore {
       ).all(roomId).filter(row => row.member).map(row => [row.member, row.at]));
       const watching = new Set((watcherMemberIds ?? []).filter(memberId => members[memberId]?.active !== false));
       // RC-2026-09-18-051: additive host presence for agent members.
-      const identityLinkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
       // #660: raw host status per member. status is "online"|"offline"|null
       // (null = no registered host); identityId is the linked agent identity.
       const hostStatusOf = memberId => {
-        const m = members[memberId];
-        if (!m || m.kind !== "agent" || m.active === false) return { identityId: null, status: null, lastSeenAt: null };
-        const link = identityLinkOf.get(roomId, memberId);
-        if (!link) return { identityId: null, status: null, lastSeenAt: null };
-        const status = this.agentHeartbeats.statusOf(link.identityId);
-        // Unregistered (no host) stays null so RC-051 clients keep the
-        // "no presence field or absent" contract. Roster still lists the member.
-        if (status.status === "unregistered") return { identityId: link.identityId, status: null, lastSeenAt: null };
-        return { identityId: link.identityId, status: status.status, lastSeenAt: status.lastSeenAt };
+        const host = this.agentHostPresence(roomId, members, memberId);
+        if (!host || host.status === "unregistered") {
+          // Unregistered (no host) keeps status null so RC-051 clients keep
+          // the "no presence field or absent" contract. Roster still lists
+          // the member.
+          return { identityId: host?.identityId ?? null, status: null, lastSeenAt: null };
+        }
+        return host;
       };
       const agentPresence = memberId => {
         const host = hostStatusOf(memberId);
@@ -3940,13 +3974,9 @@ export class RoomStore {
       const { members } = this.roomAuthority(roomId);
       const needle = search?.toLowerCase();
       // RC-2026-09-18-051: additive host presence for agent members.
-      const identityLinkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
-      const agentPresence = m => {
-        if (!m || m.kind !== "agent" || m.active === false) return null;
-        const link = identityLinkOf.get(roomId, m.id);
-        if (!link) return null;
-        const status = this.agentHeartbeats.statusOf(link.identityId);
-        return { status: status.status, lastSeenAt: status.lastSeenAt };
+      const agentPresence = member => {
+        const host = this.agentHostPresence(roomId, members, member?.id);
+        return host ? { status: host.status, lastSeenAt: host.lastSeenAt } : null;
       };
       const listed = Object.values(members)
         .filter(m => m && m.active !== false && Array.isArray(m.capabilities) && m.capabilities.length > 0)
@@ -3967,8 +3997,8 @@ export class RoomStore {
   // Round-2 #106: JSONL event-log export for audit/portability. Streams
   // {sequence, event} lines; the consumer replays them in order for #107.
   *exportEvents(token, roomId, expectedSessionBinding = null) {
-    this.authenticate(token, roomId, expectedSessionBinding);
-    const sequence = this.room(roomId).sequence;
+    const { room } = this.authedRoom(token, roomId, expectedSessionBinding);
+    const sequence = room.sequence;
     const stmt = this.db.prepare("SELECT sequence,body FROM events WHERE room_id=? AND sequence>? ORDER BY sequence LIMIT 1000");
     let after = 0;
     for (;;) {
@@ -3986,10 +4016,10 @@ export class RoomStore {
   // fails before anything is written.
   importEvents(token, roomId, lines, expectedSessionBinding = null) {
     return this.transaction(() => {
-      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      const { auth, room } = this.authedRoom(token, roomId, expectedSessionBinding);
       const { ownerId } = this.roomAuthority(roomId);
       if (auth.member.id !== ownerId) fail(403, "owner_required", "Only the room owner can import history");
-      const previous = this.room(roomId).state;
+      const previous = room.state;
       refuseArchivedWrite(previous);
       if (!Array.isArray(lines) || !lines.length || lines.length > 10000) fail(422, "invalid_import", "Import is 1 to 10000 event lines");
       const events = lines.map((line, i) => {
@@ -4003,20 +4033,24 @@ export class RoomStore {
       catch (error) { fail(422, "invalid_import", `Export does not replay: ${error.message}`); }
       if (new Set(events.map(e => e.id)).size !== events.length) fail(422, "invalid_import", "Import has duplicate event ids");
       // Dependent rows reference event ids/sequences; a history replacement
-      // drops them. Pending invitations are lost on restore (documented).
-      this.db.prepare("DELETE FROM commands WHERE room_id=?").run(roomId);
-      this.db.prepare("DELETE FROM membership_invitation_events WHERE invitation_id IN (SELECT id FROM membership_invitations WHERE room_id=?)").run(roomId);
-      this.db.prepare("DELETE FROM membership_invitations WHERE room_id=?").run(roomId);
-      // Reader cursors point into the old history; reset them.
-      this.db.prepare("DELETE FROM cursors WHERE room_id=?").run(roomId);
-      // Replacing history may preserve the head id and sequence. Invalidate
-      // message replay snapshots and full-record certification explicitly.
-      this.db.prepare("DELETE FROM messages_backfill_cursor WHERE room_id=?").run(roomId);
-      // The projection checkpoint is a replay accelerator over the old
-      // history — a stale checkpoint would corrupt rebuildProjection, so
-      // replace it with one taken from the imported state.
-      this.db.prepare("DELETE FROM projection_checkpoints WHERE room_id=?").run(roomId);
-      this.db.prepare("DELETE FROM events WHERE room_id=?").run(roomId);
+      // drops them, in dependency order:
+      // - membership invitations: pending invitations are lost on restore (documented);
+      // - cursors: reader cursors point into the old history, so reset them;
+      // - messages_backfill_cursor: replacing history may preserve the head
+      //   id and sequence — invalidate message replay snapshots and
+      //   full-record certification explicitly;
+      // - projection_checkpoints: the checkpoint is a replay accelerator over
+      //   the old history — a stale one would corrupt rebuildProjection, so
+      //   it is replaced with one taken from the imported state below.
+      for (const sql of [
+        "DELETE FROM commands WHERE room_id=?",
+        "DELETE FROM membership_invitation_events WHERE invitation_id IN (SELECT id FROM membership_invitations WHERE room_id=?)",
+        "DELETE FROM membership_invitations WHERE room_id=?",
+        "DELETE FROM cursors WHERE room_id=?",
+        "DELETE FROM messages_backfill_cursor WHERE room_id=?",
+        "DELETE FROM projection_checkpoints WHERE room_id=?",
+        "DELETE FROM events WHERE room_id=?",
+      ]) this.db.prepare(sql).run(roomId);
       const insert = this.db.prepare("INSERT INTO events VALUES(?,?,?,?)");
       events.forEach((e, i) => insert.run(roomId, i + 1, e.id, JSON.stringify(e)));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?").run(events.length, this.storedProjection(roomId, state), archivedAtOf(state), roomId);
@@ -4029,9 +4063,8 @@ export class RoomStore {
   // reply tree (messages whose replyToId chains back to the root).
   messageThread(token, roomId, messageId, expectedSessionBinding = null) {
     return this.readTransaction(() => {
-      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      const { auth, room } = this.authedRoom(token, roomId, expectedSessionBinding);
       const { members } = this.roomAuthority(roomId);
-      const room = this.room(roomId);
       // PRIV-2: a since_join reader sees no thread rooted before their join.
       const floor = this.historyFloor(roomId, auth.member.id);
       const root = room.state.messages.find(m => m.id === messageId);
@@ -4061,8 +4094,7 @@ export class RoomStore {
     if (!["all", "messages", "work", "pinned"].includes(kind)) fail(422, "invalid_search", "kind is all, messages, work, or pinned");
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) fail(422, "invalid_search", "limit is 1 to 200");
     return this.readTransaction(() => {
-      const auth = this.authenticate(token, roomId, expectedSessionBinding);
-      const room = this.room(roomId);
+      const { auth, room } = this.authedRoom(token, roomId, expectedSessionBinding);
       const needle = query.trim().toLowerCase();
       const result = { roomId, query: query.trim(), messages: [], workItems: [], total: 0 };
       const floor = this.historyFloor(roomId, auth.member.id); // PRIV-2
@@ -4106,9 +4138,8 @@ export class RoomStore {
   // each provider is currently working on. Members-only read.
   providerHeartbeats(token, roomId, expectedSessionBinding = null) {
     return this.readTransaction(() => {
-      this.authenticate(token, roomId, expectedSessionBinding);
+      const { room } = this.authedRoom(token, roomId, expectedSessionBinding);
       const { members } = this.roomAuthority(roomId);
-      const room = this.room(roomId);
       const now = this.now();
       const providers = [];
       for (const member of Object.values(members)) {
@@ -4141,19 +4172,15 @@ export class RoomStore {
   // bodies are never part of either shape.
   roomContext(token, roomId, { sinceVersion = null, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => {
-      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      const { auth, room } = this.authedRoom(token, roomId, expectedSessionBinding);
       if (sinceVersion !== null && (typeof sinceVersion !== "string" || !/^[a-f0-9]{64}$/.test(sinceVersion))) {
         fail(422, "invalid_context_version", "since_version must be the previous context_version (64 lowercase hex characters), or omit it");
       }
-      const room = this.room(roomId);
-      const caughtUp = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id)?.sequence ?? 0;
+      const caughtUp = this.caughtUpCursor(roomId, auth.member.id);
       const built = buildRoomContext({
         state: room.state, sequence: room.sequence, viewerId: auth.member.id, caughtUp, now: this.now()
       });
-      const identity = {
-        viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
-        viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null
-      };
+      const identity = viewerIdentity(auth);
       if (sinceVersion === built.context_version) {
         return { not_modified: true, context_version: built.context_version, roomId,
           evaluatedThrough: built.evaluatedThrough, evaluatedAt: built.evaluatedAt, cursors: built.cursors, ...identity };
@@ -4163,44 +4190,38 @@ export class RoomStore {
   }
   workContext(token, roomId, workItemId, { includeSource = false, includeOffers = false, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => {
-      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      const { auth, room } = this.authedRoom(token, roomId, expectedSessionBinding);
       if (!validId(workItemId) || typeof includeSource !== "boolean" || typeof includeOffers !== "boolean") fail(422, "invalid_work_context", "Choose one work ID and boolean context options");
-      const room = this.room(roomId), now = this.now();
+      const now = this.now();
       if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
       return { ...selectedWorkContext({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence, now, includeSource, includeOffers }),
-        viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
-        viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
+        ...viewerIdentity(auth) };
     });
   }
   workDiscussion(token, roomId, workItemId, { cursor = null, since, limit, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => {
-      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      const { auth, room } = this.authedRoom(token, roomId, expectedSessionBinding);
       if (!validId(workItemId)) fail(422, "invalid_discussion", "Choose one work item");
-      const room = this.room(roomId);
       if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
       const window = discussionWindow({ sequence: room.sequence, roomId, workItemId, viewerId: auth.member.id, cursor, since, limit });
       const anchorId = this.db.prepare("SELECT id FROM events WHERE room_id=? AND sequence=?").get(roomId, window.horizon)?.id;
       if (!anchorId || (window.anchorId !== null && window.anchorId !== anchorId)) fail(409, "discussion_history_changed", "Discussion history changed; restart after recovery");
       const metadata = this.db.prepare("SELECT sequence,id,json_extract(body,'$.data.messageId') AS message_id FROM events WHERE room_id=? AND sequence<=? AND json_extract(body,'$.type')=? ORDER BY sequence").all(roomId, window.horizon, T.MESSAGE_POSTED);
       return { ...selectedWorkDiscussion({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence,
-        now: this.now(), metadata, window, anchorId, cursor }),
-        viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
-        viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
+        now: this.now(), metadata, window, anchorId, cursor }), ...viewerIdentity(auth) };
     });
   }
   workResult(token, roomId, workItemId, { completionEventId = null, draftMessageId = null, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => {
-      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      const { auth, room } = this.authedRoom(token, roomId, expectedSessionBinding);
       if (!validId(workItemId) || [completionEventId, draftMessageId].some(id => id !== null && !validId(id))
         || completionEventId !== null && draftMessageId !== null) fail(422, "invalid_result_selection", "Choose current result, one completion, or one draft");
-      const room = this.room(roomId);
       if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
       let value;
       try { value = selectedWorkResult({ db: this.db, state: room.state, workItemId, sequence: room.sequence, now: this.now(), completionEventId, draftMessageId }); }
       catch { fail(422, "result_unavailable", "Exact text evidence is unavailable; no other result was substituted"); }
       if (!value) fail(404, "result_not_found", "Completion not found on this work; no other result was substituted");
-      return stampWorkResult({ ...value, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
-        viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null }, auth.member.id);
+      return stampWorkResult({ ...value, ...viewerIdentity(auth) }, auth.member.id);
     });
   }
   eventsAfter(token, roomId, after = 0, limit = 100, bindingOrOptions = null, options = {}) {
@@ -4294,11 +4315,10 @@ export class RoomStore {
     // Consent-bound DMs: incoming pending requests for the inbox. Read
     // outside the readTransaction below — the module wraps reads in a
     // write-capable transaction, which cannot nest inside a read-only one.
-    // authenticate() is a pure read, so calling it twice is harmless.
-    const preAuth = this.authenticate(token, roomId, expectedSessionBinding);
-    const dmRequests = this.dmConsents.pendingFor(roomId, preAuth.member.id);
+    const auth = this.authenticate(token, roomId, expectedSessionBinding);
+    const dmRequests = this.dmConsents.pendingFor(roomId, auth.member.id);
     return this.readTransaction(() => {
-      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      const room = this.room(roomId);
       const memberId = auth.member.id;
       const directMessages = this.db.prepare(
         `SELECT sequence, body FROM events WHERE room_id=?
@@ -4314,10 +4334,7 @@ export class RoomStore {
             body: parsed.data.body,
             at: parsed.at,
             channel: "room",
-            ...(parsed.data.requestKind === "reply" && parsed.data.requestPolicyVersion === 1
-              && [parsed.actorId, parsed.data.toMemberId].includes(memberId) ? {
-                requestKind: "reply", nextRead: { tool: "room_read_request", arguments: { requestMessageId: parsed.data.messageId ?? parsed.id } }
-              } : {}),
+            ...replyRequestHint(parsed, memberId),
           };
         });
       const assignments = this.collab.listAssignments(roomId)
@@ -4360,7 +4377,7 @@ export class RoomStore {
         directMentions,
         bondProposals,
         peerMessages,
-        next: inboxNext(roomId, directMessages, assignments, mentions, directMentions, bondProposals, peerMessages, this.room(roomId).state.replyRequests),
+        next: inboxNext(roomId, directMessages, assignments, mentions, directMentions, bondProposals, peerMessages, room.state.replyRequests),
         dmRequests,
       }, memberId);
       for (const key of ["directMessages", "assignments", "mentions", "directMentions", "bondProposals", "peerMessages", "next", "dmRequests"]) {
@@ -4413,10 +4430,7 @@ export class RoomStore {
         channel: event.data.channelId ?? "general",
         private: Boolean(event.data.toMemberId),
         ...(event.data.toMemberId ? { replyToMemberId: event.actorId } : {}),
-        ...(event.data.requestKind === "reply" && event.data.requestPolicyVersion === 1
-          && [event.actorId, event.data.toMemberId].includes(memberId) ? {
-            requestKind: "reply", nextRead: { tool: "room_read_request", arguments: { requestMessageId: event.data.messageId ?? event.id } }
-          } : {}),
+        ...replyRequestHint(event, memberId),
       }));
   }
   // Return-brief wiring (disposition 5557850637): one read transaction keeps the frozen
@@ -4424,9 +4438,8 @@ export class RoomStore {
   // Fetching never acknowledges - only markCaughtUp does, explicitly.
   returnBrief(token, roomId, { horizon = null, after = null, cursor: frozenCursor = null, limit = RETURN_BRIEF_DEFAULT_LIMIT, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => {
-      const auth = this.authenticate(token, roomId, expectedSessionBinding);
-      const room = this.room(roomId);
-      const cursor = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id)?.sequence ?? 0;
+      const { auth, room } = this.authedRoom(token, roomId, expectedSessionBinding);
+      const cursor = this.caughtUpCursor(roomId, auth.member.id);
       const { H, startAfter, C, limit: pageLimit } = resolveHistoryWindow({ sequence: room.sequence, storedCursor: cursor, horizon, after, continuationCursor: frozenCursor, limit });
       const rows = this.db.prepare("SELECT sequence, body FROM events WHERE room_id=? AND sequence>? AND sequence<=? ORDER BY sequence LIMIT ?").all(roomId, startAfter, H, pageLimit)
         .map(r => ({ sequence: r.sequence, event: JSON.parse(r.body) }));
@@ -4440,16 +4453,22 @@ export class RoomStore {
       const dmVisible = dmEventVisibility(auth.member.id, room.state.messages, brief.history.items); // SEC-19
       brief.history.items = brief.history.items.filter(row => rowInHistory(row, floor, floorMessages) && dmVisible(row.event)
         && peerEventVisible(row.event, { memberId: auth.member.id, identityId, isOwner }));
-      return { roomId, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null, ...brief };
+      return { roomId, ...viewerIdentity(auth), ...brief };
     });
   }
   markCaughtUp(token, roomId, sequence, expectedSessionBinding = null) {
     return this.transaction(() => {
-      const auth = this.authenticate(token, roomId, expectedSessionBinding);
-      if (!Number.isSafeInteger(sequence) || sequence < 0 || sequence > this.room(roomId).sequence) fail(422, "invalid_cursor", "Invalid caught-up cursor");
+      const { auth, room } = this.authedRoom(token, roomId, expectedSessionBinding);
+      if (!Number.isSafeInteger(sequence) || sequence < 0 || sequence > room.sequence) fail(422, "invalid_cursor", "Invalid caught-up cursor");
       this.db.prepare("INSERT INTO cursors VALUES(?,?,?) ON CONFLICT(room_id,member_id) DO UPDATE SET sequence=max(cursors.sequence,excluded.sequence)").run(roomId, auth.member.id, sequence);
-      return { cursor: this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id).sequence };
+      return { cursor: this.caughtUpCursor(roomId, auth.member.id) };
     });
+  }
+  // RC-2026-09-24-203: push doorbell — a pointer-only POST for the offline
+  // agent's push subscription; the inbox pull carries the body.
+  // Fire-and-forget; never fails the command.
+  pushDoorbell(identityId, eventType, roomId, id) {
+    this.agentHeartbeats.pushNotify({ identityId, eventType, roomId, id, ts: this.now() });
   }
   command(token, roomId, command, expectedSessionBinding = null) {
     validateCommand(command);
@@ -4756,8 +4775,7 @@ export class RoomStore {
         // RC-2026-09-24-203: push doorbell — a pointer-only POST for the
         // offline agent's push subscription (the inbox pull carries the
         // body). Fire-and-forget; never fails the command.
-        if (woken) this.agentHeartbeats.pushNotify({ identityId: incoming.data.toIdentityId,
-          eventType: "dm.posted", roomId, id: incoming.data.messageId ?? incoming.id, ts: this.now() });
+        if (woken) this.pushDoorbell(incoming.data.toIdentityId, "dm.posted", roomId, incoming.data.messageId ?? incoming.id);
       }
       // RC-2026-09-24-203: push doorbell for bond proposals. Both parties
       // (not the proposer, who is online by definition) get a pointer-only
@@ -4766,8 +4784,7 @@ export class RoomStore {
         const { agentAId, agentBId, proposerIdentityId, bondId } = bondEffect.data;
         for (const partyId of [agentAId, agentBId]) {
           if (typeof partyId === "string" && partyId.length > 0 && partyId !== proposerIdentityId) {
-            this.agentHeartbeats.pushNotify({ identityId: partyId, eventType: "bond.proposed",
-              roomId, id: typeof bondId === "string" ? bondId : incoming.id, ts: this.now() });
+            this.pushDoorbell(partyId, "bond.proposed", roomId, typeof bondId === "string" ? bondId : incoming.id);
           }
         }
       }
@@ -4916,23 +4933,18 @@ export class RoomStore {
   maybeWakeOnMention(roomId, state, senderMemberId, data, eventId) {
     const targets = agentWakeTargets(state, senderMemberId, data, this.db, roomId);
     if (targets.size === 0) return;
-    const linkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
     for (const [memberId, kind] of targets) {
       // Trust off skips the wake. The post already landed; the command result
       // names the skip.
       if (firstBlockedWakeTarget(state, senderMemberId, [memberId])) continue;
-      const link = linkOf.get(roomId, memberId);
+      const link = this.identityLinkOf(roomId, memberId);
       if (!link) continue;
       const { woken, signal } = this.agentHeartbeats.wakeIfOffline({
         agentId: link.identityId, kind, roomId, messageId: data.messageId ?? eventId });
       if (woken && signal) {
         this.agentPlugin.deliverWakePing({ identityId: link.identityId, signal });
-        // RC-2026-09-24-203: push doorbell — a pointer-only POST for the
-        // offline agent's push subscription; the inbox pull carries the body.
         // Targeted DMs (kind "dm") ride dm.posted, @mentions ride message.posted.
-        this.agentHeartbeats.pushNotify({ identityId: link.identityId,
-          eventType: kind === "dm" ? "dm.posted" : "message.posted",
-          roomId, id: data.messageId ?? eventId, ts: this.now() });
+        this.pushDoorbell(link.identityId, kind === "dm" ? "dm.posted" : "message.posted", roomId, data.messageId ?? eventId);
       }
     }
   }
@@ -4974,16 +4986,15 @@ export class RoomStore {
        (room_id,message_event_id,mentioned_member_id,state,created_at,timeout_at,decided_at)
        VALUES(?,?,?,?,?,?,NULL)`);
     const toMemberId = typeof data.toMemberId === "string" ? data.toMemberId : "";
+    const deliver = memberId => insert.run(roomId, eventId, memberId, "delivered", nowMs, nowMs + timeoutMs);
     for (const memberId of resolveMentionTargetsInText(members, identityNames, body, senderMemberId)) {
       if (toMemberId && toMemberId !== memberId) continue;
-      insert.run(roomId, eventId, memberId, "delivered", nowMs, nowMs + timeoutMs);
+      deliver(memberId);
     }
     // plan-squads: @squad/<name> fans out to one mention row per active
     // member (INSERT OR IGNORE dedupes against direct mentions). The
     // mention lifecycle owns delivery/ack/timeout from here.
-    for (const memberId of squadMentionTargets(this.db, roomId, body, senderMemberId, members, data.toMemberId)) {
-      insert.run(roomId, eventId, memberId, "delivered", nowMs, nowMs + timeoutMs);
-    }
+    for (const memberId of squadMentionTargets(this.db, roomId, body, senderMemberId, members, data.toMemberId)) deliver(memberId);
     // COMMS-02: warn the poster about @handles whose target is ambiguous
     // (2+ members match) or unknown, naming the candidates so they can
     // disambiguate. Delivery is unchanged — the post still lands; the
@@ -5005,8 +5016,8 @@ export class RoomStore {
 
   // #658: owner-only timeout override for a room.
   setMentionTimeout(token, roomId, timeoutMs, expectedSessionBinding = null) {
-    const auth = this.authenticate(token, roomId, expectedSessionBinding);
-    if (auth.member.id !== this.room(roomId).state.room.ownerId) fail(403, "owner_required", "Only the room owner can configure mention timeouts");
+    const { auth, room } = this.authedRoom(token, roomId, expectedSessionBinding);
+    if (auth.member.id !== room.state.room.ownerId) fail(403, "owner_required", "Only the room owner can configure mention timeouts");
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < MENTION_TIMEOUT_MS_MIN || timeoutMs > MENTION_TIMEOUT_MS_MAX) {
       fail(422, "invalid_mention_timeout", `timeoutMs must be an integer between ${MENTION_TIMEOUT_MS_MIN} and ${MENTION_TIMEOUT_MS_MAX}`);
     }
@@ -5082,7 +5093,7 @@ export class RoomStore {
   // owner may query another member's mentions (feeds the #662 attention
   // card's "N mentions unacknowledged"). Supports state and after filters.
   listMentions(token, roomId, { state = null, after = null, memberId = null } = {}, expectedSessionBinding = null) {
-    const auth = this.authenticate(token, roomId, expectedSessionBinding);
+    const { auth, room } = this.authedRoom(token, roomId, expectedSessionBinding);
     const target = memberId ?? auth.member.id;
     if (typeof target !== "string" || !target) fail(422, "invalid_mention_query", "memberId must be a non-empty string");
     if (state !== null && !["delivered", "acknowledged", "responded", "timed_out"].includes(state)) {
@@ -5091,7 +5102,7 @@ export class RoomStore {
     if (after !== null && (typeof after !== "string" || Number.isNaN(Date.parse(after)))) {
       fail(422, "invalid_mention_query", "after must be an ISO timestamp");
     }
-    if (target !== auth.member.id && auth.member.id !== this.room(roomId).state.room.ownerId) {
+    if (target !== auth.member.id && auth.member.id !== room.state.room.ownerId) {
       fail(403, "mention_forbidden", "You can only list your own mentions");
     }
     return this.transaction(() => {
@@ -5108,21 +5119,26 @@ export class RoomStore {
                AND (json_extract(e.body,'$.data.toMemberId')=? OR json_extract(e.body,'$.actorId')=?)))
          ORDER BY m.created_at DESC LIMIT 200`
       ).all(roomId, target, state, state, after, after === null ? null : Date.parse(after), target, target, auth.member.id, auth.member.id);
-      const members = this.room(roomId).state.members ?? {};
+      const members = room.state.members ?? {};
       return {
         roomId, memberId: target,
-        mentions: rows.map(r => ({
-          messageEventId: r.messageEventId, memberId: r.memberId, state: r.state,
-          displayName: members[r.memberId]?.displayName ?? r.memberId,
-          createdAt: new Date(r.createdAt).toISOString(),
-          timeoutAt: new Date(r.timeoutAt).toISOString(),
-          decidedAt: r.decidedAt === null ? null : new Date(r.decidedAt).toISOString(),
-        })),
+        mentions: rows.map(r => this.serializeMentionRow(r, members, r.messageEventId, r.memberId)),
       };
     });
   }
 
   // #658: single mention row view for the ack response.
+  // One serializer for mention rows — the list and the ack view share the
+  // same shape (the view additionally carries roomId).
+  serializeMentionRow(row, members, messageEventId, memberId) {
+    return {
+      messageEventId, memberId, state: row.state,
+      displayName: members[memberId]?.displayName ?? memberId,
+      createdAt: new Date(row.createdAt).toISOString(),
+      timeoutAt: new Date(row.timeoutAt).toISOString(),
+      decidedAt: row.decidedAt === null ? null : new Date(row.decidedAt).toISOString(),
+    };
+  }
   mentionView(roomId, messageEventId, memberId) {
     const row = this.db.prepare(
       `SELECT state, created_at AS createdAt, timeout_at AS timeoutAt, decided_at AS decidedAt
@@ -5130,13 +5146,7 @@ export class RoomStore {
     ).get(roomId, messageEventId, memberId);
     if (!row) return null;
     const members = this.room(roomId).state.members ?? {};
-    return {
-      roomId, messageEventId, memberId, state: row.state,
-      displayName: members[memberId]?.displayName ?? memberId,
-      createdAt: new Date(row.createdAt).toISOString(),
-      timeoutAt: new Date(row.timeoutAt).toISOString(),
-      decidedAt: row.decidedAt === null ? null : new Date(row.decidedAt).toISOString(),
-    };
+    return { roomId, ...this.serializeMentionRow(row, members, messageEventId, memberId) };
   }
 
   // #658: batch-load mention chip data for a page of message events. One
