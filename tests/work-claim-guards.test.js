@@ -127,6 +127,49 @@ test("a member cannot hold more than their open-claim cap", async () => {
   assert.equal(second.value.error.code, "too_many_open_claims");
 });
 
+test("the per-member cap refusal keeps each route's wording byte-identical", async () => {
+  // WAVE-400 elegance: the shared assertMemberClaimCap helper must not blur
+  // the routes' historic wording. claim speaks to "You" ("hold"/"claiming");
+  // create-with-assignee and reassign name the member ("holds"/"assigning").
+  const n = DEFAULT_MAX_MEMBER_OPEN_CLAIMS;
+  const registry = createWorkClaimRegistry();
+  for (let index = 0; index < n + 1; index += 1) {
+    assert.equal((await call(registry, "owner", "create", null, { id: `w-${index}` })).status, 201);
+  }
+  for (let index = 0; index < n; index += 1) {
+    assert.equal((await call(registry, "holder", "claim", `w-${index}`, {})).status, 200);
+  }
+  const over = await call(registry, "holder", "claim", `w-${n}`, {});
+  assert.equal(over.status, 409);
+  assert.equal(over.value.error.code, "too_many_open_claims");
+  assert.equal(over.value.error.message,
+    `You already hold ${n} open claims. Release or finish one before claiming another.`);
+  assert.equal(over.value.hint, "Release or finish an open claim before claiming another.");
+
+  const small = createWorkClaimRegistry();
+  small.configure("room1", { maxMemberOpenClaims: 1 });
+  assert.equal((await call(small, "owner", "create", null, { id: "a1", assignee: "holder" })).status, 201);
+  const overAssign = await call(small, "owner", "create", null, { id: "a2", assignee: "holder" });
+  assert.equal(overAssign.status, 409);
+  assert.equal(overAssign.value.error.code, "too_many_open_claims");
+  assert.equal(overAssign.value.error.message,
+    "holder already holds 1 open claims. Release or finish one before assigning another.");
+  assert.equal(overAssign.value.hint, "Release or finish an open claim before assigning another.");
+
+  const room = createWorkClaimRegistry();
+  room.configure("room1", { maxMemberOpenClaims: 1 });
+  assert.equal((await call(room, "owner", "create", null, { id: "r1" })).status, 201);
+  assert.equal((await call(room, "owner", "create", null, { id: "r2" })).status, 201);
+  assert.equal((await call(room, "holder", "claim", "r1", {})).status, 200);
+  assert.equal((await call(room, "human", "claim", "r2", {})).status, 200);
+  const overReassign = await call(room, "owner", "reassign", "r2", { newOwner: "holder" });
+  assert.equal(overReassign.status, 409);
+  assert.equal(overReassign.value.error.code, "too_many_open_claims");
+  assert.equal(overReassign.value.error.message,
+    "holder already holds 1 open claims. Release or finish one before assigning another.");
+  assert.equal(overReassign.value.hint, "Release or finish an open claim before assigning another.");
+});
+
 test("720h and a null lease are refused for a non-owner; the owner may opt out", async () => {
   const registry = createWorkClaimRegistry();
   await call(registry, "owner", "create", null, { id: "hours" });
