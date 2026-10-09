@@ -266,6 +266,33 @@ const STREAM_DRAIN_GRACE_MS = 5000;
 // Returns the cached value for key, marking it most-recently-used; when key is
 // absent, makeValue() builds it, the least-recently-used entry is evicted at
 // capacity, and the new value is stored. Exported for unit tests.
+// Per-stream bounded write queue. Every byte a stream emits goes through
+// this queue; the socket write itself is always fire-and-forget — the pump
+// NEVER awaits a write — so one slow consumer can never stall the room or
+// its peers. When the pending bytes exceed the cap the queue reports
+// lagging and the stream is closed alone with a final `stream_lagging`
+// event (wire protocol unchanged; the client resumes with Last-Event-ID).
+// The F1 shared pump (wave300-fanout-perf) reuses this queue per stream in
+// its fan-out step: check queue.lagging() before writing each event, skip
+// the stream for the rest of the tick when it trips, and run the same lag
+// close path. The shared fetch never waits on a stream's socket. Exported
+// for unit tests.
+export function createStreamWriteQueue(target, capBytes) {
+  const queue = {
+    capBytes,
+    pendingBytes: () => target.writableLength,
+    lagging: () => target.writableLength > capBytes,
+    // Writes one chunk; returns false when the write pushed the queue over
+    // the cap (or the socket is gone) — the caller must stop feeding this
+    // stream and run the lag close path instead of writing more.
+    write(chunk) {
+      if (target.destroyed || target.writableEnded) return false;
+      target.write(chunk);
+      return !queue.lagging();
+    },
+  };
+  return queue;
+}
 export function touchLruEntry(map, key, makeValue, capacity) {
   if (map.has(key)) {
     const value = map.get(key);
@@ -895,35 +922,38 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   function pumpStreamEntry(entry, page, messages, authority) {
     const { res, roomId, operationId } = entry;
     if (res.destroyed || res.writableEnded) { removeStreamEntry(entry); return; }
-    // Per-connection send queue: a consumer whose unsent bytes exceed the cap
-    // gets one final stream_lagging event and, if it never drains, its socket
-    // dropped. Peers keep their own queues. Reconnecting with Last-Event-ID
-    // resumes from the last event the client actually processed.
-    const lagging = () => res.writableLength > streamQueueCap;
+    // Per-connection bounded send queue: a consumer whose unsent bytes
+    // exceed the cap gets one final stream_lagging event and, if it never
+    // drains, its socket dropped. Peers keep their own queues. Reconnecting
+    // with Last-Event-ID resumes from the last event the client actually
+    // processed. The pump never awaits a socket write, so one slow stream
+    // cannot stall the room or its peers.
+    if (!entry.queue) entry.queue = createStreamWriteQueue(res, streamQueueCap);
+    const queue = entry.queue;
     try {
       // Per-stream auth every tick: a revoked credential ends only this
       // stream with access-ended; peers are unaffected.
       const auth = store.authenticate(entry.token, roomId, entry.sessionBinding);
       const rows = filterPageForViewer(auth, roomId, page.events, messages, authority)
         .filter(row => row.sequence > entry.cursor);
-      if (!rows.length) res.write(": connected transport only\n\n");
+      let flowing = rows.length === 0 ? queue.write(": connected transport only\n\n") : true;
       for (const item of rows) {
-        res.write(`id: ${item.sequence}\nevent: room-event\ndata: ${JSON.stringify(item)}\n\n`);
+        if (!flowing) break;
+        flowing = queue.write(`id: ${item.sequence}\nevent: room-event\ndata: ${JSON.stringify(item)}\n\n`);
         entry.cursor = item.sequence;
-        if (lagging()) break;
       }
       // Ephemeral typing indicators ride the stream as synthetic `typing`
       // events with no `id:` — they never disturb Last-Event-ID resume.
       // Emitted only when the visible typist set changes for this connection.
-      if (!lagging()) {
+      if (flowing) {
         const typists = currentTypists(typingBeats, roomId, entry.memberId);
         const key = typingKey(typists);
         if (key !== entry.lastTypingKey) {
           entry.lastTypingKey = key;
-          res.write(`event: typing\ndata: ${JSON.stringify({ typists })}\n\n`);
+          flowing = queue.write(`event: typing\ndata: ${JSON.stringify({ typists })}\n\n`);
         }
       }
-      if (lagging()) lagStreamEntry(entry);
+      if (!flowing) lagStreamEntry(entry);
       // Advance past invisible rows only after the complete visible batch
       // was queued. A lagging stream must resume from its last sent event.
       // max() because the shared page starts at the room's minimum cursor,
@@ -992,7 +1022,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   function stream(req, res, token, roomId, after, auth, operationId) {
     const binding = auth.sessionBinding;
     store.eventsAfter(token, roomId, after, 100, binding);
-    if (streams.size >= 100 || [...streams].filter(item => item.credentialHash === auth.credentialHash).length >= 3) reject(429, "stream_limit", "Close another room connection before opening more");
+    // Stream admission follows the honest-backpressure refusal semantics
+    // (wave300/honest-backpressure lane): 429 means *you* are over your quota
+    // — close one of your own streams (the route catch-all adds Retry-After);
+    // 503 shed_load means the *server* is shedding — back off and honor the
+    // Retry-After delay.
+    const ownStreams = [...streams].filter(item => item.credentialHash === auth.credentialHash).length;
+    if (ownStreams >= 3) reject(429, "stream_limit", "Close another room connection before opening more");
+    if (streams.size >= 100) reject(503, "shed_load", "The server is shedding load; retry after the Retry-After delay", { "Retry-After": "5" });
     res.writeHead(200, { "Content-Type": "text/event-stream", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
     res.flushHeaders();
     // The entry carries the per-stream state the shared room pump's fan-out
@@ -1004,6 +1041,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     const signal = resolveRequestSignal(req);
     const cleanup = () => { removeStreamEntry(entry); signal?.removeEventListener("abort", abort); };
     const abort = () => endStreamEntry(entry);
+    // Every stream gets a bounded write queue: the shared pump's fan-out
+    // feeds each stream through it, so one slow consumer trips its own lag
+    // path instead of stalling the room. See createStreamWriteQueue.
     res.once("close", cleanup); res.once("finish", cleanup); res.once("error", abort);
     // Workers' Node bridge does not emit close when a browser leaves. The
     // request-scoped platform signal releases only this stream and its timer.
