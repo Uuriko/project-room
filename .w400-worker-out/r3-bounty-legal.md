@@ -1,0 +1,67 @@
+# WAVE-400 docs worker — r3: bounty-legal slice
+## server/bounty-escrow-routes.mjs
+Mount prefix: `/api/rooms/{roomId}/bounties` and `/api/rooms/{roomId}/credits` (route regexes at server/http.mjs:3497-3531; handler dispatch at server/http.mjs:3861-3894 via `handleBountyEscrow`).
+Auth: room credential + session fence + rate limit for ALL routes (inherited from the authenticated room block, http.mjs:3880). Every non-GET/HEAD mutating call additionally runs `enforceAutonomyTierForAction` twice (once pre-transaction at bounty-escrow-routes.mjs:126, once inside the transaction at :151) and `reauthorize()` inside the transaction (:147-149: fresh credential required, acting identity must not have changed, API keys need `rooms:write` scope). Guest-agent members are refused all non-read calls at http.mjs:3697-3700. Idempotency: every POST accepts `Idempotency-Key` header (lowercased to `idempotency-key`, :32) or `idempotencyKey` body field (:90-96); replays return the original status+body without re-executing, and events are fanned out only on non-replays (:157). Error mapping (`runPure`, :67-78): `unknown_bounty`/`unknown_flag`→404, `not_authorized`→403, `already_claimed`/`dispute_exists`/`idempotency_actor_mismatch`/`idempotency_key_reused`→409, everything else→422; non-EscrowError → generic 500. Body shapes are strict: required keys present, no unknown keys (`shape`, :35-40), violations → 422 `invalid_bounty_input`.
+
+| Method | Path | Auth | Params | Success | Errors |
+|---|---|---|---|---|---|
+| GET | /api/rooms/{roomId}/bounties | room member | query `group`? (proposed\|funded\|claimed\|in-review\|paid\|cancelled — from BOUNTY_GROUPS, bounty-escrow.mjs:124), `viewer`? (`self` or lane id, read-only routing-visibility annotation, never hides), `poster`? (`self` or lane) | 200 `{roomId, bounties}` | 422 `invalid_bounty_input` (bad `group`) |
+| GET | /api/rooms/{roomId}/bounties/reviews | room member | query `bountyId`? (filter to one bounty) | 200 `{roomId, packets}` | — |
+| GET | /api/rooms/{roomId}/bounties/sybil-flags | room member | query `status`? (open\|dismissed\|confirmed) | 200 `{roomId, flags}` | 422 (bad `status`) |
+| POST | /api/rooms/{roomId}/bounties/sybil-flags/{flagId}/dismiss | room OWNER only (double-checked: pre-body at :191-192 and in-txn at :151-152 via `isRoomOwner`, :49-56) | body `{reason (req), idempotencyKey?}` | 200 `{roomId, flag}` | 403 `owner_required`, 404 `unknown_flag` |
+| POST | /api/rooms/{roomId}/bounties/sybil-flags/{flagId}/confirm | room OWNER only (same double gate) | body `{reason (req), idempotencyKey?}` | 200 `{roomId, flag}` | 403 `owner_required`, 404 `unknown_flag` |
+| GET | /api/rooms/{roomId}/bounties/reputation-reviews | room member | — | 200 `{roomId, packets}` | — |
+| POST | /api/rooms/{roomId}/bounties | room member | body `{title, criteria, amount, deadline (all req), verifierId?, approvalMode? (default "human"), rubric?, idempotencyKey?}` | 201 `{roomId, bounty, receipt}` | 422 `invalid_bounty_input` |
+| POST | /api/rooms/{roomId}/bounties/{bountyId}/rubric | room member (poster-only enforced in escrow) | body `{rubric (req: [{criterionId, description}]), idempotencyKey?}` | 200 `{roomId, bounty, receipt}` | 404 `unknown_bounty`, 403/422 per escrow rules |
+| POST | /api/rooms/{roomId}/bounties/{bountyId}/fund | room member (poster-only in escrow) | body `{}` or `{idempotencyKey?}` | 200 `{roomId, bounty, receipt}` | 404, 403, 422 |
+| POST | /api/rooms/{roomId}/bounties/{bountyId}/decline | room member (poster-only) | body `{reason (req), idempotencyKey?}` | 200 `{roomId, bounty, receipt}` | 404, 403, 422 |
+| POST | /api/rooms/{roomId}/bounties/{bountyId}/snooze | room member (poster-only) | body `{until (req), idempotencyKey?}` | 200 `{roomId, bounty, receipt}` | 404, 403, 422 |
+| POST | /api/rooms/{roomId}/bounties/{bountyId}/duplicate | room member (poster-only) | body `{canonical_id (req), idempotencyKey?}` | 200 `{roomId, bounty, receipt}` | 404, 403, 422 |
+| POST | /api/rooms/{roomId}/bounties/{bountyId}/watch | room member | body `{}` or `{idempotencyKey?}` | 200 `{roomId, ...result}` | 404, 422 |
+| POST | /api/rooms/{roomId}/bounties/{bountyId}/claim | room member | body `{}` or `{idempotencyKey?}` | 200 `{roomId, bounty, receipt}` | 404 `unknown_bounty`, 409 `already_claimed`, 422 (incl. `reputation_probation` — see stale flag) |
+| POST | /api/rooms/{roomId}/bounties/{bountyId}/submit | room member (claimant) | body `{evidenceUrl, summary (req), evidenceKind?, checksClaimed?, producerId?, idempotencyKey?}` | 200 `{roomId, bounty, receipt}` | 404, 403, 422 |
+| POST | /api/rooms/{roomId}/bounties/{bountyId}/accept | room member (acceptor) | body `{verifierAttestation (req), idempotencyKey?}` | 200 `{roomId, bounty, approval, attribution, receipt}` | 404, 403, 422 |
+| POST | /api/rooms/{roomId}/bounties/{bountyId}/reject | room member (poster/verifier) | body `{reason (req), idempotencyKey?}` | 200 `{roomId, bounty, settlement, alreadySettled, receipt}` | 404, 403, 422 |
+| POST | /api/rooms/{roomId}/bounties/{bountyId}/dispute | room member | body `{bond, grounds (req), idempotencyKey?}` | 201 `{roomId, bounty, dispute, receipt}` | 404, 409 `dispute_exists`, 422 |
+| POST | /api/rooms/{roomId}/bounties/{bountyId}/dispute/decide | room member (decider) | body `{outcome, reasonCodes (req), rubricCheck?, idempotencyKey?}` | 200 `{roomId, bounty, resolution, receipt}` | 404, 403, 422 |
+| POST | /api/rooms/{roomId}/bounties/{bountyId}/finalize | room member | body `{}` or `{idempotencyKey?}` | 200 `{roomId, bounty, action, receipt}` | 404, 422 |
+| GET | /api/rooms/{roomId}/credits/balances/{identity} | room member | path `identity` (percent-encoded lane id; decoded with loose printable check, :84-88; NOT `pathId`, slashes allowed) | 200 `{roomId, balances}` | 404 (bad decode), 422 (identity 1..256 chars) |
+| GET | /api/rooms/{roomId}/credits/history/{identity} | room member | path `identity` (same decode); query `state`?, `since`? | 200 `{roomId, receipts}` | 404, 422 |
+| POST | /api/rooms/{roomId}/credits/transfer | room member | body `{to, amount (req), idempotencyKey?}` | 200 `{roomId, ...result}` | 403, 422 (incl. insufficient funds per escrow) |
+| POST | /api/rooms/{roomId}/credits/epoch/close | room member | body `{}` or `{idempotencyKey?}` | 200 `{roomId, epoch}` | 422 |
+
+### Behavioral notes
+- Money-adjacent semantics (header comment, :13-19): credits are VALueless ledger units — no cash-out, no on-chain touch, no real money. Value-moving: `fund` locks the award escrow (PROPOSED→FUNDED, :245), `claim` attaches a worker, `accept` attributes the award (via `approval`/`attribution`, :304), `reject` refunds the award to the poster in full with no fee while the worker settles at zero + claim bond forfeited + flake strike (:310-317), `dispute` posts a bond (201, :325), `dispute/decide` settles per outcome, `transfer` moves ledger units between lanes (:347), `epoch/close` aggregates. Informational only: `list`/`reviews`/`sybil-flags`/`reputation-reviews` (read-only, immutable packets), `balances`/`history`. Note list/reviews/sybil-flags are labeled `rooms:read`-level in comments (:170-182) but all run inside the authenticated room block — no separate public path.
+- Lifecycle: POST /bounties creates PROPOSED (locks nothing, :21); the triage quartet fund/decline/snooze/duplicate moves it out of triage; only FUNDED is claimable (:22-24). Listings filter by semantic group, not display state.
+- `rubric` is poster-only and only while PROPOSED — funding pins the rubric for the rest of the lifecycle (:226-228).
+- Sybil resolution never moves bounty state, balances, or bonds; a CONFIRMED flag only feeds the reputation projector (sybil_confirmed per lane → possible probation) (:183-189).
+- `finalize` is a permissionless keeper pass (openapi documents auto-approval of accepted bounties whose deadline passed); signature is `{ caller }` only (:336-341).
+- Sybil flag ids come from `pathId()` (:3884), while `balances`/`history` identities use the custom `identityOf` decode (:3887) because canonical lane ids contain slashes.
+- `epoch-close` is the DEFAULT fallback in the http.mjs route ternary — `creditsEpochMatch` is matched into `creditsMatch` (http.mjs:3532) but never referenced in the `escrowRoute` chain (http.mjs:3861-3880); the ternary enumerates every other sub-match, so the fallback only ever fires for `/credits/epoch/close`. Correct today, fragile to extend.
+- STALE docs/openapi.yaml:7247 — "'403': { description: reputation_probation — probation-band lanes may only claim bounties up to 5 credits }" contradicts server/bounty-escrow.mjs:1663 + server/bounty-escrow-routes.mjs:67-78 (reputation_probation is thrown via `fail()` → EscrowError, and `runPure` maps every code except unknown_bounty/unknown_flag/not_authorized/already_claimed/dispute_exists/idempotency_* to 422; it is NOT a 403).
+- BUG? server/http.mjs:3864 — `bountyListMatch ? (req.method === "GET" ? "list" : "create")` maps HEAD /bounties to escrowRoute "create", which then 405s in handleBountyEscrow (create requires POST); HEAD on all read-only escrow routes (reviews, sybil-flags, reputation-reviews, balances, history) likewise 405s despite the guest-scope gate at http.mjs:3697-3700 explicitly keeping HEAD reads open — why it looks wrong: the handler's read branches test `req.method === "GET"` only, so HEAD reads are a dead path the routing layer claims to support.
+
+## server/legal-routes.mjs
+Mount prefix: none — root-level paths, dispatched at server/http.mjs:1932-1939 (`legalApiPaths` set at http.mjs:331 + `isLegalPath`). Public pages need no auth; account/operator endpoints need an account-session cookie.
+Auth details: `/api/account/terms` requires the account cookie (401 `unauthenticated`) + `protectWrite(req, auth, false)` (legal-routes.mjs:107-109); `/api/operator/unpublish` requires cookie auth + configured operator + `auth.account.id === operatorAccountId` (403 `operator_unconfigured` / `forbidden`) (legal-routes.mjs:114-118). The public report POST is rate-limited at 5/min keyed on the hashed remote address (legal-routes.mjs:96). All POST bodies go through the shared `body()` helper (server/http.mjs:841-848): requires application/json (415 otherwise) and always returns a non-null plain object (400 `invalid_json` otherwise), so the `Object.keys`/`Object.hasOwn` checks below can't crash on empty/malformed bodies.
+
+| Method | Path | Auth | Params | Success | Errors |
+|---|---|---|---|---|---|
+| GET, HEAD | /terms, /privacy, /subprocessors, /acceptable-use, /legal | none (public) | — | 200 `text/html; charset=utf-8` + Cache-Control + `Link: <ROOM_ORIGIN path>; rel="canonical"` + CSP (`LEGAL_PAGE_CSP`) | 405 (non-read), 404 if page generator returns null |
+| GET, HEAD | /report | none (public) | — | 200 `text/html; charset=utf-8` + `REPORT_PAGE_CSP` | 405 (non-read) |
+| GET, HEAD | /room/terms, /room/privacy, /room/subprocessors, /room/acceptable-use, /room/legal, /room/report | none (public) | — | 301 `Location: ${ROOM_ORIGIN}${alias}${search}` (+ `Cache-Control: public, max-age=3600`) | 405 (non-read) |
+| GET | /api/reports/public/challenge | none (public) | — | 200 proof-of-work challenge object | 405 (non-GET) |
+| GET, HEAD | /api/health/jobs | none (public) | — | 200 `{schema: "room.job-health/1", publicReports, servedBy: "node"}` | 405 (non-read) |
+| POST | /api/reports/public | none (public, rate-limited) | body `{kind, target, body, bucket, nonce (all req; exact set, no unknown fields except optional `email`), + proof-of-work}` | 201 `{received: true, id}` | 422 `invalid_report` (unexpected fields), 428 `proof_required` (missing/failed proof), store-level status on submit failure |
+| POST | /api/account/terms | account session cookie | body exactly `{version}` (one key only) | 200 account view | 401 `unauthenticated`, 422 `invalid_terms`, store-level on accept failure |
+| POST | /api/operator/unpublish | operator account cookie | body exactly `{kind, id}` | 200 `{unpublished: true, kind, id}` | 401 `unauthenticated`, 403 `operator_unconfigured` / `forbidden`, 422 `invalid_unpublish`, store-level on unpublish failure |
+
+### Behavioral notes
+- The `/room/*` → canonical 301s exist because the www.getdasha.com/room door kept the `/room` prefix, so relative legal links hit `/room/terms` etc. and 404'd (legal-routes.mjs:23-26); `roomPrefixedLegalPath` only maps paths in `LEGAL_SITEMAP_PATHS` or `/report`, anything else falls through.
+- `isLegalPath` + the `legalApiPaths` set is the routing gate at server/http.mjs:1932; `handleLegalRequest` returns `false` for non-legal paths so dispatch continues.
+- Public report submit hashes the reporter's address (`hashReportAddress`) for rate limiting and stores `ipHash` (legal-routes.mjs:96,100) — the report body never carries the raw IP.
+- Report `bucket` must be current: `verifyReportProof(data, store.now())` enforces freshness, stale/missing proof → 428 (legal-routes.mjs:98-100).
+- `/api/account/terms` body must be EXACTLY one key (`Object.keys(data).length !== 1` → 422) and `/api/operator/unpublish` must be exactly `{kind, id}` (legal-routes.mjs:110,119) — stricter than the escrow `shape()` (no optional keys at all).
+- `handleLegalRequest`'s challenge endpoint is GET-only (405 on HEAD) while pages and `/api/health/jobs` support HEAD (legal-routes.mjs:79,85).
+
+DONE: 36 endpoints, 1 stale flag, 1 suspected bug
