@@ -96,6 +96,7 @@ module doc. Line numbers pinned to origin/main `c5d1c313a`.
   only `message.posted` events; a message whose earliest write came from
   another row type fails parity on a correct row (likely unreachable).
   (bugs/messages-store.md)
+- `server/store.mjs` (`eventsAfter`, ~line 4303) — calls `flipExpiredMentions(roomId)` BEFORE `authenticate()`; an invalid token commits a DB write before the 401, so unauthenticated SSE pumps can keep triggering writes. (bugs/store-c.md)
 - `server/store.mjs` (`backfillReferralDepth`) — NULL `max_depth` invite
   rows "update" member rows to NULL and count as progress; the tick may
   report progress forever on a NULL chain. (bugs/store-b.md)
