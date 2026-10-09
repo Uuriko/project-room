@@ -469,7 +469,7 @@ const withHistory = (work, atMs, agentId, action, note) => {
 // whoever takes the claim next starts clean.
 const clearedReviewsOf = () => ({ attestations: Object.freeze([]), reviews: Object.freeze([]) });
 const clearedRoundOf = () => ({ owner: null, leaseStartAt: null, leaseExpiresAt: null,
-  files: Object.freeze([]), fileBlocks: Object.freeze({}), ...clearedReviewsOf() });
+  ...clearedReviewsOf(), files: Object.freeze([]), fileBlocks: Object.freeze({}) });
 // Append one history stamp to a claim without a state transition (W012
 // required reading acks, and any future note-only stamps). Same trimming
 // rules as every other claim write.
@@ -590,7 +590,6 @@ export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, p
   const declared = files == null ? null : claimedFilesOf(files);
   const links = pullRequest === undefined && pullRequests === undefined ? null : pullList(pullRequest, pullRequests);
   const claimed = { ...item, state: "claimed", owner: agent, claimedAt: isoOf(atMs),
-    ...leaseWindowOf(atMs, effective),
     files: declared ? declared.files : item.files,
     fileBlocks: declared
       ? mergedFileBlocksOf(fileBlocks, declared)
@@ -600,7 +599,8 @@ export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, p
     pullRequests: links ?? item.pullRequests,
     pullRequest: links ? currentPullRequest(links) : item.pullRequest,
     repo: repo === undefined ? item.repo : repoOf(repo),
-    branch: branch === undefined ? item.branch : branchOf(branch) };
+    branch: branch === undefined ? item.branch : branchOf(branch),
+    ...leaseWindowOf(atMs, effective) };
   return withHistory(claimed, atMs, agent, "claimed",
     effective === null ? note : note ?? `lease: ${effective}h`);
 }
