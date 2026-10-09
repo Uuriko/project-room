@@ -739,3 +739,15 @@ test("both taught vocabularies agree on the starter verbs (non-divergent)", t =>
   assert.equal(finishNext.method, finishActions.method);
   assert.deepEqual(finishNext.body, finishActions.body);
 });
+
+test("create with starter:false skips the auto-claimed starter task", t => {
+  // Seed Room Guide (#1367) added the starter:false opt-out for callers that
+  // manage their own first task. Pin it: no starter claim exists and the
+  // response says so, so the opt-out cannot silently regress to always-on.
+  const { store, rooms, identity } = setup(t);
+  const created = rooms.create(identity.secret, { ...createArgs("no-starter-room"), starter: false });
+  assert.equal(created.duplicate, false);
+  assert.equal(created.starter, null, "response reports no starter");
+  assert.ok(!store.workClaims.list("no-starter-room").some(item => item.id === "starter"),
+    "no starter work claim was created");
+});

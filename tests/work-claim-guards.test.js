@@ -213,6 +213,35 @@ test("the room owner releasing another member's claim is recorded as the actor",
   assert.equal(last.note, "stale lane");
 });
 
+test("a non-owner cannot release another member's claim (QA200-MUT-03A)", async () => {
+  const registry = createWorkClaimRegistry();
+  await call(registry, "owner", "create", null, { id: "lane" });
+  await call(registry, "holder", "claim", "lane", {});
+  await assert.rejects(call(registry, "chat", "release", "lane", { reason: "mine now" }), error => {
+    assert.equal(error.status, 403);
+    assert.equal(error.code, "work_not_owner");
+    return true;
+  });
+  assert.equal(registry.get("room1", "lane").state, "claimed");
+  assert.equal(registry.get("room1", "lane").owner, "holder");
+});
+
+test("releasing an already-unclaimed claim is refused (QA200-MUT-03B)", async () => {
+  const registry = createWorkClaimRegistry();
+  await call(registry, "owner", "create", null, { id: "lane" });
+  await call(registry, "holder", "claim", "lane", {});
+  const released = await call(registry, "owner", "release", "lane", { reason: "done for now" });
+  assert.equal(released.status, 200);
+  assert.equal(released.value.state, "unclaimed");
+  const historyLength = registry.get("room1", "lane").history.length;
+  await assert.rejects(call(registry, "owner", "release", "lane", { reason: "again" }), error => {
+    assert.equal(error.status, 422);
+    assert.equal(error.code, "invalid_claim_input");
+    return true;
+  });
+  assert.equal(registry.get("room1", "lane").history.length, historyLength);
+});
+
 test("an illegal transition names the states that are allowed", async () => {
   const registry = createWorkClaimRegistry();
   await call(registry, "owner", "create", null, { id: "lane", files: ["src/lane.mjs"] });

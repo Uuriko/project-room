@@ -97,7 +97,7 @@ async function main() {
   }
   const rooms = (values.room ?? []).map(roomId => summarizeRoom(values.to, roomId));
   process.stdout.write(`${JSON.stringify({
-    verified: result.verified, events: result.events, audit: result.audit, skippedTables: result.skippedTables, roomsInBackup: watermark.rooms?.length ?? null,
+    verified: result.verified, events: result.events, trailer: result.trailer, audit: result.audit, skippedTables: result.skippedTables, roomsInBackup: watermark.rooms?.length ?? null,
     backedUpAt: watermark.backedUpAt ? new Date(watermark.backedUpAt).toISOString() : null,
     manifest: manifest && { key: manifest.key, bytes: manifest.bytes, parts: manifest.parts.length, sha256: manifest.sha256 },
     rooms

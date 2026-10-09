@@ -809,7 +809,15 @@ export class BountyEscrow {
       return lane;
     }
     const { ownerId } = this.store.roomAuthority(roomId);
-    if (typeof ownerId !== "string" || ownerId !== lane)
+    // Member ids are validId-shaped, so the owner id may be the legacy
+    // colon form (id:agent:jill) while _requireLane() returns the canonical
+    // lane (id:agent/jill). Compare canonical forms — comparing raw would
+    // lock the actual room owner out of this gate. An empty ownerId is a
+    // corrupt authority record: fail closed as not_authorized (canonicalLane
+    // throws invalid_input on empty strings, which would leak a 422 and
+    // break this gate's documented contract).
+    if (typeof ownerId !== "string" || ownerId.length === 0
+      || canonicalLane(ownerId) !== canonicalLane(lane))
       fail("not_authorized", `${role}: only the room owner may resolve sybil flags`);
     return lane;
   }

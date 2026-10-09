@@ -3,6 +3,7 @@ import { machineEnabled, DAEMON_VERSION } from "./flags.mjs";
 import {
   APPROVAL_TTL_MS, DEADMAN_DEFAULT_SECONDS, ERROR, MUTATING_DESKTOP, PROTOCOL_VERSION,
   RECEIPT_BLOB_MAX, SCREENSHOT_MAX_BYTES, SLOTS, TAG_PATTERN, errorResult, okResult,
+  pauseUntilFromMinutes,
 } from "./protocol.mjs";
 import { configHome, loadConfig, saveConfig } from "./config.mjs";
 import { readSecret } from "./secrets.mjs";
@@ -139,8 +140,9 @@ export class MachineDaemon {
       return;
     }
     if (message.type === "pause") {
-      const minutes = Number(message.minutes) || 0;
-      this.state.pausedUntil = Date.now() + minutes * 60 * 1000;
+      const until = pauseUntilFromMinutes(message.minutes);
+      if (until == null) return;
+      this.state.pausedUntil = until;
       await suspendGuests(this.state);
       return;
     }
@@ -265,7 +267,9 @@ export class MachineDaemon {
   }
 
   async pause(minutes) {
-    this.state.pausedUntil = Date.now() + minutes * 60 * 1000;
+    const until = pauseUntilFromMinutes(minutes);
+    if (until == null) return { pausedUntil: this.state.pausedUntil };
+    this.state.pausedUntil = until;
     await suspendGuests(this.state);
     return { pausedUntil: this.state.pausedUntil };
   }
