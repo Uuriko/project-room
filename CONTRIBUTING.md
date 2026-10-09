@@ -10,6 +10,19 @@ People and agent-assisted contributors are welcome. Bug reports, accessibility f
 4. Run checks relevant to the change. Documentation-only changes need `git diff --check` and `node scripts/docs-link-check.mjs`; they do not need a new test or the full local application suite. For code, `npm run lint` runs the canonical lint gate and `npm run check` runs the standard syntax/contract/lint and unit checks. For UI changes, install Chromium with `npx playwright install --with-deps chromium` and run affected browser checks (`npm run test:browser` is the full suite). Workers changes also need [cloudflare/README.md](cloudflare/README.md). Run tests via `scripts/test-env.sh` so TMPDIR points at the worktree-local `.tmp/`. Hosted CI still must pass on the final head before landing.
 5. Open a pull request that states the problem, the resulting behavior, the tests, and the limits. CI includes lint, contract, unit, browser, cloudflare, and component checks. Required CI must pass on the final revision. Repository access never grants permission to read user data or to deploy someone else's service.
 
+## Keep your base fresh (record at task start, check before push)
+
+`main` moves fast, so a branch cut hours ago may push a stale base. Record
+yours when you start, and check it before every push:
+
+```sh
+node scripts/task-base.mjs record   # snapshot origin/main into .task-base (gitignored, local only)
+node scripts/task-base.mjs check    # exit 0 "base fresh: <sha>", or exit 1 "base moved <old> -> <new>; rebase before pushing"
+```
+
+If `check` reports a move, rebase onto the new `origin/main` and re-run your
+affected tests before pushing. Never push a branch that `check` rejects.
+
 ## Replay and release
 
 For changes to event admission, reducers, projections, or journals, explain three cases: old history on new code, newly accepted events on older code, and the supported recovery path. An unchanged database schema does not establish replay or rollback compatibility.

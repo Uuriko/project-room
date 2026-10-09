@@ -11,6 +11,9 @@ test-results/
 # Local run logs (may contain tokens) — never commit
 runlogs-tmp/
 
+# FIX-31: base-SHA freshness probe (local task state, never commit)
+.task-base
+
 # RC-2026-09-18-051: local test TMPDIR (never commit test scratch)
 .tmp/
 
