@@ -10,8 +10,7 @@ CREATE TABLE IF NOT EXISTS room_assistant_config (room_id TEXT PRIMARY KEY, valu
 CREATE TABLE IF NOT EXISTS room_assistant_runs (room_id TEXT NOT NULL, run_id TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(room_id,run_id));
 CREATE TABLE IF NOT EXISTS room_assistant_ops (room_id TEXT NOT NULL, actor_id TEXT NOT NULL, request_id TEXT NOT NULL, input TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(room_id,actor_id,request_id));`;
 const fail = (code, message, status = 409) => { throw Object.assign(new Error(message), { code, status }); };
-// A coordinator member is usable while its record is active and still
-// carries accept_work. invoke additionally requires kind === 'agent'.
+// Usable coordinator: active member record still carrying accept_work (invoke additionally needs kind === 'agent').
 const hostReady = member => Boolean(member?.active && member.permissions.includes('accept_work'));
 const terminal = new Set(['done', 'cancelled', 'failed']);
 const keys = {
@@ -51,11 +50,8 @@ export class RoomAssistant {
       const visible = id => messageVisibleToViewer(state.messages.find(m => m.id === id), auth.member.id, floor);
       const hostStale = run => !Number.isFinite(run.hostReportedAt) || this.store.now() - run.hostReportedAt > 120000;
       const runs = this.store.db.prepare('SELECT value FROM room_assistant_runs WHERE room_id=? ORDER BY rowid DESC LIMIT 100').all(roomId)
-        .map(row => JSON.parse(row.value)).flatMap(run => {
-          if (visible(run.sourceMessageId)) return [run];
-          const opening = state.messages.find(m => m.id === run.sourceMessageId);
-          return controlsDeletedSource(run, opening, auth.member, state, floor) ? [deletedControl(run)] : [];
-        })
+        .map(row => JSON.parse(row.value)).flatMap(run => visible(run.sourceMessageId) ? [run]
+          : controlsDeletedSource(run, state.messages.find(m => m.id === run.sourceMessageId), auth.member, state, floor) ? [deletedControl(run)] : [])
         .map(run => ({ ...run, status: run.status === 'working' && hostStale(run) ? 'unknown' : run.status }));
       const recent = runs.some(run => run.coordinatorMemberId === config.coordinatorMemberId && run.attemptId && !hostStale(run) && !terminal.has(run.status));
       return { contractVersion: 1, roomId, assistant: { ...config, availability: !hostReady(coordinator) ? 'not_connected' : recent ? 'connected' : 'awaiting_host' }, runs };
@@ -100,7 +96,7 @@ export class RoomAssistant {
         if (!isOwner) fail('assistant_denied', 'Only the room owner configures its assistant', 403);
         if (input.expectedRevision !== config.revision) fail('assistant_revision_conflict', 'Assistant settings changed; read them before retrying');
         if (typeof input.name !== 'string' || !input.name.trim() || input.name.length > 64
-          || input.coordinatorMemberId !== null && (!validId(input.coordinatorMemberId) || state.members[input.coordinatorMemberId]?.kind !== 'agent' || !state.members[input.coordinatorMemberId]?.active || !state.members[input.coordinatorMemberId]?.permissions.includes('accept_work')))
+          || input.coordinatorMemberId !== null && (!validId(input.coordinatorMemberId) || state.members[input.coordinatorMemberId]?.kind !== 'agent' || !hostReady(state.members[input.coordinatorMemberId])))
           fail('invalid_assistant_config', 'Choose a name and an active room agent, or disconnect', 422);
         result = { name: input.name.trim(), coordinatorMemberId: input.coordinatorMemberId, revision: config.revision + 1 };
         this.store.db.prepare('INSERT INTO room_assistant_config VALUES(?,?) ON CONFLICT(room_id) DO UPDATE SET value=excluded.value').run(roomId, JSON.stringify(result));
