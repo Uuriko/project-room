@@ -22,6 +22,45 @@ async function setup(t) {
   return { f, api, message, origin };
 }
 
+test('unfinished assistant work stays discoverable after more than 100 newer terminal requests', async t => {
+  const { f, api, message } = await setup(t);
+  const assistant = new RoomAssistant(f.store);
+  let clock = f.store.now();
+  f.store.now = () => clock;
+  // Exercise production transitions to create history without exhausting the
+  // HTTP write limiter; the externally observable read uses the actual route.
+  const apply = (actor, input) => assistant.apply('commons', { requestId: randomUUID(), ...input }, () => f.store.authenticate(f.keys[actor], 'commons')).result;
+  apply('owner', { action: 'configure', expectedRevision: 0, name: 'Room', coordinatorMemberId: 'producer' });
+  for (const id of ['queued', 'working', 'paused', 'needs-input', 'stopping']) {
+    message('owner', `prompt-${id}`);
+    apply('owner', { action: 'invoke', runId: id, sourceMessageId: `prompt-${id}` });
+    if (id === 'paused') apply('owner', { action: 'pause', runId: id, expectedRevision: 0 });
+    else if (id !== 'queued') {
+      apply('producer', { action: 'claim', runId: id, attemptId: `host-${id}`, expectedRevision: 0 });
+      if (id === 'needs-input') apply('producer', { action: 'report', runId: id, attemptId: `host-${id}`, expectedRevision: 1, state: 'needs_input', summary: 'Choose a direction.' });
+      if (id === 'stopping') apply('owner', { action: 'cancel', runId: id, expectedRevision: 1 });
+    }
+  }
+  for (let n = 0; n < 105; n++) {
+    clock += 2000; // Historical requests respect the normal chat refill budget.
+    message('owner', `terminal-prompt-${n}`);
+    apply('owner', { action: 'invoke', runId: `terminal-${n}`, sourceMessageId: `terminal-prompt-${n}` });
+    apply('owner', { action: 'cancel', runId: `terminal-${n}`, expectedRevision: 0 });
+  }
+  apply('producer', { action: 'report', runId: 'working', attemptId: 'host-working', expectedRevision: 1, state: 'working', summary: 'Still processing the original request.' });
+  const context = await api('owner');
+  const statuses = new Map(context.runs.map(run => [run.id, run.status]));
+  for (const [id, status] of [['queued', 'queued'], ['working', 'working'], ['paused', 'paused'], ['needs-input', 'needs_input'], ['stopping', 'cancel_requested']])
+    assert.equal(statuses.get(id), status, `older ${id} remains visible and actionable`);
+  assert.equal(context.runs.length, 100, 'history remains bounded');
+  assert.equal(statuses.get('terminal-104'), 'cancelled', 'recent outcomes remain available');
+  assert.equal(statuses.has('terminal-0'), false, 'older terminal history yields to unfinished work');
+  assert.equal(context.assistant.availability, 'connected', 'recent active host is not hidden by terminal history');
+  const pending = context.runs.find(run => run.id === 'queued');
+  const claimed = await api('producer', { action: 'claim', runId: pending.id, attemptId: 'recovered-host', expectedRevision: pending.revision });
+  assert.equal(claimed.result.status, 'working');
+});
+
 test('two humans share one durable run, host claims and publishes a real public result', async t => {
   const { f, api, message } = await setup(t);
   assert.equal((await api('guest')).assistant.availability, 'not_connected');

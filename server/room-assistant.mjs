@@ -46,7 +46,9 @@ export class RoomAssistant {
       const config = this.config(roomId), coordinator = state.members[config.coordinatorMemberId];
       const floor = historyFloor(this.store.db, state, roomId, auth.member.id);
       const visible = id => messageVisibleToViewer(state.messages.find(m => m.id === id), auth.member.id, floor);
-      const runs = this.store.db.prepare('SELECT value FROM room_assistant_runs WHERE room_id=? ORDER BY rowid DESC LIMIT 100').all(roomId)
+      // Keep unfinished requests discoverable by their host and controllers;
+      // newer terminal history must not push pending work out of this window.
+      const runs = this.store.db.prepare("SELECT value FROM room_assistant_runs WHERE room_id=? ORDER BY json_extract(value,'$.status') IN ('done','cancelled','failed'), rowid DESC LIMIT 100").all(roomId)
         .map(row => JSON.parse(row.value)).flatMap(run => {
           if (visible(run.sourceMessageId)) return [run];
           const opening = state.messages.find(m => m.id === run.sourceMessageId);
