@@ -392,6 +392,10 @@ export async function seedRecoveryCoverage(f) {
      mergeable, behind, checks_state, observed, created_at, updated_at)
     VALUES ('commons', 'lq_recovery', 'acme/widgets', 7, 'owner', 'owner', 'Recovery PR', ?, 'unknown', 0, 'pending', 1, ?, ?)`)
     .run("a".repeat(40), f.now(), f.now());
+  f.store.db.prepare(`INSERT INTO land_queue_idempotency
+    (room_id, request_id, op, actor_member_id, input_hash, status, response, created_at, updated_at)
+    VALUES ('commons', 'recovery-land-req', 'add_land_item', 'owner', ?, 1, '{"duplicate":false}', ?, ?)`)
+    .run("b".repeat(64), f.now(), f.now());
   f.store.db.prepare(`INSERT INTO agent_invite_redeem_receipts
     (request_id, code_hash, identity_id, room_id, member_id, display_name, permissions_json, created_at)
     VALUES ('recovery-redeem-req', ?, ?, 'commons', 'owner', 'Recovery', '[]', ?)`)
