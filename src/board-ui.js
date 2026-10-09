@@ -391,11 +391,13 @@ export function boardHtml(items, status, viewer, members, now, { older = false, 
   const body = items.length
     ? `${hint}<div class="board-columns">${COLUMNS.map(([id, label]) => `<section aria-labelledby="board-col-${id}"><h3 id="board-col-${id}">${label}${id === "blocked" && waitingCount ? ` · ${waitingCount} waiting` : ""}</h3>${columns[id].map(item => cardHtml(item, viewer, members, now, workItems, byId)).join("") || `<p class="form-hint">Nothing here.</p>`}</section>`).join("")}</div>`
     : loading ? boardSkeletonHtml()
-    : loadError ? uiText("board.loading.error")
+    : loadError ? ""
     : `<p class="board-empty">${escapeHtml(emptyBoardCopy(capabilities, { canWrite, signedIn: Boolean(viewer?.id) }))}</p>${hint}`;
   const needsMe = items.length ? needsMeHtml(items, viewer, members, now) : "";
+  // A failed refresh keeps the stale board but must still say so, with retry.
+  const loadFailure = loadError && !loading ? uiText("board.loading.error") : "";
   const loadingNote = loading ? uiText(items.length ? "board.loading.002" : "board.loading.001") : "";
-  return `${needsMe}${form}<div class="board-head"><p class="live-chip">${escapeHtml(liveLabel(status))}</p>${sweep}${capForm}</div><p id="board-status" class="form-hint" role="status">${escapeHtml(loadingNote)}</p>${body}`;
+  return `${needsMe}${form}<div class="board-head"><p class="live-chip">${escapeHtml(liveLabel(status))}</p>${sweep}${capForm}</div><p id="board-status" class="form-hint" role="status">${escapeHtml(loadingNote)}</p>${loadFailure}${body}`;
 }
 
 function staleDonePage(claims, now) {
@@ -551,7 +553,7 @@ export function installWorkBoard({ client, getState, getSession }) {
       paint();
       return false;
     } finally {
-      boardLoading = false;
+      if (mine === operation) boardLoading = false;
       if (readFlight === pending) readFlight = null;
     }
   }
