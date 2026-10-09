@@ -8,6 +8,16 @@ import { escapeHtml } from "./account-settings-ui.js";
 export function classifyAuthLink(params) {
   const hasReset = params.has("reset"), hasMagic = params.has("magic");
   if (!hasReset && !hasMagic && !params.has("email")) return { kind: "none" };
+  // Signup mail carries no proof: the verification email (?verify=email) and
+  // the already-registered notice (?signin=1) only open the app. They are not
+  // broken sign-in links, so they must not report one.
+  if (!hasReset && !hasMagic) {
+    const email = (params.get("email") || "").trim();
+    const one = (name, value) => params.getAll(name).length === 1 && params.get(name) === value;
+    const notice = one("signin", "1") && !params.has("verify") ? "signin"
+      : one("verify", "email") && !params.has("signin") ? "verify" : null;
+    if (notice && params.getAll("email").length === 1 && email) return { kind: "notice", notice, email };
+  }
   const proof = (params.get(hasReset ? "reset" : "magic") || "").trim();
   const email = (params.get("email") || "").trim();
   if (hasReset === hasMagic || params.getAll(hasReset ? "reset" : "magic").length !== 1
@@ -306,9 +316,16 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     if (link.kind === "none") return;
     // Clear every auth parameter even when validation fails or proofs compete.
     params.delete("reset"); params.delete("magic"); params.delete("email");
+    if (link.kind === "notice" || link.kind === "invalid") { params.delete("signin"); params.delete("verify"); }
     const rest = params.toString();
     const clean = window.location.pathname + (rest ? `?${rest}` : "") + window.location.hash;
     try { window.history.replaceState(null, "", clean); } catch { /* URL cleanup may be unavailable */ }
+    if (link.kind === "notice") {
+      // Open sign-in for the emailed address; nothing is redeemed.
+      passwordEmail = link.email; emailMethod = "password"; passwordMode = "login";
+      render();
+      return;
+    }
     if (link.kind === "invalid") {
       const message = uiText("signin.copy.032");
       // Mounting hosts finish wiring their other sign-in controls this turn.
