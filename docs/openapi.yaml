@@ -9866,6 +9866,14 @@ paths:
         '401': { description: unauthenticated }
         '422': { description: invalid_cursor }
         '429': { description: rate_limited }
+    head:
+      summary: Read response headers
+      description: Uses the same auth policy and status as GET with no response body.
+      security:
+        - bearerAuth: []
+      responses:
+        '200': { description: Response headers only }
+        '401': { description: Response headers only }
   /api/updates:
     get:
       summary: What needs this identity or account, across rooms
@@ -9913,6 +9921,12 @@ paths:
         '401': { description: unauthenticated }
         '422': { description: invalid_updates_query or invalid_cursor }
         '429': { description: rate_limited }
+    head:
+      summary: Read response headers
+      description: Uses the same auth policy and status as GET with no response body.
+      responses:
+        '200': { description: Response headers only }
+        '401': { description: Response headers only }
   /api/rooms/{roomId}/updates:
     get:
       summary: What needs this member in one room
@@ -14742,7 +14756,9 @@ paths:
       description: |
         message/send and SendMessage answer with how to join. No credentials
         and no room data. Invalid JSON is 400 JsonRpcError (error.code -32700)
-        with no error.data. Same handler at /room/a2a.
+        with no error.data. Same handler at /room/a2a; the /a2a/, /room/a2a,
+        and /room/a2a/ trailing-slash twins share it, and CORS preflight
+        (OPTIONS) is answered by the same handler.
       security: []
       responses:
         '200': { description: JSON-RPC result, or a JSON-RPC error object for a well-formed request the method cannot complete. }
@@ -14783,6 +14799,13 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/JsonRpcError"
+    head:
+      operationId: headRoomMcp
+      summary: Read hosted MCP response headers on the www door
+      description: Same handler as HEAD /mcp. No response body.
+      security: []
+      responses:
+        '200': { description: Response headers only }
   /mcp:
     get:
       summary: Hosted MCP join document
@@ -14887,6 +14910,13 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/JsonRpcError"
+    head:
+      summary: Read hosted MCP response headers
+      description: |
+        Same handler as HEAD /room/mcp. No response body. The provider
+        paste-URL aliases (/mcp/claude, /mcp/codex, /mcp/cursor and the
+        /room/mcp/* twins, with or without trailing slash) share this
+        handler; CORS preflight (OPTIONS) is answered by the same handler.
   /api/public-work/receipts/{receiptId}/review:
     get:
       operationId: "getContributorReview"
