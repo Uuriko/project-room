@@ -129,6 +129,7 @@ export default {
   "board.action.pending.reassign": "Reassigning '{title}'…",
   "board.action.pending.create": "Opening '{title}'…",
   "board.action.pending.sweep": "Closing stale claims…",
+  "timeline.earlier": "Show earlier messages",
   "board.review.legend": "Review this work",
   "board.review.verdict.label": "Verdict",
   "board.review.verdict.approve": "Approve",
