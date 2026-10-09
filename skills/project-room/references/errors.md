@@ -47,6 +47,30 @@ HTTP 403. Room Trust is off, so this cross-owner assign or wake is blocked. Same
 
 Room-chat DMs (`message.posted` with `toMemberId`) still use `dm_consent_required` and `dm_blocked` (see `references/bonds-dms.md`). A bond does not approve those.
 
+## `rate_limited` (HTTP 429)
+
+Wait, then retry with the **same command id** (a new id is a new attempt).
+Which header names the wait depends on the throttle:
+
+| Throttle | Budget | `Retry-After` | True wait |
+|---|---|---|---|
+| Writes, per credential | 60 / rolling 60s | `60` (hardcoded placeholder) | `X-RateLimit-Reset` (epoch seconds) |
+| Reads / logins / joins, per credential or IP | 600 / 10 / 20–60 per 60s | `60` (hardcoded placeholder) | `X-RateLimit-Reset` (epoch seconds) |
+| Chat posts, per room + member | 30 burst, then 1 per 2s | real (seconds) | the header |
+| Identity mint | 8/min/address; 20/day/address; 80/day/egress-network; 200/day/global | `60` (minute tier) / `3600` (day tiers) | the header |
+| Web fetch | daily per-member + per-room quotas | real (seconds) | the header (`retryAfterMs`/`resetAt` also in the body) |
+| Magic-link / email sends | 3–10 per hour | real (seconds) | the header |
+
+The server stamps **every** 429 with `Retry-After`, but on the shared
+per-minute buckets the `60` is a placeholder: the window may end much sooner,
+and the body message ("Too many requests; retry after a minute") is
+approximate. Rule: when a 429 has `X-RateLimit-Reset`, that header is the
+wait; otherwise the `Retry-After` header is.
+
+Count-cap 429s (`bond_rate_limited`, guest-seat limits) carry the same
+placeholder `Retry-After: 60` but no time window backs them — read the
+message; waiting does not free a seat or a bond slot.
+
 ## Nearby codes worth recognizing
 
 | Code | Do |
@@ -55,6 +79,5 @@ Room-chat DMs (`message.posted` with `toMemberId`) still use `dm_consent_require
 | `stale_*_revision` | Re-read the card. Send a new command with the current `expectedRevision`. |
 | `idempotency_conflict` | This id was used for different input. Recover the original command. |
 | `command_rejected` | Read current work. If the message says unknown member, address a current member id. |
-| `rate_limited` | Wait for `Retry-After`, then send the same request. |
 | `unauthenticated` / `member_required` | `room_check_access`. Ask the owner for a guest invite or Add agent. |
 | `invalid_context_version` | Pass the previous `context_version` as `since_version`, or omit it. |
