@@ -254,7 +254,20 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       - name: Smoke version, health, ready, legal pages
         shell: bash
-        run: node scripts/prod-deploy-smoke.mjs --sha "$SHA" --origin "$PROD_ORIGIN" --entry "$ENTRY_ORIGIN" --wait-ms 300000 | tee "$RUNNER_TEMP/prod-smoke.json"
+        # One retry before recovery: after a Worker upload the Durable Object
+        # can keep answering /api/version with the previous build for more
+        # than the 5-minute window (run 37880461862 rolled back a healthy
+        # deploy that way; the identical redeploy passed). The retry waits
+        # SMOKE_RETRY_DELAY_SECONDS (default 150) and re-checks for 60s more;
+        # a broken build still fails and recovers, about 3.5 minutes later.
+        run: |
+          if node scripts/prod-deploy-smoke.mjs --sha "$SHA" --origin "$PROD_ORIGIN" --entry "$ENTRY_ORIGIN" --wait-ms 300000 > "$RUNNER_TEMP/prod-smoke-attempt1.log"; then
+            cat "$RUNNER_TEMP/prod-smoke-attempt1.log" | tee "$RUNNER_TEMP/prod-smoke.json"
+          else
+            echo "::warning::prod smoke attempt 1 failed; retrying once in ${SMOKE_RETRY_DELAY_SECONDS:-150}s (Durable Object version lag) before recovery" >&2
+            sleep "${SMOKE_RETRY_DELAY_SECONDS:-150}"
+            node scripts/prod-deploy-smoke.mjs --sha "$SHA" --origin "$PROD_ORIGIN" --entry "$ENTRY_ORIGIN" --wait-ms 60000 | tee "$RUNNER_TEMP/prod-smoke.json"
+          fi
       - name: Live smoke
         shell: bash
         env:

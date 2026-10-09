@@ -54,7 +54,16 @@ records the exact set of scanned files. `--check` runs fail-closed gates:
    fresh scan of the current tree. This closes the bootstrap gap: with no
    earlier baseline to compare against, an inflated (or stale) committed
    baseline fails instead of becoming the new truth. An untouched baseline
-   gets the classic ratchet: fresh counts must not exceed committed counts.
+   gets the ratchet: fresh counts must not exceed the larger of the committed
+   count and the **base tree's own scan** (the PR merge commit's first parent
+   in CI, the merge-base with origin/main locally). A PR therefore never
+   commits `strings/i18n-baseline.json` just because main moved; that file
+   was a merge-conflict magnet for every concurrent PR.
+3. **Declared growth** — new hardcoded copy past that ceiling fails unless it
+   is declared: the `i18n-growth` PR label, or a PR body line
+   `i18n-growth: <reason>` (re-run the lint job after adding either), or
+   `I18N_ALLOW_GROWTH=1` for a local run. Do not regenerate the baseline to
+   get past growth.
 
 The current codebase is grandfathered in; new hardcoded strings get caught.
 Regenerate with `--baseline` after migrating strings into the catalog so the
