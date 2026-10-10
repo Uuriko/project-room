@@ -1,5 +1,6 @@
 import { RoomAssistant } from "./room-assistant.mjs";
 import { isAssistantTool } from "../client/assistant-tools.mjs";
+import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { OutsideAgents } from "./outside-agents.mjs";
 // Hosted MCP full profile: the local stdio room tools, on the same URL as
 // the public join tools, behind Authorization: Bearer pri_….
@@ -156,6 +157,41 @@ function enforceHostedStdioCallVisibility(store, secret, memberId, name) {
   if (denial) throw new ServiceError(denial.status, denial.code, denial.message);
 }
 
+// RC-2026-09-18-012 parity for the full-profile funnel (see the comment
+// in callHostedStdioTool): api-key callers need rooms:read for read tools
+// and rooms:write for write tools, mirroring the HTTP room-route gate.
+// Classification is explicit: every tool family that mutates room state
+// (help/reply/work/bounty writes, claims, assistant actions, outside-agent
+// directory writes) is a write; reads (room_read_*, room_list_*, trust
+// reads, bounty reads) default to rooms:read.
+const HOSTED_STDIO_WRITE_TOOLS = new Set([
+  "room_assistant_action",
+  "room_introduce_outside_agent",
+  "room_begin_work", "room_link_work_claim_pr", "room_set_member_claim_cap",
+  "room_post_draft",
+]);
+const HOSTED_STDIO_READ_BOUNTY_TOOLS = new Set([
+  "bounty_list", "bounty_read_balances", "bounty_read_history",
+]);
+function hostedStdioWriteTool(name) {
+  if (HOSTED_STDIO_WRITE_TOOLS.has(name)) return true;
+  if (isHelpTool(name)) return true;
+  if (isWorkTool(name)) return true;
+  if (isReplyTool(name)) return !replyRoute(name); // routed reply tools are reads
+  if (isBountyTool(name)) return !HOSTED_STDIO_READ_BOUNTY_TOOLS.has(name);
+  if (isTrustTool(name)) return false;
+  return false;
+}
+function enforceHostedStdioApiKeyScope(store, secret, name) {
+  if (typeof secret !== "string" || !secret.startsWith(API_KEY_PREFIX)) return;
+  const record = store.agentPlugin.verifyPresentedApiKey(secret);
+  if (!record) throw new ServiceError(401, "unauthenticated", "Unknown, revoked, or expired API key");
+  const required = hostedStdioWriteTool(name) ? "rooms:write" : "rooms:read";
+  const granted = (record.scopes ?? []).some(scope =>
+    scope === required || (scope.endsWith(":*") && required.startsWith(scope.slice(0, -1))));
+  if (!granted) throw new ServiceError(403, "insufficient_scope", `API key lacks the ${required} scope`);
+}
+
 export async function callHostedStdioTool(store, secret, name, args) {
   // Spend-primitive MVP (charge-then-forward): same boundary as callRoomTool
   // in mcp-room-profile.mjs, adapted to this path's { value, isError }
@@ -165,9 +201,17 @@ export async function callHostedStdioTool(store, secret, name, args) {
   // throw, or unconfirmed outcome (never charge for a call whose outcome is
   // unknown); void an idempotent duplicate or idempotent replay (the
   // original call already paid).
+  // RC-2026-09-18-012 parity (same hole class as the core-profile room
+  // tools in mcp-room-profile.mjs): the HTTP routes confine api-key
+  // callers to rooms:read / rooms:write, but the hosted full-profile MCP
+  // tools never applied that gate — a scoped key with no room scopes
+  // could read boards, messages, claims and bounties over MCP while HTTP
+  // 403'd it. Classify explicitly: writes need rooms:write, everything
+  // else needs rooms:read.
   {
     const { roomId } = args;
     const auth = store.authenticate(secret, roomId);
+    enforceHostedStdioApiKeyScope(store, secret, name);
     enforceHostedStdioCallVisibility(store, secret, auth.member.id, name);
     // Denial hierarchy: autonomy outranks spend. t1_readonly and guest
     // agents keep their established denials (agent_readonly /
