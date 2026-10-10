@@ -49,6 +49,25 @@ test("claiming a file another active claim holds is refused with the holder, the
   assert.deepEqual(registry.get("room1", "a").files, ["docs/x.md", "scripts/room"]);
 });
 
+test("claiming a parent path over a live file lease is refused", async () => {
+  const registry = createWorkClaimRegistry();
+  await call(registry, "jill", "create", null, { id: "file-hold", files: ["server/http.mjs"] });
+  const held = await call(registry, "jill", "claim", "file-hold", {});
+  await call(registry, "claude", "create", null, { id: "dir-hold" });
+  const blocked = await call(registry, "claude", "claim", "dir-hold", { files: ["server"] });
+
+  assert.equal(blocked.status, 409);
+  assert.equal(blocked.value.error.code, "file_lease_conflict");
+  assert.deepEqual(blocked.value.holder, { claimId: "file-hold", owner: "jill" });
+  assert.deepEqual(blocked.value.files, ["server/http.mjs"]);
+  assert.equal(blocked.value.leaseExpiresAt, held.value.leaseExpiresAt);
+  assert.equal(registry.get("room1", "dir-hold").state, "unclaimed");
+  const sibling = await call(registry, "claude", "claim", "dir-hold", { files: ["server2/http.mjs"] });
+  assert.equal(sibling.status, 200);
+  assert.equal(sibling.value.state, "claimed");
+  assert.deepEqual(sibling.value.files, ["server2/http.mjs"]);
+});
+
 // QA200 ch-2037 challenge: create-with-assignee is an acquire path that never
 // touched the claim route — it landed overlapping file leases silently (201).
 // The exclusivity check must run there too; the request is one transaction,
