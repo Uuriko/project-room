@@ -207,9 +207,12 @@ function viewerEnvelope(auth, roomId) {
 // Public view of one event row, joined against the live message so edits and
 // tombstones are honoured. DM rows for conversations the viewer is not a
 // party to are dropped (fail closed), mirroring the pins route.
-function eventView(store, roomId, row, memberId) {
+function eventView(store, roomId, row, memberId, floor = null) {
   const message = store.room(roomId).state.messages.find(m => m.id === row.message_id);
-  if (!message || !dmVisible(message, memberId)) return null;
+  // PRIV-2: a since_join reader's activity follows the same floor as every
+  // other message read. A mention recorded before removal stays in the table
+  // after reactivation; the body must not come back with it.
+  if (!message || !dmVisible(message, memberId) || !messageInHistory(message, floor)) return null;
   return {
     id: row.id, type: row.type, roomId,
     actorId: row.actor_id, actorName: row.actor_name,
@@ -237,18 +240,32 @@ export function listActivity(store, token, roomId, params = {}, expectedSessionB
     fail(422, "invalid_activity_type", `type must be one of ${ACTIVITY_TYPES.join(", ")}`);
   }
   return store.readTransaction(() => {
-    const clauses = ["room_id=?", "user_id=?"];
-    const args = [roomId, member.id];
-    if (type) { clauses.push("type=?"); args.push(type); }
-    if (before !== null) { clauses.push("id<?"); args.push(Number(before)); }
-    const rows = store.db.prepare(
-      `SELECT * FROM activity_events WHERE ${clauses.join(" AND ")} ORDER BY id DESC LIMIT ?`).all(...args, count + 1);
+    const floor = store.historyFloor(roomId, member.id);
     const items = [];
-    for (const row of rows.slice(0, count)) {
-      const view = eventView(store, roomId, row, member.id);
-      if (view) items.push(view);
+    let cursor = before === null ? null : Number(before);
+    let hasMore = false;
+    let scanned = 0;
+    while (items.length <= count && scanned < 2000) {
+      const clauses = ["room_id=?", "user_id=?"];
+      const args = [roomId, member.id];
+      if (type) { clauses.push("type=?"); args.push(type); }
+      if (cursor !== null) { clauses.push("id<?"); args.push(cursor); }
+      const limit = Math.min(200, 2000 - scanned);
+      const rows = store.db.prepare(
+        `SELECT * FROM activity_events WHERE ${clauses.join(" AND ")} ORDER BY id DESC LIMIT ?`).all(...args, limit);
+      if (!rows.length) break;
+      scanned += rows.length;
+      let stop = false;
+      for (const row of rows) {
+        const view = eventView(store, roomId, row, member.id, floor);
+        if (!view) continue;
+        if (items.length === count) { hasMore = true; stop = true; break; }
+        items.push(view);
+      }
+      if (stop || rows.length < limit) break;
+      cursor = rows[rows.length - 1].id;
     }
-    return { ...viewerEnvelope(auth, roomId), items, hasMore: rows.length > count, before: before === null ? null : Number(before) };
+    return { ...viewerEnvelope(auth, roomId), items, hasMore, before: before === null ? null : Number(before) };
   });
 }
 
@@ -256,12 +273,16 @@ export function activityUnreadCount(store, token, roomId, expectedSessionBinding
   const auth = authed(store, token, roomId, expectedSessionBinding);
   const member = auth.member;
   return store.readTransaction(() => {
+    const floor = store.historyFloor(roomId, member.id);
     const rows = store.db.prepare(
-      `SELECT type, COUNT(*) AS n FROM activity_events
-       WHERE room_id=? AND user_id=? AND read_at IS NULL GROUP BY type`).all(roomId, member.id);
+      `SELECT * FROM activity_events
+       WHERE room_id=? AND user_id=? AND read_at IS NULL`).all(roomId, member.id);
     const byType = Object.fromEntries(ACTIVITY_TYPES.map(t => [t, 0]));
-    for (const row of rows) byType[row.type] = row.n;
-    return { ...viewerEnvelope(auth, roomId), total: rows.reduce((sum, row) => sum + row.n, 0), byType };
+    for (const row of rows) {
+      const view = eventView(store, roomId, row, member.id, floor);
+      if (view) byType[view.type] += 1;
+    }
+    return { ...viewerEnvelope(auth, roomId), total: Object.values(byType).reduce((sum, n) => sum + n, 0), byType };
   });
 }
 
