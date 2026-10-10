@@ -352,7 +352,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // With no mailer no verification code can be delivered: every email-verification
   // gate (invites, share links, identity mint, a second room) then follows the
   // agent-invites escape hatch instead of deadlocking the account.
-  store.accountLogins.setVerificationUnachievable(() => !magicMailer.isConfigured());
+  // Optional-chained: option-validation tests build the server on a stub store
+  // with no accountLogins; a real store always has it.
+  store.accountLogins?.setVerificationUnachievable?.(() => !magicMailer.isConfigured());
   // Per-email buckets (hourly) complement the per-address rate() limits below.
   const magicRequestEmailLimiter = createRateLimiter({ capacity: 3, refillPerSecond: 3 / 3600 });
   const resetRequestEmailLimiter = createRateLimiter({ capacity: 3, refillPerSecond: 3 / 3600 });
