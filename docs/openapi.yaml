@@ -14361,7 +14361,7 @@ paths:
   /api/rooms/{roomId}/assistant:
     get:
       summary: Read the shared room assistant and public requests
-      description: Room membership and rooms read scope required. Returns configuration revision, honest connection availability and up to 100 public runs. Own visible shared source messages define invocation; private messages and hidden history are excluded. Runs contain authored input references, one permanent host attempt, revision and bounded reported public activity. Each run's status stays the raw state (a host claims status queued, so it is never relabeled; a working run with no host update for two minutes reads unknown). The additive displayStatus is for display only; it reads not_picked_up when a queued run is unclaimed for 10s, stalled when a working run has had no host update for two minutes, otherwise the status. Reading does not start execution or mark read.
+      description: Room membership and rooms read scope required. Returns configuration revision, honest connection availability and up to 100 public runs. Own visible shared source messages define invocation; private messages and hidden history are excluded. Runs contain authored input references, one permanent host attempt, revision and bounded reported public activity. A queued run unclaimed for 10s reads not_picked_up; working becomes stalled after two minutes without a host update (unknown when it never reported). Reading does not start execution or mark read.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
