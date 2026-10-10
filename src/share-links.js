@@ -484,8 +484,10 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     refreshPurposes();
     refreshAgentCode();
     // Member and co-admin links are the room creator's to make.
-    $("#share-link-access-label").hidden = getState()?.room?.ownerId !== getSession()?.member?.id;
-    $("#share-link-access").value = "guest";
+    // Optional chrome: its absence must never keep the dialog from opening.
+    const accessLabel = $("#share-link-access-label"), access = $("#share-link-access");
+    if (accessLabel) accessLabel.hidden = getState()?.room?.ownerId !== getSession()?.member?.id;
+    if (access) access.value = "guest";
     manager.showModal(); $("#share-link-create").focus();
     // Link-list feedback never owns the newer creation/clipboard status.
     await Promise.all([list(version, generation).catch(() => {}), loadKit()]);
@@ -506,7 +508,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     const request = pendingCreate ||= { requestId: crypto.randomUUID(), linkToken: newToken(),
       expiresAt: Date.now() + Number($("#share-link-expiry").value) * 3600000,
       maxJoins: Number($("#share-link-limit").value), expectedMemberRevision: getState().members[getSession().member.id].revision,
-      ...(!$("#share-link-access-label").hidden && $("#share-link-access").value !== "guest" ? { access: $("#share-link-access").value } : {}) };
+      ...($("#share-link-access-label")?.hidden === false && $("#share-link-access")?.value && $("#share-link-access").value !== "guest" ? { access: $("#share-link-access").value } : {}) };
     creationBusy(true); status("Creating link…");
     try {
       const result = await client.request(client.path("/share-links"), { method: "POST", data: request });
