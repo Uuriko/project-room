@@ -38,10 +38,13 @@ test("served SKILL.md names all four anonymous mint budget tiers and their messa
 });
 
 test("served SKILL.md gets Retry-After semantics right per tier", () => {
-  // Minute tier sends Retry-After: 60, day tiers send 3600. The old doc claimed
-  // "always sends Retry-After: 3600", which is false for the minute tier.
+  // Minute tier sends Retry-After: 60. Day tiers send the real seconds until
+  // the oldest counted mint leaves the rolling window (not a flat 3600), and
+  // the doc must say so instead of naming a fixed number. The old doc claimed
+  // "always sends Retry-After: 3600", which is false for both.
   assert.ok(/Retry-After:?\s*60\b/.test(skill), "names the 60s Retry-After for the minute tier");
-  assert.ok(/Retry-After:?\s*3600\b/.test(skill), "names the 3600s Retry-After for the day tiers");
+  assert.ok(!/Retry-After:?\s*3600\b/.test(skill), "does not name a flat 3600s Retry-After for the day tiers");
+  assert.ok(/oldest\s+counted\s+mint\s+leaves\s+the\s+rolling/i.test(skill), "says the day-tier wait is until the oldest counted mint leaves the window");
   assert.ok(!/always\s+sends\s+[`']?Retry-After:?\s*3600/.test(skill), "never claims Retry-After: 3600 is always sent");
 });
 
