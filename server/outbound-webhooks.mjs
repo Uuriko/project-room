@@ -7,6 +7,7 @@
 // WebhookError.
 import { promises as dns } from "node:dns";
 import { parseIpv4, parseIpv6, isBlockedIp, isBlockedIpv6Value, isWorkersRuntime } from "./ip-blocklist.mjs";
+import { normalizeWakeCounts } from "./agent-wake-webhooks.mjs";
 
 class WebhookError extends Error { constructor(code, message) { super(message); this.name = "WebhookError"; this.code = code; } }
 const fail = (code, message) => { throw new WebhookError(code, message); };
@@ -296,11 +297,24 @@ export const WAKE_PING_EVENT = "agent.wake";
 // agent knows a bare 👍 react on the mentioning message counts as a
 // response. Additive — the signal shape is untouched.
 export const WAKE_ACK_HINT = "react \u{1F44D} to acknowledge";
-export function buildWakePing({ agentId, signal }) {
+// hs2-webhook-counts (1c): the wake ping is counts-only by default. The
+// webhook names the agent and how many wake signals are pending — never
+// the signal content — the same privacy contract as the human push
+// channel (counts-only unless the receiver opts into previews). The
+// signal argument is still required: it is the idempotency key for the
+// journaled delivery and the trigger the receiver correlates on poll.
+// Pass full:true to keep the legacy full-signal payload for receivers
+// that explicitly opted into it.
+export function buildWakePing({ agentId, signal, counts = null, full = false }) {
   check(typeof agentId === "string" && agentId.length > 0, "agentId must be a non-empty string");
   check(signal !== null && typeof signal === "object", "signal must be an object");
   check(typeof signal.signalId === "string" && signal.signalId.length > 0, "signal.signalId must be a non-empty string");
-  return Object.freeze({ event: WAKE_PING_EVENT, agentId, signal: Object.freeze({ ...signal }), ackHint: WAKE_ACK_HINT });
+  check(typeof full === "boolean", "full must be a boolean");
+  if (full) {
+    return Object.freeze({ event: WAKE_PING_EVENT, agentId, signal: Object.freeze({ ...signal }), ackHint: WAKE_ACK_HINT });
+  }
+  return Object.freeze({ event: WAKE_PING_EVENT, agentId,
+    counts: normalizeWakeCounts(counts), ackHint: WAKE_ACK_HINT });
 }
 // Create a webhook manager. store is a caller-owned Map (webhookId -> webhook).
 export function createWebhooks({ store } = {}) {

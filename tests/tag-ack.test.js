@@ -182,11 +182,16 @@ test("ack rate is null with no mentions", () => {
 // journaled pending-wake signal, additively.
 test("buildWakePing carries the ack hint additively", () => {
   const signal = { signalId: "ws_1", agentId: "ai_x", kind: "mention", roomId: "r", messageId: "m" };
-  const payload = buildWakePing({ agentId: "ai_x", signal });
+  // hs2-webhook-counts (1c): the ack hint rides both the counts-only
+  // default and the full-signal opt-in.
+  const payload = buildWakePing({ agentId: "ai_x", signal, counts: { pending: 1, mentions: 1, dms: 0 } });
   assert.equal(payload.event, WAKE_PING_EVENT);
-  assert.deepEqual(payload.signal, signal);
+  assert.ok(!("signal" in payload));
   assert.equal(payload.ackHint, WAKE_ACK_HINT);
   assert.equal(payload.ackHint, "react 👍 to acknowledge");
+  const full = buildWakePing({ agentId: "ai_x", signal, full: true });
+  assert.deepEqual(full.signal, signal);
+  assert.equal(full.ackHint, WAKE_ACK_HINT);
 });
 
 test("journaled pending-wake signals carry the ack hint", () => {
