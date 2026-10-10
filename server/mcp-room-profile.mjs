@@ -27,7 +27,7 @@ import { nextWorkStep } from "../src/workflow.js";
 import { completedResults, searchWork } from "../src/work-selectors.js";
 import { sortWorkByCuriosity, viewerHistory } from "../src/curiosity-rank.mjs";
 import { workHelpContext } from "../src/work-help.js";
-import { HOSTED_ROOM_MCP_TOOLS, HOSTED_MCP_FOLLOW_UPS, ROOM_MCP_SERVER_NAME, ROOM_MCP_SERVER_VERSION, canonicalMcpToolName } from "../src/room-mcp-join.js";
+import { HOSTED_ROOM_MCP_TOOLS, HOSTED_MCP_FOLLOW_UPS, ROOM_MCP_SERVER_NAME, ROOM_MCP_SERVER_VERSION, canonicalMcpToolName, PUBLIC_WORK_MCP_TOOLS } from "../src/room-mcp-join.js";
 import { MCP_JOIN_TOOLS, MCP_AUTH_REQUIRED, handleMcpJoinRpc } from "./mcp-http.mjs";
 import { mcpInvalidRequest } from "./mcp-arg-errors.mjs";
 import { AgentRooms } from "./agent-rooms.mjs";
@@ -791,7 +791,7 @@ function listSelection(message, searchParams) {
   return { profile, aliases, focus };
 }
 
-const SUGGESTABLE_TOOLS = Object.freeze([...HOSTED_ROOM_MCP_TOOLS, ...MCP_JOIN_TOOLS.map(entry => entry.name)]);
+const SUGGESTABLE_TOOLS = Object.freeze([...HOSTED_ROOM_MCP_TOOLS, ...PUBLIC_WORK_MCP_TOOLS, ...MCP_JOIN_TOOLS.map(entry => entry.name)]);
 
 async function handleAuthed(message, { store, secret, identity, mcpUrl, searchParams, agentRooms }) {
   const hasId = object(message) && Object.hasOwn(message, "id");
