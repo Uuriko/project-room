@@ -106,6 +106,9 @@ Open claims are everything that is not `done`.
   most 25 per room per pass, every 15 minutes or slower) with a
   `stale_sweep:` note in their history. Held work is never swept: it ends through its lease (24h
   default, renew to keep it) or its linked PR merging or closing.
+  To keep deliberate standing backlog, tag the item `never-sweep` at create.
+  The sweep leaves it open. While it is dormant it does not count toward the
+  cap; once someone claims or touches it, it counts like any other open item.
 - Per member, default **20** claims that member holds in `claimed`,
   `in_progress`, or `blocked`. The next claim is **409**
   `too_many_open_claims`.

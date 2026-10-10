@@ -542,10 +542,18 @@ export function openClaimCount(items, now) {
 }
 // Retire dormant unclaimed items, oldest first, at most `limit`. Pure: returns
 // [before, closed] pairs; the caller writes them and emits the events.
+// Never-sweep pin (follow-up to #2341): a room can keep deliberate standing
+// backlog by tagging the item "never-sweep" at create. A pinned item still
+// goes dormant (so it never jams the open-claim cap) but the stale sweep
+// leaves it open.
+export const NEVER_SWEEP_TAG = "never-sweep";
+export function isSweepPinned(item) {
+  return (item?.tags ?? []).some(tag => typeof tag === "string" && tag.toLowerCase() === NEVER_SWEEP_TAG);
+}
 export function closeStaleUnclaimed(items, now, { limit = STALE_SWEEP_BATCH } = {}) {
   const atMs = nowMsOf(now);
   return (items ?? [])
-    .filter(item => isDormantClaim(item, atMs))
+    .filter(item => isDormantClaim(item, atMs) && !isSweepPinned(item))
     .sort((a, b) => claimUpdatedAt(a).localeCompare(claimUpdatedAt(b)))
     .slice(0, Math.max(0, limit))
     .map(before => [before, closeWork(before, "system", { verb: "close", reason: STALE_SWEEP_REASON, now: atMs, authority: true })]);
