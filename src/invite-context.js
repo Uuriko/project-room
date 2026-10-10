@@ -35,7 +35,7 @@ export function agentInviteJoinPath(hash, pathname) {
   if (!match) return null;
   const p = String(pathname ?? "");
   const door = (p === "/room" || p.startsWith("/room/")) ? "/room" : "";
-  return `${door}/join/${match[1]}`;
+  return [door, "/join/", match[1]].join("");
 }
 
 // Mirror the invitation secret at OAuth-start so the round-trip cannot drop
