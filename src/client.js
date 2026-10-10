@@ -43,6 +43,17 @@ function mergeRecentMessages(held, read) {
   if (start !== window.omitted) return null;
   return { ...snapshot, state: { ...snapshot.state, messages: [...held.slice(0, start), ...recent] } };
 }
+// A fresh client holds no history, so its first read used to be the whole room
+// (muse-room: 4+ MB, ~7s on prod, 3s short of the 10s read timeout). It now
+// reads the newest window first and fills the rest in the background; `partial`
+// marks held history that is only that window.
+const FILL_DELAY_MS = 250;
+function firstWindow(read) {
+  const window = read?.messagesWindow;
+  if (!window || window.mode !== "recent" || !Number.isSafeInteger(window.omitted) || window.omitted < 0 || !Array.isArray(read?.state?.messages)) return null;
+  const { messagesWindow, ...snapshot } = read;
+  return { snapshot, partial: window.omitted > 0 };
+}
 export const IDENTITY_MINT_POW_BITS = 12;
 export const IDENTITY_MINT_POW_WINDOW_MS = 10 * 60 * 1000;
 
@@ -455,7 +466,7 @@ export class RoomClient {
   // `revalidate`: a stream (re)open or error. It must re-read (access and the
   // newest messages), but the stream replays every event after the held
   // sequence, so older history is corrected by those events' own reads.
-  refresh(receipt = null, { revalidate = false } = {}) {
+  refresh(receipt = null, { revalidate = false, fill = false } = {}) {
     if (this.session?.authMode === "account" && !this.ownsAccountSession()) { this.endAccess(); return Promise.resolve(); }
     // Only sequenced room events can prove a snapshot already contains a change.
     // Reconnects, explicit refreshes and non-event receipts always revalidate access.
@@ -464,7 +475,8 @@ export class RoomClient {
     // A new message or claim receipt cannot change older messages, so it may
     // re-read only the newest ones. Anything else needs a full read at or past
     // its own sequence, even when a newer windowed read already landed.
-    const windowed = sequence === null ? revalidate : RECENT_REFRESH_EVENTS.has(receipt.event.type);
+    // A background fill is always a full read; a fresh client's first read is windowed.
+    const windowed = fill ? false : sequence === null ? (revalidate || !this.heldMessages()) : RECENT_REFRESH_EVENTS.has(receipt.event.type);
     const held = this.heldMessages(), fullSequence = held?.fullSequence ?? this.sequence;
     if (sequence !== null && sequence <= (windowed ? this.sequence : fullSequence)) return Promise.resolve();
     const generation = this.generation;
@@ -477,39 +489,69 @@ export class RoomClient {
       return this.flight.promise;
     }
     const flight = { generation, again: false, revisit: false, sequence: 0, fullSequence: 0, fullNow: !windowed };
+    if (fill) flight.fill = true;
     this.flight = flight;
     flight.promise = (async () => {
       try {
         let covered = held?.fullSequence ?? 0;
         do {
           const session = this.session, holding = this.heldMessages();
-          const full = flight.again || flight.fullNow || flight.fullSequence > covered || !holding;
+          // With nothing held, read the newest window first (the background fill brings the rest).
+          const full = flight.again || flight.fullNow || flight.fullSequence > covered;
           flight.again = false; flight.revisit = false; flight.fullNow = false; flight.sequence = 0;
           const read = await this.request(this.path(full ? "" : "?messages=recent"), { offerContext: true });
           if (generation !== this.generation || !this.session) return;
           if (!this.ownsResponse(read)) { this.endAccess(); return; }
           // A server without the recent view ignores the parameter and answers in full.
           const whole = full || !Object.hasOwn(read, "messagesWindow");
-          const snapshot = whole ? read : mergeRecentMessages(holding.messages, read);
+          let snapshot, partial = false;
+          if (whole) snapshot = read;
+          else if (!holding || holding.partial) {
+            // First window (or a newer window while only a window is held): used as is.
+            const first = firstWindow(read);
+            snapshot = first?.snapshot ?? null; partial = Boolean(first?.partial);
+          } else snapshot = mergeRecentMessages(holding.messages, read);
           if (!snapshot) { flight.fullNow = true; continue; }
           if (whole) covered = Math.max(covered, read.sequence);
           if (snapshot.sequence >= this.sequence) {
             this.sequence = snapshot.sequence;
             this.held = { generation, session, messages: Array.isArray(snapshot.state?.messages) ? snapshot.state.messages.slice() : null,
-              fullSequence: whole ? snapshot.sequence : holding.fullSequence };
+              fullSequence: whole ? snapshot.sequence : (holding?.fullSequence ?? 0),
+              partial, owesFull: !whole && (partial || Boolean(holding?.owesFull)) };
             this.onSnapshot(snapshot, this.session);
           }
         } while (flight.again || flight.revisit || flight.fullNow || flight.sequence > this.sequence || flight.fullSequence > covered);
+        if (this.heldMessages()?.owesFull) this.scheduleFill();
       } catch (error) {
         if (generation !== this.generation) return;
         // A failed read may have owed a full one; the stream will not replay
-        // its event, so the next read of any kind is full.
-        this.held = null;
+        // its event. Keep what is held (a retry stays a cheap windowed read) and
+        // owe a background full read instead of forcing the next read to be full.
+        const kept = this.heldMessages();
+        this.held = kept ? { ...kept, owesFull: true } : null;
         if (this.session?.authMode === "account" && !this.ownsAccountSession()) { this.endAccess(); return; }
         throw error;
       }
     })().finally(() => { if (this.flight === flight) this.flight = null; });
     return flight.promise;
+  }
+  // Background full read after a windowed first read (or a failed read). It never
+  // changes the status line: the page is already usable. A failure retries quietly
+  // with backoff; only an ended session (401/403) is surfaced.
+  scheduleFill(delay = FILL_DELAY_MS) {
+    if (this.fillTimer) return;
+    const generation = this.generation, session = this.session;
+    this.fillTimer = setTimeout(() => {
+      this.fillTimer = null;
+      if (generation !== this.generation || this.session !== session || !this.heldMessages()?.owesFull) return;
+      this.refresh(null, { fill: true }).then(() => { this.fillDelay = 1000; }, error => {
+        if (generation !== this.generation || this.session !== session) return;
+        if ([401, 403].includes(error.status) || error.code === "session_binding_changed") { this.handleFailure(error); return; }
+        const next = this.fillDelay || 1000;
+        this.fillDelay = Math.min(next * 2, 30000);
+        this.scheduleFill(next + Math.random() * next / 4);
+      });
+    }, delay);
   }
   // History held from this session's last snapshot, for windowed refreshes.
   heldMessages() {
@@ -912,7 +954,9 @@ export class RoomClient {
     // Resume from the last FULL read, not the newest windowed one: a windowed read
     // can pass an event (an edit of an older message) that it did not carry, and
     // the stream must replay that event so it triggers its own full read.
-    const resumeAfter = this.heldMessages()?.fullSequence ?? this.sequence;
+    // Only a window is held: the background fill reads everything, so resume from the newest.
+    const heldNow = this.heldMessages();
+    const resumeAfter = heldNow && !heldNow.partial ? heldNow.fullSequence : this.sequence;
     const stream = new this.events(`${this.path("/stream")}?after=${resumeAfter}${this.session.authMode === "account" ? `&auth=account&binding=${encodeURIComponent(this.session.sessionBinding)}` : ""}`);
     this.stream = stream;
     const ownsStream = () => this.stream === stream && this.generation === generation && this.session === session;
@@ -993,6 +1037,7 @@ export class RoomClient {
   disconnect() {
     this.generation++; clearTimeout(this.streamRetry); this.streamRetry = null; this.streamRetryDelay = 1000;
     clearTimeout(this.refreshRetry); this.refreshRetry = null; this.refreshRetryDelay = 1000;
+    clearTimeout(this.fillTimer); this.fillTimer = null; this.fillDelay = 1000;
     this.refreshInterrupted = false;
     this.stream?.close(); this.stream = null;
   }
