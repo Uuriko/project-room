@@ -118,3 +118,11 @@ test("verified account owner can still mint GX guest invites (no regression)", t
   assert.equal(minted.duplicate, false);
   assert.match(minted.code, /^GX-/);
 });
+
+test("with no mailer the gate is skipped (verification can never complete); with a mailer it still applies", t => {
+  const store = fixture(t);
+  const { token, binding } = ownerAccountSession(store, { verified: false });
+  assert.throws(() => store.shareLinks.create(token, "commons", details(), binding, { emailVerificationUnachievable: false }), err => err.code === "email_unverified");
+  const created = store.shareLinks.create(token, "commons", details(), binding, { emailVerificationUnachievable: true });
+  assert.equal(created.link.status, "active");
+});
