@@ -53,3 +53,13 @@ test("a live invitee whose membership binding vanished is still refused", t => {
   store.db.prepare("DELETE FROM member_accounts WHERE account_id=?").run("account-target");
   assert.throws(() => store.verifyInvitationAudit(), /operator reconciliation/);
 });
+
+test("a deleted invitee whose joined event was altered is still refused", t => {
+  const store = acceptedInvite(t);
+  executeAccountDeletion(store, planAccountDeletion(store, "account-target").plan);
+  const row = store.db.prepare("SELECT joined_event_id AS id FROM membership_invitations WHERE intended_account_id=?").get("account-target");
+  const event = store.db.prepare("SELECT body FROM events WHERE id=?").get(row.id);
+  const tampered = JSON.stringify({ ...JSON.parse(event.body), data: { ...JSON.parse(event.body).data, displayName: "Someone else" } });
+  store.db.prepare("UPDATE events SET body=? WHERE id=?").run(tampered, row.id);
+  assert.throws(() => store.verifyInvitationAudit(), /operator reconciliation/);
+});
