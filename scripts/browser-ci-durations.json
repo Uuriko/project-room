@@ -10,7 +10,7 @@
     "05e73f00b3696af89eb50076bd2f81023b87afd9",
     "41cc5c5bca139ff028101e8927897adfff80bf39"
   ],
-  "note": "Per-file junit durations averaged over two Ubuntu CI runs (2026-10-06), rounded to whole ms; scripts/visual-regression-browser-check.mjs measured once (run 37499506413, 4.6s). Timing data rebalances shard membership only; it never selects which tests run. Added message-preview and human-experience owners measured on the integrated local Mac on 2026-10-06 (5319ms and15298ms); remeasure on Ubuntu CI after first combined run. These estimates do not select test membership. Desktop Google browser owner measured on isolated 8bf751aa plus pending-terms repair, local Mac 2026-10-06: 1744ms for two real browser journeys; remeasure on Ubuntu after first required run. Selected-provider extension measured on the same isolated local Mac 2026-10-06: 5216ms for eight required real browser journeys, including cancellation, authenticated account selection, GitHub navigation and hostile entrance refusal; replaces the initial two-case estimate, remeasure on Ubuntu.",
+  "note": "Per-file junit durations averaged over two Ubuntu CI runs (2026-10-06), rounded to whole ms; scripts/visual-regression-browser-check.mjs measured once (run 37499506413, 4.6s). Timing data rebalances shard membership only; it never selects which tests run. Added message-preview and human-experience owners measured on the integrated local Mac on 2026-10-06 (5319ms and15298ms); remeasure on Ubuntu CI after first combined run. These estimates do not select test membership. Desktop Google browser owner measured on isolated 8bf751aa plus pending-terms repair, local Mac 2026-10-06: 1744ms for two real browser journeys; remeasure on Ubuntu after first required run. Selected-provider extension measured on the same isolated local Mac 2026-10-06: 5216ms for eight required real browser journeys, including cancellation, authenticated account selection, GitHub navigation and hostile entrance refusal; replaces the initial two-case estimate, remeasure on Ubuntu. A21 shard registration: activity-feed, oauth-return-invite and qa5-a11y-c entries are initial estimates from analogous suites (notification-feed, dogfood-return, a11y-room); local browser measurement exceeded the sandbox budget - remeasure on Ubuntu CI after first run.",
   "milliseconds": {
     "scripts/a11y-composer-browser-check.mjs": 3361,
     "scripts/a11y-login-browser-check.mjs": 4515,
@@ -24,6 +24,7 @@
     "scripts/acquisition-browser-check.mjs": 450,
     "scripts/action-dialog-focus-scroll-browser-check.mjs": 5819,
     "scripts/action-recovery-browser-check.mjs": 33131,
+    "scripts/activity-feed-browser-check.mjs": 12000,
     "scripts/agent-connect-browser-check.mjs": 19632,
     "scripts/agent-pause-browser-check.mjs": 2022,
     "scripts/agent-signin-browser-check.mjs": 8387,
@@ -86,6 +87,7 @@
     "scripts/native-draft-browser-check.mjs": 15397,
     "scripts/native-result-browser-check.mjs": 20548,
     "scripts/notification-feed-browser-check.mjs": 12037,
+    "scripts/oauth-return-invite-browser-check.mjs": 3000,
     "scripts/operator-console-browser-check.mjs": 1834,
     "scripts/owner-project-offers-browser-check.mjs": 10464,
     "scripts/password-reset-browser-check.mjs": 18631,
@@ -100,6 +102,7 @@
     "scripts/public-work-results-browser-check.mjs": 15440,
     "scripts/purpose-invite-check.mjs": 2568,
     "scripts/pwa-browser-check.mjs": 335,
+    "scripts/qa5-a11y-c-browser-check.mjs": 6000,
     "scripts/quiet-attribution-browser-check.mjs": 2767,
     "scripts/quiet-copy-browser-check.mjs": 4665,
     "scripts/quiet-design-check.mjs": 3673,
