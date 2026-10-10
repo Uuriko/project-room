@@ -21,7 +21,7 @@
 //     guard-weakened copy from loadWeakenedClaimModule for fail-first runs),
 //     so the same properties run against both.
 import assert from "node:assert/strict";
-import { readFile, writeFile, mkdir, rm } from "node:fs/promises";
+import { readFile, writeFile, mkdir, rm, readdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -405,13 +405,20 @@ export async function loadWeakenedClaimModule(kind) {
   );
   const weakDir = join(HERE, ".weak");
   await mkdir(weakDir, { recursive: true });
-  const weakPath = join(weakDir, `work-claims-${kind}.weak.mjs`);
+  const weakPath = join(weakDir, `work-claims-${kind}.${process.pid}.weak.mjs`);
   await writeFile(weakPath, source);
   return import(weakPath);
 }
 
+// node --test runs test files in parallel processes that share this scratch
+// dir, so each process writes pid-suffixed files and removes only its own.
+// Removing the whole dir raced a sibling file's write/import (ENOENT).
 export async function cleanWeakenedClaimModules() {
-  await rm(join(HERE, ".weak"), { recursive: true, force: true });
+  const weakDir = join(HERE, ".weak");
+  const suffix = `.${process.pid}.weak.mjs`;
+  for (const name of await readdir(weakDir).catch(() => [])) {
+    if (name.endsWith(suffix)) await rm(join(weakDir, name), { force: true });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -452,7 +459,7 @@ export async function loadWeakenedRouteModule(kind) {
   source = source.replaceAll(`from "./`, `from "../../../server/`);
   const weakDir = join(HERE, ".weak");
   await mkdir(weakDir, { recursive: true });
-  const weakPath = join(weakDir, `work-claim-routes-${kind}.weak.mjs`);
+  const weakPath = join(weakDir, `work-claim-routes-${kind}.${process.pid}.weak.mjs`);
   await writeFile(weakPath, source);
   return import(weakPath);
 }

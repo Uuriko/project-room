@@ -33,7 +33,7 @@ import { nameBeforeFirstRoom } from "./account-setup-ui.js";
 import { createAccountSettingsUI, applyStoredTheme, organizeRoomSettings, ACCOUNT_DELETED_MESSAGE } from "./account-settings-ui.js";
 import { createAuthSigninUI, classifyAuthLink } from "./auth-signin-ui.js";
 import { createAgentSigninUI } from "./agent-signin-ui.js";
-import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, defaultRequestPermissions, validateAccessRequestForm, newAccessRequestId, stashAccessRequest, readAccessRequest } from "./invite-context.js";
+import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, defaultRequestPermissions, validateAccessRequestForm, newAccessRequestId, stashAccessRequest, readAccessRequest, AGENT_INVITE_CODE_PATTERN, agentInviteJoinPath } from "./invite-context.js";
 import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, roomIdFromNext, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
 import { rememberLastRoom, rememberAccountHint, readLastRoom, readAccountHint, hasSessionHint, clearBrowserSessionHints, rememberMemberRoom, readMemberRoom, clearStoredPasswords, signInRoomTarget } from "./browser-session.js";
@@ -115,9 +115,23 @@ function consumeInvitationFragment() {
   if (!location.hash.startsWith("#invite/")) return null;
   const candidate = location.hash.slice("#invite/".length);
   history.replaceState(history.state, "", `${location.pathname}${location.search}`);
+  // QA-200 P1: a #invite/RM-<code> fragment is an agent-invite link in the
+  // SPA's fragment form. The SPA's invitation dialog only redeems 43-char
+  // human share-link tokens, so without a redirect this rendered "This
+  // invitation link is unavailable." before any API call — even though the
+  // code is redeemable on the /join page. Flag it; the call sites navigate.
+  if (AGENT_INVITE_CODE_PATTERN.test(candidate)) return { valid: false, secret: candidate, redirect: true };
   return invitationTokenPattern.test(candidate)
     ? { valid: true, secret: candidate }
     : { valid: false, secret: null };
+}
+// Navigate an agent-invite fragment (#invite/RM-<code>) to the join page
+// that can actually redeem it. Returns true when a navigation was started.
+function redirectAgentInvite(fragment) {
+  if (!fragment?.redirect) return false;
+  const path = agentInviteJoinPath(`#invite/${fragment.secret}`, location.pathname);
+  if (path) location.assign(path);
+  return true;
 }
 function selectedRoomFromLocation() {
   const nextRoom = roomIdFromNext(new URLSearchParams(location.search).get("next"));
@@ -249,6 +263,10 @@ function consumeStartRoomIntent() {
 // without a room context, so the dialog re-opens after OAuth sign-in.
 const initialInvitationFragment = consumeInvitationFragment()
   || takeRestoredInvite({ storage: window.sessionStorage, hash: location.hash, search: location.search });
+// QA-200 P1: a #invite/RM-<code> landing navigates to the join page
+// immediately instead of booting the SPA's invitation dialog, which cannot
+// redeem agent-invite codes.
+redirectAgentInvite(initialInvitationFragment);
 // Stash the live invitation secret at the exact moment an OAuth navigation
 // starts. The #invite/ fragment never reaches the server, so without this
 // the Google/GitHub round-trip would drop the invitation. The secret touches
@@ -731,7 +749,7 @@ const signinUI = createAuthSigninUI({
     if (!value && resumeResetJourney) {
       resumeResetJourney = false;
       queueMicrotask(() => {
-        if (initialInvitationFragment) openInvitation(initialInvitationFragment);
+        if (initialInvitationFragment && !initialInvitationFragment.redirect) openInvitation(initialInvitationFragment);
         else shareLinksUI.open(initialJoinFragment);
       });
     }
@@ -4924,6 +4942,7 @@ window.addEventListener("popstate", () => {
 window.addEventListener("hashchange", () => {
   revealAgentSigninLink();
   const fragment = consumeInvitationFragment();
+  if (redirectAgentInvite(fragment)) return;
   if (fragment) openInvitation(fragment);
   // JDOT-COH-NAV begin
   else if (!replayWorkNavigation()) revealLocationHash();
@@ -7614,7 +7633,7 @@ configureAuthPanel();
     history.replaceState(history.state, "", location.pathname);
   }
 }
-if (initialInvitationFragment && !initialPasswordReset) openInvitation(initialInvitationFragment);
+if (initialInvitationFragment && !initialInvitationFragment.redirect && !initialPasswordReset) openInvitation(initialInvitationFragment);
 (async () => {
   const initialResult = await initialSignin;
   if (initialResult?.pendingPasswordReset) {

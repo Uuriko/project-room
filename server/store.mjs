@@ -4191,19 +4191,28 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // order like the other kinds. Backlog 11: messages by an author the caller
   // muted (E4) are excluded for every kind, server-side (mutedEvent), so
   // agents and other API readers match the UI.
-  search(token, roomId, query, kind = "all", expectedSessionBinding = null, { limit = 50 } = {}) {
+  search(token, roomId, query, kind = "all", expectedSessionBinding = null, { limit = 50, before = null } = {}) {
     if (typeof query !== "string" || !query.trim() || query.length > 80) fail(422, "invalid_search", "Search is 1 to 80 characters");
     if (!["all", "messages", "work", "pinned"].includes(kind)) fail(422, "invalid_search", "kind is all, messages, work, or pinned");
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) fail(422, "invalid_search", "limit is 1 to 200");
+    const needle = query.trim().toLowerCase();
+    // REST search paging: `before` is the opaque cursor a previous page
+    // returned as nextCursor. It is bound to the same query and kind, so it
+    // cannot carry a page from one search into another.
+    const cursor = before == null ? null : decodeSearchCursor(before, needle, kind);
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const room = this.room(roomId);
-      const needle = query.trim().toLowerCase();
       const result = { roomId, query: query.trim(), messages: [], workItems: [], total: 0 };
       const floor = this.historyFloor(roomId, auth.member.id); // PRIV-2
       if (kind === "all" || kind === "messages" || kind === "pinned") {
+        // Collect every match the caller may read first. Every filter
+        // (tombstones, history floor, pins, mutes, targeted DMs) runs before
+        // a cursor is resolved, so a cursor can only point at a match this
+        // caller would see anyway.
+        const matches = [];
         for (const m of room.state.messages ?? []) {
-          if (m.body == null) continue; // tombstone
+          if (m.body == null) continue; // tombstone (deleted or redacted)
           if (!messageInHistory(m, floor)) continue; // PRIV-2: before the reader joined
           if (kind === "pinned" && !isPinned(room.state, m.id)) continue;
           if (mutedEvent(room.state, auth.member?.id, { actorId: m.authorId })) continue; // muted author (E4), every kind
@@ -4212,15 +4221,25 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           // nor the match count (result.total, #1812) can reveal their
           // existence, count, or bodies to a third party.
           if (m.toMemberId && m.authorId !== auth.member?.id && m.toMemberId !== auth.member?.id) continue;
-          if (m.body.toLowerCase().includes(needle)) {
-            result.total += 1;
-            result.messages.push({ id: m.id, authorId: m.authorId, body: m.body, createdAt: m.createdAt, workItemId: m.workItemId });
-            // Keep the newest `limit` matches (still chronological). Keeping the first
-            // ones left every newer match unreachable: there is no offset, and limit
-            // tops out at 200.
-            if (result.messages.length > limit) result.messages.shift();
-          }
+          if (m.body.toLowerCase().includes(needle)) matches.push(m);
         }
+        result.total = matches.length; // the full count on every page
+        // The page holds the newest `limit` matches strictly older than the
+        // cursor anchor (all matches without a cursor), still chronological.
+        // The anchor must itself be a match this caller can read now. A
+        // missing id, an id the caller may not read, and an anchor that left
+        // the result set (deleted, redacted, edited away, unpinned, author
+        // muted) all get the same 422, so the cursor is no existence oracle.
+        let stop = matches.length;
+        if (cursor) {
+          stop = matches.findIndex(m => m.id === cursor.anchor);
+          if (stop < 0) fail(422, "invalid_search_cursor", SEARCH_CURSOR_INVALID);
+        }
+        const start = Math.max(0, stop - limit);
+        for (const m of matches.slice(start, stop)) {
+          result.messages.push({ id: m.id, authorId: m.authorId, body: m.body, createdAt: m.createdAt, workItemId: m.workItemId });
+        }
+        if (kind !== "all" && start > 0) result.nextCursor = encodeSearchCursor(needle, kind, result.messages[0].id);
       }
       if (kind === "all" || kind === "work") {
         const workHits = [];
@@ -5359,4 +5378,37 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
     return chips;
   }
+}
+
+// REST search paging cursor: base64url JSON {v, k, h, a}. k is the kind; h is
+// the first 16 bytes of sha256(kind NUL needle), which binds the cursor to one
+// search without copying the query into it; a is the oldest message id of the
+// page it continues. The size is fixed by these fields (message ids are at
+// most 128 ASCII characters; a channel copy adds ":channel", 136), so any
+// valid query and id fits the decoder limit. The cursor grants nothing: the anchor must be a match the caller can
+// read on the next request, or the request is 422.
+export const SEARCH_CURSOR_MAX_LENGTH = 320;
+const SEARCH_CURSOR_INVALID = "Search cursor is not valid for this search; start the search again without before";
+function searchCursorHash(needle, kind) {
+  return createHash("sha256").update(`${kind}\u0000${needle}`, "utf8").digest().subarray(0, 16).toString("base64url");
+}
+export function encodeSearchCursor(needle, kind, anchor) {
+  return Buffer.from(JSON.stringify({ v: 2, k: kind, h: searchCursorHash(needle, kind), a: anchor }), "utf8").toString("base64url");
+}
+// A search result id is a message id (validId, at most 128 characters) or the
+// channel copy of a thread reply, which is the source id plus ":channel" (so at
+// most 136 characters). Both are legitimate anchors.
+const SEARCH_CHANNEL_SUFFIX = ":channel";
+function validSearchAnchor(anchor) {
+  if (validId(anchor)) return true;
+  return typeof anchor === "string" && anchor.endsWith(SEARCH_CHANNEL_SUFFIX) && validId(anchor.slice(0, -SEARCH_CHANNEL_SUFFIX.length));
+}
+export function decodeSearchCursor(value, needle, kind) {
+  if (kind !== "messages" && kind !== "pinned") fail(422, "invalid_search_cursor", "Search cursors page kind=messages or kind=pinned only");
+  const bad = () => fail(422, "invalid_search_cursor", SEARCH_CURSOR_INVALID);
+  if (typeof value !== "string" || !value || value.length > SEARCH_CURSOR_MAX_LENGTH || !/^[A-Za-z0-9_-]+$/.test(value)) bad();
+  let parsed;
+  try { parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")); } catch { bad(); }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || parsed.v !== 2 || parsed.k !== kind || parsed.h !== searchCursorHash(needle, kind) || !validSearchAnchor(parsed.a)) bad();
+  return { anchor: parsed.a };
 }

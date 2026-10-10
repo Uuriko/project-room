@@ -1,0 +1,39 @@
+# pin-gate — pinned-ref gate for workflow and local-action files.
+#
+# Threat: a PR that rewrites a push-to-main workflow can swap an action ref to
+# a tag or branch the attacker controls (mutating tags like `v4` can be
+# re-pointed). SHA pinning removes that lever. This gate runs on pull_request
+# (pre-merge, no secrets) and fails the PR when any `uses:` ref under
+# .github/workflows/ or .github/actions/ is not a full 40-char commit SHA, or a
+# docker:// ref has no @sha256: digest. The check is scripts/check-workflow-pins.mjs
+# (a YAML walk, so multi-line, flow-style and nested refs are all seen); it
+# also runs in `npm run check`.
+#
+# Paired with .github/CODEOWNERS so workflow, CODEOWNERS and gate-script changes
+# get owner review. Note: a pull_request workflow runs the PR's own copy, so
+# this gate is only as strong as the owner review of changes to it.
+name: pin-gate
+
+on:
+  pull_request:
+    paths:
+      - '.github/**'
+      - 'scripts/check-workflow-pins.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+
+permissions:
+  contents: read
+
+jobs:
+  pin-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Install the parser (lockfile, no scripts)
+        run: npm ci --ignore-scripts
+      - name: Require SHA-pinned action refs
+        run: node scripts/check-workflow-pins.mjs

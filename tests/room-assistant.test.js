@@ -277,7 +277,7 @@ test('hosted MCP discovers scoped coordinator tools and executes the real public
   const catalog=await rpc('tools/list',{focus:'work'});
   assert.ok(catalog.result.tools.some(tool=>tool.name==='room_assistant_context'));
   const action=catalog.result.tools.find(tool=>tool.name==='room_assistant_action');
-  assert.deepEqual(action.inputSchema.properties.action.enum,['claim','report']);
+  assert.deepEqual(action.inputSchema.properties.action.enum,['claim','report','publish']);
   assert.equal(action.inputSchema.additionalProperties,false);
   assert.ok(action.inputSchema.allOf.length>0);
   const context=await call('room_assistant_context',{});
@@ -428,4 +428,79 @@ test('completed historical report replay after deletion strips result links and 
   await api('producer',{...completed,requestId:'new-done',expectedRevision:2},404);
   await api('owner',{action:'resume',runId:'done-deleted',expectedRevision:2},404);
   assert.equal(JSON.parse(f.store.db.prepare('SELECT value FROM room_assistant_runs WHERE run_id=?').get('done-deleted').value).revision,2);
+});
+
+test('publish posts the answer and completes the run atomically (SV-1 fence)', async t => {
+  const { f, api, message } = await setup(t);
+  await api('owner',{action:'configure',expectedRevision:0,name:'Room',coordinatorMemberId:'producer'});
+  message('owner','ask-opening','What should we build?');
+  await api('owner',{action:'invoke',runId:'fenced',sourceMessageId:'ask-opening'});
+  await api('producer',{action:'claim',runId:'fenced',attemptId:'host-1',expectedRevision:0});
+  const published = await api('producer',{action:'publish',requestId:'publish-once',runId:'fenced',attemptId:'host-1',expectedRevision:1,summary:'Answered.',body:'Build the fence.',appliedInputMessageIds:['ask-opening']});
+  assert.equal(published.result.status,'done');
+  assert.ok(published.result.resultMessageId);
+  const posted = f.store.room('commons').state.messages.find(m => m.id === published.result.resultMessageId);
+  assert.equal(posted?.body,'Build the fence.');
+  assert.equal(posted?.replyToId,'ask-opening');
+  assert.equal(posted?.authorId,'producer');
+  assert.deepEqual(published.result.inputs.map(i=>i.status),['applied']);
+  // An exact retry replays the recorded receipt: no second message is posted.
+  const replay = await api('producer',{action:'publish',requestId:'publish-once',runId:'fenced',attemptId:'host-1',expectedRevision:1,summary:'Answered.',body:'Build the fence.',appliedInputMessageIds:['ask-opening']});
+  assert.deepEqual(replay,published);
+  assert.equal(f.store.room('commons').state.messages.filter(m => m.body === 'Build the fence.').length,1);
+  assert.equal((await api('owner')).runs[0].status,'done');
+});
+
+test('a stop that lands before publish fences the answer out of chat (SV-1)', async t => {
+  const { f, api, message } = await setup(t);
+  await api('owner',{action:'configure',expectedRevision:0,name:'Room',coordinatorMemberId:'producer'});
+  message('owner','stop-opening','Work on this.');
+  await api('owner',{action:'invoke',runId:'stopped',sourceMessageId:'stop-opening'});
+  await api('producer',{action:'claim',runId:'stopped',attemptId:'host-1',expectedRevision:0});
+  const cancel = await api('owner',{action:'cancel',runId:'stopped',expectedRevision:1});
+  assert.equal(cancel.result.status,'cancel_requested');
+  await api('producer',{action:'publish',runId:'stopped',attemptId:'host-1',expectedRevision:2,summary:'Late answer.',body:'Too late.',appliedInputMessageIds:['stop-opening']},409);
+  assert.equal(f.store.room('commons').state.messages.some(m => m.body === 'Too late.'),false,'no answer may appear in chat after a stop');
+  assert.equal((await api('owner')).runs[0].status,'cancel_requested');
+});
+
+test('publish with a stale revision is rejected before anything is posted', async t => {
+  const { f, api, message } = await setup(t);
+  await api('owner',{action:'configure',expectedRevision:0,name:'Room',coordinatorMemberId:'producer'});
+  message('owner','rev-opening','Work on this.'); message('guest','rev-input','More context.');
+  await api('owner',{action:'invoke',runId:'revved',sourceMessageId:'rev-opening'});
+  await api('producer',{action:'claim',runId:'revved',attemptId:'host-1',expectedRevision:0});
+  await api('guest',{action:'contribute',runId:'revved',sourceMessageId:'rev-input',expectedRevision:1});
+  await api('producer',{action:'publish',runId:'revved',attemptId:'host-1',expectedRevision:1,summary:'Stale.',body:'Stale answer.',appliedInputMessageIds:['rev-opening','rev-input']},409);
+  assert.equal(f.store.room('commons').state.messages.some(m => m.body === 'Stale answer.'),false);
+  assert.equal((await api('owner')).runs[0].status,'working');
+});
+
+test('cancel on a silent host completes immediately and revokes the attempt (independent stop)', async t => {
+  const { f, api, message } = await setup(t);
+  await api('owner',{action:'configure',expectedRevision:0,name:'Room',coordinatorMemberId:'producer'});
+  message('owner','silent-opening','Work on this.');
+  await api('owner',{action:'invoke',runId:'silent',sourceMessageId:'silent-opening'});
+  await api('producer',{action:'claim',runId:'silent',attemptId:'host-1',expectedRevision:0});
+  const now = f.store.now(); f.store.now = () => now + 121000;
+  const stopped = await api('owner',{action:'cancel',runId:'silent',expectedRevision:1});
+  assert.equal(stopped.result.status,'cancelled');
+  assert.equal(stopped.result.attemptId,null);
+  // The revoked attempt can no longer report or publish.
+  await api('producer',{action:'report',runId:'silent',attemptId:'host-1',expectedRevision:2,state:'cancelled',summary:'Late ack'},409);
+  await api('producer',{action:'publish',runId:'silent',attemptId:'host-1',expectedRevision:2,summary:'Late.',body:'Late answer.',appliedInputMessageIds:['silent-opening']},409);
+  assert.equal((await api('owner')).runs[0].status,'cancelled');
+});
+
+test('cancel on a live host still waits for host acknowledgment', async t => {
+  const { api, message } = await setup(t);
+  await api('owner',{action:'configure',expectedRevision:0,name:'Room',coordinatorMemberId:'producer'});
+  message('owner','live-opening','Work on this.');
+  await api('owner',{action:'invoke',runId:'live',sourceMessageId:'live-opening'});
+  await api('producer',{action:'claim',runId:'live',attemptId:'host-1',expectedRevision:0});
+  const requested = await api('owner',{action:'cancel',runId:'live',expectedRevision:1});
+  assert.equal(requested.result.status,'cancel_requested');
+  assert.equal(requested.result.attemptId,'host-1');
+  const ack = await api('producer',{action:'report',runId:'live',attemptId:'host-1',expectedRevision:2,state:'cancelled',summary:'Stopping.'});
+  assert.equal(ack.result.status,'cancelled');
 });

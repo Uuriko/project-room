@@ -61,6 +61,53 @@ export function isPathAllowlisted(relPath, entries) {
 // Diff parsing — added lines only, never removed/context lines
 // ---------------------------------------------------------------------------
 
+// Git C-quotes a path when it is not plain ASCII. Octal escapes are UTF-8
+// bytes, not Latin-1 code points. A still-quoted path does not start with a
+// scan directory, so isInScope drops the added lines.
+function unquoteGitPath(token) {
+  if (token.length < 2 || token[0] !== '"' || token.at(-1) !== '"') return token;
+  const body = token.slice(1, -1);
+  const bytes = [];
+  let i = 0;
+  while (i < body.length) {
+    if (body[i] !== "\\") {
+      const code = body.charCodeAt(i);
+      if (code > 0xff) return token;
+      bytes.push(code);
+      i += 1;
+      continue;
+    }
+    const next = body[i + 1];
+    if (next == null) return token;
+    if (next === "n") { bytes.push(0x0a); i += 2; continue; }
+    if (next === "t") { bytes.push(0x09); i += 2; continue; }
+    if (next === "r") { bytes.push(0x0d); i += 2; continue; }
+    if (next === "\\" || next === '"') { bytes.push(next.charCodeAt(0)); i += 2; continue; }
+    if (next >= "0" && next <= "7") {
+      let oct = "";
+      let j = i + 1;
+      while (oct.length < 3 && j < body.length && body[j] >= "0" && body[j] <= "7") {
+        oct += body[j];
+        j += 1;
+      }
+      const value = Number.parseInt(oct, 8);
+      if (!Number.isInteger(value) || value > 0xff) return token;
+      bytes.push(value);
+      i = j;
+      continue;
+    }
+    return token;
+  }
+  return Buffer.from(bytes).toString("utf8");
+}
+
+export function fileFromPlusHeader(header) {
+  if (!header.startsWith("+++ ")) return null;
+  const p = unquoteGitPath(header.slice(4).trim());
+  if (p === "/dev/null") return null;
+  return p.startsWith("b/") ? p.slice(2) : p;
+}
+
 export function parseDiff(diffText) {
   const added = [];
   let file = null;
@@ -79,8 +126,8 @@ export function parseDiff(diffText) {
     // with `++`, not a new file.
     if (line.startsWith("+++ ") && !inHunk) {
       const p = line.slice(4).trim();
-      skipFile = p === "/dev/null";
-      file = p.startsWith("b/") ? p.slice(2) : p;
+      skipFile = p === "/dev/null" || p === '"/dev/null"';
+      file = skipFile ? null : fileFromPlusHeader(line);
       continue;
     }
     if (line.startsWith("Binary files ")) {
