@@ -5,6 +5,28 @@
 # (recon 2026-10-09 item #1). A PR rewriting a workflow file can exfiltrate
 # those secrets on the post-merge run while reviews stay advisory.
 #
-# Rule: any change under .github/workflows/ requires the repo owner's
-# explicit review before merge.
-.github/workflows/** @Uuriko
+# Rule: any change under .github/ (workflows, local actions, this file) and any
+# change to a script a privileged workflow executes requires the repo owner's
+# explicit review before merge. This file covers itself, so it cannot be
+# edited or deleted without that review. Later matching rules win in
+# CODEOWNERS; every line below names the same owner.
+/.github/ @Uuriko
+/.github/CODEOWNERS @Uuriko
+/.github/workflows/ @Uuriko
+/.github/actions/ @Uuriko
+# Scripts the push-to-main, deploy, rollback and staging workflows run with secrets.
+/scripts/check-workflow-pins.mjs @Uuriko
+/scripts/deploy-checks.mjs @Uuriko
+/scripts/deploy-live.py @Uuriko
+/scripts/deploy-recovery.mjs @Uuriko
+/scripts/onboarding-probe/ @Uuriko
+/scripts/prod-deploy-smoke.mjs @Uuriko
+/scripts/live-smoke.mjs @Uuriko
+/scripts/cold-start-probe.mjs @Uuriko
+/scripts/rollback-readback.mjs @Uuriko
+/scripts/watch-deploy-drift.mjs @Uuriko
+/scripts/release-checkpoint.mjs @Uuriko
+/scripts/release-evidence.mjs @Uuriko
+/scripts/check-version-doors.mjs @Uuriko
+/cloudflare/*wrangler.jsonc @Uuriko
+/deploy/ @Uuriko

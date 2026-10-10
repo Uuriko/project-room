@@ -802,6 +802,10 @@
       "path": "/api/operator/export"
     },
     {
+      "method": "POST",
+      "path": "/api/operator/restore"
+    },
+    {
       "method": "GET",
       "path": "/api/opportunities.json"
     },
@@ -4326,6 +4330,10 @@
     {
       "method": "HEAD",
       "path": "/api/operator/export"
+    },
+    {
+      "method": "POST",
+      "path": "/api/operator/restore"
     },
     {
       "method": "POST",

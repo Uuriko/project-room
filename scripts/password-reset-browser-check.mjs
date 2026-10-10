@@ -13,7 +13,9 @@ async function setup(t) {
   const f = createAcceptanceFixture(), delivered = [];
   f.store.createAccount('reset-browser-account'); f.store.completeOnboarding('reset-browser-account');
   f.store.accountLogins.linkPasswordMethod('reset-browser-account', { email, verifier: hashPassword(oldPassword) });
-  const server = createRoomServer({ store: f.store, magicLinkMailer: { isConfigured: () => mailer.isConfigured(), sendMagicLink: p => mailer.sendMagicLink(p) } });
+  // createRoomServer asks isConfigured() at build time (#2463), before the mailer
+  // below exists (TDZ). The fixture always installs a configured synthetic sender.
+  const server = createRoomServer({ store: f.store, magicLinkMailer: { isConfigured: () => true, sendMagicLink: p => mailer.sendMagicLink(p) } });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   const mailer = createMagicLinkMailer({ baseUrl: origin, send: async p => delivered.push(p) });

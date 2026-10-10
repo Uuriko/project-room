@@ -37,6 +37,7 @@ import { edgePublicResponse } from './edge-public.mjs';
 import { appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
 import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse, workerLivenessResponse } from './health-probe.mjs';
 import { exportNdjsonStream, operatorExportResponse } from '../server/room-export.mjs';
+import { operatorRestoreResponse } from '../server/restore-ndjson.mjs';
 import { flushRoomGuide, installGuideCommandHook } from '../server/room-guide.mjs';
 
 // One probe per isolate. Concurrent health checks during a cold start share
@@ -185,6 +186,12 @@ export class ProjectRoom extends DurableObject {
     const url = new URL(request.url);
     if (url.pathname === '/api/operator/export') {
       return respond(operatorExportResponse(request, this.env.ROOM_BACKUP_TOKEN, this.store.db));
+    }
+    // Disaster recovery: replay a whole-store NDJSON export into this Durable
+    // Object's storage. Same operator token as the export; fail-closed on a
+    // non-empty store (see server/restore-ndjson.mjs and docs/BACKUP-DR.md).
+    if (url.pathname === '/api/operator/restore') {
+      return respond(await operatorRestoreResponse(request, this.env.ROOM_BACKUP_TOKEN, this.store));
     }
     try { return respond(await this.requestSignals.run(request.signal, () => this.handler.fetch(request))); }
     finally {

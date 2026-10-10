@@ -392,6 +392,10 @@ export function loadRouteSources(root) {
   };
 }
 
+// Worker literals that answer POST only (every other method is 405), so the
+// inventory does not record a GET/HEAD the Durable Object never serves.
+const WORKER_POST_ONLY_PATHS = new Set(["/api/operator/restore"]);
+
 export function extractLegacyRoutes(sources) {
   const prepared = substitute(sources.http, sources.constants);
   const names = routeNameMap(prepared);
@@ -411,8 +415,7 @@ export function extractLegacyRoutes(sources) {
   catalogPaths(sources.http, /isPublicRoomDoorPath\(/, PUBLIC_DOOR_PATHS, ["GET", "HEAD"], bag);
   catalogPaths(sources.http, /discovery && \["GET", "HEAD"\]/, DISCOVERY_PATHS, ["GET", "HEAD"], bag);
   for (const path of workerRouteTemplates(sources.worker)) {
-    addRoute(bag, "GET", path);
-    addRoute(bag, "HEAD", path);
+    for (const method of WORKER_POST_ONLY_PATHS.has(path) ? ["POST"] : ["GET", "HEAD"]) addRoute(bag, method, path);
   }
   if (/if \(boardV2Match\)/.test(prepared)) {
     for (const [, paths] of indexRegexConsts(prepared)) {
