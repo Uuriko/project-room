@@ -1036,6 +1036,7 @@
   "tests/bounty-escrow-release-probes.test.js": 180,
   "tests/bounty-sybil-owner-canonical.test.js": 176,
   "tests/bounty-sybil-route-owner-canonical.test.js": 188,
+  "tests/claim-mirror-fold.test.js": 12000,
   "tests/dm-nonparty-misc.test.js": 462,
   "tests/dm-thread-read-privacy.test.js": 1584,
   "tests/email-verify-delivery.test.js": 1000,
