@@ -1791,10 +1791,15 @@ function syncWorkForm() {
   }
   const reviewers = active.filter(member => member.permissions.includes("verify") && member.id !== $("#assignee-select").value);
   selectOptions("#verifier-select", reviewers, "Choose reviewer");
-  $("#reviewer-unavailable").hidden = !reviewing || !$("#assignee-select").value || reviewers.length > 0;
+  // qa9-new-work-no-reviewer: a required verifier with no eligible reviewer
+  // used to die in silent HTML validation on submit. Disable Create instead
+  // and say why inline, pointing at the People/permissions surface that fixes it.
+  const noReviewer = reviewing && reviewers.length === 0;
+  $("#reviewer-unavailable").hidden = !noReviewer;
   $("#verifier-field").hidden = !reviewing;
   $("#verifier-select").disabled = !reviewing;
-  $("#verifier-select").required = reviewing;
+  $("#verifier-select").required = reviewing && reviewers.length > 0;
+  $("#create-work-button").disabled = noReviewer;
   const checks = [reviewing && "Review", $("#require-decision").checked && "approval"].filter(Boolean);
   $("#work-options-summary").textContent = !reviewing && active.length === 1 && active[0].kind === "human" && active[0].id === session.member.id
     ? uiText("human.workNoReview") : `${checks.join(" + ") || "Evidence only"} · ${writing ? "external write" : "read only"}`;
@@ -5669,9 +5674,8 @@ function syncWorkPolicy() {
   }
   const required = [policy.requireIndependentReview && "independent review", policy.requireOwnerDecision && "owner approval"].filter(Boolean);
   // The "turn off review" escape does not exist under policy; say so and drop the settings shortcut.
-  $("#reviewer-unavailable-text").textContent = policy.requireIndependentReview
-    ? "No independent reviewer available. Room policy requires review: change the owner, or ask the room owner to add a reviewer."
-    : "No independent reviewer available. Change the owner or turn off review.";
+  // qa9-new-work-no-reviewer: point at People/permissions, the surface that fixes this.
+  $("#reviewer-unavailable-text").textContent = uiText(policy.requireIndependentReview ? "work.noReviewer.policy" : "work.noReviewer.optional");
   $("#review-settings-button").hidden = policy.requireIndependentReview;
   $("#work-policy-note").hidden = required.length === 0;
   $("#work-policy-note").textContent = required.length ? `Room policy: ${required.join(" and ")} ${required.length > 1 ? "are" : "is"} required for every new outcome in this room. Only the room owner can change this.` : "";
