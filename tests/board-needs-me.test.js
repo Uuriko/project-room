@@ -46,7 +46,7 @@ test("one primary action per row: Renew, Review, Hand off; titles escaped", () =
     claim("r", { owner: other, tags: [`rev-${me}`] }),
     claim("q", { updatedAt: iso(now - QUIET_MS - 60000) })
   ], { id: me, write: true }, members, now);
-  assert.match(html, /<h3 id="needs-me-heading">3 need you<\/h3>/);
+  assert.match(html, /<h3 id="needs-me-heading">3 to chase<\/h3>/);
   assert.match(html, /data-claim-action="renew" data-claim-id="soon"[^>]*>Renew</);
   assert.match(html, /data-needs-me-open="r">Review</);
   assert.match(html, /data-claim-action="release" data-claim-id="q"[^>]*>Hand off</);
@@ -62,7 +62,7 @@ test("at most three rows, most urgent first; the rest folds behind More", () => 
   assert.equal(NEEDS_ME_LIMIT, 3);
   assert.equal(rows(html), 3);
   assert.deepEqual([...html.matchAll(/class="needs-me-row"><button type="button" class="needs-me-open" data-needs-me-open="([^"]+)"/g)].map(m => m[1]), ["l1", "l2", "l3"]);
-  assert.match(html, /5 need you/);
+  assert.match(html, /5 to chase/);
   assert.match(html, /<summary>More · 3<\/summary>/, "two waiting leases plus one owned claim");
 });
 
@@ -70,7 +70,7 @@ test("empty states are hidden; read-only viewers get no write buttons", () => {
   assert.equal(needsMeHtml([], { id: me }, members, now), "", "nothing at all renders nothing");
   assert.equal(needsMeHtml([claim("x", { owner: other })], { id: me }, members, now), "");
   const calm = needsMeHtml([claim("fine")], { id: me }, members, now);
-  assert.match(calm, /Nothing needs you<\/h3>/);
+  assert.match(calm, /Nothing to chase<\/h3>/);
   assert.ok(!calm.includes("needs-me-list"), "no empty list");
   assert.match(calm, /More · 1/);
   assert.ok(!needsMeHtml([claim("soon", { leaseExpiresAt: iso(now + 60000) })], { id: me, write: false }, members, now).includes("data-claim-action"));
