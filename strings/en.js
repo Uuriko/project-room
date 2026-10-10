@@ -339,6 +339,8 @@ export default {
   "error.status.429": "You're doing that a bit too fast. Wait a moment and try again.",
   "error.status.500": "Something went wrong on our side. Try again in a moment.",
   "error.status.502": "A connected service is having trouble. Try again in a moment.",
+  "chat.since_join.note": "You just joined. Earlier messages, if there are any, aren't shared with you. New ones show up here.",
+  "chat.since_join.hello": "Say hello",
   "error.status.503": "The service is temporarily unavailable. Try again in a moment.",
   "error.status.504": "That took too long. Try again.",
   "error.unknown": "Something went wrong. Please try again."
