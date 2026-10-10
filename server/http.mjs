@@ -1276,7 +1276,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         // An optional returnTo (same strict validation as magic sign-in) keeps
         // a pending invitation in the resent link, like signup's own mail.
-        const data = await body(req);
+        // The body itself is optional (docs/openapi.yaml): a body-less resend
+        // works as before; a body that is present must be a JSON object.
+        const hasBody = Number(req.headers["content-length"] || 0) > 0 || req.headers["transfer-encoding"] !== undefined;
+        const data = hasBody ? await body(req) : {};
         const returnTo = data && Object.hasOwn(data, "returnTo") ? validateMagicReturnTo(data.returnTo) : undefined;
         if (returnTo === null) reject(422, "invalid_return_target", "A valid local return target is required");
         const issued = store.accountLogins.issueEmailVerifyCode({ accountId: session.account.id, email: normalized });
