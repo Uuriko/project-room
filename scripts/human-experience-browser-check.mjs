@@ -449,3 +449,41 @@ test('keyboard Stop on the card face keeps focus and the status change is announ
   await status.getByText('Stopped',{exact:true}).waitFor();
   assert.equal(await page.evaluate(()=>document.activeElement===document.body),false,'focus survives the Stop button disappearing');
 });
+test('ask card shows not-picked-up and stalled statuses with the result on the card', { timeout: 60000 }, async t => {
+  const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
+  await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`, browser = await chromium.launch({headless:true});
+  t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve=>server.close(resolve)); f.store.close(); rmSync(f.directory,{recursive:true,force:true}); });
+  const errors = [];
+  const context = await browser.newContext({viewport:{width:1280,height:900}}), page = await context.newPage();
+  page.on('pageerror', e=>errors.push(e.message)); await page.goto(origin); await signInFixture(page,f.keys.owner);
+  await page.locator('#main').waitFor({state:'visible'}); await page.waitForFunction(()=>document.body.classList.contains('human-experience'));
+  const api = async (actor, input) => {
+    const response = await fetch(`${origin}/api/rooms/commons/assistant`, {method:input?'POST':'GET',headers:{Authorization:`Bearer ${f.keys[actor]}`,...(input?{'Content-Type':'application/json'}:{})},...(input?{body:JSON.stringify({requestId:crypto.randomUUID(),...input})}:{})});
+    const json=await response.json(); assert.ok(response.ok,JSON.stringify(json));return json;
+  };
+  await page.locator('#assistant-setup').click(); await page.locator('#room-assistant-setup select').selectOption('producer');
+  await page.locator('#room-assistant-setup button[type=submit]').click(); await page.locator('#room-assistant-setup').waitFor({state:'hidden'});
+  await page.locator('#ask-room').click();
+  await page.locator('#message-input').fill('What is the plan?');
+  await page.locator('#message-form button[type=submit]').click();
+  await page.waitForFunction(()=>document.querySelector('#message-input').value==='');
+  await page.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('What is the plan?'));
+  const runsText = () => document.querySelector('#assistant-runs').textContent;
+  // A queued run nobody claims for 10s reads not picked up on the card.
+  const base = f.store.now(); f.store.now = () => base + 11000;
+  await page.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Not picked up'));
+  let run = (await api('producer')).runs[0]; assert.equal(run.status,'not_picked_up');
+  run = (await api('producer',{action:'claim',runId:run.id,attemptId:'host-3a',expectedRevision:run.revision})).result;
+  assert.equal(run.status,'working');
+  // A working run whose host goes silent for 2min reads stalled on the card.
+  const claimedAt = f.store.now(); f.store.now = () => claimedAt + 121000;
+  await page.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Stalled'));
+  assert.equal((await api('producer')).runs[0].status,'stalled');
+  // The published answer lands on the card itself.
+  run = (await api('producer',{action:'publish',runId:run.id,attemptId:'host-3a',expectedRevision:run.revision,summary:'Plan ready.',body:'The plan is to ship the fence first.',appliedInputMessageIds:run.inputs.map(i=>i.sourceMessageId)})).result;
+  assert.equal(run.status,'done');
+  await page.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('The plan is to ship the fence first.'));
+  assert.equal(await page.locator('.assistant-run-result').count(),1);
+  assert.deepEqual(errors,[]);
+});

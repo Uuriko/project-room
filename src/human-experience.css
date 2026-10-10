@@ -18,6 +18,8 @@
 .assistant-run { padding: .5rem 0; }
 .assistant-run + .assistant-run { border-top: 1px solid var(--border); }
 .assistant-run p { margin: .3rem 0; }
+.assistant-run-result { border-left: 2px solid var(--border); padding-left: .6rem; color: var(--text); }
+.assistant-run-result strong { margin-right: .4rem; }
 #ask-room[aria-pressed="true"] { outline: 2px solid var(--blue); }
 .human-project-item { display: flex; text-align: left; width: 100%; justify-content: space-between; gap: 1rem; padding: .8rem; margin: .4rem 0; }
 #room-assistant-setup, #human-project-dialog { max-width: min(38rem, calc(100vw - 2rem)); }
