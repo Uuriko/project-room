@@ -25,6 +25,19 @@ const normalizeFile = path => {
   let p = path.trim().replace(/\/+/g, "/");
   while (p.startsWith("./")) p = p.slice(2);
   while (p.length > 1 && p.endsWith("/")) p = p.slice(0, -1);
+  const parts = [];
+  for (const part of p.split("/")) {
+    if (part === "") continue;
+    if (part === "..") {
+      // A "." segment is not a directory, so src/./../app.js still climbs to app.js.
+      while (parts.length > 0 && parts[parts.length - 1] === ".") parts.pop();
+      if (parts.length === 0 || parts[parts.length - 1] === "..") parts.push("..");
+      else parts.pop();
+      continue;
+    }
+    parts.push(part);
+  }
+  p = parts.join("/");
   check(p.length > 0 && p !== ".", "files must name a real path");
   return p;
 };
