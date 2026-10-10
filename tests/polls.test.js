@@ -143,3 +143,67 @@ test("polls replay deterministically", () => {
   };
   assert.deepEqual(run(), run());
 });
+
+// FE0F-variant keycaps: some keyboards emit keycaps without the variation
+// selector (1⃣ U+20E3) while the server stores the fully-qualified form
+// (1️⃣ U+FE0F U+20E3). A vote must still land on the stored option emoji,
+// count in the tally, and move the single-choice vote.
+const KEYCAP_NO_FE0F = digit => `${digit}⃣`;
+
+test("a vote with the FE0F-less keycap counts for the stored option", () => {
+  let state = postPoll(twoMembers(), "poll-1", "pv-a", POLL);
+  const [e1] = pollOf(state).poll.options.map(o => o.emoji);
+  state = vote(state, "v1", "pv-a", "poll-1", KEYCAP_NO_FE0F("1"));
+  const message = pollOf(state);
+  // The vote is recorded under the stored option emoji, not a lookalike key.
+  assert.deepEqual(message.reactions[e1], ["pv-a"]);
+  assert.ok(!Object.keys(message.reactions).some(k => k !== e1 && k.includes("⃣") && k !== "👍"), "no phantom variant key");
+  const tally = pollTally(message);
+  assert.equal(tally.results[0].votes, 1);
+  assert.deepEqual(tally.results[0].voters, ["pv-a"]);
+  assert.equal(tally.total, 1);
+});
+
+test("single-choice move fires when the first vote used the FE0F-less form", () => {
+  let state = postPoll(twoMembers(), "poll-1", "pv-a", POLL);
+  const [, e2] = pollOf(state).poll.options.map(o => o.emoji);
+  state = vote(state, "v1", "pv-a", "poll-1", KEYCAP_NO_FE0F("1"));
+  state = vote(state, "v2", "pv-a", "poll-1", e2);
+  const message = pollOf(state);
+  assert.ok(!Object.keys(message.reactions).includes(KEYCAP_NO_FE0F("1")), "no phantom variant key survives the move");
+  const tally = pollTally(message);
+  assert.equal(tally.results[0].votes, 0, "the moved vote leaves option 1");
+  assert.equal(tally.results[1].votes, 1);
+  assert.equal(tally.total, 1, "one member holds exactly one vote");
+});
+
+test("unvoting with either keycap form clears the vote", () => {
+  for (const unvoteForm of [KEYCAP_NO_FE0F("1")]) {
+    let state = postPoll(twoMembers(), "poll-1", "pv-a", POLL);
+    const [e1] = pollOf(state).poll.options.map(o => o.emoji);
+    state = vote(state, "v1", "pv-a", "poll-1", e1);
+    state = vote(state, "v2", "pv-a", "poll-1", unvoteForm, false);
+    const tally = pollTally(pollOf(state));
+    assert.equal(tally.results[0].votes, 0, `unvote via ${JSON.stringify(unvoteForm)} clears`);
+    assert.equal(tally.total, 0);
+  }
+});
+
+test("pollTally folds a pre-existing FE0F-less vote key into its option", () => {
+  // A vote recorded before normalization (raw key 1⃣) still counts.
+  const state = postPoll(twoMembers(), "poll-1", "pv-a", POLL);
+  const message = pollOf(state);
+  message.reactions = { [KEYCAP_NO_FE0F("1")]: ["pv-a"] };
+  const tally = pollTally(message);
+  assert.equal(tally.results[0].votes, 1);
+  assert.deepEqual(tally.results[0].voters, ["pv-a"]);
+  assert.equal(tally.total, 1);
+});
+
+test("a FE0F-less vote on a non-poll message is untouched", () => {
+  let state = replay(seedEvents);
+  state = applyEvent(state, fixed("m1", T.MESSAGE_POSTED, "potter", { messageId: "m1", body: "hello" }));
+  state = applyEvent(state, fixed("v1", T.MESSAGE_REACTION_SET, "potter", { messageId: "m1", reaction: KEYCAP_NO_FE0F("1"), active: true }));
+  const message = state.messages.find(m => m.id === "m1");
+  assert.deepEqual(message.reactions[KEYCAP_NO_FE0F("1")], ["potter"], "ordinary reactions keep their exact key");
+});
