@@ -47,6 +47,23 @@ async function openStore(dbPath, attempts = 40) {
   throw last;
 }
 
+// RoomError codes a join can legitimately return. The child and the parent both map
+// anything else to "other", so an error code can never carry an argument value.
+const KNOWN_JOIN_CODES = new Set(["join_session_lost", "link_unavailable", "invalid_join", "join_changed", "guest_session_ended",
+  "session_binding_changed", "sign_in_required", "pilot_limit"]);
+// Parent-side check of a parsed child RESULT: never trust the child's types or text.
+export function sanitizeChildResult(value) {
+  const input = value && typeof value === "object" ? value : {};
+  const out = {};
+  if (typeof input.ok === "boolean") out.ok = input.ok;
+  if (typeof input.duplicate === "boolean") out.duplicate = input.duplicate;
+  if ("status" in input) out.status = Number.isInteger(input.status) && input.status >= 100 && input.status <= 599 ? input.status : null;
+  if ("code" in input) out.code = typeof input.code !== "string" ? null : KNOWN_JOIN_CODES.has(input.code) ? input.code : "other";
+  if (typeof input.other === "boolean") out.other = input.other;
+  if (input.phase === "open") out.phase = "open";
+  return out;
+}
+
 // Child template: retries the join itself on transient SQLITE_BUSY so the
 // test proves the join logic (exactly one guest), not lock timing.
 const childBody = (call) => `import { RoomStore } from ${JSON.stringify("file://" + STORE_MJS)};
@@ -65,7 +82,7 @@ for (let i = 0; i < 15; i++) {
   } catch (error) {
     const busy = /database is locked|SQLITE_BUSY/i.test(String(error?.message));
     if (busy && i < 14) { await sleep(25 + Math.random() * 100); continue; }
-    log({ ok: false, status: Number.isInteger(error?.status) ? error.status : null, code: /^[a-z][a-z0-9_]{2,40}$/.test(String(error?.code)) ? error.code : null, other: !(error?.status > 0) });
+    log({ ok: false, status: Number.isInteger(error?.status) ? error.status : null, code: typeof error?.code === "string" ? (${JSON.stringify([...KNOWN_JOIN_CODES])}.includes(error.code) ? error.code : "other") : null, other: !(error?.status > 0) });
     break;
   }
 }
@@ -135,7 +152,7 @@ function runRacers(dir, childFile, argSets) {
     execFile(process.execPath, [join(dir, childFile), ...args], { timeout: 180000 }, (error, stdout, stderr) => {
       const line = String(stdout).split("\n").find(l => l.startsWith("RESULT "));
       let parsed = null;
-      try { parsed = JSON.parse(line.slice("RESULT ".length)); } catch { /* leave null */ }
+      try { parsed = sanitizeChildResult(JSON.parse(line.slice("RESULT ".length))); } catch { /* leave null */ }
       resolve({ parsed, ...(parsed ? {} : { failure: describeChildFailure(error, stderr) }) });
     });
   })));
@@ -364,4 +381,19 @@ test("unknown but error-shaped names, codes and signals collapse to a constant i
 test("the child RESULT line carries no free-form error text", () => {
   assert.ok(!/message\s*:/.test(JOIN_CHILD + JOIN_AGENT_CHILD), "child result must not include error.message");
   assert.match(JOIN_CHILD, /log\(\{ ok: false, status:/);
+});
+
+test("a child RESULT code outside the known set, or of the wrong type, is not copied", () => {
+  const leaks = ["tok_secret_value", "pri_secret_value", "private_token_value_abc"];
+  for (const leak of leaks) {
+    const out = sanitizeChildResult({ ok: false, status: 409, code: leak, message: leak, extra: leak });
+    assert.deepEqual(out, { ok: false, status: 409, code: "other" });
+    assert.ok(!JSON.stringify(out).includes(leak));
+  }
+  assert.deepEqual(sanitizeChildResult({ ok: false, status: leaks[0], code: { toString: () => leaks[1] } }), { ok: false, status: null, code: null });
+  assert.deepEqual(sanitizeChildResult({ ok: false, status: 410, code: "link_unavailable" }), { ok: false, status: 410, code: "link_unavailable" });
+  assert.deepEqual(sanitizeChildResult({ ok: false, status: 409, code: "join_session_lost" }), { ok: false, status: 409, code: "join_session_lost" });
+  assert.deepEqual(sanitizeChildResult("tok_secret_value"), {});
+  // The child applies the same finite set before it logs, so the wire value is already constrained.
+  assert.ok(JOIN_CHILD.includes('"link_unavailable"'), "child template embeds the known code set");
 });
