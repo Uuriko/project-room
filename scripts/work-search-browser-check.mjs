@@ -1,4 +1,4 @@
-import { clickChrome, ensureSidebarOpen, ensureSidebarClosed, openComposerOptions } from "./room-chrome.mjs";
+import { clickChrome, ensureSidebarOpen, ensureSidebarClosed, openComposerOptions, openSearch } from "./room-chrome.mjs";
 // Simulated local people. Search must not submit, acknowledge or create work.
 import './discovery-contribution-browser-check.mjs';
 import test from 'node:test';
@@ -9,7 +9,6 @@ import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { auditRecovery } from '../server/recovery.mjs';
 import { signInFixture } from "./auth-signin.mjs";
-import { openSearch } from "./room-chrome.mjs";
 import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 
 for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'desktop'}: return to outcomes without losing context`, { timeout: 90000 }, async t => {
