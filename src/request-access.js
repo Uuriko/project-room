@@ -31,9 +31,9 @@ export function buildGeneralAccessRequest({ roomId, displayName, note, referredB
   // so nobody has to dig a raw id out of an address bar.
   const typed = typeof roomId === "string" ? roomId.trim() : "";
   const room = (typed && roomIdFromNext(typed)) || typed;
-  if (!room) throw new Error("Paste the link or name of the room you want to join.");
+  if (!room) throw new Error("Paste the link of the room you want to join.");
   if (room.length > GENERAL_REQUEST_ROOM_ID_MAX) {
-    throw new Error("That room link or name is too long. Paste the link someone sent you.");
+    throw new Error("That doesn't look like a room link. Paste the link someone sent you.");
   }
   const checked = validateAccessRequestForm({ displayName, note, referredBy });
   if (!checked.ok) throw new Error(checked.error);
