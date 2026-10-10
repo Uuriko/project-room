@@ -196,7 +196,8 @@ function projectRoom(store, roomId, memberId, identityId) {
       `SELECT m.message_event_id AS messageEventId, m.state, m.created_at AS createdAt,
               json_extract(e.body,'$.actorId') AS actorId, json_extract(e.body,'$.data.messageId') AS messageId,
               json_extract(e.body,'$.data.body') AS body
-       FROM mention_states m JOIN events e ON e.room_id=m.room_id AND e.id=m.message_event_id
+       -- CROSS JOIN pins the join order: mention_states drives (see openDirectMentions in server/store.mjs).
+       FROM mention_states m CROSS JOIN events e ON e.room_id=m.room_id AND e.id=m.message_event_id
        WHERE m.room_id=? AND m.mentioned_member_id=? AND json_extract(e.body,'$.type')='message.posted'`
     ).all(roomId, memberId);
     for (const row of rows) {
