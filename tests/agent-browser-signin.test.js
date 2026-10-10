@@ -199,3 +199,68 @@ test("Agent browser session is invalidated when secret is revoked", async t => {
   });
   assert.equal(checkRes.status, 401);
 });
+
+test("F13: an rak_ scoped API key signs in, room-scoped and TTL-capped", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const agent = f.store.identities.create("Key Agent");
+  linkToCommons(f, agent.identityId);
+
+  const expiresAt = f.store.now() + 3600000; // 1h: shorter than the 8h default
+  const key = f.store.agentPlugin.issueApiKey({ identityId: agent.identityId, scopes: ["mcp:room:commons", "rooms:read", "rooms:write"], expiresAt });
+  const rak = `rak_${key.secret}`;
+
+  // Rooms list is filtered to the key's mcp:room:* scopes.
+  const roomsRes = await post(origin, "/api/auth/agent/rooms", { identityId: agent.identityId }, rak);
+  assert.equal(roomsRes.status, 200);
+  const roomsData = await roomsRes.json();
+  assert.equal(roomsData.identityId, agent.identityId);
+  assert.equal(roomsData.displayName, "Key Agent");
+  assert.deepEqual(roomsData.rooms.map(r => r.roomId), ["commons"]);
+
+  // Session TTL = min(key expiry, default session length).
+  const sessionRes = await post(origin, "/api/auth/agent/session", { identityId: agent.identityId, roomId: "commons" }, rak);
+  assert.equal(sessionRes.status, 201);
+  const session = await sessionRes.json();
+  assert.equal(session.expiresAt, expiresAt, "session dies with the key");
+
+  // A key scoped to another room gets no session here.
+  const otherKey = f.store.agentPlugin.issueApiKey({ identityId: agent.identityId, scopes: ["mcp:room:elsewhere"] });
+  const denied = await post(origin, "/api/auth/agent/session", { identityId: agent.identityId, roomId: "commons" }, `rak_${otherKey.secret}`);
+  assert.equal(denied.status, 403);
+  const deniedRooms = await post(origin, "/api/auth/agent/rooms", { identityId: agent.identityId }, `rak_${otherKey.secret}`);
+  assert.deepEqual((await deniedRooms.json()).rooms, []);
+
+  // Key/identity mismatch and revoked keys both read as 401.
+  const stranger = f.store.identities.create("Stranger");
+  const mismatch = await post(origin, "/api/auth/agent/rooms", { identityId: stranger.identityId }, rak);
+  assert.equal(mismatch.status, 401);
+  f.store.agentPlugin.revokeApiKey({ identityId: agent.identityId, keyId: key.keyId });
+  const revoked = await post(origin, "/api/auth/agent/rooms", { identityId: agent.identityId }, rak);
+  assert.equal(revoked.status, 401);
+});
+
+test("F13: an rak_ key without expiry gets a 1-hour session (review option b)", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const agent = f.store.identities.create("Open Key Agent");
+  linkToCommons(f, agent.identityId);
+  const key = f.store.agentPlugin.issueApiKey({ identityId: agent.identityId, scopes: ["mcp:room:commons", "rooms:write"] });
+  const before = f.store.now();
+  const res = await post(origin, "/api/auth/agent/session", { identityId: agent.identityId, roomId: "commons" }, `rak_${key.secret}`);
+  assert.equal(res.status, 201);
+  const session = await res.json();
+  // Key revocation does not kill minted sessions; the 1h cap bounds them.
+  assert.ok(session.expiresAt >= before + 3600000 && session.expiresAt <= f.store.now() + 3600000, "rak_ sessions cap at 1h");
+});
+
+test("F13: a read-only rak_ key cannot mint a browser session", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const agent = f.store.identities.create("Read Key Agent");
+  linkToCommons(f, agent.identityId);
+  const key = f.store.agentPlugin.issueApiKey({ identityId: agent.identityId, scopes: ["mcp:room:commons", "rooms:read"] });
+  const res = await post(origin, "/api/auth/agent/session", { identityId: agent.identityId, roomId: "commons" }, `rak_${key.secret}`);
+  assert.equal(res.status, 403);
+  assert.equal((await res.json()).error.code, "insufficient_scope");
+});
