@@ -473,13 +473,13 @@ test('ask card shows not-picked-up and stalled statuses with the result on the c
   // A queued run nobody claims for 10s reads not picked up on the card.
   const base = f.store.now(); f.store.now = () => base + 11000;
   await page.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Not picked up'));
-  let run = (await api('producer')).runs[0]; assert.equal(run.status,'not_picked_up');
+  let run = (await api('producer')).runs[0]; assert.equal(run.status,'queued'); assert.equal(run.displayStatus,'not_picked_up');
   run = (await api('producer',{action:'claim',runId:run.id,attemptId:'host-3a',expectedRevision:run.revision})).result;
   assert.equal(run.status,'working');
   // A working run whose host goes silent for 2min reads stalled on the card.
   const claimedAt = f.store.now(); f.store.now = () => claimedAt + 121000;
   await page.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Stalled'));
-  assert.equal((await api('producer')).runs[0].status,'stalled');
+  assert.equal((await api('producer')).runs[0].displayStatus,'stalled');
   // The published answer lands on the card itself.
   run = (await api('producer',{action:'publish',runId:run.id,attemptId:'host-3a',expectedRevision:run.revision,summary:'Plan ready.',body:'The plan is to ship the fence first.',appliedInputMessageIds:run.inputs.map(i=>i.sourceMessageId)})).result;
   assert.equal(run.status,'done');
