@@ -1,9 +1,10 @@
 // Auth journeys from the live auth audit (2026-10-09), run against a local
-// server with captured mail. Each passing path stays guarded here. Paths that
-// are still broken on main are node:test todo entries: they run and report,
-// but don't fail CI, and should be flipped to plain tests as their fixes land
-// (A20 invite signup and existing-account mail, guest upgrade, the "Owner"
-// inviter line). Synthetic addresses only; nothing leaves the process.
+// server with captured mail. Each passing path stays guarded here. A path that
+// is still broken on main is a node:test todo entry: it runs and reports but
+// doesn't fail CI, and flips to a plain test when its fix lands. Invite signup
+// ("check your email") and guest upgrade are guarded by their own scoped suites,
+// invite-signup-browser-check.mjs and guest-upgrade-browser-check.mjs.
+// Synthetic addresses only; nothing leaves the process.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
@@ -147,33 +148,8 @@ test("on a phone, a wrong password says so and the right one signs in", { timeou
   assert.equal((await f.session(fresh)).authenticated, true);
 });
 
-// Still broken on main (auth audit 2026-10-09). Flip each to a plain test with its fix.
+// Still broken on main (auth audit 2026-10-09). Flip to a plain test with its fix.
 test("TODO: a reused magic link's refusal is shown once, not twice", { todo: "auth-signin-ui shows it in two alerts (Codex)" }, async t => {
   const again = await magicLinkReuse(t);
   assert.equal(await visibleCount(again, "not valid"), 1);
-});
-
-test("TODO A20: signup from an invite link tells the person to check their email", { todo: "Codex A20 (#2318/#2385)" }, async t => {
-  const f = await setup(t);
-  const page = await f.open(PHONE);
-  await page.goto(`${f.origin}/#join/${f.links.valid}`);
-  if (await page.locator("#join-account-signin").isVisible()) await page.locator("#join-account-signin").click();
-  const auth = page.locator("#join-account-auth");
-  await auth.waitFor({ state: "visible" });
-  await auth.locator('[data-password-mode="signup"]').first().click();
-  await auth.locator('[name="email"]').fill("journey-invite@example.invalid");
-  await auth.locator('[name="password"]').fill(PASSWORD);
-  await auth.locator('button[type="submit"]').click();
-  await page.getByText(/check your email/i).first().waitFor({ timeout: 4000 });
-});
-
-test("TODO: a guest can keep their account by adding an email", { todo: "guest upgrade server design (proposed to Codex)" }, async t => {
-  const f = await setup(t);
-  const page = await f.open(PHONE);
-  await page.goto(`${f.origin}/#join/${f.links.valid}`);
-  await page.locator("#join-link-name").fill("Gus");
-  await page.getByRole("button", { name: /continue as guest/i }).click();
-  await page.locator("#main").waitFor({ state: "visible" });
-  await clickChrome(page, "#account-settings-button");
-  await page.getByLabel(/^email$/i).first().waitFor({ timeout: 4000 });
 });
