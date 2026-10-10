@@ -30,6 +30,32 @@ export function referralBoardModel(data) {
   };
 }
 
+// Row renderers (pure). The referral board reuses the room's standard
+// sidebar list classes — .rb-list on the list, .rb-event on rows, .rb-seq on
+// the leaderboard rank, .rb-actor on display names — so it reads as one
+// surface with the rest of the sidebar instead of browser-default bullets,
+// numbers, and spacing. Exported so the class contract is unit-testable at
+// this boundary.
+export function myReferralRowHtml(item) {
+  return `<li class="rb-event"><span class="rb-actor">${escapeHtml(item?.referee)}</span> <span class="form-hint">joined ${escapeHtml(item?.when)}</span></li>`;
+}
+
+export function leaderboardRowHtml(entry) {
+  const count = Number(entry?.count) || 0;
+  return `<li class="rb-event"><span class="rb-seq">${escapeHtml(entry?.rank)}.</span> <span class="rb-actor">${escapeHtml(entry?.name)}</span> <span class="form-hint">${count} referral${count === 1 ? "" : "s"}</span></li>`;
+}
+
+export function recentReferralRowHtml(row) {
+  return `<li class="rb-event"><span class="rb-actor">${escapeHtml(row?.from)}</span> <span aria-hidden="true">→</span> <span class="rb-actor">${escapeHtml(row?.to)}</span> <span class="form-hint">${escapeHtml(row?.when)}</span></li>`;
+}
+
+// The three referral lists are static markup in index.html with no classes;
+// without the room's standard list class they render browser-default bullets
+// and numbers. Style them here, the only unclaimed file that touches them.
+function styleReferralLists(...lists) {
+  for (const list of lists) list?.classList?.add("rb-list");
+}
+
 export function installReferralBoard({ client, getState, getSession }) {
   const panel = $("#referral-panel");
   const board = $("#referral-board");
@@ -68,19 +94,17 @@ export function installReferralBoard({ client, getState, getSession }) {
     const progress = $("#referral-progress");
     if (progress) progress.textContent = rewardLine(data?.reward);
     if (countChip) countChip.textContent = String(model.count);
+    styleReferralLists(myItems, lbList, recentList);
     // My referrals.
     if (myList) myList.hidden = model.myItems.length === 0;
-    if (myItems) myItems.innerHTML = model.myItems.map(r =>
-      `<li>${escapeHtml(r.referee)} <span class="form-hint">joined ${escapeHtml(r.when)}</span></li>`).join("");
+    if (myItems) myItems.innerHTML = model.myItems.map(myReferralRowHtml).join("");
     // Plain leaderboard: rank by successful joins, most first.
     const leaderboard = data?.leaderboard ?? [];
     if (lbWrap) lbWrap.hidden = leaderboard.length === 0;
-    if (lbList) lbList.innerHTML = model.leaderboard.map(entry =>
-      `<li><span class="referral-rank">${entry.rank}.</span> ${escapeHtml(entry.name)} <span class="form-hint">${entry.count} referral${entry.count === 1 ? "" : "s"}</span></li>`).join("");
+    if (lbList) lbList.innerHTML = model.leaderboard.map(leaderboardRowHtml).join("");
     // Newest-first join graph, server-ordered.
     if (recentWrap) recentWrap.hidden = model.count === 0;
-    if (recentList) recentList.innerHTML = model.recent.map(r =>
-      `<li>${escapeHtml(r.from)} <span aria-hidden="true">→</span> ${escapeHtml(r.to)} <span class="form-hint">${escapeHtml(r.when)}</span></li>`).join("");
+    if (recentList) recentList.innerHTML = model.recent.map(recentReferralRowHtml).join("");
   }
 
   async function load() {
