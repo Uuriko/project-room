@@ -506,7 +506,11 @@ function closeDeployedClaims(store, nowMs) {
 // the same facts on the HTTP path released it first (claim_flaked). Sweep
 // here with the same semantics — auto-release, lease_expired event, one
 // wake per expiry — so both settlement paths read the same world.
-function sweepExpiredClaimLeases(store, nowMs) {
+// FIX-13 (WAVE-300): exported for the claim-lease-reaper background job,
+// with an opt-in per-cycle cap. maxReleases bounds how many leases one
+// cycle reaps (the reaper passes 5); the default is uncapped so the
+// existing cron caller keeps its behavior.
+export function sweepExpiredClaimLeases(store, nowMs, { maxReleases = Infinity } = {}) {
   let roomIds = [];
   try {
     roomIds = store.db.prepare("SELECT DISTINCT room_id AS roomId FROM work_claims").all().map(row => row.roomId);
@@ -514,8 +518,10 @@ function sweepExpiredClaimLeases(store, nowMs) {
     if (/no such table/i.test(error?.message ?? "")) return 0;
     throw error;
   }
+  const cap = Number.isFinite(maxReleases) && maxReleases >= 0 ? Math.floor(maxReleases) : Infinity;
   let released = 0;
   for (const roomId of roomIds) {
+    if (released >= cap) break;
     const expired = store.workClaims.list(roomId).filter(item =>
       ACTIVE_CLAIM_STATES.includes(item.state)
       && typeof item.leaseExpiresAt === "string"
@@ -524,6 +530,7 @@ function sweepExpiredClaimLeases(store, nowMs) {
     if (expired.length === 0) continue;
     store.workClaims.transaction(() => {
       for (const before of expired) {
+        if (released >= cap) break;
         const [item] = releaseExpired([before], nowMs);
         if (!item || item.state !== "unclaimed" || before.state === "unclaimed") continue;
         store.workClaims.set(roomId, item);

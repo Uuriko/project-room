@@ -66,9 +66,10 @@ function roomStub(overrides = {}) {
 test("every worker job has a heartbeat entry and its cadence", () => {
   assert.deepEqual(CRON_JOBS.map(job => job.name), [
     "gmail-sync", "channel-drain", "webhook-dispatch", "land-queue", "claim-prs",
+    "claim-lease-reaper",
     "retention", "integrity", "public-read-model", "room-backup"
   ]);
-  assert.deepEqual(CRON_JOBS.map(job => job.periodSeconds), [60, 60, 60, 60, 60, 3600, 3600, 60, 86400]);
+  assert.deepEqual(CRON_JOBS.map(job => job.periodSeconds), [60, 60, 60, 60, 60, 60, 3600, 3600, 60, 86400]);
 });
 
 test("runCronJobs runs one job at a time and yields between them", async () => {

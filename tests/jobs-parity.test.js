@@ -24,7 +24,7 @@ test("node and worker job names match aside from single-runtime jobs", () => {
   }
   const names = JOBS.map(job => job.name);
   assert.equal(new Set(names).size, names.length);
-  for (const required of ["webhook-dispatch", "land-queue", "claim-prs", "retention", "integrity", "gmail-sync", "channel-drain", "growth-watch"]) {
+  for (const required of ["webhook-dispatch", "land-queue", "claim-prs", "claim-lease-reaper", "retention", "integrity", "gmail-sync", "channel-drain", "growth-watch"]) {
     assert.ok(names.includes(required), required);
   }
 });

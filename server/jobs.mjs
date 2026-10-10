@@ -3,7 +3,7 @@
 // the budget, and how to find the next due time. A job with nothing waiting
 // stays disabled so an idle room does not wake for it.
 import { telegramConfig } from "./channel-adapters/telegram-config.mjs";
-import { syncClaimPullRequests } from "./claim-pr-sync.mjs";
+import { syncClaimPullRequests, sweepExpiredClaimLeases } from "./claim-pr-sync.mjs";
 import { discoverUnlinkedPulls, linkDeployToSettledClaims } from "./claim-autolink.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
 import { RETENTION_TABLES, runLiveStoreRetention } from "./retention-run.mjs";
@@ -22,6 +22,11 @@ export const JOB_BUDGET_MS = 5000;
 export const MINUTE_MS = 60 * 1000;
 export const HOUR_MS = 60 * MINUTE_MS;
 export const DAY_MS = 24 * HOUR_MS;
+// FIX-13 (WAVE-300): the quiet-room reaper's per-cycle bound — at most this
+// many lapsed leases are reaped per 60s tick, so one degenerate board cannot
+// spike a tick. Counted in leases (each reap is one write, one receipt, one
+// wake), not rooms.
+export const REAPER_MAX_RELEASES_PER_TICK = 5;
 // Worker cron is only a safety net. It re-arms a missing alarm; it does not
 // poll every minute. Idle rooms wake twice an hour from this cron.
 export const SAFETY_NET_CRON = "*/30 * * * *";
@@ -107,6 +112,25 @@ function backfillPending(store) {
   const row = read(store, "SELECT done FROM public_read_model_backfill WHERE id=1");
   if (!row) return true;
   return Number(row.done) !== 1;
+}
+
+// FIX-13 (WAVE-300): the reaper's enable gate. True when any room holds a
+// live claim with a lease — the only state the reaper can act on. A room
+// with no leased claims keeps the job disabled so an idle room does not
+// wake for it (the registry header's rule); a missing table is a quiet
+// false, never a throw.
+function reaperLeasesHeld(store) {
+  const row = read(store, `SELECT 1 AS hit
+    FROM work_claims
+    WHERE (
+      json_extract(item_json, '$.data.state') IN ('claimed', 'in_progress', 'blocked')
+      AND json_extract(item_json, '$.data.leaseExpiresAt') IS NOT NULL
+    ) OR (
+      json_extract(item_json, '$.state') IN ('claimed', 'in_progress', 'blocked')
+      AND json_extract(item_json, '$.leaseExpiresAt') IS NOT NULL
+    )
+    LIMIT 1`);
+  return Boolean(row?.hit);
 }
 
 function gmailOn(env) {
@@ -242,6 +266,34 @@ export const JOBS = Object.freeze([
         console.error("claim autolink follow-up failed:", error?.message ?? error);
         return out;
       }
+    }
+  }),
+  defineJob({
+    name: "claim-lease-reaper",
+    // FIX-13 (WAVE-300): the quiet-room reaper. Lease expiry was previously
+    // swept only on inbound work-claims requests and inside the claim-prs
+    // job (which only runs when a pull-request poll is due), so a room with
+    // no traffic held lapsed leases indefinitely. This job ticks every 60s
+    // and reaps expired leases through sweepExpiredClaimLeases — the same
+    // sweep the request path and the PR-sync cron use — capped at
+    // REAPER_MAX_RELEASES_PER_TICK reaps per cycle so one degenerate board
+    // cannot spike a tick. A cycle with nothing lapsed is a no-op. The run
+    // is store-local, so no ctx.room override is needed on the worker.
+    // Kill-switch (FIX-66): the reaper is room time-based housekeeping, not
+    // agent churn — it keeps running while the kill-switch is engaged, and a
+    // lease that lapses during engagement expires normally.
+    cadenceMs: MINUTE_MS,
+    runtimes: Object.freeze(["worker", "node"]),
+    enabled(_env, store) {
+      if (!store) return true;
+      return reaperLeasesHeld(store);
+    },
+    disabledReason: () => "No live claim holds a lease",
+    async run(store, ctx) {
+      if (!store?.db || !store.workClaims) return { released: 0, skipped: 1 };
+      const nowMs = ctx.now?.() ?? Date.now();
+      const released = sweepExpiredClaimLeases(store, nowMs, { maxReleases: REAPER_MAX_RELEASES_PER_TICK });
+      return { released, maxReleases: REAPER_MAX_RELEASES_PER_TICK };
     }
   }),
   defineJob({

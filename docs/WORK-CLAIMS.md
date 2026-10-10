@@ -131,6 +131,35 @@ lease without mutating the claim. The list's `swept` array names what that reque
 The former owner is woken once, with reason `lease_expired`. History records
 `lease_expired`. A later read of the same lapse does not wake them again.
 
+### Quiet-room reaper (FIX-13)
+
+Lease expiry used to be swept only on inbound work-claims requests and on
+the `claim-prs` background job (which only runs when a pull-request poll is
+due), so a room with no traffic held lapsed leases indefinitely. The
+`claim-lease-reaper` job closes that gap: every **60s** it runs
+`sweepExpiredClaimLeases` — the same sweep the request path
+(`server/work-claim-routes.mjs`) and the PR-sync cron
+(`server/claim-pr-sync.mjs`) use — capped at **5 reaps per cycle** (the
+playbook's ≤5/cycle bound, counted in leases: each reap is one write, one
+receipt, one wake, so the bound holds no matter how leases distribute
+across rooms). A cycle with nothing lapsed is a no-op: a read-only room
+scan, no writes, no events, no wakes, no unbounded state.
+
+Each reap is the standard expiry: the claim is released via
+`releaseExpired`, a `lease_expired` receipt is appended, and the former
+owner is woken once (`lease_expired`, coalesced per lapse). The job is
+registered in `server/jobs.mjs` and runs on both the Node scheduler and the
+Worker alarm; on the Worker it stays disabled while no live claim holds a
+lease, so an idle room does not wake for it.
+
+Kill-switch (FIX-66): the reaper is room time-based housekeeping, not agent
+churn — it keeps running while the kill-switch is engaged, and a lease that
+lapses during engagement expires normally. Composition with the sibling
+WAVE-300 fixes rides through the shared sweep functions: the orphan wake
+(FIX-15) and the epoch bump (FIX-20) apply to reaper reaps automatically
+once those branches land, and the reaped state follows `releaseExpired`
+(FIX-18's `expired` state when that branch lands).
+
 ## Reputation-cost claim bonds
 
 Claim behavior feeds the room's reputation ledger (server/claim-reputation.mjs).
