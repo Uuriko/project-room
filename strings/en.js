@@ -341,5 +341,21 @@ export default {
   "error.status.502": "A connected service is having trouble. Try again in a moment.",
   "error.status.503": "The service is temporarily unavailable. Try again in a moment.",
   "error.status.504": "That took too long. Try again.",
-  "error.unknown": "Something went wrong. Please try again."
+  "error.unknown": "Something went wrong. Please try again.",
+  "human.face.asked": "Asked. Waiting for the assistant.",
+  "human.face.notPickedUp": "Not picked up yet. The assistant hasn't started, so it may be offline. Your request will wait.",
+  "human.face.stalled": "Stalled. No update from the assistant for 2 minutes. You can stop it.",
+  "human.face.working": "Working",
+  "human.face.paused": "Paused",
+  "human.face.pausing": "Pausing…",
+  "human.face.resuming": "Resuming…",
+  "human.face.stopping": "Stopping…",
+  "human.face.needsDecision": "Needs a decision",
+  "human.face.done": "Result ready",
+  "human.face.failed": "Couldn't finish",
+  "human.face.stopped": "Stopped",
+  "human.face.sharedRequest": "Shared request",
+  "human.face.openResult": "Open result",
+  "human.face.addContext": "Add context",
+  "human.assistantChange": "Change"
 };
