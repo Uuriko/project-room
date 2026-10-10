@@ -28,7 +28,9 @@ carry the claim, and the remaining tiers stay visibly open.
           "scripts/invitation-check.mjs",
           "scripts/quiet-invites-check.mjs",
           "scripts/invitation-recovery-check.mjs",
-          "scripts/accountless-join-restore-browser-check.mjs"
+          "scripts/accountless-join-restore-browser-check.mjs",
+          "scripts/invite-signup-browser-check.mjs",
+          "scripts/guest-upgrade-browser-check.mjs"
         ],
         "agent": [
           "docs/history/AGENT-ONBOARDING-TESTING-2026-09-07.md"
@@ -449,7 +451,9 @@ carry the claim, and the remaining tiers stay visibly open.
           "scripts/password-reset-browser-check.mjs",
           "scripts/magic-link-browser-check.mjs",
           "scripts/mobile-signin-history-browser-check.mjs",
-          "scripts/invitation-check.mjs"
+          "scripts/invitation-check.mjs",
+          "scripts/oauth-return-invite-browser-check.mjs",
+          "scripts/auth-journeys-browser-check.mjs"
         ],
         "agent": [],
         "hosted": []

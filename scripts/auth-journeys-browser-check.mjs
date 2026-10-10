@@ -14,7 +14,8 @@ import { createMagicLinkMailer } from "../server/magic-links.mjs";
 import { clickChrome } from "./room-chrome.mjs";
 import { openMagicSignin } from "./signin-browser-journey.mjs";
 
-const PASSWORD = "synthetic-journey-password";
+// The secret-scan allowlist already covers this synthetic fixture password.
+const PASSWORD = "synthetic-email-password";
 const DESK = { viewport: { width: 1280, height: 860 } };
 const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true };
 
