@@ -44,6 +44,7 @@ import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { evaluateReceipt } from "./jev-receipts.mjs";
 import { findClaimCollisions } from "./claim-collisions.mjs";
 import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
+import { detectSybilAdvisoryForHolders } from "./sybil-watch.mjs"; // FIX-77: advisory mint-cluster signal
 import { noteReadyWork } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { getActiveSquad } from "./squads.mjs"; // plan-squads: work offers target squads
 import { isFirstContribution, retentionAck } from "./retention-response.mjs";
@@ -695,6 +696,18 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   const caller = auth.member.id;
   // Every committed claim change appends one work_claim.updated room event
   // inside this transaction (server/work-claim-events.mjs).
+  // FIX-77: advisory-only sybil signal. After a claim lands, check whether
+  // the room's open-claim holders now include a cluster of distinct
+  // anonymous-mint identities sharing one mint fingerprint. Advisory only:
+  // never refuses, never throws; the detector degrades to silence on any
+  // telemetry failure so the claim path is unaffected.
+  const sybilAdvisoryForClaim = (holderId, claimedAtMs) => {
+    const holders = registry.list(roomId)
+      .filter(entry => entry.owner && ACTIVE_CLAIM_STATES.includes(entry.state))
+      .map(entry => ({ memberId: entry.owner, claimedAt: entry.claimedAt ?? claimedAtMs }));
+    holders.push({ memberId: holderId, claimedAt: claimedAtMs });
+    return detectSybilAdvisoryForHolders(store.db, roomId, holders, { now: nowMs });
+  };
   const commit = (item, action, extra = {}) => {
     // A release clears files on the item. Read the held paths first so the
     // receipt names the lane that opened, then write the claim and the event
@@ -714,6 +727,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       verdict: extra.verdict,
       attention: extra.attention,
       attentionMemberId: extra.attentionMemberId,
+      sybilAdvisory: extra.sybilAdvisory,
       coalesce: extra.coalesce === true
     });
     if (extra.wakeMemberId && extra.wakeReason) {
@@ -956,7 +970,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       const ackedAssignee = retentionAck(item, { now: nowMs, first: firstAssignee, agentId: assignee });
       commit(ackedAssignee, "claimed", {
         attention: "assigned", attentionMemberId: assignee,
-        wakeMemberId: assignee, wakeReason: "assigned"
+        wakeMemberId: assignee, wakeReason: "assigned",
+        sybilAdvisory: sybilAdvisoryForClaim(assignee, nowMs)
       });
       return json(res, 201, ackedAssignee);
     }
@@ -1029,7 +1044,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // commit, so this stays one room event.
     const first = isFirstContribution(registry.list(roomId).filter(entry => entry.id !== item.id), caller);
     const acked = retentionAck(claimed, { now: nowMs, first, agentId: caller });
-    commit(acked, "claimed");
+    commit(acked, "claimed", { sybilAdvisory: sybilAdvisoryForClaim(caller, nowMs) });
     // W012 required reading: every enrollment response presents the reading
     // list for the claim's kind. Advisory only — enrollment never gates on
     // it, so there is no bypass to learn and no existing flow can break.

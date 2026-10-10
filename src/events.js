@@ -670,7 +670,7 @@ function validateEnvelope(incoming) {
     // Polls (missing-features #5): a kind "poll" message carries a poll
     // payload { question, options, allowMultiple }. The envelope guard admits
     // the object key; the applier runs the full option validation.
-    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "scopes", "acceptedScopes", "changed", "state", "pullRequest", "pullRequests", "blocks", "actions", "dependents", "poll"].includes(key)) throw new Error(`Invalid ${key}`);
+    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "scopes", "acceptedScopes", "changed", "state", "pullRequest", "pullRequests", "blocks", "actions", "dependents", "poll", "sybilAdvisory"].includes(key)) throw new Error(`Invalid ${key}`);
   }
 }
 
@@ -1752,6 +1752,19 @@ function recordWorkClaimUpdate(state, incoming) {
   if (data.ciState !== undefined && !["pending", "success", "failure", "neutral"].includes(data.ciState)) throw new Error("Event data missing ciState");
   if (data.verdict !== undefined && !["approve", "changes_requested", "comment"].includes(data.verdict)) throw new Error("Event data missing verdict");
   if (data.action === "ci_changed" && (data.reason !== "ci_changed" || !data.ciState)) throw new Error("Event data missing ciState");
+  // FIX-77: advisory-only sybil signal. Optional and inert: old readers
+  // ignore it, the projection does not branch on it, and it can never
+  // gate a claim. Validated structurally so a malformed field is rejected
+  // at the envelope instead of landing in the log.
+  if (data.sybilAdvisory !== undefined) {
+    const advisory = data.sybilAdvisory;
+    if (!advisory || typeof advisory !== "object") throw new Error("Event data bad sybilAdvisory");
+    if (typeof advisory.network !== "string" || !advisory.network || advisory.network.length > 128) throw new Error("Event data bad sybilAdvisory");
+    if (!Number.isInteger(advisory.size) || advisory.size < 5) throw new Error("Event data bad sybilAdvisory");
+    if (!Array.isArray(advisory.memberIds) || advisory.memberIds.length === 0
+      || !advisory.memberIds.every(m => typeof m === "string" && m.length > 0 && m.length <= 128)) throw new Error("Event data bad sybilAdvisory");
+    if (typeof advisory.text !== "string" || !/advisory/i.test(advisory.text)) throw new Error("Event data bad sybilAdvisory");
+  }
 }
 
 function recordReferral(state, incoming) {
