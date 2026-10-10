@@ -416,7 +416,7 @@ function cardHtml(item, viewer, members, now, workItems, byId) {
 }
 
 function newItemForm() {
-  return `<form id="board-new-item" class="board-new"><h3>New item</h3><label>Title <input name="title" maxlength="200" required autocomplete="off"></label><label>Note <input name="note" maxlength="4000" autocomplete="off" placeholder="Optional, context for whoever picks this up"></label><label>Files <input name="files" maxlength="4000" autocomplete="off" placeholder="Optional, comma-separated"></label><button type="submit" class="button primary">Add item</button></form>`;
+  return `<form id="board-new-item" class="board-new"><h3>New item</h3><label>Title <input name="title" data-focus-key="board-new-title" maxlength="200" required autocomplete="off"></label><label>Note <input name="note" data-focus-key="board-new-note" maxlength="4000" autocomplete="off" placeholder="Optional, context for whoever picks this up"></label><label>Files <input name="files" data-focus-key="board-new-files" maxlength="4000" autocomplete="off" placeholder="Optional, comma-separated"></label><button type="submit" class="button primary" data-focus-key="board-new-submit">Add item</button></form>`;
 }
 
 // S3: the create API accepts a note, but the form never sent one (F-parity-1).
@@ -477,8 +477,8 @@ export function boardHtml(items, status, viewer, members, now, { older = false, 
   const columns = placeClaims(visible, now);
   const byId = new Map(visible.map(item => [item.id, item]));
   const waitingCount = columns.blocked.filter(item => item.state === "unclaimed" && !item.owner).length;
-  const sweep = viewer.manage ? `<button type="button" class="button secondary" id="board-close-stale" data-claim-action="sweep">Close stale</button>` : "";
-  const capForm = viewer.owner ? `<form data-claim-cap><label>Claims per member <input name="maxMemberOpenClaims" type="number" min="1" max="10000" value="${escapeHtml(String(cap ?? 20))}" aria-label="Open claims per member"></label><button type="submit">Save cap</button></form>` : "";
+  const sweep = viewer.manage ? `<button type="button" class="button secondary" id="board-close-stale" data-claim-action="sweep" data-focus-key="board-close-stale">Close stale</button>` : "";
+  const capForm = viewer.owner ? `<form data-claim-cap><label>Claims per member <input name="maxMemberOpenClaims" data-focus-key="board-cap-value" type="number" min="1" max="10000" value="${escapeHtml(String(cap ?? 20))}" aria-label="Open claims per member"></label><button type="submit" data-focus-key="board-cap-save">Save cap</button></form>` : "";
   const form = canWrite ? newItemForm() : "";
   const hint = older ? `<p class="form-hint board-older">Older landed work is in the API</p>` : "";
   const bar = filterBarHtml(filter);
@@ -575,9 +575,9 @@ export function installWorkBoard({ client, getState, getSession }) {
     const active = document.activeElement;
     const restoreFocus = !active || active === document.body || root.contains(active);
     if (pendingFocus) stick = { key: pendingFocus.key ?? null, id: pendingFocus.id ?? null, status: pendingStatus };
-    else if (!stick && restoreFocus) {
+    else if (restoreFocus) {
       const key = active?.closest?.("[data-focus-key]")?.dataset.focusKey ?? null;
-      if (key) stick = { key, id: active.closest("article")?.dataset.claimId ?? null, status: "" };
+      if (key) stick = { key, id: active.closest("article")?.dataset.claimId ?? null, status: stick?.status ?? "" };
     }
     pendingFocus = null;
     pendingStatus = "";
@@ -585,6 +585,8 @@ export function installWorkBoard({ client, getState, getSession }) {
       older, canWrite: canWriteClaims(state, session), capabilities: advertisedCapabilities(state), cap, workItems: state?.workItems ?? {},
       loading: boardLoading, loadError: boardLoadError, filter
     });
+    // This control's markup comes from the shared strings catalog.
+    root.querySelector('[data-board-filter] [name="mine"]')?.setAttribute("data-focus-key", "board-filter-mine");
     if (stick?.status) {
       const line = root.querySelector("#board-status");
       if (line) line.textContent = stick.status;
@@ -634,7 +636,7 @@ export function installWorkBoard({ client, getState, getSession }) {
     return "Closed stale claims";
   }
 
-  async function load({ force = false } = {}) {
+  async function load({ force = false, focus = null } = {}) {
     const session = getSession(), owned = context();
     if (!owned) return;
     if (loadedContext !== owned) {
@@ -664,6 +666,9 @@ export function installWorkBoard({ client, getState, getSession }) {
       loadedRoom = session.roomId;
       seen = mark;
       boardLoading = false;
+      // Announce completion only with the fresh claim state. Loading and
+      // filter paints must not consume an action's success while it is pending.
+      if (focus) { pendingFocus = { key: focus.key ?? null, id: focus.id ?? null }; pendingStatus = focus.status ?? ""; }
       paint();
       return true;
     } catch {
@@ -688,7 +693,6 @@ export function installWorkBoard({ client, getState, getSession }) {
     // An explicit action supersedes a background read; its stale response
     // cannot paint or block the fresh list after this mutation.
     readFlight = null;
-    if (focus) { pendingFocus = { key: focus.key ?? null, id: focus.id ?? null }; pendingStatus = focus.status ?? ""; }
     mutating = true;
     if (focus?.pending) note(focus.pending);
     let pending = null;
@@ -697,7 +701,7 @@ export function installWorkBoard({ client, getState, getSession }) {
       await pending;
       if (mine !== operation || context() !== owned) return;
       // Keep duplicate mutations excluded until their new state is visible.
-      const refreshed = await load({ force: true });
+      const refreshed = await load({ force: true, focus });
       if (reconcile && actionFlight === pending && context() === owned) {
         note(refreshed ? reconcile(null) : "Could not confirm the PR link. Refresh the board before trying again.");
       }
@@ -705,7 +709,7 @@ export function installWorkBoard({ client, getState, getSession }) {
       if (mine !== operation || context() !== owned) return;
       if (reconcile) {
         note("Checking the current claim…");
-        const refreshed = await load({ force: true });
+        const refreshed = await load({ force: true, focus });
         if (actionFlight === pending && context() === owned) {
           note(refreshed ? reconcile(error) : "Could not confirm the PR link. Refresh the board before trying again.");
         }
