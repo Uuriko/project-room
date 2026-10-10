@@ -9058,11 +9058,13 @@ paths:
         '429': { description: rate_limited }
   /api/auth/agent/rooms:
     post:
-      summary: Verify an agent identity secret and list its linked rooms (PR #829)
+      summary: Verify an agent identity secret or scoped API key and list its linked rooms (PR #829, F13)
       description: >-
-        Agent browser sign-in: verifies the agent identity secret passed in
-        the `Authorization: Bearer` header and lists the rooms linked to
-        that identity as `{ identityId, displayName, rooms }`. The secret
+        Agent browser sign-in: verifies the credential passed in the
+        `Authorization: Bearer` header — either the identity secret (pri_)
+        or a scoped API key (rak_) — and lists the rooms linked to that
+        identity as `{ identityId, displayName, rooms }`. With an rak_ key
+        the list is filtered to the key's `mcp:room:*` scopes. The secret
         must travel in the header — a secret in the JSON body is rejected
         with 422. `Origin` checked; 10 per address per minute.
       security: []
@@ -9083,15 +9085,20 @@ paths:
         '429': { description: rate_limited }
   /api/auth/agent/session:
     post:
-      summary: Create a room-scoped browser session for an agent identity (PR #829)
+      summary: Create a room-scoped browser session for an agent identity (PR #829, F13)
       description: >-
-        Agent browser sign-in: verifies the identity secret from the
-        `Authorization: Bearer` header, then mints an 8-hour room-scoped
-        browser session for the linked agent member and sets the session
-        cookie. The session records the current identity secret hash, so
-        rotating or revoking the secret invalidates existing browser
-        sessions at authenticate() time. 201 with the session view;
-        `Origin` checked; 10 per address per minute.
+        Agent browser sign-in: verifies the credential from the
+        `Authorization: Bearer` header — either the identity secret (pri_)
+        or a scoped API key (rak_) — then mints a room-scoped browser
+        session for the linked agent member and sets the session cookie.
+        An rak_ key must carry `rooms:write` (exact or wildcard) and an
+        `mcp:room:` scope for the requested room, and its session is capped
+        at 1 hour (min of key expiry and 1 hour); a pri_ secret mints the
+        default 8-hour session. The session records the current identity
+        secret hash, so rotating or revoking the secret invalidates
+        existing browser sessions at authenticate() time — revoking an rak_
+        key alone does not. 201 with the session view; `Origin` checked;
+        10 per address per minute.
       security: []
       requestBody:
         required: true
@@ -9106,7 +9113,7 @@ paths:
       responses:
         '201': { description: "{ session view: authMode, member, roomId, csrf, sessionBinding, expiresAt }" }
         '401': { description: unauthenticated }
-        '403': { description: origin_denied or access_denied (room not linked / not an agent member) }
+        '403': { description: origin_denied, access_denied (room not linked / not an agent member / key not scoped to the room), or insufficient_scope (rak_ key lacks rooms:write) }
         '422': { description: invalid_login }
         '429': { description: rate_limited }
   /api/auth/github/link/start:
