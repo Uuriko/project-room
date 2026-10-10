@@ -210,7 +210,11 @@ export function installAgentInvites({ client, getState, getSession }) {
     if (!owns()) { reset(); return; }
     if (!minted) resetForm();
     render();
+    const trigger = document.activeElement;
     dialog.showModal();
+    // D3 a11y: a native dialog does not restore focus on close — return it
+    // to the invoking control so keyboard users don't lose their place.
+    dialog.addEventListener("close", () => { if (trigger?.isConnected) trigger.focus({ preventScroll: true }); }, { once: true });
     $("#agent-invite-profile")?.focus();
   });
   $("#agent-invite-close")?.addEventListener("click", () => dialog.close());

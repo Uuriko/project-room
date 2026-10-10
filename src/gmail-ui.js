@@ -133,7 +133,12 @@ export function installGmailWorkspace({ api, ownerKey, onConnectionsChanged = ()
       }
     }
     if (m && ['draft', 'forward'].includes(mode)) { files = m.attachments.map(a => ({ name: a.name, size: a.size, messageId: m.id, partId: a.partId })); renderFiles(); }
-    dialog.showModal(); form.elements[mode.startsWith('reply') ? 'body' : 'to'].focus();
+    const trigger = document.activeElement;
+    dialog.showModal();
+    // D3 a11y: a native dialog does not restore focus on close — return it
+    // to the invoking control so keyboard users don't lose their place.
+    dialog.addEventListener('close', () => { if (trigger?.isConnected) trigger.focus({ preventScroll: true }); }, { once: true });
+    form.elements[mode.startsWith('reply') ? 'body' : 'to'].focus();
   }
   function lock(value) { for (const el of form.querySelectorAll('input,textarea,button')) el.disabled = value; d('[data-rich]').contentEditable = String(!value); }
   async function submit(action) {

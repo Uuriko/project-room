@@ -336,7 +336,13 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
   function open(next = "needs") {
     if (!currentContext()) return;
     cancelPending();
-    if (!dialog.open) dialog.showModal();
+    if (!dialog.open) {
+      const trigger = document.activeElement;
+      dialog.showModal();
+      // D3 a11y: a native dialog does not restore focus on close — return it
+      // to the invoking control so keyboard users don't lose their place.
+      dialog.addEventListener("close", () => { if (trigger?.isConnected) trigger.focus({ preventScroll: true }); }, { once: true });
+    }
     const tab = tabs.querySelector(`[data-update-filter="${next}"]`);
     tab?.focus();
     void load(next);
