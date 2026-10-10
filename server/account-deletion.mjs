@@ -125,20 +125,20 @@ const countIssuedAccess = (store, accountId) => {
 };
 
 // Some tables are created on first use; count them only when they exist.
+// A genuinely missing table reads as 0. A real DB error MUST propagate:
+// executeAccountDeletion runs inside one transaction, and a swallowed error
+// here would commit a partial deletion while the receipt reports removed: 0
+// with no error surfaced.
 const countWhereIfExists = (store, table, idColumn, accountId) => {
-  try {
-    const exists = store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table);
-    if (!exists) return 0;
-    return store.db.prepare(`SELECT count(*) AS n FROM ${table} WHERE ${idColumn}=?`).get(accountId)?.n ?? 0;
-  } catch { return 0; }
+  const exists = store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table);
+  if (!exists) return 0;
+  return store.db.prepare(`SELECT count(*) AS n FROM ${table} WHERE ${idColumn}=?`).get(accountId)?.n ?? 0;
 };
 
 const deleteWhereIfExists = (store, table, idColumn, accountId) => {
-  try {
-    const exists = store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table);
-    if (!exists) return 0;
-    return store.db.prepare(`DELETE FROM ${table} WHERE ${idColumn}=?`).run(accountId).changes;
-  } catch { return 0; }
+  const exists = store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table);
+  if (!exists) return 0;
+  return store.db.prepare(`DELETE FROM ${table} WHERE ${idColumn}=?`).run(accountId).changes;
 };
 
 
