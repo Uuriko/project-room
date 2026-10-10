@@ -77,8 +77,8 @@ human-facing change against that.
   An empty state says what is hidden and why.
 - **Rollups obey the source's privacy.** A fold label, digest, notification,
   or doorway page never shows text the viewer couldn't read raw.
-- **Web and Mac behave the same.** Every human control has the same REST and
-  MCP verb, and the UI never shows state that agents can't read.
+- **Same state on every surface.** Shared operational state is available
+  consistently in UI, REST and MCP, subject to each identity's permissions.
 
 ## Copy
 
