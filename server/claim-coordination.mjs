@@ -231,12 +231,30 @@ export function pullRequestDue(item, nowMs) {
   return pull.nextPollAt == null || pull.nextPollAt <= nowMs;
 }
 
+// Drop "." segments so a stored src/./app.js lease is the same file as
+// src/app.js. ".." is left in place: a climb is not this comparison.
+function leasePath(path) {
+  if (typeof path !== "string") return path;
+  let p = path.trim().replace(/\/+/g, "/");
+  if (p.startsWith("/")) return path;
+  while (p.startsWith("./")) p = p.slice(2);
+  while (p.length > 1 && p.endsWith("/")) p = p.slice(0, -1);
+  const parts = [];
+  for (const part of p.split("/")) {
+    if (part === "" || part === ".") continue;
+    parts.push(part);
+  }
+  const out = parts.join("/");
+  return out.length > 0 ? out : path;
+}
+
 // Live claims whose declared files intersect. One entry per holding claim.
-// Paths are compared as already stored (the claim machine normalizes them).
+// Compare the lease spelling, not only the bytes already stored: a claim
+// recorded before dot segments were collapsed still holds the same file.
 function fileSlots(item) {
   const blocks = item?.fileBlocks && typeof item.fileBlocks === "object" ? item.fileBlocks : {};
   return (item?.files ?? []).filter(file => typeof file === "string").map(path => ({
-    path,
+    path: leasePath(path),
     block: typeof blocks[path] === "string" && blocks[path].length > 0 ? blocks[path] : null
   }));
 }

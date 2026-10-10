@@ -87,8 +87,17 @@ const BLOCK_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 _.:/-]{0,79}$/;
 const normalizeClaimPath = path => {
   check(typeof path === "string" && path.trim().length > 0 && path.length <= 512, "each file must be a 1..512 character path");
   let p = path.trim().replace(/\/+/g, "/");
+  check(!p.startsWith("/"), "each file must be a repo-relative path");
   while (p.startsWith("./")) p = p.slice(2);
   while (p.length > 1 && p.endsWith("/")) p = p.slice(0, -1);
+  // A "." segment is not a directory. src/./app.js is src/app.js, and src/.
+  // is the directory src. ".." stays so a climb is still refused below.
+  const parts = [];
+  for (const part of p.split("/")) {
+    if (part === "" || part === ".") continue;
+    parts.push(part);
+  }
+  p = parts.join("/");
   check(p.length > 0 && p !== "." && !p.startsWith("/") && !p.split("/").includes(".."), "each file must be a repo-relative path");
   return p;
 };

@@ -5,6 +5,7 @@
 // claims and claims with no files never conflict.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { fileLeaseConflicts } from "../server/claim-coordination.mjs";
 import { createWork } from "../server/work-claims.mjs";
 import { createWorkClaimRegistry, handleWorkClaims } from "../server/work-claim-routes.mjs";
 
@@ -47,6 +48,32 @@ test("claiming a file another active claim holds is refused with the holder, the
   assert.equal(out.value.leaseExpiresAt, held.value.leaseExpiresAt);
   assert.equal(registry.get("room1", "b").state, "unclaimed");
   assert.deepEqual(registry.get("room1", "a").files, ["docs/x.md", "scripts/room"]);
+});
+
+test("a dot segment does not dodge a live file lease", async () => {
+  const registry = createWorkClaimRegistry();
+  await call(registry, "jill", "create", null, { id: "dot-hold", files: ["src/app.js"] });
+  await call(registry, "jill", "claim", "dot-hold", {});
+  await call(registry, "claude", "create", null, { id: "dot-want" });
+  const blocked = await call(registry, "claude", "claim", "dot-want", { files: ["src/./app.js"] });
+  assert.equal(blocked.status, 409);
+  assert.equal(blocked.value.error.code, "file_lease_conflict");
+  assert.equal(registry.get("room1", "dot-want").state, "unclaimed");
+
+  await call(registry, "claude", "create", null, { id: "dot-dir" });
+  const dir = await call(registry, "claude", "claim", "dot-dir", { files: ["src/."] });
+  assert.equal(dir.status, 409);
+  assert.equal(dir.value.error.code, "file_lease_conflict");
+  assert.equal(registry.get("room1", "dot-dir").state, "unclaimed");
+});
+
+test("fileLeaseConflicts treats a stored dot segment as the same file", () => {
+  const held = { id: "lane-a", state: "claimed", owner: "jill", files: ["src/./app.js"], leaseExpiresAt: "2026-10-10T18:00:00.000Z" };
+  const wanted = { id: "lane-b", state: "claimed", owner: "claude", files: ["src/app.js"] };
+  const conflicts = fileLeaseConflicts([held], wanted);
+  assert.equal(conflicts.length, 1);
+  assert.equal(conflicts[0].holder.claimId, "lane-a");
+  assert.deepEqual(conflicts[0].files, ["src/app.js"]);
 });
 
 test("claiming a parent path over a live file lease is refused", async () => {
