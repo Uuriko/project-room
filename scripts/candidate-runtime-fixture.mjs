@@ -149,6 +149,7 @@ export function candidateRuntimeFixture(repository, directory) {
   for (const path of ['server/inbox-assign.mjs', 'server/inbox-internal-notes.mjs', 'server/inbox-collision.mjs', 'server/inbox-approval.mjs', 'server/inbox-agent-routing.mjs', 'server/inbox-collab-store.mjs', 'server/inbox-collab-routes.mjs']) paths.add(path); // Lane C inbox collaboration (task RC-2026-09-18-011)
   paths.add('server/content-trust.mjs'); // structured untrusted markers (imported by server/http.mjs surfaces and MCP)
   paths.add('server/room-activation-pack.mjs'); // Room activation pack (quill lane, RC-2026-09-18-040; imported by server/http.mjs)
+  paths.add('server/permission-moment.mjs'); // lane6 plug-in crew: "here's what you can do here" builder (imported by server/http.mjs, server/mcp-room-profile.mjs, server/room-guide.mjs; pure)
   paths.add('server/room-context.mjs'); // Compact agent room context (imported by server/store.mjs)
   for (const path of ['server/work-claims.mjs', 'server/work-claim-routes.mjs', 'server/work-duplicates.mjs', 'server/claim-coordination.mjs', 'server/claim-pr-sync.mjs', 'server/mention-receipts.mjs']) paths.add(path); // RC-2026-09-18-041: work-claim state machine + HTTP routes (imported by server/http.mjs); work-duplicates: pure duplicate detection (imported by server/work-claim-routes.mjs)
   paths.add('server/retention-response.mjs'); // room-retention: first-contribution SLA bot + zero-reply watchdog (pure, imported by server/work-claim-routes.mjs)

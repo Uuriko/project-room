@@ -8,6 +8,8 @@ import { EVENT_TYPES, isRoomArchived } from "../src/events.js";
 import { claimWork, updateWork } from "./work-claims.mjs";
 import { emitWorkClaimEvent, enqueueClaimWake } from "./work-claim-events.mjs";
 import { ROOM_GUIDE_ID, appendRoomEvent, stableEventId } from "./receipt-cards.mjs";
+import { buildPermissionMoment, renderPermissionMomentText } from "./permission-moment.mjs";
+import { getTier, DEFAULT_AUTONOMY_TIER } from "./autonomy-tiers.mjs";
 
 export { ROOM_GUIDE_ID };
 
@@ -164,6 +166,30 @@ function step(store, roomId, now) {
       data: { messageId, body: `@${name} ${chosen.title} is yours.` }
     });
     enqueueClaimWake(store, roomId, agent.id, messageId);
+    // lane6 plug-in crew: the "here's what you can do here" moment. The
+    // agent's actual permission set in plain language, each capability
+    // paired with a concrete next action. Idempotent: the stable message id
+    // means a re-run never double-posts.
+    const permissionMessageId = stableEventId("pm", `${roomId}\0${agent.id}`);
+    if (!store.room(roomId).state.messages?.some(message => message.id === permissionMessageId)) {
+      const guideState = store.room(roomId).state;
+      const joined = guideState.members?.[agent.id];
+      const tier = getTier(store.db, roomId, agent.id)?.autonomyTier ?? DEFAULT_AUTONOMY_TIER;
+      const moment = buildPermissionMoment({
+        member: { id: agent.id, displayName: joined?.displayName, kind: joined?.kind,
+          permissions: [...(joined?.permissions ?? [])] },
+        roomId,
+        autonomyTier: tier,
+        isOwner: agent.id === guideState.room?.ownerId,
+      });
+      appendRoomEvent(store, roomId, {
+        id: permissionMessageId,
+        type: EVENT_TYPES.MESSAGE_POSTED,
+        actorId: ROOM_GUIDE_ID,
+        atMs: now,
+        data: { messageId: permissionMessageId, body: `@${name} — ${renderPermissionMomentText(moment)}` }
+      });
+    }
     return "agent_joined";
   }
   return null;
