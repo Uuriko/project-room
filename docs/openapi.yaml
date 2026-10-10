@@ -8598,11 +8598,14 @@ paths:
     get:
       summary: Liveness
       description: >-
-        Open (also HEAD). Returns `{ status: "ok", mode }`; operational
-        metadata only. The Public Host aliases are served identically.
+        Open (also HEAD). Returns `{ status: "ok", mode, emailVerification }`;
+        operational metadata only. `emailVerification` is `enforced` when a
+        magic-link mailer is configured, or `relaxed-no-mailer` when it is not
+        and the email-verification gates follow the agent-invites escape hatch.
+        The Public Host aliases are served identically.
       security: []
       responses:
-        '200': { description: "{ status: ok, mode }" }
+        '200': { description: "{ status: ok, mode, emailVerification: enforced | relaxed-no-mailer }" }
     head:
       summary: Read public response headers
       description: Uses the same public GET policy and status with no response body.
