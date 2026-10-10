@@ -421,3 +421,31 @@ test('deleted assistant prompt shows only content-free stop controls and preserv
   assert.equal(await panel.getByRole('button').count(),0);
   assert.equal(await page.locator('#message-input').inputValue(),'Keep my unsent conversation draft.');
 });
+
+test('keyboard Stop on the card face keeps focus and the status change is announced (R5-1, R5-2)', {timeout:60000}, async t => {
+  const f=createAcceptanceFixture(), server=createRoomServer({store:f.store,streamInterval:40});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const origin=`http://127.0.0.1:${server.address().port}`, browser=await chromium.launch({headless:true});
+  t.after(async()=>{await browser.close();server.closeStreams();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));f.store.close();rmSync(f.directory,{recursive:true,force:true});});
+  const api=async(actor,input)=>{
+    const response=await fetch(`${origin}/api/rooms/commons/assistant`,{method:'POST',headers:{authorization:`Bearer ${f.keys[actor]}`,'content-type':'application/json'},body:JSON.stringify({requestId:crypto.randomUUID(),...input})});
+    const value=await response.json();assert.equal(response.status,200,JSON.stringify(value));return value.result;
+  };
+  await api('owner',{action:'configure',expectedRevision:0,name:'Room',coordinatorMemberId:'producer'});
+  f.store.command(f.keys.owner,'commons',{id:crypto.randomUUID(),type:'message.posted',data:{messageId:'kbd-ask',body:'Plan the offsite'}});
+  await api('owner',{action:'invoke',runId:'kbd-run',sourceMessageId:'kbd-ask'});
+  await api('producer',{action:'claim',runId:'kbd-run',attemptId:'kbd-host',expectedRevision:0});
+  const page=await browser.newPage({viewport:{width:390,height:844}});await page.goto(origin);await signInFixture(page,f.keys.owner);
+  await page.locator('#main').waitFor({state:'visible'});
+  const status=page.locator('#assistant-face [role=status]');
+  await status.getByText('Working',{exact:true}).waitFor();
+  assert.equal(await status.getAttribute('aria-live'),'polite');
+  assert.equal(await page.locator('#assistant-setup').textContent(),'Change','a connected assistant offers Change, not Connect');
+  await page.locator('#assistant-face [data-cancel]').focus(); await page.keyboard.press('Enter');
+  await status.getByText('Stopping…',{exact:true}).waitFor();
+  const focus=await page.evaluate(()=>({ body: document.activeElement===document.body, inCard: Boolean(document.activeElement?.closest('#room-assistant')) }));
+  assert.deepEqual(focus,{body:false,inCard:true},'focus stays on the Room card after a keyboard Stop');
+  await api('producer',{action:'report',runId:'kbd-run',attemptId:'kbd-host',expectedRevision:2,state:'cancelled',summary:'Stopped.'});
+  await status.getByText('Stopped',{exact:true}).waitFor();
+  assert.equal(await page.evaluate(()=>document.activeElement===document.body),false,'focus survives the Stop button disappearing');
+});

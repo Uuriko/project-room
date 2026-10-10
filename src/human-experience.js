@@ -13,11 +13,9 @@ export function faceRun(runs) {
 export function askFaceStatus(run, now = Date.now()) {
   if (!run) return null;
   const waited = Math.max(0, now - (run.createdAt ?? now));
-  if (run.status === 'queued') return waited >= NOT_PICKED_UP_MS
-    ? { key: 'not_picked_up', text: "Not picked up yet. The assistant hasn't started, so it may be offline. Your request will wait." }
-    : { key: 'asked', text: 'Asked. Waiting for the assistant.' };
-  if (run.status === 'unknown') return { key: 'stalled', text: 'Stalled. No update from the assistant for 2 minutes. You can stop it.' };
-  return { key: run.status, text: ({ working: 'Working', paused: 'Paused', pause_requested: 'Pausing…', resume_requested: 'Resuming…', cancel_requested: 'Stopping…', needs_input: 'Needs a decision', done: 'Result ready', failed: "Couldn't finish", cancelled: 'Stopped' })[run.status] ?? run.status };
+  const key = run.status === 'queued' ? (waited >= NOT_PICKED_UP_MS ? 'not_picked_up' : 'asked') : run.status === 'unknown' ? 'stalled' : run.status;
+  const textKey = ({ asked: 'asked', not_picked_up: 'notPickedUp', stalled: 'stalled', working: 'working', paused: 'paused', pause_requested: 'pausing', resume_requested: 'resuming', cancel_requested: 'stopping', needs_input: 'needsDecision', done: 'done', failed: 'failed', cancelled: 'stopped' })[key];
+  return { key, text: textKey ? uiText(`human.face.${textKey}`) : run.status };
 }
 export function installHumanExperience({ getState, getSession, client, notice, openWork, openMessage, selectResult, refreshTranscript }) {
   const $ = selector => document.querySelector(selector);
@@ -32,8 +30,15 @@ export function installHumanExperience({ getState, getSession, client, notice, o
   section.setAttribute('aria-label', 'Room assistant');
   section.innerHTML = uiText("human.copy.001");
   $('#typing-indicator').before(section);
-  const face = document.createElement('div'); face.id = 'assistant-face'; face.hidden = true; face.setAttribute('aria-live', 'polite');
+  // The status line is a persistent polite live region, so each state change
+  // is announced once (R5-2); request text and buttons are rebuilt quietly.
+  const face = document.createElement('div'); face.id = 'assistant-face'; face.hidden = true;
+  const faceRequest = document.createElement('p'); faceRequest.className = 'assistant-face-request';
+  const faceStatus = document.createElement('p'); faceStatus.className = 'assistant-face-status'; faceStatus.setAttribute('role', 'status'); faceStatus.setAttribute('aria-live', 'polite'); faceStatus.tabIndex = -1;
+  const faceActions = document.createElement('div'); faceActions.className = 'assistant-face-actions';
+  face.append(faceRequest, faceStatus, faceActions);
   $('#assistant-activity').before(face);
+  const faceButton = (label, data) => { const button = document.createElement('button'); button.type = 'button'; button.className = 'text-button'; button.textContent = label; Object.assign(button.dataset, data); return button; };
   const ask = document.createElement('button'); ask.type = 'button'; ask.id = 'ask-room'; ask.className = 'button ghost';
   ask.textContent = 'Ask Room'; ask.setAttribute('aria-pressed', 'false'); ask.title = uiText("human.copy.002");
   const composerActions = document.createElement('div'); composerActions.className = 'human-composer-actions';
@@ -86,6 +91,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
     section.querySelector('strong').textContent = assistant.name || 'Room';
     $('#room-assistant-status').textContent = assistant.availability === 'connected' ? 'Connected' : assistant.availability === 'awaiting_host' ? uiText("human.copy.009") : 'Not connected';
     $('#assistant-setup').hidden = getState().room.ownerId !== getSession().member.id;
+    $('#assistant-setup').textContent = assistant.availability === 'connected' ? uiText('human.assistantChange') : 'Connect';
     const runs = Object.values(projection.runs ?? {});
     $('#assistant-activity').hidden = !runs.length;
     const runsHtml = runs.map(run => {
@@ -102,11 +108,21 @@ export function installHumanExperience({ getState, getSession, client, notice, o
     const current = faceRun(Object.values(projection.runs ?? {}).filter(run => !getState().messages.find(m => m.id === run.sourceMessageId)?.deletedAt)), status = askFaceStatus(current);
     const faceSource = current && getState().messages.find(m => m.id === current.sourceMessageId);
     const faceControls = current && (getState().room.ownerId === getSession().member.id || current.initiatorId === getSession().member.id);
-    const faceHtml = !current ? '' : ['<p class="assistant-face-request">', esc(faceSource?.body?.slice(0, 120) || 'Shared request'), '</p><p class="assistant-face-status" data-face-status="', esc(status.key), '">', esc(status.text), '</p>',
-      current.resultMessageId ? `<button type="button" class="text-button" data-assistant-message="${esc(current.resultMessageId)}">Open result</button>` : '',
-      !CLOSED.includes(current.status) && current.status !== 'cancel_requested' && current.status !== 'needs_input' ? `<button type="button" class="text-button" data-contribute-run="${esc(current.id)}" data-revision="${current.revision}">Add context</button>` : '',
-      faceControls && !CLOSED.includes(current.status) ? uiText("human.stopRequest", { runId: esc(current.id), revision: current.revision }) : ''].join('');
-    if (face._html !== faceHtml) { face.innerHTML = faceHtml; face._html = faceHtml; }
+    const faceKey = current ? JSON.stringify([current.id, current.revision, current.status, current.resultMessageId, faceControls, faceSource?.body?.slice(0, 120)]) : '';
+    if (face._key !== faceKey) {
+      face._key = faceKey;
+      const focusedData = faceActions.contains(document.activeElement) ? { ...document.activeElement.dataset } : null;
+      faceActions.replaceChildren();
+      if (current) {
+        faceRequest.textContent = faceSource?.body?.slice(0, 120) || uiText('human.face.sharedRequest');
+        if (current.resultMessageId) faceActions.append(faceButton(uiText('human.face.openResult'), { assistantMessage: current.resultMessageId }));
+        if (!CLOSED.includes(current.status) && !['cancel_requested', 'needs_input'].includes(current.status)) faceActions.append(faceButton(uiText('human.face.addContext'), { contributeRun: current.id, revision: String(current.revision) }));
+        if (faceControls && !CLOSED.includes(current.status)) faceActions.insertAdjacentHTML('beforeend', uiText('human.stopRequest', { runId: esc(current.id), revision: current.revision }));
+        // R5-1: keep keyboard focus on the same control (or the card) across a repaint.
+        if (focusedData) ([...faceActions.querySelectorAll('button')].find(button => button.dataset.pauseRun === focusedData.pauseRun && button.dataset.cancel === focusedData.cancel && button.dataset.contributeRun === focusedData.contributeRun) || faceStatus).focus({ preventScroll: true });
+      }
+    }
+    if (current && faceStatus.dataset.faceStatus !== status.key) { faceStatus.dataset.faceStatus = status.key; faceStatus.textContent = status.text; }
     face.hidden = !current;
     if ($('#assistant-runs')._html !== runsHtml) {
       const panel = $('#assistant-runs'), focused = panel.contains(document.activeElement) ? document.activeElement : null;
@@ -157,7 +173,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
     if (operation) return;
     operation = { action: button.dataset.cancel ? 'cancel' : button.dataset.resume ? 'resume' : 'pause', requestId: crypto.randomUUID(), runId: button.dataset.pauseRun, expectedRevision: Number(button.dataset.revision) };
     // Save the exact operation before dispatch; a lost response cannot create a second stop/resume.
-    persistOperation(); button.disabled = true; await invoke();
+    persistOperation(); button.setAttribute('aria-disabled', 'true'); await invoke(); // aria-disabled keeps focus (R5-1); `if (operation)` already blocks a second submit
 
   };
   face.onclick = $('#assistant-runs').onclick;
