@@ -68,6 +68,20 @@ test("an explicit secrets-allowlist marker recovers a line the gate would otherw
   assert.equal(recovered.status, 0, recovered.stdout);
 });
 
+test("a quoted diff header with a space still scans the added provider key", () => {
+  const stripe = "sk_live_" + "d".repeat(16);
+  const result = runDiff([
+    'diff --git "a/server/my file.mjs" "b/server/my file.mjs"',
+    '--- "a/server/my file.mjs"',
+    '+++ "b/server/my file.mjs"',
+    "@@ -0,0 +1 @@",
+    `+const billing = "${stripe}";`,
+    "",
+  ].join("\n"));
+  assert.equal(result.status, 1, result.stdout);
+  assert.match(result.stderr, /server\/my file\.mjs:1 \[Stripe live key\]/);
+});
+
 test("a clean added line stays clean", () => {
   const result = runDiff(addedDiff("const billing = ready;"));
   assert.equal(result.status, 0, result.stdout);
