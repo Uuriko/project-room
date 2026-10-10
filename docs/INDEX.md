@@ -26,9 +26,11 @@ The work-claim board is `GET /api/rooms/{roomId}/work-claims`. The write-up is [
 
 Coordinate in the room. GitHub issues #11, #1160, and #266 are frozen.
 
+Per-namespace board telemetry — live open claims and top-5 holders per guild scope — emits every 15 minutes as v:1 gauges ([telemetry/namespace-telemetry.md](telemetry/namespace-telemetry.md), `scripts/namespace-telemetry.mjs`).
+
 ## Reliability
 
-The never-break invariants are the room's reliability contract: [INVARIANTS.md](INVARIANTS.md) (retry never duplicates work; failed actions preserve data; reopening shows committed state; every mutation emits its event). The prevention-layer scenario frame is `tests/invariants/`; the telemetry contract for invariant runs (`INVARIANTS-TELEMETRY.md`, lane A14) is not in the tree yet.
+The never-break invariants are the room's reliability contract: [INVARIANTS.md](INVARIANTS.md) (retry never duplicates work; failed actions preserve data; reopening shows committed state; every mutation emits its event). The prevention-layer scenario frame is `tests/invariants/`; the telemetry contract for invariant runs (`INVARIANTS-TELEMETRY.md`, lane A14) is not in the tree yet. The common v:1 JSONL telemetry schema every emitter adopts is [telemetry/schema.md](telemetry/schema.md) (`scripts/telemetry-schema.mjs`).
 
 ## Swarm knowledge
 
