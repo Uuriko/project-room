@@ -4183,7 +4183,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (req.method === "POST") {
           const keys = Object.keys(data);
           if (!keys.includes("identityId") || !keys.includes("permissions")
-            || keys.some(k => !["identityId", "memberId", "displayName", "permissions"].includes(k))
+            || keys.some(k => !["identityId", "memberId", "displayName", "permissions", "identityLinkCode"].includes(k))
             || typeof data.identityId !== "string") reject(422, "invalid_identity", "identityId and permissions are required");
           return json(res, 201, store.identities.link(selected.token, roomId, data, fence));
         }
