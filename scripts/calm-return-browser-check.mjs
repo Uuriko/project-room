@@ -88,7 +88,10 @@ for (const mobile of [false, true]) {
     assert.equal(await page.locator("#rb-history-section").evaluate(node => node.open), false);
     assert.equal(await page.locator("#rb-involving-section").evaluate(node => node.open), false);
     assert.equal(await page.locator("#rb-more-button").getAttribute("hidden"), null, "history has another page even while its disclosure is closed");
-    assert.match(await page.locator("#rb-ack-note").textContent(), new RegExp(`Marks all ${horizon} updates read`));
+    // The unread count is horizon minus the Catch up marker. The marker is not 0 any
+    // more: the owner's own leading events are skipped (store.catchUpCursor, QA8).
+    const unread = horizon - f.store.catchUpCursor("commons", "owner");
+    assert.match(await page.locator("#rb-ack-note").textContent(), new RegExp(`Marks all ${unread} updates read`));
     assert.equal(await page.locator('#rb-involving-list [data-open-work="return-0"]').count(), 0, "needs and ongoing do not duplicate the same task");
     assert.equal(await page.locator("#reminder-due li").count(), 1, "a personal reminder is a separate reason, not an extra task count");
     await page.evaluate(() => scrollTo(0, 0)); await capture("expanded");
