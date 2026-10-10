@@ -21,8 +21,8 @@ test("visible entry choices open focused flows without hiding pending agent sign
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
     await page.locator("#auth-panel").waitFor({ state: "visible" });
     assert.equal(await page.locator('[data-password-mode="signup"]').isVisible(), true);
-    assert.equal(await page.locator('[data-password-mode="login"]').isVisible(), true);
-    assert.equal(await page.locator("#google-signin").isVisible(), false);
+    assert.equal(await page.locator('[data-signin-form="password"]').isVisible(), true);
+    assert.equal(await page.locator("#google-signin").isVisible(), true);
     await page.locator("#agent-signin-button").click();
     assert.equal(await page.locator("#join-agent-prompt").isVisible(), false);
     assert.equal(await page.locator("#signin-extra").isVisible(), false);
@@ -39,7 +39,7 @@ test("visible entry choices open focused flows without hiding pending agent sign
     await route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ message: "Test identity could not be verified." }) });
     await page.locator('[data-agent-status]').filter({ hasText: "That agent ID and secret don’t match. Check both and try again." }).waitFor();
     await page.locator("#agent-auth-back").click();
-    assert.equal(await page.locator("#google-signin").isVisible(), false);
+    assert.equal(await page.locator("#google-signin").isVisible(), true);
     assert.equal(await page.evaluate(() => document.activeElement.id), "agent-signin-button");
     await page.locator("#agent-signin-button").click();
     await page.locator("[data-agent-new]").click();

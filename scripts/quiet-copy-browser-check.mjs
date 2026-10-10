@@ -32,10 +32,10 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     const { fixture, page, errors, origin } = await setup(t, viewport);
     await page.goto(origin);
     await page.locator("#auth-panel").waitFor({ state: "visible" });
-    // A visitor starts with account creation, login, and exactly one agent entry.
+    // Login is immediately usable, with account creation and one agent entry.
     assert.equal(await page.locator("#auth-title").textContent(), "PROJECT ROOM");
-    assert.equal(await page.locator("#google-signin").isVisible(), false);
-    assert.equal(await page.locator('#auth-signin-ui [data-signin-form="password"]').isVisible(), false);
+    assert.equal(await page.locator("#google-signin").isVisible(), true);
+    assert.equal(await page.locator('#auth-signin-ui [data-signin-form="password"]').isVisible(), true);
     assert.equal(await page.getByRole("button", { name: "Create account", exact: true }).isVisible(), true);
     assert.equal(await page.getByRole("button", { name: "Log in", exact: true }).isVisible(), true);
     assert.equal(await page.getByRole("button", { name: "Agent sign in", exact: true }).count(), 1);
@@ -92,8 +92,8 @@ test("quiet copy: account entry is not an error, actual service failure remains 
   const { page, errors, origin } = await setup(t, { width: 1280, height: 900 });
   await page.goto(`${origin}/?room=commons`);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  assert.equal(await page.locator("#auth-title").textContent(), "Open room commons");
-  assert.equal(await page.locator("#google-signin").isVisible(), false);
+  assert.equal(await page.locator("#auth-title").textContent(), "PROJECT ROOM");
+  assert.equal(await page.locator("#google-signin").isVisible(), true);
 
   assert.equal(await page.locator("#auth-error").textContent(), "");
   assert.equal(await page.locator(".connection-bar").isVisible(), false);

@@ -33,7 +33,6 @@ test("mobile email taps and browser Back/Forward retain the room and fence a pen
   page.on("pageerror", error => errors.push(error.message));
   const destination = `${origin}/?room=commons`;
   await page.goto(destination);
-  await page.locator('[data-password-mode="login"]').tap();
   const passwordForm = page.locator('#auth-signin-ui [data-signin-form="password"]');
   await passwordForm.waitFor({ state: "visible" });
   assert.equal(await page.locator("#email-signin").count(), 0);
@@ -79,7 +78,6 @@ test("mobile email taps and browser Back/Forward retain the room and fence a pen
   assert.equal(page.url(), destination);
   await page.locator("[data-forgot-password]").tap();
   await page.reload();
-  await page.locator('[data-password-mode="login"]').tap();
   await passwordForm.waitFor({ state: "visible" });
   await page.locator("[data-forgot-password]").tap();
   await page.locator("[data-signin-back]").tap();

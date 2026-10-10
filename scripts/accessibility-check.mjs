@@ -195,7 +195,7 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   holdOwnerBrief = false;
   if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await clickChrome(page, "#signout-button");
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  assert.equal(await page.getByRole("button", { name: "Create account", exact: true }).evaluate(node => node === document.activeElement), true, "access end moves focus to the first visible account entry");
+  assert.equal(await page.locator('[data-signin-form="password"] [name="email"]').evaluate(node => node === document.activeElement), true, "access end moves focus to the first visible account entry");
   assert.match(await page.locator("#auth-error").textContent(), /Session ended; private drafts were cleared/);
   assert.equal(await page.locator("#status").textContent(), "", "sign-out has one local announcement owner");
   await signInFixture(page, maya);

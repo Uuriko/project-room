@@ -34,9 +34,9 @@ import { createAccountSettingsUI, applyStoredTheme, organizeRoomSettings, ACCOUN
 import { createAuthSigninUI, classifyAuthLink } from "./auth-signin-ui.js";
 import { createAgentSigninUI } from "./agent-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, defaultRequestPermissions, validateAccessRequestForm, newAccessRequestId, stashAccessRequest, readAccessRequest, AGENT_INVITE_CODE_PATTERN, agentInviteJoinPath } from "./invite-context.js";
-import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, authPanelTitle, roomIdFromNext, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
+import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, roomIdFromNext, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
-import { rememberLastRoom, rememberAccountHint, readLastRoom, readLastRoomTitle, readAccountHint, hasSessionHint, clearBrowserSessionHints, rememberMemberRoom, readMemberRoom, clearStoredPasswords, signInRoomTarget } from "./browser-session.js";
+import { rememberLastRoom, rememberAccountHint, readLastRoom, readAccountHint, hasSessionHint, clearBrowserSessionHints, rememberMemberRoom, readMemberRoom, clearStoredPasswords, signInRoomTarget } from "./browser-session.js";
 import { attachmentFromBytes, composerAudienceNote, composerAudiencePickerVisible, COMPOSER_FILE_BYTES, fileChipLabel } from "./composer-files.js";
 import { formatSessionExpiry } from "./session-expiry.js";
 import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui.js";
@@ -819,7 +819,7 @@ const signinUI = createAuthSigninUI({
 });
 const initialAuthLink = classifyAuthLink(new URLSearchParams(location.search));
 const initialPasswordReset = initialAuthLink.kind === "reset";
-if (initialAuthLink.kind === "none" && !initialGoogleFailed) signinUI.showWelcome();
+if (initialAuthLink.kind === "none" && !initialGoogleFailed) signinUI.showPassword();
 const initialSignin = signinUI.mount($("#auth-signin-ui"));
 
 // Agent sign-in (RC-2026-09-23): agents choose their own account (identity
@@ -1373,8 +1373,7 @@ function roomHandoffLocation(roomId) {
   return `${location.pathname}?room=${encodeURIComponent(roomId)}`;
 }
 function configureAuthPanel(roomId = selectedRoomFromLocation()) {
-  const roomTitle = readLastRoomTitle(roomId);
-  $("#auth-title").textContent = authPanelTitle(roomId, roomTitle);
+  $("#auth-title").textContent = "PROJECT ROOM";
   // Fresh auth paint clears any stale magic-link failure banner (QAX-002).
   setFormStatus($("#auth-link-error"), "");
   const roomHint = $("#auth-room-hint");
@@ -3740,8 +3739,8 @@ function showSigninMethods() {
   $("#agent-auth-step").hidden = true;
   $("#agent-signin-button").setAttribute("aria-expanded", "false");
   $("#signin-controller").prepend($("#auth-signin-ui"));
-  signinUI.showWelcome();
-  syncSigninView("welcome");
+  signinUI.showPassword();
+  syncSigninView("password-login");
 }
 function openEmailAuth(mode, { recordHistory = true } = {}) {
   if (!agentSigninUI.canLeave() || !signinUI.canLeave()) return;
@@ -3775,7 +3774,7 @@ window.addEventListener("popstate", event => {
   if ($("#auth-panel").hidden || !mainSigninHost()) return;
   if (!signinUI.canLeave()) { history.forward(); return; }
   signinHistoryReplay = true;
-  try { signinUI.showView(event.state?.roomSigninView || "welcome"); }
+  try { signinUI.showView(event.state?.roomSigninView || "password-login"); }
   finally { signinHistoryReplay = false; }
   focusSignin();
 });

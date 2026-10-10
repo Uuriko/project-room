@@ -1,7 +1,21 @@
 import { uiText } from './strings.js';
 // Email sign-in uses a delivered single-use link. The account cookie stays
 // HttpOnly; authentication writes use the current browser slot and CSRF token.
-import { escapeHtml } from "./account-settings-ui.js";
+import { escapeHtml, base64urlToBytes, bytesToBase64url } from "./account-settings-ui.js";
+
+export function toAuthenticationPublicKey(options) {
+  const { challengeId: _challengeId, ...publicKey } = options;
+  return { ...publicKey, challenge: base64urlToBytes(options.challenge),
+    allowCredentials: (options.allowCredentials ?? []).map(credential => ({ ...credential, id: base64urlToBytes(credential.id) })) };
+}
+
+export function toAuthenticationResponse(credential) {
+  return { id: credential.id, rawId: bytesToBase64url(credential.rawId), type: credential.type,
+    response: { clientDataJSON: bytesToBase64url(credential.response.clientDataJSON),
+      authenticatorData: bytesToBase64url(credential.response.authenticatorData),
+      signature: bytesToBase64url(credential.response.signature),
+      userHandle: credential.response.userHandle == null ? null : bytesToBase64url(credential.response.userHandle) } };
+}
 
 // Shared by startup routing and redemption so malformed reset links do not
 // reserve the invitation journey. This classifies input; it never consumes it.
@@ -25,7 +39,7 @@ export function classifyAuthLink(params) {
   return { kind: hasReset ? "reset" : "magic", proof, email };
 }
 
-export function createAuthSigninUI({ accountClient, ensureAccountSession, onSignedIn, onMagicLinkFailure, onBusyChange, beforeSignIn, onSignInUncertain, onMagicLinkRequest, onAccountSwitch, onPasswordResetComplete, onViewChange, onBack }) {
+export function createAuthSigninUI({ accountClient, ensureAccountSession, onSignedIn, onMagicLinkFailure, onBusyChange, beforeSignIn, onSignInUncertain, onMagicLinkRequest, onAccountSwitch, onPasswordResetComplete, onViewChange, onBack, credentials }) {
   let container = null, welcome = false;
   let emailMethod = "password", passwordMode = "login", passwordEmail = "";
   let magicPhase = "request", magicEmail = "", busy = false;
@@ -104,15 +118,19 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     if (pendingTerms) return uiText("signin.copy.005", { fragmentA: busy ? "disabled" : "" });
     if (welcome) return uiText("signin.copy.004");
     if (pendingLink) return uiText("signin.copy.006", { fragmentA: busy ? "disabled" : "" });
-    if (emailMethod === "forgot") return uiText("signin.copy.007");
+    if (emailMethod === "forgot") {
+      const passkeySupported = Boolean(credentials?.get || (globalThis.PublicKeyCredential && globalThis.navigator?.credentials?.get));
+      return uiText("signin.copy.007") + (passkeySupported ? uiText("signin.passkey.action") : "");
+    }
     if (emailMethod === "reset") {
       if (resetPhase === "sent") return uiText("signin.copy.008", { fragmentA: escapeHtml(resetEmail) });
       if (resetPhase === "form") return uiText("signin.copy.009", { fragmentA: busy ? "disabled" : "" });
-      return uiText("signin.copy.010", { fragmentA: escapeHtml(resetEmail || passwordEmail), fragmentB: busy ? "disabled" : "" });
+      const passkeySupported = Boolean(credentials?.get || (globalThis.PublicKeyCredential && globalThis.navigator?.credentials?.get));
+      return uiText("signin.copy.010", { fragmentA: escapeHtml(resetEmail || passwordEmail), fragmentB: busy ? "disabled" : "" }) + (passkeySupported ? uiText("signin.passkey.action") : "");
     }
     if (emailMethod === "password") {
       const signup = passwordMode === "signup";
-      return uiText("signin.copy.011", { fragmentA: escapeHtml(passwordEmail), fragmentB: signup ? "new-password" : "current-password", fragmentC: signup ? 'minlength="10" aria-describedby="signup-password-hint"' : "", fragmentD: signup ? '<p class="form-hint" id="signup-password-hint">10–256 characters</p>' : "", fragmentE: busy ? "disabled" : "", fragmentF: busy ? (signup ? "Creating account…" : "Logging in…") : (signup ? "Create account" : "Log in"), fragmentG: signup ? "login" : "signup", fragmentH: signup ? "Log in" : "Create account" });
+      return uiText("signin.copy.011", { fragmentA: escapeHtml(passwordEmail), fragmentB: signup ? "new-password" : "current-password", fragmentC: signup ? 'minlength="10"' : "", fragmentD: "", fragmentE: busy ? "disabled" : "", fragmentF: busy ? (signup ? "Creating account…" : "Logging in…") : (signup ? "Create account" : "Log in"), fragmentG: signup ? "login" : "signup", fragmentH: signup ? "Log in" : "Create account", fragmentI: signup ? "" : uiText("signin.login-options") });
     }
     if (magicPhase === "sent") return uiText("signin.copy.012", { fragmentA: escapeHtml(magicEmail), fragmentB: magicManualCode ? uiText("signin.copy.013", { fragmentA: busy ? "disabled" : "" }) : "", fragmentC: magicManualCode ? "Hide code" : uiText("signin.copy.014") });
     return uiText("signin.copy.015", { fragmentA: escapeHtml(magicEmail), fragmentB: busy ? "disabled" : "" });
@@ -120,7 +138,7 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
   function render() {
     const node = surface();
     const view = currentView();
-    const hideBack = view === "welcome" || view === "terms";
+    const hideBack = view === "welcome" || view === "terms" || view.startsWith("password-");
     if (node) node.innerHTML = ["", hideBack ? "" : `<button type="button" class="text-button" data-signin-back ${busy ? "disabled" : ""}>Back</button>`, "<div data-signin-panel>", panelHtml(), "</div><p class=\"status form-status\" role=\"alert\" data-signin-status></p>"].join('');
     if (node) {
       node.setAttribute("aria-busy", String(busy));
@@ -164,13 +182,37 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
   }
   const onClick = async event => {
     if (busy) return;
+    if (event.target?.closest?.("[data-passkey-signin]")) {
+      const provider = credentials ?? globalThis.navigator?.credentials;
+      if (!provider?.get || await beforeSignIn?.() === false) return;
+      const email = surface()?.querySelector('[name="email"]')?.value?.trim();
+      if (email) passwordEmail = email;
+      await withBusy(async () => {
+        try {
+          const session = await authedSession();
+          const generation = accountClient.generation;
+          const options = await api(session, "/api/auth/passkey/authenticate/options", {});
+          const credential = await provider.get({ publicKey: toAuthenticationPublicKey(options) });
+          if (!credential) throw Object.assign(new Error(), { name: "NotAllowedError" });
+          if (!accountClient.owns(generation, session)) throw new Error(uiText("signin.copy.001"));
+          const view = await authApi(session, "/api/auth/passkey/authenticate/finish", {
+            challengeId: options.challengeId, response: toAuthenticationResponse(credential), sessionRevision: session.sessionRevision
+          });
+          await finish(view);
+        } catch (error) {
+          if (error?.name === "NotAllowedError") throw new Error(uiText("signin.passkey.cancelled"));
+          throw error;
+        }
+      });
+      return;
+    }
     const visibility = event.target?.closest?.("[data-password-visibility]");
     if (visibility) {
       const input = surface()?.querySelector('[name="password"]');
       if (!input) return;
       const shown = input.type === "password";
       input.type = shown ? "text" : "password";
-      visibility.textContent = shown ? "Hide password" : "Show password";
+      visibility.setAttribute("aria-label", shown ? "Hide password" : "Show password");
       visibility.setAttribute("aria-pressed", String(shown));
       return;
     }
