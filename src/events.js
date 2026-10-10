@@ -263,7 +263,10 @@ export function roomTrust(state) {
 // of every agent's decision power. The decide permission is checked
 // separately by requirePermission.
 export function holdsDecisionAuthority(member) {
-  return Boolean(member) && (member.kind === "human" || (member.kind === "agent" && member.delegatedAdmin === true));
+  // A removed member (active: false) never holds it, even if the projection
+  // still carries the delegation marker from before removal.
+  return Boolean(member) && member.active !== false
+    && (member.kind === "human" || (member.kind === "agent" && member.delegatedAdmin === true));
 }
 
 // Humans own themselves. An agent belongs to its accountable human, or to
@@ -2104,10 +2107,14 @@ function recordOwnerDecision(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
   requirePermission(state, incoming.actorId, "decide");
   if (!holdsDecisionAuthority(actor) || actor.id !== item.humanDecisionMakerId) {
-    throw new Error("Only the designated human decision-maker may decide");
+    throw new Error("Only the designated decision-maker may decide");
   }
-  if (actor.kind === "agent" && (actor.id === item.accountableMemberId || item.receipt?.producerId === actor.id)) {
-    throw new Error("An agent may not decide on work it is accountable for or produced");
+  // Two-person rule for agent deciders: not on work it is accountable for,
+  // proposed, verified or produced, and not when the producer is unknown
+  // (a self-reported receipt with no producer cannot prove independence).
+  if (actor.kind === "agent" && (actor.id === item.accountableMemberId || actor.id === item.proposedById
+    || actor.id === item.verifierMemberId || item.receipt?.producerId === actor.id || !receiptHasKnownProducer(item.receipt))) {
+    throw new Error("An agent may not decide on work it is accountable for, proposed, verified or produced, or whose producer is unknown");
   }
   requireFields(incoming.data, ["decision", "completionEventId", "evidenceVersion", "reason"]);
   if (!["approved", "changes_requested", "rejected"].includes(incoming.data.decision)) {

@@ -40,6 +40,7 @@ test('holdsDecisionAuthority: humans and owner-delegated agents only', () => {
   assert.equal(holdsDecisionAuthority({ kind: 'agent' }), false);
   assert.equal(holdsDecisionAuthority({ kind: 'agent', delegatedAdmin: 'yes' }), false);
   assert.equal(holdsDecisionAuthority(null), false);
+  assert.equal(holdsDecisionAuthority({ kind: 'agent', delegatedAdmin: true, active: false }), false, 'a removed agent keeps no authority');
 });
 
 test('an owner-delegated agent decides on work another member produced', t => {
@@ -82,7 +83,7 @@ test('a delegated agent may not approve work whose evidence names it as producer
   const item = f.state().workItems.w4;
   f.send('admin-agent', T.MESSAGE_POSTED, { messageId: 'why-4', body: 'Rationale: attempting self approval.' });
   assert.throws(() => f.send('admin-agent', T.OWNER_DECISION_RECORDED, { workItemId: 'w4', sourceMessageId: 'why-4', expectedRevision: item.revision, decision: 'approved',
-    completionEventId: item.receipt.eventId, evidenceVersion: 'v1', reason: 'Self approval' }), /accountable for or produced/);
+    completionEventId: item.receipt.eventId, evidenceVersion: 'v1', reason: 'Self approval' }), /accountable for, proposed, verified or produced/);
   assert.equal(f.state().workItems.w4.decision, null);
 });
 
@@ -100,7 +101,7 @@ test('demoting an already designated agent decision-maker removes its power on t
   assert.ok(!workActions(item, f.state().members['admin-agent']).some(([a]) => a === 'decide'), 'no decide action after demotion');
   f.send('admin-agent', T.MESSAGE_POSTED, { messageId: 'why-5', body: 'Rationale after demotion.' });
   assert.throws(() => f.send('admin-agent', T.OWNER_DECISION_RECORDED, { workItemId: 'w5', sourceMessageId: 'why-5', expectedRevision: item.revision, decision: 'approved',
-    completionEventId: item.receipt.eventId, evidenceVersion: 'v1', reason: 'Should be refused' }), /lacks decide|designated human decision-maker/);
+    completionEventId: item.receipt.eventId, evidenceVersion: 'v1', reason: 'Should be refused' }), /lacks decide|designated decision-maker/);
   assert.equal(f.state().workItems.w5.decision, null);
 });
 
@@ -119,4 +120,37 @@ test('the HTTP command route enforces the same rule for agent bearers', async t 
   assert.ok(plain.status >= 400 && plain.status < 500, JSON.stringify(plain));
   const delegated = await post(f.keys['admin-agent'], T.DECISION_RECORDED, { sourceMessageId: 'm-http', statement: 'Ship on Tuesdays.' });
   assert.ok(delegated.status >= 200 && delegated.status < 300, JSON.stringify(delegated));
+});
+
+function completed(f, id, completion) {
+  f.send('owner', T.WORK_PROPOSED, { workItemId: id, title: 'Outcome', definitionOfDone: 'Exact result recorded', accountableMemberId: 'producer', mode: 'read',
+    ownerDecisionRequired: true, humanDecisionMakerId: 'admin-agent' });
+  f.send('producer', T.WORK_ACCEPTED, { workItemId: id, expectedRevision: 0 });
+  f.send('producer', T.WORK_COMPLETED, { workItemId: id, expectedRevision: 1, summary: 'Done', evidenceUrl: 'https://example.invalid/result', evidenceVersion: 'v1',
+    nextAction: 'Review', signedEvidence: f.signEvidence(), ...completion });
+  return f.state().workItems[id];
+}
+const decide = (f, id, item) => {
+  f.send('admin-agent', T.MESSAGE_POSTED, { messageId: `why-${id}`, body: 'Rationale.' });
+  return () => f.send('admin-agent', T.OWNER_DECISION_RECORDED, { workItemId: id, sourceMessageId: `why-${id}`, expectedRevision: item.revision, decision: 'approved',
+    completionEventId: item.receipt.eventId, evidenceVersion: 'v1', reason: 'Review' });
+};
+
+test('a delegated agent may not approve work whose producer is unknown', t => {
+  const f = fixture(t);
+  const item = completed(f, 'w7', {});
+  assert.throws(decide(f, 'w7', item), /producer is unknown/);
+  assert.equal(f.state().workItems.w7.decision, null);
+});
+
+test('a removed delegated agent cannot decide', t => {
+  const f = fixture(t);
+  const item = completed(f, 'w8', { producerId: 'producer' });
+  const member = f.state().members['admin-agent'];
+  f.send('owner', T.MEMBER_ACCESS_CHANGED, { memberId: 'admin-agent', expectedMemberRevision: member.revision, permissions: member.permissions, active: false });
+  // Removal revokes the agent's key, and the reducer refuses an inactive
+  // member even if a stale credential got through.
+  assert.throws(() => decide(f, 'w8', item)(), /revoked|not an active member|designated decision-maker/);
+  assert.equal(holdsDecisionAuthority(f.state().members['admin-agent']), false);
+  assert.equal(f.state().workItems.w8.decision, null);
 });
