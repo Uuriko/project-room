@@ -34,3 +34,27 @@ test("three or more agent posts in a row fold; two do not; kept kinds break the 
   assert.deepEqual(agentsTalkingRuns(list, members, { keep: m => m.kind === "question" }), [{ start: 4, end: 7, count: 3 }]);
   assert.deepEqual(agentsTalkingRuns(list, members), [{ start: 4, end: 9, count: 5 }], "without keep the question folds too");
 });
+
+test("room_read_messages carries the anti-loop counts for the reader, ignoring DMs between others", async t => {
+  const { RoomStore } = await import("../server/store.mjs");
+  const { initialRoom } = await import("../server/bootstrap.mjs");
+  const { callHostedStdioTool } = await import("../server/mcp-full-profile.mjs");
+  const { PERMISSIONS } = await import("../src/events.js");
+  const store = new RoomStore(":memory:");
+  t.after(() => store.close());
+  store.initialize(initialRoom());
+  const keys = { owner: store.issueAccessKey("commons", "owner") };
+  for (const id of ["a1", "a2"]) {
+    store.command(keys.owner, "commons", { id: `join-${id}`, type: "member.added", data: { memberId: id, displayName: id, kind: "agent", permissions: [...PERMISSIONS] } });
+    keys[id] = store.issueAccessKey("commons", id);
+  }
+  const post = (who, messageId, extra = {}) => store.command(keys[who], "commons", { id: `post-${messageId}`, type: "message.posted", data: { messageId, body: messageId, ...extra } });
+  post("owner", "p1"); post("a1", "x1"); post("a2", "x2"); post("a1", "x3");
+  post("a2", "dm", { toMemberId: "owner" });
+  const read = async who => (await callHostedStdioTool(store, keys[who], "room_read_messages", { roomId: "commons", latest: true, limit: 10 })).value.antiLoop;
+  assert.deepEqual(await read("a1"), { lastPersonMessageId: "p1", lastPersonMessageAt: (await read("a1")).lastPersonMessageAt, agentMessagesSincePerson: 3, yoursSincePerson: 2 });
+  assert.equal((await read("a2")).agentMessagesSincePerson, 4, "a2 sees its own DM to the owner");
+  assert.equal((await read("owner")).agentMessagesSincePerson, 4, "the DM's recipient sees it");
+  post("owner", "p2");
+  assert.equal((await read("a1")).agentMessagesSincePerson, 0, "a person post resets it");
+});
