@@ -6,6 +6,7 @@ import { connectSnippets, HOSTED_MCP_URL, WORK_LOOP, renderedSnippet } from "../
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const ORIGIN = "https://room.trydemigod.com";
+export const PASTE_PAGE = Object.freeze({ id: "paste", docsPath: "/docs/agents/paste", htmlFile: "docs/agents/paste.html" });
 
 const escape = text => text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 
@@ -167,6 +168,17 @@ export function agentPages(dir = join(root, "docs", "agents")) {
       steps,
     }));
   }
+  // S1b: the human paste-block page. Same renderer and secret guard as the tool pages.
+  const pasteMd = readFileSync(join(dir, PASTE_PAGE.id + ".md"), "utf8");
+  if (/pri_[A-Za-z0-9_-]{8,}/.test(pasteMd)) throw new Error("paste page contains a secret");
+  if (!indexMd.includes(`(${PASTE_PAGE.id}.md)`)) throw new Error("docs/agents/index.md does not link to the paste page");
+  pages.set(PASTE_PAGE.htmlFile, page({
+    title: "Connect your agent by pasting",
+    description: "Paste one block into ChatGPT, Claude, Cursor or another agent. It joins your room, says hello, and never needs your key.",
+    path: PASTE_PAGE.docsPath,
+    body: renderMarkdown(pasteMd, { labelPrefix: "Paste block" }),
+    steps: sections(pasteMd),
+  }));
   const indexBody = renderMarkdown(indexMd) + "<ul>" + connectSnippets.map(tool => `<li><a href="${tool.docsPath}">${escape(tool.label)}</a> — <code>${escape(tool.command)}</code></li>`).join("") + "</ul>";
   pages.set("docs/agents/index.html", page({
     title: "Connect your agent",

@@ -11,6 +11,7 @@ export const comparisonSlugs = Object.freeze([
 const comparePaths = comparisonSlugs.map(slug => `/compare/${slug}`);
 const agentDocRoutes = Object.freeze([
   ["/docs/agents", "docs/agents/index.html"],
+  ["/docs/agents/paste", "docs/agents/paste.html"],
   ...connectSnippets.map(tool => [tool.docsPath, tool.htmlFile]),
 ]);
 export const reviewedPublicSearchPaths = Object.freeze(["/", "/offers", "/about", ...comparePaths, "/receipts", ...agentDocRoutes.map(([path]) => path)]);

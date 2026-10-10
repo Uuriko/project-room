@@ -112,6 +112,28 @@ const messages = Object.freeze({
   cancelled: "The request was cancelled.",
   service_unavailable: "Could not complete the request. Check the service address and retry."
 });
+// qa1-r1 (2026-10-09): local setup codes are not server errors. Sent through
+// agentErrorAx they came back as "Unknown error 'config_exists' ... this code
+// has no known recovery" with room_check_access as the next step, which an
+// agent with no saved connection cannot run. Each local code names its fix.
+const setupCommand = "node scripts/agent-inbox.mjs";
+const localRecovery = Object.freeze({
+  usage_error: ["Use a documented command; nothing was sent.", [`${setupCommand} --help`]],
+  invalid_config: ["The connection settings are incomplete or malformed; nothing was sent.",
+    ["Copy the private setup again from the room's Add agent dialog and import it into a new directory"]],
+  config_not_found: ["No saved connection at that path; nothing was sent.",
+    ["Set ROOM_AGENT_CONFIG to the directory you imported into",
+      `Or import first: pbpaste | ${setupCommand} import <new private directory>`]],
+  config_not_private: ["The saved connection must be an owner-only directory holding a regular private file, with no links.",
+    ["chmod 700 the directory and chmod 600 its file, or import into a new private directory"]],
+  ambiguous_config: ["Both ROOM_AGENT_CONFIG and ROOM_AGENT_* credentials are set; nothing was sent.",
+    ["Unset ROOM_AGENT_CONFIG or the ROOM_AGENT_ORIGIN/ROOM_AGENT_ROOM/ROOM_AGENT_TOKEN/ROOM_AGENT_MEMBER variables"]],
+  config_exists: ["Import never overwrites, and the existing directory was left untouched.",
+    [`Import into a path that does not exist yet (${setupCommand} import creates it)`,
+      `Or use the saved connection: ROOM_AGENT_CONFIG=<that directory> ${setupCommand} check`]],
+  config_save_failed: ["The new connection was not confirmed saved; nothing existing was replaced.",
+    ["Inspect the new private directory; if it is incomplete, remove it and import again"]]
+});
 export function connectionDiagnostic(error) {
   let code = "service_unavailable";
   if (error instanceof ConnectionError && Object.hasOwn(messages, error.code)) code = error.code;
@@ -126,7 +148,10 @@ export function connectionDiagnostic(error) {
   const httpStatus = error instanceof RoomClientError ? error.status : 0;
   const mapped = code === "access_ended" ? (httpStatus === 403 ? "access_denied" : "unauthenticated") : code === "rate_limited" ? "rate_limited"
     : code === "member_required" ? "member_required" : code;
-  const ax = agentErrorAx({ httpStatus, code: mapped, message: "" });
+  const recovery = Object.hasOwn(localRecovery, code) ? localRecovery[code] : null;
+  const ax = recovery
+    ? { status: "action_required", reason: code, hint: recovery[0], next: recovery[1].map(value => ({ command: value })) }
+    : agentErrorAx({ httpStatus, code: mapped, message: "" });
   return { type: "agent_connection_error", code, message: messages[code],
     status: ax.status, reason: ax.reason, hint: ax.hint, next: ax.next,
     ...(code === "rate_limited" && Number.isSafeInteger(error.retryAfterMs) && error.retryAfterMs >= 0 && error.retryAfterMs <= 300000 ? { retryAfterMs: error.retryAfterMs } : {}) };
