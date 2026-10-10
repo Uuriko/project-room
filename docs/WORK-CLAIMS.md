@@ -44,6 +44,10 @@ woken with reason `assigned`. An unknown or inactive member is **422**
 | `in_progress` | `blocked`, `done`, `claimed` (pause) |
 | `blocked` | `in_progress`, `claimed` |
 | `done` | none (immutable) |
+| `closed` | none (immutable) |
+
+The `close` and `cancel` routes retire open claims to `closed`; they do not
+deliver work. Use the dedicated routes below, not an update to `closed`.
 
 `POST .../update` with `{ "state" }` moves the claim. An illegal move is
 **422** `invalid_claim_input` and names the allowed targets, for example
@@ -70,8 +74,14 @@ labels on the same path do not conflict. The same label does. Overlap is
 `files`, and `leaseExpiresAt`. `advisory: true` still claims and returns
 `fileWarnings`.
 
-`POST .../release` with `{ "reason"? }` (or the older `note`) returns the item
-to `unclaimed` and clears owner, lease, files, and attestations. The holder
+`POST .../release` requires `{ "expectedClaimedAt", "expectedHistoryLength", "reason"?, "note"? }`.
+Read the claim first. Send its `claimedAt` and
+`history.length + (historyOmitted ?? 0)` as the two required fields. Missing
+fields are **422** `invalid_claim_input`; a stale round is **409**
+`work_claim_conflict`. Re-read before deciding whether to release the current
+round. A delayed retry must not release a newer claim.
+
+Release returns the item to `unclaimed` and clears owner, lease, files, and attestations. The holder
 can release their own claim. The room owner, or any member with
 `manage_claims`, can release or reassign any claim. The history entry is
 stamped with the caller, and `reason` is the note. `in_progress` and
@@ -81,6 +91,19 @@ stamped with the caller, and `reason` is the note. `in_progress` and
 keeps the state and names a current active member. Like release, it binds the
 claim round the client read (`expectedClaimedAt` is null for an unclaimed item);
 a stale round is a 409 `work_claim_conflict`. The new owner is woken with reason `assigned`.
+
+## Close or cancel unfinished work
+
+`POST .../close` or `POST .../cancel` accepts `{ "reason"? }` and retires an
+open item to `closed`. The holder, room owner, or a member with `manage_claims`
+can use either route. The member who created an item can also cancel it while
+it is unclaimed. Board write permissions still apply.
+
+Closing clears the owner, lease, files and review records. History records
+the caller, reason and `closed` or `cancelled` action. It does not certify a
+delivery or create a completion receipt. Both `closed` and `done` are terminal;
+another close or cancel is **409** `work_claim_terminal`. Create a new item
+for further work.
 
 ## Renew
 
@@ -95,7 +118,8 @@ is **409** `claim_lease_lapsed`: claim the item again.
 
 ## Caps
 
-Open claims are everything that is not `done`.
+Open claims are `unclaimed`, `claimed`, `in_progress` and `blocked`.
+Neither `done` nor `closed` counts toward the room's open-claim cap.
 
 - Per room, default **1000**. The next create is **409** `work_board_full`.
   Close stale claims (close or cancel) to free a slot. Releasing a claim
