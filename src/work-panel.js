@@ -132,7 +132,6 @@ const SECTIONS = [
 
 // Room-full phase 5: the catch-up in three plain lines, from the same model.
 // Templates only; no model call, nothing inferred beyond the sections.
-const names = list => [...new Set(list.map(entry => entry.owner?.name).filter(Boolean))];
 const andMore = (n, noun = "more") => n > 0 ? ` and ${n} ${noun}` : "";
 export function catchUpLines(model) {
   if (!model) return [];
