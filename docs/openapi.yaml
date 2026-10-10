@@ -9559,6 +9559,164 @@ paths:
         '410': { description: invite_revoked or invite_expired }
         '422': { description: invalid_invite or invalid_invite_name }
         '429': { description: rate_limited }
+  /api/device-codes:
+    post:
+      summary: Issue a device code for human-approved enrollment
+      description: >-
+        HS2 1b device-code connect. Identity-secret auth (the issue IS the
+        holder's consent to enroll this identity, pending a human's approval).
+        Returns a short ABCD-EFGH code (40 bits, unambiguous alphabet, shown
+        once — only its SHA-256 hash is stored) plus an /approve/<code> URL.
+        The agent prints link + code and polls
+        GET /api/device-codes/{code}/status; a human approves on their phone.
+        Codes expire 10 minutes after issue and are single-use: at most 10
+        outstanding per identity. Approval binds the identity into the room
+        under the approver's authority (membership administration grant
+        required) via the identities.link() path.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [identityId, roomId]
+              properties:
+                identityId: { type: string, description: "Your minted identity id (POST /api/agent-identities)." }
+                roomId: { type: string, description: "Room to connect to." }
+                displayName: { type: string, maxLength: 80, description: "Optional. Defaults to the identity display name." }
+                permissions: { type: array, items: { type: string }, description: "Optional. Defaults to [accept_work, complete_work]. The human approver must hold every permission granted." }
+      responses:
+        '201':
+          description: >-
+            Code issued. The response includes the raw code (shown once),
+            the /approve/<code> URL to display to the human, and the expiry.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, approveUrl, identityId, roomId, displayName, permissions, expiresAt]
+                properties:
+                  code: { type: string, description: "ABCD-EFGH code. Shown once; only its hash is stored." }
+                  approveUrl: { type: string, description: "Human-facing approval page URL to display alongside the code." }
+                  identityId: { type: string }
+                  roomId: { type: string }
+                  displayName: { type: string }
+                  permissions: { type: array, items: { type: string } }
+                  expiresAt: { type: integer }
+        '401': { description: unauthenticated }
+        '404': { description: identity_not_found or room_not_found }
+        '409': { description: identity_revoked }
+        '422': { description: invalid_device_code, invalid_permissions or invalid_display_name }
+        '429': { description: too_many_device_codes or rate_limited }
+  /api/device-codes/{code}/status:
+    get:
+      summary: Poll a device code for human approval
+      description: >-
+        The agent's poll endpoint. The code itself is the capability: a wrong
+        code answers 404 device_code_not_found either way (no oracle). Never
+        consumes the code — only approve/deny do. status is one of
+        pending, approved, denied, expired.
+      security: []
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema: { type: string }
+          description: "The ABCD-EFGH code."
+      responses:
+        '200':
+          description: Code status.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, status, identityId, roomId, displayName, permissions, expiresAt]
+                properties:
+                  code: { type: string }
+                  status: { type: string, enum: [pending, approved, denied, expired] }
+                  identityId: { type: string }
+                  roomId: { type: string }
+                  displayName: { type: string }
+                  permissions: { type: array, items: { type: string } }
+                  expiresAt: { type: integer }
+                  approvedAt: { type: integer }
+                  memberId: { type: string }
+        '404': { description: device_code_not_found }
+        '429': { description: rate_limited }
+  /api/device-codes/{code}/approve:
+    post:
+      summary: Approve a device code and bind the identity
+      description: >-
+        Human approval (room-member credential). The approver must hold the
+        membership administration grant; approval binds the identity into the
+        room via the identities.link() path and consumes the code atomically —
+        approval and bind are one step, so a code can never approve without
+        binding or bind twice. A second approve on the same code is 409
+        device_code_consumed; an expired code is 410 device_code_expired.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema: { type: string }
+          description: "The ABCD-EFGH code."
+      responses:
+        '200':
+          description: Approved and bound.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, status, identityId, roomId, memberId, approvedBy, approvedAt]
+                properties:
+                  code: { type: string }
+                  status: { type: string, enum: [approved] }
+                  identityId: { type: string }
+                  roomId: { type: string }
+                  memberId: { type: string }
+                  approvedBy: { type: string }
+                  approvedAt: { type: integer }
+        '403': { description: access_denied }
+        '404': { description: device_code_not_found }
+        '409': { description: device_code_consumed or identity_already_linked }
+        '410': { description: device_code_expired }
+        '429': { description: rate_limited }
+  /api/device-codes/{code}/deny:
+    post:
+      summary: Deny a device code
+      description: >-
+        Human refusal (room-member credential, membership administration grant
+        required). Consumes the code; the identity is never bound.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema: { type: string }
+          description: "The ABCD-EFGH code."
+      responses:
+        '200':
+          description: Denied.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, status, identityId, roomId, deniedBy]
+                properties:
+                  code: { type: string }
+                  status: { type: string, enum: [denied] }
+                  identityId: { type: string }
+                  roomId: { type: string }
+                  deniedBy: { type: string }
+        '403': { description: access_denied }
+        '404': { description: device_code_not_found }
+        '409': { description: device_code_consumed }
+        '410': { description: device_code_expired }
+        '429': { description: rate_limited }
   /api/agent-invites/preview:
     get:
       summary: Preview an agent invite code
