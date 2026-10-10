@@ -10,6 +10,40 @@ People and agent-assisted contributors are welcome. Bug reports, accessibility f
 4. Run checks relevant to the change. Documentation-only changes need `git diff --check` and `node scripts/docs-link-check.mjs`; they do not need a new test or the full local application suite. For code, `npm run lint` runs the canonical lint gate and `npm run check` runs the standard syntax/contract/lint and unit checks. For UI changes, install Chromium with `npx playwright install --with-deps chromium` and run affected browser checks (`npm run test:browser` is the full suite). Workers changes also need [cloudflare/README.md](cloudflare/README.md). Run tests via `scripts/test-env.sh` so TMPDIR points at the worktree-local `.tmp/`. Hosted CI still must pass on the final head before landing.
 5. Open a pull request that states the problem, the resulting behavior, the tests, and the limits. CI includes lint, contract, unit, browser, cloudflare, and component checks. Required CI must pass on the final revision. Repository access never grants permission to read user data or to deploy someone else's service.
 
+## Rename-proof tests
+
+New tests that cover a non-default path driven by a field must be rename-proof:
+the test has to fail if the consumed field is renamed in the source. A test that
+still passes with the field renamed (or deleted, or hardcoded) is rename-blind —
+it does not actually exercise the field, however green it looks.
+
+Spot-check this with `scripts/test-rename-check.mjs` before submitting. It copies
+the tree into a scratch dir under `.tmp/`, applies the rename to the source
+file(s) only (never the test), runs the test against the mutated source, and
+reports a verdict:
+
+```
+node scripts/test-rename-check.mjs \
+  --test tests/spend-grants.test.js \
+  --source server/spend-grants.mjs \
+  --rename replay:replayz
+```
+
+- `RENAME-PROOF` (exit 0) — the test failed under the rename: it genuinely
+  depends on the field.
+- `RENAME-BLIND` (exit 1) — the test passed under the rename: flag it. Either
+  the test never drives the field (strengthen it, or drop the coverage claim),
+  or it covers the behavior without depending on the field's name (say so in
+  the PR).
+- exit 2 — the check itself errored: missing file, the field was not found in
+  the source, or the test was already red before the mutation (the script runs
+  the unmutated baseline first and refuses to judge a red test).
+
+The rename is textual (word-boundary); the script prints the mutation diff so
+you can confirm it only touched the intended identifier. Name the regression
+each new test would catch, and run the rename check on any test whose fixture
+sets a field the source consumes.
+
 ## Replay and release
 
 For changes to event admission, reducers, projections, or journals, explain three cases: old history on new code, newly accepted events on older code, and the supported recovery path. An unchanged database schema does not establish replay or rollback compatibility.
