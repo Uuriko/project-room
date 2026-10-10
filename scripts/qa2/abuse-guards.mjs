@@ -21,6 +21,10 @@ if (!/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin)) {
 const UA = "project-room-qa2-guards/1";
 const client = createQaClient({ origin, userAgent: UA });
 const stamp = Date.now().toString(36);
+// Board cleanup 2026-10-09: the room default is 1000 (DEFAULT_MAX_OPEN_CLAIMS).
+// Filling 1000 over HTTP is slow, so C3 sets this room's cap to 200 through
+// the owner config route first and checks the guard at that cap.
+const DEFAULT_OPEN_CAP = 1000;
 const OPEN_CAP = 200;
 const MEMBER_CAP = 20;
 const ACTIVE = new Set(["claimed", "in_progress", "blocked"]);
@@ -406,6 +410,9 @@ try {
     `holdings ${heldAfterCap}; next claim ${extraClaim.status} ${codeOf(extraClaim)}; extra state ${extraItem.state}`,
   );
 
+  const defaultConfig = must(await req("GET", `${roomPath}/work-claims/config`, owner.secret), "read claim config");
+  if (defaultConfig.maxOpenClaims !== DEFAULT_OPEN_CAP) throw new Error(`default room cap ${defaultConfig.maxOpenClaims}, expected ${DEFAULT_OPEN_CAP}`);
+  must(await req("POST", `${roomPath}/work-claims/config`, owner.secret, { maxOpenClaims: OPEN_CAP }), "set room cap");
   const fillersBudget = 55;
   let made = 0;
   const openBeforeFill = await openCount();

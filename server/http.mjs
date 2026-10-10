@@ -81,7 +81,7 @@ import { getAgentAutonomyTier, setAgentAutonomyTier } from "./autonomy-tiers.mjs
 import { listAgentGrants, getAgentCapabilities, issueAgentGrant, revokeAgentGrant } from "./grants.mjs";
 import { listPins, setPin } from "./pins.mjs";
 // (squad roster handlers moved to server/routes/squads.mjs, batch RT)
-import { currentTypists, typingBeats, typingKey } from "./typing.mjs";
+import { clearBeat, currentTypists, typingBeats, typingKey } from "./typing.mjs";
 import { renderReceiptsHtml, renderReceiptDetailHtml, receiptsListJson, receiptJson, RECEIPTS_PAGE_CSP } from "./receipts-page.mjs";
 import { queryPublicReceipts, publicReceiptById, listPublicReceiptSitemap, PUBLIC_RECEIPT_ID } from "./receipts-live.mjs";
 // --- GR2 public acquisition pages (templates, opt-in room pages, agent directory). ---
@@ -4927,6 +4927,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         try {
           if (typeof command?.type === "string") inboundSpan.setAttribute(ATTR.EVENT_TYPE, command.type);
           const result = store.command(selected.token, roomId, command, fence);
+          if (!result?.duplicate && result?.event?.type === "message.posted") clearBeat(typingBeats, roomId, result.event.actorId);
           const messageId = result?.event?.data?.messageId ?? result?.event?.id;
           if (typeof messageId === "string") inboundSpan.setAttribute(ATTR.MESSAGE_ID, messageId);
           inboundSpan.setAttribute(ATTR.OUTCOME, result?.duplicate ? "duplicate" : "ok");
