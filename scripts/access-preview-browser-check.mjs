@@ -7,7 +7,7 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { enableHumanAdvanced, openSettings, closeSettings } from "./room-chrome.mjs";
+import { enableHumanAdvanced, openSettings, closeSettings, clickChrome } from "./room-chrome.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 import { signInFixtureInPlace } from "./in-place-fixture-signin.mjs";
 import { AccessRequests } from "../server/access-requests.mjs";
@@ -37,6 +37,57 @@ async function setup(t, { pending = 0, width = 1440 } = {}) {
   const send = (type, data) => f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type, data });
   return { ...f, page, errors, send, access, addRequest };
 }
+
+for (const width of [1440, 390]) test(`request access at ${width}px: retry leaves a visible confirmation after hiding the form`, { timeout: 60000 }, async t => {
+  const f = await setup(t, { width }), { page } = f;
+  const origin = new URL(page.url()).origin;
+  f.store.createAccount("request-applicant");
+  f.store.completeOnboarding("request-applicant");
+  await page.goto(`${origin}/?account=1`);
+  await signInFixture(page, f.store.issueAccountAccessKey("request-applicant"));
+  await clickChrome(page, "#nav-rooms");
+  const disclosure = page.locator("#account-request-access > summary");
+  await disclosure.click();
+  await page.locator("#account-request-room").fill(`${origin}/?room=commons`);
+  await page.locator("#account-request-name").fill("Confirmation applicant");
+  const form = page.locator("#account-request-form"), status = page.locator("#account-request-status");
+  const submit = page.locator("#account-request-submit"), submissions = [];
+  let release, reached;
+  const held = new Promise(resolve => { release = resolve; });
+  const received = new Promise(resolve => { reached = resolve; });
+  t.after(() => release());
+  await page.route("**/api/access-requests", async route => {
+    assert.equal(route.request().method(), "POST");
+    submissions.push(route.request().postDataJSON());
+    if (submissions.length === 1) return route.fulfill({ status: 503, json: { error: { code: "unavailable", message: "Try again shortly." } } });
+    const response = await route.fetch();
+    assert.equal(response.ok(), true, `the local server accepted the retry (HTTP ${response.status()}): ${await response.text()}`);
+    reached(); await held;
+    return route.fulfill({ response });
+  });
+  await submit.click();
+  await page.waitForFunction(() => document.querySelector("#account-request-status").classList.contains("error"));
+  assert.equal(await status.isVisible(), true);
+  assert.equal(await form.isVisible(), true);
+  assert.equal(await submit.isEnabled(), true);
+  await submit.click(); await received;
+  assert.equal(await submit.isDisabled(), true);
+  assert.equal(await status.isVisible(), true);
+  assert.match(await status.textContent(), /Sending your request/);
+  release();
+  await form.waitFor({ state: "hidden" });
+  await status.waitFor({ state: "visible" });
+  assert.equal(await status.getAttribute("role"), "status");
+  assert.ok((await status.textContent()).includes("commons"));
+  assert.ok((await status.textContent()).includes(submissions[1].requestId));
+  assert.equal(submissions[0].identityId, submissions[1].identityId, "retry reuses the same identity");
+  assert.equal(f.access.list(f.keys.owner, "commons").length, 1, "one request reached the owner");
+  await disclosure.click(); await status.waitFor({ state: "hidden" });
+  await disclosure.click(); await status.waitFor({ state: "visible" });
+  assert.equal(await form.isVisible(), false, "reopening keeps the submitted form closed");
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
+  assert.deepEqual(f.errors, []);
+});
 
 test("access preview: a work card shows exactly what an agent can read before a run, and opening it starts nothing", { timeout: 60000 }, async t => {
   const f = await setup(t), { page, send } = f;
