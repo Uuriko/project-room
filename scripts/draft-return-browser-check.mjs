@@ -120,6 +120,7 @@ test("confirmed draft with failed snapshot remains saved, then becomes findable 
   await page.getByText("Draft posted. Refresh to view it. Work status is unchanged.", { exact: true }).waitFor();
   assert.equal(f.snapshot().state.messages.filter(message => message.proposal).length, 1);
   assert.equal(await f.card.getByRole("link", { name: "View latest draft", exact: true }).count(), 0);
+  await page.locator("#session-menu-button").click();
   failSnapshot = false; await clickChrome(page, "#refresh-button");
   await f.card.getByRole("link", { name: "View latest draft", exact: true }).click();
   await page.waitForFunction(id => document.activeElement?.dataset.messageRecordId === id, command.data.messageId);
