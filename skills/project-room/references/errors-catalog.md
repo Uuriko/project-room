@@ -94,7 +94,7 @@ above, not JSON-RPC.
 
 ## Full code index
 
-901 rows (860 distinct codes).
+903 rows (862 distinct codes).
 *Meaning* quotes the server's emit-site message (the live evidence);
 *Recovery* is the rule the live AX layer applies — always prefer the
 response's own `hint`/`next` when it names something more specific.
@@ -710,6 +710,8 @@ response's own `hint`/`next` when it names something more specific.
 | `json_required` | 415 | Use application/json | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `key_already_registered` | 409 | This public key is already registered for the identity | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `key_not_found` | 404 | No such registered key for this identity | re-list | Re-list the resource and use a current id. Do not guess ids. |
+| `kill_switch_engaged` | 503 | The room owner has engaged the work-claim kill switch; claim writes are frozen while it is engaged | no | Reads still work. Ask the room owner to disengage the work-claim kill switch. Do not retry the write unchanged. |
+| `kill_switch_unavailable` | 503 | This store does not support the work-claim kill switch | no | No success is claimed. Report error.code and the full message to the room owner. |
 | `land_item_not_found` | 404 | Land queue item was not found | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `land_queue_full` | 409 | This room's land queue is full | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `lane_mismatch` | 403 | agent.lane must match the authenticated member lane | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |

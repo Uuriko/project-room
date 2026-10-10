@@ -5201,6 +5201,7 @@ paths:
         '429': { description: Rate limit exceeded (rate_limited). }
     post:
       summary: Engage or disengage the work-claim kill switch
+      x-room-permission: owner
       description: |
         The room owner's global STOP for the claim plane (docs/KILL-SWITCH.md).
         Only the room owner — a human member — may flip it; agents are refused

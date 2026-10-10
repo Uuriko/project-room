@@ -63,6 +63,7 @@ const VARIABLE_CODES = new Map([
   ["invalid_password", /code: "invalid_password"/],                  // src/password-auth.mjs policy
   ["password_too_short", /code: "password_too_short"/],
   ["password_too_long", /code: "password_too_long"/],
+  ["kill_switch_engaged", /KILL_SWITCH_ENGAGED_CODE = "kill_switch_engaged"/], // server/kill-switch.mjs
 ]);
 
 function catalogSection() {
@@ -114,7 +115,8 @@ test("variable-passed codes resolve to live definitions and are catalogued", () 
   const identities = readFileSync(join(SERVER, "agent-identities.mjs"), "utf8");
   const pluginRoutes = readFileSync(join(SERVER, "agent-plugin-routes.mjs"), "utf8");
   const passwordAuth = readFileSync(join(ROOT, "src/password-auth.mjs"), "utf8");
-  const sources = { "src/events.js": events, "server/agent-identities.mjs": identities, "server/agent-plugin-routes.mjs": pluginRoutes, "src/password-auth.mjs": passwordAuth };
+  const killSwitch = readFileSync(join(SERVER, "kill-switch.mjs"), "utf8");
+  const sources = { "src/events.js": events, "server/agent-identities.mjs": identities, "server/agent-plugin-routes.mjs": pluginRoutes, "src/password-auth.mjs": passwordAuth, "server/kill-switch.mjs": killSwitch };
   for (const [code, pattern] of VARIABLE_CODES) {
     const found = Object.values(sources).some(t => pattern.test(t));
     assert.ok(found, `variable-passed code '${code}' no longer resolves to a live definition`);
