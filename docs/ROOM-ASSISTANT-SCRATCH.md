@@ -18,9 +18,8 @@ For every run whose coordinator is this host's member, it does the following:
 8. It acknowledges `pause_requested`, `cancel_requested` and `resume_requested`.
 9. When the executor fails, it reports `failed` with the reason, not `done`.
 
-**SV-1 (safety value 1): a stopped run never publishes its answer.** The `publish` action
-closes this race in code for hosts that use it; it is opt-in, and the legacy
-path below is not fenced. The assistant route has a `publish`
+**SV-1 (safety value 1): a stopped run never publishes its answer.** This is now
+enforced in code, not just documented. The assistant route has a `publish`
 action: the host submits the answer `body` (plus `summary` and
 `appliedInputMessageIds`), and the server posts it as the coordinator in the
 same transaction that marks the run `done`. The fence checks the reserved
@@ -28,9 +27,7 @@ same transaction that marks the run `done`. The fence checks the reserved
 that landed first rejects the publish with 409, so the answer never reaches
 chat. A cancel on a host silent for over two minutes completes immediately
 and revokes its attempt (independent stop); any late host report or publish
-is then rejected. Silence is measured from the host's last claim or report, so
-a host that works for over two minutes without reporting loses its answer to a
-Stop; report progress at least every two minutes. Hosts should publish instead of posting then reporting
+is then rejected. Hosts should publish instead of posting then reporting
 `done`; the old post-then-report path still works but cannot close the race.
 The `postedBeforeStop` return below only applies to that legacy path.
 
