@@ -1,8 +1,11 @@
 name: deploy-drift
 
-# Reports when production's public /api/version lags main. Public endpoints
-# only: no tokens, no deploy. A red run is the report. This is not a pull
-# request check and does not block main.
+# Reports when production's public /api/version lags main, then runs the
+# zero-dependency Zero-Bug phase-2 smoke (scripts/smoke-prod.mjs: landing
+# page, claims-board read, priced-tool refusal, deployed-revision pin, DO
+# readiness) so that smoke actually runs on a schedule instead of living
+# only as a script. Public endpoints only: no tokens, no deploy. A red run
+# is the report. This is not a pull request check and does not block main.
 on:
   schedule:
     - cron: "23 * * * *"
@@ -51,6 +54,24 @@ jobs:
             echo
             echo '```json'
             cat "$RUNNER_TEMP/drift.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$code"
+      - name: Zero-bug production smoke
+        # Independent signal from the drift check: a drifted-but-healthy prod
+        # still deserves the smoke verdict, so this runs even when the drift
+        # step fails. Zero dependencies — no npm ci needed in this job.
+        if: always()
+        run: |
+          set +e
+          set -o pipefail
+          node scripts/smoke-prod.mjs --json | tee "$RUNNER_TEMP/smoke-prod.json"
+          code=$?
+          {
+            echo "## Zero-bug smoke"
+            echo
+            echo '```json'
+            cat "$RUNNER_TEMP/smoke-prod.json"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$code"
