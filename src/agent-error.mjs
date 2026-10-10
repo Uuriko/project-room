@@ -91,7 +91,8 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [path("/api/guest-agent-links"), command("Ask the owner to mint a guest invite or Add agent")]
     };
   }
-  // https://www.getdasha.com (or that host plus /room) is the browser door.
+  // This mapper has no deployment origin. Use the configured service origin,
+  // not a production hostname that fails on self-hosts or staging.
   // A route that requires Origin must not be told to omit the header.
   if (reasonCode === "origin_denied") {
     const required = /Origin header is required/.test(String(message || ""));
@@ -99,11 +100,11 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       status: "action_required",
       reason: "origin_denied",
       hint: required
-        ? "Send Origin: https://room.trydemigod.com. This route does not accept a missing or different Origin header."
-        : "Use Origin: https://room.trydemigod.com or omit the Origin header.",
+        ? "Send the configured service Origin. This route requires an allowed Origin header."
+        : "Use the configured service Origin or omit the Origin header.",
       next: [command(required
-        ? "Retry with Origin: https://room.trydemigod.com. Do not omit the Origin header."
-        : "Retry with Origin: https://room.trydemigod.com or omit the Origin header")]
+        ? "Check the configured service Origin with the operator, then retry with that Origin header. Do not omit the Origin header."
+        : "Check the configured service Origin with the operator, then retry with that Origin header or omit the Origin header")]
     };
   }
   // A room-DM refusal is about the recipient's consent, not the caller's access.

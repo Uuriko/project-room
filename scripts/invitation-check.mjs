@@ -80,7 +80,10 @@ async function fixture(t) {
   });
 
   let mailer;
-  const deliveryProxy = { isConfigured: () => mailer.isConfigured(), sendMagicLink: payload => mailer.sendMagicLink(payload) };
+  // createRoomServer asks isConfigured() while it is built (#2463), before the
+  // mailer below exists. This fixture always installs a configured synthetic
+  // sender right after bind, so "configured" is the truthful answer now.
+  const deliveryProxy = { isConfigured: () => true, sendMagicLink: payload => mailer.sendMagicLink(payload) };
   const server = createRoomServer({ store, streamInterval: 30, magicLinkMailer: deliveryProxy });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;

@@ -314,7 +314,8 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
         if (passwordMode === "signup") {
           // Signup also rotates the account cookie. Reconcile an uncertain
           // result and ignore obsolete replies just as password login does.
-          const reply = await mutationApi(session, "/api/auth/password/signup", { email: passwordEmail, password: fields.password, sessionRevision: session.sessionRevision },
+          const returnTo = onMagicLinkRequest?.();
+          const reply = await mutationApi(session, "/api/auth/password/signup", { email: passwordEmail, password: fields.password, sessionRevision: session.sessionRevision, ...(returnTo ? { returnTo } : {}) },
             reply => {
               if (reply?.status !== "check_email" || typeof reply.mailConfigured !== "boolean") throw new Error(uiText("signin.copy.025"));
               return true;

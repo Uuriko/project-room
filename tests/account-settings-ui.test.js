@@ -99,12 +99,21 @@ test("settingsHtml shows linked methods with actions and honest provider states"
 });
 
 test("settingsHtml offers password set when none exists and recovery generation", () => {
-  const html = settingsHtml({ methods: [], providers: null });
-  assert.ok(html.includes("No sign-in methods are linked yet."));
-  assert.ok(html.includes("No email on this account yet. Add a sign-in method under Advanced."));
+  const html = settingsHtml({ methods: [{ id: "m1", type: "magic", label: "Email link", email: "a@b.c", disabled: false }], providers: null });
   assert.ok(html.includes("data-form=\"password-set\""));
   assert.ok(html.includes("Generate recovery codes"));
   assert.ok(html.includes("GitHub sign-in isn\u2019t configured on this Room."));
+});
+
+test("an account with no email or password (a guest) is offered Keep this account, not a dead-end Set a password", () => {
+  const html = settingsHtml({ methods: [], providers: null });
+  assert.ok(html.includes("No sign-in methods are linked yet."));
+  assert.ok(html.includes('data-form="guest-upgrade"'), "Profile offers the guest upgrade");
+  assert.ok(html.includes("Add your email to keep this account"));
+  assert.ok(!html.includes('data-form="password-set"'), "no Set a password that needs an email the guest can't add");
+  const pending = settingsHtml({ methods: [], providers: null, pendingEmail: "g@<x>.c" });
+  assert.ok(pending.includes('data-form="guest-upgrade-confirm"'));
+  assert.ok(pending.includes("g@&lt;x&gt;.c") && !pending.includes("g@<x>.c"), "the pending email is escaped");
 });
 
 test("storeTheme paints light or dark and remembers the choice", () => {

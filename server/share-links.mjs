@@ -274,7 +274,7 @@ export class ShareLinks {
       return { links: this.db.prepare("SELECT * FROM share_links WHERE room_id=? ORDER BY created_at DESC,id DESC").all(roomId).map(row => this.view(row)) };
     });
   }
-  create(token, roomId, details, binding) {
+  create(token, roomId, details, binding, { emailVerificationUnachievable = false } = {}) {
     const { requestId, linkToken, expiresAt, maxJoins, expectedMemberRevision, access = "guest" } = details;
     if (!LINK_ACCESS.includes(access)) fail(422, "invalid_link_access", "Choose guest, member or co_admin access");
     if (!validId(requestId) || typeof linkToken !== "string" || !tokenPattern.test(linkToken)
@@ -289,7 +289,11 @@ export class ShareLinks {
       // issue) refuse unverified accounts, and share links are invitations
       // too. Accountless issuers (owner on an identity bearer, delegated
       // admin agents) have no account to verify and are unaffected.
-      if (auth.account) this.store.accountLogins.assertEmailVerified(auth.account.id);
+      // Skipped only when the deployment cannot deliver a verification code
+      // (no mailer): the gate would otherwise deadlock link creation forever,
+      // as agent-invites.create already avoids. The HTTP layer derives the
+      // flag from the mailer, never from the request.
+      if (auth.account && !emailVerificationUnachievable) this.store.accountLogins.assertEmailVerified(auth.account.id);
       // Creating share links is a membership write: the read-only autonomy
       // tier applies even for delegated-admin agents (issue #996).
       enforceAutonomyTierForAction({ db: this.store.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "share_link_create", fail });
@@ -346,7 +350,7 @@ export class ShareLinks {
     // personal link (the board still loads, as for a member without invite
     // rights). Without this the Invite dialog handed out a working guest
     // link while "Create invite link" answered 403 email_unverified.
-    if (auth.account && this.store.accountLogins.emailStatus(auth.account.id) === "unverified") return null;
+    if (auth.account && this.store.accountLogins.emailGateBlocks(auth.account.id)) return null;
     const memberId = auth.member.id;
     const rows = auth.account
       ? this.db.prepare("SELECT * FROM share_links WHERE room_id=? AND issuer_account_id=? AND issuer_member_id=? AND request_id LIKE ? ORDER BY created_at DESC, id DESC")

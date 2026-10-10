@@ -168,3 +168,66 @@ test("telegramLiveView carries the budget on the connection card only when provi
     sendBudget: { remaining: 0, resetsAtMs: null } });
   assert.deepEqual(exhausted.sendBudget, { remaining: 0, resetsAt: null });
 });
+
+// ---- fixwave C2: S-budgetKey, S-validateScope, S-channel-send-budgets-lru ---
+
+test("S-budgetKey: empty-string connectionId normalizes to the \"direct\" scope", () => {
+  const budgets = createSendBudgetRegistry({});
+  const empty = budgets.budgetKey(scope({ connectionId: "" }));
+  assert.equal(empty, "telegram:acct-1:direct");
+  assert.equal(empty, budgets.budgetKey(scope({ connectionId: null })), '"" and null share one budget');
+  assert.equal(empty, budgets.budgetKey(scope({ connectionId: undefined })), '"" and undefined share one budget');
+  assert.equal(budgets.budgetKey(scope({ connectionId: "conn-9" })), "telegram:acct-1:conn-9",
+    "a real connection id still gets its own budget");
+});
+
+test("S-validateScope: a bad scope is a 400 caller error, keeping code and message", () => {
+  const budgets = createSendBudgetRegistry({});
+  throwsServiceError(() => budgets.check({ channel: "", accountId: "acct-1" }), 400, "invalid_send_budget_scope");
+  throwsServiceError(() => budgets.check(null), 400, "invalid_send_budget_scope");
+  throwsServiceError(() => budgets.check({ channel: "telegram" }), 400, "invalid_send_budget_scope");
+  assert.throws(() => budgets.check({}), error => {
+    assert.equal(error.message, "Send-budget scope must name a channel and account.");
+    return true;
+  });
+});
+
+test("S-lru: an evicted scope resumes its consumed burst instead of a silent refill", () => {
+  const clock = fakeClock();
+  const budgets = createSendBudgetRegistry({
+    env: { TELEGRAM_SEND_BUDGET_PER_MIN: "60", TELEGRAM_SEND_BUDGET_BURST: "2" },
+    now: clock.now,
+    cacheSize: 2,
+  });
+  const a = scope({ connectionId: "a" });
+  const b = scope({ connectionId: "b" });
+  const c = scope({ connectionId: "c" });
+  budgets.check(a); budgets.check(a);
+  assert.throws(() => budgets.check(a), error => error.code === "send_budget_exhausted");
+  budgets.check(b); budgets.check(b); // cache: [A, B]
+  budgets.check(c); budgets.check(c); // C created; A evicted
+  assert.equal(budgets.size(), 2);
+  // No time has passed: A must come back exhausted, not with a fresh burst.
+  assert.throws(() => budgets.check(a), error => {
+    assert.equal(error.code, "send_budget_exhausted");
+    return true;
+  }, "evicted scope keeps its consumed burst");
+  // After a full refill window the scope recovers honestly.
+  clock.advance(120_000);
+  assert.ok(budgets.check(a).remaining >= 0, "refill over time still works");
+});
+
+test("S-lru: a config change still starts a scope fresh (no stale burst carried over)", () => {
+  const clock = fakeClock();
+  const env = { TELEGRAM_SEND_BUDGET_PER_MIN: "60", TELEGRAM_SEND_BUDGET_BURST: "1" };
+  const first = createSendBudgetRegistry({ env, now: clock.now, cacheSize: 1 });
+  const s = scope({ connectionId: "a" });
+  first.check(s);
+  assert.throws(() => first.check(s), error => error.code === "send_budget_exhausted");
+  // A new registry with a bigger burst is a config change: fresh budget.
+  const second = createSendBudgetRegistry({
+    env: { TELEGRAM_SEND_BUDGET_PER_MIN: "60", TELEGRAM_SEND_BUDGET_BURST: "5" },
+    now: clock.now, cacheSize: 1,
+  });
+  assert.equal(second.check(s).remaining, 4);
+});

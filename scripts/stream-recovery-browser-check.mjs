@@ -246,11 +246,18 @@ test("a new message refreshes a busy room with the recent window, an old edit wi
   await page.waitForFunction(() => document.querySelector("#connection-status").textContent.startsWith("Connected"));
   await page.locator(`[data-message-record-id="${ids.at(-1)}"]`).waitFor({ state: "visible" });
   const rendered = () => page.locator("[data-message-record-id]").evaluateAll(nodes => nodes.map(node => node.dataset.messageRecordId));
-  const before = await rendered();
-  // Opening reads in full once; the stream's own open re-reads only the window.
+  // Opening reads only the newest window; a quiet background full read then fills in the rest.
+  // Convergence is proven by the oldest message appearing and every history id being on screen.
+  assert.equal(reads[0]?.search, "?messages=recent", "opening reads the recent window first");
+  assert.equal(reads[0].messages, 100, "the first read carries only the newest window");
+  await page.locator(`[data-message-record-id="${ids[0]}"]`).waitFor({ state: "attached" });
   await page.waitForFunction(() => document.querySelector("#connection-status").textContent.startsWith("Connected"));
-  assert.equal(reads[0]?.search, "", "opening reads the full snapshot");
-  assert.ok(reads.slice(1).every(read => read.search === "?messages=recent"), JSON.stringify(reads));
+  const before = await rendered();
+  for (const id of ids) assert.ok(before.includes(id), `history message ${id} converged after the background fill`);
+  const fills = reads.filter(read => read.search === "");
+  assert.equal(fills.length, 1, "exactly one background full read: " + JSON.stringify(reads));
+  assert.ok(fills[0].messages >= ids.length, "the fill carries the whole history");
+  assert.ok(reads.filter(read => read.search !== "").every(read => read.search === "?messages=recent"), JSON.stringify(reads));
 
   const opened = reads.length;
   const arrival = post(f.keys.producer, "a new arrival");

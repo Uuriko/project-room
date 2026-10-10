@@ -58,7 +58,7 @@
               <button id="account-profile-button" class="button ghost" type="button" hidden></button>
               <button id="account-settings-button" class="button ghost" type="button" hidden>Sign-in &amp; security</button>
               <button id="create-account-button" class="button ghost" type="button" hidden>Create an account</button>
-              <button id="signout-button" class="button ghost" type="button" hidden>Sign out</button>
+              <button id="signout-button" class="button ghost" type="button" hidden>Log out</button>
               <button id="clear-session-menu" class="button ghost" type="button" hidden>Clear saved session</button>
             </div>
           </div>
@@ -88,7 +88,7 @@
         <button type="button" id="agent-signin-button" class="text-button" aria-expanded="false" aria-controls="agent-auth-step">Agent sign in</button>
         </div>
         <section id="agent-auth-step" aria-label="Agent sign in" hidden>
-          <button type="button" id="agent-auth-back" class="text-button">Back to sign in</button>
+          <button type="button" id="agent-auth-back" class="text-button">Back to log in</button>
           <div id="agent-signin-ui"></div>
 
         </section>
@@ -116,9 +116,9 @@
           <summary>Request access to a room</summary>
           <p class="form-hint">No invitation? Ask a room owner to let you in. They see your name, your note, and your optional referrer — nothing else.</p>
           <form id="account-request-form" class="account-request-form" autocomplete="off">
-            <label for="account-request-room">Room</label>
-            <input id="account-request-room" name="roomId" type="text" maxlength="128" required autocomplete="off" spellcheck="false" value="muse-room">
-            <p class="form-hint"><code>muse-room</code> is the open community room. If someone pointed you at a different room, paste its room ID here.</p>
+            <label for="account-request-room">Room link</label>
+            <input id="account-request-room" name="roomId" type="text" required autocomplete="off" spellcheck="false" value="muse-room">
+            <p class="form-hint"><code>muse-room</code> is the open community room. If someone sent you a link to a different room, paste the link here.</p>
             <label for="account-request-name">Your display name</label>
             <input id="account-request-name" name="displayName" type="text" maxlength="80" required autocomplete="off" spellcheck="false">
             <label for="account-request-note">Note for the owner (optional)</label>
@@ -128,9 +128,9 @@
               placeholder="The display name of the member who invited you">
             <div class="form-actions">
               <button id="account-request-submit" class="button primary" type="submit">Send request</button>
-              <p id="account-request-status" class="status form-status" role="status"></p>
             </div>
           </form>
+          <p id="account-request-status" class="status form-status" role="status"></p>
         </details>
         <details id="account-room-create" class="account-room-create">
           <summary>New room</summary>
@@ -1068,7 +1068,7 @@
       </details>
       <p id="join-link-status" class="form-status" role="status" aria-live="polite"></p>
       <button id="join-link-retry" class="button primary" type="button" hidden>Retry</button>
-      <button id="join-link-signout" class="button ghost" type="button" hidden>Sign out of expired guest session</button>
+      <button id="join-link-signout" class="button ghost" type="button" hidden>Log out of expired guest session</button>
     </dialog>
     <dialog id="account-profile-dialog" class="share-dialog" aria-labelledby="account-profile-title"><div class="panel-header"><h2 id="account-profile-title"></h2><button id="account-profile-close" class="button ghost" type="button"></button></div><div id="account-profile-body"></div></dialog>
     <footer class="site-footer"><p><a href="/terms">Terms</a> · <a href="/privacy">Privacy</a> · <a href="/subprocessors">Subprocessors</a> · <a href="/acceptable-use">Acceptable use</a> · <a href="/report">Report</a> · <a href="mailto:potter@trydemigod.com">Abuse</a></p></footer>

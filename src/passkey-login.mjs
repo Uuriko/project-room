@@ -120,8 +120,11 @@ export function isChallengeFresh(record, { now = Date.now() } = {}) {
 }
 
 const normalizeUserId = id => {
-  if (typeof id === "string") return base64urlEncode(Buffer.from(id, "utf8"));
-  return base64urlEncode(toBuffer(id));
+  const bytes = typeof id === "string" ? Buffer.from(id, "utf8") : toBuffer(id);
+  // WebAuthn: user.id is 1 to 64 bytes. Browsers reject anything longer with a
+  // TypeError, so refuse it here with a clear error instead of at create().
+  if (bytes.length < 1 || bytes.length > 64) throw new TypeError("user.id must be 1 to 64 bytes");
+  return base64urlEncode(bytes);
 };
 
 function assertRpId(rpId) {

@@ -1,8 +1,9 @@
 import { enforceAutonomyTierForAction } from './autonomy-tiers.mjs';
-import { validId, messageChannelId } from '../src/events.js';
+import { validId, messageChannelId, MAX_MESSAGE_BODY_CHARS } from '../src/events.js';
 import { conversationIndex } from '../src/conversation.js';
 import { isGuestAgentMemberId } from './guest-agent-links.mjs';
 import { historyFloor, messageInHistory, messageVisibleToViewer } from './history-visibility.mjs';
+import { createHash } from 'node:crypto';
 
 // Coordination records reserve one publisher. A host claim is an observation,
 // not a hosted execution service, and never grants that host additional rights.
@@ -12,12 +13,19 @@ CREATE TABLE IF NOT EXISTS room_assistant_runs (room_id TEXT NOT NULL, run_id TE
 CREATE TABLE IF NOT EXISTS room_assistant_ops (room_id TEXT NOT NULL, actor_id TEXT NOT NULL, request_id TEXT NOT NULL, input TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(room_id,actor_id,request_id));`;
 const fail = (code, message, status = 409) => { throw Object.assign(new Error(message), { code, status }); };
 const terminal = new Set(['done', 'cancelled', 'failed']);
+// A host that has not reported within this window is treated as silent: the
+// run reads stalled/unknown, and a stop completes without its acknowledgment.
+const hostStaleAfterMs = 120000;
 const keys = {
   configure: ['name', 'coordinatorMemberId', 'expectedRevision'], invoke: ['runId', 'sourceMessageId'],
   contribute: ['runId', 'sourceMessageId', 'expectedRevision', 'conflict'],
   resolve: ['runId', 'sourceMessageId', 'expectedRevision'],
   claim: ['runId', 'attemptId', 'expectedRevision'],
   report: ['runId', 'attemptId', 'expectedRevision', 'state', 'summary', 'resultMessageId', 'appliedInputMessageIds'],
+  // publish is the SV-1 fence: the server posts the run's answer in the same
+  // transaction that completes the run, so a stop that landed first rejects
+  // the publish and a stopped run can never leave its answer in chat.
+  publish: ['runId', 'attemptId', 'expectedRevision', 'summary', 'body', 'appliedInputMessageIds'],
   resume: ['runId', 'expectedRevision'], pause: ['runId', 'expectedRevision'], cancel: ['runId', 'expectedRevision']
 };
 // Deleted prompts retain only a stop handle for their existing controllers.
@@ -60,7 +68,10 @@ export class RoomAssistant {
       return { contractVersion: 1, roomId, assistant: { ...config, availability: !coordinator?.active || !coordinator.permissions.includes('accept_work') ? 'not_connected' : recent ? 'connected' : 'awaiting_host' }, runs };
     });
   }
-  apply(roomId, input, authorize) {
+  // postToken is the host's own credential, threaded from the route or MCP
+  // dispatch. publish is the only action that needs it: the server posts the
+  // run's answer as the coordinator inside the run transaction (SV-1 fence).
+  apply(roomId, input, authorize, postToken = null) {
     if (!input || Array.isArray(input) || !Object.hasOwn(keys, input.action) || !validId(input.requestId)
       || Object.keys(input).some(key => !['action', 'requestId', ...keys[input.action]].includes(key)))
       fail('invalid_assistant_action', 'Choose an assistant action and stable request ID', 422);
@@ -167,15 +178,62 @@ export class RoomAssistant {
             run.status = run.attemptId ? 'resume_requested' : 'queued';
           } else if (['pause', 'cancel'].includes(input.action)) {
             if (!isHuman || (!isOwner && actor.id !== run.initiatorId)) fail('assistant_denied', 'The requester or owner controls this request', 403);
-            run.status = run.attemptId ? input.action === 'pause' ? 'pause_requested' : 'cancel_requested' : input.action === 'pause' ? 'paused' : 'cancelled';
+            if (input.action === 'cancel' && run.attemptId
+              && (!Number.isFinite(run.hostReportedAt) || this.store.now() - run.hostReportedAt > hostStaleAfterMs)) {
+              // Independent stop: the host has gone silent, so no acknowledgment
+              // will come. The stop completes immediately and revokes the
+              // attempt; any late host report or publish is rejected by the
+              // SV-1 fence, so a stopped run can never publish afterwards.
+              run.status = 'cancelled';
+              run.attemptId = null;
+              run.activity.push({ at: this.store.now(), memberId: actor.id, kind: 'stopped', summary: 'Stopped; the host had gone silent and its attempt was revoked.' });
+              run.activity = run.activity.slice(-100);
+            } else {
+              run.status = run.attemptId ? input.action === 'pause' ? 'pause_requested' : 'cancel_requested' : input.action === 'pause' ? 'paused' : 'cancelled';
+            }
           } else {
             if (actor.kind !== 'agent' || actor.id !== run.coordinatorMemberId
               || !actor.permissions.includes('accept_work')
               || actor.id !== config.coordinatorMemberId && !(input.action === 'report' && ['paused', 'cancelled', 'failed'].includes(input.state))) fail('assistant_denied', 'Only the configured authorized coordinator reports its host', 403);
             enforceAutonomyTierForAction({ db: this.store.db, roomId, state, actor, action: 'coordinate the shared assistant' });
-            if ((input.action === 'claim' || input.state === 'working') && this.store.wakeQueue.pauseStatus(roomId, actor.id)) fail('assistant_host_paused', 'This coordinator is paused');
+            if ((input.action === 'claim' || input.action === 'publish' || input.state === 'working') && this.store.wakeQueue.pauseStatus(roomId, actor.id)) fail('assistant_host_paused', 'This coordinator is paused');
             if (!validId(input.attemptId)) fail('invalid_assistant_action', 'Choose a stable execution attempt', 422);
-            if (input.action === 'claim') {
+            if (input.action === 'publish') {
+              // SV-1 publish fence, enforced in code: the server posts the
+              // run's answer in the same transaction that completes the run.
+              // The fence checks the reserved attempt, the run revision and
+              // that no stop is pending; a stop that landed first rejects the
+              // publish, so a stopped run never leaves its answer in chat.
+              // Hosts must publish instead of posting then reporting done.
+              if (run.attemptId !== input.attemptId) fail('assistant_run_owned', 'Only the reserved host attempt may publish', 409);
+              if (terminal.has(run.status)) fail('assistant_run_closed', 'This request has finished');
+              if (run.status !== 'working') fail('assistant_stop_pending', 'A stop or scope decision must be acknowledged before publishing', 409);
+              if (typeof input.summary !== 'string' || !input.summary.trim() || input.summary.length > 2000)
+                fail('invalid_assistant_report', 'Report a short public activity summary', 422);
+              if (typeof input.body !== 'string' || !input.body.trim() || input.body.length > MAX_MESSAGE_BODY_CHARS)
+                fail('invalid_assistant_publish', 'Publish a non-empty answer within the message body limit', 422);
+              if (!postToken) fail('invalid_assistant_publish', 'Publish requires the host credential', 422);
+              if (input.appliedInputMessageIds !== undefined) {
+                if (!Array.isArray(input.appliedInputMessageIds) || input.appliedInputMessageIds.length > 100
+                  || input.appliedInputMessageIds.some(id => !run.inputs.some(entry => entry.sourceMessageId === id)))
+                  fail('invalid_assistant_report', 'Applied inputs must name existing shared contributions', 422);
+                for (const entry of run.inputs) if (input.appliedInputMessageIds.includes(entry.sourceMessageId)) entry.status = 'applied';
+              }
+              if (run.inputs.some(entry => entry.status !== 'applied'))
+                fail('assistant_inputs_pending', 'Read and account for every shared contribution before publishing', 409);
+              // Deterministic ids keep a retried publish idempotent at the
+              // command layer as well; the ops record above replays the receipt.
+              const stamp = createHash('sha256').update(`assistant-publish:${input.requestId}`).digest('hex').slice(0, 32);
+              const messageId = `assistant-publish-${stamp}`;
+              this.store.command(postToken, roomId, { id: `assistant-publish-cmd-${stamp}`, type: 'message.posted',
+                data: { messageId, body: input.body, replyToId: run.sourceMessageId,
+                  ...(opening?.channelId ? { channelId: opening.channelId } : {}) } });
+              run.resultMessageId = messageId;
+              run.hostReportedAt = this.store.now();
+              run.status = 'done';
+              run.activity.push({ at: this.store.now(), memberId: actor.id, kind: 'published', summary: input.summary.trim(), state: 'done' });
+              run.activity = run.activity.slice(-100);
+            } else if (input.action === 'claim') {
               if (run.attemptId) fail('assistant_run_owned', 'This request already has an execution owner; reconcile that attempt');
               if (run.status !== 'queued') fail('assistant_not_queued', 'Resolve or resume the request before execution');
               run.attemptId = input.attemptId; run.status = 'working'; run.hostReportedAt = this.store.now();

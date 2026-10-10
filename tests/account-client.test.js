@@ -303,7 +303,7 @@ test("Room account mode carries auth and binding through restore, writes, and SS
   assert.equal(await client.restore("room:one"), roomSession);
   assert.deepEqual(seen, [7]);
   assert.equal(calls[0].path, "/api/session?room=room%3Aone");
-  assert.equal(calls[1].path, "/api/rooms/room%3Aone");
+  assert.equal(calls[1].path, "/api/rooms/room%3Aone?messages=recent");
   for (const call of calls.slice(0, 2)) {
     assert.equal(call.options.headers["X-Project-Room-Auth"], "account");
     assert.equal(call.options.headers["X-Session-Binding"], owner.sessionBinding);

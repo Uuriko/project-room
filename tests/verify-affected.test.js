@@ -2,12 +2,18 @@
 // observable selection rule it guards; the fixture repo is in memory.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   parseImports,
   resolveSpecifier,
   buildReverseGraph,
   relatedTests,
   selectTests,
+  changedFiles,
+  parseGitPathList,
   SMOKE_TESTS,
 } from "../scripts/verify-affected.mjs";
 
@@ -83,6 +89,43 @@ test("closest tests win the budget; changed tests are always kept", () => {
 
   const kept = selectTests({ changed: ["tests/slow.test.js"], tests, reverse, read, timings, budgetMs: 1 });
   assert.deepEqual(kept.selected.map((s) => s.test), ["tests/slow.test.js"]);
+});
+
+test("a git-quoted name-only path still names the changed file", () => {
+  assert.deepEqual(parseGitPathList('"server/caf\\303\\251.mjs"\n'), ["server/café.mjs"]);
+  assert.deepEqual(parseGitPathList('"server/tab\\tname.mjs"\n'), ["server/tab\tname.mjs"]);
+  assert.deepEqual(parseGitPathList("server/core.mjs\n"), ["server/core.mjs"]);
+  const dir = mkdtempSync(join(tmpdir(), "verify-affected-quote-"));
+  const git = (args) => execFileSync("git", ["-C", dir, "-c", "user.email=verify@example.com", "-c", "user.name=Verify", ...args], { encoding: "utf8" });
+  try {
+    git(["init", "-q", "-b", "main"]);
+    git(["config", "core.quotePath", "true"]);
+    mkdirSync(join(dir, "server"));
+    writeFileSync(join(dir, "server", "café.mjs"), "export const n = 1;\n");
+    writeFileSync(join(dir, "server", "tab\tname.mjs"), "export const t = 1;\n");
+    git(["add", "server/café.mjs", "server/tab\tname.mjs"]);
+    git(["commit", "-q", "-m", "base"]);
+    git(["checkout", "-q", "-b", "edit"]);
+    writeFileSync(join(dir, "server", "café.mjs"), "export const n = 2;\n");
+    writeFileSync(join(dir, "server", "tab\tname.mjs"), "export const t = 2;\n");
+    git(["add", "server/café.mjs", "server/tab\tname.mjs"]);
+    git(["commit", "-q", "-m", "edit"]);
+    const changed = changedFiles("main", dir);
+    assert.deepEqual(changed, ["server/café.mjs", "server/tab\tname.mjs"]);
+    const cafe = "server/café.mjs";
+    const graph = {
+      [cafe]: "export const n = 2;\n",
+      "tests/cafe.test.js": "import { n } from \"../server/café.mjs\";\n",
+    };
+    const tests = ["tests/cafe.test.js"];
+    const read = (file) => graph[file];
+    const reverse = buildReverseGraph(Object.keys(graph), read);
+    const selected = selectTests({ changed: [cafe], tests, reverse, read, budgetMs: 1e9 });
+    assert.deepEqual(selected.selected.map((row) => row.test), ["tests/cafe.test.js"]);
+    assert.deepEqual(selected.smokeReasons, []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("unmapped code, global files and empty diffs fall back to the smoke set", () => {

@@ -241,7 +241,12 @@ function fileSlots(item) {
   }));
 }
 function slotsConflict(left, right) {
-  if (left.path !== right.path) return false;
+  if (left.path !== right.path) {
+    // A whole parent path covers a file stored beneath it. The reverse stays
+    // exact-path only.
+    if (!left.block && right.path.startsWith(`${left.path}/`)) return true;
+    return false;
+  }
   if (!left.block || !right.block) return true;
   return left.block === right.block;
 }

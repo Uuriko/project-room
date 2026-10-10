@@ -182,3 +182,31 @@ test("the confirmation token covers room contents, so a later message requires a
   assert.equal(messages.find(message => message.id === "later-note").body, null);
   assert.equal(messages.find(message => message.id === "first-note").body, null);
 });
+
+test("an account that joined a room through a share link can delete itself (join receipts keep their slot)", async t => {
+  const { randomBytes } = await import("node:crypto");
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const ownerKey = f.store.issueAccessKey("commons", "owner");
+  const linkToken = randomBytes(32).toString("base64url");
+  f.store.shareLinks.create(ownerKey, "commons", {
+    requestId: randomUUID(), linkToken, expiresAt: Date.now() + 3600000, maxJoins: 5, expectedMemberRevision: 0
+  }, null);
+  const slot = f.store.createAccountSessionSlot();
+  const view = f.store.accountSessionSlot(slot.token);
+  const headers = { Origin: origin, Cookie: `account_session=${slot.token}`, "x-csrf-token": view.csrf, "x-session-binding": view.sessionBinding, "Content-Type": "application/json" };
+  const joined = await fetch(`${origin}/api/share-links/join`, { method: "POST", headers, body: JSON.stringify({
+    linkToken, displayName: "Link guest", redemptionId: randomUUID(), expectedSessionRevision: view.sessionRevision }) });
+  assert.equal(joined.status, 201, await joined.clone().text());
+  const receipts = () => f.store.db.prepare("SELECT count(*) AS n FROM share_link_joins").get().n, receiptsBefore = receipts();
+  const planned = await (await fetch(`${origin}/api/account/deletion/plan`, { headers: { Cookie: headers.Cookie } })).json();
+  const after = f.store.accountSessionSlot(slot.token);
+  const fresh = { ...headers, "x-csrf-token": after.csrf, "x-session-binding": after.sessionBinding };
+  const done = await fetch(`${origin}/api/account/delete`, { method: "POST", headers: fresh, body: JSON.stringify({ confirmationToken: planned.confirmationToken }) });
+  assert.equal(done.status, 200, await done.clone().text());
+  assert.equal(receipts(), receiptsBefore, "the immutable join receipt is kept");
+  const row = f.store.db.prepare("SELECT account_id, parent_credential_hash FROM account_session_slots WHERE expires_at<=?").get(f.store.now());
+  assert.ok(!row || (row.account_id === null && row.parent_credential_hash === null), "the kept slot is an unauthenticated tombstone");
+  const again = await fetch(`${origin}/api/account/deletion/plan`, { headers: { Cookie: headers.Cookie } });
+  assert.equal(again.status, 401, "the old cookie no longer authenticates");
+});

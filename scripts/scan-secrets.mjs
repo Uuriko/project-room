@@ -63,6 +63,78 @@ function getDiff(base, diffFile) {
   return r.stdout;
 }
 
+// Git C-quotes a path when it is not plain ASCII. Octal escapes are UTF-8
+// bytes, not Latin-1 code points.
+function unquoteGitPath(token) {
+  if (token.length < 2 || token[0] !== '"' || token.at(-1) !== '"') return token;
+  const body = token.slice(1, -1);
+  const bytes = [];
+  let i = 0;
+  while (i < body.length) {
+    if (body[i] !== "\\") {
+      const code = body.charCodeAt(i);
+      if (code > 0xff) return token;
+      bytes.push(code);
+      i += 1;
+      continue;
+    }
+    const next = body[i + 1];
+    if (next == null) return token;
+    if (next === "n") { bytes.push(0x0a); i += 2; continue; }
+    if (next === "t") { bytes.push(0x09); i += 2; continue; }
+    if (next === "r") { bytes.push(0x0d); i += 2; continue; }
+    if (next === "\\" || next === '"') { bytes.push(next.charCodeAt(0)); i += 2; continue; }
+    if (next >= "0" && next <= "7") {
+      let oct = "";
+      let j = i + 1;
+      while (oct.length < 3 && j < body.length && body[j] >= "0" && body[j] <= "7") {
+        oct += body[j];
+        j += 1;
+      }
+      const value = Number.parseInt(oct, 8);
+      if (!Number.isInteger(value) || value > 0xff) return token;
+      bytes.push(value);
+      i = j;
+      continue;
+    }
+    return token;
+  }
+  return Buffer.from(bytes).toString("utf8");
+}
+
+export function fileFromDiffGitLine(line) {
+  if (!line.startsWith("diff --git ")) return null;
+  const rest = line.slice("diff --git ".length);
+  const tokens = [];
+  let i = 0;
+  while (i < rest.length && tokens.length < 2) {
+    while (rest[i] === " ") i += 1;
+    if (i >= rest.length) break;
+    if (rest[i] === '"') {
+      let j = i + 1;
+      while (j < rest.length) {
+        if (rest[j] === "\\" && j + 1 < rest.length) {
+          j += 2;
+          continue;
+        }
+        if (rest[j] === '"') break;
+        j += 1;
+      }
+      tokens.push(rest.slice(i, Math.min(rest.length, j + 1)));
+      i = j + 1;
+    } else {
+      const j = rest.indexOf(" ", i);
+      const end = j === -1 ? rest.length : j;
+      tokens.push(rest.slice(i, end));
+      i = end;
+    }
+  }
+  let b = tokens[1];
+  if (!b) return null;
+  b = unquoteGitPath(b);
+  return b.startsWith("b/") ? b.slice(2) : b;
+}
+
 function main() {
   const base = flag("--base") || process.env.ZERO_BUG_BASE || "origin/main";
   const diffText = getDiff(base, flag("--diff"));
@@ -71,8 +143,7 @@ function main() {
   let newLine = 0;
   for (const raw of diffText.split("\n")) {
     if (raw.startsWith("diff --git ")) {
-      const m = raw.match(/ b\/(.+)$/);
-      file = m ? m[1] : null;
+      file = fileFromDiffGitLine(raw);
       continue;
     }
     const hunk = raw.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);

@@ -99,7 +99,7 @@ import {
 } from "./activity.mjs";
 import { listOpenQuestions } from "./open-questions.mjs";
 import { GoogleSignIn, GOOGLE_START_PATH, GOOGLE_CALLBACK_PATH, googlePostLoginPage } from "./google-oauth.mjs";
-import { createMagicLinkMailer, attemptMailDelivery } from "./magic-links.mjs";
+import { createMagicLinkMailer, attemptMailDelivery, validateMagicReturnTo } from "./magic-links.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
 import { emailLookupHash, normalizeEmail } from "./account-login-methods.mjs";
 import { createPasskeyAuth, resolvePasskeyParams } from "./account-passkeys.mjs";
@@ -155,6 +155,12 @@ function securityContactFrom(raw) {
 function securityTxtDocument(contact, now = Date.now()) {
   const expires = new Date(now + 365 * 24 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
   return `Contact: ${contact}\nExpires: ${expires}\n`;
+}
+let emailGatesRelaxedWarned = false;
+function warnEmailGatesRelaxed() {
+  if (emailGatesRelaxedWarned) return;
+  emailGatesRelaxedWarned = true;
+  console.warn("No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer");
 }
 function warnMissingSecurityContact() {
   if (securityContactWarned) return;
@@ -349,6 +355,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   if (typeof magicMailer.isConfigured !== "function" || typeof magicMailer.sendMagicLink !== "function") {
     throw new Error("magicLinkMailer must come from createMagicLinkMailer()");
   }
+  // With no mailer no verification code can be delivered: every email-verification
+  // gate (invites, share links, identity mint, a second room) then follows the
+  // agent-invites escape hatch instead of deadlocking the account.
+  // Optional-chained: option-validation tests build the server on a stub store
+  // with no accountLogins; a real store always has it.
+  store.accountLogins?.setVerificationUnachievable?.(() => !magicMailer.isConfigured());
+  // The mailer is fixed when the server is built, so a deploy that lost its mail
+  // secret would otherwise open every email gate without a trace. Say so at boot
+  // and report it in /api/health.
+  const emailVerification = magicMailer.isConfigured() ? "enforced" : "relaxed-no-mailer";
+  if (emailVerification === "relaxed-no-mailer") warnEmailGatesRelaxed();
   // Per-email buckets (hourly) complement the per-address rate() limits below.
   const magicRequestEmailLimiter = createRateLimiter({ capacity: 3, refillPerSecond: 3 / 3600 });
   const resetRequestEmailLimiter = createRateLimiter({ capacity: 3, refillPerSecond: 3 / 3600 });
@@ -460,6 +477,19 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   for (const c of connectorClients) {
     oauthProvider.registerClient(c);
   }
+  // Like emailAccountIdFor (#2434): deleting an account leaves a deactivated
+  // tombstone at github:<id> / google:<sub>, and its login methods are gone, so
+  // a returning person reaches the provision step below. Take the next free
+  // suffix instead of signing them into the tombstone ("Active account
+  // required" forever). A live account at the id is returned as is.
+  const providerAccountIdFor = base => {
+    for (let generation = 1; generation <= 20; generation++) {
+      const id = generation === 1 ? base : `${base}.${generation}`;
+      const row = store.db.prepare("SELECT active FROM accounts WHERE id=?").get(id);
+      if (!row || row.active === 1) return id;
+    }
+    throw new ServiceError(409, "account_exists", "This sign-in can't start a new account; contact support");
+  };
   // GitHub subject -> account linking order (slice 4): an existing OAuth
   // link wins; otherwise a primary verified email links to the account that
   // already owns it; otherwise a github:<id> account is provisioned (with
@@ -484,7 +514,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const method = logins.linkOAuthMethod(emailOwner, { provider: "github", subject, email: normalized });
       return { accountId: emailOwner, methodRef: method.id };
     }
-    const accountId = `github:${subject}`;
+    const accountId = providerAccountIdFor(`github:${subject}`);
     if (!store.db.prepare("SELECT 1 FROM accounts WHERE id=?").get(accountId)) {
       store.createAccount(accountId, "github-oauth");
     }
@@ -531,7 +561,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const method = logins.linkOAuthMethod(emailOwner, { provider: "google", subject, email: normalized });
       return { accountId: emailOwner, methodRef: method.id };
     }
-    const accountId = `google:${subject}`;
+    const accountId = providerAccountIdFor(`google:${subject}`);
     if (!store.db.prepare("SELECT 1 FROM accounts WHERE id=?").get(accountId)) {
       store.createAccount(accountId, "google-oauth");
     }
@@ -1074,7 +1104,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         resolveChannelTransport, directSendFetch,
       })) return;
       if ((url.pathname === "/api/health" || url.pathname === "/api/health/" || isHealthAliasPath(inboundPath) || isHealthAliasPath(url.pathname)) && ["GET", "HEAD"].includes(req.method)) {
-        return json(res, 200, { status: "ok", mode: serviceMode, ...deploymentField }, req.method === "HEAD");
+        return json(res, 200, { status: "ok", mode: serviceMode, emailVerification, ...deploymentField }, req.method === "HEAD");
       }
       if (url.pathname === "/api/version" && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, { status: "ok", mode: serviceMode, sourceRevision: SOURCE_REVISION, buildId: BUILD_ID, ...deploymentField }, req.method === "HEAD");
@@ -1244,9 +1274,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!magicMailer.isConfigured()) {
           reject(503, "mail_not_configured", "Email delivery is not configured; contact the operator to verify this address");
         }
+        // An optional returnTo (same strict validation as magic sign-in) keeps
+        // a pending invitation in the resent link, like signup's own mail.
+        const data = await body(req);
+        const returnTo = data && Object.hasOwn(data, "returnTo") ? validateMagicReturnTo(data.returnTo) : undefined;
+        if (returnTo === null) reject(422, "invalid_return_target", "A valid local return target is required");
         const issued = store.accountLogins.issueEmailVerifyCode({ accountId: session.account.id, email: normalized });
         const delivered = await attemptMailDelivery(() => magicMailer.sendMagicLink({
-          to: normalized, code: issued.code, expiresAt: issued.expiresAt, purpose: "email-verify"
+          to: normalized, code: issued.code, expiresAt: issued.expiresAt, purpose: "email-verify", ...(returnTo ? { returnTo } : {})
         }), "email-verify resend");
         return json(res, 200, { status: delivered ? "resent" : "not_delivered", email: normalized, expiresAt: issued.expiresAt });
       }
@@ -3080,7 +3115,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // The gate now ports the MCP structured-argument shape
         // ({missing, unexpected, invalid}) down to HTTP, and its
         // required/optional set aligns with the service
-        // (server/access-requests.mjs): note may be omitted or null
+        // (server/access-requests.mjs): note and referredBy may be omitted or null
         // (RC-2026-09-18-025); requestId omitted is minted by the service —
         // send one when retrying so the retry is idempotent.
         const diagnosis = diagnoseArguments({
@@ -3091,7 +3126,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             displayName: { type: "string" },
             requestedPermissions: { type: "array" },
             note: { type: ["string", "null"] },
-            referredBy: { type: "string" },
+            referredBy: { type: ["string", "null"] },
             requestId: { type: "string" },
           },
           additionalProperties: false,
@@ -4127,7 +4162,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (limitRaw !== null && (!/^[1-9]\d*$/.test(limitRaw) || Number(limitRaw) > 200)) {
           reject(422, "invalid_search", "limit is 1 to 200");
         }
-        const result = store.search(selected.token, roomId, q, kind, fence, { limit: limitRaw === null ? 50 : Number(limitRaw) });
+        const before = url.searchParams.get("before");
+        const result = store.search(selected.token, roomId, q, kind, fence, { limit: limitRaw === null ? 50 : Number(limitRaw), before });
         // RC-2026-09-19-070: search hits carry bodies but not toMemberId, so
         // re-resolve each hit against the projection and drop targeted DMs
         // the viewer is not a party to. Fail closed when a hit cannot be resolved.
@@ -4746,7 +4782,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const data = await body(req);
         const linkFields = ["requestId", "linkToken", "expiresAt", "maxJoins", "expectedMemberRevision"];
         if (!exact(data, linkFields) && !exact(data, [...linkFields, "access"])) reject(422, "invalid_link", "Supply the exact invitation link settings");
-        const result = store.shareLinks.create(selected.token, roomId, data, fence);
+        // Same escape hatch as agent-invites: with no mailer, verification can never complete.
+        const result = store.shareLinks.create(selected.token, roomId, data, fence, { emailVerificationUnachievable: !magicMailer.isConfigured() });
         return json(res, result.duplicate ? 200 : 201, result);
       }
       if (route === "share-links-cancel" && req.method === "POST") {

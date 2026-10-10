@@ -283,11 +283,24 @@ const blobsOf = value => {
 export const isReceiptTag = value => typeof value === "string" && TAG_PATTERN.test(value);
 const DEFAULT_LEASE_HOURS = 24;
 const MAX_LEASE_HOURS = 168;
-export const DEFAULT_MAX_OPEN_CLAIMS = 200;
+// Board cleanup 2026-10-09: 200 jammed muse-room with an idle backlog while
+// only ~13 claims were live. The room cap now counts live items only (see
+// countsTowardOpenCap) and defaults to 1000; the per-member cap still bounds
+// what any one member can hold.
+export const DEFAULT_MAX_OPEN_CLAIMS = 1000;
 export const DEFAULT_MAX_MEMBER_OPEN_CLAIMS = 20;
 const CONFIG_CAP_CEILING = 10000;
 const DEFAULT_REVIEW_POLICY = "self_attested";
 const ACTIVE_CLAIM_STATES = ["claimed", "in_progress", "blocked"];
+// An unclaimed item nobody has touched for STALE_UNCLAIMED_DAYS is dormant.
+// Dormant items do not count against the room's open-claim cap. When the room
+// owner turns on workClaims.staleSweep (off by default), the cron's stale
+// sweep (server/claim-pr-sync.mjs) also retires them, at most
+// STALE_SWEEP_BATCH per room per pass, as closed with reason stale_sweep.
+// Items with no readable timestamp are never dormant: unknown age counts.
+export const STALE_UNCLAIMED_DAYS = 14;
+export const STALE_SWEEP_BATCH = 25;
+export const STALE_SWEEP_REASON = `stale_sweep: unclaimed with no activity for ${STALE_UNCLAIMED_DAYS} days. Open a new claim if the work is still wanted.`;
 // History actions that end a claim round (the item can be claimed again after
 // each of these). Used by appendWorkPullRequest to prove a previous round
 // existed when an outcome timestamp ties the current round's claimedAt.
@@ -512,12 +525,45 @@ export function claimUpdatedAt(item) {
   const stored = typeof item?.updatedAt === "string" ? item.updatedAt : "";
   return historyAt > stored ? historyAt : (stored || historyAt);
 }
+export function isDormantClaim(item, now) {
+  if (!item || item.state !== "unclaimed") return false;
+  const at = Date.parse(claimUpdatedAt(item));
+  if (!Number.isFinite(at)) return false;
+  return nowMsOf(now) - at >= STALE_UNCLAIMED_DAYS * 24 * 3600 * 1000;
+}
+// What the room's open-claim cap counts: non-terminal, non-dormant items.
+export function countsTowardOpenCap(item, now) {
+  return !!item && !isTerminalClaimState(item.state) && !isDormantClaim(item, now);
+}
+export function openClaimCount(items, now) {
+  let open = 0;
+  for (const item of items ?? []) if (countsTowardOpenCap(item, now)) open += 1;
+  return open;
+}
+// Retire dormant unclaimed items, oldest first, at most `limit`. Pure: returns
+// [before, closed] pairs; the caller writes them and emits the events.
+// Never-sweep pin (follow-up to #2341): a room can keep deliberate standing
+// backlog by tagging the item "never-sweep" at create. A pinned item still
+// goes dormant (so it never jams the open-claim cap) but the stale sweep
+// leaves it open.
+export const NEVER_SWEEP_TAG = "never-sweep";
+export function isSweepPinned(item) {
+  return (item?.tags ?? []).some(tag => typeof tag === "string" && tag.toLowerCase() === NEVER_SWEEP_TAG);
+}
+export function closeStaleUnclaimed(items, now, { limit = STALE_SWEEP_BATCH } = {}) {
+  const atMs = nowMsOf(now);
+  return (items ?? [])
+    .filter(item => isDormantClaim(item, atMs) && !isSweepPinned(item))
+    .sort((a, b) => claimUpdatedAt(a).localeCompare(claimUpdatedAt(b)))
+    .slice(0, Math.max(0, limit))
+    .map(before => [before, closeWork(before, "system", { verb: "close", reason: STALE_SWEEP_REASON, now: atMs, authority: true })]);
+}
 const positiveCap = (value, fallback) =>
   Number.isSafeInteger(value) && value >= 1 && value <= CONFIG_CAP_CEILING ? value : fallback;
 // Room config hook: resolve per-room work-claim defaults from an optional
 // room object. Rooms opt in by carrying workClaims = { defaultLeaseHours,
-// reviewPolicy, maxOpenClaims, maxMemberOpenClaims }; anything missing or
-// invalid falls back to the defaults.
+// reviewPolicy, maxOpenClaims, maxMemberOpenClaims, staleSweep }; anything
+// missing or invalid falls back to the defaults (staleSweep: off).
 export function roomWorkClaimConfig(room) {
   const raw = room?.workClaims ?? {};
   const defaultLeaseHours = typeof raw.defaultLeaseHours === "number" && raw.defaultLeaseHours > 0 && raw.defaultLeaseHours <= MAX_LEASE_HOURS
@@ -528,6 +574,7 @@ export function roomWorkClaimConfig(room) {
     reviewPolicy,
     maxOpenClaims: positiveCap(raw.maxOpenClaims, DEFAULT_MAX_OPEN_CLAIMS),
     maxMemberOpenClaims: positiveCap(raw.maxMemberOpenClaims, DEFAULT_MAX_MEMBER_OPEN_CLAIMS),
+    staleSweep: raw.staleSweep === true,
   });
 }
 const leaseHoursOf = value => {

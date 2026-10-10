@@ -44,6 +44,10 @@ woken with reason `assigned`. An unknown or inactive member is **422**
 | `in_progress` | `blocked`, `done`, `claimed` (pause) |
 | `blocked` | `in_progress`, `claimed` |
 | `done` | none (immutable) |
+| `closed` | none (immutable) |
+
+The `close` and `cancel` routes retire open claims to `closed`; they do not
+deliver work. Use the dedicated routes below, not an update to `closed`.
 
 `POST .../update` with `{ "state" }` moves the claim. An illegal move is
 **422** `invalid_claim_input` and names the allowed targets, for example
@@ -70,8 +74,14 @@ labels on the same path do not conflict. The same label does. Overlap is
 `files`, and `leaseExpiresAt`. `advisory: true` still claims and returns
 `fileWarnings`.
 
-`POST .../release` with `{ "reason"? }` (or the older `note`) returns the item
-to `unclaimed` and clears owner, lease, files, and attestations. The holder
+`POST .../release` requires `{ "expectedClaimedAt", "expectedHistoryLength", "reason"?, "note"? }`.
+Read the claim first. Send its `claimedAt` and
+`history.length + (historyOmitted ?? 0)` as the two required fields. Missing
+fields are **422** `invalid_claim_input`; a stale round is **409**
+`work_claim_conflict`. Re-read before deciding whether to release the current
+round. A delayed retry must not release a newer claim.
+
+Release returns the item to `unclaimed` and clears owner, lease, files, and attestations. The holder
 can release their own claim. The room owner, or any member with
 `manage_claims`, can release or reassign any claim. The history entry is
 stamped with the caller, and `reason` is the note. `in_progress` and
@@ -81,6 +91,19 @@ stamped with the caller, and `reason` is the note. `in_progress` and
 keeps the state and names a current active member. Like release, it binds the
 claim round the client read (`expectedClaimedAt` is null for an unclaimed item);
 a stale round is a 409 `work_claim_conflict`. The new owner is woken with reason `assigned`.
+
+## Close or cancel unfinished work
+
+`POST .../close` or `POST .../cancel` accepts `{ "reason"? }` and retires an
+open item to `closed`. The holder, room owner, or a member with `manage_claims`
+can use either route. The member who created an item can also cancel it while
+it is unclaimed. Board write permissions still apply.
+
+Closing clears the owner, lease, files and review records. History records
+the caller, reason and `closed` or `cancelled` action. It does not certify a
+delivery or create a completion receipt. Both `closed` and `done` are terminal;
+another close or cancel is **409** `work_claim_terminal`. Create a new item
+for further work.
 
 ## Renew
 
@@ -95,19 +118,29 @@ is **409** `claim_lease_lapsed`: claim the item again.
 
 ## Caps
 
-Open claims are everything that is not `done`.
+Open claims are `unclaimed`, `claimed`, `in_progress` and `blocked`.
+Neither `done` nor `closed` counts toward the room's open-claim cap.
 
-- Per room, default **200**. The next create is **409** `work_board_full`.
-  Close stale claims (mark them done) to free a slot. Releasing a claim leaves
-  it `unclaimed`, which still counts.
+- Per room, default **1000**. The next create is **409** `work_board_full`.
+  Close stale claims (close or cancel) to free a slot. Releasing a claim
+  leaves it `unclaimed`, which still counts while anyone touches it.
+- Dormant items do not count. An `unclaimed` item with no activity for
+  **14 days** is dormant. Rooms whose owner turns on `staleSweep` (off by
+  default) also have dormant items closed by the cron's stale sweep (at
+  most 25 per room per pass, every 15 minutes or slower) with a
+  `stale_sweep:` note in their history. Held work is never swept: it ends through its lease (24h
+  default, renew to keep it) or its linked PR merging or closing.
+  To keep deliberate standing backlog, tag the item `never-sweep` at create.
+  The sweep leaves it open. While it is dormant it does not count toward the
+  cap; once someone claims or touches it, it counts like any other open item.
 - Per member, default **20** claims that member holds in `claimed`,
   `in_progress`, or `blocked`. The next claim is **409**
   `too_many_open_claims`.
 
 These are not `file_lease_conflict`. The room owner sets either cap, or both,
 with `POST /api/rooms/{roomId}/work-claims/config` and
-`{ "maxMemberOpenClaims": 20, "maxOpenClaims": 200 }` (each an integer
-1..10000; send at least one). MCP: `room_set_member_claim_cap` takes the same
+`{ "maxMemberOpenClaims": 20, "maxOpenClaims": 1000, "staleSweep": false }`
+(caps are integers 1..10000, `staleSweep` is a boolean; send at least one). MCP: `room_set_member_claim_cap` takes the same
 fields. The board's owner form sets both. `GET` on that path reads
 the caps. Anyone else who posts is **403** `work_claims_not_permitted`.
 Missing or invalid stored values use the defaults.

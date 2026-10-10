@@ -148,6 +148,55 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   const status = text => setShareLinkStatus($("#share-link-status"), text);
   const listStatus = text => setShareLinkStatus($("#share-management-status"), text);
   const joinStatus = text => setShareLinkStatus($("#join-link-status"), text);
+  // Invite signup follow-ups (#2318, auth audit A20). After someone creates an
+  // account from the join dialog, the sign-in form moves back to the hidden
+  // auth panel, so its "Check your email" status was never seen. The dialog
+  // now asks the server for the account's own email state, says so itself,
+  // offers a resend whose link keeps this invitation, and fills the name.
+  const resendButton = () => {
+    let button = $("#join-verify-resend");
+    if (!button) {
+      button = document.createElement("button");
+      button.type = "button"; button.id = "join-verify-resend"; button.className = "text-button"; button.hidden = true;
+      button.textContent = "Send a new code";
+      $("#join-link-status").after(button);
+      button.addEventListener("click", resendVerification);
+    }
+    return button;
+  };
+  async function resendVerification() {
+    const button = resendButton(), version = joinVersion;
+    if (!joinSecret || button.disabled) return;
+    button.disabled = true;
+    try {
+      const session = accountClient.currentSession("sending a verification code", { authenticated: true });
+      const reply = await accountClient.request("/api/auth/email/verify/resend", { method: "POST", session,
+        data: { returnTo: `/${shareLinksPendingFragment()}` } });
+      if (version !== joinVersion) return;
+      joinStatus(reply?.status === "resent" ? "A new code is on its way. It can take a minute to arrive; check spam too."
+        : reply?.status === "already_verified" ? "Your email is already verified." : "We couldn\u2019t send the email just now. Try again in a minute.");
+      if (reply?.status === "already_verified") button.hidden = true;
+    } catch (error) {
+      if (version === joinVersion) joinStatus(error?.message || "Could not send a new code.");
+    } finally { button.disabled = false; }
+  }
+  const shareLinksPendingFragment = () => `#join/${joinSecret}${joinFocus ? `/${joinFocus.kind}/${encodeURIComponent(joinFocus.id)}` : ""}`;
+  async function applyAccountDefaults(version) {
+    let session;
+    try { session = accountClient.currentSession("joining this room", { authenticated: true }); } catch { return; }
+    const [methods, profile] = await Promise.all([
+      accountClient.request("/api/auth/methods", { session }).catch(() => null),
+      accountClient.request("/api/account/profile", { session }).catch(() => null)]);
+    if (version !== joinVersion || joining) return;
+    const email = (methods?.methods ?? []).map(method => method.email).find(Boolean) ?? "";
+    const name = $("#join-link-name");
+    const suggested = (typeof profile?.displayName === "string" && profile.displayName.trim()) || email.split("@")[0] || "";
+    if (name && !name.value.trim() && suggested) name.value = suggested.slice(0, 80);
+    if (methods?.emailVerification?.status === "unverified" && methods?.providers?.mail?.configured) {
+      joinStatus("Check your email for a verification code. You can join now and verify later.");
+      resendButton().hidden = false;
+    }
+  }
   function syncAccountSigninBusy() {
     const pending = joining || !canLeaveAccountSignin();
     joinDialog.setAttribute("aria-busy", String(pending));
@@ -228,7 +277,10 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     return currentLink;
   }
   function managementError(error) {
-    if ([401, 403].includes(error?.status) || ["session_binding_changed", "session_binding_required", "invalid_session_binding"].includes(error?.code)) {
+    // email_unverified is a 403 about the account, not a changed session: keep the
+    // dialog and show the server's "Verify your email" message instead of
+    // claiming the invitation access changed.
+    if (error?.code !== "email_unverified" && [401, 403].includes(error?.status) || ["session_binding_changed", "session_binding_required", "invalid_session_binding"].includes(error?.code)) {
       resetManagement(); setConnectionStatus("Invitation access changed. Reopen the room before inviting.");
     }
   }
@@ -550,7 +602,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     $("#join-link-title").textContent = "Join this room"; $("#join-link-scope").textContent = "Checking your invitation…";
     const invitedBy = $("#join-inviter-line");
     if (invitedBy) invitedBy.textContent = "";
-    joinStatus(""); if (!joinDialog.open) joinDialog.showModal();
+    joinStatus(""); resendButton().hidden = true; if (!joinDialog.open) joinDialog.showModal();
     if (!joinSecret) {
       $("#join-link-scope").textContent = "This invitation link is incomplete. Ask for a new link.";
       return;
@@ -583,6 +635,8 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       const accessSummary = $("#join-access-details").querySelector?.("summary");
       if (accessSummary) accessSummary.textContent = elevatedLink ? (preview.link.access === "co_admin" ? "Co-admin access" : "Member access") : "Guest access";
       $("#join-link-form").hidden = false; $("#join-link-name").focus();
+      if (account.authenticated && !resume && !fragment.reviewSession) await applyAccountDefaults(version);
+      if (version !== joinVersion) return;
       // Signed out: sign-in comes first, with "Continue as guest" below it.
       // Member and co-admin links need an account, so they offer no guest path.
       const elevated = preview.link.access && preview.link.access !== "guest";
@@ -651,6 +705,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     if (joining || !canLeaveAccountSignin()) { event.preventDefault(); return; }
     onOAuthStart(event);
   });
+  $("#join-link-name").addEventListener("invalid", () => joinStatus("Enter the name to show in this room."));
   $("#join-account-back").addEventListener("click", () => {
     if (joining || !canLeaveAccountSignin()) return;
     onAccountSignin(null); $("#join-account-auth").hidden = true;
@@ -736,7 +791,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       if (error.code === "join_session_lost") $("#join-account-choices").hidden = false;
       const lostGuest = error.code === "join_session_lost" && accountClient.session?.authenticated === false;
       $("#join-link-signout").hidden = error.code !== "guest_session_ended" && !lostGuest;
-      $("#join-link-signout").textContent = lostGuest ? "Start a new guest (uses another place)" : "Sign out of expired guest session";
+      $("#join-link-signout").textContent = lostGuest ? "Start a new guest (uses another place)" : "Log out of expired guest session";
       if (joined) $("#join-link-submit").textContent = "Open joined room";
     } finally {
       joinBusy(false);
@@ -798,7 +853,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   });
   ensureGrowthChrome();
   return { sync, resetManagement, open, syncAccountSigninBusy,
-    pendingFragment: () => joinSecret ? `#join/${joinSecret}${joinFocus ? `/${joinFocus.kind}/${encodeURIComponent(joinFocus.id)}` : ""}` : null,
+    pendingFragment: () => joinSecret ? shareLinksPendingFragment() : null,
     async resumeSignedIn() {
       if (!joinDialog.open || !joinSecret) return false;
       await open({ token: joinSecret, focus: joinFocus }, { afterSignIn: true }); return true;

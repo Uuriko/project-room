@@ -32,6 +32,38 @@ const changes = brief => brief.history.evaluatedThrough - brief.history.cursor;
 const storedCursor = (store, memberId) =>
   store.db.prepare("SELECT sequence FROM cursors WHERE room_id='commons' AND member_id=?").get(memberId)?.sequence ?? null;
 
+// The real brief count and paging must start at the same visibility boundary.
+// Existing body-privacy tests strip hidden rows but do not guard H - cursor.
+test("since-join catch-up excludes the hidden prefix without acknowledging or rewinding visible history", t => {
+  const { store, owner } = fixture(t);
+  const now = Date.parse("2026-10-09T12:00:00Z");
+  store.now = () => now;
+  for (let i = 0; i < 4; i++) post(store, owner, `hidden ${i}`);
+  store.command(owner, "commons", command(T.ROOM_HISTORY_VISIBILITY_SET, { historyVisibility: "since_join" }));
+  store.command(owner, "commons", command(T.MEMBER_ADDED, {
+    memberId: "late-reader", displayName: "Late reader", kind: "human", permissions: []
+  }));
+  const key = store.issueAccessKey("commons", "late-reader");
+  const joinSequence = store.room("commons").sequence;
+  post(store, owner, "visible after joining");
+  const first = store.returnBrief(key, "commons", { limit: 1 });
+  assert.equal(first.history.cursor, joinSequence - 1, "the joining event is within visible history");
+  assert.equal(changes(first), 2, "prejoin events do not inflate the count");
+  assert.deepEqual(first.history.items.map(row => row.sequence), [joinSequence]);
+  assert.equal(storedCursor(store, "late-reader"), null, "reading does not acknowledge");
+  const next = store.returnBrief(key, "commons", { ...first.history.continuation, limit: 1 });
+  assert.equal(next.history.cursor, first.history.cursor, "paging freezes the same effective marker");
+  assert.equal(next.history.items[0].event.data.body, "visible after joining");
+
+  store.markCaughtUp(key, "commons", next.history.evaluatedThrough);
+  const acknowledged = storedCursor(store, "late-reader");
+  post(store, owner, "new after acknowledgement");
+  const returned = store.returnBrief(key, "commons");
+  assert.equal(returned.history.cursor, acknowledged, "the visibility floor cannot rewind a later marker");
+  assert.equal(changes(returned), 1);
+  assert.equal(storedCursor(store, "late-reader"), acknowledged);
+});
+
 test("a room you created and only wrote in yourself has nothing to catch up on", t => {
   const { store, owner } = fixture(t);
   assert.equal(changes(store.returnBrief(owner, "commons")), 0, "room setup by the owner is not news to the owner");

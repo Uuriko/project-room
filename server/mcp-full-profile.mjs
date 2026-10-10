@@ -25,7 +25,7 @@ import { validId } from "../src/events.js";
 import { redactEventPage } from "./redact-read.mjs";
 import { projectBoard } from "../src/board.js";
 import { confirmsWorkReturn } from "../src/workflow.js";
-import { workContextMarkdown, paginateRoomMessages } from "../client/room-agent.mjs";
+import { workContextMarkdown, paginateRoomMessages, latestSnapshotPage } from "../client/room-agent.mjs";
 import { roomTools, validRoomToolArguments, buildDraftCommand } from "../client/mcp-stdio.mjs";
 import { bountyTools, isBountyTool, validBountyToolArguments } from "../client/bounty-tools.mjs";
 import { trustTools, isTrustTool, validTrustToolArguments } from "../client/trust-tools.mjs";
@@ -108,9 +108,11 @@ async function roomMessages(store, secret, roomId, args, memberId) {
     end: latest ? store.roomAuthority(roomId).sequence + 1 : null,
     mapMessage,
   });
+  const mapped = messages.map(message => markIfOther(message, memberId, message.from));
+  const cursor = latest ? latestSnapshotPage(mapped, after, hasMore) : { next, hasMore };
   return withContentTrust({
-    roomId, messages: messages.map(message => markIfOther(message, memberId, message.from)),
-    next, hasMore
+    roomId, messages: mapped,
+    next: cursor.next, hasMore: cursor.hasMore,
   });
 }
 
@@ -198,7 +200,7 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
   if (isAssistantTool(name)) {
     const assistant = new RoomAssistant(store);
     const authorize = () => store.authenticate(secret, roomId);
-    return { value: withContentTrust(name === "room_assistant_context" ? assistant.list(roomId, authorize) : assistant.apply(roomId, rest, authorize)), isError: false };
+    return { value: withContentTrust(name === "room_assistant_context" ? assistant.list(roomId, authorize) : assistant.apply(roomId, rest, authorize, secret)), isError: false };
   }
   if (name === "room_list_outside_agents") return { value: new OutsideAgents(store).list(secret, roomId), isError: false };
   if (name === "room_introduce_outside_agent") return { value: new OutsideAgents(store).record(secret, roomId, rest), isError: false };

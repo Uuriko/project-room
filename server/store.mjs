@@ -2357,7 +2357,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const linked = this.db.prepare("SELECT id,sequence,body,room_id FROM events WHERE id=?").get(stored.joined_event_id);
         const binding = this.db.prepare("SELECT account_id,origin FROM member_accounts WHERE room_id=? AND member_id=?").get(stored.room_id, stored.intended_member_id);
         const { sequence, members } = this.roomAuthority(stored.room_id);
-        assertInvitationMembershipEvidence(stored, linked, binding, { sequence, state: { members } });
+        // Account deletion removes the invitee's member_accounts binding
+        // (account-deletion.mjs, "memberships"), so a deleted invitee has no
+        // live membership to compare. The journal and projection matched above;
+        // the joined event itself is still compared to the recorded invitation.
+        const retiredInvitee = !binding && this.db.prepare("SELECT active FROM accounts WHERE id=?").get(stored.intended_account_id)?.active === 0;
+        assertInvitationMembershipEvidence(stored, linked, binding, { sequence, state: { members } }, { retiredInvitee });
       }
       return replayed;
     } catch { fail(503, "invitation_integrity_error", "Invitation record requires operator reconciliation"); }
@@ -3386,6 +3391,31 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return { invitation: invitationView(revoked, now, { includeScope: true }), duplicate: false };
     });
   }
+  // Account deletion revokes the account's pending invitations (as issuer or as
+  // the intended invitee) through the same state change revokeInvitation makes:
+  // revision, revoked_* columns and reason satisfy the status CHECK, the audit
+  // event is appended, and the journal entry keeps verifyInvitationRecord
+  // consistent. A bare `SET status='revoked'` violates that CHECK. The
+  // deleting account is the actor; the member is the invitee (self-decline) or
+  // the issuer (self-revoke). Runs inside the caller's transaction.
+  revokePendingInvitationsForAccount(accountId, { reason = "account_deleted" } = {}) {
+    const rows = this.db.prepare(`SELECT * FROM membership_invitations
+      WHERE status='pending' AND (issuer_account_id=? OR intended_account_id=?) ORDER BY id`).all(accountId, accountId);
+    const now = this.now();
+    const epoch = this.db.prepare("SELECT auth_epoch FROM accounts WHERE id=?").get(accountId)?.auth_epoch ?? 0;
+    for (const row of rows) {
+      const memberId = row.issuer_account_id === accountId ? row.issuer_member_id : row.intended_member_id;
+      const revision = row.revision + 1;
+      const changed = this.db.prepare(`UPDATE membership_invitations SET revision=?,status='revoked',revoked_at=?,revoked_by_account_id=?,revoked_by_member_id=?,revoke_reason=?
+        WHERE id=? AND revision=? AND status='pending'`).run(revision, now, accountId, memberId, reason, row.id, row.revision).changes;
+      if (changed !== 1) continue;
+      this.db.prepare(`INSERT INTO membership_invitation_events(
+        invitation_id,sequence,type,actor_account_id,actor_member_id,actor_auth_epoch,actor_session_revision,invitation_revision,at,room_event_id,reason
+      ) VALUES(?,2,'revoked',?,?,?,0,?,?,NULL,?)`).run(row.id, accountId, memberId, epoch, revision, now, reason);
+      this.appendInvitationJournal(this.db.prepare("SELECT * FROM membership_invitations WHERE id=?").get(row.id), "revoked");
+    }
+    return rows.length;
+  }
   acceptInvitation(accountSessionToken, token, { redemptionId, expectedRevision, expectedSessionBinding } = {}) {
     if (typeof token !== "string" || !tokenPattern.test(token) || typeof redemptionId !== "string" || !redemptionPattern.test(redemptionId) || expectedRevision !== 0) {
       fail(422, "invalid_invitation_acceptance", "Invitation acceptance requires its token, redemption ID, and expected revision zero");
@@ -4161,19 +4191,28 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // order like the other kinds. Backlog 11: messages by an author the caller
   // muted (E4) are excluded for every kind, server-side (mutedEvent), so
   // agents and other API readers match the UI.
-  search(token, roomId, query, kind = "all", expectedSessionBinding = null, { limit = 50 } = {}) {
+  search(token, roomId, query, kind = "all", expectedSessionBinding = null, { limit = 50, before = null } = {}) {
     if (typeof query !== "string" || !query.trim() || query.length > 80) fail(422, "invalid_search", "Search is 1 to 80 characters");
     if (!["all", "messages", "work", "pinned"].includes(kind)) fail(422, "invalid_search", "kind is all, messages, work, or pinned");
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) fail(422, "invalid_search", "limit is 1 to 200");
+    const needle = query.trim().toLowerCase();
+    // REST search paging: `before` is the opaque cursor a previous page
+    // returned as nextCursor. It is bound to the same query and kind, so it
+    // cannot carry a page from one search into another.
+    const cursor = before == null ? null : decodeSearchCursor(before, needle, kind);
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const room = this.room(roomId);
-      const needle = query.trim().toLowerCase();
       const result = { roomId, query: query.trim(), messages: [], workItems: [], total: 0 };
       const floor = this.historyFloor(roomId, auth.member.id); // PRIV-2
       if (kind === "all" || kind === "messages" || kind === "pinned") {
+        // Collect every match the caller may read first. Every filter
+        // (tombstones, history floor, pins, mutes, targeted DMs) runs before
+        // a cursor is resolved, so a cursor can only point at a match this
+        // caller would see anyway.
+        const matches = [];
         for (const m of room.state.messages ?? []) {
-          if (m.body == null) continue; // tombstone
+          if (m.body == null) continue; // tombstone (deleted or redacted)
           if (!messageInHistory(m, floor)) continue; // PRIV-2: before the reader joined
           if (kind === "pinned" && !isPinned(room.state, m.id)) continue;
           if (mutedEvent(room.state, auth.member?.id, { actorId: m.authorId })) continue; // muted author (E4), every kind
@@ -4182,15 +4221,25 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           // nor the match count (result.total, #1812) can reveal their
           // existence, count, or bodies to a third party.
           if (m.toMemberId && m.authorId !== auth.member?.id && m.toMemberId !== auth.member?.id) continue;
-          if (m.body.toLowerCase().includes(needle)) {
-            result.total += 1;
-            result.messages.push({ id: m.id, authorId: m.authorId, body: m.body, createdAt: m.createdAt, workItemId: m.workItemId });
-            // Keep the newest `limit` matches (still chronological). Keeping the first
-            // ones left every newer match unreachable: there is no offset, and limit
-            // tops out at 200.
-            if (result.messages.length > limit) result.messages.shift();
-          }
+          if (m.body.toLowerCase().includes(needle)) matches.push(m);
         }
+        result.total = matches.length; // the full count on every page
+        // The page holds the newest `limit` matches strictly older than the
+        // cursor anchor (all matches without a cursor), still chronological.
+        // The anchor must itself be a match this caller can read now. A
+        // missing id, an id the caller may not read, and an anchor that left
+        // the result set (deleted, redacted, edited away, unpinned, author
+        // muted) all get the same 422, so the cursor is no existence oracle.
+        let stop = matches.length;
+        if (cursor) {
+          stop = matches.findIndex(m => m.id === cursor.anchor);
+          if (stop < 0) fail(422, "invalid_search_cursor", SEARCH_CURSOR_INVALID);
+        }
+        const start = Math.max(0, stop - limit);
+        for (const m of matches.slice(start, stop)) {
+          result.messages.push({ id: m.id, authorId: m.authorId, body: m.body, createdAt: m.createdAt, workItemId: m.workItemId });
+        }
+        if (kind !== "all" && start > 0) result.nextCursor = encodeSearchCursor(needle, kind, result.messages[0].id);
       }
       if (kind === "all" || kind === "work") {
         const workHits = [];
@@ -4569,10 +4618,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // keep the stored marker so an agent never skips its own events on resume.
   catchUpCursor(roomId, memberId) {
     const stored = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, memberId)?.sequence ?? 0;
+    // since_join readers cannot catch up on the hidden prefix. Keep the
+    // joining event visible, and never rewind a later acknowledged marker.
+    // This only derives the read boundary; it does not store an acknowledgement.
+    const floor = this.historyFloor(roomId, memberId);
+    const after = Math.max(stored, floor ? floor.sequence - 1 : 0);
     const next = this.db.prepare(`SELECT sequence FROM events WHERE room_id=? AND sequence>?
-      AND coalesce(json_extract(body, '$.actorId'), '') <> ? ORDER BY sequence LIMIT 1`).get(roomId, stored, memberId)?.sequence ?? null;
+      AND coalesce(json_extract(body, '$.actorId'), '') <> ? ORDER BY sequence LIMIT 1`).get(roomId, after, memberId)?.sequence ?? null;
     return this.db.prepare("SELECT coalesce(max(sequence), ?) AS sequence FROM events WHERE room_id=? AND sequence>? AND (? IS NULL OR sequence<?)")
-      .get(stored, roomId, stored, next, next).sequence;
+      .get(after, roomId, after, next, next).sequence;
   }
   markCaughtUp(token, roomId, sequence, expectedSessionBinding = null) {
     return this.transaction(() => {
@@ -5324,4 +5378,37 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
     return chips;
   }
+}
+
+// REST search paging cursor: base64url JSON {v, k, h, a}. k is the kind; h is
+// the first 16 bytes of sha256(kind NUL needle), which binds the cursor to one
+// search without copying the query into it; a is the oldest message id of the
+// page it continues. The size is fixed by these fields (message ids are at
+// most 128 ASCII characters; a channel copy adds ":channel", 136), so any
+// valid query and id fits the decoder limit. The cursor grants nothing: the anchor must be a match the caller can
+// read on the next request, or the request is 422.
+export const SEARCH_CURSOR_MAX_LENGTH = 320;
+const SEARCH_CURSOR_INVALID = "Search cursor is not valid for this search; start the search again without before";
+function searchCursorHash(needle, kind) {
+  return createHash("sha256").update(`${kind}\u0000${needle}`, "utf8").digest().subarray(0, 16).toString("base64url");
+}
+export function encodeSearchCursor(needle, kind, anchor) {
+  return Buffer.from(JSON.stringify({ v: 2, k: kind, h: searchCursorHash(needle, kind), a: anchor }), "utf8").toString("base64url");
+}
+// A search result id is a message id (validId, at most 128 characters) or the
+// channel copy of a thread reply, which is the source id plus ":channel" (so at
+// most 136 characters). Both are legitimate anchors.
+const SEARCH_CHANNEL_SUFFIX = ":channel";
+function validSearchAnchor(anchor) {
+  if (validId(anchor)) return true;
+  return typeof anchor === "string" && anchor.endsWith(SEARCH_CHANNEL_SUFFIX) && validId(anchor.slice(0, -SEARCH_CHANNEL_SUFFIX.length));
+}
+export function decodeSearchCursor(value, needle, kind) {
+  if (kind !== "messages" && kind !== "pinned") fail(422, "invalid_search_cursor", "Search cursors page kind=messages or kind=pinned only");
+  const bad = () => fail(422, "invalid_search_cursor", SEARCH_CURSOR_INVALID);
+  if (typeof value !== "string" || !value || value.length > SEARCH_CURSOR_MAX_LENGTH || !/^[A-Za-z0-9_-]+$/.test(value)) bad();
+  let parsed;
+  try { parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")); } catch { bad(); }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || parsed.v !== 2 || parsed.k !== kind || parsed.h !== searchCursorHash(needle, kind) || !validSearchAnchor(parsed.a)) bad();
+  return { anchor: parsed.a };
 }

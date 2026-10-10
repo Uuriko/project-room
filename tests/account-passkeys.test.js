@@ -230,3 +230,17 @@ test("finishAuthentication rejects replayed challenges and failed assertions wit
   const retry = auth.beginAuthentication({ rpId: "example.test" });
   unauthorized(() => auth.finishAuthentication({ ...finish, challengeId: retry.challengeId, response: { bad: true } }));
 });
+
+test("registration options for an email account carry a WebAuthn-legal user.id (at most 64 bytes)", async () => {
+  const { createHash } = await import("node:crypto");
+  const emailAccount = `email:${createHash("sha256").update("ada@example.test").digest("hex")}`;
+  assert.equal(Buffer.byteLength(emailAccount), 70, "email account ids exceed the 64-byte user.id limit");
+  const model = fakeModel();
+  const auth = createPasskeyAuth({ store: fakeStore(model) });
+  const options = auth.beginRegistration({ accountId: emailAccount, rpId: "example.test", userName: "Ada" });
+  const bytes = Buffer.from(options.user.id, "base64url");
+  assert.ok(bytes.length >= 1 && bytes.length <= 64, `user.id is ${bytes.length} bytes`);
+  assert.notEqual(bytes.toString("utf8"), emailAccount);
+  const again = auth.beginRegistration({ accountId: emailAccount, rpId: "example.test", userName: "Ada" });
+  assert.equal(again.user.id, options.user.id, "stable per account so a re-register replaces the same passkey slot");
+});
