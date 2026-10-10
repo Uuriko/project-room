@@ -124,7 +124,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
         !sourceDeleted && run.resultMessageId ? `<button type="button" class="text-button" data-assistant-message="${esc(run.resultMessageId)}">Open result</button>` : '',
         (sourceDeleted ? [] : run.activity ?? []).slice(-5).map(a => `<p>${esc(a.summary)}</p>`).join(''),
         inputs,
-        editable ? ["<button type=\"button\" class=\"text-button\" data-contribute-run=\"", esc(run.id), "\" data-revision=\"", run.revision, "\">Add context</button>"].join('') : '',
+        editable ? ["<button type=\"button\" class=\"text-button\" data-contribute-run=\"", esc(run.id), "\" data-revision=\"", run.revision, "\">", uiText("human.addToThisAsk"), "</button>"].join('') : '',
         editable && run.status !== 'needs_input' ? ["<button type=\"button\" class=\"text-button\" data-contribute-run=\"", esc(run.id), "\" data-conflict=\"true\" data-revision=\"", run.revision, "\">Change direction</button>"].join('') : '',
         controls && !sourceDeleted && run.status === 'needs_input' ? ["<button type=\"button\" class=\"text-button\" data-contribute-run=\"", esc(run.id), "\" data-resolve=\"true\" data-revision=\"", run.revision, "\">Resolve direction</button>"].join('') : '',
         "</div></details>"].join('');
@@ -140,7 +140,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
       if (current) {
         faceRequest.textContent = faceSource?.body?.slice(0, 120) || uiText('human.face.sharedRequest');
         if (current.resultMessageId) faceActions.append(faceButton(uiText('human.face.openResult'), { assistantMessage: current.resultMessageId }));
-        if (!CLOSED.includes(current.status) && !['cancel_requested', 'needs_input'].includes(current.status)) faceActions.append(faceButton(uiText('human.face.addContext'), { contributeRun: current.id, revision: String(current.revision) }));
+        if (!CLOSED.includes(current.status) && !['cancel_requested', 'needs_input'].includes(current.status)) faceActions.append(faceButton(uiText('human.addToThisAsk'), { contributeRun: current.id, revision: String(current.revision) }));
         if (faceControls && !CLOSED.includes(current.status)) faceActions.insertAdjacentHTML('beforeend', uiText('human.stopRequest', { runId: esc(current.id), revision: current.revision }));
         // R5-1: keep keyboard focus on the same control (or the card) across a repaint.
         if (focusedData) ([...faceActions.querySelectorAll('button')].find(button => button.dataset.pauseRun === focusedData.pauseRun && button.dataset.cancel === focusedData.cancel && button.dataset.contributeRun === focusedData.contributeRun) || faceStatus).focus({ preventScroll: true });
@@ -193,7 +193,11 @@ export function installHumanExperience({ getState, getSession, client, notice, o
     const context = event.target.closest('[data-contribute-run]');
     if (context) {
       contribution = { action: context.dataset.resolve ? 'resolve' : 'contribute', runId: context.dataset.contributeRun, expectedRevision: Number(context.dataset.revision), ...(context.dataset.resolve ? {} : { conflict: context.dataset.conflict === 'true' }) };
-      selected = true; ask.textContent = context.dataset.resolve ? 'Resolve direction' : context.dataset.conflict ? 'Change direction' : 'Add context'; ask.setAttribute('aria-pressed', 'true'); $('#message-input').focus(); return;
+      selected = true;
+      const target = (projection.runs ?? []).find(r => r.id === context.dataset.contributeRun);
+      const asker = getState().members[target?.initiatorId]?.displayName || 'this';
+      ask.textContent = context.dataset.resolve ? 'Resolve direction' : context.dataset.conflict ? 'Change direction' : uiText('human.addingToAsk', { name: asker });
+      ask.setAttribute('aria-pressed', 'true'); $('#message-input').focus(); return;
     }
     const button = event.target.closest('[data-pause-run]'); if (!button) return;
     if (operation) return;
