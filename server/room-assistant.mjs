@@ -16,6 +16,8 @@ const terminal = new Set(['done', 'cancelled', 'failed']);
 // A host that has not reported within this window is treated as silent: the
 // run reads stalled/unknown, and a stop completes without its acknowledgment.
 const hostStaleAfterMs = 120000;
+// A queued run nobody claimed within this window reads not picked up.
+const notPickedUpAfterMs = 10000;
 const keys = {
   configure: ['name', 'coordinatorMemberId', 'expectedRevision'], invoke: ['runId', 'sourceMessageId'],
   contribute: ['runId', 'sourceMessageId', 'expectedRevision', 'conflict'],
@@ -30,6 +32,20 @@ const keys = {
 };
 // Deleted prompts retain only a stop handle for their existing controllers.
 // The history floor still applies: deletion cannot reveal older work to newcomers.
+// Display-only status for the ask card, returned as run.displayStatus next to
+// the raw run.status (hosts key their claim loop on status === 'queued', so
+// status must never be rewritten to a label). queued past the pickup window reads
+// not_picked_up; a working run whose host went silent reads stalled; a
+// working run that never reported reads unknown (legacy rows only — claim
+// always stamps hostReportedAt).
+const derivedRunStatus = (run, now) => {
+  if (run.status === 'queued' && now - run.createdAt > notPickedUpAfterMs) return 'not_picked_up';
+  if (run.status === 'working') {
+    if (!Number.isFinite(run.hostReportedAt)) return 'unknown';
+    if (now - run.hostReportedAt > hostStaleAfterMs) return 'stalled';
+  }
+  return run.status;
+};
 const controlsDeletedSource = (run, opening, actor, state, floor) => Boolean(
   opening?.deletedAt && opening.body == null && !opening.toMemberId && messageInHistory(opening, floor)
   && (actor.kind === 'human' && (actor.id === run.initiatorId || actor.id === state.room.ownerId)
@@ -63,7 +79,8 @@ export class RoomAssistant {
           const opening = state.messages.find(m => m.id === run.sourceMessageId);
           return controlsDeletedSource(run, opening, auth.member, state, floor) ? [deletedControl(run)] : [];
         })
-        .map(run => ({ ...run, status: run.status === 'working' && (!Number.isFinite(run.hostReportedAt) || this.store.now() - run.hostReportedAt > 120000) ? 'unknown' : run.status }));
+        .map(run => ({ ...run, status: run.status === 'working' && (!Number.isFinite(run.hostReportedAt) || this.store.now() - run.hostReportedAt > hostStaleAfterMs) ? 'unknown' : run.status,
+          displayStatus: derivedRunStatus(run, this.store.now()) }));
       const recent = runs.some(run => run.coordinatorMemberId === config.coordinatorMemberId && run.attemptId && Number.isFinite(run.hostReportedAt) && this.store.now() - run.hostReportedAt <= 120000 && !terminal.has(run.status));
       return { contractVersion: 1, roomId, assistant: { ...config, availability: !coordinator?.active || !coordinator.permissions.includes('accept_work') ? 'not_connected' : recent ? 'connected' : 'awaiting_host' }, runs };
     });
