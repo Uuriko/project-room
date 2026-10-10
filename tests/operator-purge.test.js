@@ -238,6 +238,9 @@ describe("operator purge and status", { concurrency: false }, () => {
     assert.deepEqual(retiredTableNames(store.db), []);
     for (const entry of PURGE_TABLES) {
       if (entry.action !== "delete") continue;
+      // An optional table created on first use (feedback_state) may be absent;
+      // purge skips it the same way (server/operator-purge.mjs purgeTable).
+      if (entry.optional && !store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(entry.table)) continue;
       assert.equal(matchingRows(store.db, entry, "room", roomA), 0, entry.table);
     }
     assert.equal(store.db.prepare("SELECT 1 FROM rooms WHERE id=?").get(roomA), undefined);
