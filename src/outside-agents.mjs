@@ -84,14 +84,23 @@ export function planOutsideAgentVerify(messages, members, roomId, approverId, in
   const decision = input.decision;
   const existing = assembleOutsideAgents(messages, members, { verifiers }).find(agent => agent.externalRef === externalRef);
   if (!existing) fail(404, "outside_agent_not_found", "Introduce the agent before deciding on its link");
-  if (!existing.linkedMemberId && !existing.verifiedBy)
-    fail(422, "outside_agent_unlinked", "There is no link to decide on for this agent");
   // A decision belongs to the link it was made on. Replay only when the
   // same decision already covers the CURRENT pending link; after a re-link
-  // the same verdict is a new decision and must record (A34).
+  // the same verdict is a new decision and must record (A34). A repeated
+  // deny is also a replay when its link is already gone: repeating it
+  // changes nothing, and the 422 below would turn an idempotent retry into
+  // an error.
   const pendingLinkId = existing.linkMessageId ?? null;
-  if (existing.latestDecision === decision && existing.decidedLinkMessageId === pendingLinkId)
+  if (existing.latestDecision === decision &&
+      (existing.decidedLinkMessageId === pendingLinkId ||
+        (decision === "denied" && pendingLinkId === null)))
     return { recorded: "replay", externalRef, decision };
+  // With no link in effect there is nothing to decide on. A denial clears
+  // the link, so deny -> approve without a re-link must not post: the old
+  // check let verifiedBy satisfy it, which recorded verified=true on a null
+  // link and silently pre-verified the member's next re-link.
+  if (!existing.linkedMemberId)
+    fail(422, "outside_agent_unlinked", "There is no link to decide on for this agent");
   const record = { v: 1, kind: "verify", externalRef, decision, decidedBy: approverId, decidedAt: Date.now() };
   return { recorded: "verify", externalRef, decision,
     commandId: commandId("verify", roomId, approverId, externalRef, decision, pendingLinkId ?? "none"),

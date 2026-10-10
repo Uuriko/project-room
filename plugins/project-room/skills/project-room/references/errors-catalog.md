@@ -778,6 +778,7 @@ response's own `hint`/`next` when it names something more specific.
 | `outside_agent_changed` | 409 | This agent is already linked to a member | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `outside_agent_forbidden` | 403 | Only the introducer or self-linked member may report this relationship | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `outside_agent_not_found` | 404 | Introduce both agents before relating them | re-list | Re-list the resource and use a current id. Do not guess ids. |
+| `outside_agent_unlinked` | 422 | There is no link to decide on for this agent | re-list | Re-list the outside agents and decide on a link that is still pending. Do not guess ids. |
 | `owner_cannot_deactivate` | 403 | The room owner cannot deactivate its own membership; transfer ownership first | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `owner_only` | 403 | Only the room owner may manage Demigod offers | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `owner_required` | 403 | Only the room owner can read the access review | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
