@@ -130,8 +130,9 @@ function anonCatalogFromSkill(text, rel) {
   // Sentence shapes seen: "... serves six tools when no credential is sent: ..."
   // and "Without a credential the tool list is six tools: ...".
   const m =
-    text.match(/(six|seven|four|\d+)\s+tools[^.\n]*?credential[^:]*:([^\n.]+)\./i) ||
-    text.match(/credential[^.\n]*?(six|seven|four|\d+)\s+tools[^:]*:([^\n.]+)\./i);
+    text.match(/No credential:\s*(six|seven|four|\d+)\s+tools\s+only\s*\(([^\n.]+)\)\./i) ||
+    text.match(/(six|seven|four|\d+)\s+tools[^.\n]*?credential[^:\n]*:([^\n.]+)\./i) ||
+    text.match(/credential[^.\n]*?(six|seven|four|\d+)\s+tools[^:\n]*:([^\n.]+)\./i);
   assert.ok(m, `${rel} states the no-credential tool count with an enumeration`);
   const count = COUNT_WORDS[m[1].toLowerCase()] ?? Number(m[1]);
   const names = new Set(toolTokens(m[2]));
@@ -144,7 +145,8 @@ function anonCatalogFromSkill(text, rel) {
 test("skill files' no-credential catalog sentence matches the live anonymous catalog", () => {
   const live = livePublicMcpTools().map((t) => t.name);
   assert.ok(live.includes("room_identity_mint"), "live anonymous catalog includes room_identity_mint");
-  for (const rel of ["skills/project-room/references/tools.md", "skills/ProjectRoom/SKILL.md"]) {
+  for (const rel of ["skills/project-room/references/tools.md", "skills/ProjectRoom/SKILL.md",
+    "skills/project-room-host-router/hosts/hosted-mcp.md"]) {
     const { count, names } = anonCatalogFromSkill(read(rel), rel);
     assert.equal(count, live.length, `${rel}: stated no-credential count matches live (${live.length})`);
     assertSetEqual(names, live, `${rel}: enumerated no-credential names match live catalog`);
