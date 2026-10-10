@@ -136,6 +136,14 @@ export const agentPluginSchema = `
 // it block the head of the due queue.
 export const SKIPPED_RECHECK_MS = 10 * 60 * 1000;
 
+// qa7-12-webhook-autopause: a dead endpoint must not burn delivery attempts
+// forever. This many CONSECUTIVE terminal (dead-lettered) deliveries
+// auto-pause the subscription (enabled=0, durable). A delivered delivery
+// resets the streak; the owner re-arms with PATCH /api/agent-webhooks/{id}.
+// Mirrors the push-notification convention (PUSH_SUSPEND_AFTER_FAILURES=3
+// in server/agent-heartbeats.mjs).
+export const WEBHOOK_AUTOPAUSE_AFTER_FAILURES = 3;
+
 // The in-memory journal keeps this many newest rows per subscription.
 // Retention keeps those, plus delivered and dead-letter rows inside the
 // window below. Pending and failed rows are never pruned: they can still
@@ -264,6 +272,12 @@ export class AgentPluginStore {
     const deliveryColumns = new Set(this.db.prepare("PRAGMA table_info(agent_webhook_deliveries)").all().map(c => c.name));
     if (deliveryColumns.size > 0 && !deliveryColumns.has("target_url")) {
       this.db.exec("ALTER TABLE agent_webhook_deliveries ADD COLUMN target_url TEXT");
+    }
+    // qa7-12-webhook-autopause: consecutive terminal-failure streak per
+    // subscription. Same additive backfill pattern: legacy rows read 0.
+    const subColumns = new Set(this.db.prepare("PRAGMA table_info(agent_webhook_subs)").all().map(c => c.name));
+    if (subColumns.size > 0 && !subColumns.has("consecutive_failures")) {
+      this.db.exec("ALTER TABLE agent_webhook_subs ADD COLUMN consecutive_failures INTEGER NOT NULL DEFAULT 0");
     }
     const keyColumns = new Set(this.db.prepare("PRAGMA table_info(agent_api_keys)").all().map(c => c.name));
     if (keyColumns.size > 0 && !keyColumns.has("last_used_ua")) {
@@ -1047,6 +1061,42 @@ export class AgentPluginStore {
     return Object.freeze(rows.map(row => this.deliveryView(row)));
   }
 
+  // qa7-12-webhook-autopause: identity-scoped enable/disable — the re-arm
+  // path after an auto-pause, and a manual pause switch. An explicit change
+  // resets the consecutive-failure streak (the owner presumably fixed the
+  // endpoint). Writes through to the database so the flag survives restarts;
+  // the pure module's setEnabled keeps the in-memory cache in agreement.
+  // Cross-identity calls 404 like unsubscribe — never an oracle.
+  setWebhookEnabled({ identityId, subscriptionId, enabled }) {
+    return this.mutate(() => {
+      if (typeof enabled !== "boolean") {
+        throw new AgentPluginError(422, "invalid_enabled", "enabled must be a boolean");
+      }
+      const row = this.db.prepare(
+        "SELECT agent_id FROM agent_webhook_subs WHERE subscription_id=?").get(subscriptionId);
+      if (!row || row.agent_id !== identityId) {
+        throw new AgentPluginError(404, "unknown_subscription", `Unknown subscription "${subscriptionId}"`);
+      }
+      const subscription = this.webhooks.setEnabled(subscriptionId, { agentId: identityId, enabled });
+      this.db.prepare("UPDATE agent_webhook_subs SET enabled=?, consecutive_failures=0 WHERE subscription_id=?")
+        .run(enabled ? 1 : 0, subscriptionId);
+      return { subscription };
+    });
+  }
+
+  // Single-delivery receipt: can the sender confirm what happened to one
+  // delivery? Identity-scoped; cross-identity reads 404 like the journal.
+  webhookDeliveryFor({ identityId, deliveryId }) {
+    return this.store.readTransaction(() => {
+      const row = this.db.prepare(
+        `SELECT d.* FROM agent_webhook_deliveries d
+         JOIN agent_webhook_subs s ON s.subscription_id = d.subscription_id
+         WHERE d.delivery_id=? AND s.agent_id=?`).get(deliveryId, identityId);
+      if (!row) throw new AgentPluginError(404, "unknown_delivery", `Unknown delivery "${deliveryId}"`);
+      return { delivery: this.deliveryView(row) };
+    });
+  }
+
   buildWebhookDelivery(subscriptionId, { eventType, data, eventId = null, roomId = null, url = null, idempotencySuffix = null }) {
     return this.mutate(() => {
       // Idempotency: the same event fanned out twice to the same
@@ -1211,6 +1261,35 @@ export class AgentPluginStore {
     }
   }
 
+  // qa7-12-webhook-autopause: record one terminal (dead-lettered) delivery
+  // against the subscription's consecutive-failure streak. At
+  // WEBHOOK_AUTOPAUSE_AFTER_FAILURES the subscription auto-pauses: enabled=0
+  // is written through to the database (durable across restarts) and to the
+  // in-memory cache (so attemptStoredDelivery's enabled check agrees), which
+  // makes the drain and fan-out skip it until the owner re-arms it. Returns
+  // the new streak length (0 when the subscription row is gone).
+  recordTerminalFailure(subscriptionId, agentId) {
+    const row = this.db.prepare(
+      "SELECT consecutive_failures FROM agent_webhook_subs WHERE subscription_id=?").get(subscriptionId);
+    if (!row) return 0;
+    const failures = (row.consecutive_failures ?? 0) + 1;
+    this.db.prepare("UPDATE agent_webhook_subs SET consecutive_failures=? WHERE subscription_id=?")
+      .run(failures, subscriptionId);
+    if (failures >= WEBHOOK_AUTOPAUSE_AFTER_FAILURES) {
+      this.db.prepare("UPDATE agent_webhook_subs SET enabled=0 WHERE subscription_id=?").run(subscriptionId);
+      try {
+        this.webhooks.setEnabled(subscriptionId, { agentId, enabled: false });
+      } catch { /* cache may lag; the table is authoritative */ }
+    }
+    return failures;
+  }
+
+  // A delivered delivery proves the endpoint works: reset the streak.
+  resetFailureStreak(subscriptionId) {
+    this.db.prepare("UPDATE agent_webhook_subs SET consecutive_failures=0 WHERE subscription_id=?")
+      .run(subscriptionId);
+  }
+
   // Attempt one stored delivery: recompute the signature with a fresh
   // issuedAt (replay resistance), POST, and advance the lifecycle.
   async attemptStoredDelivery(row, { fetchImpl, now, dnsResolvers }) {
@@ -1256,6 +1335,7 @@ export class AgentPluginStore {
       } catch { /* cache may lag; the table is authoritative */ }
       if (result.ok) {
         this.markDelivered(row.delivery_id, { signature, issuedAt, envelope, now });
+        this.resetFailureStreak(row.subscription_id);
         return "delivered";
       }
       const attempts = row.attempts + 1;
@@ -1267,6 +1347,10 @@ export class AgentPluginStore {
           ? `receiver rejected the delivery (HTTP ${result.status}); not retried${detail}`
           : `gave up after ${MAX_DELIVERY_ATTEMPTS} attempts; last error: ${result.error}`;
         this.markDeadLetter(row.delivery_id, reason, now, attempts);
+        // qa7-12-webhook-autopause: a dead endpoint must not burn attempts
+        // forever — enough consecutive terminal failures pause the
+        // subscription until the owner re-arms it.
+        this.recordTerminalFailure(row.subscription_id, row.agent_id);
         return "deadLettered";
       }
       this.db.prepare(`UPDATE agent_webhook_deliveries
