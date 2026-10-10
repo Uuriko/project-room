@@ -117,7 +117,7 @@ test("signup guidance, password visibility and pending-write controls work befor
   await page.locator('[data-password-mode="signup"]').click();
   const form = page.locator('#auth-signin-ui [data-signin-form="password"]');
   assert.equal(await form.locator('[name="password"]').getAttribute("minlength"), "10");
-  assert.match(await form.locator("#signup-password-hint").textContent(), /10–256/);
+  assert.equal(await form.locator('[name="password"]').getAttribute("maxlength"), "256");
   await form.locator('[name="email"]').fill("native-browser-signup@example.invalid");
   await form.locator('[name="password"]').fill(password);
   await form.locator('[data-password-visibility]').click();
