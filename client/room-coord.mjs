@@ -61,7 +61,12 @@ const callRoom = async fn => {
 // Repo paths: trim, drop leading ./, collapse duplicate slashes, drop `.`
 // segments and trailing slashes. `..` is rejected rather than resolved, so a
 // path cannot climb out of the repo. Case is preserved because repo paths
-// are case-sensitive.
+// are case-sensitive. NFC and NFD spellings of the same file compare equal.
+function composed(value) {
+  try { return value.normalize("NFC"); }
+  catch { return value; }
+}
+
 export function normalizePath(path) {
   if (typeof path !== "string" || !path.trim()) throw new CoordError("invalid_path", "Paths must be non-empty strings");
   let p = path.trim().replace(/\\/g, "/").replace(/\/+/g, "/");
@@ -70,7 +75,7 @@ export function normalizePath(path) {
   if (p.split("/").includes("..")) throw new CoordError("invalid_path", `Path ${JSON.stringify(path)} must stay inside the repo`);
   p = p.split("/").filter(part => part !== "." && part !== "").join("/");
   if (!p || p.startsWith("/")) throw new CoordError("invalid_path", `Path ${JSON.stringify(path)} must stay inside the repo`);
-  return p;
+  return composed(p);
 }
 
 // A claimed path covers itself and, when it names a directory, everything

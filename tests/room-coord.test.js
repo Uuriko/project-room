@@ -54,6 +54,24 @@ test('a directory claim covers the files beneath it and nothing beside it', () =
   assert.throws(() => pathCovers('../outside', 'server/a.mjs'), coded('invalid_path'));
 });
 
+test('an NFC lease covers the NFD spelling of the same file', () => {
+  const nfc = 'server/café.mjs';
+  const nfd = 'server/cafe\u0301.mjs';
+  assert.notEqual(nfc, nfd);
+  assert.equal(pathCovers(nfc, nfd), true);
+  assert.equal(pathCovers('server/café', 'server/cafe\u0301/notes.mjs'), true);
+  assert.equal(pathCovers('Server/Café.mjs', nfd), false);
+  const now = Date.parse('2026-10-10T18:00:00.000Z');
+  const conflicts = guardConflicts([{
+    id: 'lane-a', state: 'claimed', owner: 'holder',
+    leaseExpiresAt: '2026-10-10T20:00:00.000Z', files: [nfc],
+  }], [nfd], { memberId: 'other', now });
+  assert.equal(conflicts.length, 1);
+  assert.equal(conflicts[0].claimId, 'lane-a');
+  assert.equal(conflicts[0].file, 'server/café.mjs');
+  assert.throws(() => pathCovers('../café.mjs', nfc), coded('invalid_path'));
+});
+
 test('a wanted parent path conflicts with a live file lease beneath it', () => {
   const now = Date.parse('2026-10-10T03:00:00.000Z');
   const claims = [{
