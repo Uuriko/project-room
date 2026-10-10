@@ -89,9 +89,25 @@ test("TST-12: the HTTP server serves a DO-backed store", async t => {
 test("TST-12: the emulator refuses SQL transaction statements like DO does", t => {
   const storage = new DoStorageEmulator();
   t.after(() => storage.close());
-  for (const sql of ["BEGIN", "BEGIN IMMEDIATE", "COMMIT", "END", "ROLLBACK", "SAVEPOINT a", "RELEASE a", "  begin transaction"]) {
-    assert.throws(() => storage.sql.exec(sql), DoStorageError, sql);
-  }
+  const refuseTransactions = () => {
+    for (const prefix of ["", "/* comment */ ", "-- comment\n", "; ", "; /* comment */ ", ";; -- comment\n; "]) {
+      for (const sql of ["BEGIN", "BEGIN IMMEDIATE", "COMMIT", "END", "ROLLBACK", "ROLLBACK TO a", "SAVEPOINT a", "RELEASE a", "  begin transaction"]) {
+        const rejected = storage.stats.rejected;
+        assert.throws(() => storage.sql.exec(prefix + sql), { name: "DoStorageError", message: /use transactionSync/ }, prefix + sql);
+        assert.equal(storage.stats.rejected, rejected + 1);
+      }
+    }
+  };
+  refuseTransactions();
+  storage.sql.exec("CREATE TABLE guarded(v INTEGER)");
+  storage.transactionSync(() => {
+    storage.sql.exec("INSERT INTO guarded VALUES (1)");
+    refuseTransactions();
+    storage.transactionSync(() => { refuseTransactions(); storage.sql.exec("INSERT INTO guarded VALUES (2)"); });
+    refuseTransactions();
+  });
+  refuseTransactions();
+  assert.deepEqual(storage.sql.exec("SELECT v FROM guarded ORDER BY v").toArray(), [{ v: 1 }, { v: 2 }]);
   assert.throws(() => storage.sql.exec("SELECT ?", undefined), DoStorageError);
   assert.throws(() => storage.sql.exec("SELECT ?", { a: 1 }), DoStorageError);
 });
@@ -165,6 +181,7 @@ test("TST-12 review: a deferred foreign-key failure at COMMIT leaves depth at 0"
   storage.sql.exec("CREATE TABLE c(pid INTEGER REFERENCES p(id) DEFERRABLE INITIALLY DEFERRED)");
   assert.throws(() => storage.transactionSync(() => { storage.sql.exec("INSERT INTO c VALUES (99)"); }));
   assert.equal(storage.depth, 0);
+  assert.throws(() => storage.sql.exec("; BEGIN"), DoStorageError);
   storage.transactionSync(() => { storage.sql.exec("INSERT INTO p VALUES (1)"); storage.transactionSync(() => storage.sql.exec("INSERT INTO c VALUES (1)")); });
   assert.equal(storage.depth, 0);
   assert.equal(storage.sql.exec("SELECT count(*) AS n FROM c").one().n, 1);

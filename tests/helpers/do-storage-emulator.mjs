@@ -18,9 +18,7 @@
 //   - foreign keys are on.
 // It is a fidelity aid, not workerd. Run the cloudflare/*.check.mjs suites in
 // miniflare for the real runtime.
-import { DatabaseSync } from "node:sqlite";
-
-const TXN_STATEMENT = /^\s*(BEGIN|COMMIT|END|ROLLBACK|SAVEPOINT|RELEASE)\b/i;
+import { DatabaseSync, constants } from "node:sqlite";
 
 export class DoStorageError extends Error {
   constructor(message) { super(message); this.name = "DoStorageError"; }
@@ -67,17 +65,26 @@ function cursorOf(arrays, columnNames, rowsRead, rowsWritten) {
 // statement of the text and sourceSQL is exactly that statement. Quotes of
 // every kind, comments and trigger bodies are therefore parsed by SQLite, not
 // by a keyword counter here.
-const LEADING_TRIVIA = /^(?:\s+|--[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/)*/;
-const isTransactionStatement = text => TXN_STATEMENT.test(text.replace(LEADING_TRIVIA, ""));
 const isBlankSql = text => !text.replace(/--[^\n]*|\/\*[\s\S]*?\*\//g, "").replace(/[\s;]/g, "");
 
 export class DoStorageEmulator {
+  #allowTransactionControl = false;
+
   constructor({ filename = ":memory:" } = {}) {
     this.db = new DatabaseSync(filename);
     this.db.exec("PRAGMA foreign_keys=ON");
     this.depth = 0;
     this.savepoints = 0;
     this.stats = { execs: 0, transactions: 0, rollbacks: 0, rejected: 0 };
+    this.db.setAuthorizer(action => {
+      if (!this.#allowTransactionControl && (action === constants.SQLITE_TRANSACTION || action === constants.SQLITE_SAVEPOINT)) {
+        this.stats.rejected += 1;
+        // Node converts a thrown authorizer error into SQLITE_DENY while
+        // preserving the error, including our explicit storage-error API.
+        throw new DoStorageError("SQL transaction statements are not allowed on Durable Object storage; use transactionSync");
+      }
+      return constants.SQLITE_OK;
+    });
     this.sql = {
       exec: (query, ...args) => this.#exec(query, args),
       get databaseSize() { return 0; },
@@ -94,9 +101,8 @@ export class DoStorageEmulator {
     }
     const binds = args.map(arg => (arg instanceof ArrayBuffer ? new Uint8Array(arg) : arg));
     // DO runs every statement in the text and returns the cursor of the last
-    // one, SELECT included. Bindings apply to the last statement. Each
-    // statement is checked for transaction control, after any leading
-    // comment, before it runs.
+    // one, SELECT included. Bindings apply to the last statement. SQLite's
+    // authorizer refuses transaction control regardless of leading trivia.
     let rest = String(query);
     if (isBlankSql(rest)) return cursorOf([], [], 0, 0);
     const changes = () => this.db.prepare("SELECT total_changes() AS n").get().n;
@@ -111,10 +117,6 @@ export class DoStorageEmulator {
         throw new DoStorageError("Unsupported SQL text: the emulator could not find the statement boundary");
       }
       rest = rest.slice(text.length);
-      if (isTransactionStatement(text)) {
-        this.stats.rejected += 1;
-        throw new DoStorageError("SQL transaction statements are not allowed on Durable Object storage; use transactionSync");
-      }
       if (!isBlankSql(rest)) { statement.all(); continue; }
       statement.setReturnArrays(true);
       columns = statement.columns().map(column => column.name);
@@ -123,23 +125,31 @@ export class DoStorageEmulator {
     return cursorOf(rows, columns, rows.length, changes() - before);
   }
 
+  #transactionControl(sql) {
+    const previous = this.#allowTransactionControl;
+    this.#allowTransactionControl = true;
+    try { this.db.exec(sql); }
+    finally { this.#allowTransactionControl = previous; }
+  }
+
   transactionSync(fn) {
     if (typeof fn !== "function") throw new TypeError("transactionSync requires a callback");
     const outer = this.depth === 0;
     const name = `do_emulator_sp_${++this.savepoints}`;
-    this.db.exec(outer ? "BEGIN IMMEDIATE" : `SAVEPOINT ${name}`);
+    this.#transactionControl(outer ? "BEGIN IMMEDIATE" : `SAVEPOINT ${name}`);
     this.depth += 1;
     this.stats.transactions += 1;
     try {
+      // Only the internal control statement gets an allowance, never fn().
       const result = fn();
       if (result && typeof result.then === "function") throw new DoStorageError("transactionSync callback must be synchronous");
       // A deferred foreign-key failure throws here, at COMMIT, and lands in
       // the catch below. Depth drops once, in finally, either way.
-      this.db.exec(outer ? "COMMIT" : `RELEASE ${name}`);
+      this.#transactionControl(outer ? "COMMIT" : `RELEASE ${name}`);
       return result;
     } catch (error) {
       this.stats.rollbacks += 1;
-      if (outer) { if (this.db.isTransaction !== false) this.db.exec("ROLLBACK"); } else this.db.exec(`ROLLBACK TO ${name}; RELEASE ${name}`);
+      if (outer) { if (this.db.isTransaction !== false) this.#transactionControl("ROLLBACK"); } else this.#transactionControl(`ROLLBACK TO ${name}; RELEASE ${name}`);
       throw error;
     } finally {
       this.depth -= 1;
