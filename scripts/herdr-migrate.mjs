@@ -51,7 +51,7 @@
 
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
-import { readFileSync, appendFileSync, mkdirSync } from "node:fs";
+import { readFileSync, appendFileSync, mkdirSync, openSync, closeSync, writeFileSync, unlinkSync } from "node:fs";
 
 const TOOL_VERSION = "1";
 
@@ -445,30 +445,95 @@ export function deriveExitCode({ systemic, total, ok, failed }) {
 // persists into herdr_session_journal (D5 §5: B20 owns journal schema support).
 // ---------------------------------------------------------------------------
 
-export function appendJournalEntry(journalPath, entry) {
-  const dir = dirname(resolve(journalPath));
-  mkdirSync(dir, { recursive: true });
-  const existing = readJournal(journalPath);
-  const seq = existing.length + 1;
-  const full = {
-    seq,
-    at: new Date().toISOString(),
-    tool: "herdr-migrate",
-    tool_version: TOOL_VERSION,
-    ...entry,
-  };
-  appendFileSync(journalPath, JSON.stringify(full) + "\n", "utf8");
-  return full;
+// Never remove a peer's or abandoned lock automatically. An operator must
+// confirm the previous process stopped before repairing an abandoned lock.
+function acquireJournalLock(journalPath, suffix) {
+  const lockPath = `${resolve(journalPath)}${suffix}`;
+  mkdirSync(dirname(lockPath), { recursive: true });
+  let fd;
+  try {
+    fd = openSync(lockPath, "wx", 0o600);
+  } catch (err) {
+    if (err?.code === "EEXIST") throw new RoomApiError(
+      `journal is locked (${lockPath}); wait for the holder, or verify it stopped before removing an abandoned lock`,
+      { code: "journal_locked" },
+    );
+    throw err;
+  }
+  try {
+    writeFileSync(fd, JSON.stringify({ pid: process.pid, at: new Date().toISOString() }) + "\n");
+  } catch (err) {
+    closeSync(fd);
+    unlinkSync(lockPath);
+    throw err;
+  }
+  closeSync(fd);
+  return () => unlinkSync(lockPath);
 }
 
-export function readJournal(journalPath) {
+export async function withMigrationLock(journalPath, operation) {
+  const release = acquireJournalLock(journalPath, ".lock");
   try {
-    const text = readFileSync(journalPath, "utf8");
-    return text.split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
+    // An uncertain completion must never be retried merely because its
+    // final journal record could not be read.
+    readJournal(journalPath, { allowIncompleteTail: false });
+    return await operation();
+  } finally {
+    release();
+  }
+}
+
+export function appendJournalEntry(journalPath, entry) {
+  const release = acquireJournalLock(journalPath, ".append.lock");
+  try {
+    const existing = readJournal(journalPath, { allowIncompleteTail: false });
+    const seq = existing.reduce((max, row) => Math.max(max, Number.isSafeInteger(row.seq) ? row.seq : 0), existing.length) + 1;
+    const full = {
+      ...entry,
+      seq,
+      at: new Date().toISOString(),
+      tool: "herdr-migrate",
+      tool_version: TOOL_VERSION,
+    };
+    // A complete final JSON row can survive without its newline. Preserve
+    // that row, then insert the separator before the next append.
+    const separator = existing.length && !readFileSync(journalPath, "utf8").endsWith("\n") ? "\n" : "";
+    appendFileSync(journalPath, separator + JSON.stringify(full) + "\n", "utf8");
+    return full;
+  } finally {
+    release();
+  }
+}
+
+export function readJournal(journalPath, { allowIncompleteTail = true, warn = message => process.stderr.write(`herdr-migrate: warning: ${message}\n`) } = {}) {
+  let text;
+  try {
+    text = readFileSync(journalPath, "utf8");
   } catch (err) {
     if (err?.code === "ENOENT") return [];
     throw err;
   }
+  const lines = text.split("\n");
+  const finalLine = lines.findLastIndex(line => line.trim());
+  const entries = [];
+  for (let index = 0; index <= finalLine; index++) {
+    if (!lines[index].trim()) continue;
+    try {
+      const row = JSON.parse(lines[index]);
+      if (!row || typeof row !== "object" || Array.isArray(row)) throw new Error("record must be an object");
+      entries.push(row);
+    } catch {
+      if (index !== finalLine || !allowIncompleteTail) throw new RoomApiError(
+        `repair journal ${journalPath} at line ${index + 1} before executing; preserve the damaged record and reconcile any uncertain migration`,
+        { code: "journal_corrupt" },
+      );
+      // Keep the array API compatible while exposing uncertainty to callers.
+      // Read-only inspectors can report known entries. Writes fail closed.
+      Object.defineProperty(entries, "incompleteTail", { value: { line: index + 1 }, enumerable: false });
+      warn(`journal ${journalPath} has an incomplete final record at line ${index + 1}; inspection is partial; writes require journal repair`);
+    }
+  }
+  return entries;
 }
 
 // ---------------------------------------------------------------------------
@@ -621,10 +686,11 @@ Exit codes: 0 = all units ok; 1 = partial (journal shows which);
 // ---------------------------------------------------------------------------
 
 class RoomApiError extends Error {
-  constructor(message, { status = null, code = null } = {}) {
+  constructor(message, { status = null, code = null, exitCode = EXIT_SYSTEMIC } = {}) {
     super(message);
     this.status = status;
     this.code = code;
+    this.exitCode = exitCode;
   }
 }
 
@@ -818,8 +884,8 @@ function table(rows, headers) {
 }
 
 function failExit(message, code = EXIT_SYSTEMIC) {
-  process.stderr.write(`herdr-migrate: error: ${message}\n`);
-  process.exit(code);
+  // Throw through the execution scope so journal locks are released.
+  throw new RoomApiError(message, { exitCode: code });
 }
 
 // ---------------------------------------------------------------------------
@@ -1309,26 +1375,30 @@ async function main(argv) {
   }
   const deps = {};
   try {
-    switch (command) {
-      case "scan": return await cmdScan(flags, deps);
-      case "plan": return await cmdPlan(flags, deps);
-      case "migrate": return await cmdMigrate(flags, deps);
-      case "reverse": return await cmdReverse(flags, deps);
-      case "drain-status": return await cmdDrainStatus(flags, deps);
-      case "force-release": return await cmdForceRelease(flags, deps);
-      case "reap-orphans": return await cmdReapOrphans(flags, deps);
-      case "status": return await cmdStatus(flags, deps);
-      default: failExit(`unknown command: ${command}`);
-    }
+    const run = async () => {
+      switch (command) {
+        case "scan": return await cmdScan(flags, deps);
+        case "plan": return await cmdPlan(flags, deps);
+        case "migrate": return await cmdMigrate(flags, deps);
+        case "reverse": return await cmdReverse(flags, deps);
+        case "drain-status": return await cmdDrainStatus(flags, deps);
+        case "force-release": return await cmdForceRelease(flags, deps);
+        case "reap-orphans": return await cmdReapOrphans(flags, deps);
+        case "status": return await cmdStatus(flags, deps);
+        default: failExit(`unknown command: ${command}`);
+      }
+    };
+    return flags.execute
+      ? await withMigrationLock(flags.journal ?? defaultJournalPath(), run)
+      : await run();
   } catch (err) {
     if (err instanceof RoomApiError) {
       // Expected operational / input errors: clean message, systemic exit.
       process.stderr.write(`herdr-migrate: error: ${err.message}\n`);
-      process.exit(EXIT_SYSTEMIC);
+      return err.exitCode;
     }
     throw err;
   }
-  return EXIT_OK;
 }
 
 const isMain = process.argv[1] === fileURLToPath(import.meta.url);
