@@ -460,6 +460,19 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   for (const c of connectorClients) {
     oauthProvider.registerClient(c);
   }
+  // Like emailAccountIdFor (#2434): deleting an account leaves a deactivated
+  // tombstone at github:<id> / google:<sub>, and its login methods are gone, so
+  // a returning person reaches the provision step below. Take the next free
+  // suffix instead of signing them into the tombstone ("Active account
+  // required" forever). A live account at the id is returned as is.
+  const providerAccountIdFor = base => {
+    for (let generation = 1; generation <= 20; generation++) {
+      const id = generation === 1 ? base : `${base}.${generation}`;
+      const row = store.db.prepare("SELECT active FROM accounts WHERE id=?").get(id);
+      if (!row || row.active === 1) return id;
+    }
+    throw new ServiceError(409, "account_exists", "This sign-in can't start a new account; contact support");
+  };
   // GitHub subject -> account linking order (slice 4): an existing OAuth
   // link wins; otherwise a primary verified email links to the account that
   // already owns it; otherwise a github:<id> account is provisioned (with
@@ -484,7 +497,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const method = logins.linkOAuthMethod(emailOwner, { provider: "github", subject, email: normalized });
       return { accountId: emailOwner, methodRef: method.id };
     }
-    const accountId = `github:${subject}`;
+    const accountId = providerAccountIdFor(`github:${subject}`);
     if (!store.db.prepare("SELECT 1 FROM accounts WHERE id=?").get(accountId)) {
       store.createAccount(accountId, "github-oauth");
     }
@@ -531,7 +544,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const method = logins.linkOAuthMethod(emailOwner, { provider: "google", subject, email: normalized });
       return { accountId: emailOwner, methodRef: method.id };
     }
-    const accountId = `google:${subject}`;
+    const accountId = providerAccountIdFor(`google:${subject}`);
     if (!store.db.prepare("SELECT 1 FROM accounts WHERE id=?").get(accountId)) {
       store.createAccount(accountId, "google-oauth");
     }
