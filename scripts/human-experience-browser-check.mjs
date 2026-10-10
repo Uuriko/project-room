@@ -81,8 +81,13 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   await owner.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Compare our launch ideas.'));
   await peer.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Compare our launch ideas.'));
   let run=(await api('producer')).runs[0]; assert.equal(run.status,'queued');
-  await peer.locator('#assistant-activity').evaluate(n=>{n.open=true;});
-  await peer.getByRole('button',{name:'Add context',exact:true}).click(); await send(peer,'Keep the design mobile first.');
+  // HS2 3a: the request and its state are on the card face, with Activity still closed.
+  for(const page of pages) {
+    await page.locator('#assistant-face .assistant-face-request').getByText('Compare our launch ideas.').waitFor();
+    assert.match(await page.locator('#assistant-face .assistant-face-status').textContent(), /^(Asked|Not picked up yet)/);
+    assert.equal(await page.locator('#assistant-activity').evaluate(n=>n.open), false);
+  }
+  await peer.locator('#assistant-face').getByRole('button',{name:'Add context',exact:true}).click(); await send(peer,'Keep the design mobile first.');
   await peer.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('mobile first'));
   run=(await api('producer')).runs[0]; assert.equal(run.inputs.length,2); assert.equal(run.inputs[1].status,'pending');
   run=(await api('producer',{action:'claim',runId:run.id,attemptId:'test-host',expectedRevision:run.revision})).result;
@@ -91,6 +96,11 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   const post = await fetch(`${origin}/api/rooms/commons/commands`,{method:'POST',headers:{Authorization:`Bearer ${f.keys.producer}`,'Content-Type':'application/json'},body:JSON.stringify({id:'public-result-command',type:'message.posted',data:{messageId:'public-result',body:'Recommendation: choose the simpler mobile layout.'}})});assert.ok(post.ok);
   await api('producer',{action:'report',runId:run.id,attemptId:'test-host',expectedRevision:run.revision,state:'done',summary:'The recommendation is ready.',resultMessageId:'public-result'});
   for(const page of pages) { await page.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Result ready')); await page.locator('[data-message-record-id="public-result"]').waitFor(); }
+  for(const page of pages) {
+    await page.locator('#assistant-face .assistant-face-status').getByText('Result ready',{exact:true}).waitFor();
+    assert.equal(await page.locator('#assistant-face').getByRole('button',{name:'Open result',exact:true}).count(), 1, 'the result is one tap from the card face');
+    assert.equal(await page.locator('#assistant-face').getByRole('button',{name:'Stop',exact:true}).count(), 0, 'a finished ask has no Stop');
+  }
   await owner.locator('#room-more > summary').click(); await owner.locator('#topbar-settings').click();
   await owner.locator('#human-advanced').check(); assert.equal(await owner.locator('#human-advanced').isChecked(),true);
   await owner.locator('#human-advanced').uncheck();
@@ -172,7 +182,7 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   // A rejected stale write needs review and a new explicit confirmation, not an endless retry.
   await peer.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Recover this request exactly once.'));
   let recovery = (await api('producer')).runs.find(r=>r.id!==run.id);
-  await peer.locator(`[data-assistant-run="${recovery.id}"] [data-contribute-run]`).first().click();
+  await peer.locator(`#assistant-face [data-contribute-run="${recovery.id}"]`).click(); // the newest open ask is on the card face
   recovery = (await api('producer',{action:'claim',runId:recovery.id,attemptId:'recovery-host',expectedRevision:recovery.revision})).result;
   await send(peer,'Please include our latest constraint.');
   await peer.locator('#assistant-review').waitFor({state:'visible'});
@@ -212,7 +222,8 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   await owner.waitForFunction(id => document.querySelector(`[data-assistant-run="${id}"]`).textContent.includes('Cancelled'), recovery.id);
   assert.equal(await ownerRun.getByRole('button', {name:'Stop', exact:true}).count(), 0);
   // The result link returns to the exact public answer, rather than a different run.
-  await peer.locator('[data-assistant-message="public-result"]').click();
+  await peer.locator('#assistant-activity').evaluate(n=>{n.open=true;}); // an older request's result lives in Activity
+  await peer.locator('#assistant-runs [data-assistant-message="public-result"]').click();
   assert.equal(await peer.locator('[data-message-record-id="public-result"]').count(),1);
   mkdirSync('test-results',{recursive:true}); await peer.screenshot({path:'test-results/human-shared-conversation.png',fullPage:false});
   assert.deepEqual(errors,[]);
@@ -409,4 +420,32 @@ test('deleted assistant prompt shows only content-free stop controls and preserv
   await panel.getByText('Cancelled',{exact:true}).waitFor();
   assert.equal(await panel.getByRole('button').count(),0);
   assert.equal(await page.locator('#message-input').inputValue(),'Keep my unsent conversation draft.');
+});
+
+test('keyboard Stop on the card face keeps focus and the status change is announced (R5-1, R5-2)', {timeout:60000}, async t => {
+  const f=createAcceptanceFixture(), server=createRoomServer({store:f.store,streamInterval:40});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const origin=`http://127.0.0.1:${server.address().port}`, browser=await chromium.launch({headless:true});
+  t.after(async()=>{await browser.close();server.closeStreams();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));f.store.close();rmSync(f.directory,{recursive:true,force:true});});
+  const api=async(actor,input)=>{
+    const response=await fetch(`${origin}/api/rooms/commons/assistant`,{method:'POST',headers:{authorization:`Bearer ${f.keys[actor]}`,'content-type':'application/json'},body:JSON.stringify({requestId:crypto.randomUUID(),...input})});
+    const value=await response.json();assert.equal(response.status,200,JSON.stringify(value));return value.result;
+  };
+  await api('owner',{action:'configure',expectedRevision:0,name:'Room',coordinatorMemberId:'producer'});
+  f.store.command(f.keys.owner,'commons',{id:crypto.randomUUID(),type:'message.posted',data:{messageId:'kbd-ask',body:'Plan the offsite'}});
+  await api('owner',{action:'invoke',runId:'kbd-run',sourceMessageId:'kbd-ask'});
+  await api('producer',{action:'claim',runId:'kbd-run',attemptId:'kbd-host',expectedRevision:0});
+  const page=await browser.newPage({viewport:{width:390,height:844}});await page.goto(origin);await signInFixture(page,f.keys.owner);
+  await page.locator('#main').waitFor({state:'visible'});
+  const status=page.locator('#assistant-face [role=status]');
+  await status.getByText('Working',{exact:true}).waitFor();
+  assert.equal(await status.getAttribute('aria-live'),'polite');
+  assert.equal(await page.locator('#assistant-setup').textContent(),'Change','a connected assistant offers Change, not Connect');
+  await page.locator('#assistant-face [data-cancel]').focus(); await page.keyboard.press('Enter');
+  await status.getByText('Stopping…',{exact:true}).waitFor();
+  const focus=await page.evaluate(()=>({ body: document.activeElement===document.body, inCard: Boolean(document.activeElement?.closest('#room-assistant')) }));
+  assert.deepEqual(focus,{body:false,inCard:true},'focus stays on the Room card after a keyboard Stop');
+  await api('producer',{action:'report',runId:'kbd-run',attemptId:'kbd-host',expectedRevision:2,state:'cancelled',summary:'Stopped.'});
+  await status.getByText('Stopped',{exact:true}).waitFor();
+  assert.equal(await page.evaluate(()=>document.activeElement===document.body),false,'focus survives the Stop button disappearing');
 });

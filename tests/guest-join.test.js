@@ -17,12 +17,13 @@ import {
 } from "../server/guest-invites.mjs";
 import { GUEST_AGENT_TOKEN_PREFIX, isGuestAgentMemberId } from "../server/guest-agent-links.mjs";
 
+import { createTestClock } from "./helpers/test-clock.mjs";
 const ROOM = "commons";
 
 async function serve(t) {
   const directory = mkdtempSync(join(tmpdir(), "room-guest-join-"));
-  let clock = Date.now();
-  const store = new RoomStore(join(directory, "room.sqlite"), { now: () => clock });
+  const clock = createTestClock();
+  const store = new RoomStore(join(directory, "room.sqlite"), { now: clock.now });
   store.initialize(initialRoom());
   const server = createRoomServer({ store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
@@ -36,7 +37,7 @@ async function serve(t) {
     },
     ...(data === undefined ? {} : { body: JSON.stringify(data) })
   });
-  return { store, origin, request, advance: ms => { clock += ms; } };
+  return { store, origin, request, now: clock.now, advance: clock.advance };
 }
 
 // A self-signed agent card carrying a joinRequest, signed the way an
@@ -58,8 +59,8 @@ function signedCard(roomId, { name, keyPair, issuedAt, requestId, agentId } = {}
 const postJoin = (request, card) => request("/api/guest-invites/request", { method: "POST", data: { card } });
 
 test("self-serve request issues a badged read/chat guest pass", async t => {
-  const { request, store } = await serve(t);
-  const { card } = signedCard(ROOM);
+  const { request, store, now } = await serve(t);
+  const { card } = signedCard(ROOM, { issuedAt: now() });
   const res = await postJoin(request, card);
   assert.equal(res.status, 201);
   const body = await res.json();
@@ -74,8 +75,7 @@ test("self-serve request issues a badged read/chat guest pass", async t => {
   // 24h TTL on the credential.
   const tokenHash = createHash("sha256").update(body.token).digest("hex");
   const row = store.db.prepare("SELECT * FROM credentials WHERE hash=?").get(tokenHash);
-  assert.ok(row.expires_at - Date.now() > GUEST_SELF_SERVE_TTL_MS - 60_000);
-  assert.ok(row.expires_at - Date.now() <= GUEST_SELF_SERVE_TTL_MS);
+  assert.equal(row.expires_at, now() + GUEST_SELF_SERVE_TTL_MS, "TTL is measured on the store clock");
   // Key provenance: parent_hash is NULL (the key is not a credential), and
   // the member's identityId carries the card-key fingerprint.
   assert.equal(row.parent_hash, null);
@@ -109,8 +109,8 @@ test("a tampered joinRequest breaks the signature", async t => {
 });
 
 test("a stale joinRequest is rejected", async t => {
-  const { request } = await serve(t);
-  const { card } = signedCard(ROOM, { issuedAt: Date.now() - 11 * 60 * 1000 });
+  const { request, now } = await serve(t);
+  const { card } = signedCard(ROOM, { issuedAt: now() - 11 * 60 * 1000 });
   const res = await postJoin(request, card);
   assert.equal(res.status, 422);
   assert.equal((await res.json()).error.code, "stale_card");
@@ -295,7 +295,7 @@ test("a superseded requestId does not resurrect a rotated credential", async t =
 });
 
 test("the 500-seat cap evicts the least-recently-active guest", async t => {
-  const { request, store, advance } = await serve(t);
+  const { request, store, advance, now } = await serve(t);
   // Two real self-serve guests; the first is the least-recently-active.
   const { card: cardOld } = signedCard(ROOM);
   const oldBody = await (await postJoin(request, cardOld)).json();
@@ -305,7 +305,7 @@ test("the 500-seat cap evicts the least-recently-active guest", async t => {
   // Fill the seat table to the cap with synthetic rows strictly newer than
   // both real guests, so the LRU victim is unambiguous.
   const db = store.db;
-  const future = Date.now() + 3600_000;
+  const future = now() + 3600_000;
   const insert = db.prepare("INSERT INTO guest_selfserve(member_id, room_id, key_hash, created_at, last_active_at) VALUES(?,?,?,?,?)");
   for (let i = 0; i < GUEST_SELF_SERVE_MAX_SEATS_PER_ROOM - 2; i++) {
     insert.run(`guest-agent-fake-${i}`, ROOM, createHash("sha256").update(`fake-${i}`).digest("hex"), future, future);

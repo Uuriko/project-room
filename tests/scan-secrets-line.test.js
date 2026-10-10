@@ -29,6 +29,25 @@ function addedDiff(line) {
   ].join("\n");
 }
 
+test("a quoted diff header decodes octal escapes as UTF-8", () => {
+  const stripe = "sk_live_" + "f".repeat(16);
+  const result = runDiff([
+    'diff --git "a/server/caf\\303\\251.mjs" "b/server/caf\\303\\251.mjs"',
+    '--- "a/server/caf\\303\\251.mjs"',
+    '+++ "b/server/caf\\303\\251.mjs"',
+    "@@ -1,0 +2 @@ x",
+    `+const billing = "${stripe}";`,
+    'diff --git "a/server/my\\tfile.mjs" "b/server/my\\tfile.mjs"',
+    "@@ -0,0 +1 @@",
+    `+const billing = "${stripe}";`,
+    "",
+  ].join("\n"));
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stderr, /server\/café\.mjs:2 \[Stripe live key\]/);
+  assert.match(result.stderr, /server\/my\tfile\.mjs:1 \[Stripe live key\]/);
+  assert.doesNotMatch(result.stderr, /cafÃ©/);
+});
+
 test("a placeholder word elsewhere on the line does not hide a provider key", () => {
   const stripe = "sk_live_" + "b".repeat(16);
   const result = runDiff(addedDiff(`const billing = "${stripe}"; // see example`));

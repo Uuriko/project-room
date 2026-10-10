@@ -20,6 +20,7 @@
 //
 // Authoring gate: each test names the regression it would catch; all go
 // through exported production functions or the real tools/call boundary.
+import { registerBareTransactions } from "./helpers/bare-db-transactions.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -55,7 +56,7 @@ function attackDb(t) {
   const open = () => {
     const db = new DatabaseSync(dbFile);
     db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=10000;");
-    return db;
+    return registerBareTransactions(db);
   };
   t.after(() => { rmSync(directory, { recursive: true, force: true }); });
   return { directory, dbFile, open };
@@ -72,12 +73,13 @@ function issueAttackGrant(db, { capCents, perTxCapCents }) {
 
 // Worker source: hammers authorizeSpend from its own connection. Written to
 // the fixture dir (never committed) so worker_threads can load it as ESM.
-const WORKER_SOURCE = spendGrantsUrl => `
+const WORKER_SOURCE = (spendGrantsUrl, helperUrl) => `
 import { DatabaseSync } from "node:sqlite";
 import { authorizeSpend } from ${JSON.stringify(spendGrantsUrl)};
+import { registerBareTransactions } from ${JSON.stringify(helperUrl)};
 import { parentPort, workerData } from "node:worker_threads";
 const w = workerData;
-const db = new DatabaseSync(w.dbFile);
+const db = registerBareTransactions(new DatabaseSync(w.dbFile));
 db.exec("PRAGMA busy_timeout=10000;");
 const out = { ok: 0, refused402: 0, dup409: 0, other: [] };
 for (let i = 0; i < w.calls; i++) {
@@ -100,7 +102,7 @@ parentPort.postMessage(out);
 
 function runWorkers(t, directory, baseData, workerCount) {
   const workerFile = join(directory, `attack-worker-${randomUUID()}.mjs`);
-  writeFileSync(workerFile, WORKER_SOURCE(pathToFileURL(join(repoRoot, "server", "spend-grants.mjs")).href));
+  writeFileSync(workerFile, WORKER_SOURCE(pathToFileURL(join(repoRoot, "server", "spend-grants.mjs")).href, pathToFileURL(join(repoRoot, "tests", "helpers", "bare-db-transactions.mjs")).href));
   const workers = Array.from({ length: workerCount }, (_, i) =>
     new Worker(workerFile, { workerData: { ...baseData, workerIndex: i } }));
   t.after(() => { for (const w of workers) w.terminate(); });

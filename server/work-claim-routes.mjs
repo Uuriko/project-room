@@ -38,6 +38,7 @@ import {
   renewWork, roomWorkClaimConfig, closeWhenLive, isReceiptTag, ClaimError, REVIEW_POLICIES, CLAIM_KINDS,
   claimUpdatedAt, ACTIVE_CLAIM_STATES, MAX_LEASE_HOURS, STATES, summarizeClaimHistory, isHardWork,
   walkProvenance, flagPremiseInvalid, clearPremiseFlag, closeWork, isTerminalClaimState, claimHistoryLength,
+  openClaimCount, STALE_UNCLAIMED_DAYS,
 } from "./work-claims.mjs";
 import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
@@ -908,10 +909,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const data = clientPullRequestInput(reject, boardTextFields(reject, raw, { title: {}, note: { multiline: true } }));
     assertDependsOnKnown(reject, data, { selfId: id, has: other => registry.has(roomId, other) });
     if (registry.has(roomId, id)) reject(409, "work_claim_exists", `Work claim "${id}" already exists in this room`);
-    const open = registry.list(roomId).filter(item => !isTerminalClaimState(item.state)).length;
+    const open = openClaimCount(registry.list(roomId), nowMs);
     if (open >= config.maxOpenClaims) {
       refuseCap("work_board_full",
-        `This room already has ${config.maxOpenClaims} open claims. Close stale claims (POST …/work-claims/{id}/close or /cancel) before opening another.`,
+        `This room already has ${config.maxOpenClaims} open claims. Close stale claims (POST …/work-claims/{id}/close or /cancel) before opening another. Unclaimed items idle for ${STALE_UNCLAIMED_DAYS} days stop counting and are closed by the stale sweep.`,
         "Close stale claims (POST /api/rooms/{roomId}/work-claims/{claimId}/close or /cancel) before opening another.");
     }
     if (data.reviewPolicy !== undefined && !REVIEW_POLICIES.includes(data.reviewPolicy)) invalidInput(reject, `reviewPolicy one of ${REVIEW_POLICIES.join(", ")}`);
@@ -1354,9 +1355,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   if (workClaimRoute === "config" && (req.method === "GET" || req.method === "POST")) {
     if (req.method === "GET") return json(res, 200, { roomId, ...config });
     const data = body(req);
-    if (!shape(data, { required: [], optional: ["maxMemberOpenClaims", "maxOpenClaims"] })
-      || (data.maxMemberOpenClaims === undefined && data.maxOpenClaims === undefined)) {
-      invalidInput(reject, "{maxMemberOpenClaims?, maxOpenClaims?} with at least one");
+    if (!shape(data, { required: [], optional: ["maxMemberOpenClaims", "maxOpenClaims", "staleSweep"] })
+      || (data.maxMemberOpenClaims === undefined && data.maxOpenClaims === undefined && data.staleSweep === undefined)) {
+      invalidInput(reject, "{maxMemberOpenClaims?, maxOpenClaims?, staleSweep?} with at least one");
     }
     const ownerId = typeof access.authority?.ownerId === "string" && access.authority.ownerId.length > 0
       ? access.authority.ownerId : null;
@@ -1367,7 +1368,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
         invalidInput(reject, `${key} as an integer 1..10000`);
       }
     }
+    if (data.staleSweep !== undefined && typeof data.staleSweep !== "boolean") invalidInput(reject, "staleSweep as true or false");
     const patch = {};
+    if (data.staleSweep !== undefined) patch.staleSweep = data.staleSweep;
     if (data.maxMemberOpenClaims !== undefined) patch.maxMemberOpenClaims = data.maxMemberOpenClaims;
     if (data.maxOpenClaims !== undefined) patch.maxOpenClaims = data.maxOpenClaims;
     const saved = registry.configure(roomId, patch);

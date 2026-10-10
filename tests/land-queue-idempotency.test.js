@@ -5,6 +5,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -230,4 +231,56 @@ test("REST accepts requestId on the land-queue mutating routes and replays", asy
   const clash = await post("/api/rooms/commons/remove_land_item", { itemId: "lq_y", requestId: "rest-1" });
   assert.equal(clash.status, 409);
   assert.equal((await clash.json()).error.code, "idempotency_conflict");
+});
+
+test("a stale in-flight idempotency placeholder is reclaimed: the retry re-executes instead of 409ing forever", async t => {
+  const { store } = fixture(t);
+  const NOW = Date.parse("2026-10-08T12:00:00Z");
+  const itemId = "lq_stale_1";
+  store.db.prepare(`INSERT INTO land_queue
+    (room_id, item_id, repo, pr_number, claimant_member_id, added_by_member_id, mergeable, behind, checks_state, observed, created_at, updated_at)
+    VALUES ('commons', ?, 'acme/demo', 7, 'owner', 'owner', 'unknown', 0, 'pending', 0, 1, 1)`).run(itemId);
+  // Simulate a crashed first attempt: a status=0 (in-flight) placeholder whose
+  // first call died 11 minutes ago, between the key-claim INSERT and commit.
+  const inputHash = createHash("sha256").update(JSON.stringify({ itemId })).digest("hex");
+  const staleAt = NOW - 11 * 60 * 1000;
+  store.db.prepare(`INSERT INTO land_queue_idempotency
+    (room_id, request_id, op, actor_member_id, input_hash, status, response, created_at, updated_at)
+    VALUES ('commons', 'stale-key', 'remove_land_item', 'owner', ?, 0, NULL, ?, ?)`).run(inputHash, staleAt, staleAt);
+  // The retry must reclaim the dead key and re-execute, not 409 "already in
+  // flight" forever.
+  const out = store.landQueue.remove("commons", "owner", { itemId, requestId: "stale-key" });
+  assert.deepEqual(out, { roomId: "commons", itemId, removed: true });
+  assert.equal(store.landQueue.list("commons", "owner").items.length, 0);
+  // The re-execution journals a completed receipt, so a further retry replays it.
+  const replay = store.landQueue.remove("commons", "owner", { itemId, requestId: "stale-key" });
+  assert.deepEqual(replay, out);
+});
+
+test("a genuinely in-flight placeholder still 409s: only stale ones are reclaimed", t => {
+  const { store } = fixture(t);
+  const NOW = Date.parse("2026-10-08T12:00:00Z");
+  const itemId = "lq_fresh_1";
+  const inputHash = createHash("sha256").update(JSON.stringify({ itemId })).digest("hex");
+  store.db.prepare(`INSERT INTO land_queue_idempotency
+    (room_id, request_id, op, actor_member_id, input_hash, status, response, created_at, updated_at)
+    VALUES ('commons', 'fresh-key', 'remove_land_item', 'owner', ?, 0, NULL, ?, ?)`).run(inputHash, NOW, NOW);
+  assert.throws(
+    () => store.landQueue.remove("commons", "owner", { itemId, requestId: "fresh-key" }),
+    conflict
+  );
+});
+
+test("a stale placeholder for a different input is a 409 conflict, not reclaimed", t => {
+  const { store } = fixture(t);
+  const NOW = Date.parse("2026-10-08T12:00:00Z");
+  const inputHash = createHash("sha256").update(JSON.stringify({ itemId: "lq_other" })).digest("hex");
+  const staleAt = NOW - 60 * 60 * 1000;
+  store.db.prepare(`INSERT INTO land_queue_idempotency
+    (room_id, request_id, op, actor_member_id, input_hash, status, response, created_at, updated_at)
+    VALUES ('commons', 'clash-key', 'remove_land_item', 'owner', ?, 0, NULL, ?, ?)`).run(inputHash, staleAt, staleAt);
+  assert.throws(
+    () => store.landQueue.remove("commons", "owner", { itemId: "lq_different", requestId: "clash-key" }),
+    conflict
+  );
 });

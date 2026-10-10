@@ -5165,9 +5165,12 @@ paths:
     post:
       summary: Set the per-member open claim cap
       description: |
-        The room owner sets maxMemberOpenClaims, an integer from 1 to 10000.
-        The next claim past that cap is 409 too_many_open_claims. Anyone else
-        gets 403 work_claims_not_permitted. API keys need `rooms:write`.
+        The room owner sets maxMemberOpenClaims and maxOpenClaims (integers
+        from 1 to 10000; room default 1000) and staleSweep (boolean, default
+        false: when true, the cron closes unclaimed items idle 14 days). Send
+        at least one. The next claim past the member cap is 409
+        too_many_open_claims. Anyone else gets 403 work_claims_not_permitted.
+        API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -5176,9 +5179,10 @@ paths:
           application/json:
             schema:
               type: object
-              required: [maxMemberOpenClaims]
               properties:
                 maxMemberOpenClaims: { type: integer, minimum: 1, maximum: 10000 }
+                maxOpenClaims: { type: integer, minimum: 1, maximum: 10000 }
+                staleSweep: { type: boolean }
       responses:
         '200': { description: The saved caps }
         '401': { description: unauthenticated }
@@ -5555,7 +5559,12 @@ paths:
         the write is refused `409 work_claim_conflict` unless the claim
         still matches the client's last read, so a stale retry cannot
         silently clobber newer state. Without them the update keeps its
-        legacy round-blind behavior. The `done` transition accepts `deliveryMode` (how the
+        legacy round-blind behavior. An update may also carry the optional
+        client-kept idempotency key `requestId`: a retry that carries a
+        requestId already seen on this claim replays the stored outcome
+        (200, the current item) with no new write, no history entry and no
+        room event, so a timed-out retry cannot duplicate the update.
+        The `done` transition accepts `deliveryMode` (how the
         work was delivered: `result`, `merged`, or `production`),
         `reviewedBy` (the attesting member), `tags` (free-form receipt
         labels, no fixed taxonomy) and `blobs` (sha256 evidence pointers) —
@@ -5661,6 +5670,12 @@ paths:
                       minimum: 0
                       description: Optional round precondition (opt-in, same names as the appendPullRequest variant) - exact history.length + (historyOmitted ?? 0) from the same read. Detects concurrent changes since the read; see expectedClaimedAt.
                       example: 203
+                    requestId:
+                      type: string
+                      minLength: 1
+                      maxLength: 128
+                      pattern: "^[A-Za-z0-9_-]{1,128}$"
+                      description: Optional client-kept idempotency key (opt-in). A retry that carries a requestId already seen on this claim replays the stored outcome (200, the current item) with no new write, no history entry and no room event - a timed-out retry cannot duplicate the update. Send a fresh requestId per distinct update.
                 - type: object
                   additionalProperties: false
                   required: [appendPullRequest, expectedClaimedAt, expectedHistoryLength]
@@ -8583,11 +8598,14 @@ paths:
     get:
       summary: Liveness
       description: >-
-        Open (also HEAD). Returns `{ status: "ok", mode }`; operational
-        metadata only. The Public Host aliases are served identically.
+        Open (also HEAD). Returns `{ status: "ok", mode, emailVerification }`;
+        operational metadata only. `emailVerification` is `enforced` when a
+        magic-link mailer is configured, or `relaxed-no-mailer` when it is not
+        and the email-verification gates follow the agent-invites escape hatch.
+        The Public Host aliases are served identically.
       security: []
       responses:
-        '200': { description: "{ status: ok, mode }" }
+        '200': { description: "{ status: ok, mode, emailVerification: enforced | relaxed-no-mailer }" }
     head:
       summary: Read public response headers
       description: Uses the same public GET policy and status with no response body.
@@ -14731,17 +14749,30 @@ paths:
         owner-only per-room action). Scoped API keys the identity minted
         are revoked too. Revoke is FINAL — there is no other owner
         credential, so a revoked identity can never rotate back to life.
-        The old secret never appears in any response. 20 per address per
-        minute.
+        The old secret never appears in any response. The body must be
+        `{"confirm": true}` (optionally with `requestId`); anything else is
+        422 `confirm_required`. 20 per address per minute.
       security:
         - bearerAuth: []
       parameters:
         - { name: identityId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm]
+              additionalProperties: false
+              properties:
+                confirm: { type: boolean, enum: [true] }
+                requestId: { type: string, minLength: 1 }
       responses:
-        '200': { description: "{ identityId, displayName, revoked: true, revokedAt, revokedApiKeys }" }
+        '200': { description: "{ identityId, displayName, revoked: true, revokedAt, revokedApiKeys, requestId? }" }
         '401': { description: unauthenticated }
         '403': { description: "cross_identity (path identity is not the caller's) or API key used" }
         '404': { description: identity_not_found }
+        '422': { description: "confirm_required (body is not {\"confirm\": true}) or invalid_request_id" }
         '429': { description: rate_limited }
   /api/identities/{identityId}/link-code:
     post:

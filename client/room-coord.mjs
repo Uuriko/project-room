@@ -113,8 +113,8 @@ const claimsOf = value => {
   return claims;
 };
 
-// Files the given member may not touch: every path covered by another
-// member's live claim. Sorted by file, then claim id, for stable output.
+// Files the given member may not touch: a live claim that covers a wanted
+// path, or a wanted path that covers a live file. Sorted by file, then claim id.
 export function guardConflicts(claims, files, { memberId, now } = {}) {
   const at = nowFrom({ now });
   const me = memberId ?? null;
@@ -124,7 +124,7 @@ export function guardConflicts(claims, files, { memberId, now } = {}) {
     if (!isLiveClaim(claim, at) || claim.owner === me) continue;
     for (const held of claimFiles(claim)) {
       for (const file of wanted) {
-        if (covers(held, file)) {
+        if (covers(held, file) || covers(file, held)) {
           conflicts.push({ file, heldPath: normalizePath(held), claimId: claim.id, owner: claim.owner,
             title: claim.title ?? null, leaseExpiresAt: claim.leaseExpiresAt ?? null });
         }

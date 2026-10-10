@@ -27,6 +27,12 @@ import { claimWork, createWork, ACTIVE_CLAIM_STATES, roomWorkClaimConfig } from 
 // Caller-supplied idempotency key, same shape as access-requests'
 // REQUEST_ID_PATTERN: retries with the same key replay the stored response.
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+// A status=0 (in-flight) placeholder older than this belonged to a first
+// attempt that died between the key-claim INSERT and commit/abort (crash or
+// eviction): the retry reclaims the key instead of 409ing "already in flight"
+// forever. Ten minutes is generous — the longest keyed call (add's GitHub
+// refresh) completes in seconds under normal conditions.
+const STALE_INFLIGHT_MS = 10 * 60 * 1000;
 
 export const LAND_CHECKS = Object.freeze(["pending", "green", "red"]);
 export const LAND_MERGEABLE = Object.freeze(["mergeable", "behind", "conflict", "unknown", "merged"]);
@@ -603,7 +609,10 @@ export class LandQueue {
   // input replays the stored response instead of re-executing. Reuse for a
   // different op, actor, or input is 409 idempotency_conflict (the
   // store.command / access-requests / bounty-escrow convention), as is a
-  // key whose first call is still in flight. Only 2xx outcomes are recorded:
+  // key whose first call is still in flight. A status=0 placeholder older
+  // than STALE_INFLIGHT_MS is a dead first attempt (crash/eviction between
+  // key-claim and commit) and is reclaimed so the retry re-executes.
+  // Only 2xx outcomes are recorded:
   // a failure deletes the placeholder so the retry re-executes fresh rather
   // than replaying a stale error (e.g. a transient 503 github_unconfigured).
   // Without a requestId the returned gate is a no-op and behavior is
@@ -622,10 +631,23 @@ export class LandQueue {
       .run(roomId, requestId, op, memberId, inputHash, now, now);
     if (claimed.changes === 0) {
       const prior = this.db.prepare(`SELECT op, actor_member_id AS actor, input_hash AS inputHash,
-        status, response FROM land_queue_idempotency WHERE room_id=? AND request_id=?`)
+        status, response, updated_at AS updatedAt FROM land_queue_idempotency WHERE room_id=? AND request_id=?`)
         .get(roomId, requestId);
       if (!prior || prior.op !== op || prior.actor !== memberId || prior.inputHash !== inputHash) {
         fail(409, "idempotency_conflict", "requestId was already used for a different land queue operation");
+      }
+      if (prior.status === 0 && prior.updatedAt !== null && now - prior.updatedAt > STALE_INFLIGHT_MS) {
+        // Stale in-flight takeover: the first attempt died mid-flight, so its
+        // placeholder would otherwise brick this key forever. Reclaim it — the
+        // DELETE carries the staleness predicate itself, so it can only remove
+        // a row that was already stale when we read it; a racing reclaimer
+        // that re-claimed meanwhile leaves a fresh placeholder this DELETE
+        // cannot touch (its loss then shows up as a 0-changes INSERT below,
+        // followed by a correct 409 "already in flight").
+        this.db.prepare(`DELETE FROM land_queue_idempotency
+          WHERE room_id=? AND request_id=? AND status=0 AND updated_at<=?`)
+          .run(roomId, requestId, now - STALE_INFLIGHT_MS);
+        return this.#requestKey(roomId, memberId, op, requestId, invalidCode, input);
       }
       if (prior.status !== 1 || prior.response == null) {
         fail(409, "idempotency_conflict", "requestId is already in flight for this room");

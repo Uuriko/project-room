@@ -171,14 +171,18 @@ const validMemberId = id => typeof id === "string" && MEMBER_ID_PATTERN.test(id)
 // getTier returns a row object (or null when the member was never tiered —
 // enrollment default is t2_standard).
 const tierOf = (db, roomId, agentId) => getTier(db, roomId, agentId)?.autonomyTier ?? DEFAULT_AUTONOMY_TIER;
-// node:sqlite's DatabaseSync has no .transaction() helper: serialize the
-// check+reserve with explicit BEGIN IMMEDIATE, nesting-safe via isTransaction
-// (the store's own transaction() uses the same shape).
+// Transactions go through the store's platform transaction (store.transaction),
+// never raw BEGIN/COMMIT: the Durable Object wrapper cannot execute raw
+// transaction SQL, so a raw BEGIN here turned a 402 into a 500 on that runtime.
+// RoomStore registers its runner for its database at construction; callers
+// already inside a transaction (db.isTransaction) just run fn.
+const transactionRunners = new WeakMap();
+export function registerTransactionRunner(db, run) { transactionRunners.set(db, run); }
 function transact(db, fn) {
   if (db.isTransaction) return fn();
-  db.exec("BEGIN IMMEDIATE");
-  try { const result = fn(); db.exec("COMMIT"); return result; }
-  catch (error) { try { db.exec("ROLLBACK"); } catch { /* already rolled back */ } throw error; }
+  const run = transactionRunners.get(db);
+  if (typeof run !== "function") throw new Error("spend-grants: no store transaction is registered for this database");
+  return run(fn);
 }
 // Integer cents as text: no floats, no negatives, no leading zeros, bounded.
 const CENTS_PATTERN = /^(0|[1-9][0-9]{0,8})$/;
@@ -396,9 +400,10 @@ export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonc
         return { replay: "settled", priceCents: Number(existing.price_cents), toolName: existing.tool_name };
       if (existing.status === "reserved")
         return { replay: "reserved", priceCents: Number(existing.price_cents), toolName: existing.tool_name };
-      refuse(409, "duplicate_nonce", "This spend authorization was already recorded and voided; a new attempt needs a fresh nonce", {
-        tool: toolName, priceCents, denomination: SPEND_DENOMINATION, agentId, roomId, nonce,
-      });
+      // Commit the expired-reservation recovery before refusing this consumed
+      // nonce. Throwing here rolls the reaper back and strands the headroom
+      // when the client only retries its original request.
+      return { replay: "voided" };
     }
     const grant = resolveSpendGrant(db, roomId, agentId, { nowMs, includeInactive: true });
     if (!grant) paymentRefusal({ roomId, agentId, toolName, priceCents, reason: "no_spend_grant" });
@@ -466,6 +471,12 @@ export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonc
     }
     return { remainingAfter: remaining - priceCents };
   });
+
+  if (outcome.replay === "voided") {
+    refuse(409, "duplicate_nonce", "This spend authorization was already recorded and voided; a new attempt needs a fresh nonce", {
+      tool: toolName, priceCents, denomination: SPEND_DENOMINATION, agentId, roomId, nonce,
+    });
+  }
 
   const transition = (to, settledAt) => {
     const info = db.prepare(`UPDATE spend_authorizations SET status = ?, settled_at = ?
@@ -586,14 +597,11 @@ export function chargeSpendBeforeCall(store, secret, name, args) {
   const nowMs = store.now();
   const report = spendAllowanceReport(room.state, nowMs);
   // The check+reserve MUST run inside the store's platform transaction.
-  // authorizeSpend's module-local transact() issues raw BEGIN IMMEDIATE /
-  // COMMIT / ROLLBACK, which node:sqlite accepts but the Durable Object
-  // wrapper (cloudflare/storage.mjs DurableDatabase) cannot execute — on
-  // the DO the BEGIN throws a non-ServiceError, so every priced-tool call
-  // by a non-owner 500s instead of 402ing (qa4-fix-spend-do-txn-jill,
-  // live-verified 2026-10-05). store.transaction() routes through the
-  // platform abstraction on every runtime; transact() then nests safely
-  // via db.isTransaction and issues no raw SQL of its own.
+  // authorizeSpend's transact() now delegates to the store's platform
+  // transaction itself (it used to issue raw BEGIN IMMEDIATE, which the
+  // Durable Object wrapper cannot execute: qa4-fix-spend-do-txn-jill,
+  // live-verified 2026-10-05). Wrapping here keeps the projection read in
+  // the same transaction as the reservation.
   return store.transaction(() => authorizeSpend(store.db, {
     roomId,
     agentId: member.id,

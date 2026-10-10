@@ -89,6 +89,25 @@ export function suggestsTask(message) {
 
 export const ASK_AGENT_AFTER_MS = 2 * 60 * 1000;
 
+// A following letter, digit, underscore, or hyphen extends the handle.
+// "@Builder2" is not a mention of Builder. A comma, question mark, or space is.
+function handleContinues(text, index) {
+  const ch = text[index];
+  return ch != null && /[A-Za-z0-9_-]/.test(ch);
+}
+
+function bodyMentionsAgent(body, displayName) {
+  const needle = `@${displayName}`;
+  let from = 0;
+  while (from <= body.length) {
+    const at = body.indexOf(needle, from);
+    if (at === -1) return false;
+    if (!handleContinues(body, at + needle.length)) return true;
+    from = at + 1;
+  }
+  return false;
+}
+
 // A person's question that is still the latest message, with no thread
 // replies, after ASK_AGENT_AFTER_MS. Offers one active agent that is not the
 // asker and is not already mentioned; agents that can take work come first.
@@ -100,7 +119,7 @@ export function askAgentSuggestion(message, { members = {}, replyCount = 0, now 
   const asked = Date.parse(message.createdAt);
   if (!Number.isFinite(asked) || now - asked < waitMs) return null;
   const agents = Object.values(members).filter(m => m.kind === "agent" && m.active !== false && m.id !== message.authorId && m.displayName);
-  if (agents.some(m => body.includes(`@${m.displayName}`))) return null;
+  if (agents.some(m => bodyMentionsAgent(body, m.displayName))) return null;
   const canWork = m => (m.permissions ?? []).includes("accept_work");
   const pick = agents.sort((a, b) => Number(canWork(b)) - Number(canWork(a)) || a.displayName.localeCompare(b.displayName))[0];
   return pick ? { memberId: pick.id, name: pick.displayName } : null;

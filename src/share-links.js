@@ -228,7 +228,10 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     return currentLink;
   }
   function managementError(error) {
-    if ([401, 403].includes(error?.status) || ["session_binding_changed", "session_binding_required", "invalid_session_binding"].includes(error?.code)) {
+    // email_unverified is a 403 about the account, not a changed session: keep the
+    // dialog and show the server's "Verify your email" message instead of
+    // claiming the invitation access changed.
+    if (error?.code !== "email_unverified" && [401, 403].includes(error?.status) || ["session_binding_changed", "session_binding_required", "invalid_session_binding"].includes(error?.code)) {
       resetManagement(); setConnectionStatus("Invitation access changed. Reopen the room before inviting.");
     }
   }
@@ -736,7 +739,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       if (error.code === "join_session_lost") $("#join-account-choices").hidden = false;
       const lostGuest = error.code === "join_session_lost" && accountClient.session?.authenticated === false;
       $("#join-link-signout").hidden = error.code !== "guest_session_ended" && !lostGuest;
-      $("#join-link-signout").textContent = lostGuest ? "Start a new guest (uses another place)" : "Sign out of expired guest session";
+      $("#join-link-signout").textContent = lostGuest ? "Start a new guest (uses another place)" : "Log out of expired guest session";
       if (joined) $("#join-link-submit").textContent = "Open joined room";
     } finally {
       joinBusy(false);

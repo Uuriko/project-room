@@ -11,12 +11,13 @@ import { boardClaimId } from '../server/work-claim-mirror.mjs';
 import { makeTestSigner } from '../scripts/helpers/signed-evidence.mjs';
 import { setTier } from '../server/autonomy-tiers.mjs';
 
+import { createTestClock } from './helpers/test-clock.mjs';
 const command = (type, data) => ({ id: crypto.randomUUID(), type, data });
 function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), 'room-scopes-'));
   const filename = join(directory, 'room.sqlite');
-  let now = Date.now();
-  const store = new RoomStore(filename, { now: () => now });
+  const clock = createTestClock();
+  const store = new RoomStore(filename, { now: clock.now });
   store.initialize(initialRoom());
   const keys = { owner: store.issueAccessKey('commons', 'owner') };
   for (const id of ['a', 'b', 'viewer']) {
@@ -26,17 +27,17 @@ function fixture(t) {
   }
   // #953: new agent members default to t1_readonly; a and b need write access
   for (const id of ['a', 'b'])
-    setTier(store.db, 'commons', id, 't2_standard', { updatedBy: 'owner', nowMs: Date.now() });
+    setTier(store.db, 'commons', id, 't2_standard', { updatedBy: 'owner', nowMs: clock.now() });
   const item = id => store.room('commons').state.workItems[id];
   const mutate = (actor, type, id, data = {}) => store.command(keys[actor], 'commons', command(type, { workItemId: id, expectedRevision: item(id).revision, ...data }));
   const propose = (id, actor = 'a', mode = 'write') => {
     store.command(keys.owner, 'commons', command(T.WORK_PROPOSED, { workItemId: id, title: id, definitionOfDone: 'Versioned result', accountableMemberId: actor, mode, independentVerificationRequired: false, ownerDecisionRequired: false }));
     mutate(actor, T.WORK_ACCEPTED, id);
   };
-  const scope = (paths = ['src/**']) => ({ repository: 'test/repo', ref: 'draft', paths, expiresAt: new Date(now + 60000).toISOString() });
+  const scope = (paths = ['src/**']) => ({ repository: 'test/repo', ref: 'draft', paths, expiresAt: new Date(clock.now() + 60000).toISOString() });
   const signEvidence = makeTestSigner(store);
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
-  return { store, filename, keys, item, mutate, propose, scope, signEvidence, advance: ms => { now += ms; } };
+  return { store, filename, keys, item, mutate, propose, scope, signEvidence, now: clock.now, advance: clock.advance };
 }
 
 test('projection claims follow the board writer profile and do not grant write_external', t => {
@@ -45,7 +46,7 @@ test('projection claims follow the board writer profile and do not grant write_e
     f.store.command(f.keys.owner, 'commons', command(T.MEMBER_ADDED, {
       memberId: id, displayName: id, kind: 'agent', accountableHumanId: 'owner', permissions,
     }));
-    setTier(f.store.db, 'commons', id, 't2_standard', { updatedBy: 'owner', nowMs: Date.now() });
+    setTier(f.store.db, 'commons', id, 't2_standard', { updatedBy: 'owner', nowMs: f.store.now() });
     return f.store.issueAccessKey('commons', id);
   };
   const externalKey = add('external-only', ['accept_work', 'write_external']);
@@ -76,7 +77,7 @@ test('projection claims follow the board writer profile and do not grant write_e
   const posted = send(contributeKey, T.MESSAGE_POSTED, { messageId: 'board-progress', body: 'Still on docs/board.md' });
   send(contributeKey, T.CLAIM_RENEWED, {
     workItemId: 'board', expectedRevision: f.item('board').revision, progressMessageId: 'board-progress',
-    expiresAt: new Date(Date.now() + 120000).toISOString(),
+    expiresAt: new Date(f.store.now() + 120000).toISOString(),
   });
   assert.equal(f.item('board').claim.renewals, 1);
   assert.equal(posted.event.type, T.MESSAGE_POSTED);
@@ -179,7 +180,7 @@ test('projection acquire, heartbeat, handoff, and supersede show up on the work-
   assert.equal(acquired.pullRequests[0].url, 'https://github.com/Uuriko/project-room/pull/4');
   const before = Date.parse(acquired.leaseExpiresAt);
   f.advance(1000);
-  f.mutate('a', T.CLAIM_RENEWED, 'lane', { expiresAt: new Date(Date.now() + 120000).toISOString() });
+  f.mutate('a', T.CLAIM_RENEWED, 'lane', { expiresAt: new Date(f.store.now() + 120000).toISOString() });
   const renewed = f.store.workClaims.get('commons', 'lane');
   assert.ok(Date.parse(renewed.leaseExpiresAt) > before);
   f.mutate('a', T.WORK_HANDOFF_RECORDED, 'lane', {
@@ -209,7 +210,7 @@ test('a handoff from a member without the board profile is refused and writes no
   f.store.command(f.keys.owner, 'commons', command(T.MEMBER_ADDED, {
     memberId: 'narrow', displayName: 'narrow', kind: 'agent', accountableHumanId: 'owner', permissions: ['accept_work', 'write_external'],
   }));
-  setTier(f.store.db, 'commons', 'narrow', 't2_standard', { updatedBy: 'owner', nowMs: Date.now() });
+  setTier(f.store.db, 'commons', 'narrow', 't2_standard', { updatedBy: 'owner', nowMs: f.store.now() });
   f.keys.narrow = f.store.issueAccessKey('commons', 'narrow');
   const narrowKey = f.keys.narrow;
   f.propose('job', 'narrow', 'read');
@@ -232,7 +233,7 @@ test('a supersede from a member without the board profile is refused and writes 
   f.store.command(f.keys.owner, 'commons', command(T.MEMBER_ADDED, {
     memberId: 'steerer', displayName: 'steerer', kind: 'agent', accountableHumanId: 'owner', permissions: ['steer'],
   }));
-  setTier(f.store.db, 'commons', 'steerer', 't2_standard', { updatedBy: 'owner', nowMs: Date.now() });
+  setTier(f.store.db, 'commons', 'steerer', 't2_standard', { updatedBy: 'owner', nowMs: f.store.now() });
   f.keys.steerer = f.store.issueAccessKey('commons', 'steerer');
   const steererKey = f.keys.steerer;
   f.propose('old', 'a', 'read');
@@ -253,7 +254,7 @@ test('an ownerless room refuses a handoff without a claim profile but admits a b
   f.store.command(f.keys.owner, 'commons', command(T.MEMBER_ADDED, {
     memberId: 'narrow', displayName: 'narrow', kind: 'agent', accountableHumanId: 'owner', permissions: ['accept_work', 'write_external'],
   }));
-  setTier(f.store.db, 'commons', 'narrow', 't2_standard', { updatedBy: 'owner', nowMs: Date.now() });
+  setTier(f.store.db, 'commons', 'narrow', 't2_standard', { updatedBy: 'owner', nowMs: f.store.now() });
   f.keys.narrow = f.store.issueAccessKey('commons', 'narrow');
   const narrowKey = f.keys.narrow;
   const row = f.store.db.prepare('SELECT projection FROM rooms WHERE id=?').get('commons');

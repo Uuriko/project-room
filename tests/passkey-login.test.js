@@ -670,3 +670,8 @@ test("M-45: registration advertises only algorithms the store can persist (ES256
   assert.ok(algs.includes(-7), "ES256 is advertised");
   assert.ok(!algs.includes(-257), "RS256 must not be advertised: coseKeyToJwk only persists P-256 ES256 keys");
 });
+
+test("createRegistrationOptions refuses a user.id over the 64-byte WebAuthn limit", () => {
+  assert.throws(() => createRegistrationOptions({ rpId: RP_ID, user: { id: "e".repeat(70), name: "ada" } }), /1 to 64 bytes/);
+  assert.doesNotThrow(() => createRegistrationOptions({ rpId: RP_ID, user: { id: "e".repeat(64), name: "ada" } }));
+});

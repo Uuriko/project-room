@@ -306,7 +306,10 @@ export function openWorkOf(store, roomId, memberId, authority, claims = null, no
   if (!member || !mayWriteWorkClaims({ member: { ...member, id: memberId }, ownerId })) return null;
   const list = claims ?? claimBoardOf(store, roomId);
   if (!list) return null;
-  const done = new Set(list.filter(item => item?.state === "done").map(item => item.id));
+  // Invalidated work keeps its original state for the audit trail. Neither
+  // that state nor a retired scope proves a usable dependency or ready work.
+  const usable = item => item && !item.premiseFlag && !item.supersededBy;
+  const done = new Set(list.filter(item => usable(item) && item.state === "done").map(item => item.id));
   const updatedMs = item => {
     const ms = Date.parse(claimUpdatedAt(item));
     return Number.isFinite(ms) ? ms : null;
@@ -314,7 +317,7 @@ export function openWorkOf(store, roomId, memberId, authority, claims = null, no
   // Sort on the exact timestamp; round to minutes only for display.
   const minutesSince = ms => (ms === null ? null : Math.max(0, Math.round((nowMs - ms) / 60000)));
   // Board order (updatedAt desc, then id) within each group, as the Board shows.
-  const ready = list.filter(item => item?.state === "unclaimed" && (item.kind ?? "work") === "work"
+  const ready = list.filter(item => usable(item) && item.state === "unclaimed" && (item.kind ?? "work") === "work"
     && (item.dependsOn ?? []).every(dep => done.has(dep)))
     .map(item => ({ item, at: updatedMs(item), released: (item.history ?? []).some(entry => entry?.action === "claimed"),
       hard: isHardWork(item) }))

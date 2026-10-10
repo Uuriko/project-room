@@ -27,7 +27,7 @@ test("does not flag triggers, other SQL, dynamic SQL or the helper", () => {
 
 test("every exempt file still needs its exemption", () => {
   // A stale entry would hide new raw transactions. Remove it when the file moves to store.transaction(fn).
-  assert.ok(RAW_TRANSACTION_EXEMPT.length <= 3, "do not grow the exemption list; use store.transaction(fn)");
+  assert.ok(RAW_TRANSACTION_EXEMPT.length <= 2, "do not grow the exemption list; use store.transaction(fn)");
   for (const file of RAW_TRANSACTION_EXEMPT) {
     const src = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
     const hits = new Linter().verify(src, config, { filename: file }).filter(m => m.ruleId === "room/no-raw-transaction");

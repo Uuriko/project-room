@@ -9,7 +9,7 @@ import { RoomStore } from '../server/store.mjs';
 import { AgentRooms } from '../server/agent-rooms.mjs';
 import { collectNeedsMe } from '../server/needs-me.mjs';
 import { wakeNamedReviewers } from '../server/work-claim-events.mjs';
-import { createWork, claimWork, updateWork, recordReview, recordCi } from '../server/work-claims.mjs';
+import { createWork, claimWork, updateWork, recordReview, recordCi, flagPremiseInvalid, clearPremiseFlag } from '../server/work-claims.mjs';
 
 const WRITER = ['steer', 'accept_work', 'complete_work', 'verify'];
 
@@ -63,6 +63,40 @@ test('a dependency that is done makes its dependent ready', t => {
   store.workClaims.set('board', { ...dep, state: 'done' });
   const open = collectNeedsMe(store, ada.secret, {}).openWork[0];
   assert.deepEqual(open.top.map(row => row.id), ['after']);
+});
+
+// Regression owner: the real needs-me response must not dispatch invalid work.
+// Existing readiness cases only cover state and dependencies; these records
+// stay unclaimed/done when invalidated. No production test seam is required.
+test('pickup recommendations omit invalid or superseded work and dependencies, and recover after re-review', t => {
+  const { store, ada, owner, put, t0 } = setup(t);
+  const first = collectNeedsMe(store, ada.secret, {});
+  const flag = item => flagPremiseInvalid(item, {
+    premiseId: item.id, reason: 'The premise was disproved', byMemberId: owner.identityId, now: t0 + 60000
+  });
+  const flagged = flag(put('flagged', 0));
+  store.workClaims.set('board', flagged);
+  store.workClaims.set('board', { ...put('retired', 0), supersededBy: 'replacement' });
+  const dependency = { ...put('dependency', 0), state: 'done' };
+  const retiredDependency = { ...put('retired-dependency', 0), state: 'done', supersededBy: 'replacement' };
+  store.workClaims.set('board', flag(dependency));
+  store.workClaims.set('board', retiredDependency);
+  put('after-invalid', 0, { dependsOn: ['dependency'] });
+  put('after-retired', 0, { dependsOn: ['retired-dependency'] });
+  assert.equal(collectNeedsMe(store, ada.secret, { since: first.cursor }).openWork, undefined,
+    'state alone must not recommend invalidated or retired scope');
+
+  // Clearing the flag is an explicit re-review. Restore just these two claims;
+  // retirement still does not become a delivered dependency or open work.
+  for (const item of [flagged, flag(dependency)]) {
+    store.workClaims.set('board', clearPremiseFlag(item, {
+      byMemberId: owner.identityId, note: 'The premise was rechecked', now: t0 + 120000
+    }));
+  }
+  const page = collectNeedsMe(store, ada.secret, { since: first.cursor });
+  assert.equal(page.openWork[0].count, 2);
+  assert.deepEqual(new Set(page.openWork[0].top.map(row => row.id)), new Set(['flagged', 'after-invalid']));
+  assert.deepEqual(page.cursor, first.cursor, 'recommendations do not consume the attention cursor');
 });
 
 test('work posted for pickup ranks above released work', t => {

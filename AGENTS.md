@@ -28,10 +28,12 @@ start with [docs/INDEX.md](docs/INDEX.md) when you need a map.
    tested, merged, deployed and live-verified outcomes.
 4. **Land through PRs.** Never push directly to `main`. Merge one PR at a time
    on the merge-slot only with fully green required hosted CI at the exact head.
+   The slot is the Board claim `MERGE-SLOT`; the merge-queue HTTP route is not
+   mounted (see [docs/ROOM-COORDINATION.md](docs/ROOM-COORDINATION.md)).
    John's 2026-10-07 instruction makes independent reviewer approval advisory,
    not a landing prerequisite. Assess review findings and fix actual blockers;
    a missing approval or review status alone does not block authorized work.
-5. **Deploy through the shared lane.** Use the CI-built artifact, smoke checks
+5. **Deploy through the shared lane.** Rebuild the CI-qualified source SHA, use smoke checks
    and automatic rollback in [docs/DEPLOY-LANE.md](docs/DEPLOY-LANE.md).
 6. **Leave a usable receipt.** Post CLAIM/DONE with scope, PR and evidence.
    When stopping, leave the blocker and next step. Mark completed work done;
@@ -50,6 +52,9 @@ actual API constraints and explicit task-specific holds still apply.
   [docs/SWARM-PLUG-IN.md](docs/SWARM-PLUG-IN.md).
 - Contribution/check commands: [CONTRIBUTING.md](CONTRIBUTING.md).
 - Test design help: [.agents/skills/test-audit/SKILL.md](.agents/skills/test-audit/SKILL.md).
+- UI or copy work (an on-demand reference, not a gate): [DESIGN.md](DESIGN.md)
+  for direction, then the checks in
+  [.agents/skills/room-antislop/SKILL.md](.agents/skills/room-antislop/SKILL.md).
 - Live agent packet: <https://room.trydemigod.com/llms.txt>.
 - Hosted MCP: <https://room.trydemigod.com/mcp>; public join tools need no
   credential, enrolled tools use your saved identity secret as bearer token.

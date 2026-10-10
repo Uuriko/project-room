@@ -1,7 +1,7 @@
 // Projection claim commands (MCP and the work-item form) write the same
 // work-claims board the REST routes use. A handoff or supersede leaves a
 // successor card that depends on the source, so the chain is visible there.
-import { createWork, claimWork, renewWork, updateWork, roomWorkClaimConfig } from "./work-claims.mjs";
+import { createWork, claimWork, renewWork, updateWork, roomWorkClaimConfig, openClaimCount } from "./work-claims.mjs";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
 
 const BOARD_ID = /^[A-Za-z0-9_-]{1,128}$/;
@@ -50,7 +50,7 @@ function claimBoard(store, roomId, actorId, id, data, nowMs) {
     const config = typeof registry.configFor === "function"
       ? registry.configFor(roomId)
       : roomWorkClaimConfig(roomLike(registry, roomId));
-    const open = registry.list(roomId).filter(entry => entry.state !== "done" && entry.state !== "closed").length;
+    const open = openClaimCount(registry.list(roomId), nowMs);
     if (open >= config.maxOpenClaims) {
       const error = new Error(`This room already has ${config.maxOpenClaims} open claims. Close stale claims (close or cancel) before opening another.`);
       error.status = 409;
@@ -81,6 +81,19 @@ function claimBoard(store, roomId, actorId, id, data, nowMs) {
   }
   const claimed = claimWork(item, actorId, { ...fields, room: roomLike(registry, roomId), now: nowMs });
   return commit(store, roomId, actorId, claimed, "claimed", nowMs);
+}
+
+function occupiedSuccessor(registry, roomId, sourceId, nextId) {
+  const existing = registry.get(roomId, nextId);
+  if (!existing || !ACTIVE.has(existing.state)) return false;
+  return !(Array.isArray(existing.dependsOn) && existing.dependsOn.includes(sourceId));
+}
+
+function refuseOccupiedSuccessor(nextId, sourceId) {
+  const error = new Error(`Board card ${nextId} is already claimed. It is not a successor of ${sourceId}.`);
+  error.status = 409;
+  error.code = "work_claim_conflict";
+  throw error;
 }
 
 function successor(store, roomId, actorId, sourceId, nextId, title, nowMs) {
@@ -118,8 +131,9 @@ export function mirrorProjectionClaim(store, roomId, actorId, incoming) {
     }), "released", nowMs);
   }
   if (incoming.type === "work.handoff_recorded") {
-    claimBoard(store, roomId, actorId, id, data, nowMs);
     const nextId = boardClaimId(`${data.workItemId}-next`);
+    if (occupiedSuccessor(registry, roomId, id, nextId)) refuseOccupiedSuccessor(nextId, id);
+    claimBoard(store, roomId, actorId, id, data, nowMs);
     const source = registry.get(roomId, id);
     const link = { kind: "handoff", targetId: nextId, at: incoming.at, actorId, note: data.nextAction ?? null };
     const chained = { ...source, chain: Object.freeze([...(source.chain ?? []), link].slice(-20)) };
@@ -128,6 +142,7 @@ export function mirrorProjectionClaim(store, roomId, actorId, incoming) {
   }
   if (incoming.type === "work.superseded") {
     const nextId = boardClaimId(data.supersededByWorkItemId);
+    if (occupiedSuccessor(registry, roomId, id, nextId)) refuseOccupiedSuccessor(nextId, id);
     let source = registry.get(roomId, id);
     if (!source) source = commit(store, roomId, actorId, createWork({ id, title: data.workItemId, workItemId: data.workItemId }, { now: nowMs, agentId: actorId }), "created", nowMs);
     const link = { kind: "supersede", targetId: nextId, at: incoming.at, actorId, note: data.reason ?? null };

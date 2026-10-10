@@ -30,3 +30,7 @@ A flaky test — one that fails non-deterministically while the product is fine 
 - malformed entries, unparseable dates, future `quarantined_at`, or `repair_by` beyond the 14-day cap.
 
 Fix violations by doing the actual work (repair the test), not by editing dates. Extending a `repair_by` requires the reason field to say why and who agreed — and it still cannot exceed 14 days from `quarantined_at`.
+
+## Deterministic time (TST-11)
+
+A test that reads the wall clock while the code under test reads an injected clock can flake: a slow runner or an `advance()` moves one clock and not the other. Use `tests/helpers/test-clock.mjs`. `createTestClock()` gives the store and the assertions one clock (`new RoomStore(file, { now: clock.now })`, then assert against `clock.now()`). `freezeDate(t, at)` pins the global `Date` for one test when the code takes no clock; real `setTimeout` waits still run. First users: `tests/guest-join.test.js` (exact TTL on the store clock instead of a 60 s window) and `tests/claim-scopes.test.js`.

@@ -9,6 +9,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { setTier } from "../server/autonomy-tiers.mjs";
+import { activityUnreadCount, listActivity } from "../server/activity.mjs";
 
 // Attention: activity feed fan-out, read horizons, saved messages, thread mutes.
 function setup(t) {
@@ -306,4 +307,35 @@ test("pins stay in the shared 60/min write bucket", async t => {
     if (res.status === 429) limited++;
   }
   assert.ok(limited > 0, "a pin burst is capped at the 60/min write budget, not the 240/min housekeeping bucket");
+});
+
+test("a since_join reactivation hides the earlier mention from the activity feed", t => {
+  const directory = mkdtempSync(join(tmpdir(), "activity-history-floor-"));
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
+  store.initialize(initialRoom());
+  let now = Date.parse("2026-10-08T00:00:00.000Z");
+  store.now = () => (now += 1000);
+  const owner = store.issueAccessKey("commons", "owner");
+  const cmd = (type, data) => store.command(owner, "commons", { id: randomUUID(), type, data });
+  cmd(T.ROOM_HISTORY_VISIBILITY_SET, { historyVisibility: "since_join" });
+  cmd(T.MEMBER_ADDED, { memberId: "late", displayName: "Late", kind: "human", permissions: [] });
+  cmd(T.MESSAGE_POSTED, { messageId: "gap-msg", body: "gap secret for @late" });
+  const gapRevision = store.snapshot(owner, "commons").state.members.late.revision;
+  cmd(T.MEMBER_ACCESS_CHANGED, { memberId: "late", expectedMemberRevision: gapRevision, permissions: [], active: false });
+  const removedRevision = store.snapshot(owner, "commons").state.members.late.revision;
+  cmd(T.MEMBER_ACCESS_CHANGED, { memberId: "late", expectedMemberRevision: removedRevision, permissions: [], active: true });
+  const late = store.issueAccessKey("commons", "late");
+  cmd(T.MESSAGE_POSTED, { messageId: "after-msg", body: "welcome back @late" });
+
+  const feed = listActivity(store, late, "commons");
+  assert.deepEqual(feed.items.map(item => item.messageId), ["after-msg"]);
+  assert.equal(JSON.stringify(feed).includes("gap secret"), false);
+  const unread = activityUnreadCount(store, late, "commons");
+  assert.equal(unread.total, 1);
+  assert.equal(unread.byType.mention, 1);
+  assert.equal(JSON.stringify(unread).includes("gap secret"), false);
+
+  const ownerFeed = listActivity(store, owner, "commons");
+  assert.equal(ownerFeed.items.some(item => item.messageId === "gap-msg"), false, "the owner was not mentioned");
 });
