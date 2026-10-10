@@ -50,7 +50,7 @@ test('unfinished assistant work stays discoverable after more than 100 newer ter
   apply('producer', { action: 'report', runId: 'working', attemptId: 'host-working', expectedRevision: 1, state: 'working', summary: 'Still processing the original request.' });
   const context = await api('owner');
   const statuses = new Map(context.runs.map(run => [run.id, run.status]));
-  for (const [id, status] of [['queued', 'queued'], ['working', 'working'], ['paused', 'paused'], ['needs-input', 'needs_input'], ['stopping', 'cancel_requested']])
+  for (const [id, status] of [['queued', 'not_picked_up'], ['working', 'working'], ['paused', 'paused'], ['needs-input', 'needs_input'], ['stopping', 'cancel_requested']])
     assert.equal(statuses.get(id), status, `older ${id} remains visible and actionable`);
   assert.equal(context.runs.length, 100, 'history remains bounded');
   assert.equal(statuses.get('terminal-104'), 'cancelled', 'recent outcomes remain available');
@@ -199,7 +199,7 @@ test('private context, other authors, unauthorized publishers and unauthenticate
   assert.equal((await fetch(`${origin}/api/rooms/commons/assistant`)).status,401);
 });
 
-test('a saved invocation does not imply execution, stale execution is unknown, membership revocation blocks host', async t => {
+test('a saved invocation does not imply execution, stale execution is stalled, membership revocation blocks host', async t => {
   const { f, api } = await setup(t);
   await api('owner',{action:'invoke',runId:'no-host',sourceMessageId:'test-welcome'},409);
   assert.equal((await api('owner')).runs.length,0);
@@ -210,7 +210,7 @@ test('a saved invocation does not imply execution, stale execution is unknown, m
   assert.equal((await api('owner')).assistant.availability,'awaiting_host');
   await api('producer',{action:'claim',runId:'connected',attemptId:'host',expectedRevision:0});
   const now = f.store.now(); f.store.now = () => now + 121000;
-  assert.equal((await api('owner')).runs[0].status,'unknown');
+  assert.equal((await api('owner')).runs[0].status,'stalled');
   f.store.command(f.keys.owner,'commons',{id:randomUUID(),type:'member.access_changed',data:{memberId:'producer',expectedMemberRevision:0,permissions:['accept_work','complete_work'],active:false}});
   await api('producer',{action:'report',runId:'connected',attemptId:'host',expectedRevision:1,state:'working',summary:'Not authorized'},401);
 });
@@ -312,7 +312,7 @@ test('human contributions never revive stale host status or availability', async
   message('guest','fresh-contribution');
   await api('guest',{action:'contribute',runId:'stale',sourceMessageId:'fresh-contribution',expectedRevision:1});
   const stale=await api('owner');
-  assert.equal(stale.runs[0].status,'unknown');
+  assert.equal(stale.runs[0].status,'stalled');
   assert.equal(stale.runs[0].hostReportedAt,before);
   assert.equal(stale.assistant.availability,'awaiting_host');
   await api('producer',{action:'report',runId:'stale',attemptId:'host',expectedRevision:2,state:'working',summary:'Host is responsive again.'});
@@ -503,4 +503,25 @@ test('cancel on a live host still waits for host acknowledgment', async t => {
   assert.equal(requested.result.attemptId,'host-1');
   const ack = await api('producer',{action:'report',runId:'live',attemptId:'host-1',expectedRevision:2,state:'cancelled',summary:'Stopping.'});
   assert.equal(ack.result.status,'cancelled');
+});
+
+test('ask card statuses: 10s-not-picked-up and 2min-stalled', async t => {
+  const { f, api, message } = await setup(t);
+  await api('owner',{action:'configure',expectedRevision:0,name:'Room',coordinatorMemberId:'producer'});
+  message('owner','slow-prompt','Take your time.');
+  await api('owner',{action:'invoke',runId:'slow',sourceMessageId:'slow-prompt'});
+  message('owner','work-prompt','Do the thing.');
+  await api('owner',{action:'invoke',runId:'busy',sourceMessageId:'work-prompt'});
+  await api('producer',{action:'claim',runId:'busy',attemptId:'host-1',expectedRevision:0});
+  const statuses = async () => new Map((await api('owner')).runs.map(r => [r.id, r.status]));
+  assert.deepEqual([...await statuses()].sort(),[['busy','working'],['slow','queued']]);
+  const now = f.store.now(); f.store.now = () => now + 11000;
+  assert.equal((await statuses()).get('slow'),'not_picked_up','queued 11s with no claim reads not picked up');
+  assert.equal((await statuses()).get('busy'),'working','claimed 11s ago with a fresh host report still reads working');
+  f.store.now = () => now + 121000;
+  assert.equal((await statuses()).get('slow'),'not_picked_up');
+  assert.equal((await statuses()).get('busy'),'stalled','working with no host update for 2min reads stalled');
+  // A fresh host report clears the stall.
+  await api('producer',{action:'report',runId:'busy',attemptId:'host-1',expectedRevision:1,state:'working',summary:'Still on it.'});
+  assert.equal((await statuses()).get('busy'),'working');
 });
