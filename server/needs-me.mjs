@@ -92,6 +92,21 @@ function roomWatermark(parsed, roomId) {
   return parsed.number ?? 0;
 }
 
+// PRIV-2: a since_join reactivation must not scan mention or DM bodies from
+// before the new join. The scan bound is exclusive, so the join event itself
+// stays reachable and earlier rows do not fill the page. A floor that cannot
+// be read hides those bodies rather than returning them.
+function historyScanAfter(store, roomId, memberId, after, headSequence) {
+  if (typeof store?.historyFloor !== "function") return Number.MAX_SAFE_INTEGER;
+  let floor;
+  try { floor = store.historyFloor(roomId, memberId, headSequence); }
+  catch { return Number.MAX_SAFE_INTEGER; }
+  if (!floor) return after;
+  const joined = floor.sequence - 1;
+  if (!Number.isSafeInteger(joined) || joined < 0) return Number.MAX_SAFE_INTEGER;
+  return Math.max(after, joined);
+}
+
 function landWatermark(parsed, roomId) {
   if (!parsed.provided) return 0;
   return Object.hasOwn(parsed.land, roomId) ? parsed.land[roomId] : 0;
@@ -455,13 +470,14 @@ export function collectNeedsMe(store, secret, { since } = {}) {
     if (mine) myWork.push(mine);
     const after = roomWatermark(parsed, link.roomId);
     const landAfter = landWatermark(parsed, link.roomId);
-    let through = mentionHorizon(store, link.roomId, link.memberId, after, sessionWatermark(after, authority.sequence));
+    const visibleAfter = historyScanAfter(store, link.roomId, link.memberId, after, authority.sequence);
+    let through = mentionHorizon(store, link.roomId, link.memberId, visibleAfter, sessionWatermark(visibleAfter, authority.sequence));
     let candidates = [];
     if (authority.sequence > after) {
       const state = store.room(link.roomId).state;
       const kinds = [
-        mentionsOf(store, link.roomId, link.memberId, after, through),
-        roomDmsOf(store, link.roomId, link.memberId, after),
+        mentionsOf(store, link.roomId, link.memberId, visibleAfter, through),
+        roomDmsOf(store, link.roomId, link.memberId, visibleAfter),
         peerDmsOf(store, link.roomId, identity.identityId, after),
         bondRequestsOf(store, link.roomId, pendingBonds, after),
         directAsksOf(store, link.roomId, link.memberId, after, state),
