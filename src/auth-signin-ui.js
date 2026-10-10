@@ -270,7 +270,8 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
       await withBusy(async () => {
         const session = await authedSession();
         if (passwordMode === "signup") {
-          const reply = await api(session, "/api/auth/password/signup", { email: passwordEmail, password: fields.password, sessionRevision: session.sessionRevision });
+          const returnTo = onMagicLinkRequest?.();
+          const reply = await api(session, "/api/auth/password/signup", { email: passwordEmail, password: fields.password, sessionRevision: session.sessionRevision, ...(returnTo ? { returnTo } : {}) });
           if (reply?.status !== "check_email" || typeof reply.mailConfigured !== "boolean") throw new Error(uiText("signin.copy.025"));
           const restored = await accountClient.restore();
           if (restored?.authenticated) {
