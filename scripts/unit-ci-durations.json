@@ -83,6 +83,7 @@
   "tests/agent-type-catalog.test.js": 14398,
   "tests/agent-upgrade.test.js": 300000,
   "tests/agent-wake-poll.test.js": 55078,
+  "tests/agent-wake-rak-join.test.js": 12000,
   "tests/agent-wake.test.js": 34221,
   "tests/agent-work-preflight.test.js": 19123,
   "tests/agent-work-search.test.js": 66533,
