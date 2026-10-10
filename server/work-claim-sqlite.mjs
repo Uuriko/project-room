@@ -39,8 +39,6 @@ const decodeItem = text => {
   if (item.deploy == null) delete item.deploy;
   // PRODUCT-200 A4: idempotency records are sparse; absent means none seen.
   if (item.requestOutcomes == null || Object.keys(item.requestOutcomes).length === 0) delete item.requestOutcomes;
-  // FIX-75: difficulty labels are sparse; absent means the poster set none.
-  if (item.difficulty == null) delete item.difficulty;
   return item;
 };
 

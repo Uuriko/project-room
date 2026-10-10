@@ -54,7 +54,11 @@ async function fixture(t) {
   return { ownerKey, coordKey, owner, coord, call };
 }
 
-const COMPACT_KEYS = ["id", "leaseExpiresAt", "owner", "state", "title"];
+// Kept in sorted order: the tests compare against Object.keys().sort().
+const COMPACT_KEYS = ["difficulty", "id", "leaseExpiresAt", "owner", "starving", "state", "title",
+  // FIX-75 (WAVE-300): the market-maker reads the compact board too —
+  // difficulty and the starvation signal ride the summary projection.
+  "unclaimedForMs", "unstartedForMs", "waitingSince"];
 
 test("?view=summary returns compact per-claim projections without heavy fields", async t => {
   const { owner, ownerKey, call } = await fixture(t);
