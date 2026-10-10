@@ -450,10 +450,25 @@ export function planAccountDeletion(store, accountId) {
 // scrubs the account row and deactivates it, which also retires any
 // credential the earlier steps somehow missed via the auth-epoch check.
 const EXECUTORS = {
-  credentials: (store, accountId) =>
-    store.db.prepare("DELETE FROM account_credentials WHERE account_id=?").run(accountId).changes,
-  sessions: (store, accountId) =>
-    store.db.prepare("DELETE FROM account_session_slots WHERE account_id=?").run(accountId).changes,
+  credentials: (store, accountId) => {
+    // Same FK-retention shape as sessions below: a retained session slot's
+    // parent_credential_hash REFERENCES account_credentials(hash). Skip
+    // credentials still referenced by a slot; the profile step's auth_epoch
+    // bump retires them.
+    return store.db.prepare(`DELETE FROM account_credentials WHERE account_id=?
+      AND hash NOT IN (SELECT parent_credential_hash FROM account_session_slots WHERE parent_credential_hash IS NOT NULL)`).run(accountId).changes;
+  },
+  sessions: (store, accountId) => {
+    // rb-account-delete-500: a share-link join writes a share_link_joins row
+    // whose slot_hash FK-references account_session_slots(hash), and join
+    // history is deliberately retained (share_link_joins_no_delete trigger).
+    // Deleting a referenced slot aborts the whole transaction with
+    // FOREIGN KEY constraint failed. Skip referenced slots: the profile
+    // step's auth_epoch bump retires them (authenticateAccountSession
+    // rejects the epoch mismatch), while the join history stays intact.
+    return store.db.prepare(`DELETE FROM account_session_slots WHERE account_id=?
+      AND hash NOT IN (SELECT slot_hash FROM share_link_joins)`).run(accountId).changes;
+  },
   login_methods: (store, accountId) => {
     let removed = 0;
     for (const table of ["account_login_methods", "account_magic_codes", "account_recovery_codes", "account_security_events"]) {
