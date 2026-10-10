@@ -25,7 +25,7 @@ import { validId } from "../src/events.js";
 import { redactEventPage } from "./redact-read.mjs";
 import { projectBoard } from "../src/board.js";
 import { confirmsWorkReturn } from "../src/workflow.js";
-import { workContextMarkdown, paginateRoomMessages } from "../client/room-agent.mjs";
+import { workContextMarkdown, paginateRoomMessages, latestSnapshotPage } from "../client/room-agent.mjs";
 import { roomTools, validRoomToolArguments, buildDraftCommand } from "../client/mcp-stdio.mjs";
 import { bountyTools, isBountyTool, validBountyToolArguments } from "../client/bounty-tools.mjs";
 import { trustTools, isTrustTool, validTrustToolArguments } from "../client/trust-tools.mjs";
@@ -108,9 +108,11 @@ async function roomMessages(store, secret, roomId, args, memberId) {
     end: latest ? store.roomAuthority(roomId).sequence + 1 : null,
     mapMessage,
   });
+  const mapped = messages.map(message => markIfOther(message, memberId, message.from));
+  const cursor = latest ? latestSnapshotPage(mapped, after, hasMore) : { next, hasMore };
   return withContentTrust({
-    roomId, messages: messages.map(message => markIfOther(message, memberId, message.from)),
-    next, hasMore
+    roomId, messages: mapped,
+    next: cursor.next, hasMore: cursor.hasMore,
   });
 }
 
