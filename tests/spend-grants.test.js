@@ -280,6 +280,39 @@ test("void releases the reservation; settle/void are idempotent", async t => {
   assert.equal(settleSpend(f.store.db, { roomId, agentId, nonce: "v1" }), false, "voided rows cannot be settled");
 });
 
+// A retry of the expired nonce is refused, but the recovery must stay
+// committed. Otherwise a client that retries only its own request leaves the
+// grant cap and room allowance reserved until an unrelated call succeeds.
+test("expired same-nonce retry releases reservations despite duplicate_nonce refusal", async t => {
+  const { RESERVE_LEASE_MS } = await import("../server/spend-grants.mjs");
+  const f = roomWithPeer(t);
+  const now = Date.now();
+  const roomId = f.roomId, agentId = f.peerMemberId;
+  issueSpendGrant(f.store.db, roomId, agentId, {
+    grantedBy: f.ownerMemberId, capCents: "10", perTxCapCents: "10", nowMs: now,
+  });
+  const input = { roomId, agentId, toolName: "room_put_file", priceCents: 5,
+    nonce: "expired-retry", nowMs: now, roomAllowanceCents: 10, roomCommittedCents: 0 };
+  authorizeSpend(f.store.db, input);
+  const expiredAt = now + RESERVE_LEASE_MS;
+  spendError(() => authorizeSpend(f.store.db, { ...input, priceCents: 0, nowMs: expiredAt }),
+    { status: 422, code: "invalid_spend_grant" });
+  assert.equal(spendGrantSummary(f.store.db, roomId, agentId, { nowMs: expiredAt }).remainingCents, "5",
+    "malformed requests do not perform recovery writes");
+  spendError(() => authorizeSpend(f.store.db, { ...input, nowMs: expiredAt }),
+    { status: 409, code: "duplicate_nonce" });
+  const row = f.store.db.prepare(`SELECT status FROM spend_authorizations
+    WHERE room_id=? AND agent_id=? AND nonce=?`).get(roomId, agentId, input.nonce);
+  assert.equal(row.status, "voided", "recovery survives the refused retry's transaction");
+  assert.equal(spendGrantSummary(f.store.db, roomId, agentId, { nowMs: expiredAt }).remainingCents, "10");
+  assert.equal(f.store.db.prepare(`SELECT COUNT(*) AS n FROM spend_room_reservations
+    WHERE room_id=? AND status='active'`).get(roomId).n, 0, "room headroom is released too");
+  spendError(() => authorizeSpend(f.store.db, { ...input, nowMs: expiredAt + 1 }),
+    { status: 409, code: "duplicate_nonce" });
+  assert.equal(f.store.db.prepare(`SELECT COUNT(*) AS n FROM spend_authorizations
+    WHERE room_id=? AND agent_id=?`).get(roomId, agentId).n, 1, "the consumed nonce never creates a second authorization");
+});
+
 // #1525: a process crash between reserve and settle/void left a 'reserved'
 // authorization permanently consuming grant cap and room allowance.
 // Reserves now carry a lease (expires_at = created_at + RESERVE_LEASE_MS);
