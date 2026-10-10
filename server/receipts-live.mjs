@@ -91,11 +91,34 @@ export function excludeHiddenReceipts(store, items) {
   return items.filter(item => !hidden.has(item.id));
 }
 
-export function queryPublicReceipts(store, options) {
-  const page = queryUnderlying(store, options);
-  if (!page || page.error || !Array.isArray(page.receipts)) return page;
-  const hidden = hiddenReceiptIds(store, page.receipts.map(receipt => receipt.id));
-  return { ...page, receipts: page.receipts.filter(receipt => !hidden.has(receipt.id)) };
+// Owner-hidden receipts are not list rows. Filtering them after the page is
+// cut leaves a short or empty page and a nextCursor that detail reads 404.
+// Walk until the page is full of visible receipts, or the source is exhausted.
+export function queryPublicReceipts(store, options = {}) {
+  const requested = options?.limit;
+  const limit = requested === undefined ? 20 : requested;
+  let cursor = options?.cursor ?? null;
+  const visible = [];
+  const seen = new Set();
+  for (let hop = 0; hop < 200; hop += 1) {
+    const page = queryUnderlying(store, { ...options, cursor, limit });
+    if (!page || page.error || !Array.isArray(page.receipts)) return page;
+    if (!Number.isInteger(limit) || limit < 1) return page;
+    const hidden = hiddenReceiptIds(store, page.receipts.map(receipt => receipt.id));
+    for (const receipt of page.receipts) {
+      if (hidden.has(receipt.id)) continue;
+      visible.push(receipt);
+      if (visible.length > limit) break;
+    }
+    if (visible.length > limit) break;
+    if (!page.nextCursor || seen.has(page.nextCursor) || page.receipts.length === 0) {
+      return { receipts: visible, nextCursor: null };
+    }
+    seen.add(page.nextCursor);
+    cursor = page.nextCursor;
+  }
+  const receipts = visible.slice(0, limit);
+  return { receipts, nextCursor: visible.length > limit ? receipts.at(-1).id : cursor };
 }
 
 export function publicReceiptById(store, id) {
@@ -105,9 +128,12 @@ export function publicReceiptById(store, id) {
 }
 
 export function listPublicReceiptSitemap(store, limit) {
-  const entries = sitemapUnderlying(store, limit);
+  const cap = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 1000) : 1000;
+  // The read model caps a sitemap read at 1000. Over-fetch that cap, then
+  // keep only visible rows, so a hidden receipt cannot take the caller's slot.
+  const entries = sitemapUnderlying(store, 1000);
   const hidden = hiddenReceiptIds(store, entries.map(receiptIdOf));
-  return entries.filter(entry => !hidden.has(receiptIdOf(entry)));
+  return entries.filter(entry => !hidden.has(receiptIdOf(entry))).slice(0, cap);
 }
 
 export function collectPublicReceipts(store) {
