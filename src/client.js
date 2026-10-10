@@ -296,6 +296,8 @@ export class AccountClient {
   }
 }
 
+// Single source for the connected status line; app.js matches this exact text.
+const CONNECTED_STATUS = "Connected to room service · no peer read or processing receipt";
 export class RoomClient {
   constructor({ fetcher = globalThis.fetch.bind(globalThis), events = globalThis.EventSource, accountClient = null, onSnapshot = () => {}, onStatus = () => {}, onAccessEnded = () => {}, onTyping = () => {} } = {}) {
     Object.assign(this, { fetcher, events, accountClient, onSnapshot, onStatus, onAccessEnded, onTyping });
@@ -919,7 +921,7 @@ export class RoomClient {
       this.refreshInterrupted = false;
       clearTimeout(this.refreshRetry); this.refreshRetry = null;
       this.refreshRetryDelay = 1000;
-      this.onStatus("Connected to room service · no peer read or processing receipt");
+      this.onStatus(CONNECTED_STATUS);
     };
     const refreshStream = (receipt, options) => this.refresh(receipt, options).then(value => {
       markRecovered();
@@ -931,7 +933,7 @@ export class RoomClient {
       this.refreshRetryDelay = 1000;
       clearTimeout(this.refreshRetry); this.refreshRetry = null;
       this.refreshInterrupted = false;
-      this.onStatus("Connected to room service · no peer read or processing receipt");
+      this.onStatus(CONNECTED_STATUS);
       refreshStream(null, { revalidate: true });
     });
     stream.addEventListener("room-event", message => {
@@ -981,7 +983,7 @@ export class RoomClient {
         if (!this.stream || this.stream.readyState !== 1 || !this.session) return;
         this.refreshInterrupted = false;
         this.refreshRetryDelay = 1000;
-        this.onStatus("Connected to room service · no peer read or processing receipt");
+        this.onStatus(CONNECTED_STATUS);
       }).catch(retryError => {
         if (this.stream && this.stream.readyState === 1 && this.session) this.handleFailure(retryError);
       });
