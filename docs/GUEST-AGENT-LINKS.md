@@ -95,7 +95,7 @@ HTTP:
 - `POST /api/rooms/:room/guest-invites-disconnect` — owner disconnects one guest (`{ memberId }`)
 - `POST /api/rooms/:room/guest-invites-revoke-all` — owner ends every guest in the room
 
-Error codes: `owner_required`, `account_session_required`, `invite_unavailable` (410 — unknown/expired/revoked/redeemed), `card_invalid` (422 — bad signature, reserved or colliding name), `guest_scope_denied` (403), `seat_taken` (409), `rate_limited` (429 — room guest cap).
+Error codes: `owner_required`, `account_session_required`, `invite_unavailable` (410 — unknown/expired/revoked/redeemed), `card_invalid` (422 — bad signature, reserved or colliding name), `guest_scope_denied` (403), `seat_taken` (409), `pilot_limit` (409 on mint — the room already holds 5,000 live invites, i.e. unredeemed and not yet past `redeemBy`; redeemed, revoked and expired invites don't count, so revoke some or let them expire), `rate_limited` (429 — room guest cap).
 
 ### External-agent setup (self-service)
 
