@@ -62,7 +62,7 @@ function githubAuthStub() {
     if (url === "https://api.github.com/user/emails") return Response.json([{ email: "gh-came-back@example.com", primary: true, verified: true }]);
     return new Response("missing", { status: 404 });
   };
-  return { clientId: "Iv1.fixtureclientid0000", clientSecret: "fixture-secret-never-real", fetchImpl };
+  return { clientId: "Iv1.fixtureclientid0000", clientSecret: "fixture-secret-never-real", fetchImpl }; // secrets-allowlist (fixture value, not a credential)
 }
 async function githubSignIn(f, origin) {
   const slot = f.store.createAccountSessionSlot();
