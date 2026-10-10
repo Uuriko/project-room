@@ -122,6 +122,10 @@ test('path matching is segment-aware and only supports explicit paths or trailin
   for (const [left, right] of [[['src/**'], ['src/app.js']], [['src/app.js'], ['src/**']], [['**'], ['index.html']], [['./src/app.js'], ['src/app.js']], [['src/**'], ['src']]]) assert.ok(conflict(left, right));
   for (const [left, right] of [[['src/**'], ['src-other/app.js']], [['src/a.js'], ['src/b.js']], [['a/**'], ['b/**']]]) assert.equal(conflict(left, right), null);
   for (const value of ['', '/src/app.js', '../src/app.js', 'src/../app.js', 'src/*.js', 'src//app.js', 'src\\app.js', 7]) assert.throws(() => claimScope(claim([value])), { code: 'invalid_claim_scope' });
+  assert.equal(conflict(['server/café.mjs'], ['server/cafe\u0301.mjs'])?.id, 'a', 'NFC and NFD name the same reserved file');
+  assert.equal(conflict(['server/café/**'], ['server/cafe\u0301/app.mjs'])?.id, 'a');
+  assert.equal(conflict(['Server/Café.mjs'], ['server/café.mjs']), null, 'case stays distinct');
+  assert.throws(() => claimScope(claim(['../cafe\u0301.mjs'])), { code: 'invalid_claim_scope' });
   assert.ok(conflict(['legacy/*.js'], ['other.js']), 'ambiguous active historical scope conservatively needs review');
 });
 
