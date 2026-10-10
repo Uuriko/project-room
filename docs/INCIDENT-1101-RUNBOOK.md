@@ -50,3 +50,14 @@ On recurrence: capture Worker and DO exceptions plus Cron Events before changing
   failed component. Trust only the probe matrix.
 - Do not merge deploys during an active 1101 window unless the merge is the
   fix; you lose the ability to tell cause from cure.
+
+## Public-route probe (all credential-free GET routes)
+
+`node scripts/probe-public-routes.mjs [--base URL] [--json]` probes every public GET route in `docs/openapi.yaml`.
+"Public" means the operation allows no credential.
+The probe sends GET only. It sends no credential, no cookie and no body. It sends one request at a time.
+It skips routes with path parameters, sign-in routes (`/api/auth/*`) and MCP endpoints. The report lists each skipped route and the reason.
+A route answers when its status is below 500. A 5xx or a network error fails the run.
+The default output is one summary line, for schedules and logs. `--json` gives a report with schema `room.public-probe/1`.
+Exit codes: 0 all routes answered, 1 at least one route failed, 2 bad usage.
+A failing `/api/health/jobs` (503, `status: failing`) means one job reported errors. Read the `jobs` array to find which job.
