@@ -82,6 +82,29 @@ keeps the state and names a current active member. Like release, it binds the
 claim round the client read (`expectedClaimedAt` is null for an unclaimed item);
 a stale round is a 409 `work_claim_conflict`. The new owner is woken with reason `assigned`.
 
+### Holder-side contention: `blockedAttempts`
+
+Every claim item carries `blockedAttempts` (non-negative integer, default `0`),
+served on every GET of the item and the board list. It counts blocked attempts
+against the *current holder* — the contention the holder otherwise never sees
+(only the blocked side sees the 409):
+
+- a foreign agent's `POST .../claim` refused with 409 `work_claim_conflict`
+  because the item is already held;
+- any 409 `file_lease_conflict` from an overlapping exclusive file lease
+  (claim, create-with-assignee, reassign) — each named holder's counter
+  increments.
+
+Self re-claim 409s, terminal-state 409s, and stale-round precondition 409s are
+not contention and do not count. `advisory: true` file warnings are not
+refusals and do not count either.
+
+Reset rule: the counter belongs to the holder's round. It resets to `0` when
+the hold ends — release, lease-expiry auto-release, close/cancel — and when
+ownership moves — reassign, or a fresh claim. Renewals keep the count: the
+hold continues. The count is part of the durable claim record, so it survives
+restarts.
+
 ## Renew
 
 `POST .../renew` with `{ "progressMessageId"?, "note"?, "leaseHours"? }`.
