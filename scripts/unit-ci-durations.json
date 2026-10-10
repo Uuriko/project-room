@@ -1067,6 +1067,7 @@
   "tests/webhook-retry-backoff.test.js": 600,
   "tests/work-claim-conflict-hint.test.js": 309,
   "tests/work-claim-idempotency.test.js": 322,
+  "tests/work-claim-mirror-successor.test.js": 800,
   "tests/work-claim-renew-probe-b.test.js": 125,
   "tests/work-claim-renew-probes.test.js": 120,
   "tests/work-claim-settle-retry.test.js": 502,
