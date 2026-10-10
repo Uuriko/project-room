@@ -1,0 +1,142 @@
+# Kill criteria and tripwire rules (200-hard-tasks #20).
+# Machine-checkable: scripts/evaluate-tripwires.mjs reads this file plus a
+# metrics snapshot JSON and outputs GO / PAUSE / KILL with reasons.
+# Severity order: KILL > PAUSE > WARN > GO. All firing rules are reported.
+version: tripwire-rules/v1
+
+# Every signal: dotted path in the snapshot, its data source, and the window
+# the snapshot value must cover.
+signals:
+  settlement.doublePayouts:
+    source: idempotency ledger — count of payout intents executed more than once
+    window: 24h
+  settlement.forgedReceiptRate:
+    source: settlement receipt verifier — rejected bad_signature / total verified
+    window: 1h
+  settlement.unauthorizedMints:
+    source: envelope registry — mints settled that were never registered
+    window: 24h
+  settlement.liabilitiesRaw:
+    source: settlement ledger — sum of open funded (not settled/refunded) amounts, raw units
+    window: point-in-time
+  settlement.bondedRaw:
+    source: bond registry — sum of provider bonds backing open escrows, raw units
+    window: point-in-time
+  settlement.meanAbsDivergence:
+    source: gateway metering report().meanAbsDivergence (task #21)
+    window: 1h
+  settlement.disputeRate:
+    source: dispute ledger — disputes opened / jobs settled
+    window: 24h
+  settlement.attestationDelaySec:
+    source: CCTP attestation poller — max delay between deposit and attestation
+    window: 1h
+  compute.jobFailRate:
+    source: compute gateway — failed jobs / total jobs
+    window: 1h
+  compute.p95WaitSec:
+    source: demand-flow monitor — p95 queue wait seconds
+    window: 1h
+  providers.cheatConfirmed:
+    source: canary sampling — providers with a confirmed caught cheat, unresolved
+    window: 24h
+  providers.suspendedCount:
+    source: reputation system — providers currently suspended
+    window: point-in-time
+
+rules:
+  - id: kill-double-payout
+    verdict: KILL
+    when:
+      all:
+        - settlement.doublePayouts > 0
+    reason: "any confirmed double payout is a critical settlement failure"
+    action: "freeze all payouts; page on-call; open incident"
+
+  - id: kill-insolvency
+    verdict: KILL
+    when:
+      all:
+        - settlement.liabilitiesRaw > settlement.bondedRaw
+    reason: "open escrow liabilities exceed bonded backing"
+    action: "freeze new funding; page on-call; open incident"
+
+  - id: kill-receipt-forgery
+    verdict: KILL
+    when:
+      all:
+        - settlement.forgedReceiptRate > 0.01
+    reason: "receipt forgery above 1% means the signature trust root is compromised"
+    action: "freeze settlement; rotate verifier keys; page on-call"
+
+  - id: kill-unauthorized-mint
+    verdict: KILL
+    when:
+      all:
+        - settlement.unauthorizedMints > 0
+    reason: "settlement touched an unregistered asset mint"
+    action: "freeze settlement; audit envelope registry"
+
+  - id: pause-high-divergence
+    verdict: PAUSE
+    when:
+      all:
+        - settlement.meanAbsDivergence > 0.10
+    reason: "metered-vs-reported divergence above 10%: providers misreporting or meter broken"
+    action: "pause new funding; raise canary sampling to 20%; investigate"
+
+  - id: pause-dispute-storm
+    verdict: PAUSE
+    when:
+      all:
+        - settlement.disputeRate > 0.05
+    reason: "dispute rate above 5%: systemic disagreement about job outcomes"
+    action: "pause new funding; review dispute ledger"
+
+  - id: pause-attestation-delay
+    verdict: PAUSE
+    when:
+      all:
+        - settlement.attestationDelaySec > 1800
+    reason: "cross-chain attestations delayed over 30 minutes"
+    action: "pause cross-chain funding; check attestation poller"
+
+  - id: pause-compute-failures
+    verdict: PAUSE
+    when:
+      all:
+        - compute.jobFailRate > 0.10
+    reason: "job failure rate above 10%"
+    action: "pause routing to failing providers; check fleet health"
+
+  - id: pause-queue-blowout
+    verdict: PAUSE
+    when:
+      all:
+        - compute.p95WaitSec > 120
+    reason: "p95 queue wait above 120s: demand far exceeds capacity"
+    action: "shed load; recompute clearing price (task #30)"
+
+  - id: pause-cheat-confirmed
+    verdict: PAUSE
+    when:
+      all:
+        - providers.cheatConfirmed > 0
+    reason: "canary caught a cheating provider: quarantine before it spreads"
+    action: "quarantine provider; 100% canary on its jobs; open dispute"
+
+  - id: warn-divergence-rising
+    verdict: WARN
+    when:
+      all:
+        - settlement.meanAbsDivergence > 0.05
+    reason: "divergence above 5%: watch, will pause at 10%"
+    action: "increase metering scrutiny; no traffic change"
+
+  - id: warn-suspensions
+    verdict: WARN
+    when:
+      all:
+        - providers.suspendedCount > 0
+    reason: "providers currently suspended"
+    action: "review suspension queue"
