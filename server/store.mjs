@@ -4584,7 +4584,48 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   }
   command(token, roomId, command, expectedSessionBinding = null) {
     validateCommand(command);
+    return this.transaction(() =>
+      this._admitCommand(token, roomId, command, expectedSessionBinding, null).result);
+  }
+
+  // #1905: group commit for the write path. The whole batch shares one
+  // sqlite transaction (one WAL fsync instead of one per command); every
+  // command still runs in its own savepoint, so a single bad command fails
+  // alone and the rest of the batch commits. Resolves to one
+  // { ok, result|error } per item, in input order. Per-command errors keep
+  // their ServiceError shape; only a catastrophic batch failure throws.
+  commandBatch(roomId, items) {
     return this.transaction(() => {
+      let prevRoom = null;
+      return items.map(item => {
+        try {
+          validateCommand(item.command);
+        } catch (error) {
+          return { ok: false, error };
+        }
+        try {
+          const admitted = this.transaction(
+            () => this._admitCommand(item.token, roomId, item.command, item.expectedSessionBinding, prevRoom),
+            { isolated: true });
+          prevRoom = admitted.room;
+          return { ok: true, result: admitted.result };
+        } catch (error) {
+          // The savepoint rolled this command back; the next command must
+          // re-read the room rather than thread rolled-back state.
+          prevRoom = null;
+          return { ok: false, error };
+        }
+      });
+    });
+  }
+
+  // #1905: the admission half of command(), minus the transaction wrapper.
+  // Runs inside the caller's transaction (command()'s, or one savepoint of
+  // commandBatch's). prevRoom threads { sequence, state } from the previous
+  // command of a batch so a batch pays one projection parse, not one per
+  // command. Returns { result, room }: room is the value to thread onward
+  // (null when the room was unchanged and nothing was threaded in).
+  _admitCommand(token, roomId, command, expectedSessionBinding, prevRoom) {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       // RC-2026-09-23-100: guest-agent scope gate (dual-check part 2 of the
       // GX-invite design). Guest members may post chat messages and set
@@ -4610,7 +4651,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const prior = this.db.prepare("SELECT c.fingerprint,e.sequence,e.body FROM commands c JOIN events e ON e.room_id=c.room_id AND e.sequence=c.sequence WHERE c.room_id=? AND c.actor_id=? AND c.id=?").get(roomId, auth.member.id, command.id);
       if (prior) {
         if (prior.fingerprint !== fingerprint) fail(409, "idempotency_conflict", "Command ID already used for different content");
-        return { sequence: prior.sequence, event: JSON.parse(prior.body), duplicate: true };
+        return { result: { sequence: prior.sequence, event: JSON.parse(prior.body), duplicate: true }, room: prevRoom };
       }
       // Live chat posts and replies only. The replay above, importEvents,
       // initialize, and projection replay do not reach this line.
@@ -4619,10 +4660,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // bond.list is a read. It does not append a ledger event, so an archived
       // room can still answer it. Writes below still hit refuseArchivedWrite.
       if (command.type === "bond.list") {
-        const listed = this.room(roomId);
-        return { sequence: listed.sequence, duplicate: false, event: null, bonds: this.bonds.listForMember(roomId, auth.member.id) };
+        const listed = prevRoom ?? this.room(roomId);
+        return { result: { sequence: listed.sequence, duplicate: false, event: null, bonds: this.bonds.listForMember(roomId, auth.member.id) },
+          room: prevRoom };
       }
-      const room = this.room(roomId);
+      const room = prevRoom ?? this.room(roomId);
       refuseArchivedWrite(room.state);
       if (command.type === T.MESSAGE_POSTED && typeof command.data.toMemberId === "string" && command.data.toMemberId) {
         // DMs are open by default: only an explicit denial (blocked /
@@ -4747,7 +4789,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (this.bonds.handles(command.type)) {
         bondEffect = this.bonds.prepare(roomId, auth.member.id, command);
         if (bondEffect.kind === "idempotent") {
-          return { sequence: room.sequence, duplicate: true, event: null, bond: bondEffect.bond };
+          return { result: { sequence: room.sequence, duplicate: true, event: null, bond: bondEffect.bond }, room };
         }
       }
       const memberAuthorityEvent = [T.MEMBER_ADDED, T.MEMBER_ACCESS_CHANGED].includes(command.type);
@@ -4988,9 +5030,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         ? `Posted. Wake skipped for ${skippedWakes.map(id => room.state.members?.[id]?.displayName || id).join(", ")}: Room Trust is off, so that agent was not woken.`
         : null;
       syncRoomPublication(this, { roomId, state, previous: room.state, auth });
-      return { sequence, event: incoming, duplicate: false, ...(note ? { note } : {}),
-        ...((Array.isArray(mentionWarnings) && mentionWarnings.length > 0) ? { mentionWarnings } : {}) };
-    });
+      // #1905: thread the persisted state to the next command of the batch.
+      // The sequence is re-read: resumeRoundLimitPauses and redaction can
+      // append events after the main UPDATE. deepFreeze keeps room()'s
+      // contract for the next admission.
+      const finalSequence = (this._roomSequenceStmt ??=
+        this.db.prepare("SELECT sequence FROM rooms WHERE id=?")).get(roomId)?.sequence ?? sequence;
+      return { result: { sequence, event: incoming, duplicate: false, ...(note ? { note } : {}),
+        ...((Array.isArray(mentionWarnings) && mentionWarnings.length > 0) ? { mentionWarnings } : {}) },
+        room: { sequence: finalSequence, state: deepFreeze(state) } };
   }
 
   // Jev-harness receipt-acceptance gate, shadow mode (docs/JEV-GATES.md):

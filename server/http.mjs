@@ -12,6 +12,7 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { ServiceError } from "./store.mjs";
+import { createCommandQueue } from "./command-queue.mjs"; // #1905 write batching for POST /commands
 import { ABUSE_RATE_FAMILIES, loadAbuseRateBucket, saveAbuseRateBucket } from "./abuse-rate-buckets.mjs";
 import { peerEventVisible, visibleBonds } from "./bonds.mjs";
 import { clientAddress, STREAM_INTERVAL_DEFAULT_MS } from "./deployment.mjs";
@@ -323,6 +324,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   if (store?.humanPush) store.humanPush.configure({
     vapid: push === undefined ? vapidFromEnv(globalThis.process?.env ?? {}) : push
   });
+  // #1905: async command pipeline (first slice: group commit). POST /commands
+  // enqueues here; the per-room pump drains through store.commandBatch() so
+  // concurrent writers share one sqlite transaction per batch instead of one
+  // fsync per command. Responses still resolve only after the command's
+  // batch commits, so clients observe identical ordering and durability.
+  const commandQueue = createCommandQueue({ store });
   // Live Telegram bindings are read once (Worker secrets or local env); the
   // config never holds up startup and the card reports "not configured".
   if (typeof telegram?.configured !== "boolean" || !Array.isArray(telegram.bindings)) throw new Error("Telegram configuration must come from telegramConfig()");
@@ -4926,7 +4933,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           [ATTR.ROOM_ID]: roomId, [ATTR.INGRESS]: "api" } });
         try {
           if (typeof command?.type === "string") inboundSpan.setAttribute(ATTR.EVENT_TYPE, command.type);
-          const result = store.command(selected.token, roomId, command, fence);
+          // #1905: through the command queue (group commit). The promise
+          // resolves after this command's batch commits; per-command errors
+          // reject with the same ServiceError store.command would throw.
+          const result = await commandQueue.enqueue(roomId,
+            { token: selected.token, command, expectedSessionBinding: fence });
           if (!result?.duplicate && result?.event?.type === "message.posted") clearBeat(typingBeats, roomId, result.event.actorId);
           const messageId = result?.event?.data?.messageId ?? result?.event?.id;
           if (typeof messageId === "string") inboundSpan.setAttribute(ATTR.MESSAGE_ID, messageId);

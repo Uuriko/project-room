@@ -78,6 +78,7 @@ optional.push("server/inbox-spam.mjs"); // spam/phishing flagging (imported by s
 optional.push("server/notify-prefs.mjs"); // notification prefs + quiet hours (imported by server/inbox.mjs and server/inbox-import-guards.mjs; pure, no imports of its own)
 optional.push("server/thread-mutes.mjs"); // per-thread mutes (imported by server/store.mjs; pure, no imports of its own)
 optional.push("server/human-push.mjs"); // human browser push, mentions and DMs (imported by server/store.mjs)
+optional.push("server/command-queue.mjs"); // #1905 command group-commit queue (imported by server/http.mjs)
 optional.push("server/push-subscriptions.mjs", "server/web-push.mjs"); // browser push delivery (imported by server/human-push.mjs and cloudflare/room.mjs)
 optional.push("src/human-push.js", "src/human-push-display.js", "push-sw.js"); // human push button, lock-screen text, and service worker
 optional.push("server/inbox-import-guards.mjs"); // import-time spam/notify wiring (imported by server/inbox.mjs; pure, imports inbox-spam.mjs and notify-prefs.mjs)
