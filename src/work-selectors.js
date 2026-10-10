@@ -79,7 +79,7 @@ const REQUEST_ROLES = ["accountableMemberId", "verifierMemberId", "humanDecision
 // verified result or permission to act. No external evidence/history is fetched.
 export function searchWork(state, query, limit = 25, { offset: pageOffset = 0 } = {}) {
   if (!Number.isInteger(limit) || limit < 1 || limit > 25) throw new RangeError("Work search limit must be 1–25");
-  if (!Number.isSafeInteger(pageOffset) || pageOffset < 0) throw new RangeError("Work search offset must be a non-negative safe integer");
+  if (!Number.isSafeInteger(pageOffset) || pageOffset < 0) throw new RangeError("invalid_search_offset");
   const term = String(query).trim().slice(0, 200).toLocaleLowerCase();
   if (!term) return { work: [], total: 0 };
   const matches = [];
