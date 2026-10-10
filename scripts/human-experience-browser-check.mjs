@@ -87,7 +87,7 @@ test('two humans share public assistant prompts, constraints, confirmed activity
     assert.match(await page.locator('#assistant-face .assistant-face-status').textContent(), /^(Asked|Not picked up yet)/);
     assert.equal(await page.locator('#assistant-activity').evaluate(n=>n.open), false);
   }
-  await peer.locator('#assistant-face').getByRole('button',{name:'Add context',exact:true}).click(); await send(peer,'Keep the design mobile first.');
+  await peer.locator('#assistant-face').getByRole('button',{name:'Add to this ask',exact:true}).click(); await send(peer,'Keep the design mobile first.');
   await peer.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('mobile first'));
   run=(await api('producer')).runs[0]; assert.equal(run.inputs.length,2); assert.equal(run.inputs[1].status,'pending');
   run=(await api('producer',{action:'claim',runId:run.id,attemptId:'test-host',expectedRevision:run.revision})).result;
@@ -485,5 +485,47 @@ test('ask card shows not-picked-up and stalled statuses with the result on the c
   assert.equal(run.status,'done');
   await page.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('The plan is to ship the fence first.'));
   assert.equal(await page.locator('.assistant-run-result').count(),1);
+  assert.deepEqual(errors,[]);
+});
+
+test('each ask renders as one foldable row; the row keeps its open state', { timeout: 60000 }, async t => {
+  const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
+  await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`, browser = await chromium.launch({headless:true});
+  t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve=>server.close(resolve)); f.store.close(); rmSync(f.directory,{recursive:true,force:true}); });
+  const errors = [];
+  const context = await browser.newContext({viewport:{width:1280,height:900}}), page = await context.newPage();
+  page.on('pageerror', e=>errors.push(e.message)); await page.goto(origin); await signInFixture(page,f.keys.owner);
+  await page.locator('#main').waitFor({state:'visible'}); await page.waitForFunction(()=>document.body.classList.contains('human-experience'));
+  const api = async (actor, input) => {
+    const response = await fetch(`${origin}/api/rooms/commons/assistant`, {method:input?'POST':'GET',headers:{Authorization:`Bearer ${f.keys[actor]}`,...(input?{'Content-Type':'application/json'}:{})},...(input?{body:JSON.stringify({requestId:crypto.randomUUID(),...input})}:{})});
+    const json=await response.json(); assert.ok(response.ok,JSON.stringify(json));return json;
+  };
+  await page.locator('#assistant-setup').click(); await page.locator('#room-assistant-setup select').selectOption('producer');
+  await page.locator('#room-assistant-setup button[type=submit]').click(); await page.locator('#room-assistant-setup').waitFor({state:'hidden'});
+  const send = async body => { await page.locator('#ask-room').click(); await page.locator('#message-input').fill(body); await page.locator('#message-form button[type=submit]').click(); await page.waitForFunction(()=>document.querySelector('#message-input').value===''); };
+  await send('First question for the room?');
+  await send('Second question for the room?');
+  await page.waitForFunction(()=>document.querySelectorAll('#assistant-runs details.assistant-run').length===2);
+  await page.locator('#assistant-activity').evaluate(n=>{n.open=true;});
+  // One line per ask: the summary carries the prompt and the status.
+  const summaries = await page.locator('#assistant-runs details.assistant-run > summary').allTextContents();
+  assert.equal(summaries.length,2);
+  assert.ok(summaries.some(s => s.includes('First question for the room?') && s.includes('Waiting for assistant')));
+  assert.ok(summaries.some(s => s.includes('Second question for the room?') && s.includes('Waiting for assistant')));
+  // Rows start folded; the full card is one click away.
+  assert.equal(await page.locator('#assistant-runs details.assistant-run[open]').count(),0);
+  await page.locator('#assistant-runs details.assistant-run > summary').first().click();
+  await page.waitForFunction(()=>document.querySelector('#assistant-runs details.assistant-run[open]')!==null);
+  await page.locator('#assistant-runs details.assistant-run[open]').getByRole('button',{name:'Original prompt',exact:true}).waitFor();
+  // The open row survives a repaint triggered by new run activity.
+  let run = (await api('producer')).runs[0];
+  await api('producer',{action:'claim',runId:run.id,attemptId:'fold-host',expectedRevision:run.revision});
+  await page.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Working'));
+  assert.equal(await page.locator('#assistant-runs details.assistant-run[open]').count(),1,'the open row stays open across repaints');
+  // Using the summary Stop does not collapse the row.
+  await page.evaluate(()=>{ document.querySelector('#assistant-runs details.assistant-run[open] summary [data-cancel]').click(); });
+  await page.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Stopping'));
+  assert.equal(await page.locator('#assistant-runs details.assistant-run[open]').count(),1,'summary controls do not toggle the fold');
   assert.deepEqual(errors,[]);
 });
