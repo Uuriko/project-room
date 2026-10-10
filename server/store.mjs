@@ -144,7 +144,7 @@ const RETIRED_BOARD_V2_SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_board_vtwo_events_lane ON board_vtwo_events(lane);
 `;
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
-import { AgentHeartbeats, agentHeartbeatSchema } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
+import { AgentHeartbeats, agentHeartbeatSchema, HEARTBEAT_STALE_AFTER_MS } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
 import { WorkWakes, workWakeSchema } from "./work-wakes.mjs"; // Opt-in pointer-only work delivery on heartbeat reads.
 import { LandQueue, landQueueSchema, migrateLandQueueColumns } from "./land-queue.mjs";
 import { MembersDirectory, membersDirectorySchema } from "./members-directory.mjs"; // RC-2026-09-24-202: members directory + skill cards.
@@ -3981,10 +3981,34 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (status.status === "unregistered") return { identityId: link.identityId, status: null, lastSeenAt: null };
         return { identityId: link.identityId, status: status.status, lastSeenAt: status.lastSeenAt };
       };
+      // FIX-67: presence-online derived server-side from recent authenticated
+      // activity. API agents never open SSE (watching is always false for
+      // them) and heartbeat_set is opt-in, so a hostless agent doing real
+      // work used to read presence:null seconds after acting. Every
+      // authenticated command is server-journaled with actorId = the acting
+      // member and a server timestamp (see command()), and executing
+      // sessions carry server-checked heartbeat_at — both maps are built
+      // above, so this is O(members) arithmetic with no new queries and no
+      // client-reported timestamp is trusted. The TTL is the default host
+      // reachability window (HEARTBEAT_STALE_AFTER_MS = 180s): activity-
+      // derived online decays on the same schedule as a host that stops
+      // heartbeating. (Hosts with a declared cadence decay at
+      // max(180s, cadence*1.5) instead — e.g. ~3.5 min for a 140s cadence.)
+      // Enrollment (member.added) is deliberately excluded: it is not
+      // activity, so a fresh agent still reads presence:null (RC-051).
+      const activityOnlineAt = memberId => {
+        const at = Math.max(timestamp(lastCommandAt.get(memberId)) || 0,
+          timestamp(heartbeats.get(memberId)) <= now ? timestamp(heartbeats.get(memberId)) || 0 : 0);
+        return at > 0 && at <= now && now - at <= HEARTBEAT_STALE_AFTER_MS ? at : null;
+      };
       const agentPresence = memberId => {
         const host = hostStatusOf(memberId);
-        if (host.status === null) return null;
-        return { status: host.status, lastSeenAt: host.lastSeenAt };
+        if (members[memberId]?.kind !== "agent") return null; // field stays agent-only
+        const liveHostAt = host.status === "online" ? timestamp(host.lastSeenAt) : NaN;
+        const onlineAt = Math.max(Number.isFinite(liveHostAt) ? liveHostAt : 0, activityOnlineAt(memberId) ?? 0);
+        if (onlineAt > 0) return { status: "online", lastSeenAt: onlineAt };
+        if (host.status === "offline") return { status: "offline", lastSeenAt: host.lastSeenAt };
+        return null; // no registered host and no recent activity (RC-051 contract)
       };
       const listed = Object.values(members)
         .filter(m => m && m.active !== false)

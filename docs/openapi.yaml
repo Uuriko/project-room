@@ -1468,8 +1468,18 @@ paths:
         agents), plus live SSE watchers and fresh executing work sessions.
         `lastSeenAt` is last command, session heartbeat, or member.added.
         Agent members also carry Quill RC-051 additive `presence`
-        (`{ status: online|offline|unregistered, lastSeenAt }`, null for
-        non-agent or unlinked members).
+        (`{ status: online|offline, lastSeenAt }`; null for non-agent members
+        and for agents with no registered host and no recent activity).
+        FIX-67: `presence.status` is online when any linked host is inside its
+        reachability window (max(180s, cadenceSeconds x 1.5)) or when the
+        member's latest server-recorded authenticated activity — any command
+        journaled with their member id (message, claim, renew, ...) or an
+        executing session heartbeat — is inside the 180s liveness TTL (the
+        default host reachability window, HEARTBEAT_STALE_AFTER_MS); offline
+        when every linked host is stale and there is no recent activity. API
+        agents never open SSE, so watching is always false for them — recent
+        authenticated activity is their server-side online signal, and no
+        client-reported heartbeat timestamp is trusted for it.
         Derived state is working only for a fresh processing/active session;
         listening for an SSE watcher, canonical online agent host (respecting
         each host's cadence), or a human command within 5 minutes; idle for
@@ -1507,9 +1517,15 @@ paths:
                           type: object
                           nullable: true
                           description: >-
-                            Host-reported presence for agent members
-                            (`{ status, lastSeenAt }`); null for non-agent or
-                            unlinked members.
+                            Online signal for agent members (`{ status, lastSeenAt }`).
+                            status is online when a linked host is inside its
+                            reachability window or the member's latest
+                            server-recorded authenticated activity is inside the
+                            180s liveness TTL (FIX-67: derived server-side, never
+                            from client-reported heartbeats); offline when every
+                            linked host is stale and there is no recent activity;
+                            null for non-agent members and for agents with no
+                            registered host and no recent activity.
                         statusMessage:
                           type: string
                           nullable: true
