@@ -87,7 +87,7 @@ test('two humans share public assistant prompts, constraints, confirmed activity
     assert.match(await page.locator('#assistant-face .assistant-face-status').textContent(), /^(Asked|Not picked up yet)/);
     assert.equal(await page.locator('#assistant-activity').evaluate(n=>n.open), false);
   }
-  await peer.locator('#assistant-face').getByRole('button',{name:'Add to this ask',exact:true}).click(); await send(peer,'Keep the design mobile first.');
+  await peer.locator('#assistant-face').getByRole('button',{name:'Add context',exact:true}).click(); await send(peer,'Keep the design mobile first.');
   await peer.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('mobile first'));
   run=(await api('producer')).runs[0]; assert.equal(run.inputs.length,2); assert.equal(run.inputs[1].status,'pending');
   run=(await api('producer',{action:'claim',runId:run.id,attemptId:'test-host',expectedRevision:run.revision})).result;
@@ -211,7 +211,7 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   await owner.locator('#assistant-retry').waitFor({state:'visible'});
   recovery = (await api('producer')).runs.find(r => r.id === recovery.id);
   assert.equal(recovery.status, 'cancel_requested');
-  await ownerRun.getByText('Stopping · waiting for confirmation', {exact:true}).waitFor();
+  await ownerRun.locator('.assistant-run-status').getByText('Stopping · waiting for confirmation', {exact:true}).waitFor();
   assert.equal(await ownerRun.getByRole('button', {name:'Add context', exact:true}).count(), 0);
   assert.equal(await ownerRun.getByRole('button', {name:'Stop', exact:true}).count(), 0);
   await owner.locator('#assistant-retry').click();
@@ -223,6 +223,8 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   assert.equal(await ownerRun.getByRole('button', {name:'Stop', exact:true}).count(), 0);
   // The result link returns to the exact public answer, rather than a different run.
   await peer.locator('#assistant-activity').evaluate(n=>{n.open=true;}); // an older request's result lives in Activity
+  // Each ask is a foldable row; the Open result button lives in the detail, so unfold the row first.
+  await peer.locator('#assistant-runs details.assistant-run:has([data-assistant-message="public-result"]) > summary strong').click();
   await peer.locator('#assistant-runs [data-assistant-message="public-result"]').click();
   assert.equal(await peer.locator('[data-message-record-id="public-result"]').count(),1);
   mkdirSync('test-results',{recursive:true}); await peer.screenshot({path:'test-results/human-shared-conversation.png',fullPage:false});
@@ -399,25 +401,27 @@ test('deleted assistant prompt shows only content-free stop controls and preserv
   await page.locator('#main').waitFor({state:'visible'});
   await page.locator('#assistant-activity > summary').click();
   const panel=page.locator('[data-assistant-run="deleted-browser-run"]');
+  // Each ask is a foldable row: unfold it so the detail buttons are reachable (the row stays open across repaints).
+  await panel.locator('summary strong').click();
   await panel.getByRole('button',{name:'Original prompt',exact:true}).waitFor();
   await page.locator('#message-input').fill('Keep my unsent conversation draft.');
   // Keep the old assistant projection cached while real message deletion arrives.
   await page.route('**/api/rooms/commons/assistant',route=>route.request().method()==='GET'?route.abort():route.continue());
   const deletion=await fetch(`${origin}/api/rooms/commons/commands`,{method:'POST',headers:{authorization:`Bearer ${f.keys.owner}`,'content-type':'application/json'},body:JSON.stringify({id:crypto.randomUUID(),type:'message.deleted',data:{messageId:'erase-browser-prompt',expectedMessageRevision:0}})});
   assert.equal(deletion.status,201,await deletion.text());
-  await panel.getByText('Deleted request',{exact:true}).waitFor({timeout:5000});
+  await panel.locator('summary strong').getByText('Deleted request',{exact:true}).waitFor({timeout:5000});
   assert.doesNotMatch(await panel.textContent(),/ERASED-BROWSER-PROMPT/);
   await page.unroute('**/api/rooms/commons/assistant');
   for(const name of ['Original prompt','Add context','Change direction','Resolve direction','Resume']) assert.equal(await panel.getByRole('button',{name,exact:true}).count(),0);
   await panel.getByRole('button',{name:'Pause',exact:true}).click();
-  await panel.getByText('Pausing · waiting for confirmation',{exact:true}).waitFor();
+  await panel.locator('.assistant-run-status').getByText('Pausing · waiting for confirmation',{exact:true}).waitFor();
   await api('producer',{action:'report',runId:'deleted-browser-run',attemptId:'browser-host',expectedRevision:3,state:'paused',summary:'Stopped'});
-  await panel.getByText('Paused',{exact:true}).waitFor();
+  await panel.locator('.assistant-run-status').getByText('Paused',{exact:true}).waitFor();
   assert.equal(await panel.getByRole('button',{name:'Resume',exact:true}).count(),0);
   await panel.getByRole('button',{name:'Stop',exact:true}).click();
-  await panel.getByText('Stopping · waiting for confirmation',{exact:true}).waitFor();
+  await panel.locator('.assistant-run-status').getByText('Stopping · waiting for confirmation',{exact:true}).waitFor();
   await api('producer',{action:'report',runId:'deleted-browser-run',attemptId:'browser-host',expectedRevision:5,state:'cancelled',summary:'Cancelled'});
-  await panel.getByText('Cancelled',{exact:true}).waitFor();
+  await panel.locator('.assistant-run-status').getByText('Cancelled',{exact:true}).waitFor();
   assert.equal(await panel.getByRole('button').count(),0);
   assert.equal(await page.locator('#message-input').inputValue(),'Keep my unsent conversation draft.');
 });
