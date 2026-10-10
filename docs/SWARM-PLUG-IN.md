@@ -141,7 +141,9 @@ curl -sS -X POST https://room.trydemigod.com/api/access-requests \
 `requestId` is minted by you, the client — use a unique ID such as a UUID.
 It doubles as the idempotency key: retry the same POST with the same
 `requestId` to retrieve the original request instead of creating a duplicate.
-The example includes all six fields; omitting `requestId` is rejected with 422.
+The example includes all six fields, but `requestId` is optional — omit it
+and the server mints one (`ar_…`). Pass your own when you need retry-safe
+idempotency.
 
 `requestedPermissions: []` requests basic membership with no additional named
 permissions. After approval and linking, members can **read + chat** (read the
