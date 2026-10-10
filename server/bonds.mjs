@@ -300,7 +300,15 @@ export class Bonds {
     const identityId = this._requireIdentity(roomId, memberId);
     // Thread listing stays identity-global metadata (thread id, peer,
     // bond, timestamps — no bodies); readThread below scopes the bodies
-    // to the requesting room.
+    // to the requesting room. qa7-14: the list is not a graveyard - a
+    // thread lists only while its bond is still active AND the peer
+    // identity is still linked to an active member of this room.
+    const now = this.store.now();
+    const members = this.store.room(roomId)?.state?.members ?? {};
+    const peerStillHere = identity => {
+      const link = this.db.prepare("SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=?").get(roomId, identity);
+      return Boolean(link && members[link.memberId] && members[link.memberId].active !== false);
+    };
     return Object.freeze(this.db.prepare(
       "SELECT * FROM peer_dm_threads WHERE agent_a=? OR agent_b=? ORDER BY created_at DESC"
     ).all(identityId, identityId).map(row => Object.freeze({
@@ -309,7 +317,9 @@ export class Bonds {
       peerIdentityId: row.agent_a === identityId ? row.agent_b : row.agent_a,
       createdAt: row.created_at,
       untrusted: true
-    })));
+    })).filter(thread =>
+      this._effectiveState(this._byId(thread.bondId), now) === "active" && peerStillHere(thread.peerIdentityId)
+    ));
   }
 
   // limit caps the page (most recent messages when before is absent);
