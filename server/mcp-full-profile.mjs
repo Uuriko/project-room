@@ -1,4 +1,6 @@
 import { RoomAssistant } from "./room-assistant.mjs";
+import { antiLoopCounts } from "../src/anti-loop.js";
+import { messageVisibleToViewer, summaryHistoryFloor } from "./history-visibility.mjs";
 import { isAssistantTool } from "../client/assistant-tools.mjs";
 import { OutsideAgents } from "./outside-agents.mjs";
 // Hosted MCP full profile: the local stdio room tools, on the same URL as
@@ -108,9 +110,17 @@ async function roomMessages(store, secret, roomId, args, memberId) {
     end: latest ? store.roomAuthority(roomId).sequence + 1 : null,
     mapMessage,
   });
+  // HS2 2a: the anti-loop signal, counted only over messages this reader can
+  // see, by the same predicate summary surfaces use: DMs between others and,
+  // for a since_join reader, anything before their join (same-millisecond
+  // ties included) never move their counter or leak a message id. The floor
+  // fails closed.
+  const room = store.room(roomId).state;
+  const floor = summaryHistoryFloor(store, roomId, memberId, store.roomAuthority(roomId).sequence);
+  const visible = currentMessages.filter(message => messageVisibleToViewer(message, memberId, floor));
   return withContentTrust({
     roomId, messages: messages.map(message => markIfOther(message, memberId, message.from)),
-    next, hasMore
+    next, hasMore, antiLoop: antiLoopCounts(visible, room.members, memberId)
   });
 }
 
