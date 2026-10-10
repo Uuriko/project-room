@@ -746,6 +746,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     return item;
   };
   const closeLiveClaims = () => {
+    // FIX-66: while the kill-switch is engaged the board is fully frozen —
+    // no claim state changes from any request path, including the automatic
+    // land/deploy live-close on reads.
+    if (killSwitch?.isEngaged(roomId)) return [];
     const closed = [];
     for (const item of registry.list(roomId)) {
       if ((item.kind !== "land" && item.kind !== "deploy") || isTerminalClaimState(item.state)) continue;
@@ -756,7 +760,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     }
     return closed;
   };
-  const sweptIds = sweepRoom(registry, roomId, nowMs, (item, before) => {
+  // FIX-66: while the kill-switch is engaged, expired leases are not reaped —
+  // engagement freezes all claim state changes, including housekeeping.
+  const sweptIds = killSwitch?.isEngaged(roomId) ? [] : sweepRoom(registry, roomId, nowMs, (item, before) => {
     const receipt = emitWorkClaimEvent(store, roomId, {
       actorId: before.owner, item, action: "lease_expired", previousOwnerId: before.owner,
       atMs: nowMs, paths: before.files ?? []

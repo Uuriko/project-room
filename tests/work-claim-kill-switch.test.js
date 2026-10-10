@@ -190,6 +190,29 @@ test("a fresh in-memory store defaults OFF", async t => {
   }
 });
 
+test("while engaged, expired leases are not reaped — not even by reads", async t => {
+  let now = Date.now();
+  const store = new RoomStore(":memory:", { now: () => now });
+  store.initialize(initialRoom(ROOM));
+  t.after(() => store.close());
+  await callWith(store, { route: "create", body: { id: "ks-exp", files: ["server/exp.mjs"] } });
+  await callWith(store, { route: "claim", id: "ks-exp", body: { leaseHours: 1 } });
+  await killSwitch(store, "engage", { reason: "freeze the board" });
+  now += 2 * 60 * 60 * 1000; // lease lapses while the switch is engaged
+  const list = await callWith(store, { auth: AGENT, route: "list" });
+  assert.equal(list.status, 200);
+  assert.deepEqual(list.value.swept, [], "no housekeeping while engaged");
+  const item = store.workClaims.get(ROOM, "ks-exp");
+  assert.equal(item.state, "claimed", "the lapsed lease is left alone while engaged");
+  assert.equal(item.owner, "owner");
+  // After disengage the next sweep reaps it normally.
+  await killSwitch(store, "disengage");
+  const sweep = await callWith(store, { route: "sweep", body: {} });
+  assert.equal(sweep.status, 200);
+  assert.deepEqual(sweep.value.released, ["ks-exp"]);
+  assert.equal(store.workClaims.get(ROOM, "ks-exp").state, "unclaimed");
+});
+
 // --- audit trail -----------------------------------------------------------
 
 test("engage and disengage are recorded as room events with who/when/why", async t => {

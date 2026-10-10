@@ -62,6 +62,10 @@ the switch is a legible, total freeze.
   and lease TTLs untouched.
 - Leases keep their TTLs; they are simply **not reaped** while engaged
   (sweep is frozen). On disengage, the next sweep reaps lapsed leases normally.
+- **Automatic housekeeping is suspended too.** Lease-expiry reaping and the
+  land/deploy live-close normally run as side effects of ordinary requests
+  (including GETs); while engaged they are skipped, so no request path can
+  change claim state. The board is fully frozen, not just the POST routes.
 - No new claims can be taken while engaged; existing claims cannot be
   updated, released, renewed, or closed.
 
