@@ -48,6 +48,15 @@ const people = {
 const asked = (body, extra = {}) => ({ id: "q1", authorId: "rae", body, createdAt: "2026-09-28T12:00:00.000Z", ...extra });
 const later = Date.parse("2026-09-28T12:00:00.000Z") + ASK_AGENT_AFTER_MS;
 
+test("a longer handle is not an already asked shorter agent", () => {
+  assert.deepEqual(
+    askAgentSuggestion(asked("Who should own @Builder2?"), { members: people, now: later }),
+    { memberId: "builder", name: "Builder" },
+  );
+  assert.equal(askAgentSuggestion(asked("@Builder where is the log?"), { members: people, now: later }), null);
+  assert.equal(askAgentSuggestion(asked("@Builder, where is the log?"), { members: people, now: later }), null);
+});
+
 test("askAgentSuggestion offers a working agent once a person's question waits", () => {
   assert.deepEqual(askAgentSuggestion(asked("Where is the deploy log?"), { members: people, now: later }), { memberId: "builder", name: "Builder" });
   assert.equal(askAgentSuggestion(asked("Where is the deploy log?"), { members: people, now: later - 1 }), null, "not before the wait");
