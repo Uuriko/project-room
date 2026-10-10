@@ -59,7 +59,7 @@ test("while the core budget is spent, one search settles merged pulls only, neve
   assert.equal(registry.get("muse-room", "closed-one").state, "claimed", "an unmerged close can be reopened; REST decides it");
   assert.equal(registry.get("muse-room", "still-open").state, "claimed");
   assert.equal(calls.length, 1, "one search call, no core call while the budget is spent");
-  assert.match(decodeURIComponent(calls[0]), /repo:Uuriko\/project-room is:pr is:merged created:>=/);
+  assert.match(decodeURIComponent(calls[0]), /repo:Uuriko\/project-room is:pr is:merged merged:>=2026-09-26(&|$)/, "merge-time window, no created bound on the first page");
   assert.equal(out.rateLimited, true);
   assert.equal(out.searchSettled, 1);
 });
@@ -68,7 +68,12 @@ test("a hit for another repo or a mismatched pull url settles nothing", async ()
   const { store, registry, hold } = setup();
   hold("merged-one", 2479);
   writeClaimPullBudget(store, NOW + 3000_000, NOW);
-  const items = [hit(2479, true, { repository_url: "https://api.github.com/repos/someone/else" }), { ...hit(2479), pull_request: { html_url: "https://github.com/someone/else/pull/2479", merged_at: "2026-10-10T18:23:19Z" } }];
+  const items = [
+    hit(2479, true, { repository_url: "https://api.github.com/repos/someone/else" }),
+    hit(2479, true, { repository_url: "https://evil.example/repos/Uuriko/project-room" }),
+    { ...hit(2479), pull_request: { html_url: "https://github.com/someone/else/pull/2479", merged_at: "2026-10-10T18:23:19Z" } },
+    { ...hit(2479), pull_request: { html_url: "https://evil.example/someone/Uuriko/project-room/pull/2479", merged_at: "2026-10-10T18:23:19Z" } }
+  ];
   await syncClaimPullRequests(store, { fetchImpl: searchOnly(items, []), nowMs: NOW, token: null });
   assert.equal(registry.get("muse-room", "merged-one").state, "claimed");
 });
@@ -120,4 +125,37 @@ test("a rate-limited claim-prs tick reads degraded, not ok, and stays HTTP 200",
   assert.equal(jobHealthResponse({ ...view, status: "degraded" }).status, 200, "degraded is visible, not an outage");
   const clean = applyOutcomes(stored, [{ job: "claim-prs", ok: true, at: now, summary: { checked: 1, updated: 0 } }]);
   assert.notEqual(jobHealthView(clean, now).jobs.find(entry => entry.name === "claim-prs").status, "degraded");
+});
+
+test("a failing repo still passes the turn, so a healthy repo is searched next tick", async () => {
+  const { store, registry, hold } = setup();
+  hold("broken-repo", 1, "grok");
+  const other = "https://github.com/aaa-broken/repo/pull/1";
+  let item = registry.get("muse-room", "broken-repo");
+  item = { ...item, pullRequest: { ...item.pullRequest, url: other, repo: "aaa-broken/repo", number: 1 }, pullRequests: [{ ...item.pullRequest, url: other, repo: "aaa-broken/repo", number: 1 }] };
+  registry.set("muse-room", item);
+  hold("healthy", 2479);
+  writeClaimPullBudget(store, NOW + 3000_000, NOW);
+  const calls = [];
+  const fetchImpl = async url => {
+    calls.push(decodeURIComponent(String(url)));
+    if (calls.at(-1).includes("aaa-broken/repo")) return { status: 422, ok: false, headers: { get: () => null }, text: async () => "{}" };
+    return searchOnly([hit(2479)], [])(url);
+  };
+  await syncClaimPullRequests(store, { fetchImpl, nowMs: NOW, token: null });
+  await syncClaimPullRequests(store, { fetchImpl, nowMs: NOW + 60_000, token: null });
+  assert.ok(calls[0].includes("aaa-broken/repo") && calls[1].includes("Uuriko/project-room"), calls.join("\n"));
+  assert.equal(registry.get("muse-room", "healthy").state, "done");
+});
+
+test("a full page that shares one created second steps past it instead of looping", async () => {
+  const { store, hold } = setup();
+  hold("held", 2479);
+  writeClaimPullBudget(store, NOW + 3000_000, NOW);
+  const same = "2026-10-09T10:00:00Z";
+  const page = Array.from({ length: 50 }, (_, i) => hit(3000 + i, true, { created_at: same }));
+  const calls = [];
+  for (let tick = 0; tick < 3; tick++) await syncClaimPullRequests(store, { fetchImpl: searchOnly(page, calls), nowMs: NOW + tick * 60_000, token: null });
+  const cursors = calls.map(url => (decodeURIComponent(url).match(/created:>=(\S+?)(&|$)/) ?? [])[1] ?? null);
+  assert.deepEqual(cursors, [null, same, "2026-10-09T10:00:01Z"]);
 });

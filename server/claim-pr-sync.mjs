@@ -433,10 +433,10 @@ function loadDueClaims(store, nowMs) {
 // polls without a token, so the per-pull REST lookups share 60 core requests
 // an hour per egress IP, and the shared reset can hold every claim for an hour.
 // GitHub's search API has its own quota (10 a minute without a token). While
-// the core budget is spent, one search per tick walks the repo's merged pulls
-// oldest-created first from a stored cursor, so every held pull is reached
-// within a bounded number of ticks, and settles matching claims through the
-// same commitPullRequestLookup path.
+// the core budget is spent, one search per tick walks a repo's pulls merged in
+// the last 14 days, oldest-created first from a stored cursor, so every held
+// pull is reached within a bounded number of ticks. Matching claims settle
+// through the same commitPullRequestLookup path.
 // - Only a merge settles here. A merge is final; an unmerged close can be
 //   reopened, so a close waits for the REST lookup.
 // - land and deploy claims need the merge sha, so they also wait for REST.
@@ -448,6 +448,7 @@ const SEARCH_PAGE = 50;
 const SEARCH_WINDOW_MS = 14 * 24 * 3600 * 1000;
 const SEARCH_BODY_CHARS = 1_000_000;
 const SEARCH_BACKOFF_MS = 60_000;
+const ISO_SECOND = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 
 function readSearchState(store) {
   try {
@@ -499,10 +500,19 @@ function heldPullIndex(store) {
   return index;
 }
 
-async function searchMergedPulls(repo, cursor, { fetchImpl, token, deadline }) {
+function sameApiRepo(value, want) {
+  try {
+    const url = new URL(String(value ?? ""));
+    return url.origin === "https://api.github.com" && !url.search && !url.hash && url.pathname.toLowerCase() === `/repos/${want}`;
+  } catch { return false; }
+}
+
+async function searchMergedPulls(repo, cursor, windowStart, { fetchImpl, token, deadline }) {
   const budgetMs = deadline - Date.now();
   if (!(budgetMs > 0)) return { kind: "deadline" };
-  const q = `repo:${repo} is:pr is:merged created:>=${cursor}`;
+  // Eligibility is the merge time (a PR opened long ago and merged today is in);
+  // the created cursor only pages through that set.
+  const q = `repo:${repo} is:pr is:merged merged:>=${windowStart}${cursor ? ` created:>=${cursor}` : ""}`;
   const url = `https://api.github.com/search/issues?q=${encodeURIComponent(q)}&sort=created&order=asc&per_page=${SEARCH_PAGE}`;
   let response;
   try {
@@ -525,14 +535,15 @@ async function searchMergedPulls(repo, cursor, { fetchImpl, token, deadline }) {
   const items = Array.isArray(body?.items) ? body.items : [];
   const merged = new Set();
   let lastCreated = null;
-  const repoUrl = `https://api.github.com/repos/${repo}`.toLowerCase();
+  const want = repo.toLowerCase();
   for (const hit of items) {
     if (typeof hit?.created_at === "string") lastCreated = hit.created_at;
     if (!Number.isSafeInteger(hit?.number) || hit.state !== "closed") continue;
-    if (String(hit.repository_url ?? "").toLowerCase() !== repoUrl) continue;
+    if (!sameApiRepo(hit.repository_url, want)) continue;
     const pull = hit.pull_request;
     if (!pull || typeof pull.merged_at !== "string" || !pull.merged_at) continue;
-    if (!String(pull.html_url ?? "").toLowerCase().endsWith(`/${repo.toLowerCase()}/pull/${hit.number}`)) continue;
+    const html = parsePullRequestUrl(pull.html_url);
+    if (!html || html.repo.toLowerCase() !== want || html.number !== hit.number) continue;
     merged.add(hit.number);
   }
   return { kind: "ok", merged, full: items.length >= SEARCH_PAGE, lastCreated };
@@ -548,21 +559,31 @@ export async function settleFromSearch(store, { env = null, fetchImpl = fetch, t
   const repos = [...index.keys()].sort();
   const repo = repos[(Number.isSafeInteger(state.turn) ? state.turn : 0) % repos.length];
   const byNumber = index.get(repo);
-  const windowStart = new Date(nowMs - SEARCH_WINDOW_MS).toISOString().slice(0, 19) + "Z";
+  const windowStart = new Date(nowMs - SEARCH_WINDOW_MS).toISOString().slice(0, 10);
   const saved = state.cursors?.[repo];
-  const cursor = typeof saved === "string" && saved >= windowStart ? saved : windowStart;
-  const found = await searchMergedPulls(byNumber.name, cursor, { fetchImpl, token, deadline });
+  const cursor = typeof saved === "string" && ISO_SECOND.test(saved) ? saved : null;
+  const found = await searchMergedPulls(byNumber.name, cursor, windowStart, { fetchImpl, token, deadline });
+  // The turn advances whatever happened, so one failing repo cannot hold the others.
   const next = { ...state, turn: ((Number.isSafeInteger(state.turn) ? state.turn : 0) + 1) % 1_000_000, cursors: { ...(state.cursors ?? {}) } };
+  delete next.rateLimitedUntil;
   if (found.kind === "rateLimited") {
     const until = Math.max(nowMs + SEARCH_BACKOFF_MS, found.retryAfterMs ? nowMs + found.retryAfterMs : 0, found.resetMs ?? 0);
     writeSearchState(store, { ...next, rateLimitedUntil: until }, nowMs);
     return 0;
   }
-  if (found.kind !== "ok") return 0;
-  // A full page continues from its last created time next turn (the same
-  // second can repeat, never skip); a short page starts the window again.
-  next.cursors[repo] = found.full && found.lastCreated && found.lastCreated > cursor ? found.lastCreated : windowStart;
-  delete next.rateLimitedUntil;
+  if (found.kind !== "ok") {
+    writeSearchState(store, next, nowMs);
+    return 0;
+  }
+  // A full page continues from its last created time (inclusive, so a tie at
+  // the page edge repeats rather than skips). If the whole page shares one
+  // second, step one second past it so the walk cannot loop; REST still covers
+  // anything left at that second. A short page starts over from the beginning.
+  if (found.full && ISO_SECOND.test(found.lastCreated ?? "")) {
+    next.cursors[repo] = cursor && found.lastCreated <= cursor
+      ? new Date(Date.parse(cursor) + 1000).toISOString().replace(".000Z", "Z")
+      : found.lastCreated;
+  } else delete next.cursors[repo];
   let settled = 0;
   store.workClaims.transaction(() => {
     writeSearchState(store, next, nowMs);
