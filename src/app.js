@@ -1104,6 +1104,25 @@ function syncRoomLifecycle() {
   const owner = Boolean(viewer) && viewer.kind === "human" && viewer.id === room?.ownerId;
   $("#room-archive-button").hidden = !viewer || archived || !owner;
   $("#room-leave-button").hidden = !viewer || archived || owner || viewer.kind !== "human";
+  // 8375: the ownership.transferred event and the agent route existed, but a
+  // human owner had no control that issues one (account deletion even names
+  // the blocking rooms). Owner-only; agents never see it.
+  const transfer = $("#room-transfer");
+  transfer.hidden = !viewer || archived || !owner;
+  if (transfer.hidden) transfer.open = false;
+  else {
+    const select = $("#room-transfer-member"), current = select.value;
+    select.replaceChildren(...Object.values(state.members)
+      .filter(m => m.id !== room.ownerId && m.active !== false)
+      .sort((a, b) => displayName(a.id).localeCompare(displayName(b.id)))
+      .map(m => {
+        const option = document.createElement("option");
+        option.value = m.id;
+        option.textContent = displayName(m.id) + (m.kind === "agent" ? " (agent)" : "");
+        return option;
+      }));
+    if ([...select.options].some(option => option.value === current)) select.value = current;
+  }
 }
 $("#room-archive-button").addEventListener("click", async () => {
   if (!state || !session || busy) return;
@@ -1140,6 +1159,31 @@ $("#room-leave-button").addEventListener("click", async () => {
   } catch (error) {
     if (!sameSession(generation, roomId, member.id)) return;
     dialogNotice("#room-about-status", error.code === "room_archived" ? "This room is archived; leaving is not recorded." : "Couldn’t leave the room. Refresh and try again.", true);
+  } finally { button.disabled = false; }
+});
+$("#room-transfer-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  if (!state || !session || busy) return;
+  const toMemberId = $("#room-transfer-member").value, target = state.members[toMemberId];
+  if (!target || target.active === false || target.id === state.room?.ownerId) return;
+  const name = displayName(toMemberId);
+  if (!window.confirm(`Transfer ownership of this room to ${name}? They gain full authority, including managing members. You stay a member.`)) return;
+  const generation = client.generation, roomId = session.roomId, memberId = session.member.id, button = $("#room-transfer-form [type=submit]");
+  const reason = $("#room-transfer-reason").value.trim();
+  button.disabled = true; setFormStatus($("#room-transfer-status"), "");
+  try {
+    await client.send({ id: crypto.randomUUID(), type: T.OWNERSHIP_TRANSFERRED,
+      data: { toMemberId, ...(reason ? { reason } : {}) } });
+    if (sameSession(generation, roomId, memberId)) {
+      $("#room-transfer-reason").value = "";
+      notice(`Ownership transferred to ${name}.`);
+    }
+  } catch (error) {
+    if (!sameSession(generation, roomId, memberId)) return;
+    dialogNotice("#room-transfer-status",
+      error.message === "Unknown member" ? "That member is no longer available. Pick someone else."
+      : error.message === "Already the room owner" ? "They already own this room."
+      : "Couldn’t transfer ownership. Refresh and try again.", true);
   } finally { button.disabled = false; }
 });
 $("#account-room-form").addEventListener("submit", async event => {
