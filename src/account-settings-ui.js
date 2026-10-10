@@ -267,6 +267,7 @@ export function deletionPlainSummary(planned) {
   if (rooms.archive?.length) lines.push(uiText("deletion.plain.archive", { titles: titleList(rooms.archive) }));
   if (rooms.transfer?.length) lines.push(uiText("deletion.plain.transfer", { titles: titleList(rooms.transfer) }));
   if (rooms.retained?.length) lines.push(uiText("deletion.plain.leave", { titles: titleList(rooms.retained) }));
+  if (rooms.transfer?.length || rooms.retained?.length) lines.push(uiText("deletion.plain.shared"));
   lines.push(uiText("deletion.plain.kept"));
   return lines;
 }
@@ -387,7 +388,7 @@ export function createAccountSettingsUI({ accountClient, credentials = null, onA
     submit.disabled = !deletionToken || !accountEmails().includes(typed);
   };
 
-  const focusables = dialog => [...dialog.querySelectorAll("button, input, a[href], select, textarea")]
+  const focusables = dialog => [...dialog.querySelectorAll("button, input, a[href], select, textarea, summary")]
     .filter(element => !element.disabled && !element.closest("[hidden]") && element.getClientRects().length);
 
   const status = message => {

@@ -66,14 +66,29 @@ test("Delete account requires the email, posts with CSRF, and confirms on the la
   await email.waitFor();
   // Plain summary first; the engineering inventory sits behind "Full deletion plan".
   await dialog.getByText(/permanently deletes your account/).waitFor();
-  await dialog.getByText(/Rooms you own that will be archived: .*Solo notes/).waitFor();
+  await dialog.getByText(/archived, and their messages and files permanently deleted: .*Solo notes/).waitFor();
   assert.equal(await dialog.getByText(/Retention categories purged/).isVisible(), false);
   assert.equal(await dialog.getByText(/categories purged \(/).isVisible(), false);
-  await dialog.locator("summary", { hasText: "Full deletion plan" }).click();
-  await dialog.getByText(/Retention categories purged/).waitFor();
+  // Keyboard only (Jill - Dot, #2414): Shift+Tab from the email lands on the
+  // disclosure, Enter opens it, Space closes it, and Tab from the last control
+  // wraps back to it inside the dialog.
+  const disclosure = dialog.locator("summary", { hasText: "Full deletion plan" });
+  const focusedIsDisclosure = () => disclosure.evaluate(node => node === document.activeElement);
   await email.focus();
   await page.keyboard.press("Shift+Tab");
-  assert.equal(await page.evaluate(() => document.activeElement?.closest("[data-deletion-dialog]") != null), true);
+  assert.equal(await focusedIsDisclosure(), true, "Shift+Tab from the email reaches Full deletion plan");
+  await page.keyboard.press("Enter");
+  await dialog.getByText(/Retention categories purged/).waitFor();
+  await page.keyboard.press("Space");
+  await dialog.getByText(/Retention categories purged/).waitFor({ state: "hidden" });
+  await page.keyboard.press("Enter");
+  await dialog.getByText(/Retention categories purged/).waitFor();
+  const pre = dialog.locator("[data-deletion-summary] pre");
+  assert.equal(await pre.evaluate(node => getComputedStyle(node).whiteSpace), "pre-wrap", "the expanded plan wraps on a phone");
+  assert.ok(await pre.evaluate(node => node.scrollWidth <= node.clientWidth + 1), "no sideways scroll in the plan at this width");
+  await dialog.locator("[data-action='delete-account-cancel']").focus();
+  await page.keyboard.press("Tab");
+  assert.equal(await focusedIsDisclosure(), true, "Tab from Cancel wraps to Full deletion plan");
   await page.keyboard.press("Escape");
   await dialog.waitFor({ state: "hidden" });
 
